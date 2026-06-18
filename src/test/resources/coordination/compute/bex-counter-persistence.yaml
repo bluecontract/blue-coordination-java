@@ -5,11 +5,8 @@ contracts:
     type: Coordination/Timeline Channel
     timelineId: owner
   increment:
-    type: Coordination/Operation
-    channel: ownerChannel
-  incrementImpl:
     type: Coordination/Sequential Workflow Operation
-    operation: increment
+    channel: ownerChannel
     steps:
       - name: BuildPatch
         type: Coordination/Compute

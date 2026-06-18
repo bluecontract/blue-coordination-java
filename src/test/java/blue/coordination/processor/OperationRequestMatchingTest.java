@@ -20,8 +20,7 @@ class OperationRequestMatchingTest {
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = ownerContracts();
         contracts.put("triggered", triggeredChannel());
-        contracts.put("increment", operation("triggered", integerPattern()));
-        contracts.put("incrementImpl", sequentialWorkflowOperation("increment",
+        contracts.put("increment", operation("triggered", integerPattern(),
                 updateDocumentStep("replace", "/counter", directOperationIncrementValue())));
         contracts.put("producer", directWorkflow("owner",
                 triggerEventStep(operationRequestEventNode("increment", new Node().value(7)))));
@@ -36,8 +35,7 @@ class OperationRequestMatchingTest {
     void timelineEntryOperationRequestStillRuns() {
         Fixture fixture = configuredFixture();
         Node initialized = initializedDocument(fixture, timelineCounterDocument(fixture.repository,
-                operation("owner", integerPattern()),
-                sequentialWorkflowOperation("increment",
+                operation("owner", integerPattern(),
                         updateDocumentStep("replace", "/counter", timelineIncrementValue()))));
 
         Node processed = processOperationRequest(fixture, initialized, "owner", 1, "increment", new Node().value(7));
@@ -46,16 +44,60 @@ class OperationRequestMatchingTest {
     }
 
     @Test
+    void directSequentialWorkflowOperationDeclaresChannelRequestAndSteps() {
+        Fixture fixture = configuredFixture();
+        Node initialized = initializedDocument(fixture, timelineCounterDocument(fixture.repository,
+                operation("owner", integerPattern(),
+                        updateDocumentStep("replace", "/counter", timelineIncrementValue()))));
+
+        Node processed = processOperationRequest(fixture, initialized, "owner", 1, "increment", new Node().value(7));
+
+        assertCounter(processed, 7);
+    }
+
+    @Test
+    void operationDeclarationCanCoexistWithConcreteSequentialWorkflowOperation() {
+        Fixture fixture = configuredFixture();
+        Map<String, Node> contracts = ownerContracts();
+        contracts.put("incrementShape", operationDeclaration("owner", integerPattern()));
+        contracts.put("increment", operation("owner", integerPattern(),
+                updateDocumentStep("replace", "/counter", timelineIncrementValue())));
+        Node initialized = initializedDocument(fixture, document(fixture.repository, 0, contracts));
+
+        Node processed = processOperationRequest(fixture, initialized, "owner", 1, "increment", new Node().value(7));
+
+        assertCounter(processed, 7);
+    }
+
+    @Test
+    void operationDeclarationCanBeSpecializedBeforeConcreteSequentialWorkflowOperation() {
+        Fixture fixture = configuredFixture();
+        Map<String, Node> contracts = ownerContracts();
+        contracts.put("incrementShape", operationDeclaration("owner", null));
+        contracts.put("incrementAmountShape", operationDeclaration("owner", objectAmountPattern()));
+        contracts.put("increment", operation("owner", objectAmountPattern(),
+                updateDocumentStep("replace", "/counter", timelineAmountIncrementValue())));
+        Node initialized = initializedDocument(fixture, document(fixture.repository, 0, contracts));
+
+        Node accepted = processOperationRequest(fixture, initialized, "owner", 1, "increment",
+                new Node().properties("amount", new Node().value(7)));
+        Node rejected = processOperationRequest(fixture, accepted, "owner", 2, "increment",
+                new Node().properties("ignored", new Node().value(7)));
+
+        assertCounter(accepted, 7);
+        assertCounter(rejected, 7);
+    }
+
+    @Test
     void sequentialWorkflowOperationEventPatternAllowsMatchingEvent() {
         Fixture fixture = configuredFixture();
-        Node workflow = sequentialWorkflowOperation("increment",
+        Node workflow = operation("owner", integerPattern(),
                 updateDocumentStep("replace", "/counter", timelineIncrementValue()));
         workflow.properties("event", new Node()
                 .type("Coordination/Timeline Entry")
                 .properties("source", new Node()
                         .properties("value", new Node().value("web"))));
         Node initialized = initializedDocument(fixture, timelineCounterDocument(fixture.repository,
-                operation("owner", integerPattern()),
                 workflow));
 
         Node processed = processOperationRequest(fixture, initialized, "owner", 1, "increment", new Node().value(7), "web");
@@ -66,14 +108,13 @@ class OperationRequestMatchingTest {
     @Test
     void sequentialWorkflowOperationEventPatternRejectsDifferentEvent() {
         Fixture fixture = configuredFixture();
-        Node workflow = sequentialWorkflowOperation("increment",
+        Node workflow = operation("owner", integerPattern(),
                 updateDocumentStep("replace", "/counter", timelineIncrementValue()));
         workflow.properties("event", new Node()
                 .type("Coordination/Timeline Entry")
                 .properties("source", new Node()
                         .properties("value", new Node().value("web"))));
         Node initialized = initializedDocument(fixture, timelineCounterDocument(fixture.repository,
-                operation("owner", integerPattern()),
                 workflow));
 
         Node processed = processOperationRequest(fixture, initialized, "owner", 1, "increment", new Node().value(7), "api");
@@ -82,11 +123,10 @@ class OperationRequestMatchingTest {
     }
 
     @Test
-    void operationHandlerCanDeriveChannelFromOperation() {
+    void sequentialWorkflowOperationUsesDeclaredChannel() {
         Fixture fixture = configuredFixture();
         Node initialized = initializedDocument(fixture, timelineCounterDocument(fixture.repository,
-                operation("owner", integerPattern()),
-                sequentialWorkflowOperation("increment",
+                operation("owner", integerPattern(),
                         updateDocumentStep("replace", "/counter", timelineIncrementValue()))));
 
         Node processed = processOperationRequest(fixture, initialized, "owner", 1, "increment", new Node().value(7));
@@ -95,45 +135,12 @@ class OperationRequestMatchingTest {
     }
 
     @Test
-    void operationHandlerCanDeclareSameChannelAsOperation() {
-        Fixture fixture = configuredFixture();
-        Node workflow = sequentialWorkflowOperation("increment",
-                updateDocumentStep("replace", "/counter", timelineIncrementValue()));
-        workflow.properties("channel", new Node().value("owner"));
-        Node initialized = initializedDocument(fixture, timelineCounterDocument(fixture.repository,
-                operation("owner", integerPattern()),
-                workflow));
-
-        Node processed = processOperationRequest(fixture, initialized, "owner", 1, "increment", new Node().value(7));
-
-        assertCounter(processed, 7);
-    }
-
-    @Test
-    void operationWithoutChannelCanUseExplicitHandlerChannel() {
-        Fixture fixture = configuredFixture();
-        Node workflow = sequentialWorkflowOperation("increment",
-                updateDocumentStep("replace", "/counter", timelineIncrementValue()));
-        workflow.properties("channel", new Node().value("owner"));
-        Node initialized = initializedDocument(fixture, timelineCounterDocument(fixture.repository,
-                operation(null, integerPattern()),
-                workflow));
-
-        Node processed = processOperationRequest(fixture, initialized, "owner", 1, "increment", new Node().value(7));
-
-        assertCounter(processed, 7);
-    }
-
-    @Test
-    void conflictingOperationAndHandlerChannelsDoNotRun() {
+    void operationRequestMustArriveThroughDeclaredChannel() {
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = ownerContracts();
         contracts.put("other", timelineChannel("other"));
-        contracts.put("increment", operation("owner", integerPattern()));
-        Node workflow = sequentialWorkflowOperation("increment",
-                updateDocumentStep("replace", "/counter", timelineIncrementValue()));
-        workflow.properties("channel", new Node().value("other"));
-        contracts.put("incrementImpl", workflow);
+        contracts.put("increment", operation("owner", integerPattern(),
+                updateDocumentStep("replace", "/counter", timelineIncrementValue())));
         Node initialized = initializedDocument(fixture, document(fixture.repository, 0, contracts));
 
         Node processed = processOperationRequest(fixture, initialized, "other", 1, "increment", new Node().value(7));
@@ -145,8 +152,7 @@ class OperationRequestMatchingTest {
     void integerRequestPatternAcceptsIntegerAndRejectsText() {
         Fixture fixture = configuredFixture();
         Node initialized = initializedDocument(fixture, timelineCounterDocument(fixture.repository,
-                operation("owner", integerPattern()),
-                sequentialWorkflowOperation("increment",
+                operation("owner", integerPattern(),
                         updateDocumentStep("replace", "/counter", timelineIncrementValue()))));
 
         Node afterInteger = processOperationRequest(fixture, initialized, "owner", 1, "increment", new Node().value(7));
@@ -160,8 +166,7 @@ class OperationRequestMatchingTest {
     void objectRequestPatternAcceptsRequiredNestedProperty() {
         Fixture fixture = configuredFixture();
         Node initialized = initializedDocument(fixture, timelineCounterDocument(fixture.repository,
-                operation("owner", objectAmountPattern()),
-                sequentialWorkflowOperation("increment",
+                operation("owner", objectAmountPattern(),
                         updateDocumentStep("replace", "/counter", timelineAmountIncrementValue()))));
 
         Node processed = processOperationRequest(fixture, initialized, "owner", 1, "increment",
@@ -174,8 +179,7 @@ class OperationRequestMatchingTest {
     void objectRequestPatternRejectsMissingRequiredNestedProperty() {
         Fixture fixture = configuredFixture();
         Node initialized = initializedDocument(fixture, timelineCounterDocument(fixture.repository,
-                operation("owner", objectAmountPattern()),
-                sequentialWorkflowOperation("increment",
+                operation("owner", objectAmountPattern(),
                         updateDocumentStep("replace", "/counter", timelineAmountIncrementValue()))));
 
         Node processed = processOperationRequest(fixture, initialized, "owner", 1, "increment",
@@ -188,8 +192,7 @@ class OperationRequestMatchingTest {
     void requestPatternIgnoresIrrelevantLargePayloadBranches() {
         Fixture fixture = configuredFixture();
         Node initialized = initializedDocument(fixture, timelineCounterDocument(fixture.repository,
-                operation("owner", objectAmountPattern()),
-                sequentialWorkflowOperation("increment",
+                operation("owner", objectAmountPattern(),
                         updateDocumentStep("replace", "/counter", timelineAmountIncrementValue()))));
         Node irrelevant = new Node().properties("nested", largePayloadBranch());
         Node request = new Node()
@@ -207,8 +210,7 @@ class OperationRequestMatchingTest {
     void pinnedMatchingInitialDocumentRunsWhenNewerVersionIsNotAllowed() {
         Fixture fixture = configuredFixture();
         Node original = timelineCounterDocument(fixture.repository,
-                operation("owner", integerPattern()),
-                sequentialWorkflowOperation("increment",
+                operation("owner", integerPattern(),
                         updateDocumentStep("replace", "/counter", timelineIncrementValue())));
         Node initialized = initializedDocument(fixture, original);
         Node pinned = new Node().blueId((String) initialized.get("/contracts/initialized/documentId"));
@@ -225,8 +227,7 @@ class OperationRequestMatchingTest {
     void pinnedStaleDocumentDoesNotRunWhenNewerVersionIsNotAllowed() {
         Fixture fixture = configuredFixture();
         Node original = timelineCounterDocument(fixture.repository,
-                operation("owner", integerPattern()),
-                sequentialWorkflowOperation("increment",
+                operation("owner", integerPattern(),
                         updateDocumentStep("replace", "/counter", timelineIncrementValue())));
         Node initialized = initializedDocument(fixture, original);
         Node stale = new Node().blueId("2vz831ZwzhpUefTb5XkodBRANKpFMbj1F4CN33kf38Hw");
@@ -243,8 +244,7 @@ class OperationRequestMatchingTest {
     void allowNewerVersionTrueRunsWithStalePinnedDocument() {
         Fixture fixture = configuredFixture();
         Node original = timelineCounterDocument(fixture.repository,
-                operation("owner", integerPattern()),
-                sequentialWorkflowOperation("increment",
+                operation("owner", integerPattern(),
                         updateDocumentStep("replace", "/counter", timelineIncrementValue())));
         Node initialized = initializedDocument(fixture, original);
         Node stale = new Node().blueId("2vz831ZwzhpUefTb5XkodBRANKpFMbj1F4CN33kf38Hw");
@@ -261,8 +261,7 @@ class OperationRequestMatchingTest {
     void missingPinnedDocumentRunsWhenNewerVersionIsNotAllowed() {
         Fixture fixture = configuredFixture();
         Node initialized = initializedDocument(fixture, timelineCounterDocument(fixture.repository,
-                operation("owner", integerPattern()),
-                sequentialWorkflowOperation("increment",
+                operation("owner", integerPattern(),
                         updateDocumentStep("replace", "/counter", timelineIncrementValue()))));
 
         Node processed = processOperationRequest(fixture, initialized, "owner", 1,
@@ -272,14 +271,13 @@ class OperationRequestMatchingTest {
         assertCounter(processed, 7);
     }
 
-    private static Node timelineCounterDocument(BlueRepository repository, Node operation, Node handler) {
-        return timelineCounterDocument(repository, 0, operation, handler);
+    private static Node timelineCounterDocument(BlueRepository repository, Node operation) {
+        return timelineCounterDocument(repository, 0, operation);
     }
 
-    private static Node timelineCounterDocument(BlueRepository repository, int counter, Node operation, Node handler) {
+    private static Node timelineCounterDocument(BlueRepository repository, int counter, Node operation) {
         Map<String, Node> contracts = ownerContracts();
         contracts.put("increment", operation);
-        contracts.put("incrementImpl", handler);
         return document(repository, counter, contracts);
     }
 
@@ -297,12 +295,25 @@ class OperationRequestMatchingTest {
         return new Node().type("Triggered Event Channel");
     }
 
-    private static Node operation(String channel, Node requestPattern) {
+    private static Node operation(String channel, Node requestPattern, Node... steps) {
         Node operation = new Node()
-                .type("Coordination/Operation")
-                .properties("request", requestPattern);
+                .type("Coordination/Sequential Workflow Operation")
+                .properties("request", requestPattern)
+                .properties("steps", new Node().items(steps));
         if (channel != null) {
             operation.properties("channel", new Node().value(channel));
+        }
+        return operation;
+    }
+
+    private static Node operationDeclaration(String channel, Node requestPattern) {
+        Node operation = new Node()
+                .type("Coordination/Operation");
+        if (channel != null) {
+            operation.properties("channel", new Node().value(channel));
+        }
+        if (requestPattern != null) {
+            operation.properties("request", requestPattern);
         }
         return operation;
     }
@@ -316,13 +327,6 @@ class OperationRequestMatchingTest {
                 .type("Integer")
                 .value(7)
                 .schema(new Schema().required(new Node().value(true))));
-    }
-
-    private static Node sequentialWorkflowOperation(String operation, Node... steps) {
-        return new Node()
-                .type("Coordination/Sequential Workflow Operation")
-                .properties("operation", new Node().value(operation))
-                .properties("steps", new Node().items(steps));
     }
 
     private static Node directWorkflow(String channel, Node... steps) {

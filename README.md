@@ -64,7 +64,9 @@ DocumentProcessor processor =
 `CoordinationProcessors` intentionally does not register a concrete processor
 for `Coordination/Timeline Channel`. Applications should provide their own
 timeline provider channel processor or register a small local test processor
-for fixtures that use `Coordination/Timeline Entry`.
+for fixtures that use `Coordination/Timeline Entry`. `Coordination/All Timelines
+Channel` delegates to those registered timeline channel processors when deciding
+which declared timelines can invoke a shared operation.
 
 ## Counter Document
 
@@ -79,14 +81,10 @@ contracts:
     timelineId: counter-demo
 
   increment:
-    type: Coordination/Operation
+    type: Coordination/Sequential Workflow Operation
     channel: ownerChannel
     request:
       type: Integer
-
-  incrementImpl:
-    type: Coordination/Sequential Workflow Operation
-    operation: increment
     steps:
       - name: IncrementAndEmit
         type: Coordination/Compute
@@ -158,13 +156,17 @@ processing from the same resolved state.
 
 This library provides executable behavior for:
 
+- `Coordination/All Timelines Channel`;
 - `Coordination/Composite Timeline Channel`;
-- `Coordination/Operation`;
+- `Coordination/Chat Workflow Operation`;
 - `Coordination/Sequential Workflow`;
 - `Coordination/Sequential Workflow Operation`;
 - `Coordination/Compute`;
 - `Coordination/Update Document`;
 - `Coordination/Trigger Event`.
+
+It also registers `Coordination/Operation` as a non-executable declaration
+type for operation-shaped contracts.
 
 The underlying `blue-language-java` runtime provides base behavior used by
 Coordination documents:
@@ -240,7 +242,9 @@ src/main/java/blue/coordination/processor
   CoordinationProcessors.java
   CoordinationProcessorOptions.java
   CoordinationBexIntrinsics.java
+  AllTimelinesChannelProcessor.java
   CompositeTimelineChannelProcessor.java
+  ChatWorkflowOperationProcessor.java
   OperationProcessor.java
   SequentialWorkflowProcessor.java
   SequentialWorkflowOperationProcessor.java

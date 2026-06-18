@@ -113,7 +113,7 @@ class DynamicEmbeddedParticipantsWorkflowTest {
         assertEquals("embedded-" + number,
                 document.get(prefix + "/contracts/participantChannel/timelineId"));
         assertNotNull(document.getAsNode(prefix + "/contracts/say"));
-        assertNotNull(document.getAsNode(prefix + "/contracts/sayImpl"));
+        assertNotNull(document.getAsNode(prefix + "/contracts/say"));
     }
 
     private static Node operationEvent(ComputeWorkflowTestSupport support,

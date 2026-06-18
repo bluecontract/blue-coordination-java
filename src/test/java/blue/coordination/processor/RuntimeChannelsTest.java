@@ -229,8 +229,7 @@ class RuntimeChannelsTest {
 
     private static Node embeddedOperationDocument(BlueRepository repository) {
         Map<String, Node> childContracts = ownerChannelContracts();
-        childContracts.put("increment", operation("owner"));
-        childContracts.put("incrementImpl", sequentialWorkflowOperation("increment",
+        childContracts.put("increment", sequentialWorkflowOperation("owner",
                 computePatchStep("replace", "/counter",
                         bexAdd(bexBinding("event", "/message/request"), bexDocument("/counter")))));
 
@@ -289,17 +288,11 @@ class RuntimeChannelsTest {
                 .properties("paths", new Node().items(new Node().value(path)));
     }
 
-    private static Node operation(String channel) {
-        return new Node()
-                .type("Coordination/Operation")
-                .properties("channel", new Node().value(channel))
-                .properties("request", new Node().type("Integer"));
-    }
-
-    private static Node sequentialWorkflowOperation(String operation, Node... steps) {
+    private static Node sequentialWorkflowOperation(String channel, Node... steps) {
         return new Node()
                 .type("Coordination/Sequential Workflow Operation")
-                .properties("operation", new Node().value(operation))
+                .properties("channel", new Node().value(channel))
+                .properties("request", new Node().type("Integer"))
                 .properties("steps", new Node().items(steps));
     }
 

@@ -15,11 +15,8 @@ embeddedTemplate:
       type: Coordination/Timeline Channel
       timelineId: embedded
     say:
-      type: Coordination/Operation
-      channel: participantChannel
-    sayImpl:
       type: Coordination/Sequential Workflow Operation
-      operation: say
+      channel: participantChannel
       steps:
         - type: Coordination/Trigger Event
           event:
@@ -66,11 +63,8 @@ contracts:
     type: Coordination/Timeline Channel
     timelineId: bob
   createEmbedded:
-    type: Coordination/Operation
-    channel: aliceChannel
-  createEmbeddedImpl:
     type: Coordination/Sequential Workflow Operation
-    operation: createEmbedded
+    channel: aliceChannel
     steps:
       - name: BuildEmbedded
         type: Coordination/Compute
@@ -133,7 +127,7 @@ contracts:
                 $concat:
                   - /embedded_
                   - $var: suffix
-                  - /contracts/sayImpl/steps/0/event/message
+                  - /contracts/say/steps/0/event/message
               val:
                 $concat:
                   - Chat from embedded
@@ -249,11 +243,8 @@ contracts:
               events:
                 $events: true
   checkChatCount:
-    type: Coordination/Operation
-    channel: bobChannel
-  checkChatCountImpl:
     type: Coordination/Sequential Workflow Operation
-    operation: checkChatCount
+    channel: bobChannel
     steps:
       - name: BuildCheck
         type: Coordination/Compute

@@ -71,7 +71,7 @@ message:
                 value: "zzimVxhnKLL5SwMkS9kmF8p5g7pyxPWBu664HxGbszB"
           attachComponentOrder:
             description: "Attaches an included merchant order snapshot so package payment can complete after both confirmations."
-            type: { blueId: "BoAiqVUZv9Fum3wFqaX2JnQMBHJLxJSo2V9U2UBmCfsC" }
+            type: { blueId: "39HJEYVHX6RoRhdVx2mpLQ1GQ3RP5CSvDCSiWF6Mhdpq" }
             channel:
               type: { blueId: "GX7CFUmSDrE2MzptunLCCdZwnuwwrenRQqEnHL4x3uoC" }
               value: "payeeChannel"
@@ -80,8 +80,6 @@ message:
                 type: { blueId: "GX7CFUmSDrE2MzptunLCCdZwnuwwrenRQqEnHL4x3uoC" }
               initialSnapshot:
                 type: { blueId: "J18rFf6VX3ADe5gTnqmL4wXtivLkzrRXLPPhnoghnjzB" }
-          attachComponentOrderImpl:
-            type: { blueId: "CGdxkNjPcsdescqLPz6SNLsMyak6demQQr7RoKNHbCyv" }
             steps:
               items:
                 - name: "BuildComponentAttachment"
@@ -95,9 +93,6 @@ message:
                     $binding:
                       name: "steps"
                       path: "/BuildComponentAttachment/changeset"
-            operation:
-              type: { blueId: "GX7CFUmSDrE2MzptunLCCdZwnuwwrenRQqEnHL4x3uoC" }
-              value: "attachComponentOrder"
           embeddedHotelOrderEvents:
             type: { blueId: "Fjbu3QpnUaTruDTcTidETCX2N5STyv7KYxT42PCzGHxm" }
             childPath:

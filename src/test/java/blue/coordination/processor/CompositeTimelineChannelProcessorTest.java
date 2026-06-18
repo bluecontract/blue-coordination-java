@@ -31,7 +31,8 @@ class CompositeTimelineChannelProcessorTest {
         DocumentProcessingResult result = processChat(fixture, initialized, "owner", 1, "hello");
 
         assertChatCount(result.triggeredEvents(), "composite saw owner", 1);
-        assertNotNull(nodeAt(result.document(), "/contracts/checkpoint/lastEvents/inbox::owner"));
+        assertNotNull(nodeAt(result.document(), "/contracts/checkpoint/lastEvents/inbox"));
+        assertNull(nodeAt(result.document(), "/contracts/checkpoint/lastEvents/inbox::owner"));
     }
 
     @Test
@@ -46,12 +47,11 @@ class CompositeTimelineChannelProcessorTest {
 
         assertChatCount(result.triggeredEvents(), "composite saw owner", 0);
         assertChatCount(result.triggeredEvents(), "composite saw support", 0);
-        assertNull(nodeAt(result.document(), "/contracts/checkpoint/lastEvents/inbox::owner"));
-        assertNull(nodeAt(result.document(), "/contracts/checkpoint/lastEvents/inbox::support"));
+        assertNull(nodeAt(result.document(), "/contracts/checkpoint/lastEvents/inbox"));
     }
 
     @Test
-    void deliversMultipleMatchingChildrenIndependently() {
+    void deliversMultipleMatchingChildrenOnceThroughCompositeChannel() {
         Fixture fixture = configuredFixture();
         Node initialized = initializedDocument(fixture, compositeDocument(fixture.repository,
                 Arrays.asList("childA", "childB"),
@@ -61,13 +61,14 @@ class CompositeTimelineChannelProcessorTest {
         DocumentProcessingResult result = processChat(fixture, initialized, "owner", 1, "hello");
 
         assertChatCount(result.triggeredEvents(), "composite saw childA", 1);
-        assertChatCount(result.triggeredEvents(), "composite saw childB", 1);
-        assertNotNull(nodeAt(result.document(), "/contracts/checkpoint/lastEvents/inbox::childA"));
-        assertNotNull(nodeAt(result.document(), "/contracts/checkpoint/lastEvents/inbox::childB"));
+        assertChatCount(result.triggeredEvents(), "composite saw childB", 0);
+        assertNotNull(nodeAt(result.document(), "/contracts/checkpoint/lastEvents/inbox"));
+        assertNull(nodeAt(result.document(), "/contracts/checkpoint/lastEvents/inbox::childA"));
+        assertNull(nodeAt(result.document(), "/contracts/checkpoint/lastEvents/inbox::childB"));
     }
 
     @Test
-    void duplicateEventIsSkippedPerChildCheckpoint() {
+    void duplicateEventIsSkippedByCompositeChannelCheckpoint() {
         Fixture fixture = configuredFixture();
         Node initialized = initializedDocument(fixture, compositeDocument(fixture.repository,
                 Arrays.asList("childA", "childB"),
@@ -76,22 +77,21 @@ class CompositeTimelineChannelProcessorTest {
         Node event = chatTimelineEntry(fixture, "owner", 1, "hello");
 
         DocumentProcessingResult first = fixture.blue.processDocument(initialized, event);
-        Node firstA = nodeAt(first.document(), "/contracts/checkpoint/lastEvents/inbox::childA");
-        Node firstB = nodeAt(first.document(), "/contracts/checkpoint/lastEvents/inbox::childB");
+        Node firstCheckpoint = nodeAt(first.document(), "/contracts/checkpoint/lastEvents/inbox");
         DocumentProcessingResult second = fixture.blue.processDocument(first.document(), event);
 
         assertChatCount(first.triggeredEvents(), "composite saw childA", 1);
-        assertChatCount(first.triggeredEvents(), "composite saw childB", 1);
+        assertChatCount(first.triggeredEvents(), "composite saw childB", 0);
         assertChatCount(second.triggeredEvents(), "composite saw childA", 0);
         assertChatCount(second.triggeredEvents(), "composite saw childB", 0);
-        assertEquals(firstA.get("/timestamp"),
-                nodeAt(second.document(), "/contracts/checkpoint/lastEvents/inbox::childA/timestamp").getValue());
-        assertEquals(firstB.get("/timestamp"),
-                nodeAt(second.document(), "/contracts/checkpoint/lastEvents/inbox::childB/timestamp").getValue());
+        assertEquals(firstCheckpoint.get("/timestamp"),
+                nodeAt(second.document(), "/contracts/checkpoint/lastEvents/inbox/timestamp").getValue());
+        assertNull(nodeAt(second.document(), "/contracts/checkpoint/lastEvents/inbox::childA"));
+        assertNull(nodeAt(second.document(), "/contracts/checkpoint/lastEvents/inbox::childB"));
     }
 
     @Test
-    void childTimelineRecencyIsRespectedPerCompositeCheckpoint() {
+    void timelineRecencyIsRespectedPerCompositeChannelCheckpoint() {
         Fixture fixture = configuredFixture();
         Node initialized = initializedDocument(fixture, compositeDocument(fixture.repository,
                 Arrays.asList("owner"),
@@ -106,9 +106,34 @@ class CompositeTimelineChannelProcessorTest {
         assertChatCount(stale.triggeredEvents(), "composite saw owner", 0);
         assertChatCount(newer.triggeredEvents(), "composite saw owner", 1);
         assertEquals(BigInteger.valueOf(10),
-                stale.document().get("/contracts/checkpoint/lastEvents/inbox::owner/timestamp"));
+                stale.document().get("/contracts/checkpoint/lastEvents/inbox/timestamp"));
         assertEquals(BigInteger.valueOf(11),
-                newer.document().get("/contracts/checkpoint/lastEvents/inbox::owner/timestamp"));
+                newer.document().get("/contracts/checkpoint/lastEvents/inbox/timestamp"));
+    }
+
+    @Test
+    void compositeChannelUsesChildCheckpointsForIndependentRecency() {
+        Fixture fixture = configuredFixture();
+        Node initialized = initializedDocument(fixture, compositeDocument(fixture.repository,
+                Arrays.asList("owner", "support"),
+                timelineChannel("owner"),
+                timelineChannel("support")));
+
+        DocumentProcessingResult owner = processChat(fixture, initialized, "owner", 10, "owner latest");
+        DocumentProcessingResult support = processChat(fixture, owner.document(), "support", 1, "support first");
+        DocumentProcessingResult staleOwner = processChat(fixture, support.document(), "owner", 9, "owner stale");
+
+        assertChatCount(owner.triggeredEvents(), "composite saw owner", 1);
+        assertChatCount(support.triggeredEvents(), "composite saw support", 1);
+        assertChatCount(staleOwner.triggeredEvents(), "composite saw owner", 0);
+        assertEquals(BigInteger.valueOf(10),
+                staleOwner.document().get("/contracts/checkpoint/lastEvents/owner/timestamp"));
+        assertEquals(BigInteger.valueOf(1),
+                staleOwner.document().get("/contracts/checkpoint/lastEvents/support/timestamp"));
+        assertEquals("support",
+                staleOwner.document().getAsText("/contracts/checkpoint/lastEvents/inbox/timeline/timelineId"));
+        assertNull(nodeAt(staleOwner.document(), "/contracts/checkpoint/lastEvents/inbox::owner"));
+        assertNull(nodeAt(staleOwner.document(), "/contracts/checkpoint/lastEvents/inbox::support"));
     }
 
     @Test

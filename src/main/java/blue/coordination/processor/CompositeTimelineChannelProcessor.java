@@ -2,7 +2,6 @@ package blue.coordination.processor;
 
 import blue.language.model.Node;
 import blue.language.processor.ChannelCheckpointContext;
-import blue.language.processor.ChannelDelivery;
 import blue.language.processor.ChannelEvaluation;
 import blue.language.processor.ChannelEvaluationContext;
 import blue.language.processor.ChannelProcessor;
@@ -10,7 +9,6 @@ import blue.language.processor.model.ChannelEventCheckpoint;
 import blue.language.processor.model.ChannelContract;
 import blue.language.processor.model.MarkerContract;
 import blue.repo.coordination.CompositeTimelineChannel;
-import java.util.ArrayList;
 import java.util.List;
 
 public final class CompositeTimelineChannelProcessor implements ChannelProcessor<CompositeTimelineChannel> {
@@ -25,7 +23,7 @@ public final class CompositeTimelineChannelProcessor implements ChannelProcessor
         if (channels == null || channels.isEmpty()) {
             return ChannelEvaluation.noMatch();
         }
-        List<ChannelDelivery> deliveries = new ArrayList<ChannelDelivery>();
+        MatchingChild matching = null;
         for (String childKey : channels) {
             String key = trimToNull(childKey);
             if (key == null) {
@@ -55,18 +53,18 @@ public final class CompositeTimelineChannelProcessor implements ChannelProcessor
             if (deliveryEvent == null) {
                 continue;
             }
-            String checkpointKey = compositeCheckpointKey(context.bindingKey(), key);
-            Boolean shouldProcess = shouldProcessChild(processor, child, context, checkpointKey, childEvaluation);
-            deliveries.add(ChannelDelivery.of(withCompositeMetadata(deliveryEvent, key),
-                    childEvaluation.eventId(),
-                    checkpointKey,
-                    shouldProcess));
+            if (!childCheckpointAllows(key, context)) {
+                continue;
+            }
+            if (matching == null) {
+                matching = new MatchingChild(key, deliveryEvent, childEvaluation.eventId());
+            }
         }
-        return ChannelEvaluation.matchDeliveries(deliveries);
-    }
-
-    static String compositeCheckpointKey(String compositeKey, String childKey) {
-        return compositeKey + "::" + childKey;
+        if (matching == null) {
+            return ChannelEvaluation.noMatch();
+        }
+        return ChannelEvaluation.match(withCompositeMetadata(matching.event, matching.channelKey),
+                matching.eventId);
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -76,26 +74,21 @@ public final class CompositeTimelineChannelProcessor implements ChannelProcessor
         return processor.evaluate(child, context);
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    private Boolean shouldProcessChild(ChannelProcessor processor,
-                                       ChannelContract child,
-                                       ChannelEvaluationContext context,
-                                       String checkpointKey,
-                                       ChannelEvaluation childEvaluation) {
+    private boolean childCheckpointAllows(String channelKey,
+                                          ChannelEvaluationContext context) {
+        ChannelEventCheckpoint checkpoint = checkpoint(context);
+        Node lastEvent = checkpoint != null ? checkpoint.lastEvent(channelKey) : null;
+        return lastEvent == null || !TimelineProviderSupport.isOlderSameTimelineEvent(context.event(), lastEvent);
+    }
+
+    private ChannelEventCheckpoint checkpoint(ChannelEvaluationContext context) {
         MarkerContract marker = context.markers().get("checkpoint");
-        ChannelEventCheckpoint checkpoint = marker instanceof ChannelEventCheckpoint
-                ? (ChannelEventCheckpoint) marker
-                : null;
-        Node lastEvent = checkpoint != null ? checkpoint.lastEvent(checkpointKey) : null;
-        ChannelCheckpointContext checkpointContext = ChannelCheckpointContext.of(
-                context.scopePath(),
-                checkpointKey,
-                context.event(),
-                childEvaluation.eventId(),
-                lastEvent,
-                null,
-                context.markers());
-        return processor.isNewerEvent(child, checkpointContext);
+        return marker instanceof ChannelEventCheckpoint ? (ChannelEventCheckpoint) marker : null;
+    }
+
+    @Override
+    public boolean isNewerEvent(CompositeTimelineChannel contract, ChannelCheckpointContext context) {
+        return TimelineProviderSupport.isNewerOrDifferentTimelineEvent(context);
     }
 
     private Node withCompositeMetadata(Node event, String childKey) {
@@ -122,5 +115,17 @@ public final class CompositeTimelineChannelProcessor implements ChannelProcessor
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private static final class MatchingChild {
+        private final String channelKey;
+        private final Node event;
+        private final String eventId;
+
+        private MatchingChild(String channelKey, Node event, String eventId) {
+            this.channelKey = channelKey;
+            this.event = event;
+            this.eventId = eventId;
+        }
     }
 }
