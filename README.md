@@ -25,7 +25,7 @@ dependencies {
 }
 ```
 
-The project targets Java 8 bytecode and depends on:
+The project targets Java 8-compatible bytecode, builds with JDK 25, and depends on:
 
 ```groovy
 api "blue.language:blue-language-java:3.0.0"
