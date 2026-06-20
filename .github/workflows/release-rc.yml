@@ -1,0 +1,130 @@
+name: Release RC
+
+on:
+  push:
+    branches:
+      - next
+    paths:
+      - '.cz.toml'
+      - 'build.gradle'
+      - 'settings.gradle'
+      - 'gradle.properties'
+      - 'gradle/wrapper/**'
+      - 'gradlew'
+      - 'gradlew.bat'
+      - 'src/**'
+
+env:
+  CI: true
+  GITHUB_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+
+jobs:
+  ReleaseRC:
+    if: "${{ startsWith(github.event.head_commit.message, 'chore: release ') == false }}"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.WORKFLOW_PAT }}
+
+      - name: Fetch main and tags
+        run: git fetch origin main:refs/remotes/origin/main --tags
+
+      - name: Check out blue-quickjs
+        uses: actions/checkout@v4
+        with:
+          repository: bluecontract/blue-quickjs
+          path: blue-quickjs
+          submodules: recursive
+
+      - name: Set up Java 8 test runtime
+        uses: actions/setup-java@v3
+        with:
+          java-version: '8'
+          distribution: 'corretto'
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v3
+        with:
+          java-version: '25'
+          distribution: 'corretto'
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.8.0
+          run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: 'blue-quickjs/.nvmrc'
+          cache: 'pnpm'
+          cache-dependency-path: 'blue-quickjs/pnpm-lock.yaml'
+
+      - name: Cache emsdk
+        uses: actions/cache@v4
+        with:
+          path: blue-quickjs/tools/emsdk
+          key: emsdk-${{ runner.os }}-${{ hashFiles('blue-quickjs/tools/scripts/emsdk-version.txt') }}
+
+      - name: Install blue-quickjs dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: blue-quickjs
+
+      - name: Install emsdk
+        run: bash tools/scripts/setup-emsdk.sh
+        working-directory: blue-quickjs
+
+      - name: Build blue-quickjs runtime
+        run: pnpm exec nx build quickjs-runtime
+        working-directory: blue-quickjs
+
+      - name: Setup Gradle
+        uses: gradle/gradle-build-action@v2
+
+      - name: Configure Git
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+
+      - name: Prepare RC version
+        id: version
+        run: node .github/scripts/prepare-rc-release.js
+
+      - name: Commit and tag RC version
+        run: |
+          git add .cz.toml
+          git commit -m "chore: release ${{ steps.version.outputs.version }}"
+          git tag -a "v${{ steps.version.outputs.version }}" -m "Release ${{ steps.version.outputs.version }}"
+
+      - name: Execute Gradle build
+        run: ./gradlew clean build -Dblue.quickjs.root="$GITHUB_WORKSPACE/blue-quickjs"
+
+      - name: Execute Gradle publish
+        run: ./gradlew publish -Dblue.quickjs.root="$GITHUB_WORKSPACE/blue-quickjs"
+
+      - name: Execute Gradle release
+        env:
+          JRELEASER_GITHUB_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          JRELEASER_MAVENCENTRAL_USERNAME: ${{ secrets.MAVENCENTRAL_USERNAME }}
+          JRELEASER_MAVENCENTRAL_PASSWORD: ${{ secrets.MAVENCENTRAL_PASSWORD }}
+          JRELEASER_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          JRELEASER_GPG_PUBLIC_KEY: ${{ secrets.GPG_PUBLIC_KEY }}
+          JRELEASER_GPG_SECRET_KEY: ${{ secrets.GPG_SECRET_KEY }}
+        run: ./gradlew jreleaserFullRelease
+
+      - name: Push release commit and tag
+        run: git push origin HEAD:next --follow-tags
+
+      - name: Archive artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rc-artifacts
+          path: |
+            build/libs
+            build/publications
+            build/jreleaser
