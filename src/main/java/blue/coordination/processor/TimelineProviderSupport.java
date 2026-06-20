@@ -55,6 +55,30 @@ public final class TimelineProviderSupport {
         return currentTimestamp.compareTo(previousTimestamp) >= 0;
     }
 
+    public static boolean isNewerOrDifferentTimelineEvent(ChannelCheckpointContext context) {
+        Node currentEvent = context.event();
+        Node previousEvent = context.lastEvent();
+        String currentTimeline = CoordinationEventNodes.timelineId(currentEvent);
+        String previousTimeline = CoordinationEventNodes.timelineId(previousEvent);
+        if (currentTimeline != null && previousTimeline != null && !currentTimeline.equals(previousTimeline)) {
+            return true;
+        }
+        return isNewerOrSameTimelineEvent(context);
+    }
+
+    public static boolean isOlderSameTimelineEvent(Node currentEvent, Node previousEvent) {
+        String currentTimeline = CoordinationEventNodes.timelineId(currentEvent);
+        String previousTimeline = CoordinationEventNodes.timelineId(previousEvent);
+        if (currentTimeline == null || previousTimeline == null || !currentTimeline.equals(previousTimeline)) {
+            return false;
+        }
+        BigInteger currentTimestamp = CoordinationEventNodes.timestamp(currentEvent);
+        BigInteger previousTimestamp = CoordinationEventNodes.timestamp(previousEvent);
+        return currentTimestamp != null
+                && previousTimestamp != null
+                && currentTimestamp.compareTo(previousTimestamp) < 0;
+    }
+
     public static Node property(Node node, String key) {
         if (node == null || node.getProperties() == null) {
             return null;

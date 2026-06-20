@@ -78,14 +78,8 @@ contracts:
   triggeredEventChannel:
     type: Triggered Event Channel
   hotelResaleOrderPlaced:
-    type: Coordination/Operation
-    channel: hotelParticipantChannel
-  restaurantResaleOrderPlaced:
-    type: Coordination/Operation
-    channel: restaurantParticipantChannel
-  hotelResaleOrderPlacedImpl:
     type: Coordination/Sequential Workflow Operation
-    operation: hotelResaleOrderPlaced
+    channel: hotelParticipantChannel
     steps:
       - name: ForwardHotelResaleOrderPlaced
         type: Coordination/Compute
@@ -97,9 +91,9 @@ contracts:
           - $return:
               events:
                 $events: true
-  restaurantResaleOrderPlacedImpl:
+  restaurantResaleOrderPlaced:
     type: Coordination/Sequential Workflow Operation
-    operation: restaurantResaleOrderPlaced
+    channel: restaurantParticipantChannel
     steps:
       - name: ForwardRestaurantResaleOrderPlaced
         type: Coordination/Compute

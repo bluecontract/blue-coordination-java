@@ -7,11 +7,8 @@ contracts:
     type: Coordination/Timeline Channel
     timelineId: hotel
   checkIn:
-    type: Coordination/Operation
-    channel: hotelChannel
-  checkInImpl:
     type: Coordination/Sequential Workflow Operation
-    operation: checkIn
+    channel: hotelChannel
     steps:
       - name: VerifyCheckIn
         type: Coordination/Compute

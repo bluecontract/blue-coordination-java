@@ -1,1 +1,15 @@
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+}
+
 rootProject.name = 'blue-coordination-java'
+
+def localBlueRepository = file('../blue-repository-java')
+if (providers.gradleProperty('useLocalBlueRepository').map { it.toBoolean() }.getOrElse(false)
+        && localBlueRepository.isDirectory()) {
+    includeBuild(localBlueRepository) {
+        dependencySubstitution {
+            substitute module('blue.repo:blue-repo-java') using project(':')
+        }
+    }
+}

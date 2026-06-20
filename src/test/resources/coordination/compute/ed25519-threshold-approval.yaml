@@ -19,11 +19,8 @@ contracts:
     type: Coordination/Timeline Channel
     timelineId: admin
   approveAction:
-    type: Coordination/Operation
-    channel: adminChannel
-  approveActionImpl:
     type: Coordination/Sequential Workflow Operation
-    operation: approveAction
+    channel: adminChannel
     steps:
       - name: VerifyApproval
         type: Coordination/Compute

@@ -6,14 +6,11 @@ contracts:
     timelineId: counter-timeline
   increment:
     description: Increment the counter by the given number
-    type: Coordination/Operation
+    type: Coordination/Sequential Workflow Operation
     channel: ownerChannel
     request:
       description: Represents a value by which counter will be incremented
       type: Integer
-  incrementImpl:
-    type: Coordination/Sequential Workflow Operation
-    operation: increment
     steps:
       - name: IncrementAndEmit
         type: Coordination/Compute

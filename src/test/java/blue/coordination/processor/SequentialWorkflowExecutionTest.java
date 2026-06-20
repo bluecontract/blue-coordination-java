@@ -373,12 +373,10 @@ class SequentialWorkflowExecutionTest {
 
     private static Node counterDocument(BlueRepository repository, int counter, boolean includeDecrement) {
         Map<String, Node> contracts = baseOperationContracts();
-        contracts.put("increment", operation("ownerChannel"));
-        contracts.put("incrementImpl", sequentialWorkflowOperation("increment",
+        contracts.put("increment", sequentialWorkflowOperation("ownerChannel",
                 computeReplaceCounterStep(incrementValue())));
         if (includeDecrement) {
-            contracts.put("decrement", operation("ownerChannel"));
-            contracts.put("decrementImpl", sequentialWorkflowOperation("decrement",
+            contracts.put("decrement", sequentialWorkflowOperation("ownerChannel",
                     computeReplaceCounterStep(decrementValue())));
         }
         return document(repository, counter, contracts);
@@ -386,8 +384,7 @@ class SequentialWorkflowExecutionTest {
 
     private static Node counterWorkflowDocument(BlueRepository repository, int counter, Node... steps) {
         Map<String, Node> contracts = baseOperationContracts();
-        contracts.put("increment", operation("ownerChannel"));
-        contracts.put("incrementImpl", sequentialWorkflowOperation("increment", steps));
+        contracts.put("increment", sequentialWorkflowOperation("ownerChannel", steps));
         return document(repository, counter, contracts);
     }
 
@@ -397,16 +394,14 @@ class SequentialWorkflowExecutionTest {
 
     private static Node staticUpdateDocument(BlueRepository repository, Node counter, Node value) {
         Map<String, Node> contracts = baseOperationContracts();
-        contracts.put("increment", operation("ownerChannel"));
-        contracts.put("incrementImpl", sequentialWorkflowOperation("increment",
+        contracts.put("increment", sequentialWorkflowOperation("ownerChannel",
                 updateDocumentStep("replace", "/counter", value)));
         return document(repository, counter, contracts);
     }
 
     private static Node doubleIncrementDocument(BlueRepository repository) {
         Map<String, Node> contracts = baseOperationContracts();
-        contracts.put("increment", operation("ownerChannel"));
-        contracts.put("incrementImpl", sequentialWorkflowOperation("increment",
+        contracts.put("increment", sequentialWorkflowOperation("ownerChannel",
                 computeReplaceCounterStep(incrementValue()),
                 computeReplaceCounterStep(incrementValue())));
         return document(repository, 0, contracts);
@@ -468,8 +463,7 @@ class SequentialWorkflowExecutionTest {
 
     private static Node embeddedScopeDocument(BlueRepository repository) {
         Map<String, Node> childContracts = baseOperationContracts();
-        childContracts.put("increment", operation("ownerChannel"));
-        childContracts.put("incrementImpl", sequentialWorkflowOperation("increment",
+        childContracts.put("increment", sequentialWorkflowOperation("ownerChannel",
                 computeReplaceCounterStep(incrementValue())));
 
         Map<String, Node> rootContracts = new LinkedHashMap<>();
@@ -494,17 +488,11 @@ class SequentialWorkflowExecutionTest {
         return contracts;
     }
 
-    private static Node operation(String channel) {
-        return new Node()
-                .type("Coordination/Operation")
-                .properties("channel", new Node().value(channel))
-                .properties("request", new Node().type("Integer"));
-    }
-
-    private static Node sequentialWorkflowOperation(String operation, Node... steps) {
+    private static Node sequentialWorkflowOperation(String channel, Node... steps) {
         return new Node()
                 .type("Coordination/Sequential Workflow Operation")
-                .properties("operation", new Node().value(operation))
+                .properties("channel", new Node().value(channel))
+                .properties("request", new Node().type("Integer"))
                 .properties("steps", new Node().items(steps));
     }
 

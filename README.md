@@ -25,11 +25,12 @@ dependencies {
 }
 ```
 
-The project targets Java 8 bytecode and depends on:
+The project targets Java 8-compatible bytecode, builds with JDK 25, runs tests
+on Java 8, and depends on:
 
 ```groovy
 api "blue.language:blue-language-java:3.0.0"
-api "blue.repo:blue-repo-java:2.0.1"
+api "blue.repo:blue-repo-java:3.0.0-rc.1"
 api "blue.bex:blue-bex-java:1.0.0"
 ```
 
@@ -64,7 +65,9 @@ DocumentProcessor processor =
 `CoordinationProcessors` intentionally does not register a concrete processor
 for `Coordination/Timeline Channel`. Applications should provide their own
 timeline provider channel processor or register a small local test processor
-for fixtures that use `Coordination/Timeline Entry`.
+for fixtures that use `Coordination/Timeline Entry`. `Coordination/All Timelines
+Channel` delegates to those registered timeline channel processors when deciding
+which declared timelines can invoke a shared operation.
 
 ## Counter Document
 
@@ -79,14 +82,10 @@ contracts:
     timelineId: counter-demo
 
   increment:
-    type: Coordination/Operation
+    type: Coordination/Sequential Workflow Operation
     channel: ownerChannel
     request:
       type: Integer
-
-  incrementImpl:
-    type: Coordination/Sequential Workflow Operation
-    operation: increment
     steps:
       - name: IncrementAndEmit
         type: Coordination/Compute
@@ -158,13 +157,17 @@ processing from the same resolved state.
 
 This library provides executable behavior for:
 
+- `Coordination/All Timelines Channel`;
 - `Coordination/Composite Timeline Channel`;
-- `Coordination/Operation`;
+- `Coordination/Chat Workflow Operation`;
 - `Coordination/Sequential Workflow`;
 - `Coordination/Sequential Workflow Operation`;
 - `Coordination/Compute`;
 - `Coordination/Update Document`;
 - `Coordination/Trigger Event`.
+
+It also registers `Coordination/Operation` as a non-executable declaration
+type for operation-shaped contracts.
 
 The underlying `blue-language-java` runtime provides base behavior used by
 Coordination documents:
@@ -197,6 +200,10 @@ Common workflow bindings:
 `Coordination/Trigger Event` accepts literal event payloads only.
 
 ## Build And Test
+
+Gradle runs on JDK 25 and uses a Java 8 toolchain for tests. If Java 8 is not
+installed locally, Gradle can provision it through the configured Foojay
+toolchain resolver.
 
 Run tests:
 
@@ -240,7 +247,9 @@ src/main/java/blue/coordination/processor
   CoordinationProcessors.java
   CoordinationProcessorOptions.java
   CoordinationBexIntrinsics.java
+  AllTimelinesChannelProcessor.java
   CompositeTimelineChannelProcessor.java
+  ChatWorkflowOperationProcessor.java
   OperationProcessor.java
   SequentialWorkflowProcessor.java
   SequentialWorkflowOperationProcessor.java

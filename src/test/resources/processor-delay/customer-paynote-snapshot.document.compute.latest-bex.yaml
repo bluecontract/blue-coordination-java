@@ -22,7 +22,7 @@
     },
     "sampleAdminUpdate": {
       "description": "The standard, required operation for Sample Admin to deliver events.",
-      "type": "Coordination/Operation",
+      "type": "Coordination/Sequential Workflow Operation",
       "order": {
         "description": "Deterministic sort key within a scope; missing ≡ 0.",
         "type": "Integer"
@@ -30,18 +30,6 @@
       "channel": "sampleAdminChannel",
       "request": {
         "description": "The request schema for this operation (any Blue node). Invocation payloads MUST conform to this shape.\n"
-      }
-    },
-    "sampleAdminUpdateImpl": {
-      "description": "Implementation that re-emits the provided events",
-      "type": "Coordination/Sequential Workflow Operation",
-      "order": {
-        "description": "Deterministic sort key within a scope; missing ≡ 0.",
-        "type": "Integer"
-      },
-      "channel": {
-        "description": "The contracts-map key of the channel this handler binds to (same scope).",
-        "type": "Text"
       },
       "event": {
         "description": "Optional matcher payload used by the handler's processor to further restrict events."
@@ -65,8 +53,7 @@
             }
           ]
         }
-      ],
-      "operation": "sampleAdminUpdate"
+      ]
     },
     "investorChannel": {
       "type": "Coordination/Timeline Channel",
@@ -5298,7 +5285,7 @@
                       ]
                     },
                     "attachComponentOrder": {
-                      "type": "Coordination/Operation",
+                      "type": "Coordination/Sequential Workflow Operation",
                       "description": "Attaches an included merchant order snapshot so package payment can complete after both confirmations.",
                       "channel": "payeeChannel",
                       "request": {
@@ -5308,11 +5295,7 @@
                         "initialSnapshot": {
                           "type": "Common/Record"
                         }
-                      }
-                    },
-                    "attachComponentOrderImpl": {
-                      "type": "Coordination/Sequential Workflow Operation",
-                      "operation": "attachComponentOrder",
+                      },
                       "steps": [
                         {
                           "name": "BuildComponentAttachment",

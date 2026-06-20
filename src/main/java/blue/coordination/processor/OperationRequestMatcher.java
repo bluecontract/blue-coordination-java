@@ -5,7 +5,6 @@ import blue.language.processor.HandlerMatchContext;
 import blue.language.processor.model.InitializationMarker;
 import blue.language.processor.model.MarkerContract;
 import blue.language.utils.BlueIdCalculator;
-import blue.repo.coordination.Operation;
 import blue.repo.coordination.OperationRequest;
 import blue.repo.coordination.SequentialWorkflowOperation;
 import java.util.Map;
@@ -23,21 +22,17 @@ final class OperationRequestMatcher {
         if (requestEvent == null) {
             return false;
         }
-        String operationKey = trimToNull(contract.getOperation());
+        String operationKey = trimToNull(contract.getKey());
         if (operationKey == null || !operationKey.equals(requestEvent.operation())) {
             return false;
         }
-        Operation operation = operationMarker(context.markers(), operationKey);
-        if (operation == null) {
-            return false;
-        }
-        if (!channelsCompatible(contract, operation)) {
+        if (!channelsCompatible(contract)) {
             return false;
         }
         if (!pinnedDocumentCompatible(requestEvent, context.markers())) {
             return false;
         }
-        return requestMatches(operation.getRequest(), requestEvent, context);
+        return requestMatches(contract.getRequest(), requestEvent, context);
     }
 
     private boolean requestMatches(Node requestPattern,
@@ -67,8 +62,8 @@ final class OperationRequestMatcher {
                 && requestPattern.getSchema() == null;
     }
 
-    private boolean channelsCompatible(SequentialWorkflowOperation contract, Operation operation) {
-        String operationChannel = trimToNull(operation.getChannel());
+    private boolean channelsCompatible(SequentialWorkflowOperation contract) {
+        String operationChannel = trimToNull(contract.getChannel());
         if (operationChannel == null) {
             return true;
         }
@@ -100,14 +95,6 @@ final class OperationRequestMatcher {
         }
         MarkerContract marker = markers.get("initialized");
         return marker instanceof InitializationMarker ? (InitializationMarker) marker : null;
-    }
-
-    private Operation operationMarker(Map<String, MarkerContract> markers, String key) {
-        if (markers == null) {
-            return null;
-        }
-        MarkerContract marker = markers.get(key);
-        return marker instanceof Operation ? (Operation) marker : null;
     }
 
     private static String trimToNull(String value) {

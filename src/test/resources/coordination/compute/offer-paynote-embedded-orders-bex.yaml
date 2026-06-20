@@ -39,7 +39,7 @@ contracts:
   # - A request for another package id does not match this operation.
   # - A second PayNote reaches the workflow and fails because /paynote is already present.
   deliverPaynote:
-    type: Coordination/Operation
+    type: Coordination/Sequential Workflow Operation
     channel: packageParticipants
     request:
       name: Package PayNote
@@ -65,16 +65,10 @@ contracts:
           timelineId: card-processor
         confirmAuthorization:
           channel: cardProcessorChannel
-        confirmAuthorizationImpl:
-          operation: confirmAuthorization
         provideRestaurantOrder:
           channel: travelAgencyChannel
-        provideRestaurantOrderImpl:
-          operation: provideRestaurantOrder
         provideHotelOrder:
           channel: travelAgencyChannel
-        provideHotelOrderImpl:
-          operation: provideHotelOrder
         restaurantOrderEvents:
           childPath: /restaurantOrder
         hotelOrderEvents:
@@ -85,11 +79,6 @@ contracts:
           channel: hotelOrderEvents
         confirmCapture:
           channel: cardProcessorChannel
-        confirmCaptureImpl:
-          operation: confirmCapture
-  deliverPaynoteImpl:
-    type: Coordination/Sequential Workflow Operation
-    operation: deliverPaynote
     steps:
       - name: BuildDeliverPaynotePatch
         type: Coordination/Compute

@@ -86,11 +86,8 @@ final class ComputeWorkflowTestSupport {
                 "contracts:",
                 CoordinationTestResources.simpleTimelineChannelYaml("ownerChannel", "owner", 2),
                 "  run:",
-                "    type: Coordination/Operation",
-                "    channel: ownerChannel",
-                "  runImpl:",
                 "    type: Coordination/Sequential Workflow Operation",
-                "    operation: run",
+                "    channel: ownerChannel",
                 body);
     }
 
@@ -101,13 +98,10 @@ final class ComputeWorkflowTestSupport {
                 "contracts:",
                 CoordinationTestResources.simpleTimelineChannelYaml("ownerChannel", "owner", 2),
                 "  run:",
-                "    type: Coordination/Operation",
-                "    channel: ownerChannel",
-                extraContracts,
-                "  runImpl:",
                 "    type: Coordination/Sequential Workflow Operation",
-                "    operation: run",
-                body);
+                "    channel: ownerChannel",
+                body,
+                extraContracts);
     }
 
     Node initializedOperationWorkflow(String body) {

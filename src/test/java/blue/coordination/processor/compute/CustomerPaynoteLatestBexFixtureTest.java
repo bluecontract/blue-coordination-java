@@ -218,14 +218,12 @@ class CustomerPaynoteLatestBexFixtureTest {
         Map<String, Node> all = contracts.getProperties();
         Node channel = all.get("sampleAdminChannel");
         Node operation = all.get("sampleAdminUpdate");
-        Node implementation = all.get("sampleAdminUpdateImpl");
         operation.getProperties().remove("request");
-        implementation.getProperties().remove("event");
-        implementation.properties("channel", new Node().value("sampleAdminChannel"));
+        operation.getProperties().remove("event");
+        operation.properties("channel", new Node().value("sampleAdminChannel"));
         all.clear();
         all.put("sampleAdminChannel", channel);
         all.put("sampleAdminUpdate", operation);
-        all.put("sampleAdminUpdateImpl", implementation);
     }
 
     private static final class Fixture {
