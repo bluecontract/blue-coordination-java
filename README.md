@@ -30,7 +30,7 @@ on Java 8, and depends on:
 
 ```groovy
 api "blue.language:blue-language-java:3.0.0"
-api "blue.repo:blue-repo-java:2.0.1"
+api "blue.repo:blue-repo-java:3.0.0-rc.1"
 api "blue.bex:blue-bex-java:1.0.0"
 ```
 

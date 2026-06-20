@@ -5,7 +5,8 @@ plugins {
 rootProject.name = 'blue-coordination-java'
 
 def localBlueRepository = file('../blue-repository-java')
-if (localBlueRepository.isDirectory()) {
+if (providers.gradleProperty('useLocalBlueRepository').map { it.toBoolean() }.getOrElse(false)
+        && localBlueRepository.isDirectory()) {
     includeBuild(localBlueRepository) {
         dependencySubstitution {
             substitute module('blue.repo:blue-repo-java') using project(':')
