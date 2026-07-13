@@ -44,9 +44,8 @@ import blue.coordination.processor.CoordinationProcessors;
 import blue.language.Blue;
 import blue.repo.BlueRepository;
 
-BlueRepository repository = BlueRepository.v1_3_0();
+BlueRepository repository = BlueRepository.latest();
 Blue blue = repository.configure(new Blue());
-blue.nodeProvider(repository.nodeProvider());
 
 CoordinationProcessors.registerWith(blue);
 ```
@@ -62,12 +61,10 @@ DocumentProcessor processor =
                 .build();
 ```
 
-`CoordinationProcessors` intentionally does not register a concrete processor
-for `Coordination/Timeline Channel`. Applications should provide their own
-timeline provider channel processor or register a small local test processor
-for fixtures that use `Coordination/Timeline Entry`. `Coordination/All Timelines
-Channel` delegates to those registered timeline channel processors when deciding
-which declared timelines can invoke a shared operation.
+`CoordinationProcessors` registers Timeline, Composite Timeline, and All
+Timelines channel processors. Timeline providers remain responsible for feeding
+authenticated, ordered Timeline Entries; the processors enforce the channel's
+timeline and actor identity and sequence-based checkpoint semantics.
 
 ## Counter Document
 
@@ -79,7 +76,12 @@ counter: 0
 contracts:
   ownerChannel:
     type: Coordination/Timeline Channel
-    timelineId: counter-demo
+    timeline:
+      type: Coordination/Timeline
+      timelineId: counter-demo
+    actor:
+      type: MyOS/MyOS Principal Actor
+      accountId: counter-demo
 
   increment:
     type: Coordination/Sequential Workflow Operation
@@ -123,8 +125,13 @@ An input event for that channel looks like this:
 ```yaml
 type: Coordination/Timeline Entry
 timeline:
+  type: Coordination/Timeline
   timelineId: counter-demo
+sequence: 1
 timestamp: 1
+actor:
+  type: MyOS/MyOS Principal Actor
+  accountId: counter-demo
 message:
   type: Coordination/Operation Request
   operation: increment
