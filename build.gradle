@@ -38,9 +38,9 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 dependencies {
-    api 'blue.language:blue-language-java:3.0.0'
-    api 'blue.repo:blue-repo-java:3.0.0-rc.1'
-    api 'blue.bex:blue-bex-java:1.0.0'
+    api 'blue.language:blue-language-java:3.1.0-rc.5'
+    api 'blue.repo:blue-repo-java:3.0.0-rc.5'
+    api 'blue.bex:blue-bex-java:1.1.0-rc.1'
 
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.15.2'
     implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
