@@ -82,10 +82,18 @@ class RepositoryStyleCounterDocumentTest {
                 "      type: Integer",
                 "    event:",
                 "      description: Optional matcher payload used by the channel's processor to further restrict which incoming events it accepts at this scope.",
-                "    timelineId:",
-                "      description: The `timelineId` whose entries this channel delivers.",
-                "      type: Text",
-                "      value: " + TIMELINE_ID,
+                "    timeline:",
+                "      description: Timeline whose entries this channel delivers.",
+                "      type: Coordination/Timeline",
+                "      timelineId:",
+                "        type: Text",
+                "        value: " + TIMELINE_ID,
+                "    actor:",
+                "      description: Actor whose entries this channel delivers.",
+                "      type: MyOS/MyOS Principal Actor",
+                "      accountId:",
+                "        type: Text",
+                "        value: " + TIMELINE_ID,
                 "  increment:",
                 "    description: Increment the counter by the given number",
                 "    type: Coordination/Sequential Workflow Operation",
@@ -212,10 +220,9 @@ class RepositoryStyleCounterDocumentTest {
     }
 
     private static Fixture configuredFixture() {
-        BlueRepository repository = BlueRepository.v1_3_0();
+        BlueRepository repository = BlueRepository.latest();
         Blue blue = CoordinationTestResources.configuredBlue(repository);
         CoordinationProcessors.registerWith(blue);
-        TestTimelineProvider.registerWith(blue);
         return new Fixture(repository, blue);
     }
 

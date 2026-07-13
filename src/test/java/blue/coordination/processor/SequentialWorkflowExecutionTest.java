@@ -77,9 +77,13 @@ class SequentialWorkflowExecutionTest {
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, counterDocument(fixture.repository, 0, true));
         Node afterFirst = processOperationRequest(fixture, document, "owner", 1, "increment", 7);
+        assertEquals(BigInteger.ONE,
+                afterFirst.get("/contracts/checkpoint/lastEvents/ownerChannel/sequence"));
 
         Node afterSecond = processOperationRequest(fixture, afterFirst, "owner", 2, "increment", 5);
 
+        assertEquals(BigInteger.valueOf(2),
+                afterSecond.get("/contracts/checkpoint/lastEvents/ownerChannel/sequence"));
         assertCounter(afterSecond, 12);
     }
 
@@ -583,30 +587,20 @@ class SequentialWorkflowExecutionTest {
                                               int timestamp,
                                               String operation,
                                               Node request) {
-        Node event = new Node()
-                .blue(fixture.repository.typeAliasBlue())
-                .type("Coordination/Timeline Entry")
-                .properties("timeline", new Node()
-                        .properties("timelineId", new Node().value(timelineId)))
-                .properties("timestamp", new Node().value(timestamp))
-                .properties("message", new Node()
-                        .type("Coordination/Operation Request")
-                        .properties("operation", new Node().value(operation))
-                        .properties("request", request));
-        return fixture.blue.preprocess(event).blue(null);
+        Node operationRequest = new Node()
+                .type("Coordination/Operation Request")
+                .properties("operation", new Node().value(operation))
+                .properties("request", request);
+        return TestTimelineProvider.timelineEntry(
+                fixture.blue, fixture.repository, timelineId, timestamp, operationRequest);
     }
 
     private static Node chatTimelineEntry(Fixture fixture, String timelineId, int timestamp, String message) {
-        Node event = new Node()
-                .blue(fixture.repository.typeAliasBlue())
-                .type("Coordination/Timeline Entry")
-                .properties("timeline", new Node()
-                        .properties("timelineId", new Node().value(timelineId)))
-                .properties("timestamp", new Node().value(timestamp))
-                .properties("message", new Node()
-                        .type("Coordination/Chat Message")
-                        .properties("message", new Node().value(message)));
-        return fixture.blue.preprocess(event).blue(null);
+        return TestTimelineProvider.timelineEntry(fixture.blue,
+                fixture.repository,
+                timelineId,
+                timestamp,
+                TestTimelineProvider.chatMessage(message));
     }
 
     private static Node initializedDocument(Fixture fixture, Node document) {
@@ -615,26 +609,23 @@ class SequentialWorkflowExecutionTest {
     }
 
     private static Fixture configuredFixture() {
-        BlueRepository repository = BlueRepository.v1_3_0();
+        BlueRepository repository = BlueRepository.latest();
         Blue blue = CoordinationTestResources.configuredBlue(repository);
         CoordinationProcessors.registerWith(blue);
-        TestTimelineProvider.registerWith(blue);
         return new Fixture(repository, blue);
     }
 
     private static Fixture configuredFixture(CoordinationProcessorOptions options) {
-        BlueRepository repository = BlueRepository.v1_3_0();
+        BlueRepository repository = BlueRepository.latest();
         Blue blue = CoordinationTestResources.configuredBlue(repository);
         CoordinationProcessors.registerWith(blue, options);
-        TestTimelineProvider.registerWith(blue);
         return new Fixture(repository, blue);
     }
 
     private static Fixture configuredCoordinationFixture(CoordinationProcessorOptions options) {
-        BlueRepository repository = BlueRepository.v1_3_0();
+        BlueRepository repository = BlueRepository.latest();
         Blue blue = CoordinationTestResources.configuredBlue(repository);
         CoordinationProcessors.registerWith(blue, options);
-        TestTimelineProvider.registerWith(blue);
         return new Fixture(repository, blue);
     }
 

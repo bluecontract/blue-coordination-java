@@ -1,7 +1,9 @@
 # Generated from src/test/resources/processor-delay/customer-paynote-snapshot.event.json
 type: "Coordination/Timeline Entry"
 timeline:
+  type: "Coordination/Timeline"
   timelineId: "admin-timeline"
+sequence: 1
 timestamp: 1700000000000
 actor:
   type: "Sample/Principal Actor"

@@ -11,6 +11,7 @@ import blue.language.processor.model.JsonPatch;
 import blue.language.snapshot.ResolvedSnapshot;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.ChatMessage;
+import blue.repo.coordination.TimelineChannel;
 import java.math.BigInteger;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -18,7 +19,6 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CounterSnapshotRoundTripStressTest {
@@ -45,6 +45,23 @@ class CounterSnapshotRoundTripStressTest {
                     "counter",
                     i,
                     TestTimelineProvider.chatMessage("tick " + i));
+            if (i > 1) {
+                Node previous = currentSnapshot.canonicalNodeAt(
+                        "/contracts/checkpoint/lastEvents/ownerChannel");
+                CoordinationEventNodes.TimelineEntryView previousEntry =
+                        CoordinationEventNodes.timelineEntry(previous);
+                CoordinationEventNodes.TimelineEntryView currentEntry =
+                        CoordinationEventNodes.timelineEntry(event);
+                assertNotNull(previousEntry);
+                assertNotNull(currentEntry);
+                assertTrue(BlueSemanticIdentity.equals(
+                        currentEntry.timeline(), previousEntry.timeline()));
+                assertTrue(currentEntry.sequence().compareTo(previousEntry.sequence()) > 0);
+                TimelineChannel channel = fixture.blue.nodeToObject(
+                        currentSnapshot.resolvedNodeAt("/contracts/ownerChannel"),
+                        TimelineChannel.class);
+                assertTrue(TimelineProviderSupport.matchesTimelineAndActor(channel, currentEntry));
+            }
 
             DocumentProcessingResult result = fixture.blue.processDocument(currentSnapshot, event);
 
@@ -65,7 +82,7 @@ class CounterSnapshotRoundTripStressTest {
             ResolvedSnapshot loadedSnapshot = fixture.blue.loadSnapshot(parsedCanonical);
 
             assertEquals(result.blueId(), loadedSnapshot.blueId(), "iteration " + i + " should preserve BlueId");
-            assertSnapshotCacheReuse(result.snapshot(), loadedSnapshot);
+            assertSnapshotRoundTrip(result.snapshot(), loadedSnapshot);
             currentSnapshot = loadedSnapshot;
         }
 
@@ -85,12 +102,10 @@ class CounterSnapshotRoundTripStressTest {
                 + ", elapsedMillis=" + elapsedMillis);
     }
 
-    private static void assertSnapshotCacheReuse(ResolvedSnapshot expected, ResolvedSnapshot actual) {
-        if (expected == actual) {
-            assertSame(expected, actual);
-        } else {
-            assertSame(expected.frozenResolvedRoot(), actual.frozenResolvedRoot());
-        }
+    private static void assertSnapshotRoundTrip(ResolvedSnapshot expected, ResolvedSnapshot actual) {
+        assertEquals(expected.blueId(), actual.blueId());
+        assertEquals(expected.frozenCanonicalRoot().blueId(),
+                actual.frozenCanonicalRoot().blueId());
     }
 
     private static Node bexOnlyCounterDocument(String counterIncrementHandlerBlueId) {
@@ -111,10 +126,9 @@ class CounterSnapshotRoundTripStressTest {
     }
 
     private static Fixture configuredFixture() {
-        BlueRepository repository = BlueRepository.v1_3_0();
+        BlueRepository repository = BlueRepository.latest();
         Blue blue = CoordinationTestResources.configuredBlue(repository);
         CoordinationProcessors.registerWith(blue);
-        TestTimelineProvider.registerWith(blue);
         Node counterIncrementHandlerType = new Node().name("Counter Increment Handler");
         String counterIncrementHandlerBlueId = blue.calculateBlueId(counterIncrementHandlerType);
         blue.registerExternalContractType(counterIncrementHandlerBlueId,

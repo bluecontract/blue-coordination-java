@@ -5,7 +5,12 @@ usedNonces: {}
 contracts:
   hotelChannel:
     type: Coordination/Timeline Channel
-    timelineId: hotel
+    timeline:
+      type: Coordination/Timeline
+      timelineId: hotel
+    actor:
+      type: MyOS/MyOS Principal Actor
+      accountId: hotel
   checkIn:
     type: Coordination/Sequential Workflow Operation
     channel: hotelChannel

@@ -94,9 +94,9 @@ class OperationRequestMatchingTest {
         Node workflow = operation("owner", integerPattern(),
                 updateDocumentStep("replace", "/counter", timelineIncrementValue()));
         workflow.properties("event", new Node()
-                .type("Coordination/Timeline Entry")
                 .properties("source", new Node()
-                        .properties("value", new Node().value("web"))));
+                        .type("Coordination/API Call")
+                        .properties("apiKeyId", new Node().value("web"))));
         Node initialized = initializedDocument(fixture, timelineCounterDocument(fixture.repository,
                 workflow));
 
@@ -111,9 +111,9 @@ class OperationRequestMatchingTest {
         Node workflow = operation("owner", integerPattern(),
                 updateDocumentStep("replace", "/counter", timelineIncrementValue()));
         workflow.properties("event", new Node()
-                .type("Coordination/Timeline Entry")
                 .properties("source", new Node()
-                        .properties("value", new Node().value("web"))));
+                        .type("Coordination/API Call")
+                        .properties("apiKeyId", new Node().value("web"))));
         Node initialized = initializedDocument(fixture, timelineCounterDocument(fixture.repository,
                 workflow));
 
@@ -438,31 +438,24 @@ class OperationRequestMatchingTest {
                                                       int timestamp,
                                                       Node operationRequest,
                                                       String sourceValue) {
-        Node event = new Node()
-                .blue(fixture.repository.typeAliasBlue())
-                .type("Coordination/Timeline Entry")
-                .properties("timeline", new Node()
-                        .properties("timelineId", new Node().value(timelineId)))
-                .properties("timestamp", new Node().value(timestamp))
-                .properties("message", operationRequest);
+        Node event = TestTimelineProvider.timelineEntry(
+                fixture.blue, fixture.repository, timelineId, timestamp, operationRequest);
         if (sourceValue != null) {
             event.properties("source", new Node()
-                    .properties("value", new Node().value(sourceValue)));
+                    .type("Coordination/API Call")
+                    .properties("apiKeyId", new Node().value(sourceValue)));
+            return fixture.blue.preprocess(
+                    event.blue(fixture.repository.typeAliasBlue())).blue(null);
         }
-        return fixture.blue.preprocess(event).blue(null);
+        return event;
     }
 
     private static Node chatTimelineEntry(Fixture fixture, String timelineId, int timestamp) {
-        Node event = new Node()
-                .blue(fixture.repository.typeAliasBlue())
-                .type("Coordination/Timeline Entry")
-                .properties("timeline", new Node()
-                        .properties("timelineId", new Node().value(timelineId)))
-                .properties("timestamp", new Node().value(timestamp))
-                .properties("message", new Node()
-                        .type("Coordination/Chat Message")
-                        .properties("message", new Node().value("run")));
-        return fixture.blue.preprocess(event).blue(null);
+        return TestTimelineProvider.timelineEntry(fixture.blue,
+                fixture.repository,
+                timelineId,
+                timestamp,
+                TestTimelineProvider.chatMessage("run"));
     }
 
     private static Node largePayloadBranch() {
@@ -489,10 +482,9 @@ class OperationRequestMatchingTest {
     }
 
     private static Fixture configuredFixture() {
-        BlueRepository repository = BlueRepository.v1_3_0();
+        BlueRepository repository = BlueRepository.latest();
         Blue blue = CoordinationTestResources.configuredBlue(repository);
         CoordinationProcessors.registerWith(blue);
-        TestTimelineProvider.registerWith(blue);
         return new Fixture(repository, blue);
     }
 

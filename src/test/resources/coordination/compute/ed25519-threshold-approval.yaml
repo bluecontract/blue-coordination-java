@@ -17,7 +17,12 @@ executed: {}
 contracts:
   adminChannel:
     type: Coordination/Timeline Channel
-    timelineId: admin
+    timeline:
+      type: Coordination/Timeline
+      timelineId: admin
+    actor:
+      type: MyOS/MyOS Principal Actor
+      accountId: admin
   approveAction:
     type: Coordination/Sequential Workflow Operation
     channel: adminChannel

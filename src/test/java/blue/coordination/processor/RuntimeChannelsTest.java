@@ -416,31 +416,20 @@ class RuntimeChannelsTest {
     }
 
     private static Node chatTimelineEntry(Fixture fixture, int timestamp) {
-        Node event = new Node()
-                .blue(fixture.repository.typeAliasBlue())
-                .type("Coordination/Timeline Entry")
-                .properties("timeline", new Node()
-                        .properties("timelineId", new Node().value("owner")))
-                .properties("timestamp", new Node().value(timestamp))
-                .properties("message", chatMessageEvent("run"));
-        return fixture.blue.preprocess(event).blue(null);
+        return TestTimelineProvider.timelineEntry(
+                fixture.blue, fixture.repository, "owner", timestamp, chatMessageEvent("run"));
     }
 
     private static Node operationRequestEvent(Fixture fixture,
                                               int timestamp,
                                               String operation,
                                               Node request) {
-        Node event = new Node()
-                .blue(fixture.repository.typeAliasBlue())
-                .type("Coordination/Timeline Entry")
-                .properties("timeline", new Node()
-                        .properties("timelineId", new Node().value("owner")))
-                .properties("timestamp", new Node().value(timestamp))
-                .properties("message", new Node()
-                        .type("Coordination/Operation Request")
-                        .properties("operation", new Node().value(operation))
-                        .properties("request", request));
-        return fixture.blue.preprocess(event).blue(null);
+        Node operationRequest = new Node()
+                .type("Coordination/Operation Request")
+                .properties("operation", new Node().value(operation))
+                .properties("request", request);
+        return TestTimelineProvider.timelineEntry(
+                fixture.blue, fixture.repository, "owner", timestamp, operationRequest);
     }
 
     private static Node nodeAt(Node node, String pointer) {
@@ -453,10 +442,9 @@ class RuntimeChannelsTest {
     }
 
     private static Fixture configuredFixture() {
-        BlueRepository repository = BlueRepository.v1_3_0();
+        BlueRepository repository = BlueRepository.latest();
         Blue blue = CoordinationTestResources.configuredBlue(repository);
         CoordinationProcessors.registerWith(blue);
-        TestTimelineProvider.registerWith(blue);
         return new Fixture(repository, blue);
     }
 

@@ -4,6 +4,7 @@ import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
+import blue.language.snapshot.ResolvedSnapshot;
 import java.math.BigInteger;
 import org.junit.jupiter.api.Test;
 
@@ -45,13 +46,15 @@ class DynamicEmbeddedParticipantsWorkflowTest {
                         .processingMetrics(metrics)
                         .build());
 
-        Node current = support.initialize(support.yamlResource(DOCUMENT_RESOURCE)).document();
+        DocumentProcessingResult initialized = support.initialize(support.yamlResource(DOCUMENT_RESOURCE));
+        ResolvedSnapshot current = initialized.snapshot();
+        Node currentDocument = initialized.document();
 
-        assertNotNull(current.getAsNode("/embeddedTemplate"));
-        assertNotNull(current.getAsNode("/contractTemplates/embeddedTimeline"));
-        assertNotNull(current.getAsNode("/contractTemplates/embeddedBridge"));
-        assertNotNull(current.getAsNode("/contractTemplates/embeddedChatCounter"));
-        assertFalse(current.getProperties().containsKey("embeddedTemplates"));
+        assertNotNull(currentDocument.getAsNode("/embeddedTemplate"));
+        assertNotNull(currentDocument.getAsNode("/contractTemplates/embeddedTimeline"));
+        assertNotNull(currentDocument.getAsNode("/contractTemplates/embeddedBridge"));
+        assertNotNull(currentDocument.getAsNode("/contractTemplates/embeddedChatCounter"));
+        assertFalse(currentDocument.getProperties().containsKey("embeddedTemplates"));
 
         for (int i = 1; i <= EMBEDDED_PARTICIPANTS; i++) {
             // Alice creates /embedded_i plus the root contracts that make this new document routable:
@@ -60,18 +63,19 @@ class DynamicEmbeddedParticipantsWorkflowTest {
             DocumentProcessingResult result = support.blue.processDocument(current,
                     operationEvent(support, "alice", i, "createEmbedded"));
             assertFalse(result.capabilityFailure(), result.failureReason());
-            current = result.document();
+            current = result.snapshot();
+            currentDocument = result.document();
         }
 
-        assertEquals(BigInteger.valueOf(EMBEDDED_PARTICIPANTS), current.get("/nextEmbeddedNumber"));
+        assertEquals(BigInteger.valueOf(EMBEDDED_PARTICIPANTS), currentDocument.get("/nextEmbeddedNumber"));
         for (int i = 1; i <= EMBEDDED_PARTICIPANTS; i++) {
-            assertEmbeddedParticipant(current, i);
-            assertEquals("/embedded_" + i, current.get("/contracts/embeddedDocs/paths/" + (i - 1)));
+            assertEmbeddedParticipant(currentDocument, i);
+            assertEquals("/embedded_" + i, currentDocument.get("/contracts/embeddedDocs/paths/" + (i - 1)));
             assertEquals("embedded_" + i + "_timeline",
-                    current.get("/contracts/allEmbeddedTimelines/channels/" + (i - 1)));
-            assertNotNull(current.getAsNode("/contracts/embedded_" + i + "_timeline"));
-            assertNotNull(current.getAsNode("/contracts/embedded_" + i + "_bridge"));
-            assertNotNull(current.getAsNode("/contracts/embedded_" + i + "_chatCounter"));
+                    currentDocument.get("/contracts/allEmbeddedTimelines/channels/" + (i - 1)));
+            assertNotNull(currentDocument.getAsNode("/contracts/embedded_" + i + "_timeline"));
+            assertNotNull(currentDocument.getAsNode("/contracts/embedded_" + i + "_bridge"));
+            assertNotNull(currentDocument.getAsNode("/contracts/embedded_" + i + "_chatCounter"));
         }
 
         for (int i = 0; i < CHAT_MESSAGES; i++) {
@@ -82,7 +86,8 @@ class DynamicEmbeddedParticipantsWorkflowTest {
             DocumentProcessingResult chatResult = support.blue.processDocument(current,
                     operationEvent(support, "embedded-" + participantNumber, timestamp, "say"));
             assertFalse(chatResult.capabilityFailure(), chatResult.failureReason());
-            current = chatResult.document();
+            current = chatResult.snapshot();
+            currentDocument = chatResult.document();
 
             // Bob checks the root counter after each embedded chat. The check is intentionally a
             // separate operation so the test proves both automatic event counting and explicit user
@@ -90,14 +95,15 @@ class DynamicEmbeddedParticipantsWorkflowTest {
             DocumentProcessingResult bobCheck = support.blue.processDocument(current,
                     operationEvent(support, "bob", 100 + i, "checkChatCount"));
             assertFalse(bobCheck.capabilityFailure(), bobCheck.failureReason());
-            current = bobCheck.document();
+            current = bobCheck.snapshot();
+            currentDocument = bobCheck.document();
 
-            assertEquals(BigInteger.valueOf(i + 1), current.get("/chatMessagesSeen"));
-            assertEquals(BigInteger.valueOf(i + 1), current.get("/embeddedTimelineEventsSeen"));
-            assertEquals(Boolean.valueOf(i + 1 >= 5), current.get("/success"));
+            assertEquals(BigInteger.valueOf(i + 1), currentDocument.get("/chatMessagesSeen"));
+            assertEquals(BigInteger.valueOf(i + 1), currentDocument.get("/embeddedTimelineEventsSeen"));
+            assertEquals(Boolean.valueOf(i + 1 >= 5), currentDocument.get("/success"));
         }
 
-        assertEquals(Boolean.TRUE, current.get("/success"));
+        assertEquals(Boolean.TRUE, currentDocument.get("/success"));
         long expectedPatchApplications = EMBEDDED_PARTICIPANTS + (CHAT_MESSAGES * 3L);
         assertEquals(expectedPatchApplications, metrics.directBexChangesetHits(),
                 "Every returned Compute changeset should use direct BEX changeset application");
@@ -111,7 +117,9 @@ class DynamicEmbeddedParticipantsWorkflowTest {
         assertEquals("Embedded", document.get(prefix + "/name"));
         assertEquals("Embedded " + number, document.get(prefix + "/displayName"));
         assertEquals("embedded-" + number,
-                document.get(prefix + "/contracts/participantChannel/timelineId"));
+                document.get(prefix + "/contracts/participantChannel/timeline/timelineId"));
+        assertEquals("embedded-" + number,
+                document.get(prefix + "/contracts/participantChannel/actor/accountId"));
         assertNotNull(document.getAsNode(prefix + "/contracts/say"));
         assertNotNull(document.getAsNode(prefix + "/contracts/say"));
     }

@@ -13,11 +13,17 @@
       "event": {
         "description": "Optional matcher payload used by the channel's processor to further restrict which incoming events it accepts at this scope."
       },
-      "timelineId": "admin-timeline",
-      "accountId": "0",
-      "email": {
-        "description": "Email address associated with the Sample timeline",
-        "type": "Text"
+      "timeline": {
+        "type": "Coordination/Timeline",
+        "timelineId": "admin-timeline"
+      },
+      "actor": {
+        "type": "Sample/Principal Actor",
+        "accountId": "0",
+        "email": {
+          "description": "Email address associated with the Sample timeline",
+          "type": "Text"
+        }
       }
     },
     "sampleAdminUpdate": {
@@ -64,11 +70,17 @@
       "event": {
         "description": "Optional matcher payload used by the channel's processor to further restrict which incoming events it accepts at this scope."
       },
-      "timelineId": "investor-timeline",
-      "accountId": "investor-uid",
-      "email": {
-        "description": "Email address associated with the Sample timeline",
-        "type": "Text"
+      "timeline": {
+        "type": "Coordination/Timeline",
+        "timelineId": "investor-timeline"
+      },
+      "actor": {
+        "type": "Sample/Principal Actor",
+        "accountId": "investor-uid",
+        "email": {
+          "description": "Email address associated with the Sample timeline",
+          "type": "Text"
+        }
       }
     },
     "initLifecycleChannel": {
