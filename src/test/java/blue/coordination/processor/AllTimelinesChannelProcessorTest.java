@@ -3,6 +3,7 @@ package blue.coordination.processor;
 import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
+import blue.language.processor.ProcessorStatus;
 import blue.repo.BlueRepository;
 import java.math.BigInteger;
 import java.util.LinkedHashMap;
@@ -11,182 +12,215 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 class AllTimelinesChannelProcessorTest {
+    private static final String TIMELINE = "shared-timeline";
+    private static final String ACTOR = "shared-actor";
 
     @Test
-    void allTimelinesChannelLetsDeclaredTimelineParticipantsCallChatOperation() {
+    void allTimelinesWithSeveralMatchingChildrenDeliversOnce() {
         Fixture fixture = configuredFixture();
-        Node initialized = initializedDocument(fixture, chatDocument(fixture.repository));
+        Map<String, Node> contracts = matchingChildren();
+        contracts.put("all", allTimelines());
+        contracts.put("handler", sourceReportingHandler());
+        Node initialized = initializedDocument(fixture, contracts);
 
-        DocumentProcessingResult alice = processChat(fixture, initialized, "alice", 1, "bob", "hello bob");
-        DocumentProcessingResult bob = processChat(fixture, alice.document(), "bob", 1, "alice", "hello alice");
-        DocumentProcessingResult charlie = processChat(fixture, bob.document(), "charlie", 1, "alice", "not allowed");
+        DocumentProcessingResult result = process(fixture,
+                initialized,
+                TIMELINE,
+                ACTOR,
+                1,
+                10,
+                "hello");
 
-        assertSuccessful(alice);
-        assertSuccessful(bob);
-        assertSuccessful(charlie);
-        assertChatMessage(alice, "bob", "hello bob");
-        assertChatMessage(bob, "alice", "hello alice");
-        assertEquals(0, charlie.triggeredEvents().size());
-        assertEquals("alice", alice.document()
-                .getAsText("/contracts/checkpoint/lastEvents/aliceTimeline/timeline/timelineId"));
-        assertEquals("alice", alice.document()
-                .getAsText("/contracts/checkpoint/lastEvents/allTimelines/timeline/timelineId"));
-        assertEquals("bob", bob.document()
-                .getAsText("/contracts/checkpoint/lastEvents/bobTimeline/timeline/timelineId"));
-        assertEquals("bob", bob.document()
-                .getAsText("/contracts/checkpoint/lastEvents/allTimelines/timeline/timelineId"));
-        assertNull(nodeAt(bob.document(), "/contracts/checkpoint/lastEvents/allTimelines::alice"));
-        assertNull(nodeAt(bob.document(), "/contracts/checkpoint/lastEvents/allTimelines::bob"));
+        assertChatCount(result.triggeredEvents(), "childA", 1);
+        assertNotNull(checkpoint(result.document(), "all"));
+        assertNull(checkpoint(result.document(), "all::childA"));
+        assertNull(checkpoint(result.document(), "all::childB"));
     }
 
     @Test
-    void allTimelinesChannelLetsOneParticipantRespondToAnother() {
+    void allTimelinesMatchingChildSelectionUsesOrderThenKey() {
         Fixture fixture = configuredFixture();
-        Node initialized = initializedDocument(fixture, chatDocument(fixture.repository));
+        Map<String, Node> ordered = matchingChildren();
+        ordered.get("childB").properties("order", new Node().value(-1));
+        ordered.put("all", allTimelines());
+        ordered.put("handler", sourceReportingHandler());
 
-        DocumentProcessingResult request = processChat(fixture, initialized, "alice", 1, "bob", "question");
-        DocumentProcessingResult response = processChat(fixture, request.document(), "bob", 2, "alice", "answer", "question");
+        DocumentProcessingResult orderWinner = process(fixture,
+                initializedDocument(fixture, ordered),
+                TIMELINE,
+                ACTOR,
+                1,
+                1,
+                "order");
 
-        assertSuccessful(request);
-        assertSuccessful(response);
-        assertChatMessage(request, "bob", "question");
-        assertChatMessage(response, "alice", "answer");
-        assertEquals("question", onlyChatEvent(response).getAsText("/inReplyTo"));
-        assertEquals("alice", response.document()
-                .getAsText("/contracts/checkpoint/lastEvents/aliceTimeline/timeline/timelineId"));
-        assertEquals("bob", response.document()
-                .getAsText("/contracts/checkpoint/lastEvents/bobTimeline/timeline/timelineId"));
-        assertEquals("bob", response.document()
-                .getAsText("/contracts/checkpoint/lastEvents/allTimelines/timeline/timelineId"));
-        assertNull(nodeAt(response.document(), "/contracts/checkpoint/lastEvents/allTimelines::alice"));
-        assertNull(nodeAt(response.document(), "/contracts/checkpoint/lastEvents/allTimelines::bob"));
+        assertChatCount(orderWinner.triggeredEvents(), "childB", 1);
+
+        Fixture keyFixture = configuredFixture();
+        Map<String, Node> tied = new LinkedHashMap<String, Node>();
+        tied.put("childB", TestTimelineProvider.channel(TIMELINE, ACTOR));
+        tied.put("childA", TestTimelineProvider.channel(TIMELINE, ACTOR));
+        tied.put("all", allTimelines());
+        tied.put("handler", sourceReportingHandler());
+
+        DocumentProcessingResult keyWinner = process(keyFixture,
+                initializedDocument(keyFixture, tied),
+                TIMELINE,
+                ACTOR,
+                1,
+                1,
+                "key");
+
+        assertChatCount(keyWinner.triggeredEvents(), "childA", 1);
     }
 
     @Test
-    void allTimelinesChannelUsesDeclaredTimelineCheckpointsForIndependentRecency() {
+    void allTimelinesAcceptsDifferentTimelineWithIndependentSequence() {
         Fixture fixture = configuredFixture();
-        Node initialized = initializedDocument(fixture, chatDocument(fixture.repository));
-
-        DocumentProcessingResult alice = processChat(fixture, initialized, "alice", 2, "bob", "newer alice");
-        DocumentProcessingResult bob = processChat(fixture, alice.document(), "bob", 1, "alice", "independent bob");
-        DocumentProcessingResult staleAlice = processChat(fixture, bob.document(), "alice", 1, "bob", "stale alice");
-
-        assertSuccessful(alice);
-        assertSuccessful(bob);
-        assertSuccessful(staleAlice);
-        assertChatMessage(alice, "bob", "newer alice");
-        assertChatMessage(bob, "alice", "independent bob");
-        assertEquals(0, staleAlice.triggeredEvents().size());
-        assertEquals(BigInteger.valueOf(2),
-                staleAlice.document().get("/contracts/checkpoint/lastEvents/aliceTimeline/timestamp"));
-        assertEquals(BigInteger.valueOf(1),
-                staleAlice.document().get("/contracts/checkpoint/lastEvents/bobTimeline/timestamp"));
-        assertEquals("bob", staleAlice.document()
-                .getAsText("/contracts/checkpoint/lastEvents/allTimelines/timeline/timelineId"));
-        assertNull(nodeAt(staleAlice.document(), "/contracts/checkpoint/lastEvents/allTimelines::alice"));
-        assertNull(nodeAt(staleAlice.document(), "/contracts/checkpoint/lastEvents/allTimelines::bob"));
-    }
-
-    private static Node chatDocument(BlueRepository repository) {
         Map<String, Node> contracts = new LinkedHashMap<String, Node>();
-        contracts.put("allTimelines", new Node()
-                .type("Coordination/All Timelines Channel"));
-        contracts.put("aliceTimeline", TestTimelineProvider.channel("alice"));
-        contracts.put("bobTimeline", TestTimelineProvider.channel("bob"));
-        contracts.put("chat", chatWorkflowOperation());
+        contracts.put("alice", TestTimelineProvider.channel("alice-timeline", "alice-actor"));
+        contracts.put("bob", TestTimelineProvider.channel("bob-timeline", "bob-actor"));
+        contracts.put("all", allTimelines());
+        Node initialized = initializedDocument(fixture, contracts);
+
+        DocumentProcessingResult alice = process(fixture,
+                initialized,
+                "alice-timeline",
+                "alice-actor",
+                10,
+                100,
+                "alice");
+        DocumentProcessingResult bob = process(fixture,
+                alice.document(),
+                "bob-timeline",
+                "bob-actor",
+                1,
+                50,
+                "bob");
+
+        assertEquals("bob-timeline",
+                checkpoint(bob.document(), "all").getAsText("/timeline/timelineId"));
+        assertEquals(BigInteger.ONE, checkpoint(bob.document(), "all").get("/sequence"));
+        assertEquals(BigInteger.TEN, checkpoint(bob.document(), "alice").get("/sequence"));
+        assertEquals(BigInteger.ONE, checkpoint(bob.document(), "bob").get("/sequence"));
+    }
+
+    @Test
+    void allTimelinesRejectsEntryThatMatchesNoDeclaredTimelineChannel() {
+        Fixture fixture = configuredFixture();
+        Map<String, Node> contracts = new LinkedHashMap<String, Node>();
+        contracts.put("child", TestTimelineProvider.channel(TIMELINE, ACTOR));
+        contracts.put("all", allTimelines());
+        contracts.put("triggered", new Node().type("Triggered Event Channel"));
+
+        DocumentProcessingResult result = process(fixture,
+                initializedDocument(fixture, contracts),
+                "unknown-timeline",
+                "unknown-actor",
+                1,
+                1,
+                "unknown");
+
+        assertNull(checkpoint(result.document(), "all"));
+    }
+
+    private static Map<String, Node> matchingChildren() {
+        Map<String, Node> contracts = new LinkedHashMap<String, Node>();
+        contracts.put("childA", TestTimelineProvider.channel(TIMELINE, ACTOR));
+        contracts.put("childB", TestTimelineProvider.channel(TIMELINE, ACTOR));
+        return contracts;
+    }
+
+    private static Node allTimelines() {
+        return new Node().type("Coordination/All Timelines Channel");
+    }
+
+    private static Node sourceReportingHandler() {
+        return handler(new Node().properties("$binding",
+                new Node().value("event/meta/allTimelinesSourceChannelKey")));
+    }
+
+    private static Node handler(Node message) {
+        Node append = new Node().properties("$appendEvent",
+                new Node().properties("$merge", new Node().items(
+                        new Node().properties("type", new Node().value("Coordination/Chat Message")),
+                        new Node().properties("message", message))));
+        Node step = new Node()
+                .type("Coordination/Compute")
+                .properties("do", new Node().items(
+                        append,
+                        new Node().properties("$return", new Node().value(true))));
         return new Node()
-                .blue(repository.typeAliasBlue())
-                .name("All Timelines Chat")
+                .type("Coordination/Sequential Workflow")
+                .properties("channel", new Node().value("all"))
+                .properties("steps", new Node().items(step));
+    }
+
+    private static Node initializedDocument(Fixture fixture, Map<String, Node> contracts) {
+        Node document = new Node()
+                .blue(fixture.repository.typeAliasBlue())
+                .name("All Timelines V2 Test")
                 .properties("contracts", new Node().properties(contracts));
+        DocumentProcessingResult initialized = fixture.blue.initializeDocument(fixture.blue.preprocess(document));
+        assertEquals(ProcessorStatus.SUCCESS, initialized.status(), initialized.failureReason());
+        return initialized.document();
     }
 
-    private static Node chatWorkflowOperation() {
-        return new Node()
-                .type("Coordination/Chat Workflow Operation")
-                .properties("channel", new Node().value("allTimelines"));
-    }
-
-    private static Node chatRequest(String to, String message) {
-        return new Node()
-                .type("Coordination/Chat Message")
-                .properties("to", new Node().value(to))
-                .properties("message", new Node().value(message));
-    }
-
-    private static Node chatRequest(String to, String message, String inReplyTo) {
-        Node request = chatRequest(to, message);
-        if (inReplyTo != null) {
-            request.properties("inReplyTo", new Node().value(inReplyTo));
-        }
-        return request;
-    }
-
-    private static DocumentProcessingResult processChat(Fixture fixture,
-                                                        Node document,
-                                                        String timelineId,
-                                                        int timestamp,
-                                                        String to,
-                                                        String message) {
-        return processChat(fixture, document, timelineId, timestamp, to, message, null);
-    }
-
-    private static DocumentProcessingResult processChat(Fixture fixture,
-                                                        Node document,
-                                                        String timelineId,
-                                                        int timestamp,
-                                                        String to,
-                                                        String message,
-                                                        String inReplyTo) {
+    private static DocumentProcessingResult process(Fixture fixture,
+                                                    Node document,
+                                                    String timeline,
+                                                    String actor,
+                                                    long sequence,
+                                                    long timestamp,
+                                                    String message) {
         return fixture.blue.processDocument(document,
-                TestTimelineProvider.timelineEntry(fixture.blue,
-                        fixture.repository,
-                        timelineId,
-                        timestamp,
-                        CoordinationTestResources.operationRequest("chat", chatRequest(to, message, inReplyTo))));
+                event(fixture, timeline, actor, sequence, timestamp, message));
     }
 
-    private static Node initializedDocument(Fixture fixture, Node document) {
-        DocumentProcessingResult result = fixture.blue.initializeDocument(fixture.blue.preprocess(document));
-        assertSuccessful(result);
-        return result.document();
+    private static Node event(Fixture fixture,
+                              String timeline,
+                              String actor,
+                              long sequence,
+                              long timestamp,
+                              String message) {
+        return TestTimelineProvider.timelineEntry(fixture.blue,
+                fixture.repository,
+                timeline,
+                actor,
+                BigInteger.valueOf(sequence),
+                BigInteger.valueOf(timestamp),
+                TestTimelineProvider.chatMessage(message));
     }
 
-    private static Fixture configuredFixture() {
-        BlueRepository repository = BlueRepository.v1_3_0();
-        Blue blue = CoordinationTestResources.configuredBlue(repository);
-        CoordinationProcessors.registerWith(blue);
-        TestTimelineProvider.registerWith(blue);
-        return new Fixture(repository, blue);
-    }
-
-    private static void assertSuccessful(DocumentProcessingResult result) {
-        assertFalse(result.capabilityFailure(), result.failureReason());
-    }
-
-    private static void assertChatMessage(DocumentProcessingResult result, String expectedTo, String expectedMessage) {
-        Node event = onlyChatEvent(result);
-        assertEquals(expectedTo, event.getAsText("/to"));
-        assertEquals(expectedMessage, event.getAsText("/message"));
-    }
-
-    private static Node onlyChatEvent(DocumentProcessingResult result) {
-        List<Node> events = result.triggeredEvents();
-        assertEquals(1, events.size());
-        return events.get(0);
-    }
-
-    private static Node nodeAt(Node node, String path) {
+    private static Node checkpoint(Node document, String key) {
         try {
-            Object value = node.get(path);
-            return value instanceof Node ? (Node) value : null;
+            return document.getAsNode("/contracts/checkpoint/lastEvents/" + key);
         } catch (IllegalArgumentException ex) {
             return null;
         }
+    }
+
+    private static void assertChatCount(List<Node> events, String message, int expected) {
+        int count = 0;
+        for (Node event : events) {
+            try {
+                if (message.equals(event.get("/message"))) {
+                    count++;
+                }
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        assertEquals(expected, count);
+    }
+
+    private static Fixture configuredFixture() {
+        BlueRepository repository = BlueRepository.latest();
+        Blue blue = CoordinationTestResources.configuredBlue(repository);
+        CoordinationProcessors.registerWith(blue);
+        return new Fixture(repository, blue);
     }
 
     private static final class Fixture {

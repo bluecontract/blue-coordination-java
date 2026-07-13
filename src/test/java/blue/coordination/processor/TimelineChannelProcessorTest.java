@@ -1,222 +1,417 @@
 package blue.coordination.processor;
 
-import blue.coordination.processor.CoordinationProcessors;
 import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.repo.BlueRepository;
+import blue.repo.coordination.APICall;
+import blue.repo.coordination.ChatMessage;
+import blue.repo.coordination.Timeline;
+import blue.repo.coordination.TimelineEntry;
+import blue.repo.mandate.Mandate;
+import blue.repo.mandate.MandateAuthority;
+import blue.repo.myos.MyOSPrincipalActor;
+import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TimelineChannelProcessorTest {
+    private static final String TIMELINE = "owner-timeline";
+    private static final String ACTOR = "owner-account";
 
     @Test
-    void matchesTimelineEntryForConfiguredTimeline() {
+    void matchingTimelineAndActorAccept() {
         Fixture fixture = configuredFixture();
-        Node document = initializedDocument(fixture, "owner");
-        Node event = timelineEntryEvent(fixture, "owner", 10, "hello");
+        Node document = initializedDocument(fixture);
 
-        Node processed = fixture.blue.processDocument(document, event).document();
+        Node processed = process(fixture, document,
+                event(fixture, TIMELINE, ACTOR, 10, 100, "hello")).document();
 
-        assertEquals("owner", checkpointEvent(processed)
-                .getAsText("/timeline/timelineId"));
-        assertEquals("hello", checkpointEvent(processed)
-                .getAsText("/message/message"));
+        assertEquals(TIMELINE, checkpointEvent(processed).getAsText("/timeline/timelineId"));
+        assertEquals(ACTOR, checkpointEvent(processed).getAsText("/actor/accountId"));
+        assertEquals("hello", checkpointEvent(processed).getAsText("/message/message"));
     }
 
     @Test
-    void rejectsDifferentTimeline() {
+    void unrelatedTypedLookalikeRejectsWithoutCheckpoint() {
         Fixture fixture = configuredFixture();
-        Node document = initializedDocument(fixture, "owner");
-        Node event = timelineEntryEvent(fixture, "other", 10, "hello");
+        Node document = initializedDocument(fixture);
+        Node event = new Node()
+                .type(ChatMessage.repositoryType().reference())
+                .properties("timeline", new Node().blueId("not-a-blue-id"))
+                .properties("actor", new Node().blueId("not-a-blue-id"))
+                .properties("sequence", new Node().value(1))
+                .properties("timestamp", new Node().value(1))
+                .properties("message", TestTimelineProvider.chatMessage("lookalike"));
 
-        Node processed = fixture.blue.processDocument(document, event).document();
+        DocumentProcessingResult result = process(fixture, document, event);
+
+        assertFalse(result.capabilityFailure(), result.failureReason());
+        assertNull(checkpointEvent(result.document()));
+    }
+
+    @Test
+    void untypedTimelineLookalikeRejectsWithoutCheckpoint() {
+        Fixture fixture = configuredFixture();
+        Node document = initializedDocument(fixture);
+        Node event = new Node()
+                .properties("timeline", new Node().blueId("not-a-blue-id"))
+                .properties("actor", new Node().blueId("not-a-blue-id"))
+                .properties("sequence", new Node().value(1))
+                .properties("timestamp", new Node().value(1))
+                .properties("message", TestTimelineProvider.chatMessage("lookalike"));
+
+        DocumentProcessingResult result = process(fixture, document, event);
+
+        assertFalse(result.capabilityFailure(), result.failureReason());
+        assertNull(checkpointEvent(result.document()));
+    }
+
+    @Test
+    void invalidTimelineEntryReferenceFailsDeterministically() {
+        Fixture fixture = configuredFixture();
+        Node invalid = event(fixture, TIMELINE, ACTOR, 1, 1, "invalid");
+        invalid.getProperties().put("timeline", new Node().blueId("not-a-blue-id"));
+
+        IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                () -> CoordinationEventNodes.timelineEntry(invalid));
+
+        assertTrue(failure.getMessage().contains("Semantic identity reference"), failure.getMessage());
+    }
+
+    @Test
+    void sameTimelineDifferentActorRejectsWithoutCheckpoint() {
+        Fixture fixture = configuredFixture();
+
+        Node processed = process(fixture, initializedDocument(fixture),
+                event(fixture, TIMELINE, "different-account", 1, 1, "wrong actor")).document();
 
         assertNull(checkpointEvent(processed));
     }
 
     @Test
-    void channelWithoutTimelineIdMatchesAnyTimelineEntry() {
+    void sameActorDifferentTimelineRejectsWithoutCheckpoint() {
         Fixture fixture = configuredFixture();
-        Node document = initializedDocument(fixture, null);
-        Node event = timelineEntryEvent(fixture, "any", 10, "hello");
 
-        Node processed = fixture.blue.processDocument(document, event).document();
-
-        assertNotNull(checkpointEvent(processed));
-        assertEquals("any", checkpointEvent(processed).getAsText("/timeline/timelineId"));
-    }
-
-    @Test
-    void rejectsNonTimelineEntry() {
-        Fixture fixture = configuredFixture();
-        Node document = initializedDocument(fixture, "owner");
-        Node event = chatMessageEvent(fixture, "hello");
-
-        Node processed = fixture.blue.processDocument(document, event).document();
+        Node processed = process(fixture, initializedDocument(fixture),
+                event(fixture, "different-timeline", ACTOR, 1, 1, "wrong timeline")).document();
 
         assertNull(checkpointEvent(processed));
     }
 
     @Test
-    void rejectsExplicitNonTimelineEntryEvenWithTimelineEntryShape() {
+    void pureReferenceEqualsEquivalentMaterializedBinding() {
         Fixture fixture = configuredFixture();
-        Node document = initializedDocument(fixture, "owner");
-        Node event = misleadingChatMessageEvent(fixture);
+        Node timeline = fixture.blue.objectToNode(new Timeline().timelineId(TIMELINE));
+        Node actor = fixture.blue.objectToNode(new MyOSPrincipalActor().accountId(ACTOR));
 
-        Node processed = fixture.blue.processDocument(document, event).document();
+        Node timelineReference = new Node().blueId(fixture.blue.calculateSemanticBlueId(timeline));
+        Node actorReference = new Node().blueId(fixture.blue.calculateSemanticBlueId(actor));
 
-        assertNull(checkpointEvent(processed));
+        assertTrue(BlueSemanticIdentity.equals(timelineReference, timeline));
+        assertTrue(BlueSemanticIdentity.equals(actorReference, actor));
     }
 
     @Test
-    void rejectsStaleTimelineEntry() {
+    void completedAndMinimalMaterializedBindingsAreEqual() {
         Fixture fixture = configuredFixture();
-        Node document = initializedDocument(fixture, "owner");
-        Node first = fixture.blue.processDocument(document,
-                timelineEntryEvent(fixture, "owner", 10, "newer")).document();
+        Node minimalEntry = event(fixture, TIMELINE, ACTOR, 1, 1, "entry");
+        Node completedEntry = fixture.blue.resolve(minimalEntry.clone());
 
-        Node afterStale = fixture.blue.processDocument(first,
-                timelineEntryEvent(fixture, "owner", 9, "stale")).document();
-
-        assertEquals(new BigInteger("10"), checkpointEvent(afterStale).get("/timestamp"));
-        assertEquals("newer", checkpointEvent(afterStale).getAsText("/message/message"));
+        assertTrue(BlueSemanticIdentity.equals(
+                minimalEntry.getAsNode("/timeline"), completedEntry.getAsNode("/timeline")));
+        assertTrue(BlueSemanticIdentity.equals(
+                minimalEntry.getAsNode("/actor"), completedEntry.getAsNode("/actor")));
     }
 
     @Test
-    void acceptsNewerTimelineEntry() {
+    void sameTypeDifferentContentDoesNotEqual() {
         Fixture fixture = configuredFixture();
-        Node document = initializedDocument(fixture, "owner");
-        Node first = fixture.blue.processDocument(document,
-                timelineEntryEvent(fixture, "owner", 10, "first")).document();
+        Node first = fixture.blue.objectToNode(new Timeline().timelineId("first"));
+        Node second = fixture.blue.objectToNode(new Timeline().timelineId("second"));
 
-        Node afterNewer = fixture.blue.processDocument(first,
-                timelineEntryEvent(fixture, "owner", 11, "second")).document();
-
-        assertEquals(new BigInteger("11"), checkpointEvent(afterNewer).get("/timestamp"));
-        assertEquals("second", checkpointEvent(afterNewer).getAsText("/message/message"));
+        assertFalse(BlueSemanticIdentity.equals(first, second));
     }
 
     @Test
-    void acceptsDifferentEntryWithEqualTimestamp() {
+    void equalTimestampHigherSequenceAccepts() {
         Fixture fixture = configuredFixture();
-        Node document = initializedDocument(fixture, "owner");
-        Node first = fixture.blue.processDocument(document,
-                timelineEntryEvent(fixture, "owner", 10, "first")).document();
+        Node first = process(fixture, initializedDocument(fixture),
+                event(fixture, TIMELINE, ACTOR, 10, 100, "first")).document();
 
-        Node afterEqual = fixture.blue.processDocument(first,
-                timelineEntryEvent(fixture, "owner", 10, "equal")).document();
+        Node second = process(fixture, first,
+                event(fixture, TIMELINE, ACTOR, 11, 100, "second")).document();
 
-        assertEquals(new BigInteger("10"), checkpointEvent(afterEqual).get("/timestamp"));
-        assertEquals("equal", checkpointEvent(afterEqual).getAsText("/message/message"));
+        assertEquals(BigInteger.valueOf(11), checkpointEvent(second).get("/sequence"));
+        assertEquals("second", checkpointEvent(second).getAsText("/message/message"));
     }
 
     @Test
-    void duplicateSameTimelineEntryIsIgnored() {
+    void higherTimestampLowerSequenceRejects() {
         Fixture fixture = configuredFixture();
-        Node document = initializedDocument(fixture, "owner");
-        Node event = timelineEntryEvent(fixture, "owner", 10, "hello");
-        Node afterFirst = fixture.blue.processDocument(document, event).document();
-        String signatureBefore = checkpointSignature(afterFirst);
+        Node first = process(fixture, initializedDocument(fixture),
+                event(fixture, TIMELINE, ACTOR, 10, 100, "first")).document();
 
-        Node afterSecond = fixture.blue.processDocument(afterFirst, event).document();
-        String signatureAfter = checkpointSignature(afterSecond);
+        Node stale = process(fixture, first,
+                event(fixture, TIMELINE, ACTOR, 9, 101, "stale")).document();
 
-        assertEquals(signatureBefore, signatureAfter);
-        assertEquals("hello", checkpointEvent(afterSecond).getAsText("/message/message"));
+        assertEquals(BigInteger.TEN, checkpointEvent(stale).get("/sequence"));
+        assertEquals("first", checkpointEvent(stale).getAsText("/message/message"));
     }
 
-    private static Node initializedDocument(Fixture fixture, String timelineId) {
-        Node document = timelineDocument(fixture.repository, timelineId);
+    @Test
+    void lowerTimestampHigherSequenceUsesSequence() {
+        Fixture fixture = configuredFixture();
+        Node first = process(fixture, initializedDocument(fixture),
+                event(fixture, TIMELINE, ACTOR, 10, 100, "first")).document();
+
+        Node newer = process(fixture, first,
+                event(fixture, TIMELINE, ACTOR, 11, 99, "newer")).document();
+
+        assertEquals(BigInteger.valueOf(11), checkpointEvent(newer).get("/sequence"));
+        assertEquals(BigInteger.valueOf(99), checkpointEvent(newer).get("/timestamp"));
+    }
+
+    @Test
+    void exactEventReplayIsDuplicate() {
+        Fixture fixture = configuredFixture();
+        Node event = event(fixture, TIMELINE, ACTOR, 10, 100, "same");
+        Node first = process(fixture, initializedDocument(fixture), event).document();
+        String signature = checkpointSignature(first);
+
+        Node replay = process(fixture, first, event.clone()).document();
+
+        assertEquals(signature, checkpointSignature(replay));
+        assertEquals("same", checkpointEvent(replay).getAsText("/message/message"));
+    }
+
+    @Test
+    void differentContentAtCheckpointedSequenceRejectsAsEquivocation() {
+        Fixture fixture = configuredFixture();
+        Node first = process(fixture, initializedDocument(fixture),
+                event(fixture, TIMELINE, ACTOR, 10, 100, "first")).document();
+
+        Node equivocation = process(fixture, first,
+                event(fixture, TIMELINE, ACTOR, 10, 100, "different")).document();
+
+        assertEquals("first", checkpointEvent(equivocation).getAsText("/message/message"));
+    }
+
+    @Test
+    void sequenceBeyondLongRangeRemainsExact() {
+        Fixture fixture = configuredFixture();
+        BigInteger firstSequence = new BigInteger("9223372036854775808123456789");
+        BigInteger secondSequence = firstSequence.add(BigInteger.ONE);
+        Node firstEvent = event(fixture, TIMELINE, ACTOR, firstSequence, BigInteger.ONE, "first");
+        assertEquals(firstSequence, firstEvent.get("/sequence"));
+        assertNotNull(CoordinationEventNodes.timelineEntry(firstEvent));
+        DocumentProcessingResult firstResult = process(fixture, initializedDocument(fixture),
+                firstEvent);
+        assertNotNull(checkpointEvent(firstResult.document()), firstResult.failureReason());
+
+        DocumentProcessingResult secondResult = process(fixture, firstResult.document(),
+                event(fixture, TIMELINE, ACTOR, secondSequence, BigInteger.ONE, "second"));
+        assertNotNull(checkpointEvent(secondResult.document()), secondResult.failureReason());
+
+        assertEquals(secondSequence, checkpointEvent(secondResult.document()).get("/sequence"));
+    }
+
+    @Test
+    void missingTimelineRejectsWithoutCheckpoint() {
+        assertMissingFieldRejects("timeline");
+    }
+
+    @Test
+    void missingActorRejectsWithoutCheckpoint() {
+        assertMissingFieldRejects("actor");
+    }
+
+    @Test
+    void missingSequenceRejectsWithoutCheckpoint() {
+        assertMissingFieldRejects("sequence");
+    }
+
+    @Test
+    void invalidSequenceRejectsWithoutCheckpoint() {
+        Fixture fixture = configuredFixture();
+        Node invalid = event(fixture, TIMELINE, ACTOR, 1, 1, "invalid");
+        invalid.getProperties().put("sequence", new Node().value("1"));
+
+        assertRejected(fixture, invalid);
+    }
+
+    @Test
+    void decimalSequenceRejectsWithoutTruncation() {
+        Fixture fixture = configuredFixture();
+        Node invalid = event(fixture, TIMELINE, ACTOR, 1, 1, "invalid");
+        invalid.getProperties().put("sequence", new Node().value(new BigDecimal("1.5")));
+
+        assertRejected(fixture, invalid);
+    }
+
+    @Test
+    void missingTimestampRejectsWithoutCheckpoint() {
+        assertMissingFieldRejects("timestamp");
+    }
+
+    @Test
+    void invalidTimestampRejectsWithoutCheckpoint() {
+        Fixture fixture = configuredFixture();
+        Node invalid = event(fixture, TIMELINE, ACTOR, 1, 1, "invalid");
+        invalid.getProperties().put("timestamp", new Node().value("1"));
+
+        assertRejected(fixture, invalid);
+    }
+
+    @Test
+    void missingMessageRejectsWithoutCheckpoint() {
+        assertMissingFieldRejects("message");
+    }
+
+    @Test
+    void optionalSourceSurvivesDeliveryUnchanged() {
+        Fixture fixture = configuredFixture();
+        TimelineEntry attributed = baseEntry(fixture, BigInteger.ONE, BigInteger.ONE, "source")
+                .source(new APICall().apiKeyId("api-key-7"));
+
+        Node event = fixture.blue.preprocess(fixture.blue.objectToNode(attributed)
+                .blue(fixture.repository.typeAliasBlue())).blue(null);
+        Node processed = process(fixture, initializedDocument(fixture), event).document();
+
+        assertEquals("api-key-7", checkpointEvent(processed).getAsText("/source/apiKeyId"));
+    }
+
+    @Test
+    void optionalOnBehalfOfSurvivesDeliveryUnchanged() {
+        Fixture fixture = configuredFixture();
+        Mandate mandate = new Mandate().contracts(requiredMandateChannels());
+        MandateAuthority authority = new MandateAuthority()
+                .actor(new MyOSPrincipalActor().accountId("represented-account"))
+                .mandate(mandate);
+        TimelineEntry attributed = baseEntry(fixture, BigInteger.ONE, BigInteger.ONE, "authority")
+                .onBehalfOf(authority);
+
+        Node event = fixture.blue.preprocess(fixture.blue.objectToNode(attributed)
+                .blue(fixture.repository.typeAliasBlue())).blue(null);
+        Node processed = process(fixture, initializedDocument(fixture), event).document();
+
+        assertEquals("represented-account",
+                checkpointEvent(processed).getAsText("/onBehalfOf/actor/accountId"));
+        assertEquals("guarantor",
+                checkpointEvent(processed).getAsText(
+                        "/onBehalfOf/mandate/contracts/mandateGuarantorChannel/timeline/timelineId"));
+    }
+
+    private static void assertMissingFieldRejects(String field) {
+        Fixture fixture = configuredFixture();
+        Node invalid = event(fixture, TIMELINE, ACTOR, 1, 1, "invalid");
+        invalid.getProperties().remove(field);
+        assertRejected(fixture, invalid);
+    }
+
+    private static void assertRejected(Fixture fixture, Node event) {
+        DocumentProcessingResult result = process(fixture, initializedDocument(fixture), event);
+        assertNull(checkpointEvent(result.document()), result.failureReason());
+    }
+
+    private static Node initializedDocument(Fixture fixture) {
+        Map<String, Node> contracts = new LinkedHashMap<String, Node>();
+        contracts.put("ownerChannel", TestTimelineProvider.channel(TIMELINE, ACTOR));
+        Node document = new Node()
+                .blue(fixture.repository.typeAliasBlue())
+                .name("Timeline V2 Test")
+                .properties("contracts", new Node().properties(contracts));
         DocumentProcessingResult result = fixture.blue.initializeDocument(fixture.blue.preprocess(document));
+        assertFalse(result.capabilityFailure(), result.failureReason());
+        assertNotNull(result.snapshot());
         return result.document();
     }
 
     private static Fixture configuredFixture() {
-        BlueRepository repository = BlueRepository.v1_3_0();
+        BlueRepository repository = BlueRepository.latest();
         Blue blue = CoordinationTestResources.configuredBlue(repository);
         CoordinationProcessors.registerWith(blue);
-        TestTimelineProvider.registerWith(blue);
         return new Fixture(repository, blue);
     }
 
-    private static Node timelineDocument(BlueRepository repository, String timelineId) {
-        Node ownerChannel = TestTimelineProvider.channel(timelineId);
-        Map<String, Node> contracts = new LinkedHashMap<>();
-        contracts.put("ownerChannel", ownerChannel);
-
-        return new Node()
-                .blue(repository.typeAliasBlue())
-                .name("Timeline Test")
-                .properties("contracts", new Node().properties(contracts));
+    private static Node event(Fixture fixture,
+                              String timelineId,
+                              String actorId,
+                              long sequence,
+                              long timestamp,
+                              String message) {
+        return event(fixture,
+                timelineId,
+                actorId,
+                BigInteger.valueOf(sequence),
+                BigInteger.valueOf(timestamp),
+                message);
     }
 
-    private static Node timelineEntryEvent(Fixture fixture, String timelineId, int timestamp, String message) {
+    private static Node event(Fixture fixture,
+                              String timelineId,
+                              String actorId,
+                              BigInteger sequence,
+                              BigInteger timestamp,
+                              String message) {
         return TestTimelineProvider.timelineEntry(fixture.blue,
                 fixture.repository,
                 timelineId,
+                actorId,
+                sequence,
                 timestamp,
                 TestTimelineProvider.chatMessage(message));
     }
 
-    private static Node chatMessageEvent(Fixture fixture, String message) {
-        Node event = new Node()
-                .blue(fixture.repository.typeAliasBlue())
-                .type("Coordination/Chat Message")
-                .properties("message", new Node().value(message));
-        return fixture.blue.preprocess(event).blue(null);
+    private static TimelineEntry baseEntry(Fixture fixture,
+                                           BigInteger sequence,
+                                           BigInteger timestamp,
+                                           String message) {
+        return new TimelineEntry()
+                .timeline(new Timeline().timelineId(TIMELINE))
+                .actor(new MyOSPrincipalActor().accountId(ACTOR))
+                .sequence(sequence)
+                .timestamp(timestamp)
+                .message(fixture.blue.objectToNode(new ChatMessage().message(message)));
     }
 
-    private static Node misleadingChatMessageEvent(Fixture fixture) {
-        Node event = new Node()
-                .blue(fixture.repository.typeAliasBlue())
-                .type("Coordination/Chat Message")
-                .properties("timeline", new Node()
-                        .properties("timelineId", new Node().value("owner")))
-                .properties("timestamp", new Node().value(10))
-                .properties("message", new Node().value("misleading"));
-        return fixture.blue.preprocess(event).blue(null);
+    private static Node requiredMandateChannels() {
+        return new Node().properties("mandateGuarantorChannel", TestTimelineProvider.channel("guarantor"))
+                .properties("authorityHolderChannel", TestTimelineProvider.channel("holder"))
+                .properties("authorizedActorChannel", TestTimelineProvider.channel("authorized"));
+    }
+
+    private static DocumentProcessingResult process(Fixture fixture, Node document, Node event) {
+        return fixture.blue.processDocument(document, event);
     }
 
     private static Node checkpointEvent(Node document) {
-        Node checkpoint = checkpoint(document);
-        if (checkpoint == null) {
-            return null;
-        }
-        Node lastEvents = property(checkpoint, "lastEvents");
-        return property(lastEvents, "ownerChannel");
-    }
-
-    private static Node checkpoint(Node document) {
-        Node contracts = property(document, "contracts");
-        return property(contracts, "checkpoint");
+        return nodeAt(document, "/contracts/checkpoint/lastEvents/ownerChannel");
     }
 
     private static String checkpointSignature(Node document) {
-        Node checkpoint = checkpoint(document);
-        Node lastSignatures = property(checkpoint, "lastSignatures");
-        Node signature = property(lastSignatures, "ownerChannel");
-        Object value = signature != null ? signature.getValue() : null;
-        return value instanceof String ? (String) value : null;
+        Node signature = nodeAt(document, "/contracts/checkpoint/lastSignatures/ownerChannel");
+        return signature != null && signature.getValue() instanceof String
+                ? (String) signature.getValue()
+                : null;
     }
 
-    private static Node property(Node node, String key) {
-        if (node == null) {
+    private static Node nodeAt(Node node, String path) {
+        try {
+            Object value = node.get(path);
+            return value instanceof Node ? (Node) value : null;
+        } catch (IllegalArgumentException ex) {
             return null;
         }
-        if ("contracts".equals(key)) {
-            return node.getContracts();
-        }
-        if (node.getProperties() == null) {
-            return null;
-        }
-        return node.getProperties().get(key);
     }
 
     private static final class Fixture {

@@ -22,6 +22,7 @@ public final class CoordinationProcessors {
         }
         SequentialWorkflowRunner runner = workflowRunner(options);
         BlueRepositoryModels.registerAll(blue.getDocumentProcessor().getContractTypeResolver());
+        blue.registerContractProcessor(new TimelineChannelProcessor());
         blue.registerContractProcessor(new AllTimelinesChannelProcessor());
         blue.registerContractProcessor(new CompositeTimelineChannelProcessor());
         blue.registerContractProcessor(new OperationProcessor());
@@ -52,6 +53,7 @@ public final class CoordinationProcessors {
                 new TypeClassResolver("blue.language.processor.model"));
         return builder
                 .withContractTypeResolver(resolver)
+                .registerContractProcessor(new TimelineChannelProcessor())
                 .registerContractProcessor(new AllTimelinesChannelProcessor())
                 .registerContractProcessor(new CompositeTimelineChannelProcessor())
                 .registerContractProcessor(new OperationProcessor())

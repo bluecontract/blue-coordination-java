@@ -11,6 +11,7 @@ import blue.repo.coordination.ChatMessage;
 import blue.repo.coordination.Timeline;
 import blue.repo.coordination.TimelineChannel;
 import blue.repo.coordination.TimelineEntry;
+import blue.repo.myos.MyOSPrincipalActor;
 
 import java.math.BigInteger;
 
@@ -24,9 +25,20 @@ public final class TestTimelineProvider {
     }
 
     public static Node channel(String timelineId) {
+        return channel(timelineId, timelineId);
+    }
+
+    public static Node channel(String timelineId, String actorId) {
         Node channel = new Node().type(TimelineChannel.qualifiedName());
         if (timelineId != null) {
-            channel.properties("timelineId", new Node().value(timelineId));
+            channel.properties("timeline", new Node()
+                    .type(Timeline.qualifiedName())
+                    .properties("timelineId", new Node().value(timelineId)));
+        }
+        if (actorId != null) {
+            channel.properties("actor", new Node()
+                    .type(MyOSPrincipalActor.qualifiedName())
+                    .properties("accountId", new Node().value(actorId)));
         }
         return channel;
     }
@@ -36,20 +48,34 @@ public final class TestTimelineProvider {
                                      String timelineId,
                                      int timestamp,
                                      Node message) {
+        return timelineEntry(blue,
+                repository,
+                timelineId,
+                timelineId,
+                BigInteger.valueOf(timestamp),
+                BigInteger.valueOf(timestamp),
+                message);
+    }
+
+    public static Node timelineEntry(Blue blue,
+                                     BlueRepository repository,
+                                     String timelineId,
+                                     String actorId,
+                                     BigInteger sequence,
+                                     BigInteger timestamp,
+                                     Node message) {
         TimelineEntry entry = new TimelineEntry()
                 .timeline(new Timeline().timelineId(timelineId))
-                .timestamp(BigInteger.valueOf(timestamp))
-                .message(message);
+                .actor(new MyOSPrincipalActor().accountId(actorId))
+                .sequence(sequence)
+                .timestamp(timestamp);
 
-        Node event = new Node()
-                .blue(repository.typeAliasBlue())
-                .type(TimelineEntry.qualifiedName())
-                .properties("timeline", blue.objectToNode(entry.getTimeline()))
-                .properties("timestamp", new Node().value(entry.getTimestamp()))
-                .properties("message", entry.getMessage());
-        Node aliasesResolved = new RepositoryTypeAliasPreprocessor(
-                CoordinationTestResources.testTypeAliases(repository)).preprocess(event);
-        return blue.preprocess(aliasesResolved).blue(null);
+        Node event = blue.objectToNode(entry)
+                .properties("sequence", new Node().value(sequence))
+                .properties("timestamp", new Node().value(timestamp))
+                .properties("message", message)
+                .blue(repository.typeAliasBlue());
+        return blue.preprocess(event).blue(null);
     }
 
     public static Node chatMessage(String message) {

@@ -1,15 +1,11 @@
 package blue.coordination.processor;
 
-import blue.coordination.processor.RepositoryTypeAliasPreprocessor;
 import blue.language.Blue;
-import blue.language.NodeProvider;
 import blue.language.model.Node;
-import blue.language.processor.registry.BlueRuntimeTypeRegistry;
-import blue.language.provider.BootstrapProvider;
-import blue.language.provider.SequentialNodeProvider;
-import blue.language.utils.NodeProviderWrapper;
 import blue.repo.BlueRepository;
+import blue.repo.coordination.Timeline;
 import blue.repo.coordination.TimelineChannel;
+import blue.repo.myos.MyOSPrincipalActor;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -70,13 +66,7 @@ public final class CoordinationTestResources {
     }
 
     public static Blue configuredBlue(BlueRepository repository) {
-        Blue blue = repository.configure(new Blue());
-        NodeProvider provider = new SequentialNodeProvider(Arrays.asList(
-                BootstrapProvider.INSTANCE,
-                BlueRuntimeTypeRegistry.getDefault().asProvider(),
-                NodeProviderWrapper.unverified(repository.nodeProvider())));
-        blue.nodeProvider(provider);
-        return blue;
+        return repository.configure(new Blue());
     }
 
     public static String simpleTimelineChannelYaml(String key, String timelineId, int indent) {
@@ -85,7 +75,12 @@ public final class CoordinationTestResources {
         return String.join("\n",
                 base + key + ":",
                 child + "type: " + TimelineChannel.qualifiedName(),
-                child + "timelineId: " + timelineId);
+                child + "timeline:",
+                spaces(indent + 4) + "type: " + Timeline.qualifiedName(),
+                spaces(indent + 4) + "timelineId: " + timelineId,
+                child + "actor:",
+                spaces(indent + 4) + "type: " + MyOSPrincipalActor.qualifiedName(),
+                spaces(indent + 4) + "accountId: " + timelineId);
     }
 
     public static Node operationRequest(String operation, Node request) {
@@ -102,11 +97,14 @@ public final class CoordinationTestResources {
                                              int timestamp,
                                              String operation,
                                              Node request) {
+        Node requestWithResolvedAliases = new RepositoryTypeAliasPreprocessor(
+                testTypeAliases(repository)).preprocess(
+                request != null ? request.clone() : new Node());
         return TestTimelineProvider.timelineEntry(blue,
                 repository,
                 timelineId,
                 timestamp,
-                operationRequest(operation, request));
+                operationRequest(operation, requestWithResolvedAliases));
     }
 
     private static String normalizeResourcePath(String resourcePath) {

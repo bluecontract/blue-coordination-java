@@ -5,11 +5,12 @@ import blue.language.processor.ChannelCheckpointContext;
 import blue.language.processor.ChannelEvaluation;
 import blue.language.processor.ChannelEvaluationContext;
 import blue.language.processor.ChannelProcessor;
-import blue.language.processor.model.ChannelEventCheckpoint;
 import blue.language.processor.model.ChannelContract;
-import blue.language.processor.model.MarkerContract;
 import blue.repo.coordination.CompositeTimelineChannel;
+import blue.repo.coordination.TimelineChannel;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public final class CompositeTimelineChannelProcessor implements ChannelProcessor<CompositeTimelineChannel> {
     @Override
@@ -24,9 +25,10 @@ public final class CompositeTimelineChannelProcessor implements ChannelProcessor
             return ChannelEvaluation.noMatch();
         }
         MatchingChild matching = null;
+        Set<String> evaluatedKeys = new HashSet<String>();
         for (String childKey : channels) {
             String key = trimToNull(childKey);
-            if (key == null) {
+            if (key == null || !evaluatedKeys.add(key)) {
                 continue;
             }
             if (key.equals(context.bindingKey())) {
@@ -37,6 +39,10 @@ public final class CompositeTimelineChannelProcessor implements ChannelProcessor
             if (child == null) {
                 throw new IllegalStateException("Composite Timeline Channel '" + context.bindingKey()
                         + "' references missing child channel '" + key + "'");
+            }
+            if (!(child instanceof TimelineChannel)) {
+                throw new IllegalStateException("Composite Timeline Channel '" + context.bindingKey()
+                        + "' child '" + key + "' must be a Timeline Channel");
             }
             ChannelProcessor<? extends ChannelContract> processor = context.channelProcessor(key);
             if (processor == null) {
@@ -53,11 +59,12 @@ public final class CompositeTimelineChannelProcessor implements ChannelProcessor
             if (deliveryEvent == null) {
                 continue;
             }
-            if (!childCheckpointAllows(key, context)) {
-                continue;
-            }
-            if (matching == null) {
-                matching = new MatchingChild(key, deliveryEvent, childEvaluation.eventId());
+            MatchingChild candidate = new MatchingChild(key,
+                    order(child),
+                    deliveryEvent,
+                    childEvaluation.eventId());
+            if (matching == null || candidate.precedes(matching)) {
+                matching = candidate;
             }
         }
         if (matching == null) {
@@ -72,18 +79,6 @@ public final class CompositeTimelineChannelProcessor implements ChannelProcessor
                                             ChannelContract child,
                                             ChannelEvaluationContext context) {
         return processor.evaluate(child, context);
-    }
-
-    private boolean childCheckpointAllows(String channelKey,
-                                          ChannelEvaluationContext context) {
-        ChannelEventCheckpoint checkpoint = checkpoint(context);
-        Node lastEvent = checkpoint != null ? checkpoint.lastEvent(channelKey) : null;
-        return lastEvent == null || !TimelineProviderSupport.isOlderSameTimelineEvent(context.event(), lastEvent);
-    }
-
-    private ChannelEventCheckpoint checkpoint(ChannelEvaluationContext context) {
-        MarkerContract marker = context.markers().get("checkpoint");
-        return marker instanceof ChannelEventCheckpoint ? (ChannelEventCheckpoint) marker : null;
     }
 
     @Override
@@ -117,15 +112,27 @@ public final class CompositeTimelineChannelProcessor implements ChannelProcessor
         return trimmed.isEmpty() ? null : trimmed;
     }
 
+    private int order(ChannelContract contract) {
+        return contract.getOrder() != null ? contract.getOrder() : 0;
+    }
+
     private static final class MatchingChild {
         private final String channelKey;
+        private final int order;
         private final Node event;
         private final String eventId;
 
-        private MatchingChild(String channelKey, Node event, String eventId) {
+        private MatchingChild(String channelKey, int order, Node event, String eventId) {
             this.channelKey = channelKey;
+            this.order = order;
             this.event = event;
             this.eventId = eventId;
+        }
+
+        private boolean precedes(MatchingChild other) {
+            int orderComparison = Integer.compare(order, other.order);
+            return orderComparison < 0
+                    || (orderComparison == 0 && channelKey.compareTo(other.channelKey) < 0);
         }
     }
 }

@@ -1,6 +1,8 @@
 package blue.coordination.processor;
 
 import blue.language.model.Node;
+import blue.repo.BlueRepository;
+import blue.repo.coordination.Actor;
 import blue.repo.coordination.ChatMessage;
 import blue.repo.coordination.OperationRequest;
 import blue.repo.coordination.StatusCompleted;
@@ -12,64 +14,40 @@ import java.util.List;
 import java.util.Map;
 
 final class CoordinationEventNodes {
+    private static final BlueRepository REPOSITORY = BlueRepository.latest();
+    private static final Node TIMELINE_TYPE = repositoryType(Timeline.qualifiedName());
+    private static final Node ACTOR_TYPE = repositoryType(Actor.qualifiedName());
+
     private CoordinationEventNodes() {
     }
 
-    static TimelineEntry timelineEntry(Node node) {
+    static TimelineEntryView timelineEntry(Node node) {
         if (!isTimelineEntry(node)) {
             return null;
         }
-        TimelineEntry entry = new TimelineEntry();
-        String timelineId = timelineId(node);
-        if (timelineId != null) {
-            entry.timeline(new Timeline().timelineId(timelineId));
-        }
+        Node timeline = property(node, "timeline");
+        Node actor = property(node, "actor");
+        BigInteger sequence = integerProperty(node, "sequence");
         BigInteger timestamp = timestamp(node);
-        if (timestamp != null) {
-            entry.timestamp(timestamp);
+        Node message = property(node, "message");
+        if (!BlueSemanticIdentity.matchesType(timeline, TIMELINE_TYPE)
+                || !BlueSemanticIdentity.matchesType(actor, ACTOR_TYPE)
+                || sequence == null
+                || timestamp == null
+                || message == null) {
+            return null;
         }
-        return entry;
+        return new TimelineEntryView(timeline, actor, sequence);
     }
 
     static boolean isTimelineEntry(Node node) {
-        if (node == null) {
-            return false;
-        }
-        String typeBlueId = typeBlueId(node);
-        if (typeBlueId != null) {
-            return TimelineEntry.blueId().equals(typeBlueId);
-        }
-        String typeName = typeInlineValue(node);
-        if (typeName != null) {
-            return TimelineEntry.qualifiedName().equals(typeName);
-        }
-        return hasTimelineEntryShape(node);
-    }
-
-    static String timelineId(Node node) {
-        Node timeline = property(node, "timeline");
-        Node timelineId = property(timeline, "timelineId");
-        Object value = timelineId != null ? timelineId.getValue() : null;
-        return value instanceof String ? (String) value : null;
+        return node != null
+                && node.getType() != null
+                && TimelineEntry.blueId().equals(node.getType().getBlueId());
     }
 
     static BigInteger timestamp(Node node) {
-        Node timestamp = property(node, "timestamp");
-        Object value = timestamp != null ? timestamp.getValue() : null;
-        if (value instanceof BigInteger) {
-            return (BigInteger) value;
-        }
-        if (value instanceof Number) {
-            return BigInteger.valueOf(((Number) value).longValue());
-        }
-        if (value instanceof String) {
-            try {
-                return new BigInteger((String) value);
-            } catch (NumberFormatException ignored) {
-                return null;
-            }
-        }
-        return null;
+        return integerProperty(node, "timestamp");
     }
 
     static boolean matchesPattern(Node node, Node pattern) {
@@ -94,17 +72,6 @@ final class CoordinationEventNodes {
         return propertiesMatch(node.getProperties(), pattern.getProperties());
     }
 
-    private static boolean hasTimelineEntryShape(Node node) {
-        Map<String, Node> properties = node.getProperties();
-        return properties != null
-                && properties.containsKey("timeline")
-                && (properties.containsKey("message")
-                || properties.containsKey("timestamp")
-                || properties.containsKey("prevEntry")
-                || properties.containsKey("actor")
-                || properties.containsKey("source"));
-    }
-
     private static Node property(Node node, String key) {
         if (node == null || node.getProperties() == null) {
             return null;
@@ -112,15 +79,17 @@ final class CoordinationEventNodes {
         return node.getProperties().get(key);
     }
 
-    private static String typeBlueId(Node node) {
-        Node type = node.getType();
-        return type != null ? type.getBlueId() : null;
-    }
-
-    private static String typeInlineValue(Node node) {
-        Node type = node.getType();
-        Object value = type != null ? type.getValue() : null;
-        return value instanceof String ? (String) value : null;
+    private static BigInteger integerProperty(Node node, String key) {
+        Node property = property(node, key);
+        Object value = property != null ? property.getValue() : null;
+        if (value instanceof BigInteger) {
+            return (BigInteger) value;
+        }
+        if (value instanceof Byte || value instanceof Short
+                || value instanceof Integer || value instanceof Long) {
+            return BigInteger.valueOf(((Number) value).longValue());
+        }
+        return null;
     }
 
     private static boolean typeMatches(Node nodeType, Node patternType) {
@@ -255,5 +224,37 @@ final class CoordinationEventNodes {
             }
         }
         return false;
+    }
+
+    private static Node repositoryType(String qualifiedName) {
+        return REPOSITORY.nodeByName(qualifiedName)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Published repository is missing " + qualifiedName));
+    }
+
+    static final class TimelineEntryView {
+        private final Node timeline;
+        private final Node actor;
+        private final BigInteger sequence;
+
+        private TimelineEntryView(Node timeline,
+                                  Node actor,
+                                  BigInteger sequence) {
+            this.timeline = timeline;
+            this.actor = actor;
+            this.sequence = sequence;
+        }
+
+        Node timeline() {
+            return timeline;
+        }
+
+        Node actor() {
+            return actor;
+        }
+
+        BigInteger sequence() {
+            return sequence;
+        }
     }
 }
