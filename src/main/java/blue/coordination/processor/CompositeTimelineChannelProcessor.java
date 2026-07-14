@@ -53,16 +53,9 @@ public final class CompositeTimelineChannelProcessor implements ChannelProcessor
             if (childEvaluation == null || !childEvaluation.matches()) {
                 continue;
             }
-            Node deliveryEvent = childEvaluation.event() != null
-                    ? childEvaluation.event()
-                    : context.event();
-            if (deliveryEvent == null) {
-                continue;
-            }
             MatchingChild candidate = new MatchingChild(key,
                     order(child),
-                    deliveryEvent,
-                    childEvaluation.eventId());
+                    childEvaluation);
             if (matching == null || candidate.precedes(matching)) {
                 matching = candidate;
             }
@@ -70,8 +63,10 @@ public final class CompositeTimelineChannelProcessor implements ChannelProcessor
         if (matching == null) {
             return ChannelEvaluation.noMatch();
         }
-        return ChannelEvaluation.match(withCompositeMetadata(matching.event, matching.channelKey),
-                matching.eventId);
+        return TimelineProviderSupport.preserveUnionDelivery(matching.evaluation,
+                context.event(),
+                "compositeSourceChannelKey",
+                matching.channelKey);
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -84,24 +79,6 @@ public final class CompositeTimelineChannelProcessor implements ChannelProcessor
     @Override
     public boolean isNewerEvent(CompositeTimelineChannel contract, ChannelCheckpointContext context) {
         return TimelineProviderSupport.isNewerOrDifferentTimelineEvent(context);
-    }
-
-    private Node withCompositeMetadata(Node event, String childKey) {
-        Node copy = event.clone();
-        Node meta = property(copy, "meta");
-        if (meta == null) {
-            meta = new Node();
-            copy.properties("meta", meta);
-        }
-        meta.properties("compositeSourceChannelKey", new Node().value(childKey));
-        return copy;
-    }
-
-    private Node property(Node node, String key) {
-        if (node == null || node.getProperties() == null) {
-            return null;
-        }
-        return node.getProperties().get(key);
     }
 
     private String trimToNull(String value) {
@@ -119,14 +96,12 @@ public final class CompositeTimelineChannelProcessor implements ChannelProcessor
     private static final class MatchingChild {
         private final String channelKey;
         private final int order;
-        private final Node event;
-        private final String eventId;
+        private final ChannelEvaluation evaluation;
 
-        private MatchingChild(String channelKey, int order, Node event, String eventId) {
+        private MatchingChild(String channelKey, int order, ChannelEvaluation evaluation) {
             this.channelKey = channelKey;
             this.order = order;
-            this.event = event;
-            this.eventId = eventId;
+            this.evaluation = evaluation;
         }
 
         private boolean precedes(MatchingChild other) {

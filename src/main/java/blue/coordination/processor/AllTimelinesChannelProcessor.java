@@ -26,11 +26,10 @@ public final class AllTimelinesChannelProcessor implements ChannelProcessor<AllT
         if (matching == null) {
             return ChannelEvaluation.noMatch();
         }
-        Node deliveryEvent = matching.evaluation.event() != null
-                ? matching.evaluation.event()
-                : event;
-        return ChannelEvaluation.match(withAllTimelinesMetadata(deliveryEvent, matching.channelKey),
-                matching.evaluation.eventId());
+        return TimelineProviderSupport.preserveUnionDelivery(matching.evaluation,
+                event,
+                "allTimelinesSourceChannelKey",
+                matching.channelKey);
     }
 
     private MatchingTimeline matchingTimeline(ChannelEvaluationContext context) {
@@ -69,17 +68,6 @@ public final class AllTimelinesChannelProcessor implements ChannelProcessor<AllT
     @Override
     public boolean isNewerEvent(AllTimelinesChannel contract, ChannelCheckpointContext context) {
         return TimelineProviderSupport.isNewerOrDifferentTimelineEvent(context);
-    }
-
-    private Node withAllTimelinesMetadata(Node event, String sourceChannelKey) {
-        Node copy = event.clone();
-        Node meta = TimelineProviderSupport.property(copy, "meta");
-        if (meta == null) {
-            meta = new Node();
-            copy.properties("meta", meta);
-        }
-        meta.properties("allTimelinesSourceChannelKey", new Node().value(sourceChannelKey));
-        return copy;
     }
 
     private int order(ChannelContract contract) {

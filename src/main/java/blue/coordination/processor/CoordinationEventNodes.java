@@ -24,6 +24,8 @@ final class CoordinationEventNodes {
     };
     private static final Node TIMELINE_TYPE = repositoryType(Timeline.qualifiedName());
     private static final Node ACTOR_TYPE = repositoryType(Actor.qualifiedName());
+    private static final Node OPERATION_REQUEST_TYPE = new Node()
+            .type(new Node().blueId(OperationRequest.blueId()));
 
     private CoordinationEventNodes() {
     }
@@ -62,6 +64,19 @@ final class CoordinationEventNodes {
                 && matchesPattern(candidate, BINDING_CONVERTER.get().objectToNode(configuredBinding));
     }
 
+    static OperationRequestView operationRequest(Node event) {
+        if (matchesOperationRequestType(event)) {
+            return OperationRequestView.from(event, false);
+        }
+        if (!isTimelineEntry(event)) {
+            return null;
+        }
+        Node message = property(event, "message");
+        return matchesOperationRequestType(message)
+                ? OperationRequestView.from(message, true)
+                : null;
+    }
+
     static boolean matchesPattern(Node node, Node pattern) {
         if (pattern == null) {
             return true;
@@ -89,6 +104,40 @@ final class CoordinationEventNodes {
             return null;
         }
         return node.getProperties().get(key);
+    }
+
+    private static boolean matchesOperationRequestType(Node node) {
+        if (node == null || node.getType() == null) {
+            return false;
+        }
+        String typeBlueId = node.getType().getBlueId();
+        if (OperationRequest.blueId().equals(typeBlueId)) {
+            return true;
+        }
+        if (typeBlueId == null) {
+            return false;
+        }
+        try {
+            Node resolvedType = node.getType().isReferenceOnly()
+                    ? REPOSITORY.nodeByBlueId(typeBlueId).orElse(null)
+                    : node.getType();
+            return resolvedType != null
+                    && BINDING_CONVERTER.get().nodeMatchesType(
+                            new Node().type(resolvedType.clone().blueId(null)),
+                            OPERATION_REQUEST_TYPE);
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private static String nonBlankTextProperty(Node node, String key) {
+        Node property = property(node, key);
+        Object value = property != null ? property.getValue() : null;
+        if (!(value instanceof String)) {
+            return null;
+        }
+        String text = (String) value;
+        return text.trim().isEmpty() ? null : text;
     }
 
     private static BigInteger integerProperty(Node node, String key) {
@@ -267,6 +316,55 @@ final class CoordinationEventNodes {
 
         BigInteger sequence() {
             return sequence;
+        }
+    }
+
+    static final class OperationRequestView {
+        private final Node requestNode;
+        private final boolean timelineMessage;
+        private final String operation;
+        private final String channel;
+
+        private OperationRequestView(Node requestNode,
+                                     boolean timelineMessage,
+                                     String operation,
+                                     String channel) {
+            this.requestNode = requestNode;
+            this.timelineMessage = timelineMessage;
+            this.operation = operation;
+            this.channel = channel;
+        }
+
+        private static OperationRequestView from(Node requestNode, boolean timelineMessage) {
+            return new OperationRequestView(requestNode,
+                    timelineMessage,
+                    nonBlankTextProperty(requestNode, "operation"),
+                    nonBlankTextProperty(requestNode, "channel"));
+        }
+
+        boolean routable() {
+            return operation != null && channel != null;
+        }
+
+        String operation() {
+            return operation;
+        }
+
+        String channel() {
+            return channel;
+        }
+
+        Node request() {
+            return property(requestNode, "request");
+        }
+
+        Node patternFor(Node requestPattern) {
+            Node request = requestPattern.clone();
+            if (!timelineMessage) {
+                return new Node().properties("request", request);
+            }
+            return new Node().properties("message", new Node()
+                    .properties("request", request));
         }
     }
 }

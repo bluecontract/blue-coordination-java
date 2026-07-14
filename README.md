@@ -135,12 +135,19 @@ actor:
 message:
   type: Coordination/Operation Request
   operation: increment
+  channel: ownerChannel
   request: 5
 ```
 
 After processing, `/counter` is `5`, the workflow emits a chat message, and the
 channel checkpoint records the delivered timeline entry so duplicates do not
 run twice.
+
+The request's required `channel` is its effective same-scope handler channel.
+The Timeline Channel that accepts the entry still owns source eligibility and
+checkpointing; routing preserves the full Timeline Entry and does not evaluate
+the target channel as another external source. This V2 repository behavior is
+outside the current Blue Contracts 1.0 conformance surface.
 
 ## Processing Model
 
