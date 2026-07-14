@@ -49,6 +49,10 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
     private final AtomicLong processingSnapshotCacheMisses = new AtomicLong();
     private final AtomicLong processingSnapshotFromDocumentNanos = new AtomicLong();
     private final AtomicLong processingSnapshotFromDocumentBuilds = new AtomicLong();
+    private final AtomicLong processEventSnapshotAttempts = new AtomicLong();
+    private final AtomicLong processEventSnapshotBuilds = new AtomicLong();
+    private final AtomicLong processEventSnapshotFailures = new AtomicLong();
+    private final AtomicLong processEventSnapshotConstructionNanos = new AtomicLong();
     private final AtomicLong bundleLoadNanos = new AtomicLong();
     private final AtomicLong bundleLoadCacheKeyBuildNanos = new AtomicLong();
     private final AtomicLong bundleLoadActualBuildNanos = new AtomicLong();
@@ -279,6 +283,26 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
     @Override
     public void incrementProcessingSnapshotFromDocumentBuilds() {
         processingSnapshotFromDocumentBuilds.incrementAndGet();
+    }
+
+    @Override
+    public void incrementProcessEventSnapshotAttempts() {
+        processEventSnapshotAttempts.incrementAndGet();
+    }
+
+    @Override
+    public void incrementProcessEventSnapshotBuilds() {
+        processEventSnapshotBuilds.incrementAndGet();
+    }
+
+    @Override
+    public void incrementProcessEventSnapshotFailures() {
+        processEventSnapshotFailures.incrementAndGet();
+    }
+
+    @Override
+    public void addProcessEventSnapshotConstructionNanos(long nanos) {
+        processEventSnapshotConstructionNanos.addAndGet(nonNegative(nanos));
     }
 
     @Override
@@ -736,6 +760,22 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
         return processingSnapshotFromDocumentBuilds.get();
     }
 
+    public long processEventSnapshotAttempts() {
+        return processEventSnapshotAttempts.get();
+    }
+
+    public long processEventSnapshotBuilds() {
+        return processEventSnapshotBuilds.get();
+    }
+
+    public long processEventSnapshotFailures() {
+        return processEventSnapshotFailures.get();
+    }
+
+    public long processEventSnapshotConstructionNanos() {
+        return processEventSnapshotConstructionNanos.get();
+    }
+
     public long bundleLoadNanos() {
         return bundleLoadNanos.get();
     }
@@ -1020,6 +1060,10 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
         public final long processingSnapshotCacheMisses;
         public final long processingSnapshotFromDocumentNanos;
         public final long processingSnapshotFromDocumentBuilds;
+        public final long processEventSnapshotAttempts;
+        public final long processEventSnapshotBuilds;
+        public final long processEventSnapshotFailures;
+        public final long processEventSnapshotConstructionNanos;
         public final long bundleLoadNanos;
         public final long bundleLoadCacheKeyBuildNanos;
         public final long bundleLoadActualBuildNanos;
@@ -1123,6 +1167,10 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
             this.processingSnapshotCacheMisses = metrics.processingSnapshotCacheMisses();
             this.processingSnapshotFromDocumentNanos = metrics.processingSnapshotFromDocumentNanos();
             this.processingSnapshotFromDocumentBuilds = metrics.processingSnapshotFromDocumentBuilds();
+            this.processEventSnapshotAttempts = metrics.processEventSnapshotAttempts();
+            this.processEventSnapshotBuilds = metrics.processEventSnapshotBuilds();
+            this.processEventSnapshotFailures = metrics.processEventSnapshotFailures();
+            this.processEventSnapshotConstructionNanos = metrics.processEventSnapshotConstructionNanos();
             this.bundleLoadNanos = metrics.bundleLoadNanos();
             this.bundleLoadCacheKeyBuildNanos = metrics.bundleLoadCacheKeyBuildNanos();
             this.bundleLoadActualBuildNanos = metrics.bundleLoadActualBuildNanos();
