@@ -182,16 +182,20 @@ class TimelineChannelProcessorTest {
     }
 
     @Test
-    void exactEventReplayIsDuplicate() {
+    void exactEventReplayDoesNotRunHandlersAgain() {
         Fixture fixture = configuredFixture();
+        Map<String, Node> contracts = new LinkedHashMap<String, Node>();
+        contracts.put("ownerChannel", TestTimelineProvider.channel(TIMELINE, ACTOR));
+        contracts.put("replayObserver", replayObserver());
         Node event = event(fixture, TIMELINE, ACTOR, 10, 100, "same");
-        Node first = process(fixture, initializedDocument(fixture), event).document();
-        String signature = checkpointSignature(first);
+        DocumentProcessingResult first = process(fixture, initializedDocument(fixture, contracts), event);
 
-        Node replay = process(fixture, first, event.clone()).document();
+        DocumentProcessingResult replay = process(fixture, first.document(), event.clone());
 
-        assertEquals(signature, checkpointSignature(replay));
-        assertEquals("same", checkpointEvent(replay).getAsText("/message/message"));
+        assertEquals(1, first.triggeredEvents().size());
+        assertEquals("handled once", first.triggeredEvents().get(0).getAsText("/message"));
+        assertTrue(replay.triggeredEvents().isEmpty());
+        assertEquals("same", checkpointEvent(replay.document()).getAsText("/message/message"));
     }
 
     @Test
@@ -326,6 +330,10 @@ class TimelineChannelProcessorTest {
     private static Node initializedDocument(Fixture fixture) {
         Map<String, Node> contracts = new LinkedHashMap<String, Node>();
         contracts.put("ownerChannel", TestTimelineProvider.channel(TIMELINE, ACTOR));
+        return initializedDocument(fixture, contracts);
+    }
+
+    private static Node initializedDocument(Fixture fixture, Map<String, Node> contracts) {
         Node document = new Node()
                 .blue(fixture.repository.typeAliasBlue())
                 .name("Timeline V2 Test")
@@ -334,6 +342,15 @@ class TimelineChannelProcessorTest {
         assertFalse(result.capabilityFailure(), result.failureReason());
         assertNotNull(result.snapshot());
         return result.document();
+    }
+
+    private static Node replayObserver() {
+        return new Node()
+                .type("Coordination/Sequential Workflow")
+                .properties("channel", new Node().value("ownerChannel"))
+                .properties("steps", new Node().items(new Node()
+                        .type("Coordination/Trigger Event")
+                        .properties("event", TestTimelineProvider.chatMessage("handled once"))));
     }
 
     private static Fixture configuredFixture() {
@@ -396,13 +413,6 @@ class TimelineChannelProcessorTest {
 
     private static Node checkpointEvent(Node document) {
         return nodeAt(document, "/contracts/checkpoint/lastEvents/ownerChannel");
-    }
-
-    private static String checkpointSignature(Node document) {
-        Node signature = nodeAt(document, "/contracts/checkpoint/lastSignatures/ownerChannel");
-        return signature != null && signature.getValue() instanceof String
-                ? (String) signature.getValue()
-                : null;
     }
 
     private static Node nodeAt(Node node, String path) {
