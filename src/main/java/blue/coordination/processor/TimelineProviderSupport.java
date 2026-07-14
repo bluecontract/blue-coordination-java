@@ -27,8 +27,10 @@ public final class TimelineProviderSupport {
                                            CoordinationEventNodes.TimelineEntryView entry) {
         return contract != null
                 && entry != null
-                && BlueSemanticIdentity.equals(contract.getTimeline(), entry.timeline())
-                && BlueSemanticIdentity.equals(contract.getActor(), entry.actor());
+                && CoordinationEventNodes.matchesGeneratedBinding(
+                        entry.timeline(), contract.getTimeline())
+                && CoordinationEventNodes.matchesGeneratedBinding(
+                        entry.actor(), contract.getActor());
     }
 
     public static boolean matchesEventFilter(TimelineChannel contract, Node eventNode) {

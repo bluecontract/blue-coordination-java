@@ -1,5 +1,6 @@
 package blue.coordination.processor;
 
+import blue.language.Blue;
 import blue.language.model.Node;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.Actor;
@@ -15,6 +16,12 @@ import java.util.Map;
 
 final class CoordinationEventNodes {
     private static final BlueRepository REPOSITORY = BlueRepository.latest();
+    private static final ThreadLocal<Blue> BINDING_CONVERTER = new ThreadLocal<Blue>() {
+        @Override
+        protected Blue initialValue() {
+            return REPOSITORY.configure(new Blue());
+        }
+    };
     private static final Node TIMELINE_TYPE = repositoryType(Timeline.qualifiedName());
     private static final Node ACTOR_TYPE = repositoryType(Actor.qualifiedName());
 
@@ -48,6 +55,11 @@ final class CoordinationEventNodes {
 
     static BigInteger timestamp(Node node) {
         return integerProperty(node, "timestamp");
+    }
+
+    static boolean matchesGeneratedBinding(Node candidate, Object configuredBinding) {
+        return configuredBinding != null
+                && matchesPattern(candidate, BINDING_CONVERTER.get().objectToNode(configuredBinding));
     }
 
     static boolean matchesPattern(Node node, Node pattern) {

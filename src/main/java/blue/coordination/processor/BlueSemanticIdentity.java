@@ -24,10 +24,6 @@ final class BlueSemanticIdentity {
         return left != null && right != null && identity(left).equals(identity(right));
     }
 
-    static boolean equals(Object model, Node node) {
-        return model != null && node != null && identity(model).equals(identity(node));
-    }
-
     static boolean matchesType(Node node, Node expectedType) {
         if (node == null || expectedType == null) {
             return false;
@@ -49,11 +45,6 @@ final class BlueSemanticIdentity {
             return identity(blue.objectToNode(typedValue), blue);
         }
         return blue.calculateSemanticBlueId(node);
-    }
-
-    private static String identity(Object model) {
-        Blue blue = CONTEXT.get().blue;
-        return identity(blue.objectToNode(model), blue);
     }
 
     private static String identity(Node node, Blue blue) {
