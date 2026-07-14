@@ -91,7 +91,8 @@ class CoordinationProcessorsTest {
                         fixture.repository,
                         "owner",
                         1,
-                        CoordinationTestResources.operationRequest("increment", new Node().value(7))));
+                        CoordinationTestResources.operationRequest(
+                                "increment", "missingChannel", new Node().value(7))));
 
         assertFalse(processed.capabilityFailure(), processed.failureReason());
         assertEquals(BigInteger.ZERO, processed.document().getProperties().get("counter").getValue());

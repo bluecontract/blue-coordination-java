@@ -11,6 +11,7 @@ actor:
 message:
   type: "Coordination/Operation Request"
   operation: "sampleAdminUpdate"
+  channel: "sampleAdminChannel"
   request:
     - type: "Sample/Document Initial Snapshot Resolved"
       inResponseTo:

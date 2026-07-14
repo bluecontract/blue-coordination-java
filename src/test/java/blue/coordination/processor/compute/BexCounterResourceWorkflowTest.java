@@ -42,6 +42,7 @@ class BexCounterResourceWorkflowTest {
                 TIMELINE_ID,
                 1700000001,
                 "increment",
+                "ownerChannel",
                 new Node().value(1));
 
         DocumentProcessingResult result = fixture.blue.processDocument(initialized.document(), event);

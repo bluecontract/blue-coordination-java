@@ -199,10 +199,12 @@ class RepositoryStyleCounterDocumentTest {
     private static Node operationRequest(String operation, int request) {
         OperationRequest operationRequest = new OperationRequest()
                 .operation(operation)
+                .channel("ownerChannel")
                 .request(new Node().value(request));
         return new Node()
                 .type(OperationRequest.qualifiedName())
                 .properties("operation", new Node().value(operationRequest.getOperation()))
+                .properties("channel", new Node().value(operationRequest.getChannel()))
                 .properties("request", operationRequest.getRequest());
     }
 

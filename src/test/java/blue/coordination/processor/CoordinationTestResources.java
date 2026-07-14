@@ -83,11 +83,12 @@ public final class CoordinationTestResources {
                 spaces(indent + 4) + "accountId: " + timelineId);
     }
 
-    public static Node operationRequest(String operation, Node request) {
+    public static Node operationRequest(String operation, String channel, Node request) {
         Node safeRequest = request != null ? request : new Node();
         return new Node()
                 .type("Coordination/Operation Request")
                 .properties("operation", new Node().value(operation))
+                .properties("channel", new Node().value(channel))
                 .properties("request", safeRequest);
     }
 
@@ -96,6 +97,7 @@ public final class CoordinationTestResources {
                                              String timelineId,
                                              int timestamp,
                                              String operation,
+                                             String channel,
                                              Node request) {
         Node requestWithResolvedAliases = new RepositoryTypeAliasPreprocessor(
                 testTypeAliases(repository)).preprocess(
@@ -104,7 +106,7 @@ public final class CoordinationTestResources {
                 repository,
                 timelineId,
                 timestamp,
-                operationRequest(operation, requestWithResolvedAliases));
+                operationRequest(operation, channel, requestWithResolvedAliases));
     }
 
     private static String normalizeResourcePath(String resourcePath) {

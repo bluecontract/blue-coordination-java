@@ -60,15 +60,24 @@ final class ComputeWorkflowTestSupport {
     }
 
     Node operationRequest(String operation, Node request) {
-        return operationRequest("owner", timestamp++, operation, request);
+        return operationRequest("owner", timestamp++, operation, "ownerChannel", request);
     }
 
-    Node operationRequest(String timelineId, int timestamp, String operation, Node request) {
+    Node operationRequest(String operation, String channel, Node request) {
+        return operationRequest("owner", timestamp++, operation, channel, request);
+    }
+
+    Node operationRequest(String timelineId,
+                          int timestamp,
+                          String operation,
+                          String channel,
+                          Node request) {
         return CoordinationTestResources.operationRequestEvent(blue,
                 repository,
                 timelineId,
                 timestamp,
                 operation,
+                channel,
                 request);
     }
 

@@ -351,7 +351,31 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
                                        int timestamp,
                                        String operation,
                                        Node request) {
-        return support.operationRequest(timelineId, timestamp, operation, request);
+        return support.operationRequest(
+                timelineId,
+                timestamp,
+                operation,
+                operationChannel(timelineId, operation),
+                request);
+    }
+
+    private static String operationChannel(String timelineId, String operation) {
+        if ("deliverPaynote".equals(operation)) {
+            return "packageParticipants";
+        }
+        if ("confirmAuthorization".equals(operation) || "confirmCapture".equals(operation)) {
+            return "cardProcessorChannel";
+        }
+        if ("provideRestaurantOrder".equals(operation) || "provideHotelOrder".equals(operation)) {
+            return "travelAgencyChannel";
+        }
+        if ("confirm".equals(operation) && "restaurant".equals(timelineId)) {
+            return "restaurantChannel";
+        }
+        if ("confirm".equals(operation) && "hotel".equals(timelineId)) {
+            return "hotelChannel";
+        }
+        throw new IllegalArgumentException("Unknown operation route: " + operation + " from " + timelineId);
     }
 
     private static Node packagePaynote(ComputeWorkflowTestSupport support) {

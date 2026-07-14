@@ -27,7 +27,7 @@ class Ed25519IntrinsicWorkflowTest {
         Node document = support.initialize(support.yamlResource(HOTEL_DOCUMENT)).document();
 
         DocumentProcessingResult result = support.process(document,
-                support.operationRequest("hotel", 1, "checkIn", hotelRequest()));
+                support.operationRequest("hotel", 1, "checkIn", "hotelChannel", hotelRequest()));
 
         assertFalse(result.capabilityFailure(), result.failureReason());
         assertEquals(Boolean.TRUE, result.document().get("/usedNonces/customerA/hotel-nonce-1"));
@@ -42,7 +42,7 @@ class Ed25519IntrinsicWorkflowTest {
         Node document = support.initialize(support.yamlResource(THRESHOLD_DOCUMENT)).document();
 
         DocumentProcessingResult afterAlice = support.process(document,
-                support.operationRequest("admin", 1, "approveAction",
+                support.operationRequest("admin", 1, "approveAction", "adminChannel",
                         approvalRequest("alice", "alice-nonce-1", ALICE_SIGNATURE)));
 
         assertFalse(afterAlice.capabilityFailure(), afterAlice.failureReason());
@@ -50,7 +50,7 @@ class Ed25519IntrinsicWorkflowTest {
         assertEquals(Boolean.TRUE, afterAlice.document().get("/approvals/delete-file-123/alice"));
 
         DocumentProcessingResult afterBob = support.process(afterAlice.document(),
-                support.operationRequest("admin", 2, "approveAction",
+                support.operationRequest("admin", 2, "approveAction", "adminChannel",
                         approvalRequest("bob", "bob-nonce-1", BOB_SIGNATURE)));
 
         assertFalse(afterBob.capabilityFailure(), afterBob.failureReason());

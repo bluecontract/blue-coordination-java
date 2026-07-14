@@ -132,7 +132,21 @@ class DynamicEmbeddedParticipantsWorkflowTest {
                 timelineId,
                 timestamp,
                 operation,
+                operationChannel(operation),
                 new Node());
+    }
+
+    private static String operationChannel(String operation) {
+        if ("createEmbedded".equals(operation)) {
+            return "aliceChannel";
+        }
+        if ("say".equals(operation)) {
+            return "participantChannel";
+        }
+        if ("checkChatCount".equals(operation)) {
+            return "bobChannel";
+        }
+        throw new IllegalArgumentException("Unknown operation: " + operation);
     }
 
 }

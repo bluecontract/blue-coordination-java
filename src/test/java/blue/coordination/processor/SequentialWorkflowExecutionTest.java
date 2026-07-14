@@ -590,6 +590,7 @@ class SequentialWorkflowExecutionTest {
         Node operationRequest = new Node()
                 .type("Coordination/Operation Request")
                 .properties("operation", new Node().value(operation))
+                .properties("channel", new Node().value("ownerChannel"))
                 .properties("request", request);
         return TestTimelineProvider.timelineEntry(
                 fixture.blue, fixture.repository, timelineId, timestamp, operationRequest);

@@ -284,7 +284,18 @@ class PaynoteReducedDefinitionWorkflowTest {
                 timelineId,
                 timestamp,
                 operation,
+                participantChannel(timelineId),
                 request);
+    }
+
+    private static String participantChannel(String timelineId) {
+        if ("hotel-participant".equals(timelineId)) {
+            return "hotelParticipantChannel";
+        }
+        if ("restaurant-participant".equals(timelineId)) {
+            return "restaurantParticipantChannel";
+        }
+        throw new IllegalArgumentException("Unknown participant timeline: " + timelineId);
     }
 
     private static Node subscriptionUpdate(String subscriptionId,

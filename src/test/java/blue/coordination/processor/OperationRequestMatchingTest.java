@@ -23,12 +23,30 @@ class OperationRequestMatchingTest {
         contracts.put("increment", operation("triggered", integerPattern(),
                 updateDocumentStep("replace", "/counter", directOperationIncrementValue())));
         contracts.put("producer", directWorkflow("owner",
-                triggerEventStep(operationRequestEventNode("increment", new Node().value(7)))));
+                triggerEventStep(operationRequestEventNode(
+                        "increment", "triggered", new Node().value(7)))));
         Node initialized = initializedDocument(fixture, document(fixture.repository, 0, contracts));
 
         Node processed = processChat(fixture, initialized, "owner", 1).document();
 
         assertCounter(processed, 7);
+    }
+
+    @Test
+    void bareOperationRequestCannotRedirectTriggeredDelivery() {
+        Fixture fixture = configuredFixture();
+        Map<String, Node> contracts = ownerContracts();
+        contracts.put("triggered", triggeredChannel());
+        contracts.put("increment", operation("triggered", integerPattern(),
+                updateDocumentStep("replace", "/counter", directOperationIncrementValue())));
+        contracts.put("producer", directWorkflow("owner",
+                triggerEventStep(operationRequestEventNode(
+                        "increment", "owner", new Node().value(7)))));
+        Node initialized = initializedDocument(fixture, document(fixture.repository, 0, contracts));
+
+        Node processed = processChat(fixture, initialized, "owner", 1).document();
+
+        assertCounter(processed, 0);
     }
 
     @Test
@@ -135,7 +153,7 @@ class OperationRequestMatchingTest {
     }
 
     @Test
-    void operationRequestMustArriveThroughDeclaredChannel() {
+    void operationRequestRoutesFromEligibleSourceToDeclaredChannel() {
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = ownerContracts();
         contracts.put("other", timelineChannel("other"));
@@ -145,7 +163,7 @@ class OperationRequestMatchingTest {
 
         Node processed = processOperationRequest(fixture, initialized, "other", 1, "increment", new Node().value(7));
 
-        assertCounter(processed, 0);
+        assertCounter(processed, 7);
     }
 
     @Test
@@ -207,24 +225,24 @@ class OperationRequestMatchingTest {
     }
 
     @Test
-    void pinnedMatchingInitialDocumentRunsWhenNewerVersionIsNotAllowed() {
+    void documentValueDoesNotAffectProcessorEligibility() {
         Fixture fixture = configuredFixture();
         Node original = timelineCounterDocument(fixture.repository,
                 operation("owner", integerPattern(),
                         updateDocumentStep("replace", "/counter", timelineIncrementValue())));
         Node initialized = initializedDocument(fixture, original);
-        Node pinned = new Node().blueId((String) initialized.get("/contracts/initialized/documentId"));
+        Node unrelatedDocument = new Node()
+                .blueId("2vz831ZwzhpUefTb5XkodBRANKpFMbj1F4CN33kf38Hw");
 
         Node processed = processOperationRequest(fixture, initialized, "owner", 1,
                 operationRequestEventNode("increment", new Node().value(7))
-                        .properties("allowNewerVersion", new Node().value(false))
-                        .properties("document", pinned.clone()));
+                        .properties("document", unrelatedDocument));
 
         assertCounter(processed, 7);
     }
 
     @Test
-    void pinnedStaleDocumentDoesNotRunWhenNewerVersionIsNotAllowed() {
+    void requireExactDocumentVersionTrueIsFeederOwned() {
         Fixture fixture = configuredFixture();
         Node original = timelineCounterDocument(fixture.repository,
                 operation("owner", integerPattern(),
@@ -234,14 +252,14 @@ class OperationRequestMatchingTest {
 
         Node processed = processOperationRequest(fixture, initialized, "owner", 1,
                 operationRequestEventNode("increment", new Node().value(7))
-                        .properties("allowNewerVersion", new Node().value(false))
+                        .properties("requireExactDocumentVersion", new Node().value(true))
                         .properties("document", stale));
 
-        assertCounter(processed, 0);
+        assertCounter(processed, 7);
     }
 
     @Test
-    void allowNewerVersionTrueRunsWithStalePinnedDocument() {
+    void requireExactDocumentVersionFalseIsFeederOwned() {
         Fixture fixture = configuredFixture();
         Node original = timelineCounterDocument(fixture.repository,
                 operation("owner", integerPattern(),
@@ -251,22 +269,8 @@ class OperationRequestMatchingTest {
 
         Node processed = processOperationRequest(fixture, initialized, "owner", 1,
                 operationRequestEventNode("increment", new Node().value(7))
-                        .properties("allowNewerVersion", new Node().value(true))
+                        .properties("requireExactDocumentVersion", new Node().value(false))
                         .properties("document", stale));
-
-        assertCounter(processed, 7);
-    }
-
-    @Test
-    void missingPinnedDocumentRunsWhenNewerVersionIsNotAllowed() {
-        Fixture fixture = configuredFixture();
-        Node initialized = initializedDocument(fixture, timelineCounterDocument(fixture.repository,
-                operation("owner", integerPattern(),
-                        updateDocumentStep("replace", "/counter", timelineIncrementValue()))));
-
-        Node processed = processOperationRequest(fixture, initialized, "owner", 1,
-                operationRequestEventNode("increment", new Node().value(7))
-                        .properties("allowNewerVersion", new Node().value(false)));
 
         assertCounter(processed, 7);
     }
@@ -378,9 +382,14 @@ class OperationRequestMatchingTest {
     }
 
     private static Node operationRequestEventNode(String operation, Node request) {
+        return operationRequestEventNode(operation, "owner", request);
+    }
+
+    private static Node operationRequestEventNode(String operation, String channel, Node request) {
         return new Node()
                 .type("Coordination/Operation Request")
                 .properties("operation", new Node().value(operation))
+                .properties("channel", new Node().value(channel))
                 .properties("request", request);
     }
 
