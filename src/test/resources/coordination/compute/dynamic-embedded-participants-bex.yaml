@@ -117,26 +117,7 @@ contracts:
                   - /embedded_
                   - $var: suffix
               val:
-                $merge:
-                  - name: Embedded
-                  - displayName: Embedded
-                  - contracts:
-                      participantChannel:
-                        type: Coordination/Timeline Channel
-                        timeline:
-                          type: Coordination/Timeline
-                          timelineId: embedded
-                        actor:
-                          type: MyOS/MyOS Principal Actor
-                          accountId: embedded
-                      say:
-                        type: Coordination/Sequential Workflow Operation
-                        channel: participantChannel
-                        steps:
-                          - type: Coordination/Trigger Event
-                            event:
-                              type: Coordination/Chat Message
-                              message: Chat from embedded
+                $document: /embeddedTemplate
           - $appendChange:
               op: replace
               path:
@@ -198,14 +179,7 @@ contracts:
                   - $var: suffix
                   - _timeline
               val:
-                $merge:
-                  - type: Coordination/Timeline Channel
-                  - timeline:
-                      type: Coordination/Timeline
-                      timelineId: embedded
-                  - actor:
-                      type: MyOS/MyOS Principal Actor
-                      accountId: embedded
+                $document: /contractTemplates/embeddedTimeline
           - $appendChange:
               op: replace
               path:
@@ -244,9 +218,7 @@ contracts:
                   - $var: suffix
                   - _bridge
               val:
-                $merge:
-                  - type: Embedded Node Channel
-                  - childPath: /embedded
+                $document: /contractTemplates/embeddedBridge
           - $appendChange:
               op: replace
               path:
@@ -266,27 +238,7 @@ contracts:
                   - $var: suffix
                   - _chatCounter
               val:
-                $literal:
-                  type: Coordination/Sequential Workflow
-                  channel: embedded_bridge
-                  event:
-                    type: Coordination/Chat Message
-                  steps:
-                    - name: BuildChatCounterPatch
-                      type: Coordination/Compute
-                      do:
-                        - $appendChange:
-                            op: replace
-                            path: /chatMessagesSeen
-                            val:
-                              $add:
-                                - $document: /chatMessagesSeen
-                                - 1
-                        - $return:
-                            changeset:
-                              $changeset: true
-                            events:
-                              $events: true
+                $document: /contractTemplates/embeddedChatCounter
           - $appendChange:
               op: replace
               path:
