@@ -9,6 +9,7 @@ plugins {
     id 'maven-publish'
     id 'signing'
     id 'org.jreleaser' version '1.24.0'
+    id 'me.champeau.jmh' version '0.7.3'
 }
 
 group = 'blue.coordination'
@@ -68,6 +69,18 @@ test {
         events 'PASSED', 'FAILED', 'SKIPPED'
         showStandardStreams = true
     }
+}
+
+jmh {
+    jmhVersion = '1.37'
+    warmupIterations = 3
+    warmup = '1s'
+    iterations = 5
+    timeOnIteration = '1s'
+    fork = 2
+    profilers = ['gc']
+    resultFormat = 'JSON'
+    resultsFile = file("$buildDir/reports/jmh/resolved-processing-host-story.json")
 }
 
 ext.genResourcesDir = file("$buildDir/generated-resources")
