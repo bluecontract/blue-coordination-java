@@ -5,7 +5,6 @@ import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorStatus;
 import blue.language.snapshot.ResolvedSnapshot;
-import blue.language.utils.MergeReverser;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.ChatMessage;
 import blue.repo.coordination.Timeline;
@@ -92,8 +91,8 @@ public class ResolvedProcessingHostStoryBenchmark {
         trace("initial process", phaseStarted, result.document());
 
         phaseStarted = System.nanoTime();
-        Node epoch = minimizedEpoch(result, "initialization");
-        trace("epoch 0 minimize", phaseStarted, epoch);
+        Node epoch = storedEpoch(result, "initialization");
+        trace("epoch 0 store", phaseStarted, epoch);
         for (int index = 0; index < EVENTS; index++) {
             phaseStarted = System.nanoTime();
             ResolvedSnapshot resolvedEpoch = blue.resolveToSnapshot(epoch.clone());
@@ -103,8 +102,8 @@ public class ResolvedProcessingHostStoryBenchmark {
             requireSuccess(result, "event " + (index + 1));
             trace("event " + (index + 1) + " process", phaseStarted, result.document());
             phaseStarted = System.nanoTime();
-            epoch = minimizedEpoch(result, "event " + (index + 1));
-            trace("epoch " + (index + 1) + " minimize", phaseStarted, epoch);
+            epoch = storedEpoch(result, "event " + (index + 1));
+            trace("epoch " + (index + 1) + " store", phaseStarted, epoch);
         }
         return result;
     }
@@ -131,12 +130,12 @@ public class ResolvedProcessingHostStoryBenchmark {
         }
     }
 
-    private static Node minimizedEpoch(DocumentProcessingResult result, String phase) {
-        Node resolved = result.resolvedDocument();
-        if (resolved == null) {
-            throw new IllegalStateException(phase + " did not produce a resolved epoch");
+    private static Node storedEpoch(DocumentProcessingResult result, String phase) {
+        Node canonical = result.canonicalDocument();
+        if (canonical == null) {
+            throw new IllegalStateException(phase + " did not produce a canonical epoch");
         }
-        return new MergeReverser().reverseToMinimizedOverlay(resolved);
+        return canonical;
     }
 
     private static void requireSuccess(DocumentProcessingResult result, String phase) {
