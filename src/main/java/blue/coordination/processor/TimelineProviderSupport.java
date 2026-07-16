@@ -2,11 +2,15 @@ package blue.coordination.processor;
 
 import blue.language.model.Node;
 import blue.language.processor.ChannelCheckpointContext;
+import blue.language.processor.ChannelDelivery;
 import blue.language.processor.ChannelEvaluation;
 import blue.language.processor.ChannelEvaluationContext;
 import blue.language.utils.BlueIdCalculator;
+import blue.repo.coordination.OperationRequest;
 import blue.repo.coordination.TimelineChannel;
-import java.math.BigInteger;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 public final class TimelineProviderSupport {
     private TimelineProviderSupport() {
@@ -14,18 +18,40 @@ public final class TimelineProviderSupport {
 
     public static ChannelEvaluation evaluateTimelineEntry(TimelineChannel contract, ChannelEvaluationContext context) {
         Node eventNode = context.event();
-        if (!CoordinationEventNodes.isTimelineEntry(eventNode)) {
+        CoordinationEventNodes.TimelineEntryView entry = CoordinationEventNodes.timelineEntry(eventNode);
+        if (entry == null) {
             return ChannelEvaluation.noMatch();
         }
-        if (!matchesTimelineId(contract, eventNode) || !matchesEventFilter(contract, eventNode)) {
+        if (!matchesTimelineAndActor(contract, entry) || !matchesEventFilter(contract, eventNode)) {
             return ChannelEvaluation.noMatch();
         }
-        return ChannelEvaluation.match(eventNode);
+        return acceptedTimelineEntry(eventNode, context);
     }
 
-    public static boolean matchesTimelineId(TimelineChannel contract, Node eventNode) {
-        String timelineId = trimToNull(contract.getTimelineId());
-        return timelineId == null || timelineId.equals(CoordinationEventNodes.timelineId(eventNode));
+    private static ChannelEvaluation acceptedTimelineEntry(Node eventNode,
+                                                            ChannelEvaluationContext context) {
+        CoordinationEventNodes.OperationRequestView request =
+                CoordinationEventNodes.operationRequest(eventNode);
+        if (request == null || !request.routable() || context.channel(request.channel()) == null) {
+            return ChannelEvaluation.match(eventNode);
+        }
+        ChannelDelivery delivery = ChannelDelivery.of(eventNode,
+                null,
+                null,
+                null,
+                request.channel(),
+                OperationRequest.blueId() + ":" + request.operation());
+        return ChannelEvaluation.matchDeliveries(Collections.singletonList(delivery));
+    }
+
+    static boolean matchesTimelineAndActor(TimelineChannel contract,
+                                           CoordinationEventNodes.TimelineEntryView entry) {
+        return contract != null
+                && entry != null
+                && CoordinationEventNodes.matchesGeneratedBinding(
+                        entry.timeline(), contract.getTimeline())
+                && CoordinationEventNodes.matchesGeneratedBinding(
+                        entry.actor(), contract.getActor());
     }
 
     public static boolean matchesEventFilter(TimelineChannel contract, Node eventNode) {
@@ -33,50 +59,58 @@ public final class TimelineProviderSupport {
         return definition == null || CoordinationEventNodes.matchesPattern(eventNode, definition);
     }
 
+    static ChannelEvaluation preserveUnionDelivery(ChannelEvaluation childEvaluation,
+                                                    Node fallbackEvent,
+                                                    String metadataKey,
+                                                    String sourceChannelKey) {
+        List<ChannelDelivery> childDeliveries = childEvaluation.deliveries();
+        if (!childDeliveries.isEmpty()) {
+            List<ChannelDelivery> unionDeliveries =
+                    new ArrayList<ChannelDelivery>(childDeliveries.size());
+            for (ChannelDelivery childDelivery : childDeliveries) {
+                unionDeliveries.add(ChannelDelivery.of(
+                        withSourceMetadata(childDelivery.event(), metadataKey, sourceChannelKey),
+                        childDelivery.eventId(),
+                        null,
+                        childDelivery.shouldProcess(),
+                        childDelivery.handlerChannelKey(),
+                        childDelivery.logicalDeliveryKey()));
+            }
+            return ChannelEvaluation.matchDeliveries(unionDeliveries);
+        }
+        Node deliveryEvent = childEvaluation.event() != null
+                ? childEvaluation.event()
+                : fallbackEvent;
+        return deliveryEvent != null
+                ? ChannelEvaluation.match(
+                        withSourceMetadata(deliveryEvent, metadataKey, sourceChannelKey),
+                        childEvaluation.eventId())
+                : ChannelEvaluation.noMatch();
+    }
+
     public static String eventId(Node eventNode) {
         return eventNode != null ? BlueIdCalculator.calculateBlueId(eventNode.clone().blue(null)) : null;
     }
 
+    private static Node withSourceMetadata(Node event,
+                                           String metadataKey,
+                                           String sourceChannelKey) {
+        Node copy = event.clone();
+        Node meta = property(copy, "meta");
+        if (meta == null) {
+            meta = new Node();
+            copy.properties("meta", meta);
+        }
+        meta.properties(metadataKey, new Node().value(sourceChannelKey));
+        return copy;
+    }
+
     public static boolean isNewerOrSameTimelineEvent(ChannelCheckpointContext context) {
-        Node currentEvent = context.event();
-        Node previousEvent = context.lastEvent();
-        BigInteger currentTimestamp = CoordinationEventNodes.timestamp(currentEvent);
-        if (currentTimestamp == null) {
-            return true;
-        }
-        BigInteger previousTimestamp = CoordinationEventNodes.timestamp(previousEvent);
-        if (previousTimestamp == null) {
-            return true;
-        }
-        if (currentTimestamp.compareTo(previousTimestamp) == 0
-                && CoordinationEventNodes.matchesPattern(previousEvent, currentEvent)) {
-            return false;
-        }
-        return currentTimestamp.compareTo(previousTimestamp) >= 0;
+        return isNewerTimelineEvent(context, false);
     }
 
     public static boolean isNewerOrDifferentTimelineEvent(ChannelCheckpointContext context) {
-        Node currentEvent = context.event();
-        Node previousEvent = context.lastEvent();
-        String currentTimeline = CoordinationEventNodes.timelineId(currentEvent);
-        String previousTimeline = CoordinationEventNodes.timelineId(previousEvent);
-        if (currentTimeline != null && previousTimeline != null && !currentTimeline.equals(previousTimeline)) {
-            return true;
-        }
-        return isNewerOrSameTimelineEvent(context);
-    }
-
-    public static boolean isOlderSameTimelineEvent(Node currentEvent, Node previousEvent) {
-        String currentTimeline = CoordinationEventNodes.timelineId(currentEvent);
-        String previousTimeline = CoordinationEventNodes.timelineId(previousEvent);
-        if (currentTimeline == null || previousTimeline == null || !currentTimeline.equals(previousTimeline)) {
-            return false;
-        }
-        BigInteger currentTimestamp = CoordinationEventNodes.timestamp(currentEvent);
-        BigInteger previousTimestamp = CoordinationEventNodes.timestamp(previousEvent);
-        return currentTimestamp != null
-                && previousTimestamp != null
-                && currentTimestamp.compareTo(previousTimestamp) < 0;
+        return isNewerTimelineEvent(context, true);
     }
 
     public static Node property(Node node, String key) {
@@ -92,23 +126,29 @@ public final class TimelineProviderSupport {
         return value instanceof String ? (String) value : null;
     }
 
-    public static boolean hasType(Node node, String blueId, String qualifiedName) {
-        if (node == null || node.getType() == null) {
+    private static boolean isNewerTimelineEvent(ChannelCheckpointContext context,
+                                                boolean acceptDifferentTimeline) {
+        CoordinationEventNodes.TimelineEntryView current =
+                CoordinationEventNodes.timelineEntry(context.event());
+        if (current == null) {
             return false;
         }
-        Node type = node.getType();
-        if (blueId != null && blueId.equals(type.getBlueId())) {
+        Node previousEvent = context.lastEvent();
+        if (previousEvent == null) {
             return true;
         }
-        Object value = type.getValue();
-        return qualifiedName != null && qualifiedName.equals(value);
-    }
-
-    private static String trimToNull(String value) {
-        if (value == null) {
-            return null;
+        if (context.eventSignature() != null
+                && context.eventSignature().equals(context.lastEventSignature())) {
+            return false;
         }
-        String trimmed = value.trim();
-        return trimmed.isEmpty() ? null : trimmed;
+        CoordinationEventNodes.TimelineEntryView previous =
+                CoordinationEventNodes.timelineEntry(previousEvent);
+        if (previous == null) {
+            return false;
+        }
+        if (!BlueSemanticIdentity.equals(current.timeline(), previous.timeline())) {
+            return acceptDifferentTimeline;
+        }
+        return current.timestamp().compareTo(previous.timestamp()) > 0;
     }
 }

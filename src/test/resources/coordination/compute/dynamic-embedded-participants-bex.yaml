@@ -13,7 +13,12 @@ embeddedTemplate:
   contracts:
     participantChannel:
       type: Coordination/Timeline Channel
-      timelineId: embedded
+      timeline:
+        type: Coordination/Timeline
+        timelineId: embedded
+      actor:
+        type: MyOS/MyOS Principal Actor
+        accountId: embedded
     say:
       type: Coordination/Sequential Workflow Operation
       channel: participantChannel
@@ -26,7 +31,12 @@ contractTemplates:
   # Template for the root-level timeline channel that points at one generated embedded document.
   embeddedTimeline:
     type: Coordination/Timeline Channel
-    timelineId: embedded
+    timeline:
+      type: Coordination/Timeline
+      timelineId: embedded
+    actor:
+      type: MyOS/MyOS Principal Actor
+      accountId: embedded
   # Template for the root-level embedded node channel that surfaces events from one generated child.
   embeddedBridge:
     type: Embedded Node Channel
@@ -57,11 +67,21 @@ contracts:
   # Alice is allowed to create embedded participant documents.
   aliceChannel:
     type: Coordination/Timeline Channel
-    timelineId: alice
+    timeline:
+      type: Coordination/Timeline
+      timelineId: alice
+    actor:
+      type: MyOS/MyOS Principal Actor
+      accountId: alice
   # Bob is allowed to check whether enough embedded chat messages have been observed.
   bobChannel:
     type: Coordination/Timeline Channel
-    timelineId: bob
+    timeline:
+      type: Coordination/Timeline
+      timelineId: bob
+    actor:
+      type: MyOS/MyOS Principal Actor
+      accountId: bob
   createEmbedded:
     type: Coordination/Sequential Workflow Operation
     channel: aliceChannel
@@ -116,7 +136,18 @@ contracts:
                 $concat:
                   - /embedded_
                   - $var: suffix
-                  - /contracts/participantChannel/timelineId
+                  - /contracts/participantChannel/timeline/timelineId
+              val:
+                $concat:
+                  - embedded-
+                  - $var: suffix
+          - $appendChange:
+              op: replace
+              path:
+                $concat:
+                  - /embedded_
+                  - $var: suffix
+                  - /contracts/participantChannel/actor/accountId
               val:
                 $concat:
                   - embedded-
@@ -155,7 +186,18 @@ contracts:
                 $concat:
                   - /contracts/embedded_
                   - $var: suffix
-                  - _timeline/timelineId
+                  - _timeline/timeline/timelineId
+              val:
+                $concat:
+                  - embedded-
+                  - $var: suffix
+          - $appendChange:
+              op: replace
+              path:
+                $concat:
+                  - /contracts/embedded_
+                  - $var: suffix
+                  - _timeline/actor/accountId
               val:
                 $concat:
                   - embedded-

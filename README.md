@@ -29,9 +29,9 @@ The project targets Java 8-compatible bytecode, builds with JDK 25, runs tests
 on Java 8, and depends on:
 
 ```groovy
-api "blue.language:blue-language-java:3.0.0"
-api "blue.repo:blue-repo-java:3.0.0-rc.1"
-api "blue.bex:blue-bex-java:1.0.0"
+api "blue.language:blue-language-java:3.1.0-rc.9"
+api "blue.repo:blue-repo-java:3.0.0-rc.8"
+api "blue.bex:blue-bex-java:1.1.0-rc.2"
 ```
 
 ## Register Processors
@@ -44,9 +44,8 @@ import blue.coordination.processor.CoordinationProcessors;
 import blue.language.Blue;
 import blue.repo.BlueRepository;
 
-BlueRepository repository = BlueRepository.v1_3_0();
+BlueRepository repository = BlueRepository.latest();
 Blue blue = repository.configure(new Blue());
-blue.nodeProvider(repository.nodeProvider());
 
 CoordinationProcessors.registerWith(blue);
 ```
@@ -62,12 +61,10 @@ DocumentProcessor processor =
                 .build();
 ```
 
-`CoordinationProcessors` intentionally does not register a concrete processor
-for `Coordination/Timeline Channel`. Applications should provide their own
-timeline provider channel processor or register a small local test processor
-for fixtures that use `Coordination/Timeline Entry`. `Coordination/All Timelines
-Channel` delegates to those registered timeline channel processors when deciding
-which declared timelines can invoke a shared operation.
+`CoordinationProcessors` registers Timeline, Composite Timeline, and All
+Timelines channel processors. Timeline providers remain responsible for feeding
+authenticated, ordered Timeline Entries; the processors enforce the channel's
+timeline and actor identity and strict timestamp-based checkpoint semantics.
 
 ## Counter Document
 
@@ -79,7 +76,12 @@ counter: 0
 contracts:
   ownerChannel:
     type: Coordination/Timeline Channel
-    timelineId: counter-demo
+    timeline:
+      type: Coordination/Timeline
+      timelineId: counter-demo
+    actor:
+      type: MyOS/MyOS Principal Actor
+      accountId: counter-demo
 
   increment:
     type: Coordination/Sequential Workflow Operation
@@ -123,17 +125,28 @@ An input event for that channel looks like this:
 ```yaml
 type: Coordination/Timeline Entry
 timeline:
+  type: Coordination/Timeline
   timelineId: counter-demo
 timestamp: 1
+actor:
+  type: MyOS/MyOS Principal Actor
+  accountId: counter-demo
 message:
   type: Coordination/Operation Request
   operation: increment
+  channel: ownerChannel
   request: 5
 ```
 
 After processing, `/counter` is `5`, the workflow emits a chat message, and the
 channel checkpoint records the delivered timeline entry so duplicates do not
 run twice.
+
+The request's required `channel` is its effective same-scope handler channel.
+The Timeline Channel that accepts the entry still owns source eligibility and
+checkpointing; routing preserves the full Timeline Entry and does not evaluate
+the target channel as another external source. This V2 repository behavior is
+outside the current Blue Contracts 1.0 conformance surface.
 
 ## Processing Model
 

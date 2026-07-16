@@ -14,6 +14,9 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
     private final AtomicLong bexSyntheticProgramMaterializations = new AtomicLong();
     private final AtomicLong patchesApplied = new AtomicLong();
     private final AtomicLong eventsEmitted = new AtomicLong();
+    private final AtomicLong successfulComputeTerminationRequests = new AtomicLong();
+    private final AtomicLong declarativeTerminationSteps = new AtomicLong();
+    private final AtomicLong computeResultValidationFailures = new AtomicLong();
     private final AtomicLong computeProgramNormalizations = new AtomicLong();
     private final AtomicLong computeDefinitionNormalizations = new AtomicLong();
     private final AtomicLong computeDefinitionResolveHits = new AtomicLong();
@@ -49,6 +52,10 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
     private final AtomicLong processingSnapshotCacheMisses = new AtomicLong();
     private final AtomicLong processingSnapshotFromDocumentNanos = new AtomicLong();
     private final AtomicLong processingSnapshotFromDocumentBuilds = new AtomicLong();
+    private final AtomicLong processEventSnapshotAttempts = new AtomicLong();
+    private final AtomicLong processEventSnapshotBuilds = new AtomicLong();
+    private final AtomicLong processEventSnapshotFailures = new AtomicLong();
+    private final AtomicLong processEventSnapshotConstructionNanos = new AtomicLong();
     private final AtomicLong bundleLoadNanos = new AtomicLong();
     private final AtomicLong bundleLoadCacheKeyBuildNanos = new AtomicLong();
     private final AtomicLong bundleLoadActualBuildNanos = new AtomicLong();
@@ -138,6 +145,18 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
 
     public void incrementEventsEmitted() {
         eventsEmitted.incrementAndGet();
+    }
+
+    public void incrementSuccessfulComputeTerminationRequests() {
+        successfulComputeTerminationRequests.incrementAndGet();
+    }
+
+    public void incrementDeclarativeTerminationSteps() {
+        declarativeTerminationSteps.incrementAndGet();
+    }
+
+    public void incrementComputeResultValidationFailures() {
+        computeResultValidationFailures.incrementAndGet();
     }
 
     public void incrementComputeProgramNormalizations() {
@@ -279,6 +298,26 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
     @Override
     public void incrementProcessingSnapshotFromDocumentBuilds() {
         processingSnapshotFromDocumentBuilds.incrementAndGet();
+    }
+
+    @Override
+    public void incrementProcessEventSnapshotAttempts() {
+        processEventSnapshotAttempts.incrementAndGet();
+    }
+
+    @Override
+    public void incrementProcessEventSnapshotBuilds() {
+        processEventSnapshotBuilds.incrementAndGet();
+    }
+
+    @Override
+    public void incrementProcessEventSnapshotFailures() {
+        processEventSnapshotFailures.incrementAndGet();
+    }
+
+    @Override
+    public void addProcessEventSnapshotConstructionNanos(long nanos) {
+        processEventSnapshotConstructionNanos.addAndGet(nonNegative(nanos));
     }
 
     @Override
@@ -596,6 +635,18 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
         return eventsEmitted.get();
     }
 
+    public long successfulComputeTerminationRequests() {
+        return successfulComputeTerminationRequests.get();
+    }
+
+    public long declarativeTerminationSteps() {
+        return declarativeTerminationSteps.get();
+    }
+
+    public long computeResultValidationFailures() {
+        return computeResultValidationFailures.get();
+    }
+
     public long computeProgramNormalizations() {
         return computeProgramNormalizations.get();
     }
@@ -734,6 +785,22 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
 
     public long processingSnapshotFromDocumentBuilds() {
         return processingSnapshotFromDocumentBuilds.get();
+    }
+
+    public long processEventSnapshotAttempts() {
+        return processEventSnapshotAttempts.get();
+    }
+
+    public long processEventSnapshotBuilds() {
+        return processEventSnapshotBuilds.get();
+    }
+
+    public long processEventSnapshotFailures() {
+        return processEventSnapshotFailures.get();
+    }
+
+    public long processEventSnapshotConstructionNanos() {
+        return processEventSnapshotConstructionNanos.get();
     }
 
     public long bundleLoadNanos() {
@@ -985,6 +1052,9 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
         public final long bexSyntheticProgramMaterializations;
         public final long patchesApplied;
         public final long eventsEmitted;
+        public final long successfulComputeTerminationRequests;
+        public final long declarativeTerminationSteps;
+        public final long computeResultValidationFailures;
         public final long computeProgramNormalizations;
         public final long computeDefinitionNormalizations;
         public final long computeDefinitionResolveHits;
@@ -1020,6 +1090,10 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
         public final long processingSnapshotCacheMisses;
         public final long processingSnapshotFromDocumentNanos;
         public final long processingSnapshotFromDocumentBuilds;
+        public final long processEventSnapshotAttempts;
+        public final long processEventSnapshotBuilds;
+        public final long processEventSnapshotFailures;
+        public final long processEventSnapshotConstructionNanos;
         public final long bundleLoadNanos;
         public final long bundleLoadCacheKeyBuildNanos;
         public final long bundleLoadActualBuildNanos;
@@ -1088,6 +1162,9 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
             this.bexSyntheticProgramMaterializations = metrics.bexSyntheticProgramMaterializations();
             this.patchesApplied = metrics.patchesApplied();
             this.eventsEmitted = metrics.eventsEmitted();
+            this.successfulComputeTerminationRequests = metrics.successfulComputeTerminationRequests();
+            this.declarativeTerminationSteps = metrics.declarativeTerminationSteps();
+            this.computeResultValidationFailures = metrics.computeResultValidationFailures();
             this.computeProgramNormalizations = metrics.computeProgramNormalizations();
             this.computeDefinitionNormalizations = metrics.computeDefinitionNormalizations();
             this.computeDefinitionResolveHits = metrics.computeDefinitionResolveHits();
@@ -1123,6 +1200,10 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
             this.processingSnapshotCacheMisses = metrics.processingSnapshotCacheMisses();
             this.processingSnapshotFromDocumentNanos = metrics.processingSnapshotFromDocumentNanos();
             this.processingSnapshotFromDocumentBuilds = metrics.processingSnapshotFromDocumentBuilds();
+            this.processEventSnapshotAttempts = metrics.processEventSnapshotAttempts();
+            this.processEventSnapshotBuilds = metrics.processEventSnapshotBuilds();
+            this.processEventSnapshotFailures = metrics.processEventSnapshotFailures();
+            this.processEventSnapshotConstructionNanos = metrics.processEventSnapshotConstructionNanos();
             this.bundleLoadNanos = metrics.bundleLoadNanos();
             this.bundleLoadCacheKeyBuildNanos = metrics.bundleLoadCacheKeyBuildNanos();
             this.bundleLoadActualBuildNanos = metrics.bundleLoadActualBuildNanos();

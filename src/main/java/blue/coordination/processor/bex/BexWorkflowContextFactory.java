@@ -7,6 +7,7 @@ import blue.bex.value.BexValue;
 import blue.bex.value.BexValues;
 import blue.coordination.processor.workflow.StepExecutionContext;
 import blue.language.model.Node;
+import blue.language.processor.ProcessorExecutionContext;
 
 import java.util.Map;
 
@@ -29,6 +30,7 @@ public final class BexWorkflowContextFactory {
         BexValue event = BexValues.nodeCursorTrustedImmutable(context.eventRef());
         BexValue currentContract = currentContractBinding(context);
         BexStepResults steps = stepResults(context.stepResults());
+        ProcessorExecutionContext processorContext = context.processorContext();
         return BexExecutionContext.builder()
                 .document(new ScopedProcessorExecutionContextBexDocumentView(context, metrics))
                 .event(event)
@@ -37,6 +39,10 @@ public final class BexWorkflowContextFactory {
                 .binding("event", event)
                 .binding("steps", steps.asValue())
                 .binding("currentContract", currentContract)
+                .lazyBinding("processingEvent", () ->
+                        processorContext.hasProcessEvent()
+                                ? BexValues.frozen(processorContext.frozenProcessEvent())
+                                : BexValues.undefined())
                 .gasLimit(gasLimit)
                 .build();
     }

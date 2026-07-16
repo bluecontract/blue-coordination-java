@@ -3,7 +3,12 @@ counter: 0
 contracts:
   ownerChannel:
     type: Coordination/Timeline Channel
-    timelineId: counter-timeline
+    timeline:
+      type: Coordination/Timeline
+      timelineId: counter-timeline
+    actor:
+      type: MyOS/MyOS Principal Actor
+      accountId: counter-timeline
   increment:
     description: Increment the counter by the given number
     type: Coordination/Sequential Workflow Operation

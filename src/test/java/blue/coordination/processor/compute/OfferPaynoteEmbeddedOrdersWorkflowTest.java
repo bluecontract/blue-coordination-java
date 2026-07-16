@@ -5,6 +5,7 @@ import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorStatus;
+import blue.language.snapshot.ResolvedSnapshot;
 import java.math.BigInteger;
 import java.util.List;
 import java.util.Locale;
@@ -48,12 +49,12 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
 
         Node authored = support.yamlResource(DOCUMENT_RESOURCE);
         assertNoRootTemplates(authored);
-        Node current = support.initialize(authored).document();
-        assertEquals("Awaiting PayNote", current.get("/order/status"));
-        assertEquals("20-21 June weekend", current.get("/package/title"));
-        assertEquals("Deluxe Room", current.get("/package/roomType"));
-        assertEquals("Restaurant Cud Malina", current.get("/package/restaurantName"));
-        assertEquals(BigInteger.valueOf(499), current.get("/package/price/amount"));
+        ResolvedSnapshot current = support.initialize(authored).snapshot();
+        assertEquals("Awaiting PayNote", current.resolvedNodeAt("/order/status").getValue());
+        assertEquals("20-21 June weekend", current.resolvedNodeAt("/package/title").getValue());
+        assertEquals("Deluxe Room", current.resolvedNodeAt("/package/roomType").getValue());
+        assertEquals("Restaurant Cud Malina", current.resolvedNodeAt("/package/restaurantName").getValue());
+        assertEquals(BigInteger.valueOf(499), current.resolvedNodeAt("/package/price/amount").getValue());
         long snapshotBuildsAfterInitialize = metrics.processingSnapshotFromDocumentBuilds();
 
         // Travel Agency delivers the PayNote directly in the operation request. The root order embeds
@@ -61,67 +62,72 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
         DocumentProcessingResult paynoteDelivered = processMeasured(metrics, "deliverPaynote", support, current,
                 operationEvent(support, "travel-agency", 1, "deliverPaynote", packagePaynote(support)));
         assertFalse(paynoteDelivered.capabilityFailure(), paynoteDelivered.failureReason());
-        current = paynoteDelivered.document();
-        assertEquals("Waiting for PayNote capture", current.get("/order/status"));
-        assertEquals(Boolean.TRUE, current.get("/order/paynoteDelivered"));
-        assertEquals("Package PayNote", current.get("/paynote/name"));
-        assertEquals("/paynote", current.get("/contracts/embeddedPaynotes/paths/0"));
+        current = paynoteDelivered.snapshot();
+        Node currentDocument = paynoteDelivered.document();
+        assertEquals("Waiting for PayNote capture", currentDocument.get("/order/status"));
+        assertEquals(Boolean.TRUE, currentDocument.get("/order/paynoteDelivered"));
+        assertEquals("Package PayNote", currentDocument.get("/paynote/name"));
+        assertEquals("/paynote", currentDocument.get("/contracts/embeddedPaynotes/paths/0"));
         assertContainsEventKind(paynoteDelivered.triggeredEvents(), "PayNote Authorization Requested");
 
         // Card Processor authorizes the PayNote. Before this point, component orders are illegal.
         DocumentProcessingResult authorized = processMeasured(metrics, "confirmAuthorization", support, current,
                 operationEvent(support, "card-processor", 2, "confirmAuthorization", new Node()));
         assertFalse(authorized.capabilityFailure(), authorized.failureReason());
-        current = authorized.document();
-        assertEquals("Authorized", current.get("/paynote/status"));
+        current = authorized.snapshot();
+        assertEquals("Authorized", authorized.document().get("/paynote/status"));
 
         // Travel Agency provides the restaurant document as a request to PayNote.
         DocumentProcessingResult restaurantProvided = processMeasured(metrics, "provideRestaurantOrder", support, current,
                 operationEvent(support, "travel-agency", 3, "provideRestaurantOrder", restaurantOrder(support)));
         assertFalse(restaurantProvided.capabilityFailure(), restaurantProvided.failureReason());
-        current = restaurantProvided.document();
-        assertEquals("Restaurant Order", current.get("/paynote/restaurantOrder/name"));
-        assertEquals(Boolean.TRUE, current.get("/paynote/restaurantOrderProvided"));
-        assertEquals("/restaurantOrder", current.get("/paynote/contracts/componentOrders/paths/0"));
+        current = restaurantProvided.snapshot();
+        currentDocument = restaurantProvided.document();
+        assertEquals("Restaurant Order", currentDocument.get("/paynote/restaurantOrder/name"));
+        assertEquals(Boolean.TRUE, currentDocument.get("/paynote/restaurantOrderProvided"));
+        assertEquals("/restaurantOrder", currentDocument.get("/paynote/contracts/componentOrders/paths/0"));
 
         // Travel Agency provides the hotel document as a separate request to PayNote.
         DocumentProcessingResult hotelProvided = processMeasured(metrics, "provideHotelOrder", support, current,
                 operationEvent(support, "travel-agency", 4, "provideHotelOrder", hotelOrder(support)));
         assertFalse(hotelProvided.capabilityFailure(), hotelProvided.failureReason());
-        current = hotelProvided.document();
-        assertEquals("Hotel Order", current.get("/paynote/hotelOrder/name"));
-        assertEquals(Boolean.TRUE, current.get("/paynote/hotelOrderProvided"));
-        assertEquals("/hotelOrder", current.get("/paynote/contracts/componentOrders/paths/1"));
+        current = hotelProvided.snapshot();
+        currentDocument = hotelProvided.document();
+        assertEquals("Hotel Order", currentDocument.get("/paynote/hotelOrder/name"));
+        assertEquals(Boolean.TRUE, currentDocument.get("/paynote/hotelOrderProvided"));
+        assertEquals("/hotelOrder", currentDocument.get("/paynote/contracts/componentOrders/paths/1"));
 
         // Restaurant confirms the restaurant order. PayNote notices the embedded event, but capture
         // is still blocked because the hotel order has not confirmed yet.
         DocumentProcessingResult restaurantConfirmed = processMeasured(metrics, "restaurantConfirm", support, current,
                 operationEvent(support, "restaurant", 5, "confirm", new Node()));
         assertFalse(restaurantConfirmed.capabilityFailure(), restaurantConfirmed.failureReason());
-        current = restaurantConfirmed.document();
-        assertEquals("Confirmed", current.get("/paynote/restaurantOrder/status"));
-        assertEquals(Boolean.TRUE, current.get("/paynote/restaurantConfirmed"));
-        assertEquals(Boolean.FALSE, current.get("/paynote/captureRequested"));
+        current = restaurantConfirmed.snapshot();
+        currentDocument = restaurantConfirmed.document();
+        assertEquals("Confirmed", currentDocument.get("/paynote/restaurantOrder/status"));
+        assertEquals(Boolean.TRUE, currentDocument.get("/paynote/restaurantConfirmed"));
+        assertEquals(Boolean.FALSE, currentDocument.get("/paynote/captureRequested"));
 
         // Hotel confirms the hotel order. Now both embedded confirmations exist, so PayNote emits a
         // capture request for Card Processor.
         DocumentProcessingResult hotelConfirmed = processMeasured(metrics, "hotelConfirm", support, current,
                 operationEvent(support, "hotel", 6, "confirm", new Node()));
         assertFalse(hotelConfirmed.capabilityFailure(), hotelConfirmed.failureReason());
-        current = hotelConfirmed.document();
-        assertEquals("Confirmed", current.get("/paynote/hotelOrder/status"));
-        assertEquals(Boolean.TRUE, current.get("/paynote/hotelConfirmed"));
-        assertEquals(Boolean.TRUE, current.get("/paynote/captureRequested"));
+        current = hotelConfirmed.snapshot();
+        currentDocument = hotelConfirmed.document();
+        assertEquals("Confirmed", currentDocument.get("/paynote/hotelOrder/status"));
+        assertEquals(Boolean.TRUE, currentDocument.get("/paynote/hotelConfirmed"));
+        assertEquals(Boolean.TRUE, currentDocument.get("/paynote/captureRequested"));
 
         // Card Processor confirms capture. The root package order observes /paynote/captured through
         // a Document Update Channel and switches to Ready to use.
         DocumentProcessingResult captured = processMeasured(metrics, "confirmCapture", support, current,
                 operationEvent(support, "card-processor", 7, "confirmCapture", new Node()));
         assertFalse(captured.capabilityFailure(), captured.failureReason());
-        current = captured.document();
-        assertEquals("Captured", current.get("/paynote/status"));
-        assertEquals(Boolean.TRUE, current.get("/paynote/captured"));
-        assertEquals("Ready to use", current.get("/order/status"));
+        currentDocument = captured.document();
+        assertEquals("Captured", currentDocument.get("/paynote/status"));
+        assertEquals(Boolean.TRUE, currentDocument.get("/paynote/captured"));
+        assertEquals("Ready to use", currentDocument.get("/order/status"));
         assertContainsEventKind(captured.triggeredEvents(), "Package Order Ready to Use");
 
         assertEquals(0L, metrics.updateIndividualPatchApplications());
@@ -137,7 +143,7 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
     @Test
     void illegalPackagePaynoteAndComponentOrderOperationsFailClosed() {
         ComputeWorkflowTestSupport support = support(null);
-        Node current = support.initialize(support.yamlResource(DOCUMENT_RESOURCE)).document();
+        ResolvedSnapshot current = support.initialize(support.yamlResource(DOCUMENT_RESOURCE)).snapshot();
 
         // Illegal: wrong PayNote amount. The package order only accepts the exact 499 PLN PayNote for
         // this Hotel Badura + Cud Malina weekend package. This is rejected by deliverPaynote.request
@@ -151,17 +157,16 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
         assertEquals("Awaiting PayNote", wrongPaynoteResult.document().get("/order/status"));
 
         current = support.blue.processDocument(current,
-                operationEvent(support, "travel-agency", 12, "deliverPaynote", packagePaynote(support))).document();
+                operationEvent(support, "travel-agency", 12, "deliverPaynote", packagePaynote(support))).snapshot();
 
         // Illegal: Travel Agency cannot provide component orders until Card Processor authorizes the
         // embedded PayNote.
-        Node pendingAuthorization = current;
-        DocumentProcessingResult beforeAuthorization = support.blue.processDocument(pendingAuthorization,
+        DocumentProcessingResult beforeAuthorization = support.blue.processDocument(current,
                 operationEvent(support, "travel-agency", 13, "provideHotelOrder", hotelOrder(support)));
         assertRuntimeFatal(beforeAuthorization, "after PayNote authorization");
 
         current = support.blue.processDocument(current,
-                operationEvent(support, "card-processor", 14, "confirmAuthorization", new Node())).document();
+                operationEvent(support, "card-processor", 14, "confirmAuthorization", new Node())).snapshot();
 
         // Illegal: provideRestaurantOrder rejects a hotel document at operation-request matching time.
         // Restaurant and hotel fulfillment documents are intentionally specific and not interchangeable.
@@ -173,13 +178,12 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
         assertEquals(Boolean.FALSE, wrongRestaurantDocument.document().get("/paynote/restaurantOrderProvided"));
 
         current = support.blue.processDocument(current,
-                operationEvent(support, "travel-agency", 16, "provideRestaurantOrder", restaurantOrder(support))).document();
+                operationEvent(support, "travel-agency", 16, "provideRestaurantOrder", restaurantOrder(support))).snapshot();
         current = support.blue.processDocument(current,
-                operationEvent(support, "travel-agency", 17, "provideHotelOrder", hotelOrder(support))).document();
+                operationEvent(support, "travel-agency", 17, "provideHotelOrder", hotelOrder(support))).snapshot();
 
         // Illegal: Card Processor cannot capture before both Restaurant and Hotel have confirmed.
-        Node beforeCaptureRequested = current;
-        DocumentProcessingResult earlyCapture = support.blue.processDocument(beforeCaptureRequested,
+        DocumentProcessingResult earlyCapture = support.blue.processDocument(current,
                 operationEvent(support, "card-processor", 18, "confirmCapture", new Node()));
         assertRuntimeFatal(earlyCapture, "before both orders confirm");
     }
@@ -195,7 +199,7 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
     private static DocumentProcessingResult processMeasured(BexProcessingMetrics metrics,
                                                             String label,
                                                             ComputeWorkflowTestSupport support,
-                                                            Node document,
+                                                            ResolvedSnapshot document,
                                                             Node event) {
         BexProcessingMetrics.Snapshot before = metrics.snapshot();
         long start = System.nanoTime();
@@ -347,7 +351,31 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
                                        int timestamp,
                                        String operation,
                                        Node request) {
-        return support.operationRequest(timelineId, timestamp, operation, request);
+        return support.operationRequest(
+                timelineId,
+                timestamp,
+                operation,
+                operationChannel(timelineId, operation),
+                request);
+    }
+
+    private static String operationChannel(String timelineId, String operation) {
+        if ("deliverPaynote".equals(operation)) {
+            return "packageParticipants";
+        }
+        if ("confirmAuthorization".equals(operation) || "confirmCapture".equals(operation)) {
+            return "cardProcessorChannel";
+        }
+        if ("provideRestaurantOrder".equals(operation) || "provideHotelOrder".equals(operation)) {
+            return "travelAgencyChannel";
+        }
+        if ("confirm".equals(operation) && "restaurant".equals(timelineId)) {
+            return "restaurantChannel";
+        }
+        if ("confirm".equals(operation) && "hotel".equals(timelineId)) {
+            return "hotelChannel";
+        }
+        throw new IllegalArgumentException("Unknown operation route: " + operation + " from " + timelineId);
     }
 
     private static Node packagePaynote(ComputeWorkflowTestSupport support) {
@@ -371,10 +399,20 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
                 "contracts:",
                 "  travelAgencyChannel:",
                 "    type: Coordination/Timeline Channel",
-                "    timelineId: travel-agency",
+                "    timeline:",
+                "      type: Coordination/Timeline",
+                "      timelineId: travel-agency",
+                "    actor:",
+                "      type: MyOS/MyOS Principal Actor",
+                "      accountId: travel-agency",
                 "  cardProcessorChannel:",
                 "    type: Coordination/Timeline Channel",
-                "    timelineId: card-processor",
+                "    timeline:",
+                "      type: Coordination/Timeline",
+                "      timelineId: card-processor",
+                "    actor:",
+                "      type: MyOS/MyOS Principal Actor",
+                "      accountId: card-processor",
                 "  confirmAuthorization:",
                 "    type: Coordination/Sequential Workflow Operation",
                 "    channel: cardProcessorChannel",
@@ -419,7 +457,10 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
                 "      status: Pending",
                 "      contracts:",
                 "        restaurantChannel:",
-                "          timelineId: restaurant",
+                "          timeline:",
+                "            timelineId: restaurant",
+                "          actor:",
+                "            accountId: restaurant",
                 "        confirm:",
                 "          channel: restaurantChannel",
                 "    steps:",
@@ -473,7 +514,10 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
                 "      status: Pending",
                 "      contracts:",
                 "        hotelChannel:",
-                "          timelineId: hotel",
+                "          timeline:",
+                "            timelineId: hotel",
+                "          actor:",
+                "            accountId: hotel",
                 "        confirm:",
                 "          channel: hotelChannel",
                 "    steps:",
@@ -645,7 +689,12 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
                 "contracts:",
                 "  restaurantChannel:",
                 "    type: Coordination/Timeline Channel",
-                "    timelineId: restaurant",
+                "    timeline:",
+                "      type: Coordination/Timeline",
+                "      timelineId: restaurant",
+                "    actor:",
+                "      type: MyOS/MyOS Principal Actor",
+                "      accountId: restaurant",
                 "  confirm:",
                 "    type: Coordination/Sequential Workflow Operation",
                 "    channel: restaurantChannel",
@@ -689,7 +738,12 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
                 "contracts:",
                 "  hotelChannel:",
                 "    type: Coordination/Timeline Channel",
-                "    timelineId: hotel",
+                "    timeline:",
+                "      type: Coordination/Timeline",
+                "      timelineId: hotel",
+                "    actor:",
+                "      type: MyOS/MyOS Principal Actor",
+                "      accountId: hotel",
                 "  confirm:",
                 "    type: Coordination/Sequential Workflow Operation",
                 "    channel: hotelChannel",

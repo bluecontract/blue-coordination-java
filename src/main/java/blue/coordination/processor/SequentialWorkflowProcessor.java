@@ -33,7 +33,7 @@ public final class SequentialWorkflowProcessor implements HandlerProcessor<Seque
 
     @Override
     public boolean matches(SequentialWorkflow contract, HandlerMatchContext context) {
-        return contract.getEvent() == null || context.matchesEventPattern(contract.getEvent());
+        return SequentialWorkflowEventMatcher.matches(contract.getEvent(), context);
     }
 
     @Override

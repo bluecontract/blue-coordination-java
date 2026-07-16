@@ -1,16 +1,22 @@
 package blue.coordination.processor.workflow;
 
 public final class WorkflowStepResult {
-    private static final WorkflowStepResult NONE = new WorkflowStepResult(false, null, false);
+    private static final WorkflowStepResult NONE = new WorkflowStepResult(false, null, false, false);
+    private static final WorkflowStepResult TERMINAL = new WorkflowStepResult(false, null, false, true);
 
     private final boolean hasValue;
     private final Object value;
     private final boolean changesetHandled;
+    private final boolean terminal;
 
-    private WorkflowStepResult(boolean hasValue, Object value, boolean changesetHandled) {
+    private WorkflowStepResult(boolean hasValue,
+                               Object value,
+                               boolean changesetHandled,
+                               boolean terminal) {
         this.hasValue = hasValue;
         this.value = value;
         this.changesetHandled = changesetHandled;
+        this.terminal = terminal;
     }
 
     public static WorkflowStepResult none() {
@@ -22,7 +28,19 @@ public final class WorkflowStepResult {
     }
 
     public static WorkflowStepResult value(Object value, boolean changesetHandled) {
-        return new WorkflowStepResult(true, value, changesetHandled);
+        return new WorkflowStepResult(true, value, changesetHandled, false);
+    }
+
+    public static WorkflowStepResult terminal() {
+        return TERMINAL;
+    }
+
+    public static WorkflowStepResult terminalValue(Object value) {
+        return terminalValue(value, false);
+    }
+
+    public static WorkflowStepResult terminalValue(Object value, boolean changesetHandled) {
+        return new WorkflowStepResult(true, value, changesetHandled, true);
     }
 
     public boolean hasValue() {
@@ -35,5 +53,9 @@ public final class WorkflowStepResult {
 
     public boolean changesetHandled() {
         return changesetHandled;
+    }
+
+    public boolean isTerminal() {
+        return terminal;
     }
 }

@@ -3,7 +3,6 @@ package blue.coordination.processor.compute;
 import blue.coordination.processor.CoordinationProcessors;
 import blue.coordination.processor.CoordinationTestResources;
 import blue.coordination.processor.RepositoryTypeAliasPreprocessor;
-import blue.coordination.processor.TestTimelineProvider;
 import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
@@ -83,10 +82,9 @@ class CustomerPaynoteLatestBexFixtureTest {
     }
 
     private static Fixture configuredFixture() {
-        BlueRepository repository = BlueRepository.v1_3_0();
+        BlueRepository repository = BlueRepository.latest();
         Blue blue = CoordinationTestResources.configuredBlue(repository);
         CoordinationProcessors.registerWith(blue);
-        TestTimelineProvider.registerWith(blue);
         return new Fixture(repository, blue);
     }
 

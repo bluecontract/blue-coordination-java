@@ -21,10 +21,20 @@ contracts:
   # Customer and Travel Agency are the package-order participants.
   customerChannel:
     type: Coordination/Timeline Channel
-    timelineId: customer
+    timeline:
+      type: Coordination/Timeline
+      timelineId: customer
+    actor:
+      type: MyOS/MyOS Principal Actor
+      accountId: customer
   travelAgencyChannel:
     type: Coordination/Timeline Channel
-    timelineId: travel-agency
+    timeline:
+      type: Coordination/Timeline
+      timelineId: travel-agency
+    actor:
+      type: MyOS/MyOS Principal Actor
+      accountId: travel-agency
   packageParticipants:
     type: Coordination/Composite Timeline Channel
     channels:
@@ -60,9 +70,15 @@ contracts:
       captured: false
       contracts:
         travelAgencyChannel:
-          timelineId: travel-agency
+          timeline:
+            timelineId: travel-agency
+          actor:
+            accountId: travel-agency
         cardProcessorChannel:
-          timelineId: card-processor
+          timeline:
+            timelineId: card-processor
+          actor:
+            accountId: card-processor
         confirmAuthorization:
           channel: cardProcessorChannel
         provideRestaurantOrder:

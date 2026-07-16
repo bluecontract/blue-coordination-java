@@ -368,7 +368,9 @@ class ComputeWorkflowExecutionTest {
                 "                $currentContract: /channel",
                 "          - $return: {}"))).document();
 
-        DocumentProcessingResult result = support.processRun(document);
+        DocumentProcessingResult result = support.process(
+                document,
+                support.operationRequest("run", "manualChannel", new Node().value("request")));
 
         assertEquals("manualChannel", onlyEvent(result).get("/channel"));
     }

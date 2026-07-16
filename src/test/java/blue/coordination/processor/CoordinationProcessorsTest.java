@@ -51,7 +51,6 @@ class CoordinationProcessorsTest {
     @Test
     void realRepositoryCoordinationContractsLoadAndInitialize() {
         Fixture fixture = configuredFixture();
-        TestTimelineProvider.registerWith(fixture.blue);
         Node document = counterDocument(fixture.repository, "ownerChannel");
         Node preprocessed = fixture.blue.preprocess(document.clone());
         Map<String, Node> contracts = contracts(preprocessed);
@@ -83,7 +82,6 @@ class CoordinationProcessorsTest {
     @Test
     void sequentialWorkflowOperationWithMissingChannelDoesNotRun() {
         Fixture fixture = configuredFixture();
-        TestTimelineProvider.registerWith(fixture.blue);
         Node document = counterDocument(fixture.repository, "missingChannel");
         Node preprocessed = fixture.blue.preprocess(document.clone());
 
@@ -93,7 +91,8 @@ class CoordinationProcessorsTest {
                         fixture.repository,
                         "owner",
                         1,
-                        CoordinationTestResources.operationRequest("increment", new Node().value(7))));
+                        CoordinationTestResources.operationRequest(
+                                "increment", "missingChannel", new Node().value(7))));
 
         assertFalse(processed.capabilityFailure(), processed.failureReason());
         assertEquals(BigInteger.ZERO, processed.document().getProperties().get("counter").getValue());
@@ -132,7 +131,7 @@ class CoordinationProcessorsTest {
         ContractProcessorRegistry registry = processor.getContractRegistry();
 
         assertTrue(registry.lookupChannel(AllTimelinesChannel.blueId()).isPresent());
-        assertFalse(registry.lookupChannel(TimelineChannel.blueId()).isPresent());
+        assertTrue(registry.lookupChannel(TimelineChannel.blueId()).isPresent());
         assertTrue(registry.lookupChannel(CompositeTimelineChannel.blueId()).isPresent());
         assertFalse(registry.lookupMarker(Operation.blueId()).isPresent());
         assertTrue(registry.lookupHandler(ChatWorkflowOperation.blueId()).isPresent());
@@ -142,7 +141,7 @@ class CoordinationProcessorsTest {
     }
 
     private static Fixture configuredFixture() {
-        BlueRepository repository = BlueRepository.v1_3_0();
+        BlueRepository repository = BlueRepository.latest();
         Blue blue = CoordinationTestResources.configuredBlue(repository);
         CoordinationProcessors.registerWith(blue);
         return new Fixture(repository, blue);
@@ -150,9 +149,7 @@ class CoordinationProcessorsTest {
 
     private static Node counterDocument(BlueRepository repository, String operationChannel) {
         Map<String, Node> contracts = new LinkedHashMap<>();
-        contracts.put("ownerChannel", new Node()
-                .type("Coordination/Timeline Channel")
-                .properties("timelineId", new Node().value("owner")));
+        contracts.put("ownerChannel", TestTimelineProvider.channel("owner"));
         contracts.put("increment", new Node()
                 .type("Coordination/Sequential Workflow Operation")
                 .properties("channel", new Node().value(operationChannel))

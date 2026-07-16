@@ -215,14 +215,8 @@ class TriggerEventStepExecutorTest {
     }
 
     private static Node chatTimelineEntry(Fixture fixture) {
-        Node event = new Node()
-                .blue(fixture.repository.typeAliasBlue())
-                .type("Coordination/Timeline Entry")
-                .properties("timeline", new Node()
-                        .properties("timelineId", new Node().value("owner")))
-                .properties("timestamp", new Node().value(1))
-                .properties("message", chatMessageEvent("run"));
-        return fixture.blue.preprocess(event).blue(null);
+        return TestTimelineProvider.timelineEntry(
+                fixture.blue, fixture.repository, "owner", 1, chatMessageEvent("run"));
     }
 
     private static Node initializedDocument(Fixture fixture, Node document) {
@@ -230,10 +224,9 @@ class TriggerEventStepExecutorTest {
     }
 
     private static Fixture configuredFixture() {
-        BlueRepository repository = BlueRepository.v1_3_0();
+        BlueRepository repository = BlueRepository.latest();
         Blue blue = CoordinationTestResources.configuredBlue(repository);
         CoordinationProcessors.registerWith(blue);
-        TestTimelineProvider.registerWith(blue);
         return new Fixture(repository, blue);
     }
 

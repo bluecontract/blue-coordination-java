@@ -3,7 +3,12 @@ counter: 0
 contracts:
   ownerChannel:
     type: Coordination/Timeline Channel
-    timelineId: owner
+    timeline:
+      type: Coordination/Timeline
+      timelineId: owner
+    actor:
+      type: MyOS/MyOS Principal Actor
+      accountId: owner
   increment:
     type: Coordination/Sequential Workflow Operation
     channel: ownerChannel

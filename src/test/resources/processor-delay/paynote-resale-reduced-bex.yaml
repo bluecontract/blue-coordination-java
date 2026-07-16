@@ -71,10 +71,20 @@ state:
 contracts:
   hotelParticipantChannel:
     type: Coordination/Timeline Channel
-    timelineId: hotel-participant
+    timeline:
+      type: Coordination/Timeline
+      timelineId: hotel-participant
+    actor:
+      type: MyOS/MyOS Principal Actor
+      accountId: hotel-participant
   restaurantParticipantChannel:
     type: Coordination/Timeline Channel
-    timelineId: restaurant-participant
+    timeline:
+      type: Coordination/Timeline
+      timelineId: restaurant-participant
+    actor:
+      type: MyOS/MyOS Principal Actor
+      accountId: restaurant-participant
   triggeredEventChannel:
     type: Triggered Event Channel
   hotelResaleOrderPlaced:

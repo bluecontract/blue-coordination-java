@@ -18,13 +18,14 @@ class MustUnderstandContractsTest {
     @Test
     void unknownContractTypeStopsInitialization() {
         Fixture fixture = configuredFixture(false);
+        String unknownType = "3nxchG67TRi4XrYFM2MTjj4LmuHNQzVv9NZLjATrPN19";
         Node document = document(fixture.repository, contract("unknown", new Node()
-                .type(new Node().blueId("3nxchG67TRi4XrYFM2MTjj4LmuHNQzVv9NZLjATrPN19"))));
+                .type(new Node().blueId(unknownType))));
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> initialize(fixture, document));
 
-        assertTrue(ex.getMessage().contains("No content found for blueId"));
+        assertTrue(ex.getMessage().contains(unknownType), ex.getMessage());
     }
 
     @Test
@@ -38,23 +39,21 @@ class MustUnderstandContractsTest {
     }
 
     @Test
-    void abstractCoordinationTimelineChannelStopsInitializationWhenUsedDirectly() {
+    void timelineChannelIsSupportedWhenUsedDirectly() {
         Fixture fixture = configuredFixture(false);
-        Node document = document(fixture.repository, contract("owner", new Node()
-                .type("Coordination/Timeline Channel")
-                .properties("timelineId", new Node().value("owner"))));
+        Node document = document(fixture.repository,
+                contract("owner", TestTimelineProvider.channel("owner")));
 
         DocumentProcessingResult result = initialize(fixture, document);
 
-        assertCapabilityFailure(result, "Unsupported contract type");
+        assertFalse(result.capabilityFailure(), result.failureReason());
+        assertTrue(fixture.blue.isInitialized(result.document()));
     }
 
     @Test
-    void handlerBoundToAbstractTimelineChannelFailsClearly() {
+    void handlerBoundToTimelineChannelInitializes() {
         Fixture fixture = configuredFixture(false);
-        Map<String, Node> contracts = contract("owner", new Node()
-                .type("Coordination/Timeline Channel")
-                .properties("timelineId", new Node().value("owner")));
+        Map<String, Node> contracts = contract("owner", TestTimelineProvider.channel("owner"));
         contracts.put("handler", new Node()
                 .type("Coordination/Sequential Workflow")
                 .properties("channel", new Node().value("owner"))
@@ -63,7 +62,8 @@ class MustUnderstandContractsTest {
 
         DocumentProcessingResult result = initialize(fixture, document);
 
-        assertCapabilityFailure(result, "Unsupported contract type");
+        assertFalse(result.capabilityFailure(), result.failureReason());
+        assertTrue(fixture.blue.isInitialized(result.document()));
     }
 
     @Test
@@ -150,7 +150,7 @@ class MustUnderstandContractsTest {
     }
 
     private static Fixture configuredFixture(boolean simpleTimelineProvider) {
-        BlueRepository repository = BlueRepository.v1_3_0();
+        BlueRepository repository = BlueRepository.latest();
         Blue blue = CoordinationTestResources.configuredBlue(repository);
         CoordinationProcessors.registerWith(blue);
         if (simpleTimelineProvider) {

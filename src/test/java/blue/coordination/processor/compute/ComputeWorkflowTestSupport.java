@@ -4,7 +4,6 @@ import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationProcessors;
 import blue.coordination.processor.RepositoryTypeAliasPreprocessor;
 import blue.coordination.processor.CoordinationTestResources;
-import blue.coordination.processor.TestTimelineProvider;
 import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
@@ -26,10 +25,9 @@ final class ComputeWorkflowTestSupport {
     }
 
     static ComputeWorkflowTestSupport create(CoordinationProcessorOptions options) {
-        BlueRepository repository = BlueRepository.v1_3_0();
+        BlueRepository repository = BlueRepository.latest();
         Blue blue = CoordinationTestResources.configuredBlue(repository);
         CoordinationProcessors.registerWith(blue, options);
-        TestTimelineProvider.registerWith(blue);
         return new ComputeWorkflowTestSupport(repository, blue);
     }
 
@@ -62,15 +60,24 @@ final class ComputeWorkflowTestSupport {
     }
 
     Node operationRequest(String operation, Node request) {
-        return operationRequest("owner", timestamp++, operation, request);
+        return operationRequest("owner", timestamp++, operation, "ownerChannel", request);
     }
 
-    Node operationRequest(String timelineId, int timestamp, String operation, Node request) {
+    Node operationRequest(String operation, String channel, Node request) {
+        return operationRequest("owner", timestamp++, operation, channel, request);
+    }
+
+    Node operationRequest(String timelineId,
+                          int timestamp,
+                          String operation,
+                          String channel,
+                          Node request) {
         return CoordinationTestResources.operationRequestEvent(blue,
                 repository,
                 timelineId,
                 timestamp,
                 operation,
+                channel,
                 request);
     }
 
