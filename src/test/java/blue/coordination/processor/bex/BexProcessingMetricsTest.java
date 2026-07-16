@@ -40,6 +40,23 @@ class BexProcessingMetricsTest {
         assertSnapshot(second, 2L, 2L, 1L, 24L);
     }
 
+    @Test
+    void terminationMetricsAreBoundedCountersAndSnapshotsAreImmutable() {
+        BexProcessingMetrics metrics = new BexProcessingMetrics();
+        metrics.incrementSuccessfulComputeTerminationRequests();
+        metrics.incrementDeclarativeTerminationSteps();
+        metrics.incrementComputeResultValidationFailures();
+        BexProcessingMetrics.Snapshot first = metrics.snapshot();
+
+        metrics.incrementSuccessfulComputeTerminationRequests();
+        metrics.incrementDeclarativeTerminationSteps();
+        metrics.incrementComputeResultValidationFailures();
+        BexProcessingMetrics.Snapshot second = metrics.snapshot();
+
+        assertTerminationSnapshot(first, 1L);
+        assertTerminationSnapshot(second, 2L);
+    }
+
     private static void assertSnapshot(BexProcessingMetrics.Snapshot snapshot,
                                        long attempts,
                                        long builds,
@@ -49,5 +66,12 @@ class BexProcessingMetricsTest {
         assertEquals(builds, snapshot.processEventSnapshotBuilds);
         assertEquals(failures, snapshot.processEventSnapshotFailures);
         assertEquals(constructionNanos, snapshot.processEventSnapshotConstructionNanos);
+    }
+
+    private static void assertTerminationSnapshot(BexProcessingMetrics.Snapshot snapshot,
+                                                  long expected) {
+        assertEquals(expected, snapshot.successfulComputeTerminationRequests);
+        assertEquals(expected, snapshot.declarativeTerminationSteps);
+        assertEquals(expected, snapshot.computeResultValidationFailures);
     }
 }
