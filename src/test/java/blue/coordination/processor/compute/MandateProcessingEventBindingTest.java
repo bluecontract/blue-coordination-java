@@ -180,7 +180,6 @@ class MandateProcessingEventBindingTest {
                     repository,
                     "guarantor",
                     "guarantor",
-                    BigInteger.ONE,
                     BigInteger.valueOf(timestamp),
                     CoordinationTestResources.operationRequest(
                             "confirmMandateAuthority",

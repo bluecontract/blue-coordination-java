@@ -176,7 +176,6 @@ class MandateDeclaredTypeEventMatchingTest {
                     repository,
                     "guarantor",
                     "guarantor",
-                    BigInteger.ONE,
                     BigInteger.valueOf(EVENT_TIMESTAMP),
                     CoordinationTestResources.operationRequest(
                             "confirmMandateAuthority",
@@ -190,7 +189,6 @@ class MandateDeclaredTypeEventMatchingTest {
                     repository,
                     "guarantor",
                     "guarantor",
-                    BigInteger.valueOf(2L),
                     BigInteger.valueOf(EVENT_TIMESTAMP + 1L),
                     TestTimelineProvider.chatMessage("trigger fatal probe"));
         }

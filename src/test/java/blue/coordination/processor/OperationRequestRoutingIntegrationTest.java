@@ -207,8 +207,8 @@ class OperationRequestRoutingIntegrationTest {
 
             assertSuccess(result);
             assertEquals(BigInteger.ONE, result.document().get("/ordinaryCount"));
-            assertEquals(BigInteger.ONE,
-                    checkpoint(result.document(), ALICE_CHANNEL).get("/sequence"));
+            assertEquals(BigInteger.valueOf(1_001),
+                    checkpoint(result.document(), ALICE_CHANNEL).get("/timestamp"));
         }
     }
 
@@ -245,7 +245,8 @@ class OperationRequestRoutingIntegrationTest {
 
         assertSuccess(result);
         assertEquals(BigInteger.ZERO, result.document().get("/counter"));
-        assertEquals(BigInteger.ONE, checkpoint(result.document(), ALICE_CHANNEL).get("/sequence"));
+        assertEquals(BigInteger.valueOf(1_001),
+                checkpoint(result.document(), ALICE_CHANNEL).get("/timestamp"));
     }
 
     @Test
@@ -268,7 +269,8 @@ class OperationRequestRoutingIntegrationTest {
 
         assertSuccess(result);
         assertEquals(BigInteger.ZERO, result.document().get("/counter"));
-        assertEquals(BigInteger.ONE, checkpoint(result.document(), ALICE_CHANNEL).get("/sequence"));
+        assertEquals(BigInteger.valueOf(1_001),
+                checkpoint(result.document(), ALICE_CHANNEL).get("/timestamp"));
     }
 
     @Test
@@ -365,8 +367,8 @@ class OperationRequestRoutingIntegrationTest {
         assertSuccess(backfill);
         assertEquals(BigInteger.ONE, backfill.document().get("/counter"));
         assertNull(checkpoint(backfill.document(), ALICE_CHANNEL));
-        assertEquals(BigInteger.valueOf(5),
-                checkpoint(backfill.document(), "freshSource").get("/sequence"));
+        assertEquals(BigInteger.valueOf(1_005),
+                checkpoint(backfill.document(), "freshSource").get("/timestamp"));
     }
 
     @Test
@@ -582,27 +584,26 @@ class OperationRequestRoutingIntegrationTest {
 
     private static DocumentProcessingResult process(Fixture fixture,
                                                     Node document,
-                                                    long sequence,
+                                                    long timestampOffset,
                                                     Node message) {
         return fixture.blue.processDocument(document,
                 timelineEntry(fixture,
                         ALICE_TIMELINE,
                         ALICE_ACTOR,
-                        sequence,
+                        timestampOffset,
                         message));
     }
 
     private static Node timelineEntry(Fixture fixture,
                                       String timeline,
                                       String actor,
-                                      long sequence,
+                                      long timestampOffset,
                                       Node message) {
         return TestTimelineProvider.timelineEntry(fixture.blue,
                 fixture.repository,
                 timeline,
                 actor,
-                BigInteger.valueOf(sequence),
-                BigInteger.valueOf(1_000L + sequence),
+                BigInteger.valueOf(1_000L + timestampOffset),
                 message);
     }
 

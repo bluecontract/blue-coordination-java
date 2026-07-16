@@ -43,7 +43,7 @@ class CompositeTimelineChannelProcessorTest {
         contracts.put("handler", sourceReportingHandler("inbox", "compositeSourceChannelKey"));
         Node initialized = initializedDocument(fixture, contracts);
 
-        DocumentProcessingResult result = process(fixture, initialized, 1, 10, "hello");
+        DocumentProcessingResult result = process(fixture, initialized, 10, "hello");
 
         assertChatCount(result.triggeredEvents(), "childA", 1);
         assertNotNull(checkpoint(result.document(), "inbox"));
@@ -57,10 +57,10 @@ class CompositeTimelineChannelProcessorTest {
         TimelineChannel child = timelineContract();
         Map<String, ChannelContract> channels = singletonChannel("child", child);
         ChannelEventCheckpoint checkpoint = new ChannelEventCheckpoint()
-                .putEvent("child", eventNode(fixture, 10, 100, "child ahead"));
+                .putEvent("child", eventNode(fixture, 100, "child ahead"));
         ChannelEvaluationContext context = ChannelEvaluationContextFactory.create(
                 "inbox",
-                eventNode(fixture, 9, 99, "union backfill"),
+                eventNode(fixture, 99, "union backfill"),
                 channels,
                 singletonMarker(checkpoint),
                 new TimelineChannelProcessor());
@@ -70,15 +70,15 @@ class CompositeTimelineChannelProcessorTest {
         ChannelEvaluation evaluation = new CompositeTimelineChannelProcessor().evaluate(union, context);
 
         assertTrue(evaluation.matches());
-        assertEquals(BigInteger.valueOf(9), evaluation.event().get("/sequence"));
+        assertEquals(BigInteger.valueOf(99), evaluation.event().get("/timestamp"));
     }
 
     @Test
     void childCheckpointIsIndependentFromUnionCheckpoint() {
         Fixture fixture = configuredFixture();
         TimelineChannel child = timelineContract();
-        Node current = eventNode(fixture, 1, 1, "child backfill");
-        Node unionAhead = eventNode(fixture, 10, 100, "union ahead");
+        Node current = eventNode(fixture, 1, "child backfill");
+        Node unionAhead = eventNode(fixture, 100, "union ahead");
         ChannelEventCheckpoint checkpoint = new ChannelEventCheckpoint().putEvent("inbox", unionAhead);
         Map<String, MarkerContract> markers = singletonMarker(checkpoint);
         ChannelEvaluationContext evaluationContext = ChannelEvaluationContextFactory.create(
@@ -107,7 +107,7 @@ class CompositeTimelineChannelProcessorTest {
         contracts.put("unionHandler", fixedHandler("inbox", "union"));
         Node initialized = initializedDocument(fixture, contracts);
 
-        DocumentProcessingResult result = process(fixture, initialized, 1, 1, "hello");
+        DocumentProcessingResult result = process(fixture, initialized, 1, "hello");
 
         assertChatCount(result.triggeredEvents(), "direct", 1);
         assertChatCount(result.triggeredEvents(), "union", 1);
@@ -126,7 +126,6 @@ class CompositeTimelineChannelProcessorTest {
         DocumentProcessingResult orderWinner = process(fixture,
                 initializedDocument(fixture, ordered),
                 1,
-                1,
                 "order");
 
         assertChatCount(orderWinner.triggeredEvents(), "childB", 1);
@@ -139,7 +138,6 @@ class CompositeTimelineChannelProcessorTest {
         DocumentProcessingResult keyWinner = process(keyFixture,
                 initializedDocument(keyFixture, tied),
                 1,
-                1,
                 "key");
 
         assertChatCount(keyWinner.triggeredEvents(), "childA", 1);
@@ -149,8 +147,8 @@ class CompositeTimelineChannelProcessorTest {
     void newUnionWithNoCheckpointCanBackfillIndependently() {
         Fixture fixture = configuredFixture();
         TimelineChannel child = timelineContract();
-        Node current = eventNode(fixture, 5, 50, "backfill");
-        Node ahead = eventNode(fixture, 10, 100, "ahead");
+        Node current = eventNode(fixture, 50, "backfill");
+        Node ahead = eventNode(fixture, 100, "ahead");
         ChannelEventCheckpoint checkpoint = new ChannelEventCheckpoint()
                 .putEvent("child", ahead)
                 .putEvent("existingUnion", ahead);
@@ -179,7 +177,6 @@ class CompositeTimelineChannelProcessorTest {
         DocumentProcessingResult result = process(fixture,
                 initializedDocument(fixture, contracts),
                 1,
-                1,
                 "hello");
 
         assertRuntimeFatal(result, "references missing child channel 'missing'");
@@ -195,7 +192,6 @@ class CompositeTimelineChannelProcessorTest {
         DocumentProcessingResult result = process(fixture,
                 initializedDocument(fixture, contracts),
                 1,
-                1,
                 "hello");
 
         assertRuntimeFatal(result, "must be a Timeline Channel");
@@ -209,7 +205,6 @@ class CompositeTimelineChannelProcessorTest {
 
         DocumentProcessingResult result = process(fixture,
                 initializedDocument(fixture, contracts),
-                1,
                 1,
                 "hello");
 
@@ -233,14 +228,14 @@ class CompositeTimelineChannelProcessorTest {
         ChannelEvaluation allowed = processor.evaluate(union,
                 ChannelEvaluationContextFactory.create(
                         "inbox",
-                        eventNode(fixture, 1, 1, "allowed"),
+                        eventNode(fixture, 1, "allowed"),
                         channels,
                         Collections.<String, MarkerContract>emptyMap(),
                         new TimelineChannelProcessor()));
         ChannelEvaluation denied = processor.evaluate(union,
                 ChannelEvaluationContextFactory.create(
                         "inbox",
-                        eventNode(fixture, 2, 2, "denied"),
+                        eventNode(fixture, 2, "denied"),
                         channels,
                         Collections.<String, MarkerContract>emptyMap(),
                         new TimelineChannelProcessor()));
@@ -330,21 +325,18 @@ class CompositeTimelineChannelProcessorTest {
 
     private static DocumentProcessingResult process(Fixture fixture,
                                                     Node document,
-                                                    long sequence,
                                                     long timestamp,
                                                     String message) {
-        return fixture.blue.processDocument(document, eventNode(fixture, sequence, timestamp, message));
+        return fixture.blue.processDocument(document, eventNode(fixture, timestamp, message));
     }
 
     private static Node eventNode(Fixture fixture,
-                                  long sequence,
                                   long timestamp,
                                   String message) {
         return TestTimelineProvider.timelineEntry(fixture.blue,
                 fixture.repository,
                 TIMELINE,
                 ACTOR,
-                BigInteger.valueOf(sequence),
                 BigInteger.valueOf(timestamp),
                 TestTimelineProvider.chatMessage(message));
     }

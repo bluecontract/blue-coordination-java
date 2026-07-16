@@ -235,10 +235,8 @@ class TimelineChannelBindingMatchingTest {
         TimelineEntry entry = new TimelineEntry()
                 .timeline(timeline)
                 .actor(actor)
-                .sequence(BigInteger.ONE)
                 .timestamp(BigInteger.ONE);
         Node event = fixture.blue.objectToNode(entry)
-                .properties("sequence", new Node().value(BigInteger.ONE))
                 .properties("timestamp", new Node().value(BigInteger.ONE))
                 .properties("message", TestTimelineProvider.chatMessage("hello"))
                 .blue(fixture.repository.typeAliasBlue());

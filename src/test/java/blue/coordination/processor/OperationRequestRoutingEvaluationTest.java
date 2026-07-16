@@ -49,7 +49,7 @@ class OperationRequestRoutingEvaluationTest {
         assertNull(delivery.checkpointKey());
         assertNull(delivery.shouldProcess());
         assertNull(delivery.eventId());
-        assertEquals(BigInteger.ONE, delivery.event().get("/sequence"));
+        assertEquals(BigInteger.TEN, delivery.event().get("/timestamp"));
         assertEquals(BigInteger.valueOf(7), delivery.event().get("/message/request"));
     }
 
@@ -380,7 +380,6 @@ class OperationRequestRoutingEvaluationTest {
                 fixture.repository,
                 TIMELINE,
                 ACTOR,
-                BigInteger.ONE,
                 BigInteger.TEN,
                 message);
     }

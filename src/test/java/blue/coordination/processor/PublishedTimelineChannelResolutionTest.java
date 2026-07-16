@@ -107,12 +107,11 @@ class PublishedTimelineChannelResolutionTest {
         return blue.parseSourceYaml(CHANNEL_YAML);
     }
 
-    private static Node timelineEntry(Blue blue, BigInteger sequence, String message) {
+    private static Node timelineEntry(Blue blue, BigInteger timestamp, String message) {
         TimelineEntry entry = new TimelineEntry()
                 .timeline(new Timeline().timelineId("timeline-1"))
                 .actor(new MyOSPrincipalActor().accountId("account-1"))
-                .sequence(sequence)
-                .timestamp(sequence)
+                .timestamp(timestamp)
                 .message(blue.objectToNode(new ChatMessage().message(message)));
         return blue.preprocess(blue.objectToNode(entry));
     }
@@ -124,7 +123,7 @@ class PublishedTimelineChannelResolutionTest {
         assertEquals(result.snapshot().blueId(), result.snapshot().frozenCanonicalRoot().blueId());
     }
 
-    private static void assertCheckpoint(Node document, BigInteger sequence, String message) {
+    private static void assertCheckpoint(Node document, BigInteger timestamp, String message) {
         Node event = document.getAsNode("/contracts/checkpoint/lastEvents/timeline");
         assertNotNull(event);
         assertNotNull(event.getType());
@@ -132,8 +131,8 @@ class PublishedTimelineChannelResolutionTest {
         assertEquals(TimelineEntry.blueId(), event.getType().getBlueId());
         assertEquals("timeline-1", event.getAsText("/timeline/timelineId"));
         assertEquals("account-1", event.getAsText("/actor/accountId"));
-        assertEquals(sequence, event.get("/sequence"));
-        assertEquals(sequence, event.get("/timestamp"));
+        assertFalse(event.getProperties().containsKey("sequence"));
+        assertEquals(timestamp, event.get("/timestamp"));
         assertEquals(message, event.getAsText("/message/message"));
     }
 

@@ -78,12 +78,12 @@ class SequentialWorkflowExecutionTest {
         Node document = initializedDocument(fixture, counterDocument(fixture.repository, 0, true));
         Node afterFirst = processOperationRequest(fixture, document, "owner", 1, "increment", 7);
         assertEquals(BigInteger.ONE,
-                afterFirst.get("/contracts/checkpoint/lastEvents/ownerChannel/sequence"));
+                afterFirst.get("/contracts/checkpoint/lastEvents/ownerChannel/timestamp"));
 
         Node afterSecond = processOperationRequest(fixture, afterFirst, "owner", 2, "increment", 5);
 
         assertEquals(BigInteger.valueOf(2),
-                afterSecond.get("/contracts/checkpoint/lastEvents/ownerChannel/sequence"));
+                afterSecond.get("/contracts/checkpoint/lastEvents/ownerChannel/timestamp"));
         assertCounter(afterSecond, 12);
     }
 

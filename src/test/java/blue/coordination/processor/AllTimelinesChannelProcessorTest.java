@@ -31,7 +31,6 @@ class AllTimelinesChannelProcessorTest {
                 initialized,
                 TIMELINE,
                 ACTOR,
-                1,
                 10,
                 "hello");
 
@@ -54,7 +53,6 @@ class AllTimelinesChannelProcessorTest {
                 TIMELINE,
                 ACTOR,
                 1,
-                1,
                 "order");
 
         assertChatCount(orderWinner.triggeredEvents(), "childB", 1);
@@ -71,14 +69,13 @@ class AllTimelinesChannelProcessorTest {
                 TIMELINE,
                 ACTOR,
                 1,
-                1,
                 "key");
 
         assertChatCount(keyWinner.triggeredEvents(), "childA", 1);
     }
 
     @Test
-    void allTimelinesAcceptsDifferentTimelineWithIndependentSequence() {
+    void allTimelinesAcceptsEqualTimestampFromDifferentTimeline() {
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = new LinkedHashMap<String, Node>();
         contracts.put("alice", TestTimelineProvider.channel("alice-timeline", "alice-actor"));
@@ -90,22 +87,20 @@ class AllTimelinesChannelProcessorTest {
                 initialized,
                 "alice-timeline",
                 "alice-actor",
-                10,
                 100,
                 "alice");
         DocumentProcessingResult bob = process(fixture,
                 alice.document(),
                 "bob-timeline",
                 "bob-actor",
-                1,
-                50,
+                100,
                 "bob");
 
         assertEquals("bob-timeline",
                 checkpoint(bob.document(), "all").getAsText("/timeline/timelineId"));
-        assertEquals(BigInteger.ONE, checkpoint(bob.document(), "all").get("/sequence"));
-        assertEquals(BigInteger.TEN, checkpoint(bob.document(), "alice").get("/sequence"));
-        assertEquals(BigInteger.ONE, checkpoint(bob.document(), "bob").get("/sequence"));
+        assertEquals(BigInteger.valueOf(100), checkpoint(bob.document(), "all").get("/timestamp"));
+        assertEquals(BigInteger.valueOf(100), checkpoint(bob.document(), "alice").get("/timestamp"));
+        assertEquals(BigInteger.valueOf(100), checkpoint(bob.document(), "bob").get("/timestamp"));
     }
 
     @Test
@@ -120,7 +115,6 @@ class AllTimelinesChannelProcessorTest {
                 initializedDocument(fixture, contracts),
                 "unknown-timeline",
                 "unknown-actor",
-                1,
                 1,
                 "unknown");
 
@@ -173,24 +167,21 @@ class AllTimelinesChannelProcessorTest {
                                                     Node document,
                                                     String timeline,
                                                     String actor,
-                                                    long sequence,
                                                     long timestamp,
                                                     String message) {
         return fixture.blue.processDocument(document,
-                event(fixture, timeline, actor, sequence, timestamp, message));
+                event(fixture, timeline, actor, timestamp, message));
     }
 
     private static Node event(Fixture fixture,
                               String timeline,
                               String actor,
-                              long sequence,
                               long timestamp,
                               String message) {
         return TestTimelineProvider.timelineEntry(fixture.blue,
                 fixture.repository,
                 timeline,
                 actor,
-                BigInteger.valueOf(sequence),
                 BigInteger.valueOf(timestamp),
                 TestTimelineProvider.chatMessage(message));
     }

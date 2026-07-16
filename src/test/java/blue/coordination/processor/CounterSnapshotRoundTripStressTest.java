@@ -56,7 +56,7 @@ class CounterSnapshotRoundTripStressTest {
                 assertNotNull(currentEntry);
                 assertTrue(BlueSemanticIdentity.equals(
                         currentEntry.timeline(), previousEntry.timeline()));
-                assertTrue(currentEntry.sequence().compareTo(previousEntry.sequence()) > 0);
+                assertTrue(currentEntry.timestamp().compareTo(previousEntry.timestamp()) > 0);
                 TimelineChannel channel = fixture.blue.nodeToObject(
                         currentSnapshot.resolvedNodeAt("/contracts/ownerChannel"),
                         TimelineChannel.class);

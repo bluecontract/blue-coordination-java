@@ -46,14 +46,13 @@ class ProcessingEventBindingTest {
                 captureStep("/observation", directObservation())));
 
         DocumentProcessingResult result = fixture.process(initialized,
-                fixture.operationEvent(1, ROOT_TIMESTAMP, "run", "ownerChannel",
+                fixture.operationEvent(ROOT_TIMESTAMP, "run", "ownerChannel",
                         new Node().properties("requestSentinel", scalar("direct-request"))));
 
         assertSuccess(result);
         assertEquals("object", result.document().get("/observation/rootKind"));
         assertEquals("owner", result.document().get("/observation/rootTimeline"));
         assertEquals("owner", result.document().get("/observation/rootActor"));
-        assertEquals(BigInteger.ONE, result.document().get("/observation/rootSequence"));
         assertEquals(BigInteger.valueOf(ROOT_TIMESTAMP), result.document().get("/observation/currentTimestamp"));
         assertEquals(BigInteger.valueOf(ROOT_TIMESTAMP), result.document().get("/observation/rootTimestamp"));
         assertEquals("direct-request", result.document().get("/observation/rootRequestSentinel"));
@@ -72,7 +71,7 @@ class ProcessingEventBindingTest {
         Node initialized = fixture.initialize(document(contracts));
 
         DocumentProcessingResult result = fixture.process(initialized,
-                fixture.operationEvent(1, ROOT_TIMESTAMP, "run", "ownerChannel", scalar("request")));
+                fixture.operationEvent(ROOT_TIMESTAMP, "run", "ownerChannel", scalar("request")));
 
         assertSuccess(result);
         assertEquals("triggered-message", result.document().get("/observation/currentSentinel"));
@@ -94,7 +93,7 @@ class ProcessingEventBindingTest {
         Node initialized = fixture.initialize(document(contracts));
 
         DocumentProcessingResult result = fixture.process(initialized,
-                fixture.operationEvent(1, ROOT_TIMESTAMP, "run", "ownerChannel", scalar("request")));
+                fixture.operationEvent(ROOT_TIMESTAMP, "run", "ownerChannel", scalar("request")));
 
         assertSuccess(result);
         assertEquals("second-hop", result.document().get("/observation/currentSentinel"));
@@ -143,7 +142,7 @@ class ProcessingEventBindingTest {
         Node initialized = fixture.initialize(root);
 
         DocumentProcessingResult result = fixture.process(initialized,
-                fixture.operationEvent(1, ROOT_TIMESTAMP, "run", "ownerChannel", scalar("child-request")));
+                fixture.operationEvent(ROOT_TIMESTAMP, "run", "ownerChannel", scalar("child-request")));
 
         assertSuccess(result);
         assertEquals("child-request", result.document().get("/child/observation/currentSentinel"));
@@ -166,7 +165,7 @@ class ProcessingEventBindingTest {
         Node initialized = fixture.initialize(document(rootContracts).properties("child", child));
 
         DocumentProcessingResult result = fixture.process(initialized,
-                fixture.operationEvent(1, ROOT_TIMESTAMP, "run", "ownerChannel", scalar("request")));
+                fixture.operationEvent(ROOT_TIMESTAMP, "run", "ownerChannel", scalar("request")));
 
         assertSuccess(result);
         assertEquals("from-child", result.document().get("/observation/currentSentinel"));
@@ -212,9 +211,9 @@ class ProcessingEventBindingTest {
                 captureStep("/observation", binding("processingEvent/timestamp"))));
 
         DocumentProcessingResult first = fixture.process(initialized,
-                fixture.operationEvent(1, 101, "run", "ownerChannel", scalar("first")));
+                fixture.operationEvent(101, "run", "ownerChannel", scalar("first")));
         DocumentProcessingResult second = fixture.process(first.document(),
-                fixture.operationEvent(2, 202, "run", "ownerChannel", scalar("second")));
+                fixture.operationEvent(202, "run", "ownerChannel", scalar("second")));
 
         assertSuccess(first);
         assertSuccess(second);
@@ -260,7 +259,7 @@ class ProcessingEventBindingTest {
                 captureStep("/thirdObservation", routedObservation("/message/request"))));
 
         DocumentProcessingResult result = fixture.process(initialized,
-                fixture.operationEvent(1, ROOT_TIMESTAMP, "run", "ownerChannel", scalar("request")));
+                fixture.operationEvent(ROOT_TIMESTAMP, "run", "ownerChannel", scalar("request")));
 
         assertSuccess(result);
         assertEquals(BigInteger.valueOf(ROOT_TIMESTAMP), result.document().get("/observation"));
@@ -277,8 +276,8 @@ class ProcessingEventBindingTest {
         Node currentDocument = currentEventFixture.initialize(directTimelineDocument(binding("event/timestamp")));
         Node processingDocument = processingEventFixture.initialize(
                 directTimelineDocument(binding("processingEvent/timestamp")));
-        Node currentEvent = currentEventFixture.timelineEvent(1, ROOT_TIMESTAMP, scalar("same"));
-        Node processingEvent = processingEventFixture.timelineEvent(1, ROOT_TIMESTAMP, scalar("same"));
+        Node currentEvent = currentEventFixture.timelineEvent(ROOT_TIMESTAMP, scalar("same"));
+        Node processingEvent = processingEventFixture.timelineEvent(ROOT_TIMESTAMP, scalar("same"));
 
         DocumentProcessingResult currentResult = currentEventFixture.process(currentDocument, currentEvent);
         DocumentProcessingResult processingResult = processingEventFixture.process(processingDocument, processingEvent);
@@ -431,7 +430,6 @@ class ProcessingEventBindingTest {
                 .properties("rootKind", operation("$kind", binding("processingEvent")))
                 .properties("rootTimeline", binding("processingEvent/timeline/timelineId"))
                 .properties("rootActor", binding("processingEvent/actor/accountId"))
-                .properties("rootSequence", binding("processingEvent/sequence"))
                 .properties("currentTimestamp", event("/timestamp"))
                 .properties("rootTimestamp", binding("processingEvent/timestamp"))
                 .properties("rootRequestSentinel",
@@ -557,8 +555,7 @@ class ProcessingEventBindingTest {
             return blue.processDocument(blue.preprocess(document), event);
         }
 
-        Node operationEvent(int sequence,
-                            int timestamp,
+        Node operationEvent(int timestamp,
                             String operation,
                             String channel,
                             Node request) {
@@ -566,17 +563,15 @@ class ProcessingEventBindingTest {
                     repository,
                     "owner",
                     "owner",
-                    BigInteger.valueOf(sequence),
                     BigInteger.valueOf(timestamp),
                     CoordinationTestResources.operationRequest(operation, channel, request));
         }
 
-        Node timelineEvent(int sequence, int timestamp, Node message) {
+        Node timelineEvent(int timestamp, Node message) {
             return TestTimelineProvider.timelineEntry(blue,
                     repository,
                     "owner",
                     "owner",
-                    BigInteger.valueOf(sequence),
                     BigInteger.valueOf(timestamp),
                     message);
         }

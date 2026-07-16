@@ -53,7 +53,6 @@ public final class TestTimelineProvider {
                 timelineId,
                 timelineId,
                 BigInteger.valueOf(timestamp),
-                BigInteger.valueOf(timestamp),
                 message);
     }
 
@@ -61,21 +60,29 @@ public final class TestTimelineProvider {
                                      BlueRepository repository,
                                      String timelineId,
                                      String actorId,
-                                     BigInteger sequence,
                                      BigInteger timestamp,
                                      Node message) {
         TimelineEntry entry = new TimelineEntry()
                 .timeline(new Timeline().timelineId(timelineId))
                 .actor(new MyOSPrincipalActor().accountId(actorId))
-                .sequence(sequence)
                 .timestamp(timestamp);
 
         Node event = blue.objectToNode(entry)
-                .properties("sequence", new Node().value(sequence))
                 .properties("timestamp", new Node().value(timestamp))
                 .properties("message", message)
                 .blue(repository.typeAliasBlue());
         return blue.preprocess(event).blue(null);
+    }
+
+    public static Node timelineEntryWithProviderSequence(Blue blue,
+                                                         BlueRepository repository,
+                                                         String timelineId,
+                                                         String actorId,
+                                                         BigInteger providerSequence,
+                                                         BigInteger timestamp,
+                                                         Node message) {
+        return timelineEntry(blue, repository, timelineId, actorId, timestamp, message)
+                .properties("sequence", new Node().value(providerSequence));
     }
 
     public static Node chatMessage(String message) {
