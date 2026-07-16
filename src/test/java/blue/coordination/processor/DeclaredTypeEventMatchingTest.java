@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 
 import static blue.language.utils.Properties.TEXT_TYPE_BLUE_ID;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -42,6 +43,24 @@ class DeclaredTypeEventMatchingTest {
         assertTrue(processor.matches(workflow, context(blue, types.event(types.childId))));
         assertFalse(processor.matches(workflow, context(blue, types.event(types.unrelatedSameShapeId))));
         assertFalse(processor.matches(workflow, context(blue, types.differentEvent())));
+    }
+
+    @Test
+    void directWorkflowLineageIsIndependentOfPureOrMaterializedRepresentation() {
+        TypeFixture types = TypeFixture.create();
+        Blue blue = types.configuredBlue();
+        SequentialWorkflowProcessor processor = new SequentialWorkflowProcessor();
+
+        assertRepresentationMatrix(
+                processor, blue, types, types.expectedId, types.expectedId, true);
+        assertRepresentationMatrix(
+                processor, blue, types, types.childId, types.expectedId, true);
+        assertRepresentationMatrix(
+                processor, blue, types, types.grandchildId, types.expectedId, true);
+        assertRepresentationMatrix(
+                processor, blue, types, types.siblingId, types.childId, false);
+        assertRepresentationMatrix(
+                processor, blue, types, types.unrelatedSameShapeId, types.expectedId, false);
     }
 
     @Test
@@ -65,7 +84,7 @@ class DeclaredTypeEventMatchingTest {
     }
 
     @Test
-    void untypedEventsAndPatternsWithoutTypesRetainStructuralMatching() {
+    void anonymousTypedUntypedAndTypeFreePatternsRetainStructuralMatching() {
         TypeFixture types = TypeFixture.create();
         Blue blue = types.configuredBlue();
         SequentialWorkflowProcessor processor = new SequentialWorkflowProcessor();
@@ -85,6 +104,22 @@ class DeclaredTypeEventMatchingTest {
         assertFalse(processor.matches(
                 workflow(new Node().properties("kind", new Node().value("other"))),
                 context(blue, types.event(types.unrelatedSameShapeId))));
+
+        Node anonymousExpectedType = TypeFixture.sameShapeDefinition("Anonymous Expected Event");
+        assertTrue(processor.matches(
+                workflow(new Node().type(anonymousExpectedType)),
+                context(blue, types.event(types.unrelatedSameShapeId))));
+
+        Node anonymouslyTypedEvent = new Node()
+                .type(TypeFixture.sameShapeDefinition("Anonymous Actual Event"))
+                .properties("kind", new Node().value("accepted"));
+        SequentialWorkflow identityBearingPattern = workflow(types.pattern(types.expectedId));
+        HandlerMatchContext anonymousActualContext = context(blue, anonymouslyTypedEvent);
+        boolean structuralResult = anonymousActualContext.matchesEventPattern(
+                identityBearingPattern.getEvent());
+        assertTrue(structuralResult);
+        assertEquals(structuralResult,
+                processor.matches(identityBearingPattern, anonymousActualContext));
     }
 
     @Test
@@ -120,6 +155,13 @@ class DeclaredTypeEventMatchingTest {
 
         assertTrue(new SequentialWorkflowOperationProcessor().matches(sequential, context));
         assertTrue(new ChatWorkflowOperationProcessor().matches(chat, context));
+
+        HandlerMatchContext materializedContext = context(
+                blue,
+                operationRequest(types.materializedEvent(blue, types.unrelatedSameShapeId)));
+        assertTrue(new SequentialWorkflowOperationProcessor().matches(
+                sequential, materializedContext));
+        assertTrue(new ChatWorkflowOperationProcessor().matches(chat, materializedContext));
     }
 
     @Test
@@ -167,6 +209,35 @@ class DeclaredTypeEventMatchingTest {
         return HandlerMatchContextFactory.create(blue, OPERATION, CHANNEL, event);
     }
 
+    private static void assertRepresentationMatrix(SequentialWorkflowProcessor processor,
+                                                   Blue blue,
+                                                   TypeFixture types,
+                                                   String actualTypeId,
+                                                   String expectedTypeId,
+                                                   boolean expectedResult) {
+        Node pureEvent = types.event(actualTypeId);
+        Node materializedEvent = types.materializedEvent(blue, actualTypeId);
+        Node pureExpected = reference(expectedTypeId);
+        Node materializedExpected = types.materializedType(blue, expectedTypeId);
+
+        assertResult(expectedResult, processor.matches(
+                workflow(new Node().type(pureExpected)), context(blue, pureEvent)));
+        assertResult(expectedResult, processor.matches(
+                workflow(new Node().type(materializedExpected)), context(blue, pureEvent)));
+        assertResult(expectedResult, processor.matches(
+                workflow(new Node().type(pureExpected)), context(blue, materializedEvent)));
+        assertResult(expectedResult, processor.matches(
+                workflow(new Node().type(materializedExpected)), context(blue, materializedEvent)));
+    }
+
+    private static void assertResult(boolean expected, boolean actual) {
+        if (expected) {
+            assertTrue(actual);
+        } else {
+            assertFalse(actual);
+        }
+    }
+
     private static Node reference(String blueId) {
         return new Node().blueId(blueId);
     }
@@ -174,6 +245,8 @@ class DeclaredTypeEventMatchingTest {
     private static final class TypeFixture {
         private final String expectedId;
         private final String childId;
+        private final String grandchildId;
+        private final String siblingId;
         private final String unrelatedSameShapeId;
         private final String unrelatedDifferentShapeId;
         private final String operationLookalikeId;
@@ -181,12 +254,16 @@ class DeclaredTypeEventMatchingTest {
 
         private TypeFixture(String expectedId,
                             String childId,
+                            String grandchildId,
+                            String siblingId,
                             String unrelatedSameShapeId,
                             String unrelatedDifferentShapeId,
                             String operationLookalikeId,
                             Map<String, Node> definitions) {
             this.expectedId = expectedId;
             this.childId = childId;
+            this.grandchildId = grandchildId;
+            this.siblingId = siblingId;
             this.unrelatedSameShapeId = unrelatedSameShapeId;
             this.unrelatedDifferentShapeId = unrelatedDifferentShapeId;
             this.operationLookalikeId = operationLookalikeId;
@@ -197,6 +274,11 @@ class DeclaredTypeEventMatchingTest {
             Node expected = sameShapeDefinition("Expected Event");
             String expectedId = BlueIdCalculator.calculateBlueId(expected);
             Node child = sameShapeDefinition("Child Event").type(reference(expectedId));
+            String childId = BlueIdCalculator.calculateBlueId(child);
+            Node grandchild = sameShapeDefinition("Grandchild Event").type(reference(childId));
+            Node common = sameShapeDefinition("Common Event");
+            String commonId = BlueIdCalculator.calculateBlueId(common);
+            Node sibling = sameShapeDefinition("Sibling Event").type(reference(commonId));
             Node unrelatedSameShape = sameShapeDefinition("Unrelated Same Shape Event");
             Node unrelatedDifferentShape = new Node()
                     .name("Unrelated Different Shape Event")
@@ -205,19 +287,25 @@ class DeclaredTypeEventMatchingTest {
                     .name("Unrelated Operation Lookalike")
                     .properties("operation", requiredText())
                     .properties("channel", requiredText());
-            String childId = BlueIdCalculator.calculateBlueId(child);
+            String grandchildId = BlueIdCalculator.calculateBlueId(grandchild);
+            String siblingId = BlueIdCalculator.calculateBlueId(sibling);
             String unrelatedSameShapeId = BlueIdCalculator.calculateBlueId(unrelatedSameShape);
             String unrelatedDifferentShapeId = BlueIdCalculator.calculateBlueId(unrelatedDifferentShape);
             String operationLookalikeId = BlueIdCalculator.calculateBlueId(operationLookalike);
             Map<String, Node> definitions = new LinkedHashMap<String, Node>();
             definitions.put(expectedId, expected);
             definitions.put(childId, child);
+            definitions.put(grandchildId, grandchild);
+            definitions.put(commonId, common);
+            definitions.put(siblingId, sibling);
             definitions.put(unrelatedSameShapeId, unrelatedSameShape);
             definitions.put(unrelatedDifferentShapeId, unrelatedDifferentShape);
             definitions.put(operationLookalikeId, operationLookalike);
             return new TypeFixture(
                     expectedId,
                     childId,
+                    grandchildId,
+                    siblingId,
                     unrelatedSameShapeId,
                     unrelatedDifferentShapeId,
                     operationLookalikeId,
@@ -247,6 +335,14 @@ class DeclaredTypeEventMatchingTest {
             return new Node()
                     .type(reference(typeBlueId))
                     .properties("kind", new Node().value("accepted"));
+        }
+
+        private Node materializedEvent(Blue blue, String typeBlueId) {
+            return blue.resolveToSnapshot(event(typeBlueId)).resolvedRoot();
+        }
+
+        private Node materializedType(Blue blue, String typeBlueId) {
+            return materializedEvent(blue, typeBlueId).getType();
         }
 
         private Node eventWithoutKind(String typeBlueId) {

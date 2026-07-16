@@ -17,6 +17,7 @@ import blue.repo.coordination.ChatMessage;
 import blue.repo.mandate.Mandate;
 import blue.repo.mandate.MandateActivated;
 import blue.repo.mandate.MandateAuthorityConfirmed;
+import blue.repo.mandate.MandateTerminated;
 import blue.repo.mandate.StatusActive;
 import blue.repo.mandate.StatusAuthorityConfirmed;
 
@@ -25,6 +26,8 @@ import org.junit.jupiter.api.Test;
 import java.math.BigInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MandateDeclaredTypeEventMatchingTest {
@@ -142,7 +145,25 @@ class MandateDeclaredTypeEventMatchingTest {
             document.blue(repository.typeAliasBlue());
             Node aliasesResolved = new RepositoryTypeAliasPreprocessor(repository).preprocess(document);
             ResolvedSnapshot snapshot = blue.resolveToSnapshot(blue.preprocess(aliasesResolved));
+            assertMaterializedDeclaredType(snapshot,
+                    "/contracts/initializeMandate/event/type",
+                    RuntimeBlueIds.DOCUMENT_PROCESSING_INITIATED);
+            assertMaterializedDeclaredType(snapshot,
+                    "/contracts/applyMandateActivation/event/type",
+                    MandateActivated.blueId());
+            assertMaterializedDeclaredType(snapshot,
+                    "/contracts/applyMandateTermination/event/type",
+                    MandateTerminated.blueId());
             return blue.initializeDocument(snapshot);
+        }
+
+        private static void assertMaterializedDeclaredType(ResolvedSnapshot snapshot,
+                                                           String path,
+                                                           String expectedBlueId) {
+            Node type = snapshot.resolvedRoot().getAsNode(path);
+            assertNotNull(type, path);
+            assertEquals(expectedBlueId, type.getBlueId(), path);
+            assertFalse(type.isReferenceOnly(), path);
         }
 
         private DocumentProcessingResult process(ResolvedSnapshot snapshot, Node event) {
