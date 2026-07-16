@@ -8,6 +8,7 @@ import blue.bex.result.BexExecutionResult;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.coordination.processor.bex.BexWorkflowContextFactory;
 import blue.language.model.Node;
+import blue.language.processor.ProcessorFatalException;
 import blue.language.snapshot.FrozenNode;
 import blue.repo.coordination.Compute;
 import blue.repo.coordination.SequentialWorkflowStep;
@@ -112,19 +113,27 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute> 
             if (result.gasUsed() > 0L) {
                 context.processorContext().consumeGas(result.gasUsed());
             }
-            int appliedPatches = resultEmitter.applyChangeset(result, context);
-            if (FrozenNodeUtil.booleanProperty(programNode, "emitEvents", true)) {
-                int emitted = resultEmitter.emit(result, context);
-                if (metrics != null) {
-                    for (int i = 0; i < emitted; i++) {
-                        metrics.incrementEventsEmitted();
-                    }
-                }
+            ComputeEffectPlan plan = resultEmitter.plan(result,
+                    context,
+                    FrozenNodeUtil.booleanProperty(programNode, "emitEvents", true));
+            resultEmitter.buffer(plan, context);
+            boolean returnResult = FrozenNodeUtil.booleanProperty(programNode, "returnResult", true);
+            if (plan.terminationRequested()) {
+                return returnResult
+                        ? WorkflowStepResult.terminalValue(result, plan.changesetHandled())
+                        : WorkflowStepResult.terminal();
             }
-            if (!FrozenNodeUtil.booleanProperty(programNode, "returnResult", true)) {
-                return WorkflowStepResult.none();
+            return returnResult
+                    ? WorkflowStepResult.value(result, plan.changesetHandled())
+                    : WorkflowStepResult.none();
+        } catch (ComputeResultValidationException ex) {
+            if (metrics != null) {
+                metrics.incrementComputeResultValidationFailures();
             }
-            return WorkflowStepResult.value(result, appliedPatches > 0 || resultEmitter.hasReturnedChangeset(result));
+            context.processorContext().throwFatal("Invalid Compute result: " + ex.getMessage());
+            return WorkflowStepResult.none();
+        } catch (ProcessorFatalException ex) {
+            throw ex;
         } catch (BexException ex) {
             context.processorContext().throwFatal("Compute failed: " + ex.getMessage());
             return WorkflowStepResult.none();

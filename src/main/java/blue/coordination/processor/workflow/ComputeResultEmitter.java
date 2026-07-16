@@ -10,7 +10,10 @@ import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.model.Node;
 import blue.language.processor.WorkingDocument;
 import blue.language.processor.model.JsonPatch;
+import blue.language.snapshot.FrozenNode;
+
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
@@ -25,51 +28,130 @@ final class ComputeResultEmitter {
         this.metrics = metrics;
     }
 
-    int applyChangeset(BexExecutionResult result, StepExecutionContext context) {
-        List<JsonPatch> patches = changesetPatches(result, context);
-        if (patches == null || patches.isEmpty()) {
-            return 0;
+    ComputeEffectPlan plan(BexExecutionResult result,
+                           StepExecutionContext context,
+                           boolean emitEvents) {
+        if (result == null) {
+            throw invalid("Compute execution result is required");
         }
-        applyPatches(patches, context);
-        return patches.size();
+        try {
+            boolean returnedChangeset = hasReturnedChangeset(result);
+            List<JsonPatch> patches;
+            try {
+                patches = changesetPatches(result, context);
+            } catch (ComputeResultValidationException ex) {
+                throw ex;
+            } catch (RuntimeException ex) {
+                throw conversionFailure("changeset", ex);
+            }
+            List<Node> events = emitEvents
+                    ? validatedEventNodes(result)
+                    : Collections.<Node>emptyList();
+            Termination termination = termination(result);
+            return new ComputeEffectPlan(patches,
+                    events,
+                    termination.requested,
+                    termination.reason,
+                    returnedChangeset || !patches.isEmpty());
+        } catch (ComputeResultValidationException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
+            throw new ComputeResultValidationException(
+                    "Compute result effects could not be converted: " + boundedDetail(ex), ex);
+        }
     }
 
-    boolean hasReturnedChangeset(BexExecutionResult result) {
+    private List<Node> validatedEventNodes(BexExecutionResult result) {
+        try {
+            return eventNodes(result);
+        } catch (ComputeResultValidationException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
+            throw conversionFailure("events", ex);
+        }
+    }
+
+    void buffer(ComputeEffectPlan plan, StepExecutionContext context) {
+        if (plan == null) {
+            throw new IllegalArgumentException("plan must not be null");
+        }
+        plan.claimForBuffering();
+        List<JsonPatch> patches = plan.patches();
+        if (!patches.isEmpty()) {
+            applyPatches(patches, context);
+        }
+        for (FrozenNode event : plan.events()) {
+            context.processorContext().emitEvent(event.toNode());
+            if (metrics != null) {
+                metrics.incrementEventsEmitted();
+            }
+        }
+        if (plan.terminationRequested()) {
+            context.processorContext().terminateGracefully(plan.terminationReason());
+            if (metrics != null) {
+                metrics.incrementSuccessfulComputeTerminationRequests();
+            }
+        }
+    }
+
+    private boolean hasReturnedChangeset(BexExecutionResult result) {
         BexValue changeset = result.value() != null ? result.value().get("changeset") : BexValues.undefined();
         return !changeset.isUndefined() && !changeset.isNull();
     }
 
-    int emit(BexExecutionResult result, StepExecutionContext context) {
+    private List<Node> eventNodes(BexExecutionResult result) {
         BexValue events = result.value() != null ? result.value().get("events") : BexValues.undefined();
         if (events.isUndefined() || events.isNull()) {
             events = result.events().asValue();
         }
-        if (events.isUndefined() || events.isNull()) {
-            return 0;
+        if (events.isUndefined() || events.isNull() || (events.isList() && events.size() == 0)) {
+            return Collections.emptyList();
         }
         if (!events.isList()) {
-            context.processorContext().throwFatal("Compute result events must be a list");
-            return 0;
+            throw invalid("Compute result events must be a list");
         }
-        if (events.size() == 0) {
-            return 0;
-        }
-        int emitted = 0;
+        List<Node> converted = new ArrayList<Node>(events.size());
         for (int i = 0; i < events.size(); i++) {
             BexValue event = events.get(String.valueOf(i));
-            if (event.isUndefined() || event.isNull()) {
-                context.processorContext().throwFatal("Compute result events cannot contain undefined/null entries");
-                return emitted;
+            if (event == null || event.isUndefined() || event.isNull()) {
+                throw invalid("Compute result events cannot contain undefined/null entries");
             }
             if (!event.isObject()) {
-                context.processorContext().throwFatal("Compute result events must contain object entries");
-                return emitted;
+                throw invalid("Compute result events must contain object entries");
             }
-            Node eventNode = BexNodeWriter.toNode(event);
-            context.processorContext().emitEvent(eventNode);
-            emitted++;
+            try {
+                converted.add(BexNodeWriter.toNode(event));
+            } catch (RuntimeException ex) {
+                throw new ComputeResultValidationException(
+                        "Compute result event entry could not be converted", ex);
+            }
         }
-        return emitted;
+        return converted;
+    }
+
+    private Termination termination(BexExecutionResult result) {
+        BexValue termination = result.value() != null
+                ? result.value().get("termination")
+                : BexValues.undefined();
+        if (termination == null || termination.isUndefined() || termination.isNull()) {
+            return Termination.absent();
+        }
+        if (!termination.isObject()) {
+            throw invalid("Compute result termination must be an object");
+        }
+        for (String key : termination.keys()) {
+            if (!"reason".equals(key)) {
+                throw invalid("Compute result termination contains unsupported properties");
+            }
+        }
+        BexValue reason = termination.get("reason");
+        if (reason == null || reason.isUndefined() || reason.isNull()) {
+            return Termination.requested(null);
+        }
+        if (!"text".equals(BexValues.kind(reason))) {
+            throw invalid("Compute result termination reason must be Text");
+        }
+        return Termination.requested(reason.asText());
     }
 
     private List<JsonPatch> changesetPatches(BexExecutionResult result, StepExecutionContext context) {
@@ -79,22 +161,17 @@ final class ComputeResultEmitter {
             return patchesFromBexChangeset(accumulated, context);
         }
         if (!changeset.isList()) {
-            context.processorContext().throwFatal("Compute result changeset must be a list");
-            return null;
+            throw invalid("Compute result changeset must be a list");
         }
         if (changeset.size() == 0) {
-            return null;
+            return Collections.emptyList();
         }
         if (isAccumulatedChangesetValue(changeset, accumulated)) {
             return patchesFromBexChangeset(accumulated, context);
         }
         List<JsonPatch> patches = new ArrayList<JsonPatch>(changeset.size());
         for (int i = 0; i < changeset.size(); i++) {
-            BexValue item = changeset.get(String.valueOf(i));
-            WorkflowPatchEntry entry = patchEntry(item, i, context);
-            if (entry == null) {
-                return null;
-            }
+            WorkflowPatchEntry entry = patchEntry(changeset.get(String.valueOf(i)), i);
             patches.add(toPatch(entry, context));
         }
         return patches;
@@ -102,7 +179,7 @@ final class ComputeResultEmitter {
 
     private List<JsonPatch> patchesFromBexChangeset(BexChangeset changeset, StepExecutionContext context) {
         if (changeset == null || changeset.entries().isEmpty()) {
-            return null;
+            return Collections.emptyList();
         }
         if (metrics != null) {
             metrics.incrementDirectBexChangesetHits();
@@ -124,32 +201,31 @@ final class ComputeResultEmitter {
         }
     }
 
-    private WorkflowPatchEntry patchEntry(BexValue item, int index, StepExecutionContext context) {
+    private WorkflowPatchEntry patchEntry(BexValue item, int index) {
         if (item == null || item.isUndefined() || item.isNull() || !item.isObject()) {
-            context.processorContext().throwFatal("Compute result changeset entry " + index + " must be an object");
-            return null;
+            throw invalid("Compute result changeset entry " + index + " must be an object");
         }
         String op = textValue(item.get("op"));
         String path = textValue(item.get("path"));
         if (!"add".equals(op) && !"replace".equals(op) && !"remove".equals(op)) {
-            context.processorContext().throwFatal("Invalid patch op in Compute result changeset: " + op);
-            return null;
+            throw invalid("Invalid patch op in Compute result changeset");
         }
         if (path == null || path.trim().isEmpty()) {
-            context.processorContext().throwFatal("Compute result changeset entry " + index + " missing path");
-            return null;
+            throw invalid("Compute result changeset entry " + index + " missing path");
         }
         Node nodeValue = null;
         if (!"remove".equals(op)) {
             BexValue val = item.get("val");
             if (val.isUndefined()) {
-                context.processorContext().throwFatal("Compute result changeset entry " + index + " missing val");
-                return null;
+                throw invalid("Compute result changeset entry " + index + " missing val");
             }
             long writerStart = System.nanoTime();
-            nodeValue = BexNodeWriter.toNode(val);
-            if (metrics != null) {
-                metrics.addBexNodeWriterNanos(System.nanoTime() - writerStart);
+            try {
+                nodeValue = BexNodeWriter.toNode(val);
+            } finally {
+                if (metrics != null) {
+                    metrics.addBexNodeWriterNanos(System.nanoTime() - writerStart);
+                }
             }
         }
         return new WorkflowPatchEntry(op, path, nodeValue);
@@ -157,48 +233,52 @@ final class ComputeResultEmitter {
 
     private JsonPatch toPatch(WorkflowPatchEntry entry, StepExecutionContext context) {
         String normalizedOp = entry.op().trim().toLowerCase();
-        String path = context.processorContext().resolvePointer(entry.path());
+        String path = resolvedPointer(entry.path(), context);
         if ("remove".equals(normalizedOp)) {
             return JsonPatch.remove(path);
         }
-        Node value = entry.val();
-        if (value == null) {
-            context.processorContext().throwFatal("Compute result patch value is required for operation: " + entry.op());
-            return null;
-        }
         if ("add".equals(normalizedOp)) {
-            return JsonPatch.add(path, value);
+            return JsonPatch.add(path, entry.val());
         }
-        if ("replace".equals(normalizedOp)) {
-            return JsonPatch.replace(path, value);
-        }
-        context.processorContext().throwFatal("Unsupported Compute result patch operation: " + entry.op());
-        return null;
+        // patchEntry has already restricted this branch to replace.
+        return JsonPatch.replace(path, entry.val());
     }
 
     private JsonPatch toPatch(BexPatchEntry entry, StepExecutionContext context) {
+        if (entry == null) {
+            throw invalid("Compute result accumulated patch is incomplete");
+        }
         String normalizedOp = entry.op().trim().toLowerCase();
-        String path = context.processorContext().resolvePointer(entry.authoredPath());
-        if ("remove".equals(normalizedOp)) {
+        boolean remove = "remove".equals(normalizedOp);
+        if (!remove && (entry.val() == null || entry.val().isUndefined())) {
+            throw invalid("Compute result patch value is required");
+        }
+        String path = resolvedPointer(entry.authoredPath(), context);
+        if (remove) {
             return JsonPatch.remove(path);
         }
-        if (entry.val() == null || entry.val().isUndefined()) {
-            context.processorContext().throwFatal("Compute result patch value is required for operation: " + entry.op());
-            return null;
-        }
         long writerStart = System.nanoTime();
-        Node value = BexNodeWriter.toNode(entry.val());
-        if (metrics != null) {
-            metrics.addBexNodeWriterNanos(System.nanoTime() - writerStart);
+        Node value;
+        try {
+            value = BexNodeWriter.toNode(entry.val());
+        } finally {
+            if (metrics != null) {
+                metrics.addBexNodeWriterNanos(System.nanoTime() - writerStart);
+            }
         }
         if ("add".equals(normalizedOp)) {
             return JsonPatch.add(path, value);
         }
-        if ("replace".equals(normalizedOp)) {
-            return JsonPatch.replace(path, value);
+        // BexPatchEntry has already restricted this branch to replace.
+        return JsonPatch.replace(path, value);
+    }
+
+    private String resolvedPointer(String authoredPath, StepExecutionContext context) {
+        try {
+            return context.processorContext().resolvePointer(authoredPath);
+        } catch (RuntimeException ex) {
+            throw new ComputeResultValidationException("Compute result patch path is invalid", ex);
         }
-        context.processorContext().throwFatal("Unsupported Compute result patch operation: " + entry.op());
-        return null;
     }
 
     private void applyPatches(List<JsonPatch> patches, StepExecutionContext context) {
@@ -256,5 +336,43 @@ final class ComputeResultEmitter {
             return null;
         }
         return value.asText();
+    }
+
+    private ComputeResultValidationException invalid(String message) {
+        return new ComputeResultValidationException(message);
+    }
+
+    private ComputeResultValidationException conversionFailure(String field, RuntimeException exception) {
+        return new ComputeResultValidationException(
+                "Compute result " + field + " could not be converted: " + boundedDetail(exception), exception);
+    }
+
+    private String boundedDetail(RuntimeException exception) {
+        String message = exception.getMessage();
+        if (message == null || message.trim().isEmpty()) {
+            return exception.getClass().getSimpleName();
+        }
+        String normalized = message.replace('\n', ' ').replace('\r', ' ').trim();
+        return normalized.length() <= 160 ? normalized : normalized.substring(0, 160);
+    }
+
+    private static final class Termination {
+        private static final Termination ABSENT = new Termination(false, null);
+
+        private final boolean requested;
+        private final String reason;
+
+        private Termination(boolean requested, String reason) {
+            this.requested = requested;
+            this.reason = reason;
+        }
+
+        private static Termination absent() {
+            return ABSENT;
+        }
+
+        private static Termination requested(String reason) {
+            return new Termination(true, reason);
+        }
     }
 }

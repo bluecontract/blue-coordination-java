@@ -14,6 +14,9 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
     private final AtomicLong bexSyntheticProgramMaterializations = new AtomicLong();
     private final AtomicLong patchesApplied = new AtomicLong();
     private final AtomicLong eventsEmitted = new AtomicLong();
+    private final AtomicLong successfulComputeTerminationRequests = new AtomicLong();
+    private final AtomicLong declarativeTerminationSteps = new AtomicLong();
+    private final AtomicLong computeResultValidationFailures = new AtomicLong();
     private final AtomicLong computeProgramNormalizations = new AtomicLong();
     private final AtomicLong computeDefinitionNormalizations = new AtomicLong();
     private final AtomicLong computeDefinitionResolveHits = new AtomicLong();
@@ -142,6 +145,18 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
 
     public void incrementEventsEmitted() {
         eventsEmitted.incrementAndGet();
+    }
+
+    public void incrementSuccessfulComputeTerminationRequests() {
+        successfulComputeTerminationRequests.incrementAndGet();
+    }
+
+    public void incrementDeclarativeTerminationSteps() {
+        declarativeTerminationSteps.incrementAndGet();
+    }
+
+    public void incrementComputeResultValidationFailures() {
+        computeResultValidationFailures.incrementAndGet();
     }
 
     public void incrementComputeProgramNormalizations() {
@@ -620,6 +635,18 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
         return eventsEmitted.get();
     }
 
+    public long successfulComputeTerminationRequests() {
+        return successfulComputeTerminationRequests.get();
+    }
+
+    public long declarativeTerminationSteps() {
+        return declarativeTerminationSteps.get();
+    }
+
+    public long computeResultValidationFailures() {
+        return computeResultValidationFailures.get();
+    }
+
     public long computeProgramNormalizations() {
         return computeProgramNormalizations.get();
     }
@@ -1025,6 +1052,9 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
         public final long bexSyntheticProgramMaterializations;
         public final long patchesApplied;
         public final long eventsEmitted;
+        public final long successfulComputeTerminationRequests;
+        public final long declarativeTerminationSteps;
+        public final long computeResultValidationFailures;
         public final long computeProgramNormalizations;
         public final long computeDefinitionNormalizations;
         public final long computeDefinitionResolveHits;
@@ -1132,6 +1162,9 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
             this.bexSyntheticProgramMaterializations = metrics.bexSyntheticProgramMaterializations();
             this.patchesApplied = metrics.patchesApplied();
             this.eventsEmitted = metrics.eventsEmitted();
+            this.successfulComputeTerminationRequests = metrics.successfulComputeTerminationRequests();
+            this.declarativeTerminationSteps = metrics.declarativeTerminationSteps();
+            this.computeResultValidationFailures = metrics.computeResultValidationFailures();
             this.computeProgramNormalizations = metrics.computeProgramNormalizations();
             this.computeDefinitionNormalizations = metrics.computeDefinitionNormalizations();
             this.computeDefinitionResolveHits = metrics.computeDefinitionResolveHits();

@@ -9,6 +9,7 @@ import blue.language.snapshot.FrozenNode;
 import blue.repo.coordination.Compute;
 import blue.repo.coordination.SequentialWorkflow;
 import blue.repo.coordination.SequentialWorkflowStep;
+import blue.repo.coordination.TerminateProcessing;
 import blue.repo.coordination.TriggerEvent;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -74,6 +75,9 @@ public final class SequentialWorkflowRunner {
                         handledChangesetSteps.add(key);
                     }
                 }
+                if (result != null && result.isTerminal()) {
+                    break;
+                }
             }
         } finally {
             if (metrics != null) {
@@ -127,6 +131,9 @@ public final class SequentialWorkflowRunner {
         if (step instanceof Compute) {
             return "Coordination/Compute";
         }
+        if (step instanceof TerminateProcessing) {
+            return "Coordination/Terminate Processing";
+        }
         return step.getClass().getName();
     }
 
@@ -175,6 +182,7 @@ public final class SequentialWorkflowRunner {
                         bexContextFactory,
                         new ComputeResultEmitter(metrics),
                         metrics),
+                new TerminateProcessingStepExecutor(metrics),
                 new UpdateDocumentStepExecutor(metrics));
     }
 
