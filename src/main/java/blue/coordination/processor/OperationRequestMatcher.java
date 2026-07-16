@@ -10,7 +10,7 @@ final class OperationRequestMatcher {
         if (contract == null || context == null) {
             return false;
         }
-        if (contract.getEvent() != null && !context.matchesEventPattern(contract.getEvent())) {
+        if (!SequentialWorkflowEventMatcher.matches(contract.getEvent(), context)) {
             return false;
         }
         CoordinationEventNodes.OperationRequestView request =
