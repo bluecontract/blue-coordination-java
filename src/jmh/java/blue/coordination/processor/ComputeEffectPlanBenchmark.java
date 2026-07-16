@@ -137,7 +137,6 @@ public class ComputeEffectPlanBenchmark {
         TimelineEntry entry = new TimelineEntry()
                 .timeline(new Timeline().timelineId("owner"))
                 .actor(new MyOSPrincipalActor().accountId("owner"))
-                .sequence(BigInteger.ONE)
                 .timestamp(BigInteger.ONE);
         Node request = new Node()
                 .type("Coordination/Operation Request")
@@ -145,7 +144,6 @@ public class ComputeEffectPlanBenchmark {
                 .properties("channel", new Node().value("ownerChannel"))
                 .properties("request", new Node().value("request"));
         Node source = blue.objectToNode(entry)
-                .properties("sequence", new Node().value(BigInteger.ONE))
                 .properties("timestamp", new Node().value(BigInteger.ONE))
                 .properties("message", request)
                 .blue(repository.typeAliasBlue());

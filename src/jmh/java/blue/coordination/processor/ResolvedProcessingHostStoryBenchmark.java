@@ -220,18 +220,16 @@ public class ResolvedProcessingHostStoryBenchmark {
                                         .properties("$changeset", new Node().value(true))))));
     }
 
-    private static Node timelineEntry(Blue blue, BlueRepository repository, int sequence) {
+    private static Node timelineEntry(Blue blue, BlueRepository repository, int entryNumber) {
         TimelineEntry entry = new TimelineEntry()
                 .timeline(new Timeline().timelineId("owner"))
                 .actor(new MyOSPrincipalActor().accountId("owner"))
-                .sequence(BigInteger.valueOf(sequence))
-                .timestamp(BigInteger.valueOf(7_000_000L + sequence));
+                .timestamp(BigInteger.valueOf(7_000_000L + entryNumber));
         Node message = new Node()
                 .type(ChatMessage.qualifiedName())
-                .properties("message", new Node().value("entry-" + sequence));
+                .properties("message", new Node().value("entry-" + entryNumber));
         Node event = blue.objectToNode(entry)
-                .properties("sequence", new Node().value(sequence))
-                .properties("timestamp", new Node().value(7_000_000L + sequence))
+                .properties("timestamp", new Node().value(7_000_000L + entryNumber))
                 .properties("message", message)
                 .blue(repository.typeAliasBlue());
         return blue.preprocess(event).blue(null);
