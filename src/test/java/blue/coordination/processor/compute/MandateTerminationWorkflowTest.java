@@ -16,6 +16,7 @@ import blue.repo.BlueRepository;
 import blue.repo.coordination.StatusFailed;
 import blue.repo.mandate.Mandate;
 import blue.repo.mandate.MandateTerminated;
+import blue.repo.mandate.StatusTerminated;
 
 import org.junit.jupiter.api.Test;
 
@@ -34,16 +35,14 @@ class MandateTerminationWorkflowTest {
     void generatedMandateTerminationAppliesTimestampAndTerminatesExactlyOnce() {
         Fixture fixture = fixture();
         DocumentProcessingResult initialized = fixture.initialize(mandateDocument(false));
+        assertEquals(1L, fixture.metrics.handlersExecuted());
+        long handlersBeforeTermination = fixture.metrics.handlersExecuted();
 
         DocumentProcessingResult result = fixture.process(initialized.snapshot(),
                 fixture.terminateMandateEvent(TERMINATION_TIMESTAMP));
 
         assertSuccess(result);
-        // The generated apply workflow writes Status Terminated in the same batch as
-        // terminatedAt. Language RC6 then re-runs the structurally compatible
-        // initialization handler for Document Processing Terminated and restores
-        // Pending. Task 9A exclusively owns that declared-type matcher correction.
-        assertEquals(blue.repo.coordination.StatusPending.blueId(),
+        assertEquals(StatusTerminated.blueId(),
                 result.canonicalDocument().getAsText("/status/type/blueId"));
         assertEquals(BigInteger.valueOf(TERMINATION_TIMESTAMP), result.document().get("/terminatedAt"));
         assertEquals("graceful", result.document().get("/contracts/terminated/cause"));
@@ -59,13 +58,19 @@ class MandateTerminationWorkflowTest {
         assertEquals(1L, fixture.metrics.successfulComputeTerminationRequests());
         assertEquals(0L, fixture.metrics.declarativeTerminationSteps());
         assertEquals(0L, fixture.metrics.computeResultValidationFailures());
+        assertEquals(2L, fixture.metrics.handlersExecuted() - handlersBeforeTermination);
 
+        long handlersBeforeDuplicate = fixture.metrics.handlersExecuted();
         DocumentProcessingResult duplicate = fixture.process(result.snapshot(),
                 fixture.terminateMandateEvent(TERMINATION_TIMESTAMP));
         assertSuccess(duplicate);
         assertTrue(eventsOfType(duplicate, MandateTerminated.blueId()).isEmpty());
-        assertEquals(blue.repo.coordination.StatusPending.blueId(),
+        assertTrue(eventsOfType(duplicate, RuntimeBlueIds.DOCUMENT_PROCESSING_TERMINATED).isEmpty());
+        assertEquals(StatusTerminated.blueId(),
                 duplicate.canonicalDocument().getAsText("/status/type/blueId"));
+        assertEquals(BigInteger.valueOf(TERMINATION_TIMESTAMP), duplicate.document().get("/terminatedAt"));
+        assertEquals(handlersBeforeDuplicate, fixture.metrics.handlersExecuted());
+        assertEquals(1L, fixture.metrics.successfulComputeTerminationRequests());
     }
 
     @Test
@@ -139,6 +144,7 @@ class MandateTerminationWorkflowTest {
         CoordinationProcessors.registerWith(blue, CoordinationProcessorOptions.builder()
                 .processingMetrics(metrics)
                 .build());
+        blue.getDocumentProcessor().processingMetricsSink(metrics);
         return new Fixture(repository, blue, metrics);
     }
 

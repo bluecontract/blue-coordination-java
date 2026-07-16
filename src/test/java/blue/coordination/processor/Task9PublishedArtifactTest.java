@@ -59,7 +59,7 @@ class Task9PublishedArtifactTest {
     }
 
     @Test
-    void languageRc6AdvertisesReviewedContractsFixtureIdentity() throws IOException {
+    void publishedLanguageAdvertisesReviewedContractsFixtureIdentity() throws IOException {
         String manifest = resourceText("registry/blue-contracts-1.0/manifest.yaml");
 
         assertTrue(manifest.contains(
