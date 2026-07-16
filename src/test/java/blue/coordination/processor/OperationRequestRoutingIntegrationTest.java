@@ -15,6 +15,7 @@ import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessingMetricsSink;
 import blue.language.processor.ProcessorStatus;
 import blue.repo.BlueRepository;
+import blue.repo.coordination.Authority;
 import blue.repo.coordination.Compute;
 import blue.repo.coordination.OperationRequest;
 import blue.repo.coordination.SequentialWorkflowStep;
@@ -128,7 +129,9 @@ class OperationRequestRoutingIntegrationTest {
                 .properties("specializedField", new Node().value("preserved"));
         Node event = timelineEntry(fixture, ALICE_TIMELINE, ALICE_ACTOR, 1, message)
                 .properties("source", new Node().properties("kind", new Node().value("verified-api")))
-                .properties("onBehalfOf", new Node().value("mandate-owner"));
+                .properties("onBehalfOf", new Node()
+                        .type(new Node().blueId(Authority.blueId()))
+                        .properties("label", new Node().value("mandate-owner")));
 
         DocumentProcessingResult result = fixture.blue.processDocument(initialized, event);
 
@@ -136,7 +139,7 @@ class OperationRequestRoutingIntegrationTest {
         assertEquals(ALICE_TIMELINE, result.document().get("/captured/timeline/timelineId"));
         assertEquals(ALICE_ACTOR, result.document().get("/captured/actor/accountId"));
         assertEquals("verified-api", result.document().get("/captured/source/kind"));
-        assertEquals("mandate-owner", result.document().get("/captured/onBehalfOf"));
+        assertEquals("mandate-owner", result.document().get("/captured/onBehalfOf/label"));
         assertEquals("preserved", result.document().get("/captured/message/specializedField"));
         assertEquals(BOB_CHANNEL, result.document().get("/captured/message/channel"));
         assertEquals(Boolean.TRUE,

@@ -74,7 +74,7 @@ final class ComputeDefinitionResolver {
             }
             return cached;
         }
-        FrozenNode frozen = context.processorContext().canonicalFrozenAt(pointer);
+        FrozenNode frozen = context.workingResolvedAt(pointer);
         if (frozen != null) {
             cache.putIfAbsent(key, frozen);
         }

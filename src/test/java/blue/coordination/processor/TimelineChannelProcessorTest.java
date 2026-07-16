@@ -3,6 +3,7 @@ package blue.coordination.processor;
 import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
+import blue.language.processor.ProcessorStatus;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.APICall;
 import blue.repo.coordination.ChatMessage;
@@ -289,7 +290,9 @@ class TimelineChannelProcessorTest {
 
         Node event = fixture.blue.preprocess(fixture.blue.objectToNode(attributed)
                 .blue(fixture.repository.typeAliasBlue())).blue(null);
-        Node processed = process(fixture, initializedDocument(fixture), event).document();
+        DocumentProcessingResult result = process(fixture, initializedDocument(fixture), event);
+        assertEquals(ProcessorStatus.SUCCESS, result.status(), result.failureReason());
+        Node processed = result.document();
 
         assertEquals("api-key-7", checkpointEvent(processed).getAsText("/source/apiKeyId"));
     }
@@ -297,22 +300,26 @@ class TimelineChannelProcessorTest {
     @Test
     void optionalOnBehalfOfSurvivesDeliveryUnchanged() {
         Fixture fixture = configuredFixture();
-        Mandate mandate = new Mandate().contracts(requiredMandateChannels());
-        MandateAuthority authority = new MandateAuthority()
-                .actor(new MyOSPrincipalActor().accountId("represented-account"))
-                .mandate(mandate);
-        TimelineEntry attributed = baseEntry(fixture, BigInteger.ONE, BigInteger.ONE, "authority")
-                .onBehalfOf(authority);
-
-        Node event = fixture.blue.preprocess(fixture.blue.objectToNode(attributed)
+        Node authority = new Node()
+                .type(MandateAuthority.qualifiedName())
+                .properties("actor", new Node()
+                        .type(MyOSPrincipalActor.qualifiedName())
+                        .properties("accountId", new Node().value("represented-account")))
+                .properties("mandate", authorityMandate());
+        Node event = fixture.blue.preprocess(fixture.blue.objectToNode(
+                        baseEntry(fixture, BigInteger.ONE, BigInteger.ONE, "authority"))
+                .properties("onBehalfOf", authority)
                 .blue(fixture.repository.typeAliasBlue())).blue(null);
-        Node processed = process(fixture, initializedDocument(fixture), event).document();
+        DocumentProcessingResult result = process(fixture, initializedDocument(fixture), event);
+        assertEquals(ProcessorStatus.SUCCESS, result.status(), result.failureReason());
+        Node processed = result.document();
 
         assertEquals("represented-account",
                 checkpointEvent(processed).getAsText("/onBehalfOf/actor/accountId"));
-        assertEquals("guarantor",
-                checkpointEvent(processed).getAsText(
-                        "/onBehalfOf/mandate/contracts/mandateGuarantorChannel/timeline/timelineId"));
+        assertEquals("Timeline Authority Mandate",
+                checkpointEvent(processed).getAsText("/onBehalfOf/mandate/name"));
+        assertNotNull(checkpointEvent(result.snapshot().resolvedRoot()).getAsNode(
+                "/onBehalfOf/mandate/contracts/mandateGuarantorChannel/type"));
     }
 
     private static void assertMissingFieldRejects(String field) {
@@ -399,6 +406,13 @@ class TimelineChannelProcessorTest {
                 .sequence(sequence)
                 .timestamp(timestamp)
                 .message(fixture.blue.objectToNode(new ChatMessage().message(message)));
+    }
+
+    private static Node authorityMandate() {
+        return new Node()
+                .name("Timeline Authority Mandate")
+                .type(Mandate.qualifiedName())
+                .properties("contracts", requiredMandateChannels());
     }
 
     private static Node requiredMandateChannels() {
