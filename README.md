@@ -29,9 +29,9 @@ The project targets Java 8-compatible bytecode, builds with JDK 25, runs tests
 on Java 8, and depends on:
 
 ```groovy
-api "blue.language:blue-language-java:3.0.0"
-api "blue.repo:blue-repo-java:3.0.0-rc.1"
-api "blue.bex:blue-bex-java:1.0.0"
+api "blue.language:blue-language-java:3.1.0-rc.9"
+api "blue.repo:blue-repo-java:3.0.0-rc.8"
+api "blue.bex:blue-bex-java:1.1.0-rc.2"
 ```
 
 ## Register Processors
@@ -64,7 +64,7 @@ DocumentProcessor processor =
 `CoordinationProcessors` registers Timeline, Composite Timeline, and All
 Timelines channel processors. Timeline providers remain responsible for feeding
 authenticated, ordered Timeline Entries; the processors enforce the channel's
-timeline and actor identity and sequence-based checkpoint semantics.
+timeline and actor identity and strict timestamp-based checkpoint semantics.
 
 ## Counter Document
 
@@ -127,7 +127,6 @@ type: Coordination/Timeline Entry
 timeline:
   type: Coordination/Timeline
   timelineId: counter-demo
-sequence: 1
 timestamp: 1
 actor:
   type: MyOS/MyOS Principal Actor
