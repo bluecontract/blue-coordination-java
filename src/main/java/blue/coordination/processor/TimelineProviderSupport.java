@@ -149,6 +149,6 @@ public final class TimelineProviderSupport {
         if (!BlueSemanticIdentity.equals(current.timeline(), previous.timeline())) {
             return acceptDifferentTimeline;
         }
-        return current.sequence().compareTo(previous.sequence()) > 0;
+        return current.timestamp().compareTo(previous.timestamp()) > 0;
     }
 }

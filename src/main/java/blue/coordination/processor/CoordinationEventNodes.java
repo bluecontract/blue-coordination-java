@@ -36,17 +36,15 @@ final class CoordinationEventNodes {
         }
         Node timeline = property(node, "timeline");
         Node actor = property(node, "actor");
-        BigInteger sequence = integerProperty(node, "sequence");
         BigInteger timestamp = timestamp(node);
         Node message = property(node, "message");
         if (!BlueSemanticIdentity.matchesType(timeline, TIMELINE_TYPE)
                 || !BlueSemanticIdentity.matchesType(actor, ACTOR_TYPE)
-                || sequence == null
                 || timestamp == null
                 || message == null) {
             return null;
         }
-        return new TimelineEntryView(timeline, actor, sequence);
+        return new TimelineEntryView(timeline, actor, timestamp);
     }
 
     static boolean isTimelineEntry(Node node) {
@@ -296,14 +294,14 @@ final class CoordinationEventNodes {
     static final class TimelineEntryView {
         private final Node timeline;
         private final Node actor;
-        private final BigInteger sequence;
+        private final BigInteger timestamp;
 
         private TimelineEntryView(Node timeline,
                                   Node actor,
-                                  BigInteger sequence) {
+                                  BigInteger timestamp) {
             this.timeline = timeline;
             this.actor = actor;
-            this.sequence = sequence;
+            this.timestamp = timestamp;
         }
 
         Node timeline() {
@@ -314,8 +312,8 @@ final class CoordinationEventNodes {
             return actor;
         }
 
-        BigInteger sequence() {
-            return sequence;
+        BigInteger timestamp() {
+            return timestamp;
         }
     }
 
