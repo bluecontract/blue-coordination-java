@@ -29,7 +29,7 @@ The project targets Java 8-compatible bytecode, builds with JDK 25, runs tests
 on Java 8, and depends on:
 
 ```groovy
-api "blue.language:blue-language-java:3.1.0-rc.9"
+api "blue.language:blue-language-java:3.1.0-rc.10"
 api "blue.repo:blue-repo-java:3.0.0-rc.8"
 api "blue.bex:blue-bex-java:1.1.0-rc.2"
 ```
