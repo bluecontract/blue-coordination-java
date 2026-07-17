@@ -11,7 +11,7 @@ import blue.repo.coordination.ChatMessage;
 import blue.repo.coordination.Timeline;
 import blue.repo.coordination.TimelineChannel;
 import blue.repo.coordination.TimelineEntry;
-import blue.repo.myos.MyOSPrincipalActor;
+import blue.repo.myos.PrincipalActor;
 
 import java.math.BigInteger;
 
@@ -33,11 +33,12 @@ public final class TestTimelineProvider {
         if (timelineId != null) {
             channel.properties("timeline", new Node()
                     .type(Timeline.qualifiedName())
+                    .properties("providerId", new Node().value("test-provider"))
                     .properties("timelineId", new Node().value(timelineId)));
         }
         if (actorId != null) {
             channel.properties("actor", new Node()
-                    .type(MyOSPrincipalActor.qualifiedName())
+                    .type(PrincipalActor.qualifiedName())
                     .properties("accountId", new Node().value(actorId)));
         }
         return channel;
@@ -63,8 +64,8 @@ public final class TestTimelineProvider {
                                      BigInteger timestamp,
                                      Node message) {
         TimelineEntry entry = new TimelineEntry()
-                .timeline(new Timeline().timelineId(timelineId))
-                .actor(new MyOSPrincipalActor().accountId(actorId))
+                .timeline(new Timeline().providerId("test-provider").timelineId(timelineId))
+                .actor(new PrincipalActor().accountId(actorId))
                 .timestamp(timestamp);
 
         Node event = blue.objectToNode(entry)

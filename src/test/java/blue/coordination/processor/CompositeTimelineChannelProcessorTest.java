@@ -17,7 +17,7 @@ import blue.repo.coordination.CompositeTimelineChannel;
 import blue.repo.coordination.Timeline;
 import blue.repo.coordination.TimelineChannel;
 import blue.repo.coordination.TimelineEntry;
-import blue.repo.myos.MyOSPrincipalActor;
+import blue.repo.myos.PrincipalActor;
 import java.math.BigInteger;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -253,8 +253,8 @@ class CompositeTimelineChannelProcessorTest {
 
     private static TimelineChannel timelineContract() {
         return new TimelineChannel()
-                .timeline(new Timeline().timelineId(TIMELINE))
-                .actor(new MyOSPrincipalActor().accountId(ACTOR));
+                .timeline(new Timeline().providerId("test-provider").timelineId(TIMELINE))
+                .actor(new PrincipalActor().accountId(ACTOR));
     }
 
     private static Map<String, ChannelContract> singletonChannel(String key, ChannelContract channel) {

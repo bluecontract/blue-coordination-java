@@ -14,7 +14,7 @@ import blue.repo.coordination.Timeline;
 import blue.repo.coordination.TimelineChannel;
 import blue.repo.coordination.TimelineEntry;
 import blue.repo.myos.MyOSAgentActor;
-import blue.repo.myos.MyOSPrincipalActor;
+import blue.repo.myos.PrincipalActor;
 import blue.repo.myos.MyOSTimeline;
 import java.math.BigInteger;
 import java.util.Arrays;
@@ -28,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TimelineChannelBindingMatchingTest {
+    private static final String PROVIDER = "test-provider";
     private static final String TIMELINE = "owner-timeline";
     private static final String ACTOR = "owner-account";
     private static final TimelineChannelProcessor TIMELINE_PROCESSOR = new TimelineChannelProcessor();
@@ -88,12 +89,14 @@ class TimelineChannelBindingMatchingTest {
         Fixture fixture = configuredFixture();
         MyOSTimeline configuredTimeline = new MyOSTimeline();
         configuredTimeline.timelineId(TIMELINE);
-        MyOSTimeline entryTimeline = new MyOSTimeline().accountId("provider-account");
+        MyOSTimeline entryTimeline = new MyOSTimeline();
         entryTimeline.timelineId(TIMELINE);
+        Node event = resolvedEvent(fixture, entryTimeline, principal(ACTOR));
+        event.getAsNode("/timeline").properties("providerExtension", new Node().value("present"));
 
         ChannelEvaluation evaluation = evaluateTimeline(
                 channel(configuredTimeline, principal(ACTOR)),
-                resolvedEvent(fixture, entryTimeline, principal(ACTOR)));
+                event);
 
         assertTrue(evaluation.matches());
     }
@@ -106,8 +109,8 @@ class TimelineChannelBindingMatchingTest {
         entryActor.onBehalfOf(principal("represented-account"));
 
         ChannelEvaluation evaluation = evaluateTimeline(
-                channel(new Timeline().timelineId(TIMELINE), configuredActor),
-                resolvedEvent(fixture, new Timeline().timelineId(TIMELINE), entryActor));
+                channel(timeline(TIMELINE), configuredActor),
+                resolvedEvent(fixture, timeline(TIMELINE), entryActor));
 
         assertTrue(evaluation.matches());
     }
@@ -133,7 +136,7 @@ class TimelineChannelBindingMatchingTest {
         assertFalse(evaluateTimeline(
                 new TimelineChannel().actor(principal(ACTOR)), event).matches());
         assertFalse(evaluateTimeline(
-                new TimelineChannel().timeline(new Timeline().timelineId(TIMELINE)), event).matches());
+                new TimelineChannel().timeline(timeline(TIMELINE)), event).matches());
     }
 
     @Test
@@ -214,21 +217,25 @@ class TimelineChannelBindingMatchingTest {
     }
 
     private static TimelineChannel channel(String timelineId, String actorId) {
-        return channel(new Timeline().timelineId(timelineId), principal(actorId));
+        return channel(timeline(timelineId), principal(actorId));
     }
 
     private static TimelineChannel channel(Timeline timeline, Actor actor) {
         return new TimelineChannel().timeline(timeline).actor(actor);
     }
 
-    private static MyOSPrincipalActor principal(String accountId) {
-        return new MyOSPrincipalActor().accountId(accountId);
+    private static PrincipalActor principal(String accountId) {
+        return new PrincipalActor().accountId(accountId);
     }
 
     private static Node resolvedEvent(Fixture fixture, String timelineId, String actorId) {
         return resolvedEvent(fixture,
-                new Timeline().timelineId(timelineId),
+                timeline(timelineId),
                 principal(actorId));
+    }
+
+    private static Timeline timeline(String timelineId) {
+        return new Timeline().providerId(PROVIDER).timelineId(timelineId);
     }
 
     private static Node resolvedEvent(Fixture fixture, Timeline timeline, Actor actor) {

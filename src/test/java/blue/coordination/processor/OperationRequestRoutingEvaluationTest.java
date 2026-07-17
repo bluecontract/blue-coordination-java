@@ -16,7 +16,7 @@ import blue.repo.coordination.Request;
 import blue.repo.coordination.SequentialWorkflowOperation;
 import blue.repo.coordination.Timeline;
 import blue.repo.coordination.TimelineChannel;
-import blue.repo.myos.MyOSPrincipalActor;
+import blue.repo.myos.PrincipalActor;
 import java.math.BigInteger;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -365,14 +365,14 @@ class OperationRequestRoutingEvaluationTest {
 
     private static TimelineChannel sourceContract() {
         return new TimelineChannel()
-                .timeline(new Timeline().timelineId(TIMELINE))
-                .actor(new MyOSPrincipalActor().accountId(ACTOR));
+                .timeline(new Timeline().providerId("test-provider").timelineId(TIMELINE))
+                .actor(new PrincipalActor().accountId(ACTOR));
     }
 
     private static TimelineChannel targetContract() {
         return new TimelineChannel()
-                .timeline(new Timeline().timelineId("bob-timeline"))
-                .actor(new MyOSPrincipalActor().accountId("bob-account"));
+                .timeline(new Timeline().providerId("test-provider").timelineId("bob-timeline"))
+                .actor(new PrincipalActor().accountId("bob-account"));
     }
 
     private static Node entry(Fixture fixture, Node message) {

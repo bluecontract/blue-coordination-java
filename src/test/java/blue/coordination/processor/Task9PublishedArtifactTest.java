@@ -22,14 +22,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class Task9PublishedArtifactTest {
     private static final String REPOSITORY_AGGREGATE =
-            "F7mowRpvfyh7PF2tSNPLEitCFynYjzhj2269nBYqamyM";
+            "G1DXowcU5SQQw4h1fcyppAoyK8QkyDzTc2dc9W4uQv8H";
     private static final String TERMINATE_PROCESSING_BLUE_ID =
             "DacNQ6C6PgsEiE4QfUHmaWBztpEvo2YyXxUcP86ze77w";
     private static final String CONTRACTS_FIXTURE_IDENTITY =
             "sha256:22713df4d50a38b91762aea1e1a360019c1d16c2584ca1bac022305edb4c66d1";
 
     @Test
-    void repositoryRc8ContainsGeneratedTerminateProcessingContract() {
+    void repositoryRc9ContainsGeneratedTerminateProcessingContract() {
         BlueRepository repository = BlueRepository.latest();
         RepositoryDefinition definition = repository.definition(TerminateProcessing.qualifiedName())
                 .orElseThrow(() -> new AssertionError("Terminate Processing manifest entry is missing"));

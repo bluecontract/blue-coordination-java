@@ -8,7 +8,7 @@ import blue.language.snapshot.ResolvedSnapshot;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.Timeline;
 import blue.repo.coordination.TimelineEntry;
-import blue.repo.myos.MyOSPrincipalActor;
+import blue.repo.myos.PrincipalActor;
 
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -106,9 +106,10 @@ public class ComputeEffectPlanBenchmark {
                 .type("Coordination/Timeline Channel")
                 .properties("timeline", new Node()
                         .type("Coordination/Timeline")
+                        .properties("providerId", new Node().value("test-provider"))
                         .properties("timelineId", new Node().value("owner")))
                 .properties("actor", new Node()
-                        .type("MyOS/MyOS Principal Actor")
+                        .type("MyOS/Principal Actor")
                         .properties("accountId", new Node().value("owner")));
         Node operation = new Node()
                 .type("Coordination/Sequential Workflow Operation")
@@ -135,8 +136,8 @@ public class ComputeEffectPlanBenchmark {
 
     private Node operationEvent() {
         TimelineEntry entry = new TimelineEntry()
-                .timeline(new Timeline().timelineId("owner"))
-                .actor(new MyOSPrincipalActor().accountId("owner"))
+                .timeline(new Timeline().providerId("test-provider").timelineId("owner"))
+                .actor(new PrincipalActor().accountId("owner"))
                 .timestamp(BigInteger.ONE);
         Node request = new Node()
                 .type("Coordination/Operation Request")

@@ -5,9 +5,10 @@ contracts:
     type: Coordination/Timeline Channel
     timeline:
       type: Coordination/Timeline
+      providerId: test-provider
       timelineId: counter-timeline
     actor:
-      type: MyOS/MyOS Principal Actor
+      type: MyOS/Principal Actor
       accountId: counter-timeline
   increment:
     description: Increment the counter by the given number

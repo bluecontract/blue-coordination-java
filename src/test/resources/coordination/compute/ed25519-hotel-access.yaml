@@ -7,9 +7,10 @@ contracts:
     type: Coordination/Timeline Channel
     timeline:
       type: Coordination/Timeline
+      providerId: test-provider
       timelineId: hotel
     actor:
-      type: MyOS/MyOS Principal Actor
+      type: MyOS/Principal Actor
       accountId: hotel
   checkIn:
     type: Coordination/Sequential Workflow Operation
