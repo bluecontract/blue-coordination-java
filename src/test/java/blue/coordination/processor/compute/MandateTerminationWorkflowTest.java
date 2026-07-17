@@ -46,7 +46,7 @@ class MandateTerminationWorkflowTest {
                 result.canonicalDocument().getAsText("/status/type/blueId"));
         assertEquals(BigInteger.valueOf(TERMINATION_TIMESTAMP), result.document().get("/terminatedAt"));
         assertEquals("graceful", result.document().get("/contracts/terminated/cause"));
-        assertEquals("Mandate terminated", result.document().get("/contracts/terminated/reason"));
+        assertEquals("requested by guarantor", result.document().get("/contracts/terminated/reason"));
 
         List<Node> domainEvents = eventsOfType(result, MandateTerminated.blueId());
         assertEquals(1, domainEvents.size());
@@ -87,7 +87,7 @@ class MandateTerminationWorkflowTest {
         assertEquals(StatusFailed.blueId(), result.canonicalDocument().getAsText("/status/type/blueId"));
         assertNull(result.document().getAsNode("/terminatedAt").getValue());
         assertEquals("graceful", result.document().get("/contracts/terminated/cause"));
-        assertEquals("Mandate terminated", result.document().get("/contracts/terminated/reason"));
+        assertEquals("requested by guarantor", result.document().get("/contracts/terminated/reason"));
         assertEquals(1, eventsOfType(result, MandateTerminated.blueId()).size());
         assertEquals(1, eventsOfType(result, RuntimeBlueIds.DOCUMENT_PROCESSING_TERMINATED).size());
         assertEquals(1L, fixture.metrics.successfulComputeTerminationRequests());

@@ -113,7 +113,7 @@ class TimelineChannelProcessorTest {
     @Test
     void pureReferenceEqualsEquivalentMaterializedBinding() {
         Fixture fixture = configuredFixture();
-        Node timeline = fixture.blue.objectToNode(new Timeline().providerId("test-provider").timelineId(TIMELINE));
+        Node timeline = fixture.blue.objectToNode(new Timeline().timelineId(TIMELINE));
         Node actor = fixture.blue.objectToNode(new PrincipalActor().accountId(ACTOR));
 
         Node timelineReference = new Node().blueId(fixture.blue.calculateSemanticBlueId(timeline));
@@ -138,8 +138,8 @@ class TimelineChannelProcessorTest {
     @Test
     void sameTypeDifferentContentDoesNotEqual() {
         Fixture fixture = configuredFixture();
-        Node first = fixture.blue.objectToNode(new Timeline().providerId("test-provider").timelineId("first"));
-        Node second = fixture.blue.objectToNode(new Timeline().providerId("test-provider").timelineId("second"));
+        Node first = fixture.blue.objectToNode(new Timeline().timelineId("first"));
+        Node second = fixture.blue.objectToNode(new Timeline().timelineId("second"));
 
         assertFalse(BlueSemanticIdentity.equals(first, second));
     }
@@ -498,7 +498,7 @@ class TimelineChannelProcessorTest {
                                            BigInteger timestamp,
                                            String message) {
         return new TimelineEntry()
-                .timeline(new Timeline().providerId("test-provider").timelineId(TIMELINE))
+                .timeline(new Timeline().timelineId(TIMELINE))
                 .actor(new PrincipalActor().accountId(ACTOR))
                 .timestamp(timestamp)
                 .message(fixture.blue.objectToNode(new ChatMessage().message(message)));

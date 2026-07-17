@@ -110,7 +110,7 @@ class PublishedTimelineChannelResolutionTest {
 
     private static Node timelineEntry(Blue blue, BigInteger timestamp, String message) {
         TimelineEntry entry = new TimelineEntry()
-                .timeline(new Timeline().providerId("test-provider").timelineId("timeline-1"))
+                .timeline(new Timeline().timelineId("timeline-1"))
                 .actor(new PrincipalActor().accountId("account-1"))
                 .timestamp(timestamp)
                 .message(blue.objectToNode(new ChatMessage().message(message)));
