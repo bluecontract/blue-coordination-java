@@ -223,7 +223,7 @@ public class ResolvedProcessingHostStoryBenchmark {
 
     private static Node timelineEntry(Blue blue, BlueRepository repository, int entryNumber) {
         TimelineEntry entry = new TimelineEntry()
-                .timeline(new Timeline().providerId("test-provider").timelineId("owner"))
+                .timeline(new Timeline().timelineId("owner"))
                 .actor(new PrincipalActor().accountId("owner"))
                 .timestamp(BigInteger.valueOf(7_000_000L + entryNumber));
         Node message = new Node()

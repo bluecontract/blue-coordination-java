@@ -136,7 +136,7 @@ public class ComputeEffectPlanBenchmark {
 
     private Node operationEvent() {
         TimelineEntry entry = new TimelineEntry()
-                .timeline(new Timeline().providerId("test-provider").timelineId("owner"))
+                .timeline(new Timeline().timelineId("owner"))
                 .actor(new PrincipalActor().accountId("owner"))
                 .timestamp(BigInteger.ONE);
         Node request = new Node()

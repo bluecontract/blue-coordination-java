@@ -28,7 +28,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TimelineChannelBindingMatchingTest {
-    private static final String PROVIDER = "test-provider";
     private static final String TIMELINE = "owner-timeline";
     private static final String ACTOR = "owner-account";
     private static final TimelineChannelProcessor TIMELINE_PROCESSOR = new TimelineChannelProcessor();
@@ -235,7 +234,7 @@ class TimelineChannelBindingMatchingTest {
     }
 
     private static Timeline timeline(String timelineId) {
-        return new Timeline().providerId(PROVIDER).timelineId(timelineId);
+        return new Timeline().timelineId(timelineId);
     }
 
     private static Node resolvedEvent(Fixture fixture, Timeline timeline, Actor actor) {

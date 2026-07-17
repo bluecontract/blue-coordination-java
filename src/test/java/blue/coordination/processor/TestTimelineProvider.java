@@ -64,7 +64,7 @@ public final class TestTimelineProvider {
                                      BigInteger timestamp,
                                      Node message) {
         TimelineEntry entry = new TimelineEntry()
-                .timeline(new Timeline().providerId("test-provider").timelineId(timelineId))
+                .timeline(new Timeline().timelineId(timelineId))
                 .actor(new PrincipalActor().accountId(actorId))
                 .timestamp(timestamp);
 

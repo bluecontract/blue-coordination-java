@@ -253,7 +253,7 @@ class CompositeTimelineChannelProcessorTest {
 
     private static TimelineChannel timelineContract() {
         return new TimelineChannel()
-                .timeline(new Timeline().providerId("test-provider").timelineId(TIMELINE))
+                .timeline(new Timeline().timelineId(TIMELINE))
                 .actor(new PrincipalActor().accountId(ACTOR));
     }
 

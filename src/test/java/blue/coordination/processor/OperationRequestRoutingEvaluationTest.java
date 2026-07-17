@@ -365,13 +365,13 @@ class OperationRequestRoutingEvaluationTest {
 
     private static TimelineChannel sourceContract() {
         return new TimelineChannel()
-                .timeline(new Timeline().providerId("test-provider").timelineId(TIMELINE))
+                .timeline(new Timeline().timelineId(TIMELINE))
                 .actor(new PrincipalActor().accountId(ACTOR));
     }
 
     private static TimelineChannel targetContract() {
         return new TimelineChannel()
-                .timeline(new Timeline().providerId("test-provider").timelineId("bob-timeline"))
+                .timeline(new Timeline().timelineId("bob-timeline"))
                 .actor(new PrincipalActor().accountId("bob-account"));
     }
 

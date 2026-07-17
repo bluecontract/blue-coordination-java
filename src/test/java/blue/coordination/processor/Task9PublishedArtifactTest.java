@@ -22,14 +22,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class Task9PublishedArtifactTest {
     private static final String REPOSITORY_AGGREGATE =
-            "G1DXowcU5SQQw4h1fcyppAoyK8QkyDzTc2dc9W4uQv8H";
+            "DPkjPHvEASr115BcLA4CMXRYKaJRAfmqTyodkndGJ4FY";
     private static final String TERMINATE_PROCESSING_BLUE_ID =
             "DacNQ6C6PgsEiE4QfUHmaWBztpEvo2YyXxUcP86ze77w";
     private static final String CONTRACTS_FIXTURE_IDENTITY =
             "sha256:22713df4d50a38b91762aea1e1a360019c1d16c2584ca1bac022305edb4c66d1";
 
     @Test
-    void repositoryRc9ContainsGeneratedTerminateProcessingContract() {
+    void repositoryRc10ContainsGeneratedTerminateProcessingContract() {
         BlueRepository repository = BlueRepository.latest();
         RepositoryDefinition definition = repository.definition(TerminateProcessing.qualifiedName())
                 .orElseThrow(() -> new AssertionError("Terminate Processing manifest entry is missing"));
@@ -47,15 +47,15 @@ class Task9PublishedArtifactTest {
     }
 
     @Test
-    void generatedMandateUsesOneComputeStepReturningTermination() {
+    void generatedMandateUsesOneComputeStepPropagatingTerminationReason() {
         Node mandate = BlueRepository.latest().nodeByBlueId(Mandate.blueId())
                 .orElseThrow(() -> new AssertionError("Published Mandate definition is missing"));
         Node steps = mandate.getAsNode("/contracts/applyMandateTermination/steps");
 
         assertEquals(1, steps.getItems().size());
         assertEquals(Compute.blueId(), steps.getItems().get(0).getType().getBlueId());
-        assertEquals("Mandate terminated", mandate.get(
-                "/contracts/mandateLifecycleDefinition/functions/applyMandateTermination/do/2/$return/termination/reason"));
+        assertEquals("terminationReason", mandate.get(
+                "/contracts/mandateLifecycleDefinition/functions/applyMandateTermination/do/2/$return/termination/reason/$var"));
     }
 
     @Test
