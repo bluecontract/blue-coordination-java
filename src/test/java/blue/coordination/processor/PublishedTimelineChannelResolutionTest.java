@@ -12,7 +12,7 @@ import blue.repo.coordination.ChatMessage;
 import blue.repo.coordination.Timeline;
 import blue.repo.coordination.TimelineChannel;
 import blue.repo.coordination.TimelineEntry;
-import blue.repo.myos.MyOSPrincipalActor;
+import blue.repo.myos.PrincipalActor;
 import java.math.BigInteger;
 import java.util.Collections;
 import org.junit.jupiter.api.Test;
@@ -28,9 +28,10 @@ class PublishedTimelineChannelResolutionTest {
             "type: Coordination/Timeline Channel",
             "timeline:",
             "  type: Coordination/Timeline",
+            "  providerId: test-provider",
             "  timelineId: timeline-1",
             "actor:",
-            "  type: MyOS/MyOS Principal Actor",
+            "  type: MyOS/Principal Actor",
             "  accountId: account-1");
 
     @Test
@@ -109,8 +110,8 @@ class PublishedTimelineChannelResolutionTest {
 
     private static Node timelineEntry(Blue blue, BigInteger timestamp, String message) {
         TimelineEntry entry = new TimelineEntry()
-                .timeline(new Timeline().timelineId("timeline-1"))
-                .actor(new MyOSPrincipalActor().accountId("account-1"))
+                .timeline(new Timeline().providerId("test-provider").timelineId("timeline-1"))
+                .actor(new PrincipalActor().accountId("account-1"))
                 .timestamp(timestamp)
                 .message(blue.objectToNode(new ChatMessage().message(message)));
         return blue.preprocess(blue.objectToNode(entry));

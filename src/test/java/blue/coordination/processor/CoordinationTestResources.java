@@ -5,7 +5,7 @@ import blue.language.model.Node;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.Timeline;
 import blue.repo.coordination.TimelineChannel;
-import blue.repo.myos.MyOSPrincipalActor;
+import blue.repo.myos.PrincipalActor;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -77,9 +77,10 @@ public final class CoordinationTestResources {
                 child + "type: " + TimelineChannel.qualifiedName(),
                 child + "timeline:",
                 spaces(indent + 4) + "type: " + Timeline.qualifiedName(),
+                spaces(indent + 4) + "providerId: test-provider",
                 spaces(indent + 4) + "timelineId: " + timelineId,
                 child + "actor:",
-                spaces(indent + 4) + "type: " + MyOSPrincipalActor.qualifiedName(),
+                spaces(indent + 4) + "type: " + PrincipalActor.qualifiedName(),
                 spaces(indent + 4) + "accountId: " + timelineId);
     }
 

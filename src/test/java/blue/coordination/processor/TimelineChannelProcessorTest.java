@@ -13,7 +13,7 @@ import blue.repo.coordination.Timeline;
 import blue.repo.coordination.TimelineEntry;
 import blue.repo.mandate.Mandate;
 import blue.repo.mandate.MandateAuthority;
-import blue.repo.myos.MyOSPrincipalActor;
+import blue.repo.myos.PrincipalActor;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.Collections;
@@ -113,8 +113,8 @@ class TimelineChannelProcessorTest {
     @Test
     void pureReferenceEqualsEquivalentMaterializedBinding() {
         Fixture fixture = configuredFixture();
-        Node timeline = fixture.blue.objectToNode(new Timeline().timelineId(TIMELINE));
-        Node actor = fixture.blue.objectToNode(new MyOSPrincipalActor().accountId(ACTOR));
+        Node timeline = fixture.blue.objectToNode(new Timeline().providerId("test-provider").timelineId(TIMELINE));
+        Node actor = fixture.blue.objectToNode(new PrincipalActor().accountId(ACTOR));
 
         Node timelineReference = new Node().blueId(fixture.blue.calculateSemanticBlueId(timeline));
         Node actorReference = new Node().blueId(fixture.blue.calculateSemanticBlueId(actor));
@@ -138,8 +138,8 @@ class TimelineChannelProcessorTest {
     @Test
     void sameTypeDifferentContentDoesNotEqual() {
         Fixture fixture = configuredFixture();
-        Node first = fixture.blue.objectToNode(new Timeline().timelineId("first"));
-        Node second = fixture.blue.objectToNode(new Timeline().timelineId("second"));
+        Node first = fixture.blue.objectToNode(new Timeline().providerId("test-provider").timelineId("first"));
+        Node second = fixture.blue.objectToNode(new Timeline().providerId("test-provider").timelineId("second"));
 
         assertFalse(BlueSemanticIdentity.equals(first, second));
     }
@@ -384,7 +384,7 @@ class TimelineChannelProcessorTest {
         Node authority = new Node()
                 .type(MandateAuthority.qualifiedName())
                 .properties("actor", new Node()
-                        .type(MyOSPrincipalActor.qualifiedName())
+                        .type(PrincipalActor.qualifiedName())
                         .properties("accountId", new Node().value("represented-account")))
                 .properties("mandate", authorityMandate());
         Node event = fixture.blue.preprocess(fixture.blue.objectToNode(
@@ -498,8 +498,8 @@ class TimelineChannelProcessorTest {
                                            BigInteger timestamp,
                                            String message) {
         return new TimelineEntry()
-                .timeline(new Timeline().timelineId(TIMELINE))
-                .actor(new MyOSPrincipalActor().accountId(ACTOR))
+                .timeline(new Timeline().providerId("test-provider").timelineId(TIMELINE))
+                .actor(new PrincipalActor().accountId(ACTOR))
                 .timestamp(timestamp)
                 .message(fixture.blue.objectToNode(new ChatMessage().message(message)));
     }

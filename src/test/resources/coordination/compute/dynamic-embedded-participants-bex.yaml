@@ -15,9 +15,10 @@ embeddedTemplate:
       type: Coordination/Timeline Channel
       timeline:
         type: Coordination/Timeline
+        providerId: test-provider
         timelineId: embedded
       actor:
-        type: MyOS/MyOS Principal Actor
+        type: MyOS/Principal Actor
         accountId: embedded
     say:
       type: Coordination/Sequential Workflow Operation
@@ -33,9 +34,10 @@ contractTemplates:
     type: Coordination/Timeline Channel
     timeline:
       type: Coordination/Timeline
+      providerId: test-provider
       timelineId: embedded
     actor:
-      type: MyOS/MyOS Principal Actor
+      type: MyOS/Principal Actor
       accountId: embedded
   # Template for the root-level embedded node channel that surfaces events from one generated child.
   embeddedBridge:
@@ -69,18 +71,20 @@ contracts:
     type: Coordination/Timeline Channel
     timeline:
       type: Coordination/Timeline
+      providerId: test-provider
       timelineId: alice
     actor:
-      type: MyOS/MyOS Principal Actor
+      type: MyOS/Principal Actor
       accountId: alice
   # Bob is allowed to check whether enough embedded chat messages have been observed.
   bobChannel:
     type: Coordination/Timeline Channel
     timeline:
       type: Coordination/Timeline
+      providerId: test-provider
       timelineId: bob
     actor:
-      type: MyOS/MyOS Principal Actor
+      type: MyOS/Principal Actor
       accountId: bob
   createEmbedded:
     type: Coordination/Sequential Workflow Operation

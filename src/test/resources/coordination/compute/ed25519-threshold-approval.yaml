@@ -19,9 +19,10 @@ contracts:
     type: Coordination/Timeline Channel
     timeline:
       type: Coordination/Timeline
+      providerId: test-provider
       timelineId: admin
     actor:
-      type: MyOS/MyOS Principal Actor
+      type: MyOS/Principal Actor
       accountId: admin
   approveAction:
     type: Coordination/Sequential Workflow Operation

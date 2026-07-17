@@ -2,6 +2,7 @@
 type: "Coordination/Timeline Entry"
 timeline:
   type: "Coordination/Timeline"
+  providerId: "test-provider"
   timelineId: "admin-timeline"
 timestamp: 1700000000000
 actor:

@@ -5,9 +5,10 @@ contracts:
     type: Coordination/Timeline Channel
     timeline:
       type: Coordination/Timeline
+      providerId: test-provider
       timelineId: owner
     actor:
-      type: MyOS/MyOS Principal Actor
+      type: MyOS/Principal Actor
       accountId: owner
   increment:
     type: Coordination/Sequential Workflow Operation

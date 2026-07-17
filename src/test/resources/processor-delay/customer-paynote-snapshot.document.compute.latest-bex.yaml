@@ -15,6 +15,7 @@
       },
       "timeline": {
         "type": "Coordination/Timeline",
+        "providerId": "test-provider",
         "timelineId": "admin-timeline"
       },
       "actor": {

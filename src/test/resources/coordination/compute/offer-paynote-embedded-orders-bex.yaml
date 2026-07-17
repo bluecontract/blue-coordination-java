@@ -23,17 +23,19 @@ contracts:
     type: Coordination/Timeline Channel
     timeline:
       type: Coordination/Timeline
+      providerId: test-provider
       timelineId: customer
     actor:
-      type: MyOS/MyOS Principal Actor
+      type: MyOS/Principal Actor
       accountId: customer
   travelAgencyChannel:
     type: Coordination/Timeline Channel
     timeline:
       type: Coordination/Timeline
+      providerId: test-provider
       timelineId: travel-agency
     actor:
-      type: MyOS/MyOS Principal Actor
+      type: MyOS/Principal Actor
       accountId: travel-agency
   packageParticipants:
     type: Coordination/Composite Timeline Channel
