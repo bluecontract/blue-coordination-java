@@ -5,6 +5,7 @@ import blue.language.model.Node;
 import blue.language.processor.WorkingDocument;
 import blue.language.processor.model.JsonPatch;
 import blue.language.snapshot.FrozenNode;
+import blue.language.utils.MergeReverser;
 import blue.repo.coordination.SequentialWorkflowStep;
 import blue.repo.coordination.UpdateDocument;
 import java.lang.reflect.Method;
@@ -68,6 +69,21 @@ public final class UpdateDocumentStepExecutor implements WorkflowStepExecutor<Up
     }
 
     private List<WorkflowPatchEntry> literalChangeset(UpdateDocument step, StepExecutionContext context) {
+        FrozenNode frozenChangeset = FrozenNodeUtil.property(context.stepFrozenNode(), "changeset");
+        if (frozenChangeset != null && frozenChangeset.getItems() != null) {
+            List<WorkflowPatchEntry> entries =
+                    new ArrayList<WorkflowPatchEntry>(frozenChangeset.getItems().size());
+            MergeReverser mergeReverser = new MergeReverser();
+            for (int i = 0; i < frozenChangeset.getItems().size(); i++) {
+                FrozenNode item = frozenChangeset.getItems().get(i);
+                Node literal = item == null ? null : item.toNode();
+                if (item != null && !item.isStrictCanonical()) {
+                    literal = mergeReverser.reverseToMinimizedOverlay(literal);
+                }
+                entries.add(literalPatchEntry(literal, i, context));
+            }
+            return entries;
+        }
         if (step == null || step.getChangeset() == null) {
             return java.util.Collections.emptyList();
         }
