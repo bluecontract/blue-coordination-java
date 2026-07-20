@@ -310,7 +310,7 @@ class ProcessingEventBindingTest {
     }
 
     @Test
-    void coordinationRegistrationDoesNotReplaceIndependentProcessorMetricsSink() {
+    void coordinationRegistrationPreservesIndependentSinkAndFansOutLanguageMetrics() {
         BexProcessingMetrics processorMetrics = new BexProcessingMetrics();
         BexProcessingMetrics workflowMetrics = new BexProcessingMetrics();
         BlueRepository repository = BlueRepository.latest();
@@ -327,7 +327,7 @@ class ProcessingEventBindingTest {
 
         assertSuccess(result);
         assertEquals(1L, processorMetrics.processEventSnapshotAttempts());
-        assertEquals(0L, workflowMetrics.processEventSnapshotAttempts());
+        assertEquals(1L, workflowMetrics.processEventSnapshotAttempts());
         assertEquals(0L, processorMetrics.computeStepsExecuted());
         assertEquals(1L, workflowMetrics.computeStepsExecuted());
     }

@@ -3,12 +3,9 @@ package blue.coordination.processor.workflow;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.model.Node;
 import blue.language.snapshot.FrozenNode;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 
 final class ComputeDefinitionResolver {
     private final BexProcessingMetrics metrics;
-    private final ConcurrentMap<String, FrozenNode> cache = new ConcurrentHashMap<String, FrozenNode>();
 
     ComputeDefinitionResolver() {
         this(null);
@@ -19,6 +16,12 @@ final class ComputeDefinitionResolver {
     }
 
     FrozenNode resolve(FrozenNode stepNode, StepExecutionContext context) {
+        return resolve(stepNode, context, metrics);
+    }
+
+    FrozenNode resolve(FrozenNode stepNode,
+                       StepExecutionContext context,
+                       BexProcessingMetrics invocationMetrics) {
         FrozenNode definition = FrozenNodeUtil.property(stepNode, "definition");
         if (definition == null || FrozenNodeUtil.isEmpty(definition)) {
             return null;
@@ -26,13 +29,19 @@ final class ComputeDefinitionResolver {
         String text = FrozenNodeUtil.text(definition);
         if (text != null && !text.trim().isEmpty()) {
             String pointer = resolvePointer(text.trim(), context);
-            FrozenNode frozen = cachedFrozenAt(pointer, context);
+            // This lookup is deliberately performed against the current
+            // WorkingDocument on every invocation. The exact returned frozen
+            // identity participates in the Compute plan key, so a definition
+            // changed by an earlier step can never reuse a stale plan.
+            FrozenNode frozen = context.workingResolvedAt(pointer);
             if (frozen == null) {
                 context.processorContext().throwFatal("Compute definition not found: " + text);
                 return null;
             }
+            incrementFrozenDirectHit(invocationMetrics);
             return frozen;
         }
+        incrementFrozenDirectHit(invocationMetrics);
         return definition;
     }
 
@@ -44,12 +53,16 @@ final class ComputeDefinitionResolver {
         String text = NodeUtil.text(definition);
         if (text != null && !text.trim().isEmpty()) {
             String pointer = resolvePointer(text.trim(), context);
-            FrozenNode frozen = cachedFrozenAt(pointer, context);
+            FrozenNode frozen = context.workingResolvedAt(pointer);
             if (frozen == null) {
                 context.processorContext().throwFatal("Compute definition not found: " + text);
                 return null;
             }
+            incrementFrozenDirectHit(metrics);
             return frozen;
+        }
+        if (metrics != null) {
+            metrics.incrementComputeDefinitionMaterializations();
         }
         return FrozenNode.fromResolvedNode(definition);
     }
@@ -65,31 +78,13 @@ final class ComputeDefinitionResolver {
         return appendPointer(parent, reference);
     }
 
-    private FrozenNode cachedFrozenAt(String pointer, StepExecutionContext context) {
-        String key = cacheKey(pointer, context);
-        FrozenNode cached = cache.get(key);
-        if (cached != null) {
-            if (metrics != null) {
-                metrics.incrementComputeDefinitionResolveHits();
-            }
-            return cached;
+    private void incrementFrozenDirectHit(BexProcessingMetrics invocationMetrics) {
+        BexProcessingMetrics activeMetrics = invocationMetrics != null
+                ? invocationMetrics
+                : metrics;
+        if (activeMetrics != null) {
+            activeMetrics.incrementComputeDefinitionFrozenDirectHits();
         }
-        FrozenNode frozen = context.workingResolvedAt(pointer);
-        if (frozen != null) {
-            cache.putIfAbsent(key, frozen);
-        }
-        if (metrics != null) {
-            metrics.incrementComputeDefinitionResolveMisses();
-        }
-        return frozen;
-    }
-
-    private String cacheKey(String pointer, StepExecutionContext context) {
-        FrozenNode contract = context.currentContractFrozenNode();
-        String contractId = contract != null && contract.blueId() != null
-                ? contract.blueId()
-                : String.valueOf(context.processorContext().scopePath()) + ":" + String.valueOf(context.processorContext().contractKey());
-        return contractId + "|" + pointer;
     }
 
     private String currentContractPointer(StepExecutionContext context) {

@@ -17,7 +17,7 @@ final class StaticPayloadValidator {
         return true;
     }
 
-    private static String firstBexOperatorPath(FrozenNode node, String path) {
+    static String firstBexOperatorPath(FrozenNode node, String path) {
         if (node == null) {
             return null;
         }

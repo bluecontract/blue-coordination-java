@@ -817,13 +817,23 @@ class ComputeWorkflowExecutionTest {
                 "          $document: /status"));
 
         Node afterFirst = support.processRun(document).document();
+        long hitsAfterWarmup = 0L;
+        long missesAfterWarmup = 0L;
+        for (BexMetrics item : metrics) {
+            hitsAfterWarmup += item.compileCacheHits();
+            missesAfterWarmup += item.compileCacheMisses();
+        }
+
         support.processRun(afterFirst);
 
-        long hits = 0L;
+        long totalHits = 0L;
+        long totalMisses = 0L;
         for (BexMetrics item : metrics) {
-            hits += item.compileCacheHits();
+            totalHits += item.compileCacheHits();
+            totalMisses += item.compileCacheMisses();
         }
-        assertTrue(hits > 0L);
+        assertTrue(totalHits - hitsAfterWarmup > 0L);
+        assertEquals(0L, totalMisses - missesAfterWarmup);
     }
 
     @Test

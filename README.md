@@ -21,7 +21,7 @@ repositories {
 }
 
 dependencies {
-    implementation "blue.coordination:blue-coordination-java:1.0.0"
+    implementation "blue.coordination:blue-coordination-java:2.0.0-rc.4"
 }
 ```
 
@@ -29,8 +29,8 @@ The project targets Java 8-compatible bytecode, builds with JDK 25, runs tests
 on Java 8, and depends on:
 
 ```groovy
-api "blue.language:blue-language-java:3.1.0-rc.10"
-api "blue.repo:blue-repo-java:3.0.0-rc.8"
+api "blue.language:blue-language-java:3.1.0-rc.11"
+api "blue.repo:blue-repo-java:3.0.0-rc.10"
 api "blue.bex:blue-bex-java:1.1.0-rc.2"
 ```
 
@@ -224,6 +224,33 @@ Run tests:
 ./gradlew test
 ```
 
+Run the focused correctness and bounded-memory suites:
+
+```bash
+./gradlew workflowPlanDifferentialTest
+./gradlew complexFixtureIntegrationTest
+./gradlew memoryIntegrationTest
+```
+
+Each focused task uses one worker capped at 2 GiB. Passing `-PtestJfr`
+runs that focused task on the current modern Gradle JVM and records under
+`build/reports/jfr/`; the normal `test` task continues to run on Java 8.
+
+The released Blue Language dependency is pinned, while local validation can
+override its version, Maven repository, or source checkout without editing the
+build:
+
+```bash
+./gradlew test -PblueLanguageVersion=3.1.0-rc.11
+./gradlew test -PblueLanguageRepository=/absolute/path/to/maven-repository
+./gradlew test -PblueLanguageDir=/absolute/path/to/blue-language-java
+BLUE_LANGUAGE_DIR=/absolute/path/to/blue-language-java ./gradlew test
+```
+
+`-PblueLanguageDir` takes precedence over `BLUE_LANGUAGE_DIR` and uses Gradle
+composite substitution. A configured directory that does not exist fails the
+build instead of silently falling back to Maven Central.
+
 Build jars:
 
 ```bash
@@ -235,6 +262,58 @@ Publish locally:
 ```bash
 ./gradlew publishToMavenLocal
 ```
+
+Stage the artifact without writing outside this repository:
+
+```bash
+./gradlew stageLocalMaven
+```
+
+The staged Maven repository is `build/staging-deploy`.
+
+Run JMH and generate JSON, CSV, Markdown, and environment metadata:
+
+```bash
+./gradlew jmh
+./gradlew jmh -PtestJfr
+```
+
+Reports are written to `build/reports/jmh`. Generic JMH gates are deliberately
+reported as `NOT_CONFIGURED`; operation-level acceptance gates belong to the
+Playground performance driver.
+
+Run black-box Playground validation against a supplied checkout:
+
+```bash
+./gradlew playgroundCompatibilityTest -PplaygroundDir=../blue-playground
+./gradlew playgroundPerformanceTest -PplaygroundDir=../blue-playground
+BLUE_PLAYGROUND_DIR=../blue-playground ./gradlew playgroundCompatibilityTest
+```
+
+These tasks first stage the current artifact, then copy a sanitized Playground
+checkout to `build/black-box-playground`. Dependency and lock-file overlays,
+caches, temporary files, reports, and optional JFR recordings are confined to
+this repository; the supplied Playground checkout remains read-only. The
+compatibility task runs the VetExt mandate/business suites and full Order
+suite. The performance task runs the VetExt performance driver and the full
+Order suite under its existing 2 GiB worker limit. Dependency verification is
+disabled only for this generated copy because its locally staged snapshot is
+not present in the supplied checkout's verification metadata.
+
+VetExt and Order are launched as independent phases and the task returns a
+combined failure after attempting both. Per-phase reports and raw test results
+are preserved under `build/reports/playground`, including when a phase fails or
+its test worker terminates.
+
+Create the reproducible source archive and SHA-256 sidecar:
+
+```bash
+./gradlew sourceArchive
+```
+
+Artifacts are written to `build/distributions`. The performance evidence and
+remaining acceptance work are tracked in
+[`docs/performance/complex-operations-coordination.md`](docs/performance/complex-operations-coordination.md).
 
 ## Test Coverage
 

@@ -14,15 +14,12 @@ import blue.repo.coordination.TriggerEvent;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.LinkedHashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
-public final class SequentialWorkflowRunner {
+public final class SequentialWorkflowRunner implements AutoCloseable {
     private final List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors;
     private final BexProcessingMetrics metrics;
+    private final SequentialWorkflowPlanCache planCache;
 
     public SequentialWorkflowRunner() {
         this(defaultExecutors());
@@ -34,11 +31,24 @@ public final class SequentialWorkflowRunner {
 
     private SequentialWorkflowRunner(List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors,
                                      BexProcessingMetrics metrics) {
+        this(executors,
+                metrics,
+                SequentialWorkflowPlanCache.DEFAULT_MAX_ENTRIES,
+                SequentialWorkflowPlanCache.DEFAULT_MAX_WEIGHT_BYTES);
+    }
+
+    SequentialWorkflowRunner(List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors,
+                             BexProcessingMetrics metrics,
+                             int planCacheMaxEntries,
+                             long planCacheMaxWeightBytes) {
         if (executors == null) {
             throw new IllegalArgumentException("executors must not be null");
         }
         this.executors = Collections.unmodifiableList(new ArrayList<WorkflowStepExecutor<? extends SequentialWorkflowStep>>(executors));
         this.metrics = metrics;
+        this.planCache = new SequentialWorkflowPlanCache(planCacheMaxEntries,
+                planCacheMaxWeightBytes,
+                metrics);
     }
 
     public void execute(SequentialWorkflow workflow, ProcessorExecutionContext context) {
@@ -47,36 +57,43 @@ public final class SequentialWorkflowRunner {
             if (workflow.getSteps() == null) {
                 return;
             }
-            Map<String, Object> stepResults = new LinkedHashMap<String, Object>();
-            Set<String> handledChangesetSteps = new LinkedHashSet<String>();
             FrozenNode contractNode = rawContractNode(context);
-            List<FrozenNode> stepNodes = stepNodes(contractNode);
             List<SequentialWorkflowStep> steps = workflow.getSteps();
-            WorkingDocument workingDocument = rootWorkingDocument(context);
-            for (int i = 0; i < steps.size(); i++) {
-                SequentialWorkflowStep step = steps.get(i);
-                FrozenNode stepNode = i < stepNodes.size() ? stepNodes.get(i) : null;
-                if (metrics != null) {
-                    metrics.incrementWorkflowStepsExecuted();
-                }
-                WorkflowStepResult result = executeStep(workflow,
-                        step,
-                        stepNode,
-                        contractNode,
-                        i,
-                        stepResults,
-                        handledChangesetSteps,
-                        context,
-                        workingDocument);
-                if (result != null && result.hasValue()) {
-                    String key = stepKey(stepNode, i);
-                    stepResults.put(key, result.value());
-                    if (result.changesetHandled()) {
-                        handledChangesetSteps.add(key);
+            SequentialWorkflowPlan plan = workflowPlan(contractNode, steps);
+            WorkflowExecutionState executionState = new WorkflowExecutionState();
+            try (WorkingDocument workingDocument = rootWorkingDocument(context)) {
+                for (int i = 0; i < steps.size(); i++) {
+                    SequentialWorkflowStep step = steps.get(i);
+                    SequentialWorkflowPlan.StepPlan stepPlan = i < plan.stepCount()
+                            ? plan.step(i)
+                            : SequentialWorkflowPlan.planStep(step,
+                                    null,
+                                    i,
+                                    executors,
+                                    metrics);
+                    if (!stepPlan.matches(step)) {
+                        stepPlan = SequentialWorkflowPlan.planStep(step,
+                                stepPlan.frozenStep(),
+                                i,
+                                executors,
+                                metrics);
                     }
-                }
-                if (result != null && result.isTerminal()) {
-                    break;
+                    if (metrics != null) {
+                        metrics.incrementWorkflowStepsExecuted();
+                    }
+                    WorkflowStepResult result = executeStep(workflow,
+                            step,
+                            stepPlan,
+                            contractNode,
+                            executionState,
+                            context,
+                            workingDocument);
+                    if (result != null && result.hasValue()) {
+                        executionState.record(stepPlan.key(), result.value(), result.changesetHandled());
+                    }
+                    if (result != null && result.isTerminal()) {
+                        break;
+                    }
                 }
             }
         } finally {
@@ -88,33 +105,34 @@ public final class SequentialWorkflowRunner {
 
     private WorkflowStepResult executeStep(SequentialWorkflow workflow,
                                            SequentialWorkflowStep step,
-                                           FrozenNode stepNode,
+                                           SequentialWorkflowPlan.StepPlan stepPlan,
                                            FrozenNode contractNode,
-                                           int stepIndex,
-                                           Map<String, Object> stepResults,
-                                           Set<String> handledChangesetSteps,
+                                           WorkflowExecutionState executionState,
                                            ProcessorExecutionContext context,
                                            WorkingDocument workingDocument) {
         if (step == null) {
             context.throwFatal("Unsupported null sequential workflow step");
             return WorkflowStepResult.none();
         }
-        for (WorkflowStepExecutor<? extends SequentialWorkflowStep> executor : executors) {
-            if (executor.supports(step)) {
-                StepExecutionContext stepContext = new StepExecutionContext(context,
-                        workflow,
-                        step,
-                        stepNode,
-                        contractNode,
-                        stepIndex,
-                        stepResults,
-                        handledChangesetSteps,
-                        workingDocument);
-                return executeSupported(executor, step, stepContext);
-            }
+        WorkflowStepExecutor<? extends SequentialWorkflowStep> executor = stepPlan.executor();
+        if (executor == null) {
+            context.throwFatal("Unsupported sequential workflow step: " + stepPlan.kind());
+            return WorkflowStepResult.none();
         }
-        context.throwFatal("Unsupported sequential workflow step: " + stepName(step));
-        return WorkflowStepResult.none();
+        WorkflowExecutionState.Snapshot stateView = executionState.snapshotView();
+        if (metrics != null) {
+            metrics.incrementWorkflowStepResultViewHits();
+        }
+        StepExecutionContext stepContext = new StepExecutionContext(context,
+                workflow,
+                step,
+                stepPlan.frozenStep(),
+                contractNode,
+                stepPlan.index(),
+                stateView,
+                stepPlan.staticUpdatePlan(),
+                workingDocument);
+        return executeSupported(executor, step, stepContext);
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
@@ -122,19 +140,6 @@ public final class SequentialWorkflowRunner {
                                                 SequentialWorkflowStep step,
                                                 StepExecutionContext context) {
         return executor.execute(step, context);
-    }
-
-    private String stepName(SequentialWorkflowStep step) {
-        if (step instanceof TriggerEvent) {
-            return "Coordination/Trigger Event";
-        }
-        if (step instanceof Compute) {
-            return "Coordination/Compute";
-        }
-        if (step instanceof TerminateProcessing) {
-            return "Coordination/Terminate Processing";
-        }
-        return step.getClass().getName();
     }
 
     private static List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> defaultExecutors() {
@@ -186,22 +191,55 @@ public final class SequentialWorkflowRunner {
                 new UpdateDocumentStepExecutor(metrics));
     }
 
-    private List<FrozenNode> stepNodes(FrozenNode contractNode) {
-        if (contractNode == null || contractNode.getProperties() == null) {
-            return Collections.emptyList();
+    private SequentialWorkflowPlan workflowPlan(final FrozenNode contractNode,
+                                                 final List<SequentialWorkflowStep> steps) {
+        if (contractNode == null) {
+            if (metrics != null) {
+                metrics.incrementWorkflowPlanCacheMisses();
+            }
+            SequentialWorkflowPlan plan = SequentialWorkflowPlan.build(null, steps, executors, metrics);
+            if (metrics != null) {
+                metrics.incrementWorkflowPlansBuilt();
+            }
+            return plan;
         }
-        FrozenNode steps = contractNode.getProperties().get("steps");
-        if (steps == null || steps.getItems() == null) {
-            return Collections.emptyList();
-        }
-        return steps.getItems();
+        return planCache.getOrBuild(contractNode.resolvedStructuralKey(),
+                new SequentialWorkflowPlanCache.PlanFactory() {
+                    @Override
+                    public SequentialWorkflowPlan build() {
+                        return SequentialWorkflowPlan.build(contractNode, steps, executors, metrics);
+                    }
+                });
     }
 
-    private String stepKey(FrozenNode stepNode, int index) {
-        if (stepNode != null && stepNode.getName() != null && !stepNode.getName().trim().isEmpty()) {
-            return stepNode.getName().trim();
+    /** Clears all immutable workflow plans retained by this runner. */
+    public void clearCaches() {
+        planCache.clear();
+        for (WorkflowStepExecutor<? extends SequentialWorkflowStep> executor : executors) {
+            if (executor instanceof ComputeStepExecutor) {
+                ((ComputeStepExecutor) executor).clearPlanCache();
+            }
         }
-        return "Step" + (index + 1);
+    }
+
+    /** Current number of retained workflow plans. */
+    public int workflowPlanCacheSize() {
+        return planCache.size();
+    }
+
+    /** Current approximate retained workflow-plan weight. */
+    public long workflowPlanCacheWeightBytes() {
+        return planCache.weightBytes();
+    }
+
+    @Override
+    public void close() {
+        planCache.close();
+        for (WorkflowStepExecutor<? extends SequentialWorkflowStep> executor : executors) {
+            if (executor instanceof ComputeStepExecutor) {
+                ((ComputeStepExecutor) executor).close();
+            }
+        }
     }
 
     private FrozenNode rawContractNode(ProcessorExecutionContext context) {

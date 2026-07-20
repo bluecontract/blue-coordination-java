@@ -21,6 +21,7 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
@@ -340,6 +341,50 @@ class SequentialWorkflowExecutionTest {
 
         assertCounter(processed, 0);
         assertEquals(Boolean.TRUE, sawNullResult.get());
+    }
+
+    @Test
+    void workflowPlanReusesExactContractAndReplansChangedContract() {
+        AtomicInteger supportsCalls = new AtomicInteger();
+        WorkflowStepExecutor<TriggerEvent> executor = new WorkflowStepExecutor<TriggerEvent>() {
+            @Override
+            public boolean supports(SequentialWorkflowStep step) {
+                supportsCalls.incrementAndGet();
+                return step instanceof TriggerEvent;
+            }
+
+            @Override
+            public WorkflowStepResult execute(TriggerEvent step, StepExecutionContext context) {
+                return WorkflowStepResult.none();
+            }
+        };
+        SequentialWorkflowRunner runner = new SequentialWorkflowRunner(
+                Arrays.<WorkflowStepExecutor<? extends SequentialWorkflowStep>>asList(executor));
+        Fixture fixture = configuredFixture(null, runner);
+
+        Node first = initializedDocument(fixture, directWorkflowStepsDocument(fixture.repository,
+                0,
+                "same contract",
+                triggerEventStep("ignored")));
+        Node afterFirst = processChat(fixture, first, "owner", 1, "run").document();
+        processChat(fixture, afterFirst, "owner", 2, "run");
+        Node equivalent = initializedDocument(fixture, directWorkflowStepsDocument(fixture.repository,
+                0,
+                "same contract",
+                triggerEventStep("ignored")));
+        processChat(fixture, equivalent, "owner", 1, "run");
+        Node changed = initializedDocument(fixture, directWorkflowStepsDocument(fixture.repository,
+                0,
+                "changed contract",
+                triggerEventStep("ignored")));
+        processChat(fixture, changed, "owner", 1, "run");
+
+        assertEquals(2, supportsCalls.get());
+        assertEquals(2, runner.workflowPlanCacheSize());
+        assertTrue(runner.workflowPlanCacheWeightBytes() > 0L);
+        runner.clearCaches();
+        assertEquals(0, runner.workflowPlanCacheSize());
+        assertEquals(0L, runner.workflowPlanCacheWeightBytes());
     }
 
     private static Node processOperationRequest(Fixture fixture,
