@@ -1,9 +1,11 @@
 package blue.coordination.processor.workflow;
 
 import blue.coordination.processor.bex.BexProcessingMetrics;
+import blue.language.model.Node;
 import blue.language.processor.model.FrozenJsonPatch;
 import blue.language.processor.model.JsonPatch;
 import blue.language.snapshot.FrozenNode;
+import blue.language.utils.MergeReverser;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -46,9 +48,15 @@ final class StaticUpdatePlan {
             return invalid("Update Document changeset must be a static patch list");
         }
         List<PatchTemplate> templates = new ArrayList<PatchTemplate>(changeset.getItems().size());
+        MergeReverser mergeReverser = new MergeReverser();
         long weight = 96L;
         for (int index = 0; index < changeset.getItems().size(); index++) {
             FrozenNode item = changeset.getItems().get(index);
+            boolean resolvedConstruction = item != null && !item.isStrictCanonical();
+            if (resolvedConstruction) {
+                Node authoredItem = mergeReverser.reverseToMinimizedOverlay(item.toNode());
+                item = authoredItem != null ? FrozenNode.fromNode(authoredItem) : null;
+            }
             Map<String, FrozenNode> properties = item != null ? item.getProperties() : null;
             if (properties == null) {
                 return invalid("Update Document changeset entry " + index
@@ -93,9 +101,10 @@ final class StaticUpdatePlan {
                     // workflow graph in resolved construction mode. Preserve the
                     // exact visible authored shape and pay this conversion once.
                     value = FrozenNode.fromNode(value.toNode());
-                    if (metrics != null) {
-                        metrics.addMetric("staticUpdateResolvedValueCanonicalizations", 1L);
-                    }
+                    resolvedConstruction = true;
+                }
+                if (resolvedConstruction && metrics != null) {
+                    metrics.addMetric("staticUpdateResolvedValueCanonicalizations", 1L);
                 }
             }
             templates.add(new PatchTemplate(patchOp, path.value, value));
