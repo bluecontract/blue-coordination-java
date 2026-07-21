@@ -446,7 +446,7 @@ class FrozenUpdateDocumentDifferentialTest {
         }
     }
 
-    /** Test-only reproduction of the pre-rc15 mutable Language handoff. */
+    /** Test-only reproduction of the legacy mutable Language handoff. */
     private static final class LegacyMutableUpdateExecutor
             implements WorkflowStepExecutor<UpdateDocument> {
         private final BexProcessingMetrics metrics;

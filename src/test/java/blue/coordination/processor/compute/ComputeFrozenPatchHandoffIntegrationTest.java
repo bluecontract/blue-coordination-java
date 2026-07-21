@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Focused proof that built-in Compute effects use the rc15 frozen patch boundary. */
+/** Focused proof that built-in Compute effects use the frozen patch boundary. */
 class ComputeFrozenPatchHandoffIntegrationTest {
 
     @Test

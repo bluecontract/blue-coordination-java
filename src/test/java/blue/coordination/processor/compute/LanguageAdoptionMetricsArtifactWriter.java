@@ -22,8 +22,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
-/** Deterministic JSON/CSV serialization for representative rc15-adoption metrics. */
-final class LanguageRc15MetricsArtifactWriter {
+/** Deterministic JSON/CSV serialization for representative Language-adoption metrics. */
+final class LanguageAdoptionMetricsArtifactWriter {
     static final String JSON_FILE_NAME = "scenario-metrics.json";
     static final String CSV_FILE_NAME = "scenario-metrics.csv";
     private static final String CAPTURE_PHASE =
@@ -41,7 +41,7 @@ final class LanguageRc15MetricsArtifactWriter {
             "frozenPatchValuesMaterialized"
     };
 
-    private LanguageRc15MetricsArtifactWriter() {
+    private LanguageAdoptionMetricsArtifactWriter() {
     }
 
     static Scenario capture(String scenarioId,

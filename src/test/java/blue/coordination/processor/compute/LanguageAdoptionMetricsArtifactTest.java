@@ -36,32 +36,32 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Produces deterministic machine-readable evidence for the rc15 adoption scenarios. */
-class LanguageRc15MetricsArtifactTest {
+/** Produces deterministic machine-readable evidence for the Language-adoption scenarios. */
+class LanguageAdoptionMetricsArtifactTest {
     private static final String PAYNOTE_RESOURCE =
             "/processor-delay/paynote-resale-reduced-bex.yaml";
     private static final Path REPORT_DIRECTORY = Paths.get(System.getProperty("user.dir"),
-            "build", "reports", "language-rc15-adoption");
+            "build", "reports", "language-adoption");
 
     @Test
     void writesJsonAndCsvForRequiredRepresentativeScenarios() throws Exception {
-        List<LanguageRc15MetricsArtifactWriter.Scenario> scenarios = Arrays.asList(
+        List<LanguageAdoptionMetricsArtifactWriter.Scenario> scenarios = Arrays.asList(
                 staticUpdateDocumentScenario(),
                 multiPatchComputeScenario(),
                 payNoteFixtureScenario(),
                 mandateFixtureScenario());
 
-        LanguageRc15MetricsArtifactWriter.write(REPORT_DIRECTORY, scenarios);
+        LanguageAdoptionMetricsArtifactWriter.write(REPORT_DIRECTORY, scenarios);
 
-        Path json = REPORT_DIRECTORY.resolve(LanguageRc15MetricsArtifactWriter.JSON_FILE_NAME);
-        Path csv = REPORT_DIRECTORY.resolve(LanguageRc15MetricsArtifactWriter.CSV_FILE_NAME);
+        Path json = REPORT_DIRECTORY.resolve(LanguageAdoptionMetricsArtifactWriter.JSON_FILE_NAME);
+        Path csv = REPORT_DIRECTORY.resolve(LanguageAdoptionMetricsArtifactWriter.CSV_FILE_NAME);
         assertTrue(Files.isRegularFile(json));
         assertTrue(Files.isRegularFile(csv));
         assertJsonScenarios(json);
         assertCsvScenarios(csv);
     }
 
-    private static LanguageRc15MetricsArtifactWriter.Scenario staticUpdateDocumentScenario() {
+    private static LanguageAdoptionMetricsArtifactWriter.Scenario staticUpdateDocumentScenario() {
         OwnedScenario fixture = new OwnedScenario();
         try {
             DocumentProcessingResult initialized = fixture.support.initialize(fixture.support.yaml(
@@ -85,7 +85,7 @@ class LanguageRc15MetricsArtifactTest {
             assertEquals(BigInteger.ONE, result.document().get("/count"));
             assertEquals(2L, fixture.metrics.patchesApplied());
             assertTrue(metric(fixture.metrics, "frozenPatchesHandedToLanguage") >= 2L);
-            return LanguageRc15MetricsArtifactWriter.capture(
+            return LanguageAdoptionMetricsArtifactWriter.capture(
                     "static-update-document",
                     "static-update-document",
                     "inline Coordination/Update Document with two authored patches",
@@ -97,7 +97,7 @@ class LanguageRc15MetricsArtifactTest {
         }
     }
 
-    private static LanguageRc15MetricsArtifactWriter.Scenario multiPatchComputeScenario() {
+    private static LanguageAdoptionMetricsArtifactWriter.Scenario multiPatchComputeScenario() {
         OwnedScenario fixture = new OwnedScenario();
         try {
             DocumentProcessingResult initialized = fixture.support.initialize(fixture.support.yaml(
@@ -131,7 +131,7 @@ class LanguageRc15MetricsArtifactTest {
             assertEquals(3L, fixture.metrics.patchesApplied());
             assertEquals(1L, fixture.metrics.updateBatchPatchApplications());
             assertEquals(0L, fixture.metrics.updateIndividualPatchApplications());
-            return LanguageRc15MetricsArtifactWriter.capture(
+            return LanguageAdoptionMetricsArtifactWriter.capture(
                     "multi-patch-compute",
                     "multi-patch-compute",
                     "inline Coordination/Compute accumulated three-patch BEX changeset",
@@ -143,7 +143,7 @@ class LanguageRc15MetricsArtifactTest {
         }
     }
 
-    private static LanguageRc15MetricsArtifactWriter.Scenario payNoteFixtureScenario() {
+    private static LanguageAdoptionMetricsArtifactWriter.Scenario payNoteFixtureScenario() {
         OwnedScenario fixture = new OwnedScenario();
         try {
             DocumentProcessingResult initialized = fixture.support.blue.initializeDocument(
@@ -163,7 +163,7 @@ class LanguageRc15MetricsArtifactTest {
             assertSuccess(result);
             assertEquals(Boolean.TRUE,
                     result.document().get("/orders/package-order-a/hotelOrder/resalePlaced"));
-            return LanguageRc15MetricsArtifactWriter.capture(
+            return LanguageAdoptionMetricsArtifactWriter.capture(
                     "paynote-resale-fixture",
                     "paynote-fixture",
                     "classpath:" + PAYNOTE_RESOURCE,
@@ -175,7 +175,7 @@ class LanguageRc15MetricsArtifactTest {
         }
     }
 
-    private static LanguageRc15MetricsArtifactWriter.Scenario mandateFixtureScenario() {
+    private static LanguageAdoptionMetricsArtifactWriter.Scenario mandateFixtureScenario() {
         OwnedScenario fixture = new OwnedScenario();
         try {
             Node mandate = mandateDocument();
@@ -207,7 +207,7 @@ class LanguageRc15MetricsArtifactTest {
             assertSuccess(result);
             assertEquals(BigInteger.valueOf(7_000_001L),
                     result.document().get("/authorityConfirmedAt"));
-            return LanguageRc15MetricsArtifactWriter.capture(
+            return LanguageAdoptionMetricsArtifactWriter.capture(
                     "mandate-authority-confirmation",
                     "mandate-fixture",
                     "generated Mandate authority-confirmation lifecycle fixture",

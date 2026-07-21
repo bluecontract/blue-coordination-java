@@ -40,7 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** End-to-end differential for the rc15 frozen Compute patch handoff. */
+/** End-to-end differential for the frozen Compute patch handoff. */
 class FrozenComputeDifferentialTest {
 
     @Test
@@ -405,7 +405,7 @@ class FrozenComputeDifferentialTest {
     }
 
     /**
-     * Test-only reproduction of the pre-rc15 mutable Language patch handoff.
+     * Test-only reproduction of the legacy mutable Language patch handoff.
      * Planning and BEX execution stay shared so the differential isolates the
      * mutable-versus-frozen boundary under test.
      */

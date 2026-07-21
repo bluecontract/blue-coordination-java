@@ -15,8 +15,7 @@ plugins {
 group = 'blue.coordination'
 version = determineProjectVersion()
 
-def blueLanguageVersion = providers.gradleProperty('blueLanguageVersion')
-        .getOrElse('3.1.0-rc.11')
+def blueLanguageVersion = '3.1.0-rc.16'
 def binaryCompatibilityBaselineVersion = providers.gradleProperty(
         'binaryCompatibilityBaselineVersion').getOrElse('2.0.0-rc.4')
 
@@ -25,20 +24,24 @@ base {
 }
 
 repositories {
-    def blueLanguageRepository = providers.gradleProperty('blueLanguageRepository').orNull
-    if (blueLanguageRepository) {
-        maven {
-            name = 'blueLanguageOverride'
-            url = uri(blueLanguageRepository)
-            content {
-                includeModule 'blue.language', 'blue-language-java'
+    mavenCentral()
+    exclusiveContent {
+        forRepository {
+            ivy {
+                name = 'releasedCoordinationBaseline'
+                url = uri('https://repo1.maven.org/maven2')
+                patternLayout {
+                    artifact 'blue/coordination/blue-coordination-java/[revision]/blue-coordination-java-[revision].[ext]'
+                }
+                metadataSources {
+                    artifact()
+                }
             }
         }
+        filter {
+            includeModule 'blue.coordination.baseline', 'blue-coordination-java'
+        }
     }
-    if (!System.getenv('CI')) {
-        mavenLocal()
-    }
-    mavenCentral()
 }
 
 java {
@@ -73,7 +76,8 @@ dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 
-    binaryCompatibilityBaseline "blue.coordination:blue-coordination-java:${binaryCompatibilityBaselineVersion}"
+    // Alias the released artifact so Gradle never substitutes the current root project.
+    binaryCompatibilityBaseline "blue.coordination.baseline:blue-coordination-java:${binaryCompatibilityBaselineVersion}"
 }
 
 compileTestJava {
@@ -179,14 +183,14 @@ tasks.register('memoryIntegrationTest', Test) { focusedTest ->
     ])
 }
 
-tasks.register('languageRc15MetricsArtifactTest', Test) { focusedTest ->
-    description = 'Runs the four representative rc15 scenarios and writes deterministic JSON/CSV metrics evidence.'
+tasks.register('languageAdoptionMetricsArtifactTest', Test) { focusedTest ->
+    description = 'Runs four representative Language-adoption scenarios and writes deterministic JSON/CSV metrics evidence.'
     configureFocusedTest(focusedTest, [
-            'blue.coordination.processor.compute.LanguageRc15MetricsArtifactTest'
+            'blue.coordination.processor.compute.LanguageAdoptionMetricsArtifactTest'
     ])
     outputs.files(
-            layout.buildDirectory.file('reports/language-rc15-adoption/scenario-metrics.json'),
-            layout.buildDirectory.file('reports/language-rc15-adoption/scenario-metrics.csv'))
+            layout.buildDirectory.file('reports/language-adoption/scenario-metrics.json'),
+            layout.buildDirectory.file('reports/language-adoption/scenario-metrics.csv'))
 }
 
 // Minimal class-file reader used by the verification tasks below. Keeping this
@@ -594,12 +598,13 @@ tasks.named('jmh') {
 }
 
 ext.genResourcesDir = file("$buildDir/generated-resources")
+def buildPropertiesVersion = project.version.toString()
 task generateBuildProperties {
     ext.buildPropertiesFile = file("$genResourcesDir/blue/coordination/build.properties")
-    inputs.property('buildVersion', project.version.toString())
+    inputs.property('buildVersion', buildPropertiesVersion)
     outputs.file(buildPropertiesFile)
     doLast {
-        buildPropertiesFile.text = ("blue-coordination-java.build.version=" + project.version + "\n"
+        buildPropertiesFile.text = ("blue-coordination-java.build.version=" + buildPropertiesVersion + "\n"
                 + "blue-coordination-java.build.timestamp=" + new Date().format("yyyy-MM-dd'T'HH:mm:ssZ"))
     }
 }
@@ -679,7 +684,6 @@ tasks.register('sourceArchive', Zip) {
         include 'gradlew'
         include 'gradlew.bat'
         include 'docs/**'
-        include 'scripts/**'
         include 'src/**'
         exclude '**/.DS_Store'
         exclude '**/*.db'
@@ -711,248 +715,11 @@ tasks.register('sourceArchive', Zip) {
     }
 }
 
-def configuredPlaygroundDir = providers.gradleProperty('playgroundDir')
-        .orElse(providers.environmentVariable('BLUE_PLAYGROUND_DIR'))
-def blackBoxPlaygroundDir = layout.buildDirectory.dir('black-box-playground')
-def blackBoxStagingRepository = layout.buildDirectory.dir('staging-deploy')
-
-def validatePlaygroundDir = tasks.register('validatePlaygroundDir') {
-    group = 'verification'
-    description = 'Validates the read-only Blue Playground source used by black-box tasks.'
-    doLast {
-        if (!configuredPlaygroundDir.isPresent()) {
-            throw new GradleException(
-                    'Set -PplaygroundDir=/path/to/blue-playground or BLUE_PLAYGROUND_DIR before running Playground tasks.')
-        }
-        def source = file(configuredPlaygroundDir.get()).canonicalFile
-        def destination = blackBoxPlaygroundDir.get().asFile.canonicalFile
-        if (!source.isDirectory()) {
-            throw new GradleException("Configured Blue Playground directory does not exist: ${source}")
-        }
-        if (!new File(source, 'gradlew').isFile()
-                || !new File(source, 'build.gradle.kts').isFile()
-                || !new File(source, 'gradle/libs.versions.toml').isFile()) {
-            throw new GradleException("Configured directory is not a supported Blue Playground checkout: ${source}")
-        }
-        if (source == destination || source.toPath().startsWith(destination.toPath())) {
-            throw new GradleException('The Blue Playground source must be separate from build/black-box-playground.')
-        }
-    }
-}
-
-def publishBlackBoxArtifact = tasks.named('publishMavenPublicationToMavenRepository')
-publishBlackBoxArtifact.configure {
-    mustRunAfter validatePlaygroundDir
-}
-
 def stageLocalMaven = tasks.register('stageLocalMaven') {
     group = 'publishing'
     description = 'Publishes the current Coordination artifact into build/staging-deploy.'
-    dependsOn publishBlackBoxArtifact
+    dependsOn tasks.named('publishMavenPublicationToMavenRepository')
 }
-stageLocalMaven.configure {
-    mustRunAfter validatePlaygroundDir
-}
-
-def prepareBlackBoxPlayground = tasks.register('prepareBlackBoxPlayground', Sync) {
-    group = 'verification'
-    description = 'Copies a sanitized Blue Playground checkout under this project build directory.'
-    dependsOn validatePlaygroundDir
-    mustRunAfter stageLocalMaven
-    // The overlay intentionally mutates only the generated copy. Re-sync on
-    // every black-box run so a prior overlay can never become the next input.
-    outputs.upToDateWhen { false }
-    doFirst {
-        // A previous copied build may contain node_modules/.bin symlinks.
-        // Remove only this managed build output before Sync inspects it.
-        project.delete(blackBoxPlaygroundDir.get().asFile)
-    }
-    from {
-        configuredPlaygroundDir.isPresent() ? file(configuredPlaygroundDir.get()) : []
-    }
-    into blackBoxPlaygroundDir
-    includeEmptyDirs = false
-    exclude '**/.git', '**/.git/**'
-    exclude '**/.gradle', '**/.gradle/**'
-    exclude '**/build', '**/build/**'
-    exclude '**/node_modules', '**/node_modules/**'
-    exclude 'db', 'db/**'
-    exclude 'dumps', 'dumps/**'
-    exclude 'logs', 'logs/**'
-    exclude 'recordings', 'recordings/**'
-    exclude '**/*.db', '**/*.hprof', '**/*.jfr', '**/*.log', '**/*.zip'
-}
-
-def overlayBlackBoxPlayground = tasks.register('overlayBlackBoxPlayground') {
-    group = 'verification'
-    description = 'Overlays staged Coordination and Blue Language versions only in the copied Playground.'
-    dependsOn stageLocalMaven, prepareBlackBoxPlayground
-    inputs.property('coordinationVersion', project.version.toString())
-    inputs.property('blueLanguageVersion', blueLanguageVersion)
-    inputs.file('scripts/playground-local.init.gradle')
-    outputs.upToDateWhen { false }
-    doLast {
-        def destination = blackBoxPlaygroundDir.get().asFile
-        def buildFile = new File(destination, 'build.gradle.kts')
-        def catalogFile = new File(destination, 'gradle/libs.versions.toml')
-        def lockFile = new File(destination, 'gradle.lockfile')
-        def versionGuardFile = new File(destination,
-                'src/main/java/com/blue/playground/blue/ResolvedBlueVersions.java')
-        [buildFile, catalogFile, lockFile, versionGuardFile].each { required ->
-            if (!required.isFile()) {
-                throw new GradleException("Copied Playground is missing required file: ${required}")
-            }
-        }
-
-        def replaceCoordinateVersion = { File target, String coordinate, String replacementVersion ->
-            def pattern = java.util.regex.Pattern.compile(
-                    java.util.regex.Pattern.quote(coordinate) + '[^\\s"\'=,\\)]+')
-            def content = target.getText('UTF-8')
-            def matcher = pattern.matcher(content)
-            if (!matcher.find()) {
-                throw new GradleException("Could not locate ${coordinate} in copied file ${target}")
-            }
-            target.setText(matcher.replaceAll(java.util.regex.Matcher.quoteReplacement(
-                    coordinate + replacementVersion)), 'UTF-8')
-        }
-        def replaceCatalogVersion = { File target, String key, String replacementVersion ->
-            def pattern = java.util.regex.Pattern.compile(
-                    '(?m)^(\\s*' + java.util.regex.Pattern.quote(key) + '\\s*=\\s*")[^"]+')
-            def content = target.getText('UTF-8')
-            def matcher = pattern.matcher(content)
-            if (!matcher.find()) {
-                throw new GradleException("Could not locate ${key} in copied version catalog ${target}")
-            }
-            def replacement = matcher.group(1) + replacementVersion
-            target.setText(matcher.replaceFirst(java.util.regex.Matcher.quoteReplacement(replacement)), 'UTF-8')
-        }
-        def catalogVersion = { File target, String key ->
-            def pattern = java.util.regex.Pattern.compile(
-                    '(?m)^\s*' + java.util.regex.Pattern.quote(key) + '\s*=\s*"([^"]+)"')
-            def matcher = pattern.matcher(target.getText('UTF-8'))
-            if (!matcher.find()) {
-                throw new GradleException("Could not read ${key} from copied version catalog ${target}")
-            }
-            matcher.group(1)
-        }
-        def replaceLiteral = { File target, String currentValue, String replacementValue ->
-            if (currentValue == replacementValue) {
-                return
-            }
-            def content = target.getText('UTF-8')
-            if (!content.contains(currentValue)) {
-                throw new GradleException("Could not locate ${currentValue} in copied file ${target}")
-            }
-            target.setText(content.replace(currentValue, replacementValue), 'UTF-8')
-        }
-
-        def originalCoordinationVersion = catalogVersion(catalogFile, 'blueCoordination')
-        def originalLanguageVersion = catalogVersion(catalogFile, 'blueLanguage')
-        replaceLiteral(buildFile, originalCoordinationVersion, project.version.toString())
-        replaceLiteral(buildFile, originalLanguageVersion, blueLanguageVersion)
-        replaceLiteral(versionGuardFile, originalCoordinationVersion, project.version.toString())
-        replaceLiteral(versionGuardFile, originalLanguageVersion, blueLanguageVersion)
-
-        if (project.version.toString().endsWith('-SNAPSHOT')) {
-            def guardSource = versionGuardFile.getText('UTF-8')
-            def exactGuard = 'if (!location.contains(artifact + "-" + version + ".jar")) {'
-            def snapshotAwareGuard = '''boolean exactJar = location.contains(artifact + "-" + version + ".jar");
-            boolean versionedMavenPath = location.contains("/" + version + "/" + artifact + "-");
-            if (!exactJar && !versionedMavenPath) {'''
-            if (!guardSource.contains(exactGuard)) {
-                throw new GradleException("Could not locate runtime version guard in copied file ${versionGuardFile}")
-            }
-            versionGuardFile.setText(guardSource.replace(exactGuard, snapshotAwareGuard), 'UTF-8')
-        }
-
-        replaceCoordinateVersion(buildFile,
-                'blue.coordination:blue-coordination-java:', project.version.toString())
-        replaceCoordinateVersion(buildFile,
-                'blue.language:blue-language-java:', blueLanguageVersion)
-        replaceCoordinateVersion(lockFile,
-                'blue.coordination:blue-coordination-java:', project.version.toString())
-        replaceCoordinateVersion(lockFile,
-                'blue.language:blue-language-java:', blueLanguageVersion)
-        replaceCatalogVersion(catalogFile, 'blueCoordination', project.version.toString())
-        replaceCatalogVersion(catalogFile, 'blueLanguage', blueLanguageVersion)
-
-        java.nio.file.Files.copy(
-                file('scripts/playground-local.init.gradle').toPath(),
-                new File(destination, 'coordination-local.init.gradle').toPath(),
-                java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-        new File(destination, 'coordination-overlay.properties').setText(
-                "blueCoordinationVersion=${project.version}\n"
-                        + "blueLanguageVersion=${blueLanguageVersion}\n"
-                        + "stagingRepository=${blackBoxStagingRepository.get().asFile.toURI()}\n",
-                'UTF-8')
-    }
-}
-
-def registerPlaygroundSuite = { String taskName, String suite, String taskDescription ->
-    def playgroundTask = tasks.register(taskName, Exec) { suiteTask ->
-        group = 'verification'
-        description = taskDescription
-        dependsOn overlayBlackBoxPlayground
-        outputs.upToDateWhen { false }
-        doFirst {
-            def cacheRoot = layout.buildDirectory.dir('black-box-gradle-user-home').get().asFile
-            def npmCache = layout.buildDirectory.dir('black-box-npm-cache').get().asFile
-            def tempRoot = layout.buildDirectory.dir('black-box-tmp').get().asFile
-            def jfrRoot = layout.buildDirectory.dir("reports/jfr/${taskName}").get().asFile
-            [cacheRoot, npmCache, tempRoot].each { it.mkdirs() }
-            if (testJfrEnabled) {
-                jfrRoot.mkdirs()
-            }
-            environment 'GRADLE_USER_HOME', cacheRoot.absolutePath
-            environment 'npm_config_cache', npmCache.absolutePath
-            environment 'XDG_CACHE_HOME', new File(cacheRoot, 'xdg').absolutePath
-            environment 'TMPDIR', tempRoot.absolutePath
-            environment 'TEMP', tempRoot.absolutePath
-            environment 'TMP', tempRoot.absolutePath
-            commandLine 'bash', file('scripts/run-playground-suite.sh').absolutePath,
-                    suite,
-                    blackBoxPlaygroundDir.get().asFile.absolutePath,
-                    blackBoxStagingRepository.get().asFile.toURI().toString(),
-                    project.version.toString(),
-                    blueLanguageVersion,
-                    testJfrEnabled ? jfrRoot.absolutePath : ''
-        }
-    }
-    def reportTask = tasks.register("${taskName}Reports") {
-        group = 'verification'
-        description = "Preserves ${suite} Playground reports even when its acceptance task fails."
-        mustRunAfter playgroundTask
-        doLast {
-            def sourceBuild = new File(blackBoxPlaygroundDir.get().asFile, 'build')
-            def reportRoot = layout.buildDirectory.dir("reports/playground/${suite}").get().asFile
-            project.delete(reportRoot)
-            project.copy {
-                from new File(sourceBuild, 'reports')
-                into new File(reportRoot, 'reports')
-            }
-            project.copy {
-                from new File(sourceBuild, 'test-results')
-                into new File(reportRoot, 'test-results')
-            }
-            project.copy {
-                from new File(sourceBuild, 'coordination-suite-results')
-                into new File(reportRoot, 'runs')
-            }
-        }
-    }
-    playgroundTask.configure {
-        finalizedBy reportTask
-    }
-}
-
-registerPlaygroundSuite(
-        'playgroundCompatibilityTest',
-        'compatibility',
-        'Runs VetExt mandate/business and full Order semantic tests in a sanitized Playground copy.')
-registerPlaygroundSuite(
-        'playgroundPerformanceTest',
-        'performance',
-        'Runs the VetExt performance gate and full Order scenario in a sanitized Playground copy.')
 
 if (System.getenv('CI')) {
     jreleaser {

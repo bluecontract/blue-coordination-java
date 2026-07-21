@@ -111,7 +111,7 @@ class RepresentativeWorkflowLifecycleSmokeTest {
             }
         }
         assertTrue(observedRetentionGauge,
-                "the local Language runtime must publish close-time cache gauges");
+                "the Language runtime must publish close-time cache gauges");
     }
 
     private static long metric(Map<String, Long> metrics, String name) {
