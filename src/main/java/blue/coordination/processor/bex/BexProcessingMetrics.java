@@ -3,11 +3,46 @@ package blue.coordination.processor.bex;
 import blue.bex.result.BexMetrics;
 import blue.language.processor.ProcessingMetricsSink;
 
+import java.util.Collections;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 public final class BexProcessingMetrics implements ProcessingMetricsSink {
+    /**
+     * Language currently emits a fixed vocabulary, but keep the adapter safe if a future
+     * integration accidentally supplies data-derived names.
+     */
+    public static final int MAX_LANGUAGE_METRIC_NAMES = 256;
+
+    private final Object languageMetricNameLock = new Object();
+    private final ConcurrentMap<String, Boolean> languageMetricNames =
+            new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, AtomicLong> languageCounters =
+            new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, AtomicLong> languageGauges =
+            new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, AtomicLong> languageHighWaterMarks =
+            new ConcurrentHashMap<>();
+    private final AtomicLong droppedLanguageMetricNames = new AtomicLong();
+
     private final AtomicLong workflowStepsExecuted = new AtomicLong();
+    private final AtomicLong workflowPlansBuilt = new AtomicLong();
+    private final AtomicLong workflowPlanCacheHits = new AtomicLong();
+    private final AtomicLong workflowPlanCacheMisses = new AtomicLong();
+    private final AtomicLong workflowPlanCacheEvictions = new AtomicLong();
+    private final AtomicLong workflowPlanWeightBytes = new AtomicLong();
+    private final AtomicLong workflowExecutorLookups = new AtomicLong();
+    private final AtomicLong workflowStepResultSnapshotsCreated = new AtomicLong();
+    private final AtomicLong workflowStepResultViewHits = new AtomicLong();
     private final AtomicLong computeStepsExecuted = new AtomicLong();
+    private final AtomicLong computePlansBuilt = new AtomicLong();
+    private final AtomicLong computePlanCacheHits = new AtomicLong();
+    private final AtomicLong computePlanCacheMisses = new AtomicLong();
+    private final AtomicLong computePlanCacheEvictions = new AtomicLong();
+    private final AtomicLong computePlanWeightBytes = new AtomicLong();
     private final AtomicLong updateDocumentStepsExecuted = new AtomicLong();
     private final AtomicLong triggerEventStepsExecuted = new AtomicLong();
     private final AtomicLong directBexChangesetHits = new AtomicLong();
@@ -19,6 +54,9 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
     private final AtomicLong computeResultValidationFailures = new AtomicLong();
     private final AtomicLong computeProgramNormalizations = new AtomicLong();
     private final AtomicLong computeDefinitionNormalizations = new AtomicLong();
+    private final AtomicLong computeDefinitionMaterializations = new AtomicLong();
+    private final AtomicLong computeDefinitionFrozenDirectHits = new AtomicLong();
+    private final AtomicLong computeProgramSourceBuilds = new AtomicLong();
     private final AtomicLong computeDefinitionResolveHits = new AtomicLong();
     private final AtomicLong computeDefinitionResolveMisses = new AtomicLong();
     private final AtomicLong workflowRunnerNanos = new AtomicLong();
@@ -33,6 +71,9 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
     private final AtomicLong updatePatchApplyNanos = new AtomicLong();
     private final AtomicLong updateBatchPatchApplications = new AtomicLong();
     private final AtomicLong updateIndividualPatchApplications = new AtomicLong();
+    private final AtomicLong updateStaticTemplatesBuilt = new AtomicLong();
+    private final AtomicLong updateStaticTemplateHits = new AtomicLong();
+    private final AtomicLong updateReflectionFallbacks = new AtomicLong();
     private final AtomicLong triggerStepNanos = new AtomicLong();
     private final AtomicLong triggerEmitEventNanos = new AtomicLong();
     private final AtomicLong bexCompileNanos = new AtomicLong();
@@ -42,6 +83,8 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
     private final AtomicLong bexCompiledExecutions = new AtomicLong();
     private final AtomicLong bexNodeWriterNanos = new AtomicLong();
     private final AtomicLong directBexPatchEntryConversions = new AtomicLong();
+    private final AtomicLong bexPatchFrozenDirectConversions = new AtomicLong();
+    private final AtomicLong bexPatchNodeMaterializations = new AtomicLong();
     private final AtomicLong processDocumentNanos = new AtomicLong();
     private final AtomicLong blueProcessDocumentNanos = new AtomicLong();
     private final AtomicLong eventPreprocessNanos = new AtomicLong();
@@ -107,6 +150,23 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
     private final AtomicLong batchPatchCommitNanos = new AtomicLong();
     private final AtomicLong documentUpdateBeforeMaterializations = new AtomicLong();
     private final AtomicLong documentUpdateAfterMaterializations = new AtomicLong();
+    private final AtomicLong patchSequencesPrepared = new AtomicLong();
+    private final AtomicLong patchesPrepared = new AtomicLong();
+    private final AtomicLong singletonPatchTransactions = new AtomicLong();
+    private final AtomicLong sequencePlanningNanos = new AtomicLong();
+    private final AtomicLong sequenceConformanceNanos = new AtomicLong();
+    private final AtomicLong sequenceCommitNanos = new AtomicLong();
+    private final AtomicLong sequenceFinalCacheCommitNanos = new AtomicLong();
+    private final AtomicLong sequenceIntermediateSnapshotAdvances = new AtomicLong();
+    private final AtomicLong sequenceSharedSnapshotCacheInserts = new AtomicLong();
+    private final AtomicLong sequenceFinalSnapshotCacheInserts = new AtomicLong();
+    private final AtomicLong sequenceSuffixRebases = new AtomicLong();
+    private final AtomicLong sequenceStalePreviewFallbacks = new AtomicLong();
+    private final AtomicLong sequenceFallbackPatches = new AtomicLong();
+    private final AtomicLong parsedPointerCacheHits = new AtomicLong();
+    private final AtomicLong parsedPointerCacheMisses = new AtomicLong();
+    private final AtomicLong frozenPatchValueHits = new AtomicLong();
+    private final AtomicLong patchValueMaterializations = new AtomicLong();
     private final AtomicLong workflowDocumentViewsFromFrozen = new AtomicLong();
     private final AtomicLong workflowDocumentViewsFromDocument = new AtomicLong();
     private final AtomicLong workflowDocumentViewMisses = new AtomicLong();
@@ -119,8 +179,60 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
         workflowStepsExecuted.incrementAndGet();
     }
 
+    public void incrementWorkflowPlansBuilt() {
+        workflowPlansBuilt.incrementAndGet();
+    }
+
+    public void incrementWorkflowPlanCacheHits() {
+        workflowPlanCacheHits.incrementAndGet();
+    }
+
+    public void incrementWorkflowPlanCacheMisses() {
+        workflowPlanCacheMisses.incrementAndGet();
+    }
+
+    public void incrementWorkflowPlanCacheEvictions() {
+        workflowPlanCacheEvictions.incrementAndGet();
+    }
+
+    public void addWorkflowPlanWeightBytes(long delta) {
+        addToNonNegativeGauge(workflowPlanWeightBytes, delta);
+    }
+
+    public void incrementWorkflowExecutorLookups() {
+        workflowExecutorLookups.incrementAndGet();
+    }
+
+    public void incrementWorkflowStepResultSnapshotsCreated() {
+        workflowStepResultSnapshotsCreated.incrementAndGet();
+    }
+
+    public void incrementWorkflowStepResultViewHits() {
+        workflowStepResultViewHits.incrementAndGet();
+    }
+
     public void incrementComputeStepsExecuted() {
         computeStepsExecuted.incrementAndGet();
+    }
+
+    public void incrementComputePlansBuilt() {
+        computePlansBuilt.incrementAndGet();
+    }
+
+    public void incrementComputePlanCacheHits() {
+        computePlanCacheHits.incrementAndGet();
+    }
+
+    public void incrementComputePlanCacheMisses() {
+        computePlanCacheMisses.incrementAndGet();
+    }
+
+    public void incrementComputePlanCacheEvictions() {
+        computePlanCacheEvictions.incrementAndGet();
+    }
+
+    public void addComputePlanWeightBytes(long delta) {
+        addToNonNegativeGauge(computePlanWeightBytes, delta);
     }
 
     public void incrementUpdateDocumentStepsExecuted() {
@@ -165,6 +277,18 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
 
     public void incrementComputeDefinitionNormalizations() {
         computeDefinitionNormalizations.incrementAndGet();
+    }
+
+    public void incrementComputeDefinitionMaterializations() {
+        computeDefinitionMaterializations.incrementAndGet();
+    }
+
+    public void incrementComputeDefinitionFrozenDirectHits() {
+        computeDefinitionFrozenDirectHits.incrementAndGet();
+    }
+
+    public void incrementComputeProgramSourceBuilds() {
+        computeProgramSourceBuilds.incrementAndGet();
     }
 
     public void incrementComputeDefinitionResolveHits() {
@@ -223,6 +347,18 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
         updateIndividualPatchApplications.incrementAndGet();
     }
 
+    public void incrementUpdateStaticTemplatesBuilt() {
+        updateStaticTemplatesBuilt.incrementAndGet();
+    }
+
+    public void incrementUpdateStaticTemplateHits() {
+        updateStaticTemplateHits.incrementAndGet();
+    }
+
+    public void incrementUpdateReflectionFallbacks() {
+        updateReflectionFallbacks.incrementAndGet();
+    }
+
     public void addTriggerStepNanos(long nanos) {
         triggerStepNanos.addAndGet(nonNegative(nanos));
     }
@@ -237,6 +373,14 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
 
     public void incrementDirectBexPatchEntryConversions() {
         directBexPatchEntryConversions.incrementAndGet();
+    }
+
+    public void incrementBexPatchFrozenDirectConversions() {
+        bexPatchFrozenDirectConversions.incrementAndGet();
+    }
+
+    public void incrementBexPatchNodeMaterializations() {
+        bexPatchNodeMaterializations.incrementAndGet();
     }
 
     public void addBexMetrics(BexMetrics metrics) {
@@ -575,6 +719,91 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
         documentUpdateAfterMaterializations.incrementAndGet();
     }
 
+    @Override
+    public void incrementPatchSequencesPrepared() {
+        patchSequencesPrepared.incrementAndGet();
+    }
+
+    @Override
+    public void addPatchesPrepared(long count) {
+        patchesPrepared.addAndGet(count);
+    }
+
+    @Override
+    public void incrementSingletonPatchTransactions() {
+        singletonPatchTransactions.incrementAndGet();
+    }
+
+    @Override
+    public void addSequencePlanningNanos(long nanos) {
+        sequencePlanningNanos.addAndGet(nonNegative(nanos));
+    }
+
+    @Override
+    public void addSequenceConformanceNanos(long nanos) {
+        sequenceConformanceNanos.addAndGet(nonNegative(nanos));
+    }
+
+    @Override
+    public void addSequenceCommitNanos(long nanos) {
+        sequenceCommitNanos.addAndGet(nonNegative(nanos));
+    }
+
+    @Override
+    public void addSequenceFinalCacheCommitNanos(long nanos) {
+        sequenceFinalCacheCommitNanos.addAndGet(nonNegative(nanos));
+    }
+
+    @Override
+    public void incrementSequenceIntermediateSnapshotAdvances() {
+        sequenceIntermediateSnapshotAdvances.incrementAndGet();
+    }
+
+    @Override
+    public void incrementSequenceSharedSnapshotCacheInserts() {
+        sequenceSharedSnapshotCacheInserts.incrementAndGet();
+    }
+
+    @Override
+    public void incrementSequenceFinalSnapshotCacheInserts() {
+        sequenceFinalSnapshotCacheInserts.incrementAndGet();
+    }
+
+    @Override
+    public void incrementSequenceSuffixRebases() {
+        sequenceSuffixRebases.incrementAndGet();
+    }
+
+    @Override
+    public void incrementSequenceStalePreviewFallbacks() {
+        sequenceStalePreviewFallbacks.incrementAndGet();
+    }
+
+    @Override
+    public void incrementSequenceFallbackPatches() {
+        sequenceFallbackPatches.incrementAndGet();
+    }
+
+    @Override
+    public void incrementParsedPointerCacheHits() {
+        parsedPointerCacheHits.incrementAndGet();
+    }
+
+    @Override
+    public void incrementParsedPointerCacheMisses() {
+        parsedPointerCacheMisses.incrementAndGet();
+    }
+
+    @Override
+    public void incrementFrozenPatchValueHits() {
+        frozenPatchValueHits.incrementAndGet();
+    }
+
+    @Override
+    public void incrementPatchValueMaterializations() {
+        patchValueMaterializations.incrementAndGet();
+    }
+
     public void incrementWorkflowDocumentViewsFromFrozen() {
         workflowDocumentViewsFromFrozen.incrementAndGet();
     }
@@ -607,8 +836,60 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
         return workflowStepsExecuted.get();
     }
 
+    public long workflowPlansBuilt() {
+        return workflowPlansBuilt.get();
+    }
+
+    public long workflowPlanCacheHits() {
+        return workflowPlanCacheHits.get();
+    }
+
+    public long workflowPlanCacheMisses() {
+        return workflowPlanCacheMisses.get();
+    }
+
+    public long workflowPlanCacheEvictions() {
+        return workflowPlanCacheEvictions.get();
+    }
+
+    public long workflowPlanWeightBytes() {
+        return workflowPlanWeightBytes.get();
+    }
+
+    public long workflowExecutorLookups() {
+        return workflowExecutorLookups.get();
+    }
+
+    public long workflowStepResultSnapshotsCreated() {
+        return workflowStepResultSnapshotsCreated.get();
+    }
+
+    public long workflowStepResultViewHits() {
+        return workflowStepResultViewHits.get();
+    }
+
     public long computeStepsExecuted() {
         return computeStepsExecuted.get();
+    }
+
+    public long computePlansBuilt() {
+        return computePlansBuilt.get();
+    }
+
+    public long computePlanCacheHits() {
+        return computePlanCacheHits.get();
+    }
+
+    public long computePlanCacheMisses() {
+        return computePlanCacheMisses.get();
+    }
+
+    public long computePlanCacheEvictions() {
+        return computePlanCacheEvictions.get();
+    }
+
+    public long computePlanWeightBytes() {
+        return computePlanWeightBytes.get();
     }
 
     public long updateDocumentStepsExecuted() {
@@ -653,6 +934,18 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
 
     public long computeDefinitionNormalizations() {
         return computeDefinitionNormalizations.get();
+    }
+
+    public long computeDefinitionMaterializations() {
+        return computeDefinitionMaterializations.get();
+    }
+
+    public long computeDefinitionFrozenDirectHits() {
+        return computeDefinitionFrozenDirectHits.get();
+    }
+
+    public long computeProgramSourceBuilds() {
+        return computeProgramSourceBuilds.get();
     }
 
     public long computeDefinitionResolveHits() {
@@ -711,6 +1004,18 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
         return updateIndividualPatchApplications.get();
     }
 
+    public long updateStaticTemplatesBuilt() {
+        return updateStaticTemplatesBuilt.get();
+    }
+
+    public long updateStaticTemplateHits() {
+        return updateStaticTemplateHits.get();
+    }
+
+    public long updateReflectionFallbacks() {
+        return updateReflectionFallbacks.get();
+    }
+
     public long triggerStepNanos() {
         return triggerStepNanos.get();
     }
@@ -745,6 +1050,14 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
 
     public long directBexPatchEntryConversions() {
         return directBexPatchEntryConversions.get();
+    }
+
+    public long bexPatchFrozenDirectConversions() {
+        return bexPatchFrozenDirectConversions.get();
+    }
+
+    public long bexPatchNodeMaterializations() {
+        return bexPatchNodeMaterializations.get();
     }
 
     public long processDocumentNanos() {
@@ -1007,6 +1320,96 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
         return documentUpdateAfterMaterializations.get();
     }
 
+    /**
+     * Number of reusable Language patch-sequence planning sessions. This is the raw value from
+     * {@link #incrementPatchSequencesPrepared()}.
+     */
+    public long preparedPatchSequences() {
+        return patchSequencesPrepared.get();
+    }
+
+    /** Number of patches accepted by Language sequence sessions. */
+    public long preparedPatches() {
+        return patchesPrepared.get();
+    }
+
+    /**
+     * Closest public proxy for a Language sequence transaction.
+     *
+     * <p>The callback identifies a reusable sequential <em>planning</em> session,
+     * not the Language runtime's internal transaction counter, so reports must
+     * retain this qualification.</p>
+     */
+    public long languageSequenceTransactions() {
+        return patchSequencesPrepared.get();
+    }
+
+    /** Number of legacy standalone one-patch Language transactions. */
+    public long languageSingletonTransactions() {
+        return singletonPatchTransactions.get();
+    }
+
+    public long sequencePlanningNanos() {
+        return sequencePlanningNanos.get();
+    }
+
+    public long sequenceConformanceNanos() {
+        return sequenceConformanceNanos.get();
+    }
+
+    public long sequenceCommitNanos() {
+        return sequenceCommitNanos.get();
+    }
+
+    public long sequenceFinalCacheCommitNanos() {
+        return sequenceFinalCacheCommitNanos.get();
+    }
+
+    public long languageIntermediateSnapshotAdvances() {
+        return sequenceIntermediateSnapshotAdvances.get();
+    }
+
+    public long sequenceSharedSnapshotCacheInserts() {
+        return sequenceSharedSnapshotCacheInserts.get();
+    }
+
+    /** Maps to Language's final sequence snapshot-cache insertion callback. */
+    public long languageFinalSnapshotPromotions() {
+        return sequenceFinalSnapshotCacheInserts.get();
+    }
+
+    public long sequenceFinalSnapshotCacheInserts() {
+        return sequenceFinalSnapshotCacheInserts.get();
+    }
+
+    public long languageSuffixRebases() {
+        return sequenceSuffixRebases.get();
+    }
+
+    public long sequenceStalePreviewFallbacks() {
+        return sequenceStalePreviewFallbacks.get();
+    }
+
+    public long languageFallbackPatches() {
+        return sequenceFallbackPatches.get();
+    }
+
+    public long parsedPointerCacheHits() {
+        return parsedPointerCacheHits.get();
+    }
+
+    public long parsedPointerCacheMisses() {
+        return parsedPointerCacheMisses.get();
+    }
+
+    public long frozenPatchValueHits() {
+        return frozenPatchValueHits.get();
+    }
+
+    public long languagePatchValueMaterializations() {
+        return patchValueMaterializations.get();
+    }
+
     public long workflowDocumentViewsFromFrozen() {
         return workflowDocumentViewsFromFrozen.get();
     }
@@ -1035,8 +1438,115 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
         return bexDocumentViewUndefinedHits.get();
     }
 
+    @Override
+    public void addMetric(String metricName, long delta) {
+        AtomicLong counter = languageMetric(languageCounters, metricName);
+        if (counter != null) {
+            counter.addAndGet(delta);
+        }
+    }
+
+    @Override
+    public void setMetric(String metricName, long value) {
+        AtomicLong gauge = languageMetric(languageGauges, metricName);
+        if (gauge != null) {
+            gauge.set(value);
+        }
+    }
+
+    @Override
+    public void recordMetricHighWater(String metricName, long value) {
+        AtomicLong highWater = languageMetric(languageHighWaterMarks, metricName);
+        if (highWater == null) {
+            return;
+        }
+        long current = highWater.get();
+        while (value > current && !highWater.compareAndSet(current, value)) {
+            current = highWater.get();
+        }
+    }
+
+    /** Immutable, name-sorted snapshot of Language's generic additive counters. */
+    public Map<String, Long> languageCounters() {
+        return immutableSortedValues(languageCounters);
+    }
+
+    /** Immutable, name-sorted snapshot of Language's generic current-value gauges. */
+    public Map<String, Long> languageGauges() {
+        return immutableSortedValues(languageGauges);
+    }
+
+    /** Immutable, name-sorted snapshot of Language's generic high-water gauges. */
+    public Map<String, Long> languageHighWaterMarks() {
+        return immutableSortedValues(languageHighWaterMarks);
+    }
+
+    /** Number of generic metric samples dropped because their new name exceeded the cap. */
+    public long droppedLanguageMetricNames() {
+        return droppedLanguageMetricNames.get();
+    }
+
     public Snapshot snapshot() {
         return new Snapshot(this);
+    }
+
+    private AtomicLong languageMetric(ConcurrentMap<String, AtomicLong> metrics,
+                                      String metricName) {
+        requireMetricName(metricName);
+        if (!acceptLanguageMetricName(metricName)) {
+            return null;
+        }
+        AtomicLong current = metrics.get(metricName);
+        if (current != null) {
+            return current;
+        }
+        AtomicLong created = new AtomicLong();
+        AtomicLong raced = metrics.putIfAbsent(metricName, created);
+        return raced != null ? raced : created;
+    }
+
+    private boolean acceptLanguageMetricName(String metricName) {
+        if (languageMetricNames.containsKey(metricName)) {
+            return true;
+        }
+        synchronized (languageMetricNameLock) {
+            if (languageMetricNames.containsKey(metricName)) {
+                return true;
+            }
+            if (languageMetricNames.size() >= MAX_LANGUAGE_METRIC_NAMES) {
+                droppedLanguageMetricNames.incrementAndGet();
+                return false;
+            }
+            languageMetricNames.put(metricName, Boolean.TRUE);
+            return true;
+        }
+    }
+
+    private static void requireMetricName(String metricName) {
+        if (metricName == null || metricName.isEmpty()) {
+            throw new IllegalArgumentException("metricName must not be empty");
+        }
+    }
+
+    private static Map<String, Long> immutableSortedValues(
+            ConcurrentMap<String, AtomicLong> source) {
+        Map<String, Long> values = new TreeMap<>();
+        for (Map.Entry<String, AtomicLong> entry : source.entrySet()) {
+            values.put(entry.getKey(), entry.getValue().get());
+        }
+        return Collections.unmodifiableMap(values);
+    }
+
+    private static void addToNonNegativeGauge(final AtomicLong gauge, final long delta) {
+        gauge.updateAndGet(current -> {
+            if (delta >= 0L) {
+                return current > Long.MAX_VALUE - delta ? Long.MAX_VALUE : current + delta;
+            }
+            if (delta == Long.MIN_VALUE || current < -delta) {
+                return 0L;
+            }
+            return current + delta;
+        });
     }
 
     private static long nonNegative(long nanos) {
@@ -1045,7 +1555,20 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
 
     public static final class Snapshot {
         public final long workflowStepsExecuted;
+        public final long workflowPlansBuilt;
+        public final long workflowPlanCacheHits;
+        public final long workflowPlanCacheMisses;
+        public final long workflowPlanCacheEvictions;
+        public final long workflowPlanWeightBytes;
+        public final long workflowExecutorLookups;
+        public final long workflowStepResultSnapshotsCreated;
+        public final long workflowStepResultViewHits;
         public final long computeStepsExecuted;
+        public final long computePlansBuilt;
+        public final long computePlanCacheHits;
+        public final long computePlanCacheMisses;
+        public final long computePlanCacheEvictions;
+        public final long computePlanWeightBytes;
         public final long updateDocumentStepsExecuted;
         public final long triggerEventStepsExecuted;
         public final long directBexChangesetHits;
@@ -1057,6 +1580,9 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
         public final long computeResultValidationFailures;
         public final long computeProgramNormalizations;
         public final long computeDefinitionNormalizations;
+        public final long computeDefinitionMaterializations;
+        public final long computeDefinitionFrozenDirectHits;
+        public final long computeProgramSourceBuilds;
         public final long computeDefinitionResolveHits;
         public final long computeDefinitionResolveMisses;
         public final long workflowRunnerNanos;
@@ -1071,6 +1597,9 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
         public final long updatePatchApplyNanos;
         public final long updateBatchPatchApplications;
         public final long updateIndividualPatchApplications;
+        public final long updateStaticTemplatesBuilt;
+        public final long updateStaticTemplateHits;
+        public final long updateReflectionFallbacks;
         public final long triggerStepNanos;
         public final long triggerEmitEventNanos;
         public final long bexCompileNanos;
@@ -1080,6 +1609,8 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
         public final long bexCompiledExecutions;
         public final long bexNodeWriterNanos;
         public final long directBexPatchEntryConversions;
+        public final long bexPatchFrozenDirectConversions;
+        public final long bexPatchNodeMaterializations;
         public final long processDocumentNanos;
         public final long blueProcessDocumentNanos;
         public final long eventPreprocessNanos;
@@ -1145,6 +1676,25 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
         public final long batchPatchCommitNanos;
         public final long documentUpdateBeforeMaterializations;
         public final long documentUpdateAfterMaterializations;
+        public final long preparedPatchSequences;
+        public final long preparedPatches;
+        public final long languageSequenceTransactions;
+        public final long languageSingletonTransactions;
+        public final long sequencePlanningNanos;
+        public final long sequenceConformanceNanos;
+        public final long sequenceCommitNanos;
+        public final long sequenceFinalCacheCommitNanos;
+        public final long languageIntermediateSnapshotAdvances;
+        public final long sequenceSharedSnapshotCacheInserts;
+        public final long languageFinalSnapshotPromotions;
+        public final long sequenceFinalSnapshotCacheInserts;
+        public final long languageSuffixRebases;
+        public final long sequenceStalePreviewFallbacks;
+        public final long languageFallbackPatches;
+        public final long parsedPointerCacheHits;
+        public final long parsedPointerCacheMisses;
+        public final long frozenPatchValueHits;
+        public final long languagePatchValueMaterializations;
         public final long workflowDocumentViewsFromFrozen;
         public final long workflowDocumentViewsFromDocument;
         public final long workflowDocumentViewMisses;
@@ -1152,10 +1702,27 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
         public final long bexDocumentViewFrozenDirectHits;
         public final long bexDocumentViewFrozenRootFallbackHits;
         public final long bexDocumentViewUndefinedHits;
+        public final Map<String, Long> languageCounters;
+        public final Map<String, Long> languageGauges;
+        public final Map<String, Long> languageHighWaterMarks;
+        public final long droppedLanguageMetricNames;
 
         private Snapshot(BexProcessingMetrics metrics) {
             this.workflowStepsExecuted = metrics.workflowStepsExecuted();
+            this.workflowPlansBuilt = metrics.workflowPlansBuilt();
+            this.workflowPlanCacheHits = metrics.workflowPlanCacheHits();
+            this.workflowPlanCacheMisses = metrics.workflowPlanCacheMisses();
+            this.workflowPlanCacheEvictions = metrics.workflowPlanCacheEvictions();
+            this.workflowPlanWeightBytes = metrics.workflowPlanWeightBytes();
+            this.workflowExecutorLookups = metrics.workflowExecutorLookups();
+            this.workflowStepResultSnapshotsCreated = metrics.workflowStepResultSnapshotsCreated();
+            this.workflowStepResultViewHits = metrics.workflowStepResultViewHits();
             this.computeStepsExecuted = metrics.computeStepsExecuted();
+            this.computePlansBuilt = metrics.computePlansBuilt();
+            this.computePlanCacheHits = metrics.computePlanCacheHits();
+            this.computePlanCacheMisses = metrics.computePlanCacheMisses();
+            this.computePlanCacheEvictions = metrics.computePlanCacheEvictions();
+            this.computePlanWeightBytes = metrics.computePlanWeightBytes();
             this.updateDocumentStepsExecuted = metrics.updateDocumentStepsExecuted();
             this.triggerEventStepsExecuted = metrics.triggerEventStepsExecuted();
             this.directBexChangesetHits = metrics.directBexChangesetHits();
@@ -1167,6 +1734,9 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
             this.computeResultValidationFailures = metrics.computeResultValidationFailures();
             this.computeProgramNormalizations = metrics.computeProgramNormalizations();
             this.computeDefinitionNormalizations = metrics.computeDefinitionNormalizations();
+            this.computeDefinitionMaterializations = metrics.computeDefinitionMaterializations();
+            this.computeDefinitionFrozenDirectHits = metrics.computeDefinitionFrozenDirectHits();
+            this.computeProgramSourceBuilds = metrics.computeProgramSourceBuilds();
             this.computeDefinitionResolveHits = metrics.computeDefinitionResolveHits();
             this.computeDefinitionResolveMisses = metrics.computeDefinitionResolveMisses();
             this.workflowRunnerNanos = metrics.workflowRunnerNanos();
@@ -1181,6 +1751,9 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
             this.updatePatchApplyNanos = metrics.updatePatchApplyNanos();
             this.updateBatchPatchApplications = metrics.updateBatchPatchApplications();
             this.updateIndividualPatchApplications = metrics.updateIndividualPatchApplications();
+            this.updateStaticTemplatesBuilt = metrics.updateStaticTemplatesBuilt();
+            this.updateStaticTemplateHits = metrics.updateStaticTemplateHits();
+            this.updateReflectionFallbacks = metrics.updateReflectionFallbacks();
             this.triggerStepNanos = metrics.triggerStepNanos();
             this.triggerEmitEventNanos = metrics.triggerEmitEventNanos();
             this.bexCompileNanos = metrics.bexCompileNanos();
@@ -1190,6 +1763,8 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
             this.bexCompiledExecutions = metrics.bexCompiledExecutions();
             this.bexNodeWriterNanos = metrics.bexNodeWriterNanos();
             this.directBexPatchEntryConversions = metrics.directBexPatchEntryConversions();
+            this.bexPatchFrozenDirectConversions = metrics.bexPatchFrozenDirectConversions();
+            this.bexPatchNodeMaterializations = metrics.bexPatchNodeMaterializations();
             this.processDocumentNanos = metrics.processDocumentNanos();
             this.blueProcessDocumentNanos = metrics.blueProcessDocumentNanos();
             this.eventPreprocessNanos = metrics.eventPreprocessNanos();
@@ -1255,6 +1830,25 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
             this.batchPatchCommitNanos = metrics.batchPatchCommitNanos();
             this.documentUpdateBeforeMaterializations = metrics.documentUpdateBeforeMaterializations();
             this.documentUpdateAfterMaterializations = metrics.documentUpdateAfterMaterializations();
+            this.preparedPatchSequences = metrics.preparedPatchSequences();
+            this.preparedPatches = metrics.preparedPatches();
+            this.languageSequenceTransactions = metrics.languageSequenceTransactions();
+            this.languageSingletonTransactions = metrics.languageSingletonTransactions();
+            this.sequencePlanningNanos = metrics.sequencePlanningNanos();
+            this.sequenceConformanceNanos = metrics.sequenceConformanceNanos();
+            this.sequenceCommitNanos = metrics.sequenceCommitNanos();
+            this.sequenceFinalCacheCommitNanos = metrics.sequenceFinalCacheCommitNanos();
+            this.languageIntermediateSnapshotAdvances = metrics.languageIntermediateSnapshotAdvances();
+            this.sequenceSharedSnapshotCacheInserts = metrics.sequenceSharedSnapshotCacheInserts();
+            this.languageFinalSnapshotPromotions = metrics.languageFinalSnapshotPromotions();
+            this.sequenceFinalSnapshotCacheInserts = metrics.sequenceFinalSnapshotCacheInserts();
+            this.languageSuffixRebases = metrics.languageSuffixRebases();
+            this.sequenceStalePreviewFallbacks = metrics.sequenceStalePreviewFallbacks();
+            this.languageFallbackPatches = metrics.languageFallbackPatches();
+            this.parsedPointerCacheHits = metrics.parsedPointerCacheHits();
+            this.parsedPointerCacheMisses = metrics.parsedPointerCacheMisses();
+            this.frozenPatchValueHits = metrics.frozenPatchValueHits();
+            this.languagePatchValueMaterializations = metrics.languagePatchValueMaterializations();
             this.workflowDocumentViewsFromFrozen = metrics.workflowDocumentViewsFromFrozen();
             this.workflowDocumentViewsFromDocument = metrics.workflowDocumentViewsFromDocument();
             this.workflowDocumentViewMisses = metrics.workflowDocumentViewMisses();
@@ -1262,6 +1856,10 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
             this.bexDocumentViewFrozenDirectHits = metrics.bexDocumentViewFrozenDirectHits();
             this.bexDocumentViewFrozenRootFallbackHits = metrics.bexDocumentViewFrozenRootFallbackHits();
             this.bexDocumentViewUndefinedHits = metrics.bexDocumentViewUndefinedHits();
+            this.languageCounters = metrics.languageCounters();
+            this.languageGauges = metrics.languageGauges();
+            this.languageHighWaterMarks = metrics.languageHighWaterMarks();
+            this.droppedLanguageMetricNames = metrics.droppedLanguageMetricNames();
         }
     }
 }

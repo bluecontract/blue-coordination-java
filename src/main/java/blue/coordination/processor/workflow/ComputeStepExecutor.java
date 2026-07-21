@@ -13,13 +13,14 @@ import blue.language.snapshot.FrozenNode;
 import blue.repo.coordination.Compute;
 import blue.repo.coordination.SequentialWorkflowStep;
 
-public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute> {
+public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute>, AutoCloseable {
     private final BexEngine bexEngine;
     private final long defaultGasLimit;
     private final ComputeDefinitionResolver definitionResolver;
     private final BexWorkflowContextFactory contextFactory;
     private final ComputeResultEmitter resultEmitter;
     private final ComputeProgramNormalizer normalizer;
+    private final ComputeProgramPlanCache planCache;
     private final BexProcessingMetrics metrics;
 
     public ComputeStepExecutor() {
@@ -61,7 +62,11 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute> 
         this.definitionResolver = definitionResolver;
         this.contextFactory = contextFactory;
         this.resultEmitter = resultEmitter;
-        this.normalizer = new ComputeProgramNormalizer();
+        this.normalizer = new ComputeProgramNormalizer(metrics);
+        this.planCache = new ComputeProgramPlanCache(
+                ComputeProgramPlanCache.DEFAULT_MAX_ENTRIES,
+                ComputeProgramPlanCache.DEFAULT_MAX_WEIGHT_BYTES,
+                metrics);
         this.metrics = metrics;
     }
 
@@ -77,35 +82,46 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute> 
             if (metrics != null) {
                 metrics.incrementComputeStepsExecuted();
             }
-            Node rawStepNode = context.stepNodeRef();
+            FrozenNode rawStepNode = context.stepFrozenNode();
             if (rawStepNode == null) {
-                context.processorContext().throwFatal("Compute step must have a raw step node");
-                return WorkflowStepResult.none();
+                Node mutableStepNode = context.stepNodeRef();
+                if (mutableStepNode == null) {
+                    context.processorContext().throwFatal("Compute step must have a raw step node");
+                    return WorkflowStepResult.none();
+                }
+                rawStepNode = FrozenNode.fromResolvedNode(mutableStepNode);
             }
-            FrozenNode programNode = FrozenNode.fromResolvedNode(normalizer.program(rawStepNode));
             long resolveStart = System.nanoTime();
-            FrozenNode definitionNode = definitionResolver.resolve(programNode, context);
-            if (definitionNode != null) {
-                definitionNode = FrozenNode.fromResolvedNode(normalizer.definition(definitionNode.toNode()));
-            }
+            final FrozenNode resolvedDefinitionNode = definitionResolver.resolve(rawStepNode,
+                    context,
+                    metrics);
             if (metrics != null) {
                 metrics.addComputeDefinitionResolveNanos(System.nanoTime() - resolveStart);
             }
-            String entry = FrozenNodeUtil.textProperty(programNode, "entry");
-            long sourceStart = System.nanoTime();
-            BexProgramSource source = definitionNode != null
-                    ? BexProgramSource.withDefinition(programNode, definitionNode, entry)
-                    : BexProgramSource.inline(programNode);
-            if (metrics != null) {
-                metrics.addComputeProgramSourceBuildNanos(System.nanoTime() - sourceStart);
-            }
+            final FrozenNode exactRawStepNode = rawStepNode;
+            final String effectiveEntry = FrozenNodeUtil.textProperty(rawStepNode, "entry");
+            ComputeProgramPlanCache.Key planKey = ComputeProgramPlanCache.Key.from(
+                    rawStepNode,
+                    resolvedDefinitionNode,
+                    effectiveEntry,
+                    normalizer.normalizationVersion());
+            ComputeProgramPlanCache.Lookup lookup = planCache.lookup(planKey,
+                    new ComputeProgramPlanCache.PlanFactory() {
+                        @Override
+                        public ComputeProgramPlan create() {
+                            return buildPlan(exactRawStepNode,
+                                    resolvedDefinitionNode,
+                                    effectiveEntry);
+                        }
+                    });
+            ComputeProgramPlan computePlan = lookup.plan();
             long contextStart = System.nanoTime();
-            BexExecutionContext bexContext = contextFactory.create(context, computeGasLimit(programNode));
+            BexExecutionContext bexContext = contextFactory.create(context, computePlan.gasLimit());
             if (metrics != null) {
                 metrics.addComputeContextBuildNanos(System.nanoTime() - contextStart);
             }
             long executeStart = System.nanoTime();
-            BexExecutionResult result = bexEngine.compileAndExecute(source, bexContext);
+            BexExecutionResult result = bexEngine.compileAndExecute(computePlan.source(), bexContext);
             if (metrics != null) {
                 metrics.addComputeCompileExecuteNanos(System.nanoTime() - executeStart);
                 metrics.addBexMetrics(result.metrics());
@@ -113,19 +129,24 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute> 
             if (result.gasUsed() > 0L) {
                 context.processorContext().consumeGas(result.gasUsed());
             }
-            ComputeEffectPlan plan = resultEmitter.plan(result,
+            ComputeEffectPlan effectPlan = resultEmitter.plan(result,
                     context,
-                    FrozenNodeUtil.booleanProperty(programNode, "emitEvents", true));
-            resultEmitter.buffer(plan, context);
-            boolean returnResult = FrozenNodeUtil.booleanProperty(programNode, "returnResult", true);
-            if (plan.terminationRequested()) {
-                return returnResult
-                        ? WorkflowStepResult.terminalValue(result, plan.changesetHandled())
+                    computePlan.emitEvents());
+            resultEmitter.buffer(effectPlan, context);
+            WorkflowStepResult stepResult;
+            if (effectPlan.terminationRequested()) {
+                stepResult = computePlan.returnResult()
+                        ? WorkflowStepResult.terminalValue(result, effectPlan.changesetHandled())
                         : WorkflowStepResult.terminal();
+            } else {
+                stepResult = computePlan.returnResult()
+                        ? WorkflowStepResult.value(result, effectPlan.changesetHandled())
+                        : WorkflowStepResult.none();
             }
-            return returnResult
-                    ? WorkflowStepResult.value(result, plan.changesetHandled())
-                    : WorkflowStepResult.none();
+            // Failed compilation, execution, result validation, gas handling,
+            // or effect buffering never publishes a candidate plan.
+            planCache.publish(lookup);
+            return stepResult;
         } catch (ComputeResultValidationException ex) {
             if (metrics != null) {
                 metrics.incrementComputeResultValidationFailures();
@@ -156,6 +177,60 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute> 
             throw new BexException("Compute gasLimit must be positive");
         }
         return parsed.longValue();
+    }
+
+    /** Clears reusable Compute plans while keeping this executor usable. */
+    public void clearPlanCache() {
+        planCache.clear();
+    }
+
+    @Override
+    public void close() {
+        planCache.close();
+    }
+
+    int cachedPlanCount() {
+        return planCache.size();
+    }
+
+    long cachedPlanWeightBytes() {
+        return planCache.weightBytes();
+    }
+
+    boolean isPlanCacheClosed() {
+        return planCache.isClosed();
+    }
+
+    private ComputeProgramPlan buildPlan(FrozenNode rawStepNode,
+                                         FrozenNode rawDefinitionNode,
+                                         String effectiveEntry) {
+        FrozenNode programNode = normalizer.program(rawStepNode);
+        FrozenNode definitionNode = rawDefinitionNode != null
+                ? normalizer.definition(rawDefinitionNode)
+                : null;
+        String normalizedEntry = FrozenNodeUtil.textProperty(programNode, "entry");
+        // The key is built from the authored effective entry. Retain the
+        // normalized value in the source to preserve the pre-cache behavior.
+        if (effectiveEntry == null ? normalizedEntry != null : !effectiveEntry.equals(normalizedEntry)) {
+            throw new BexException("Compute entry changed during normalization");
+        }
+        long sourceStart = System.nanoTime();
+        BexProgramSource source = definitionNode != null
+                ? BexProgramSource.withDefinition(programNode, definitionNode, normalizedEntry)
+                : BexProgramSource.inline(programNode);
+        if (metrics != null) {
+            metrics.incrementComputeProgramSourceBuilds();
+            metrics.addComputeProgramSourceBuildNanos(System.nanoTime() - sourceStart);
+        }
+        return new ComputeProgramPlan(programNode,
+                definitionNode,
+                source,
+                normalizedEntry,
+                computeGasLimit(programNode),
+                FrozenNodeUtil.booleanProperty(programNode, "emitEvents", true),
+                FrozenNodeUtil.booleanProperty(programNode, "returnResult", true),
+                rawStepNode,
+                rawDefinitionNode);
     }
 
 }

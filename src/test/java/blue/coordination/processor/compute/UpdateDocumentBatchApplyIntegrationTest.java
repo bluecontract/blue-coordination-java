@@ -68,6 +68,9 @@ class UpdateDocumentBatchApplyIntegrationTest {
         assertEquals(1L, metrics.updateBatchPatchApplications());
         assertEquals(0L, metrics.updateIndividualPatchApplications());
         assertEquals(1L, metrics.directBexChangesetHits());
+        assertEquals(3L, metrics.bexPatchNodeMaterializations());
+        assertEquals(0L, metrics.bexPatchFrozenDirectConversions(),
+                "newly computed scalar values still require the single measured BEX boundary conversion");
     }
 
     @Test
@@ -142,6 +145,10 @@ class UpdateDocumentBatchApplyIntegrationTest {
                 "          - op: replace",
                 "            path: /status",
                 "            val: existing"));
+        long frozenHandedBefore = metric(metrics, "frozenPatchesHandedToLanguage");
+        long frozenAcceptedBefore = metric(metrics, "frozenPatchValuesAccepted");
+        long mutableFrozenBefore = metric(metrics, "mutablePatchValuesFrozen");
+        long frozenMaterializedBefore = metric(metrics, "frozenPatchValuesMaterialized");
 
         DocumentProcessingResult result = support.processRun(document,
                 new Node()
@@ -153,6 +160,13 @@ class UpdateDocumentBatchApplyIntegrationTest {
         assertEquals(2L, metrics.patchesApplied());
         assertEquals(2L, metrics.updateBatchPatchApplications());
         assertEquals(0L, metrics.updateIndividualPatchApplications());
+        assertEquals(2L, metrics.updateStaticTemplatesBuilt());
+        assertEquals(2L, metrics.updateStaticTemplateHits());
+        assertEquals(0L, metrics.updateReflectionFallbacks());
+        assertEquals(2L, metric(metrics, "frozenPatchesHandedToLanguage") - frozenHandedBefore);
+        assertTrue(metric(metrics, "frozenPatchValuesAccepted") - frozenAcceptedBefore >= 2L);
+        assertEquals(0L, metric(metrics, "mutablePatchValuesFrozen") - mutableFrozenBefore);
+        assertEquals(0L, metric(metrics, "frozenPatchValuesMaterialized") - frozenMaterializedBefore);
     }
 
     @Test
@@ -175,5 +189,10 @@ class UpdateDocumentBatchApplyIntegrationTest {
 
         assertEquals(ProcessorStatus.RUNTIME_FATAL, result.status(), result.failureReason());
         assertTrue(result.failureReason().contains("Update Document changeset must be static"));
+    }
+
+    private static long metric(BexProcessingMetrics metrics, String name) {
+        Long value = metrics.languageCounters().get(name);
+        return value != null ? value.longValue() : 0L;
     }
 }

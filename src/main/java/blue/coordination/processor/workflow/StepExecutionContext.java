@@ -3,13 +3,11 @@ package blue.coordination.processor.workflow;
 import blue.language.model.Node;
 import blue.language.processor.ProcessorExecutionContext;
 import blue.language.processor.WorkingDocument;
+import blue.language.processor.model.FrozenJsonPatch;
 import blue.language.processor.model.JsonPatch;
 import blue.language.snapshot.FrozenNode;
 import blue.repo.coordination.SequentialWorkflow;
 import blue.repo.coordination.SequentialWorkflowStep;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -23,8 +21,8 @@ public final class StepExecutionContext {
     private final FrozenNode stepFrozenNode;
     private final FrozenNode currentContractFrozenNode;
     private final int stepIndex;
-    private final Map<String, Object> stepResults;
-    private final Set<String> handledChangesetSteps;
+    private final WorkflowExecutionState.Snapshot workflowStateView;
+    private final StaticUpdatePlan staticUpdatePlan;
     private final Node eventRef;
     private WorkingDocument workingDocument;
 
@@ -111,6 +109,51 @@ public final class StepExecutionContext {
                 workingDocument);
     }
 
+    StepExecutionContext(ProcessorExecutionContext processorContext,
+                         SequentialWorkflow workflow,
+                         SequentialWorkflowStep step,
+                         FrozenNode stepFrozenNode,
+                         FrozenNode currentContractFrozenNode,
+                         int stepIndex,
+                         WorkflowExecutionState.Snapshot workflowStateView,
+                         WorkingDocument workingDocument) {
+        this(processorContext,
+                workflow,
+                step,
+                null,
+                null,
+                stepFrozenNode,
+                currentContractFrozenNode,
+                stepIndex,
+                workflowStateView,
+                null,
+                true,
+                workingDocument);
+    }
+
+    StepExecutionContext(ProcessorExecutionContext processorContext,
+                         SequentialWorkflow workflow,
+                         SequentialWorkflowStep step,
+                         FrozenNode stepFrozenNode,
+                         FrozenNode currentContractFrozenNode,
+                         int stepIndex,
+                         WorkflowExecutionState.Snapshot workflowStateView,
+                         StaticUpdatePlan staticUpdatePlan,
+                         WorkingDocument workingDocument) {
+        this(processorContext,
+                workflow,
+                step,
+                null,
+                null,
+                stepFrozenNode,
+                currentContractFrozenNode,
+                stepIndex,
+                workflowStateView,
+                staticUpdatePlan,
+                true,
+                workingDocument);
+    }
+
     private StepExecutionContext(ProcessorExecutionContext processorContext,
                                  SequentialWorkflow workflow,
                                  SequentialWorkflowStep step,
@@ -121,6 +164,32 @@ public final class StepExecutionContext {
                                  int stepIndex,
                                  Map<String, Object> stepResults,
                                  Set<String> handledChangesetSteps,
+                                 WorkingDocument workingDocument) {
+        this(processorContext,
+                workflow,
+                step,
+                stepNode,
+                currentContractNode,
+                stepFrozenNode,
+                currentContractFrozenNode,
+                stepIndex,
+                WorkflowExecutionState.snapshotOf(stepResults, handledChangesetSteps),
+                null,
+                true,
+                workingDocument);
+    }
+
+    private StepExecutionContext(ProcessorExecutionContext processorContext,
+                                 SequentialWorkflow workflow,
+                                 SequentialWorkflowStep step,
+                                 Node stepNode,
+                                 Node currentContractNode,
+                                 FrozenNode stepFrozenNode,
+                                 FrozenNode currentContractFrozenNode,
+                                 int stepIndex,
+                                 WorkflowExecutionState.Snapshot workflowStateView,
+                                 StaticUpdatePlan staticUpdatePlan,
+                                 boolean useSnapshotView,
                                  WorkingDocument workingDocument) {
         if (processorContext == null) {
             throw new IllegalArgumentException("processorContext must not be null");
@@ -136,10 +205,10 @@ public final class StepExecutionContext {
         this.stepFrozenNode = stepFrozenNode;
         this.currentContractFrozenNode = currentContractFrozenNode;
         this.stepIndex = stepIndex;
-        this.stepResults = Collections.unmodifiableMap(new LinkedHashMap<String, Object>(
-                stepResults != null ? stepResults : Collections.<String, Object>emptyMap()));
-        this.handledChangesetSteps = Collections.unmodifiableSet(new LinkedHashSet<String>(
-                handledChangesetSteps != null ? handledChangesetSteps : Collections.<String>emptySet()));
+        this.workflowStateView = workflowStateView != null
+                ? workflowStateView
+                : new WorkflowExecutionState().snapshotView();
+        this.staticUpdatePlan = staticUpdatePlan;
         this.eventRef = processorContext.event();
         this.workingDocument = workingDocument;
     }
@@ -197,11 +266,15 @@ public final class StepExecutionContext {
     }
 
     public Map<String, Object> stepResults() {
-        return stepResults;
+        return workflowStateView.results();
     }
 
     boolean wasChangesetHandled(String stepKey) {
-        return stepKey != null && handledChangesetSteps.contains(stepKey);
+        return workflowStateView.wasChangesetHandled(stepKey);
+    }
+
+    StaticUpdatePlan staticUpdatePlan() {
+        return staticUpdatePlan;
     }
 
     public Node event() {
@@ -240,6 +313,18 @@ public final class StepExecutionContext {
         }
         try {
             return workingDocument().previewAndApplyPatches(patches);
+        } catch (RuntimeException ex) {
+            processorContext.throwFatal("Working document preview failed: " + ex.getMessage());
+            return null;
+        }
+    }
+
+    WorkingDocument.Preview advanceWorkingDocumentFrozen(List<FrozenJsonPatch> patches) {
+        if (patches == null || patches.isEmpty()) {
+            return null;
+        }
+        try {
+            return workingDocument().previewAndApplyFrozenPatches(patches);
         } catch (RuntimeException ex) {
             processorContext.throwFatal("Working document preview failed: " + ex.getMessage());
             return null;

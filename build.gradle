@@ -15,15 +15,33 @@ plugins {
 group = 'blue.coordination'
 version = determineProjectVersion()
 
+def blueLanguageVersion = '3.1.0-rc.16'
+def binaryCompatibilityBaselineVersion = providers.gradleProperty(
+        'binaryCompatibilityBaselineVersion').getOrElse('2.0.0-rc.4')
+
 base {
     archivesName = 'blue-coordination-java'
 }
 
 repositories {
-    if (!System.getenv('CI')) {
-        mavenLocal()
-    }
     mavenCentral()
+    exclusiveContent {
+        forRepository {
+            ivy {
+                name = 'releasedCoordinationBaseline'
+                url = uri('https://repo1.maven.org/maven2')
+                patternLayout {
+                    artifact 'blue/coordination/blue-coordination-java/[revision]/blue-coordination-java-[revision].[ext]'
+                }
+                metadataSources {
+                    artifact()
+                }
+            }
+        }
+        filter {
+            includeModule 'blue.coordination.baseline', 'blue-coordination-java'
+        }
+    }
 }
 
 java {
@@ -38,8 +56,16 @@ tasks.withType(JavaCompile).configureEach {
     options.release = 8
 }
 
+configurations {
+    binaryCompatibilityBaseline {
+        canBeConsumed = false
+        canBeResolved = true
+        transitive = false
+    }
+}
+
 dependencies {
-    api 'blue.language:blue-language-java:3.1.0-rc.10'
+    api "blue.language:blue-language-java:${blueLanguageVersion}"
     api 'blue.repo:blue-repo-java:3.0.0-rc.10'
     api 'blue.bex:blue-bex-java:1.1.0-rc.2'
 
@@ -49,6 +75,9 @@ dependencies {
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    // Alias the released artifact so Gradle never substitutes the current root project.
+    binaryCompatibilityBaseline "blue.coordination.baseline:blue-coordination-java:${binaryCompatibilityBaselineVersion}"
 }
 
 compileTestJava {
@@ -71,6 +100,412 @@ test {
     }
 }
 
+def testJfrEnabled = providers.gradleProperty('testJfr')
+        .map { !'false'.equalsIgnoreCase(it == null ? '' : it.trim()) }
+        .getOrElse(false)
+
+def configureFocusedTest = { Test focusedTest, List<String> includedTests ->
+    focusedTest.group = 'verification'
+    focusedTest.testClassesDirs = sourceSets.test.output.classesDirs
+    focusedTest.classpath = sourceSets.test.runtimeClasspath
+    focusedTest.dependsOn tasks.named('testClasses')
+    focusedTest.useJUnitPlatform()
+    focusedTest.maxHeapSize = '2g'
+    focusedTest.maxParallelForks = 1
+    focusedTest.forkEvery = 0L
+    focusedTest.filter {
+        includedTests.each { includeTestsMatching(it) }
+    }
+    focusedTest.reports {
+        junitXml.required = true
+        html.required = true
+    }
+    focusedTest.testLogging {
+        events 'PASSED', 'FAILED', 'SKIPPED'
+        showStandardStreams = true
+    }
+    if (testJfrEnabled) {
+        def recording = layout.buildDirectory.file("reports/jfr/${focusedTest.name}.jfr").get().asFile
+        focusedTest.doFirst {
+            recording.parentFile.mkdirs()
+            if (recording.exists() && !recording.delete()) {
+                throw new GradleException("Could not replace JFR recording: ${recording}")
+            }
+        }
+        focusedTest.jvmArgs "-XX:StartFlightRecording=filename=${recording.absolutePath},settings=profile,dumponexit=true"
+    } else {
+        focusedTest.javaLauncher = javaToolchains.launcherFor {
+            languageVersion = JavaLanguageVersion.of(8)
+        }
+    }
+}
+
+tasks.register('workflowPlanDifferentialTest', Test) { focusedTest ->
+    description = 'Runs sequential-workflow planning, execution-state, static-update, and semantic differential tests.'
+    configureFocusedTest(focusedTest, [
+            'blue.coordination.processor.CoordinationProcessorsTest',
+            'blue.coordination.processor.SequentialWorkflowExecutionTest',
+            'blue.coordination.processor.bex.BexProcessingMetricsTest',
+            'blue.coordination.processor.compute.ComputeFrozenPatchHandoffIntegrationTest',
+            'blue.coordination.processor.compute.ComputeProgramPlanIntegrationTest',
+            'blue.coordination.processor.compute.ComputeWorkflowExecutionTest',
+            'blue.coordination.processor.compute.UpdateDocumentBatchApplyIntegrationTest',
+            'blue.coordination.processor.workflow.*DifferentialTest',
+            'blue.coordination.processor.workflow.ComputeEffectPlanTest',
+            'blue.coordination.processor.workflow.SequentialWorkflowRunnerLifecycleTest',
+            'blue.coordination.processor.workflow.StaticUpdatePlanTest',
+            'blue.coordination.processor.workflow.WorkflowExecutionStateTest',
+            'blue.coordination.processor.workflow.WorkflowPatchEntryTest'
+    ])
+}
+
+tasks.register('complexFixtureIntegrationTest', Test) { focusedTest ->
+    description = 'Runs PayNote, embedded-document, mandate, and termination workflow fixtures.'
+    configureFocusedTest(focusedTest, [
+            'blue.coordination.processor.EmbeddedTerminationWorkflowTest',
+            'blue.coordination.processor.compute.*Paynote*',
+            'blue.coordination.processor.compute.*Embedded*',
+            'blue.coordination.processor.compute.*Mandate*',
+            'blue.coordination.processor.compute.*Termination*',
+            'blue.coordination.processor.compute.TerminateProcessingWorkflowTest'
+    ])
+}
+
+tasks.register('memoryIntegrationTest', Test) { focusedTest ->
+    description = 'Runs bounded-cache, round-trip, stress, and memory-oriented workflow tests in one 2 GiB worker.'
+    configureFocusedTest(focusedTest, [
+            'blue.coordination.processor.*Stress*',
+            'blue.coordination.processor.*Memory*',
+            'blue.coordination.processor.compute.*RoundTrip*',
+            'blue.coordination.processor.compute.*Memory*',
+            'blue.coordination.processor.compute.RepresentativeWorkflowLifecycleSmokeTest',
+            'blue.coordination.processor.workflow.*CacheTest'
+    ])
+}
+
+tasks.register('languageAdoptionMetricsArtifactTest', Test) { focusedTest ->
+    description = 'Runs four representative Language-adoption scenarios and writes deterministic JSON/CSV metrics evidence.'
+    configureFocusedTest(focusedTest, [
+            'blue.coordination.processor.compute.LanguageAdoptionMetricsArtifactTest'
+    ])
+    outputs.files(
+            layout.buildDirectory.file('reports/language-adoption/scenario-metrics.json'),
+            layout.buildDirectory.file('reports/language-adoption/scenario-metrics.csv'))
+}
+
+// Minimal class-file reader used by the verification tasks below. Keeping this
+// in the build avoids adding a release plugin solely for two deterministic
+// checks, and compares JVM descriptors rather than source formatting.
+def parseBinaryApiClass = { byte[] bytecode ->
+    def input = new DataInputStream(new ByteArrayInputStream(bytecode))
+    if (input.readInt() != (0xCAFEBABE as int)) {
+        throw new GradleException('Invalid class-file magic')
+    }
+    int minorVersion = input.readUnsignedShort()
+    int majorVersion = input.readUnsignedShort()
+    int constantPoolCount = input.readUnsignedShort()
+    Object[] constantPool = new Object[constantPoolCount]
+    for (int index = 1; index < constantPoolCount; index++) {
+        int tag = input.readUnsignedByte()
+        if (tag == 1) {
+            constantPool[index] = input.readUTF()
+        } else if (tag == 3 || tag == 4) {
+            input.readInt()
+        } else if (tag == 5 || tag == 6) {
+            input.readLong()
+            index++
+        } else if (tag == 7) {
+            constantPool[index] = Integer.valueOf(input.readUnsignedShort())
+        } else if (tag == 8 || tag == 16 || tag == 19 || tag == 20) {
+            input.readUnsignedShort()
+        } else if (tag == 9 || tag == 10 || tag == 11 || tag == 12
+                || tag == 17 || tag == 18) {
+            input.readUnsignedShort()
+            input.readUnsignedShort()
+        } else if (tag == 15) {
+            input.readUnsignedByte()
+            input.readUnsignedShort()
+        } else {
+            throw new GradleException("Unsupported constant-pool tag ${tag}")
+        }
+    }
+
+    def utf8 = { int index ->
+        Object value = constantPool[index]
+        if (!(value instanceof String)) {
+            throw new GradleException("Invalid UTF-8 constant-pool index ${index}")
+        }
+        (String) value
+    }
+    def className = { int index ->
+        if (index == 0) {
+            return null
+        }
+        Object nameIndex = constantPool[index]
+        if (!(nameIndex instanceof Integer)) {
+            throw new GradleException("Invalid class constant-pool index ${index}")
+        }
+        utf8(((Integer) nameIndex).intValue()).replace('/', '.')
+    }
+    def skipAttributes = { DataInputStream stream ->
+        int attributeCount = stream.readUnsignedShort()
+        for (int attributeIndex = 0; attributeIndex < attributeCount; attributeIndex++) {
+            stream.readUnsignedShort()
+            long remaining = ((long) stream.readInt()) & 0xffffffffL
+            while (remaining > 0L) {
+                long skipped = stream.skip(remaining)
+                if (skipped <= 0L) {
+                    if (stream.read() < 0) {
+                        throw new EOFException('Truncated class-file attribute')
+                    }
+                    skipped = 1L
+                }
+                remaining -= skipped
+            }
+        }
+    }
+    def readMembers = { DataInputStream stream ->
+        def members = new TreeMap<String, Integer>()
+        int memberCount = stream.readUnsignedShort()
+        for (int memberIndex = 0; memberIndex < memberCount; memberIndex++) {
+            int access = stream.readUnsignedShort()
+            String name = utf8(stream.readUnsignedShort())
+            String descriptor = utf8(stream.readUnsignedShort())
+            skipAttributes(stream)
+            if ((access & (0x0001 | 0x0004)) != 0 && name != '<clinit>') {
+                members.put(name + descriptor, Integer.valueOf(access))
+            }
+        }
+        members
+    }
+
+    int access = input.readUnsignedShort()
+    String name = className(input.readUnsignedShort())
+    String superName = className(input.readUnsignedShort())
+    int interfaceCount = input.readUnsignedShort()
+    def interfaces = new TreeSet<String>()
+    for (int interfaceIndex = 0; interfaceIndex < interfaceCount; interfaceIndex++) {
+        interfaces.add(className(input.readUnsignedShort()))
+    }
+    Map<String, Integer> fields = readMembers(input)
+    Map<String, Integer> methods = readMembers(input)
+    skipAttributes(input)
+    [
+            name        : name,
+            access      : access,
+            superName   : superName,
+            interfaces  : interfaces,
+            fields      : fields,
+            methods     : methods,
+            minorVersion: minorVersion,
+            majorVersion: majorVersion
+    ]
+}
+
+def readBinaryApi = { File archive ->
+    def classes = new TreeMap<String, Map<String, Object>>()
+    def zip = new java.util.zip.ZipFile(archive)
+    try {
+        def entries = Collections.list(zip.entries())
+                .findAll { entry ->
+                    !entry.directory
+                            && entry.name.endsWith('.class')
+                            && !entry.name.startsWith('META-INF/versions/')
+                            && !entry.name.endsWith('/module-info.class')
+                            && entry.name != 'module-info.class'
+                }
+                .sort { left, right -> left.name <=> right.name }
+        entries.each { entry ->
+            Map<String, Object> parsed = zip.getInputStream(entry).withCloseable { stream ->
+                parseBinaryApiClass(stream.bytes)
+            }
+            if ((((Integer) parsed.access).intValue() & (0x0001 | 0x0004)) != 0) {
+                classes.put((String) parsed.name, parsed)
+            }
+        }
+    } finally {
+        zip.close()
+    }
+    classes
+}
+
+def visibilityCompatible = { int oldAccess, int newAccess ->
+    boolean oldPublic = (oldAccess & 0x0001) != 0
+    boolean newPublic = (newAccess & 0x0001) != 0
+    boolean newProtected = (newAccess & 0x0004) != 0
+    oldPublic ? newPublic : (newPublic || newProtected)
+}
+
+def incompatibleModifierChanges = { int oldAccess, int newAccess, boolean method ->
+    def changes = new ArrayList<String>()
+    if (((oldAccess ^ newAccess) & 0x0008) != 0) {
+        changes.add('static modifier changed')
+    }
+    if ((oldAccess & 0x0010) == 0 && (newAccess & 0x0010) != 0) {
+        changes.add('became final')
+    }
+    if (method && (oldAccess & 0x0400) == 0 && (newAccess & 0x0400) != 0) {
+        changes.add('became abstract')
+    }
+    changes
+}
+
+def binaryCompatibilityReport = layout.buildDirectory.file(
+        'reports/binary-compatibility/blue-coordination-java.txt')
+def binaryCompatibilityCheck = tasks.register('binaryCompatibilityCheck') {
+    group = 'verification'
+    description = 'Checks public/protected JVM API compatibility with the previous Coordination candidate.'
+    dependsOn tasks.named('jar')
+    inputs.files(configurations.binaryCompatibilityBaseline)
+    inputs.file(tasks.named('jar').flatMap { it.archiveFile })
+    inputs.property('baselineVersion', binaryCompatibilityBaselineVersion)
+    outputs.file(binaryCompatibilityReport)
+    doLast {
+        Set<File> resolvedBaseline = configurations.binaryCompatibilityBaseline.resolve()
+        if (resolvedBaseline.size() != 1) {
+            throw new GradleException(
+                    "Expected one binary compatibility baseline JAR, found ${resolvedBaseline}")
+        }
+        File baselineJar = resolvedBaseline.iterator().next()
+        File currentJar = tasks.named('jar').get().archiveFile.get().asFile
+        Map<String, Map<String, Object>> baselineApi = readBinaryApi(baselineJar)
+        Map<String, Map<String, Object>> currentApi = readBinaryApi(currentJar)
+        def problems = new ArrayList<String>()
+
+        baselineApi.each { String className, Map<String, Object> oldClass ->
+            Map<String, Object> newClass = currentApi.get(className)
+            if (newClass == null) {
+                problems.add("${className}: public/protected class was removed")
+                return
+            }
+            int oldAccess = ((Integer) oldClass.access).intValue()
+            int newAccess = ((Integer) newClass.access).intValue()
+            if (!visibilityCompatible(oldAccess, newAccess)) {
+                problems.add("${className}: class visibility was reduced")
+            }
+            if (((oldAccess ^ newAccess) & (0x0200 | 0x2000 | 0x4000)) != 0) {
+                problems.add("${className}: class/interface/annotation/enum kind changed")
+            }
+            if ((oldAccess & 0x0010) == 0 && (newAccess & 0x0010) != 0) {
+                problems.add("${className}: class became final")
+            }
+            if ((oldAccess & 0x0400) == 0 && (newAccess & 0x0400) != 0) {
+                problems.add("${className}: class became abstract")
+            }
+            if (oldClass.superName != newClass.superName) {
+                problems.add("${className}: superclass changed from ${oldClass.superName} to ${newClass.superName}")
+            }
+            ((Set<String>) oldClass.interfaces).each { String interfaceName ->
+                if (!((Set<String>) newClass.interfaces).contains(interfaceName)) {
+                    problems.add("${className}: directly implemented interface ${interfaceName} was removed")
+                }
+            }
+
+            ['field', 'method'].each { String memberKind ->
+                Map<String, Integer> oldMembers = memberKind == 'field'
+                        ? (Map<String, Integer>) oldClass.fields
+                        : (Map<String, Integer>) oldClass.methods
+                Map<String, Integer> newMembers = memberKind == 'field'
+                        ? (Map<String, Integer>) newClass.fields
+                        : (Map<String, Integer>) newClass.methods
+                oldMembers.each { String signature, Integer oldMemberAccess ->
+                    Integer newMemberAccess = newMembers.get(signature)
+                    if (newMemberAccess == null) {
+                        problems.add("${className}: ${memberKind} ${signature} was removed or changed descriptor")
+                        return
+                    }
+                    if (!visibilityCompatible(oldMemberAccess.intValue(),
+                            newMemberAccess.intValue())) {
+                        problems.add("${className}: ${memberKind} ${signature} visibility was reduced")
+                    }
+                    incompatibleModifierChanges(oldMemberAccess.intValue(),
+                            newMemberAccess.intValue(), memberKind == 'method').each { change ->
+                        problems.add("${className}: ${memberKind} ${signature} ${change}")
+                    }
+                }
+            }
+        }
+
+        def digest = java.security.MessageDigest.getInstance('SHA-256')
+        baselineJar.withInputStream { stream ->
+            byte[] buffer = new byte[8192]
+            int read
+            while ((read = stream.read(buffer)) >= 0) {
+                if (read > 0) {
+                    digest.update(buffer, 0, read)
+                }
+            }
+        }
+        String baselineSha256 = digest.digest()
+                .collect { String.format('%02x', it & 0xff) }.join()
+        File report = binaryCompatibilityReport.get().asFile
+        report.parentFile.mkdirs()
+        report.withWriter('UTF-8') { writer ->
+            writer.writeLine("baseline=blue.coordination:blue-coordination-java:${binaryCompatibilityBaselineVersion}")
+            writer.writeLine("baselineJar=${baselineJar.name}")
+            writer.writeLine("baselineSha256=${baselineSha256}")
+            writer.writeLine("currentJar=${currentJar.name}")
+            writer.writeLine("baselineApiClasses=${baselineApi.size()}")
+            writer.writeLine("currentApiClasses=${currentApi.size()}")
+            writer.writeLine("compatible=${problems.isEmpty()}")
+            problems.sort().each { writer.writeLine("problem=${it}") }
+        }
+        if (!problems.isEmpty()) {
+            throw new GradleException(
+                    "Binary compatibility check failed with ${problems.size()} problem(s); see ${report}")
+        }
+    }
+}
+
+def java8BytecodeReport = layout.buildDirectory.file(
+        'reports/bytecode/java8-bytecode.txt')
+def verifyJava8Bytecode = tasks.register('verifyJava8Bytecode') {
+    group = 'verification'
+    description = 'Verifies that every class in the published Coordination JAR targets Java 8 or earlier.'
+    dependsOn tasks.named('jar')
+    inputs.file(tasks.named('jar').flatMap { it.archiveFile })
+    outputs.file(java8BytecodeReport)
+    doLast {
+        File currentJar = tasks.named('jar').get().archiveFile.get().asFile
+        def versions = new TreeMap<String, Integer>()
+        def zip = new java.util.zip.ZipFile(currentJar)
+        try {
+            Collections.list(zip.entries())
+                    .findAll { entry -> !entry.directory && entry.name.endsWith('.class') }
+                    .sort { left, right -> left.name <=> right.name }
+                    .each { entry ->
+                        Map<String, Object> parsed = zip.getInputStream(entry).withCloseable { stream ->
+                            parseBinaryApiClass(stream.bytes)
+                        }
+                        versions.put(entry.name, (Integer) parsed.majorVersion)
+                    }
+        } finally {
+            zip.close()
+        }
+        def incompatible = versions.findAll { String name, Integer major -> major > 52 }
+        File report = java8BytecodeReport.get().asFile
+        report.parentFile.mkdirs()
+        report.withWriter('UTF-8') { writer ->
+            writer.writeLine("jar=${currentJar.name}")
+            writer.writeLine("classCount=${versions.size()}")
+            writer.writeLine("maximumAllowedMajorVersion=52")
+            writer.writeLine("maximumObservedMajorVersion=${versions.values().max() ?: 0}")
+            writer.writeLine("compatible=${incompatible.isEmpty()}")
+            incompatible.each { name, major ->
+                writer.writeLine("problem=${name}: major version ${major}")
+            }
+        }
+        if (!incompatible.isEmpty()) {
+            throw new GradleException(
+                    "Java 8 bytecode verification failed for ${incompatible.size()} class(es); see ${report}")
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn binaryCompatibilityCheck, verifyJava8Bytecode
+}
+
 jmh {
     jmhVersion = '1.37'
     warmupIterations = 3
@@ -78,18 +513,98 @@ jmh {
     iterations = 5
     timeOnIteration = '1s'
     fork = 2
-    profilers = ['gc']
+    profilers = testJfrEnabled
+            ? ['gc', "jfr:dir=${file("$buildDir/reports/jfr/jmh").absolutePath}"]
+            : ['gc']
+    jvmArgs = ['-Xms512m', '-Xmx2g']
     resultFormat = 'JSON'
-    resultsFile = file("$buildDir/reports/jmh/resolved-processing-host-story.json")
+    resultsFile = file("$buildDir/reports/jmh/jmh-results.json")
+}
+
+tasks.named('jmh') {
+    def jsonReport = file("$buildDir/reports/jmh/jmh-results.json")
+    def csvReport = file("$buildDir/reports/jmh/jmh-results.csv")
+    def markdownReport = file("$buildDir/reports/jmh/jmh-results.md")
+    def environmentReport = file("$buildDir/reports/jmh/environment.properties")
+    outputs.files(csvReport, markdownReport, environmentReport)
+    doLast {
+        if (!jsonReport.isFile()) {
+            throw new GradleException("JMH JSON report was not created: ${jsonReport}")
+        }
+        def results = new groovy.json.JsonSlurper().parse(jsonReport)
+        def csvCell = { Object value ->
+            '"' + String.valueOf(value == null ? '' : value).replace('"', '""') + '"'
+        }
+        def markdownCell = { Object value ->
+            String.valueOf(value == null ? '' : value).replace('|', '\\|').replace('\n', ' ')
+        }
+
+        csvReport.parentFile.mkdirs()
+        csvReport.withWriter('UTF-8') { writer ->
+            writer.writeLine('benchmark,mode,threads,forks,score,scoreError,scoreUnit,gate')
+            results.each { result ->
+                def metric = result.primaryMetric ?: [:]
+                writer.writeLine([
+                        result.benchmark,
+                        result.mode,
+                        result.threads,
+                        result.forks,
+                        metric.score,
+                        metric.scoreError,
+                        metric.scoreUnit,
+                        'NOT_CONFIGURED'
+                ].collect(csvCell).join(','))
+            }
+        }
+
+        def environment = new TreeMap<String, String>()
+        environment.put('blueCoordinationVersion', project.version.toString())
+        environment.put('blueLanguageVersion', blueLanguageVersion)
+        environment.put('gradleVersion', gradle.gradleVersion)
+        environment.put('gradleJvmMaxHeapBytes', String.valueOf(Runtime.runtime.maxMemory()))
+        environment.put('javaVendor', System.getProperty('java.vendor', 'unknown'))
+        environment.put('javaVersion', System.getProperty('java.version', 'unknown'))
+        environment.put('jmhForkJvmArgs', '-Xms512m,-Xmx2g')
+        environment.put('osArch', System.getProperty('os.arch', 'unknown'))
+        environment.put('osName', System.getProperty('os.name', 'unknown'))
+        environment.put('osVersion', System.getProperty('os.version', 'unknown'))
+        environment.put('processors', String.valueOf(Runtime.runtime.availableProcessors()))
+        environmentReport.withWriter('UTF-8') { writer ->
+            environment.each { key, value -> writer.writeLine("${key}=${value}") }
+        }
+
+        markdownReport.withWriter('UTF-8') { writer ->
+            writer.writeLine('# Coordination JMH results')
+            writer.writeLine('')
+            writer.writeLine('Environment metadata is recorded in `environment.properties`. Generic JMH hard gates are not configured; each row is marked `NOT_CONFIGURED`.')
+            writer.writeLine('')
+            writer.writeLine('| Benchmark | Mode | Threads | Forks | Score | Error | Unit | Gate |')
+            writer.writeLine('|---|---:|---:|---:|---:|---:|---|---|')
+            results.each { result ->
+                def metric = result.primaryMetric ?: [:]
+                writer.writeLine('| ' + [
+                        result.benchmark,
+                        result.mode,
+                        result.threads,
+                        result.forks,
+                        metric.score,
+                        metric.scoreError,
+                        metric.scoreUnit,
+                        'NOT_CONFIGURED'
+                ].collect(markdownCell).join(' | ') + ' |')
+            }
+        }
+    }
 }
 
 ext.genResourcesDir = file("$buildDir/generated-resources")
+def buildPropertiesVersion = project.version.toString()
 task generateBuildProperties {
     ext.buildPropertiesFile = file("$genResourcesDir/blue/coordination/build.properties")
-    inputs.property('buildVersion', project.version.toString())
+    inputs.property('buildVersion', buildPropertiesVersion)
     outputs.file(buildPropertiesFile)
     doLast {
-        buildPropertiesFile.text = ("blue-coordination-java.build.version=" + project.version + "\n"
+        buildPropertiesFile.text = ("blue-coordination-java.build.version=" + buildPropertiesVersion + "\n"
                 + "blue-coordination-java.build.timestamp=" + new Date().format("yyyy-MM-dd'T'HH:mm:ssZ"))
     }
 }
@@ -142,6 +657,68 @@ publishing {
             }
         }
     }
+}
+
+tasks.register('sourceArchive', Zip) {
+    group = 'distribution'
+    description = 'Creates a reproducible source-only archive and SHA-256 checksum.'
+    def sourceArchiveName = "${rootProject.name}-${project.version}-source.zip"
+    def checksumFile = layout.buildDirectory.file("distributions/${sourceArchiveName}.sha256")
+    archiveFileName = sourceArchiveName
+    destinationDirectory = layout.buildDirectory.dir('distributions')
+    outputs.file(checksumFile)
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from(projectDir) {
+        into("${rootProject.name}-${project.version}")
+        include '.cz.toml'
+        include '.github/**'
+        include '.gitignore'
+        include 'LICENSE'
+        include 'README.md'
+        include 'build.gradle'
+        include 'settings.gradle'
+        include 'gradle.properties'
+        include 'gradle/**'
+        include 'gradlew'
+        include 'gradlew.bat'
+        include 'docs/**'
+        include 'src/**'
+        exclude '**/.DS_Store'
+        exclude '**/*.db'
+        exclude '**/*.hprof'
+        exclude '**/*.jfr'
+        exclude '**/*.log'
+        exclude '**/*.zip'
+        exclude '**/build/**'
+        exclude '**/dumps/**'
+        exclude '**/logs/**'
+        exclude '**/node_modules/**'
+        exclude '**/recordings/**'
+    }
+    doLast {
+        def archive = archiveFile.get().asFile
+        def digest = java.security.MessageDigest.getInstance('SHA-256')
+        archive.withInputStream { input ->
+            byte[] buffer = new byte[8192]
+            int read
+            while ((read = input.read(buffer)) >= 0) {
+                if (read > 0) {
+                    digest.update(buffer, 0, read)
+                }
+            }
+        }
+        def checksum = digest.digest().collect { String.format('%02x', it & 0xff) }.join()
+        checksumFile.get().asFile.setText(
+                "${checksum}  ${archive.name}\n", 'UTF-8')
+    }
+}
+
+def stageLocalMaven = tasks.register('stageLocalMaven') {
+    group = 'publishing'
+    description = 'Publishes the current Coordination artifact into build/staging-deploy.'
+    dependsOn tasks.named('publishMavenPublicationToMavenRepository')
 }
 
 if (System.getenv('CI')) {

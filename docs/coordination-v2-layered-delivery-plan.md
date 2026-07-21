@@ -1370,13 +1370,10 @@ node ../blue-js/libs/repository-generator/dist/bin/blue-repo-generator.mjs \
 ../blue-repository-java/gradlew -p ../blue-repository-java \
   verifyGeneratedSources clean build
 
-# Task 1: core Processing Event
-../blue-language-java/gradlew -p ../blue-language-java test \
-  --tests '*ProcessorProcessEventContextTest'
-
-# Task 2: core routed delivery
-../blue-language-java/gradlew -p ../blue-language-java test \
-  --tests '*RoutedChannelDeliveryTest'
+# Tasks 1-2: released Blue Language dependency
+./gradlew dependencyInsight \
+  --dependency blue-language-java \
+  --configuration runtimeClasspath
 
 # Task 3: Timeline V2
 ./gradlew test --tests '*Timeline*ChannelProcessorTest'

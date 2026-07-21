@@ -3,13 +3,14 @@ package blue.coordination.processor.workflow;
 import blue.bex.result.BexChangeset;
 import blue.bex.result.BexExecutionResult;
 import blue.bex.result.BexPatchEntry;
+import blue.bex.value.BexFrozenWriter;
 import blue.bex.value.BexNodeWriter;
 import blue.bex.value.BexValue;
 import blue.bex.value.BexValues;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.model.Node;
 import blue.language.processor.WorkingDocument;
-import blue.language.processor.model.JsonPatch;
+import blue.language.processor.model.FrozenJsonPatch;
 import blue.language.snapshot.FrozenNode;
 
 import java.util.ArrayList;
@@ -36,7 +37,7 @@ final class ComputeResultEmitter {
         }
         try {
             boolean returnedChangeset = hasReturnedChangeset(result);
-            List<JsonPatch> patches;
+            List<FrozenJsonPatch> patches;
             try {
                 patches = changesetPatches(result, context);
             } catch (ComputeResultValidationException ex) {
@@ -76,7 +77,7 @@ final class ComputeResultEmitter {
             throw new IllegalArgumentException("plan must not be null");
         }
         plan.claimForBuffering();
-        List<JsonPatch> patches = plan.patches();
+        List<FrozenJsonPatch> patches = plan.patches();
         if (!patches.isEmpty()) {
             applyPatches(patches, context);
         }
@@ -154,7 +155,8 @@ final class ComputeResultEmitter {
         return Termination.requested(reason.asText());
     }
 
-    private List<JsonPatch> changesetPatches(BexExecutionResult result, StepExecutionContext context) {
+    private List<FrozenJsonPatch> changesetPatches(BexExecutionResult result,
+                                                   StepExecutionContext context) {
         BexValue changeset = result.value() != null ? result.value().get("changeset") : BexValues.undefined();
         BexChangeset accumulated = result.changeset();
         if (changeset.isUndefined() || changeset.isNull()) {
@@ -169,7 +171,7 @@ final class ComputeResultEmitter {
         if (isAccumulatedChangesetValue(changeset, accumulated)) {
             return patchesFromBexChangeset(accumulated, context);
         }
-        List<JsonPatch> patches = new ArrayList<JsonPatch>(changeset.size());
+        List<FrozenJsonPatch> patches = new ArrayList<FrozenJsonPatch>(changeset.size());
         for (int i = 0; i < changeset.size(); i++) {
             WorkflowPatchEntry entry = patchEntry(changeset.get(String.valueOf(i)), i);
             patches.add(toPatch(entry, context));
@@ -177,7 +179,8 @@ final class ComputeResultEmitter {
         return patches;
     }
 
-    private List<JsonPatch> patchesFromBexChangeset(BexChangeset changeset, StepExecutionContext context) {
+    private List<FrozenJsonPatch> patchesFromBexChangeset(BexChangeset changeset,
+                                                          StepExecutionContext context) {
         if (changeset == null || changeset.entries().isEmpty()) {
             return Collections.emptyList();
         }
@@ -186,7 +189,8 @@ final class ComputeResultEmitter {
         }
         long conversionStart = System.nanoTime();
         try {
-            List<JsonPatch> patches = new ArrayList<JsonPatch>(changeset.entries().size());
+            List<FrozenJsonPatch> patches =
+                    new ArrayList<FrozenJsonPatch>(changeset.entries().size());
             for (BexPatchEntry entry : changeset.entries()) {
                 patches.add(toPatch(entry, context));
                 if (metrics != null) {
@@ -213,38 +217,33 @@ final class ComputeResultEmitter {
         if (path == null || path.trim().isEmpty()) {
             throw invalid("Compute result changeset entry " + index + " missing path");
         }
-        Node nodeValue = null;
+        FrozenNode nodeValue = null;
         if (!"remove".equals(op)) {
             BexValue val = item.get("val");
             if (val.isUndefined()) {
                 throw invalid("Compute result changeset entry " + index + " missing val");
             }
-            long writerStart = System.nanoTime();
-            try {
-                nodeValue = BexNodeWriter.toNode(val);
-            } finally {
-                if (metrics != null) {
-                    metrics.addBexNodeWriterNanos(System.nanoTime() - writerStart);
-                }
-            }
+            nodeValue = freezePatchValue(val);
         }
         return new WorkflowPatchEntry(op, path, nodeValue);
     }
 
-    private JsonPatch toPatch(WorkflowPatchEntry entry, StepExecutionContext context) {
+    private FrozenJsonPatch toPatch(WorkflowPatchEntry entry,
+                                    StepExecutionContext context) {
         String normalizedOp = entry.op().trim().toLowerCase();
         String path = resolvedPointer(entry.path(), context);
         if ("remove".equals(normalizedOp)) {
-            return JsonPatch.remove(path);
+            return FrozenJsonPatch.remove(path);
         }
         if ("add".equals(normalizedOp)) {
-            return JsonPatch.add(path, entry.val());
+            return FrozenJsonPatch.add(path, entry.val());
         }
         // patchEntry has already restricted this branch to replace.
-        return JsonPatch.replace(path, entry.val());
+        return FrozenJsonPatch.replace(path, entry.val());
     }
 
-    private JsonPatch toPatch(BexPatchEntry entry, StepExecutionContext context) {
+    private FrozenJsonPatch toPatch(BexPatchEntry entry,
+                                    StepExecutionContext context) {
         if (entry == null) {
             throw invalid("Compute result accumulated patch is incomplete");
         }
@@ -255,22 +254,14 @@ final class ComputeResultEmitter {
         }
         String path = resolvedPointer(entry.authoredPath(), context);
         if (remove) {
-            return JsonPatch.remove(path);
+            return FrozenJsonPatch.remove(path);
         }
-        long writerStart = System.nanoTime();
-        Node value;
-        try {
-            value = BexNodeWriter.toNode(entry.val());
-        } finally {
-            if (metrics != null) {
-                metrics.addBexNodeWriterNanos(System.nanoTime() - writerStart);
-            }
-        }
+        FrozenNode value = freezePatchValue(entry.val());
         if ("add".equals(normalizedOp)) {
-            return JsonPatch.add(path, value);
+            return FrozenJsonPatch.add(path, value);
         }
         // BexPatchEntry has already restricted this branch to replace.
-        return JsonPatch.replace(path, value);
+        return FrozenJsonPatch.replace(path, value);
     }
 
     private String resolvedPointer(String authoredPath, StepExecutionContext context) {
@@ -281,14 +272,32 @@ final class ComputeResultEmitter {
         }
     }
 
-    private void applyPatches(List<JsonPatch> patches, StepExecutionContext context) {
+    private void applyPatches(List<FrozenJsonPatch> patches,
+                              StepExecutionContext context) {
         long applyStart = System.nanoTime();
         boolean applied = false;
+        boolean previewTransferred = false;
+        WorkingDocument.Preview preview = null;
+        long frozenValueCount = frozenValueCount(patches);
         try {
-            WorkingDocument.Preview preview = context.advanceWorkingDocument(patches);
-            context.processorContext().applyPreviewedPatches(patches, preview);
+            preview = context.advanceWorkingDocumentFrozen(patches);
+            if (preview == null) {
+                return;
+            }
+            if (metrics != null) {
+                metrics.addMetric("frozenPatchesHandedToLanguage", patches.size());
+                metrics.addMetric("frozenPatchValuesHandedToLanguage", frozenValueCount);
+            }
+            context.processorContext().applyPreviewedFrozenPatches(patches, preview);
+            previewTransferred = true;
+            if (metrics != null) {
+                metrics.addMetric("frozenPatchValuesHandedToLanguage", frozenValueCount);
+            }
             applied = true;
         } finally {
+            if (!previewTransferred && preview != null) {
+                preview.close();
+            }
             if (metrics != null) {
                 metrics.addUpdatePatchApplyNanos(System.nanoTime() - applyStart);
                 if (applied) {
@@ -297,6 +306,16 @@ final class ComputeResultEmitter {
                 }
             }
         }
+    }
+
+    private long frozenValueCount(List<FrozenJsonPatch> patches) {
+        long count = 0L;
+        for (FrozenJsonPatch patch : patches) {
+            if (patch.getValue() != null) {
+                count++;
+            }
+        }
+        return count;
     }
 
     private boolean isAccumulatedChangesetValue(BexValue value, BexChangeset changeset) {
@@ -324,11 +343,50 @@ final class ComputeResultEmitter {
                 if (val != null && !val.isUndefined() && !val.isNull()) {
                     return false;
                 }
-            } else if (val == null || val.isUndefined() || !Objects.equals(entry.val().toSimple(), val.toSimple())) {
+            } else if (val == null || val.isUndefined()) {
+                return false;
+            } else if (entry.val() != val
+                    && !Objects.equals(entry.val().toSimple(), val.toSimple())) {
+                // BEX's accumulated changeset view preserves the exact value object
+                // held by each BexPatchEntry. The identity branch is therefore the
+                // normal path; deep conversion remains only for an independently
+                // authored result that happens to be semantically equivalent.
                 return false;
             }
         }
         return true;
+    }
+
+    FrozenNode freezePatchValue(BexValue value) {
+        // BEX exposes the exact FrozenNode only through BexFrozenWriter. Avoid
+        // invoking that writer for ordinary values because rc2's fallback factory
+        // itself performs Node round trips. A non-null frozen BlueId identifies the
+        // zero-materialization FrozenNode-backed lane.
+        if (BexValues.frozenBlueId(value) != null) {
+            FrozenNode frozen = BexFrozenWriter.toFrozen(value);
+            if (frozen.isStrictCanonical()) {
+                if (metrics != null) {
+                    metrics.incrementBexPatchFrozenDirectConversions();
+                }
+                return frozen;
+            }
+        }
+        return materializePatchValue(value);
+    }
+
+    private FrozenNode materializePatchValue(BexValue value) {
+        long writerStart = System.nanoTime();
+        try {
+            // This is the one unavoidable rc2 boundary for newly computed values:
+            // take a mutable BEX rendering and immediately freeze it as authored
+            // canonical content. No mutable value crosses into Language.
+            return FrozenNode.fromNode(BexNodeWriter.toNode(value));
+        } finally {
+            if (metrics != null) {
+                metrics.addBexNodeWriterNanos(System.nanoTime() - writerStart);
+                metrics.incrementBexPatchNodeMaterializations();
+            }
+        }
     }
 
     private String textValue(BexValue value) {

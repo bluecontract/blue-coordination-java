@@ -7,8 +7,10 @@ import blue.bex.result.BexMetrics;
 import blue.bex.result.BexPatchEntry;
 import blue.bex.value.BexValue;
 import blue.bex.value.BexValues;
+import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.model.Node;
-import blue.language.processor.model.JsonPatch;
+import blue.language.processor.model.FrozenJsonPatch;
+import blue.language.snapshot.FrozenNode;
 import blue.repo.coordination.TerminateProcessing;
 
 import org.junit.jupiter.api.Test;
@@ -25,6 +27,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -51,36 +54,45 @@ class ComputeEffectPlanTest {
     }
 
     @Test
-    void planCopiesAndFreezesPatchContent() {
+    void planDefensivelyCopiesAndRetainsImmutableFrozenPatches() {
         Node value = new Node().properties("status", new Node().value("original"));
-        List<JsonPatch> patches = new ArrayList<JsonPatch>();
-        patches.add(JsonPatch.replace("/target", value));
+        FrozenNode frozenValue = FrozenNode.fromNode(value);
+        FrozenJsonPatch patch = FrozenJsonPatch.replace("/target", frozenValue);
+        List<FrozenJsonPatch> patches = new ArrayList<FrozenJsonPatch>();
+        patches.add(patch);
         ComputeEffectPlan plan = new ComputeEffectPlan(
                 patches, Collections.emptyList(), false, null, true);
 
         value.getProperties().get("status").value("mutated-input");
         patches.clear();
-        List<JsonPatch> firstRead = plan.patches();
-        firstRead.get(0).getVal().getProperties().get("status").value("mutated-output");
+        List<FrozenJsonPatch> firstRead = plan.patches();
 
         assertEquals(1, plan.patches().size());
-        assertEquals("original", plan.patches().get(0).getVal().get("/status"));
+        assertSame(patch, plan.patches().get(0),
+                "immutable patches should be retained without rematerialization");
+        assertSame(frozenValue, plan.patches().get(0).getVal());
+        assertEquals("original",
+                plan.patches().get(0).getVal().property("status").getValue());
         assertThrows(UnsupportedOperationException.class, firstRead::clear);
     }
 
     @Test
     void planPreservesEverySupportedPatchOperationAndRejectsNullPatches() {
-        List<JsonPatch> patches = new ArrayList<JsonPatch>();
-        patches.add(JsonPatch.add("/added", new Node().value("value")));
-        patches.add(JsonPatch.replace("/replaced", new Node().value("value")));
-        patches.add(JsonPatch.remove("/removed"));
+        FrozenNode value = FrozenNode.fromNode(new Node().value("value"));
+        List<FrozenJsonPatch> patches = new ArrayList<FrozenJsonPatch>();
+        patches.add(FrozenJsonPatch.add("/added", value));
+        patches.add(FrozenJsonPatch.replace("/replaced", value));
+        patches.add(FrozenJsonPatch.remove("/removed"));
 
         ComputeEffectPlan plan = new ComputeEffectPlan(
                 patches, Collections.emptyList(), false, null, true);
 
-        assertEquals(JsonPatch.Op.ADD, plan.patches().get(0).getOp());
-        assertEquals(JsonPatch.Op.REPLACE, plan.patches().get(1).getOp());
-        assertEquals(JsonPatch.Op.REMOVE, plan.patches().get(2).getOp());
+        assertEquals(blue.language.processor.model.JsonPatch.Op.ADD,
+                plan.patches().get(0).getOp());
+        assertEquals(blue.language.processor.model.JsonPatch.Op.REPLACE,
+                plan.patches().get(1).getOp());
+        assertEquals(blue.language.processor.model.JsonPatch.Op.REMOVE,
+                plan.patches().get(2).getOp());
         assertThrows(IllegalArgumentException.class,
                 () -> new ComputeEffectPlan(Collections.singletonList(null),
                         Collections.emptyList(), false, null, false));
@@ -112,6 +124,25 @@ class ComputeEffectPlanTest {
 
         assertEquals("Compute execution result is required", missingResult.getMessage());
         assertEquals("plan must not be null", missingPlan.getMessage());
+    }
+
+    @Test
+    void emitterRetainsStrictFrozenBexValuesAndMaterializesComputedValuesOnce() {
+        BexProcessingMetrics metrics = new BexProcessingMetrics();
+        ComputeResultEmitter emitter = new ComputeResultEmitter(metrics);
+        FrozenNode retained = FrozenNode.fromNode(new Node()
+                .properties("kind", new Node().value("retained")));
+
+        FrozenNode direct = emitter.freezePatchValue(BexValues.frozen(retained));
+        FrozenNode computed = emitter.freezePatchValue(BexValues.map(
+                Collections.singletonMap("kind", BexValues.scalar("computed"))));
+
+        assertSame(retained, direct,
+                "strict BEX frozen values must cross the boundary by identity");
+        assertTrue(computed.isStrictCanonical());
+        assertEquals("computed", computed.property("kind").getValue());
+        assertEquals(1L, metrics.bexPatchFrozenDirectConversions());
+        assertEquals(1L, metrics.bexPatchNodeMaterializations());
     }
 
     @Test

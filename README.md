@@ -21,7 +21,7 @@ repositories {
 }
 
 dependencies {
-    implementation "blue.coordination:blue-coordination-java:1.0.0"
+    implementation "blue.coordination:blue-coordination-java:2.0.0-rc.4"
 }
 ```
 
@@ -29,8 +29,8 @@ The project targets Java 8-compatible bytecode, builds with JDK 25, runs tests
 on Java 8, and depends on:
 
 ```groovy
-api "blue.language:blue-language-java:3.1.0-rc.10"
-api "blue.repo:blue-repo-java:3.0.0-rc.8"
+api "blue.language:blue-language-java:3.1.0-rc.16"
+api "blue.repo:blue-repo-java:3.0.0-rc.10"
 api "blue.bex:blue-bex-java:1.1.0-rc.2"
 ```
 
@@ -224,6 +224,21 @@ Run tests:
 ./gradlew test
 ```
 
+Run the focused correctness and bounded-memory suites:
+
+```bash
+./gradlew workflowPlanDifferentialTest
+./gradlew complexFixtureIntegrationTest
+./gradlew memoryIntegrationTest
+```
+
+Each focused task uses one worker capped at 2 GiB. Passing `-PtestJfr`
+runs that focused task on the current modern Gradle JVM and records under
+`build/reports/jfr/`; the normal `test` task continues to run on Java 8.
+
+Blue Language is pinned to the released
+`blue.language:blue-language-java:3.1.0-rc.16` artifact from Maven Central.
+
 Build jars:
 
 ```bash
@@ -235,6 +250,35 @@ Publish locally:
 ```bash
 ./gradlew publishToMavenLocal
 ```
+
+Stage the artifact without writing outside this repository:
+
+```bash
+./gradlew stageLocalMaven
+```
+
+The staged Maven repository is `build/staging-deploy`.
+
+Run JMH and generate JSON, CSV, Markdown, and environment metadata:
+
+```bash
+./gradlew jmh
+./gradlew jmh -PtestJfr
+```
+
+Reports are written to `build/reports/jmh`. Generic JMH gates are deliberately
+reported as `NOT_CONFIGURED`; operation-level acceptance is exercised by the
+focused integration and differential suites in this repository.
+
+Create the reproducible source archive and SHA-256 sidecar:
+
+```bash
+./gradlew sourceArchive
+```
+
+Artifacts are written to `build/distributions`. The verified performance and
+correctness evidence is recorded in
+[`docs/performance/complex-operations-coordination.md`](docs/performance/complex-operations-coordination.md).
 
 ## Test Coverage
 
