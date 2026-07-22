@@ -2,6 +2,7 @@ package blue.coordination.processor;
 
 import blue.coordination.processor.CoordinationProcessors;
 import blue.language.Blue;
+import blue.language.NodeProvider;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.HandlerProcessor;
@@ -9,6 +10,9 @@ import blue.language.processor.ProcessorExecutionContext;
 import blue.language.processor.model.HandlerContract;
 import blue.language.processor.model.JsonPatch;
 import blue.language.snapshot.ResolvedSnapshot;
+import blue.language.provider.BasicNodeProvider;
+import blue.language.provider.SequentialNodeProvider;
+import blue.language.utils.NodeProviderWrapper;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.ChatMessage;
 import blue.repo.coordination.TimelineChannel;
@@ -40,13 +44,15 @@ class CounterSnapshotRoundTripStressTest {
         String finalBlueId = null;
 
         for (int i = 1; i <= STRESS_ITERATIONS; i++) {
-            Node event = TestTimelineProvider.timelineEntry(fixture.blue,
+            Node event = timelineEntry(fixture.blue,
                     fixture.repository,
                     "counter",
                     i,
-                    TestTimelineProvider.chatMessage("tick " + i));
+                    chatMessage("tick " + i));
             if (i > 1) {
-                Node previous = currentSnapshot.canonicalNodeAt(
+                // Canonical child fragments may omit context-derived types; compare the
+                // resolved event view when treating the nested timeline as a document.
+                Node previous = currentSnapshot.resolvedNodeAt(
                         "/contracts/checkpoint/lastEvents/ownerChannel");
                 CoordinationEventNodes.TimelineEntryView previousEntry =
                         CoordinationEventNodes.timelineEntry(previous);
@@ -78,12 +84,14 @@ class CounterSnapshotRoundTripStressTest {
             finalBlueId = result.blueId();
 
             String canonicalJson = fixture.blue.nodeToJson(result.canonicalDocument());
-            Node parsedCanonical = fixture.blue.jsonToNode(canonicalJson);
-            ResolvedSnapshot loadedSnapshot = fixture.blue.loadSnapshot(parsedCanonical);
+            Fixture coldFixture = configuredFixture();
+            Node parsedCanonical = coldFixture.blue.parseSourceJson(canonicalJson);
+            ResolvedSnapshot loadedSnapshot = coldFixture.blue.loadSnapshot(parsedCanonical);
 
             assertEquals(result.blueId(), loadedSnapshot.blueId(), "iteration " + i + " should preserve BlueId");
             assertSnapshotRoundTrip(result.snapshot(), loadedSnapshot);
             currentSnapshot = loadedSnapshot;
+            fixture = coldFixture;
         }
 
         long elapsedMillis = (System.nanoTime() - started) / 1_000_000L;
@@ -110,7 +118,7 @@ class CounterSnapshotRoundTripStressTest {
 
     private static Node bexOnlyCounterDocument(String counterIncrementHandlerBlueId) {
         Map<String, Node> contracts = new LinkedHashMap<String, Node>();
-        contracts.put("ownerChannel", TestTimelineProvider.channel("counter"));
+        contracts.put("ownerChannel", timelineChannel("counter"));
         contracts.put("incrementImpl", new Node()
                 .type(new Node().blueId(counterIncrementHandlerBlueId))
                 .properties("channel", new Node().value("ownerChannel")));
@@ -121,6 +129,45 @@ class CounterSnapshotRoundTripStressTest {
                 .properties("contracts", new Node().properties(contracts));
     }
 
+    private static Node timelineChannel(String timelineId) {
+        return new Node()
+                .type(TimelineChannel.qualifiedName())
+                .properties("timeline", timeline(timelineId))
+                .properties("actor", principalActor());
+    }
+
+    private static Node timelineEntry(Blue blue,
+                                      BlueRepository repository,
+                                      String timelineId,
+                                      int timestamp,
+                                      Node message) {
+        Node event = new Node()
+                .type("Coordination/Timeline Entry")
+                .properties("timeline", timeline(timelineId))
+                .properties("actor", principalActor())
+                .properties("timestamp", new Node().value(BigInteger.valueOf(timestamp)))
+                .properties("message", message)
+                .blue(repository.typeAliasBlue());
+        return blue.preprocess(event).blue(null);
+    }
+
+    private static Node timeline(String timelineId) {
+        return new Node()
+                .type("Coordination/Timeline")
+                .properties("providerId", new Node().value("test-provider"))
+                .properties("timelineId", new Node().value(timelineId));
+    }
+
+    private static Node principalActor() {
+        return new Node().type("Coordination/Principal Actor");
+    }
+
+    private static Node chatMessage(String message) {
+        return new Node()
+                .type(ChatMessage.qualifiedName())
+                .properties("message", new Node().value(message));
+    }
+
     private static void assertCounterMessage(Node event, int counter) {
         assertEquals("Counter is now " + counter, event.get("/message"));
     }
@@ -128,9 +175,15 @@ class CounterSnapshotRoundTripStressTest {
     private static Fixture configuredFixture() {
         BlueRepository repository = BlueRepository.latest();
         Blue blue = CoordinationTestResources.configuredBlue(repository);
-        CoordinationProcessors.registerWith(blue);
+        NodeProvider repositoryProvider = blue.getNodeProvider();
         Node counterIncrementHandlerType = new Node().name("Counter Increment Handler");
-        String counterIncrementHandlerBlueId = blue.calculateBlueId(counterIncrementHandlerType);
+        BasicNodeProvider testTypes = new BasicNodeProvider();
+        testTypes.addSingleNodes(counterIncrementHandlerType);
+        String counterIncrementHandlerBlueId = testTypes.getBlueIdByName(
+                "Counter Increment Handler");
+        blue.nodeProvider(new SequentialNodeProvider(
+                NodeProviderWrapper.unverified(testTypes), repositoryProvider));
+        CoordinationProcessors.registerWith(blue);
         blue.registerExternalContractType(counterIncrementHandlerBlueId,
                 counterIncrementHandlerType,
                 new CounterIncrementHandlerProcessor());

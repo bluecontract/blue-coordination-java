@@ -26,7 +26,7 @@ class Task9PublishedArtifactTest {
     private static final String TERMINATE_PROCESSING_BLUE_ID =
             "DacNQ6C6PgsEiE4QfUHmaWBztpEvo2YyXxUcP86ze77w";
     private static final String CONTRACTS_FIXTURE_IDENTITY =
-            "sha256:e6d4895fa007837aa1b54a92d1e4cb3133e2e7daa5cc5bb22e7443b6009a244a";
+            "sha256:013ad328449a15ae2ff969f4bcb308db7413ffe8138b5309e7a9fe342723fcf3";
 
     @Test
     void repositoryRc10ContainsGeneratedTerminateProcessingContract() {

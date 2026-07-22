@@ -2,10 +2,11 @@ package blue.coordination.processor.compute;
 
 import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.bex.BexProcessingMetrics;
+import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
-import blue.language.snapshot.FrozenNode;
 import blue.language.snapshot.ResolvedSnapshot;
+import blue.repo.BlueRepository;
 import java.math.BigInteger;
 import org.junit.jupiter.api.Test;
 
@@ -35,10 +36,10 @@ class BexCounterPersistenceRoundTripTest {
     @Test
     void serializedCanonicalDocumentCanBeReloadedAndProcessedAcrossOneHundredBexIncrements() {
         BexProcessingMetrics metrics = new BexProcessingMetrics();
-        ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create(
-                CoordinationProcessorOptions.builder()
-                        .processingMetrics(metrics)
-                        .build());
+        CoordinationProcessorOptions options = CoordinationProcessorOptions.builder()
+                .processingMetrics(metrics)
+                .build();
+        ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create(options);
 
         long start = System.nanoTime();
 
@@ -59,15 +60,17 @@ class BexCounterPersistenceRoundTripTest {
         long totalSerializeNanos = 0L;
 
         for (int i = 1; i <= ITERATIONS; i++) {
+            ComputeWorkflowTestSupport coldSupport = ComputeWorkflowTestSupport.create(options);
             long loadStart = System.nanoTime();
-            ResolvedSnapshot snapshot = deserializeCanonicalAndLoadSnapshot(support, storedCanonicalJson);
+            ResolvedSnapshot snapshot = deserializeCanonicalAndLoadSnapshot(
+                    coldSupport, storedCanonicalJson);
             totalDeserializeAndLoadSnapshotNanos += System.nanoTime() - loadStart;
             assertNotNull(snapshot.blueId(), "stored snapshot should load at iteration " + i);
             storedBlueId = snapshot.blueId();
 
             long processStart = System.nanoTime();
-            DocumentProcessingResult result = support.blue.processDocument(snapshot,
-                    support.operationRequest("increment", new Node().value(1)));
+            DocumentProcessingResult result = coldSupport.blue.processDocument(snapshot,
+                    operationRequest(coldSupport.blue, coldSupport.repository, i));
             totalProcessNanos += System.nanoTime() - processStart;
 
             assertFalse(result.capabilityFailure(), result.failureReason());
@@ -75,13 +78,14 @@ class BexCounterPersistenceRoundTripTest {
             assertEquals(BigInteger.valueOf(i), result.resolvedDocument().get("/counter"));
 
             long serializeStart = System.nanoTime();
-            storedCanonicalJson = serializeCanonical(support, result);
+            storedCanonicalJson = serializeCanonical(coldSupport, result);
             storedBlueId = result.blueId();
             totalSerializeNanos += System.nanoTime() - serializeStart;
         }
 
         long totalNanos = System.nanoTime() - start;
-        ResolvedSnapshot finalSnapshot = deserializeCanonicalAndLoadSnapshot(support, storedCanonicalJson);
+        ResolvedSnapshot finalSnapshot = deserializeCanonicalAndLoadSnapshot(
+                ComputeWorkflowTestSupport.create(options), storedCanonicalJson);
         assertEquals(BigInteger.valueOf(ITERATIONS), finalSnapshot.resolvedNodeAt("/counter").getValue());
         assertEquals(ITERATIONS, metrics.updateBatchPatchApplications());
         assertEquals(ITERATIONS, metrics.directBexChangesetHits());
@@ -112,10 +116,38 @@ class BexCounterPersistenceRoundTripTest {
     private static ResolvedSnapshot deserializeCanonicalAndLoadSnapshot(ComputeWorkflowTestSupport support,
             String storedCanonicalJson) {
         Node storedCanonical = support.blue.parseSourceJson(storedCanonicalJson);
-        FrozenNode canonicalRoot = FrozenNode.fromUncheckedCanonicalNode(storedCanonical);
-        return new ResolvedSnapshot(canonicalRoot,
-                FrozenNode.fromResolvedNode(storedCanonical),
-                canonicalRoot.blueId());
+        // Canonical Identity Input is not a Resolved View. Reload it through the
+        // Language resolver so context-derived types are restored before processing.
+        return support.blue.loadSnapshot(storedCanonical);
+    }
+
+    private static Node operationRequest(Blue blue,
+                                         BlueRepository repository,
+                                         int timestamp) {
+        Node message = new Node()
+                .type("Coordination/Operation Request")
+                .properties("operation", new Node().value("increment"))
+                .properties("channel", new Node().value("ownerChannel"))
+                .properties("request", new Node().value(1));
+        Node event = new Node()
+                .type("Coordination/Timeline Entry")
+                .properties("timeline", timeline())
+                .properties("actor", principalActor())
+                .properties("timestamp", new Node().value(BigInteger.valueOf(timestamp)))
+                .properties("message", message)
+                .blue(repository.typeAliasBlue());
+        return blue.preprocess(event).blue(null);
+    }
+
+    private static Node timeline() {
+        return new Node()
+                .type("Coordination/Timeline")
+                .properties("providerId", new Node().value("test-provider"))
+                .properties("timelineId", new Node().value("owner"));
+    }
+
+    private static Node principalActor() {
+        return new Node().type("Coordination/Principal Actor");
     }
 
     private static double nanosToMs(long nanos) {

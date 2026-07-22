@@ -8,8 +8,7 @@ contracts:
       providerId: test-provider
       timelineId: owner
     actor:
-      type: MyOS/Principal Actor
-      accountId: owner
+      type: Coordination/Principal Actor
   increment:
     type: Coordination/Sequential Workflow Operation
     channel: ownerChannel
