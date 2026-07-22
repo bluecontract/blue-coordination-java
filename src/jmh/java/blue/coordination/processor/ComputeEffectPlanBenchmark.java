@@ -6,9 +6,10 @@ import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorStatus;
 import blue.language.snapshot.ResolvedSnapshot;
 import blue.repo.BlueRepository;
+import blue.repo.coordination.Event;
+import blue.repo.coordination.PrincipalActor;
 import blue.repo.coordination.Timeline;
 import blue.repo.coordination.TimelineEntry;
-import blue.repo.myos.PrincipalActor;
 
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -65,6 +66,7 @@ public class ComputeEffectPlanBenchmark {
     public void verify() {
         requireSuccess(lastResult);
         boolean changeset = effects.contains("changeset");
+        boolean events = effects.contains("Events") || "events".equals(effects);
         boolean termination = effects.contains("Termination");
         Object expectedStatus = changeset ? "changed" : "idle";
         if (!expectedStatus.equals(lastResult.document().get("/status"))) {
@@ -73,6 +75,24 @@ public class ComputeEffectPlanBenchmark {
         Object cause = valueAt(lastResult.document(), "/contracts/terminated/cause");
         if (termination != "graceful".equals(cause)) {
             throw new IllegalStateException("Unexpected termination result: " + cause);
+        }
+        int expectedTriggeredEvents = (events ? 1 : 0) + (termination ? 1 : 0);
+        if (lastResult.triggeredEvents().size() != expectedTriggeredEvents) {
+            throw new IllegalStateException("Unexpected triggered event count: "
+                    + lastResult.triggeredEvents().size());
+        }
+        int benchmarkEvents = 0;
+        for (Node emitted : lastResult.triggeredEvents()) {
+            Node type = emitted.getType();
+            boolean expectedType = type != null
+                    && (Event.qualifiedName().equals(type.getValue())
+                    || Event.blueId().equals(type.getBlueId()));
+            if (expectedType && "benchmark".equals(valueAt(emitted, "/kind"))) {
+                benchmarkEvents++;
+            }
+        }
+        if (benchmarkEvents != (events ? 1 : 0)) {
+            throw new IllegalStateException("Unexpected benchmark event count: " + benchmarkEvents);
         }
     }
 
@@ -109,8 +129,7 @@ public class ComputeEffectPlanBenchmark {
                         .properties("providerId", new Node().value("test-provider"))
                         .properties("timelineId", new Node().value("owner")))
                 .properties("actor", new Node()
-                        .type("MyOS/Principal Actor")
-                        .properties("accountId", new Node().value("owner")));
+                        .type("Coordination/Principal Actor"));
         Node operation = new Node()
                 .type("Coordination/Sequential Workflow Operation")
                 .properties("channel", new Node().value("ownerChannel"))
@@ -137,7 +156,7 @@ public class ComputeEffectPlanBenchmark {
     private Node operationEvent() {
         TimelineEntry entry = new TimelineEntry()
                 .timeline(new Timeline().timelineId("owner"))
-                .actor(new PrincipalActor().accountId("owner"))
+                .actor(new PrincipalActor())
                 .timestamp(BigInteger.ONE);
         Node request = new Node()
                 .type("Coordination/Operation Request")

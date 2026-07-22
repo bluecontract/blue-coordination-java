@@ -29,7 +29,7 @@ The project targets Java 8-compatible bytecode, builds with JDK 25, runs tests
 on Java 8, and depends on:
 
 ```groovy
-api "blue.language:blue-language-java:3.1.0-rc.16"
+api "blue.language:blue-language-java:3.1.0-rc.18"
 api "blue.repo:blue-repo-java:3.0.0-rc.10"
 api "blue.bex:blue-bex-java:1.1.0-rc.2"
 ```
@@ -237,7 +237,7 @@ runs that focused task on the current modern Gradle JVM and records under
 `build/reports/jfr/`; the normal `test` task continues to run on Java 8.
 
 Blue Language is pinned to the released
-`blue.language:blue-language-java:3.1.0-rc.16` artifact from Maven Central.
+`blue.language:blue-language-java:3.1.0-rc.18` artifact from Maven Central.
 
 Build jars:
 

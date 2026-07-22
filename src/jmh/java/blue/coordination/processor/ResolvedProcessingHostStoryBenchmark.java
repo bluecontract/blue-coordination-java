@@ -7,9 +7,9 @@ import blue.language.processor.ProcessorStatus;
 import blue.language.snapshot.ResolvedSnapshot;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.ChatMessage;
+import blue.repo.coordination.PrincipalActor;
 import blue.repo.coordination.Timeline;
 import blue.repo.coordination.TimelineEntry;
-import blue.repo.myos.PrincipalActor;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Level;
@@ -192,8 +192,7 @@ public class ResolvedProcessingHostStoryBenchmark {
                         .properties("providerId", new Node().value("test-provider"))
                         .properties("timelineId", new Node().value("owner")))
                 .properties("actor", new Node()
-                        .type("MyOS/Principal Actor")
-                        .properties("accountId", new Node().value("owner")));
+                        .type("Coordination/Principal Actor"));
     }
 
     private static Node workflow(String counterPath) {
@@ -224,7 +223,7 @@ public class ResolvedProcessingHostStoryBenchmark {
     private static Node timelineEntry(Blue blue, BlueRepository repository, int entryNumber) {
         TimelineEntry entry = new TimelineEntry()
                 .timeline(new Timeline().timelineId("owner"))
-                .actor(new PrincipalActor().accountId("owner"))
+                .actor(new PrincipalActor())
                 .timestamp(BigInteger.valueOf(7_000_000L + entryNumber));
         Node message = new Node()
                 .type(ChatMessage.qualifiedName())
