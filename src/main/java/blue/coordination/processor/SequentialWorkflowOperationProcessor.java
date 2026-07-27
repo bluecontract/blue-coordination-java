@@ -7,6 +7,8 @@ import blue.language.processor.HandlerRegistrationContext;
 import blue.language.processor.ProcessorExecutionContext;
 import blue.repo.coordination.SequentialWorkflow;
 import blue.repo.coordination.SequentialWorkflowOperation;
+import java.util.Collections;
+import java.util.List;
 
 public final class SequentialWorkflowOperationProcessor implements HandlerProcessor<SequentialWorkflowOperation> {
     private final SequentialWorkflowRunner runner;
@@ -26,6 +28,11 @@ public final class SequentialWorkflowOperationProcessor implements HandlerProces
     @Override
     public Class<SequentialWorkflowOperation> contractType() {
         return SequentialWorkflowOperation.class;
+    }
+
+    @Override
+    public List<String> executableBodyFields() {
+        return Collections.singletonList("steps");
     }
 
     @Override

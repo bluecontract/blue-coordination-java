@@ -38,14 +38,17 @@ class MandateTerminationWorkflowTest {
         assertEquals(1L, fixture.metrics.handlersExecuted());
         long handlersBeforeTermination = fixture.metrics.handlersExecuted();
 
-        DocumentProcessingResult result = fixture.process(initialized.snapshot(),
+        DocumentProcessingResult result = fixture.process(
+                blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                        fixture.blue, initialized),
                 fixture.terminateMandateEvent(TERMINATION_TIMESTAMP));
 
         assertSuccess(result);
         assertEquals(StatusTerminated.blueId(),
-                result.canonicalDocument().getAsText("/status/type/blueId"));
+                result.document().getAsText("/status/type/blueId"));
         assertEquals(BigInteger.valueOf(TERMINATION_TIMESTAMP), result.document().get("/terminatedAt"));
-        assertEquals("graceful", result.document().get("/contracts/terminated/cause"));
+        assertEquals("mandate-terminated",
+                result.document().get("/contracts/terminated/cause"));
         assertEquals("requested by guarantor", result.document().get("/contracts/terminated/reason"));
 
         List<Node> domainEvents = eventsOfType(result, MandateTerminated.blueId());
@@ -61,13 +64,15 @@ class MandateTerminationWorkflowTest {
         assertEquals(2L, fixture.metrics.handlersExecuted() - handlersBeforeTermination);
 
         long handlersBeforeDuplicate = fixture.metrics.handlersExecuted();
-        DocumentProcessingResult duplicate = fixture.process(result.snapshot(),
+        DocumentProcessingResult duplicate = fixture.process(
+                blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                        fixture.blue, result),
                 fixture.terminateMandateEvent(TERMINATION_TIMESTAMP));
         assertSuccess(duplicate);
         assertTrue(eventsOfType(duplicate, MandateTerminated.blueId()).isEmpty());
         assertTrue(eventsOfType(duplicate, RuntimeBlueIds.DOCUMENT_PROCESSING_TERMINATED).isEmpty());
         assertEquals(StatusTerminated.blueId(),
-                duplicate.canonicalDocument().getAsText("/status/type/blueId"));
+                duplicate.document().getAsText("/status/type/blueId"));
         assertEquals(BigInteger.valueOf(TERMINATION_TIMESTAMP), duplicate.document().get("/terminatedAt"));
         assertEquals(handlersBeforeDuplicate, fixture.metrics.handlersExecuted());
         assertEquals(1L, fixture.metrics.successfulComputeTerminationRequests());
@@ -77,16 +82,19 @@ class MandateTerminationWorkflowTest {
     void failedMandateTerminatesWithoutReplacingFailureStateOrTimestamp() {
         Fixture fixture = fixture();
         DocumentProcessingResult initialized = fixture.initialize(mandateDocument(true));
-        assertEquals(StatusFailed.blueId(), initialized.canonicalDocument().getAsText("/status/type/blueId"));
+        assertEquals(StatusFailed.blueId(), initialized.document().getAsText("/status/type/blueId"));
         assertNull(initialized.document().getAsNode("/terminatedAt").getValue());
 
-        DocumentProcessingResult result = fixture.process(initialized.snapshot(),
+        DocumentProcessingResult result = fixture.process(
+                blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                        fixture.blue, initialized),
                 fixture.terminateMandateEvent(TERMINATION_TIMESTAMP));
 
         assertSuccess(result);
-        assertEquals(StatusFailed.blueId(), result.canonicalDocument().getAsText("/status/type/blueId"));
+        assertEquals(StatusFailed.blueId(), result.document().getAsText("/status/type/blueId"));
         assertNull(result.document().getAsNode("/terminatedAt").getValue());
-        assertEquals("graceful", result.document().get("/contracts/terminated/cause"));
+        assertEquals("mandate-terminated",
+                result.document().get("/contracts/terminated/cause"));
         assertEquals("requested by guarantor", result.document().get("/contracts/terminated/reason"));
         assertEquals(1, eventsOfType(result, MandateTerminated.blueId()).size());
         assertEquals(1, eventsOfType(result, RuntimeBlueIds.DOCUMENT_PROCESSING_TERMINATED).size());
@@ -115,7 +123,7 @@ class MandateTerminationWorkflowTest {
 
     private static List<Node> eventsOfType(DocumentProcessingResult result, String blueId) {
         List<Node> events = new ArrayList<Node>();
-        for (Node event : result.triggeredEvents()) {
+        for (Node event : result.events()) {
             if (event.getType() != null && blueId.equals(event.getType().getBlueId())) {
                 events.add(event);
             }
@@ -124,8 +132,8 @@ class MandateTerminationWorkflowTest {
     }
 
     private static int indexOfType(DocumentProcessingResult result, String blueId) {
-        for (int i = 0; i < result.triggeredEvents().size(); i++) {
-            Node event = result.triggeredEvents().get(i);
+        for (int i = 0; i < result.events().size(); i++) {
+            Node event = result.events().get(i);
             if (event.getType() != null && blueId.equals(event.getType().getBlueId())) {
                 return i;
             }
@@ -134,7 +142,7 @@ class MandateTerminationWorkflowTest {
     }
 
     private static void assertSuccess(DocumentProcessingResult result) {
-        assertEquals(ProcessorStatus.SUCCESS, result.status(), result.failureReason());
+        assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
     }
 
     private static Fixture fixture() {
@@ -173,7 +181,9 @@ class MandateTerminationWorkflowTest {
         }
 
         private Node terminateMandateEvent(int timestamp) {
-            Node request = new Node().properties("reason", new Node().value("requested by guarantor"));
+            Node request = new Node()
+                    .properties("cause", new Node().value("mandate-terminated"))
+                    .properties("reason", new Node().value("requested by guarantor"));
             return TestTimelineProvider.timelineEntry(blue,
                     repository,
                     "guarantor",

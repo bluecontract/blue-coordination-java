@@ -44,7 +44,9 @@ public class ComputeEffectPlanBenchmark {
     @Setup(Level.Trial)
     public void setUp() {
         repository = BlueRepository.latest();
-        blue = repository.configure(new Blue());
+        blue = new Blue()
+                .nodeProvider(repository.nodeProvider())
+                .typeClassResolver(repository.typeClassResolver());
         CoordinationProcessors.registerWith(blue, CoordinationProcessorOptions.builder().build());
 
         Node source = sourceDocument(effects).blue(repository.typeAliasBlue());
@@ -52,7 +54,7 @@ public class ComputeEffectPlanBenchmark {
         ResolvedSnapshot selected = blue.resolveToSnapshot(blue.preprocess(aliasesResolved));
         DocumentProcessingResult initialized = blue.initializeDocument(selected);
         requireSuccess(initialized);
-        initializedSnapshot = initialized.snapshot();
+        initializedSnapshot = blue.resolveToSnapshot(initialized.document());
         event = operationEvent();
     }
 
@@ -73,16 +75,16 @@ public class ComputeEffectPlanBenchmark {
             throw new IllegalStateException("Compute changeset was not applied");
         }
         Object cause = valueAt(lastResult.document(), "/contracts/terminated/cause");
-        if (termination != "graceful".equals(cause)) {
+        if (termination != "benchmark-complete".equals(cause)) {
             throw new IllegalStateException("Unexpected termination result: " + cause);
         }
         int expectedTriggeredEvents = (events ? 1 : 0) + (termination ? 1 : 0);
-        if (lastResult.triggeredEvents().size() != expectedTriggeredEvents) {
+        if (lastResult.events().size() != expectedTriggeredEvents) {
             throw new IllegalStateException("Unexpected triggered event count: "
-                    + lastResult.triggeredEvents().size());
+                    + lastResult.events().size());
         }
         int benchmarkEvents = 0;
-        for (Node emitted : lastResult.triggeredEvents()) {
+        for (Node emitted : lastResult.events()) {
             Node type = emitted.getType();
             boolean expectedType = type != null
                     && (Event.qualifiedName().equals(type.getValue())
@@ -117,6 +119,7 @@ public class ComputeEffectPlanBenchmark {
         }
         if (termination) {
             result.properties("termination", new Node()
+                    .properties("cause", new Node().value("benchmark-complete"))
                     .properties("reason", new Node().value("benchmark-complete")));
         }
         statements.add(new Node().properties("$return", result));
@@ -172,7 +175,9 @@ public class ComputeEffectPlanBenchmark {
 
     private static void requireSuccess(DocumentProcessingResult result) {
         if (result == null || result.status() != ProcessorStatus.SUCCESS) {
-            throw new IllegalStateException(result != null ? result.failureReason() : "missing result");
+            throw new IllegalStateException(result != null && result.diagnostic() != null
+                    ? result.diagnostic().message()
+                    : "missing result");
         }
     }
 }

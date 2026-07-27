@@ -13,46 +13,40 @@ final class OperationRequestMatcher {
         if (!SequentialWorkflowEventMatcher.matches(contract.getEvent(), context)) {
             return false;
         }
-        CoordinationEventNodes.OperationRequestView request =
-                CoordinationEventNodes.operationRequest(context.event());
-        if (request == null || !request.routable()) {
-            return false;
-        }
         String operationKey = nonBlank(contract.getKey());
-        if (operationKey == null || !operationKey.equals(request.operation())) {
+        String channelKey = nonBlank(context.channelKey());
+        if (operationKey == null || channelKey == null) {
             return false;
         }
-        if (!request.channel().equals(context.channelKey())) {
-            return false;
-        }
-        return requestMatches(contract.getRequest(), request, context);
-    }
-
-    private boolean requestMatches(Node requestPattern,
-                                   CoordinationEventNodes.OperationRequestView request,
-                                   HandlerMatchContext context) {
-        if (requestPattern == null) {
-            return true;
-        }
-        if (isEmptyRequestPattern(requestPattern)) {
-            return true;
-        }
-        if (request.request() == null) {
-            return false;
-        }
-        return context.matchesEventPattern(request.patternFor(requestPattern));
+        Node requestPattern = contract.getRequest();
+        return CoordinationEventNodes.matchesOperationRequest(
+                context.event(),
+                operationKey,
+                channelKey,
+                requestPattern == null
+                        || isEmptyRequestPattern(requestPattern)
+                        ? null
+                        : requestPattern,
+                context);
     }
 
     private boolean isEmptyRequestPattern(Node requestPattern) {
-        return requestPattern.getType() == null
+        return requestPattern.getName() == null
+                && requestPattern.getDescription() == null
+                && requestPattern.getType() == null
                 && requestPattern.getItemType() == null
                 && requestPattern.getKeyType() == null
                 && requestPattern.getValueType() == null
                 && requestPattern.getValue() == null
                 && requestPattern.getItems() == null
                 && (requestPattern.getProperties() == null || requestPattern.getProperties().isEmpty())
+                && requestPattern.getContracts() == null
                 && requestPattern.getBlueId() == null
-                && requestPattern.getSchema() == null;
+                && requestPattern.getSchema() == null
+                && requestPattern.getMergePolicy() == null
+                && requestPattern.getPreviousBlueId() == null
+                && requestPattern.getPosition() == null
+                && requestPattern.getBlue() == null;
     }
 
     private static String nonBlank(String value) {

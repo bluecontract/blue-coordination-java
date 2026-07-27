@@ -159,7 +159,7 @@ class ProcessingEventBindingTest {
         rootContracts.put("embedded", new Node().type("Process Embedded")
                 .properties("paths", new Node().items(scalar("/child"))));
         rootContracts.put("childBridge", new Node().type("Embedded Node Channel")
-                .properties("childPath", scalar("/child")));
+                .properties("sourcePath", scalar("/child")));
         rootContracts.put("observeBridge", workflow("childBridge", chatMatcher("from-child"),
                 captureStep("/observation", routedObservation("/message"))));
         Node initialized = fixture.initialize(document(rootContracts).properties("child", child));
@@ -512,7 +512,7 @@ class ProcessingEventBindingTest {
     }
 
     private static void assertSuccess(DocumentProcessingResult result) {
-        assertEquals(ProcessorStatus.SUCCESS, result.status(), result.failureReason());
+        assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
     }
 
     private static Fixture fixture() {

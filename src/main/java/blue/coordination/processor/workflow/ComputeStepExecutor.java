@@ -82,6 +82,13 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute>,
             if (metrics != null) {
                 metrics.incrementComputeStepsExecuted();
             }
+            if (!supportsManifestBoundRuntimeCounters()) {
+                context.processorContext().throwFatal(
+                        "Compute runtime capability is unavailable: "
+                                + "blue-bex-java 1.1 does not expose "
+                                + "manifest-bound named runtime counters");
+                return WorkflowStepResult.none();
+            }
             FrozenNode rawStepNode = context.stepFrozenNode();
             if (rawStepNode == null) {
                 Node mutableStepNode = context.stepNodeRef();
@@ -125,9 +132,6 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute>,
             if (metrics != null) {
                 metrics.addComputeCompileExecuteNanos(System.nanoTime() - executeStart);
                 metrics.addBexMetrics(result.metrics());
-            }
-            if (result.gasUsed() > 0L) {
-                context.processorContext().consumeGas(result.gasUsed());
             }
             ComputeEffectPlan effectPlan = resultEmitter.plan(result,
                     context,
@@ -177,6 +181,16 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute>,
             throw new BexException("Compute gasLimit must be positive");
         }
         return parsed.longValue();
+    }
+
+    /**
+     * The Contracts 1.0 child-ledger API cannot accept BEX's legacy aggregate
+     * {@code gasUsed()} value. Keep the evaluator fail-closed until the runtime
+     * supplies a closed, manifest-bound named counter stream that can be
+     * admitted live by the parent ledger.
+     */
+    private boolean supportsManifestBoundRuntimeCounters() {
+        return false;
     }
 
     /** Clears reusable Compute plans while keeping this executor usable. */

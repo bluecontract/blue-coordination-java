@@ -19,6 +19,7 @@ import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -39,7 +40,8 @@ class ComputeEffectPlanTest {
         events.add(event);
 
         ComputeEffectPlan plan = new ComputeEffectPlan(
-                Collections.emptyList(), events, true, "done", true);
+                Collections.emptyList(), events, true,
+                "completed", "done", true);
         event.getProperties().get("kind").value("mutated");
         events.clear();
 
@@ -47,6 +49,7 @@ class ComputeEffectPlanTest {
         assertEquals(1, plan.events().size());
         assertEquals("original", plan.events().get(0).toNode().get("/kind"));
         assertTrue(plan.terminationRequested());
+        assertEquals("completed", plan.terminationCause());
         assertEquals("done", plan.terminationReason());
         assertTrue(plan.changesetHandled());
         assertThrows(UnsupportedOperationException.class,
@@ -61,7 +64,8 @@ class ComputeEffectPlanTest {
         List<FrozenJsonPatch> patches = new ArrayList<FrozenJsonPatch>();
         patches.add(patch);
         ComputeEffectPlan plan = new ComputeEffectPlan(
-                patches, Collections.emptyList(), false, null, true);
+                patches, Collections.emptyList(), false,
+                null, null, true);
 
         value.getProperties().get("status").value("mutated-input");
         patches.clear();
@@ -70,9 +74,9 @@ class ComputeEffectPlanTest {
         assertEquals(1, plan.patches().size());
         assertSame(patch, plan.patches().get(0),
                 "immutable patches should be retained without rematerialization");
-        assertSame(frozenValue, plan.patches().get(0).getVal());
+        assertSame(frozenValue, plan.patches().get(0).getValue());
         assertEquals("original",
-                plan.patches().get(0).getVal().property("status").getValue());
+                plan.patches().get(0).getValue().property("status").getValue());
         assertThrows(UnsupportedOperationException.class, firstRead::clear);
     }
 
@@ -85,7 +89,8 @@ class ComputeEffectPlanTest {
         patches.add(FrozenJsonPatch.remove("/removed"));
 
         ComputeEffectPlan plan = new ComputeEffectPlan(
-                patches, Collections.emptyList(), false, null, true);
+                patches, Collections.emptyList(), false,
+                null, null, true);
 
         assertEquals(blue.language.processor.model.JsonPatch.Op.ADD,
                 plan.patches().get(0).getOp());
@@ -95,13 +100,15 @@ class ComputeEffectPlanTest {
                 plan.patches().get(2).getOp());
         assertThrows(IllegalArgumentException.class,
                 () -> new ComputeEffectPlan(Collections.singletonList(null),
-                        Collections.emptyList(), false, null, false));
+                        Collections.emptyList(), false,
+                        null, null, false));
     }
 
     @Test
     void planCannotBeBufferedTwice() {
         ComputeEffectPlan plan = new ComputeEffectPlan(
-                Collections.emptyList(), Collections.emptyList(), false, null, false);
+                Collections.emptyList(), Collections.emptyList(), false,
+                null, null, false);
         ComputeResultEmitter emitter = new ComputeResultEmitter();
 
         emitter.buffer(plan, null);
@@ -158,6 +165,42 @@ class ComputeEffectPlanTest {
     }
 
     @Test
+    void emitterPreservesApplicationTerminationCauseAndOptionalReason() {
+        ComputeResultEmitter emitter = new ComputeResultEmitter();
+        Map<String, BexValue> termination = new LinkedHashMap<String, BexValue>();
+        termination.put("cause", BexValues.scalar("completed"));
+        termination.put("reason", BexValues.scalar("all work applied"));
+        Map<String, BexValue> resultValue = new LinkedHashMap<String, BexValue>();
+        resultValue.put("termination", BexValues.map(termination));
+
+        ComputeEffectPlan plan = emitter.plan(
+                executionResult(BexValues.map(resultValue)), null, true);
+
+        assertTrue(plan.terminationRequested());
+        assertEquals("completed", plan.terminationCause());
+        assertEquals("all work applied", plan.terminationReason());
+    }
+
+    @Test
+    void emitterRejectsMissingOrModeStyleTerminationCause() {
+        ComputeResultEmitter emitter = new ComputeResultEmitter();
+        Map<String, BexValue> reasonOnly = new LinkedHashMap<String, BexValue>();
+        reasonOnly.put("reason", BexValues.scalar("legacy"));
+        Map<String, BexValue> emptyCause = new LinkedHashMap<String, BexValue>();
+        emptyCause.put("cause", BexValues.scalar(""));
+        Map<String, BexValue> unknownField = new LinkedHashMap<String, BexValue>();
+        unknownField.put("cause", BexValues.scalar("completed"));
+        unknownField.put("mode", BexValues.scalar("legacy-mode"));
+
+        assertTerminationFailure(emitter, reasonOnly,
+                "Compute result termination cause must be non-empty Text");
+        assertTerminationFailure(emitter, emptyCause,
+                "Compute result termination cause must be non-empty Text");
+        assertTerminationFailure(emitter, unknownField,
+                "Compute result termination contains unsupported properties");
+    }
+
+    @Test
     void emitterBoundsUnexpectedConversionDiagnosticsByActiveField() {
         ComputeResultEmitter emitter = new ComputeResultEmitter();
         String longMessage = repeat('x', 200) + "\nnot-exposed";
@@ -207,6 +250,30 @@ class ComputeEffectPlanTest {
     }
 
     @Test
+    void emitterPreservesScalarAndListEventNodes() {
+        ComputeResultEmitter emitter = new ComputeResultEmitter();
+        List<BexValue> events = Arrays.asList(
+                BexValues.scalar("scalar-event"),
+                BexValues.list(Arrays.asList(
+                        BexValues.scalar("first"),
+                        BexValues.scalar("second"))));
+        Map<String, BexValue> resultValue =
+                new LinkedHashMap<String, BexValue>();
+        resultValue.put("events", BexValues.list(events));
+
+        ComputeEffectPlan plan = emitter.plan(
+                executionResult(BexValues.map(resultValue)),
+                null,
+                true);
+
+        assertEquals("scalar-event", plan.events().get(0).getValue());
+        assertEquals("first",
+                plan.events().get(1).getItems().get(0).getValue());
+        assertEquals("second",
+                plan.events().get(1).getItems().get(1).getValue());
+    }
+
+    @Test
     void emitterRejectsMalformedAccumulatedPatchesBeforePointerResolution() {
         ComputeResultEmitter emitter = new ComputeResultEmitter();
         List<BexPatchEntry> malformed = new ArrayList<BexPatchEntry>();
@@ -225,6 +292,61 @@ class ComputeEffectPlanTest {
                     () -> emitter.plan(result, null, false));
             assertEquals(expected[i], failure.getMessage());
         }
+    }
+
+    @Test
+    void emitterRejectsNonTextPatchFieldsAndRemoveValuesBeforeBuffering() {
+        ComputeResultEmitter emitter = new ComputeResultEmitter();
+        Map<String, BexValue> nonTextOp = patchValue(
+                BexValues.scalar(7), BexValues.scalar("/target"),
+                BexValues.scalar("value"));
+        Map<String, BexValue> nonTextPath = patchValue(
+                BexValues.scalar("replace"), BexValues.scalar(true),
+                BexValues.scalar("value"));
+        Map<String, BexValue> removeWithValue = patchValue(
+                BexValues.scalar("remove"), BexValues.scalar("/target"),
+                BexValues.scalar("forbidden"));
+
+        assertChangesetFailure(emitter, nonTextOp,
+                "Compute result changeset entry 0 field 'op' must be Text");
+        assertChangesetFailure(emitter, nonTextPath,
+                "Compute result changeset entry 0 field 'path' must be Text");
+        assertChangesetFailure(emitter, removeWithValue,
+                "Compute result changeset entry 0 val must be absent for remove");
+    }
+
+    @Test
+    void explicitNullRemoveValueCannotMasqueradeAsAccumulatedChangeset() {
+        ComputeResultEmitter emitter = new ComputeResultEmitter();
+        Map<String, BexValue> returnedRemove = patchValue(
+                BexValues.scalar("remove"),
+                BexValues.scalar("/target"),
+                BexValues.nullValue());
+        Map<String, BexValue> resultValue =
+                new LinkedHashMap<String, BexValue>();
+        resultValue.put("changeset", BexValues.list(
+                Collections.singletonList(
+                        BexValues.map(returnedRemove))));
+        BexChangeset accumulated = new BexChangeset(
+                Collections.singletonList(
+                        new BexPatchEntry(
+                                "remove",
+                                "/target",
+                                "/target",
+                                BexValues.undefined())));
+
+        ComputeResultValidationException failure = assertThrows(
+                ComputeResultValidationException.class,
+                () -> emitter.plan(
+                        executionResult(
+                                BexValues.map(resultValue),
+                                accumulated),
+                        null,
+                        false));
+
+        assertEquals(
+                "Compute result changeset entry 0 val must be absent for remove",
+                failure.getMessage());
     }
 
     @Test
@@ -300,6 +422,52 @@ class ComputeEffectPlanTest {
                 new BexEvents(Collections.emptyList()),
                 0L,
                 new BexMetrics());
+    }
+
+    private static void assertTerminationFailure(
+            ComputeResultEmitter emitter,
+            Map<String, BexValue> termination,
+            String expectedMessage) {
+        Map<String, BexValue> resultValue =
+                new LinkedHashMap<String, BexValue>();
+        resultValue.put("termination", BexValues.map(termination));
+        ComputeResultValidationException failure = assertThrows(
+                ComputeResultValidationException.class,
+                () -> emitter.plan(
+                        executionResult(BexValues.map(resultValue)),
+                        null,
+                        true));
+        assertEquals(expectedMessage, failure.getMessage());
+    }
+
+    private static Map<String, BexValue> patchValue(
+            BexValue op,
+            BexValue path,
+            BexValue val) {
+        Map<String, BexValue> patch = new LinkedHashMap<String, BexValue>();
+        patch.put("op", op);
+        patch.put("path", path);
+        if (val != null) {
+            patch.put("val", val);
+        }
+        return patch;
+    }
+
+    private static void assertChangesetFailure(
+            ComputeResultEmitter emitter,
+            Map<String, BexValue> patch,
+            String expectedMessage) {
+        Map<String, BexValue> resultValue =
+                new LinkedHashMap<String, BexValue>();
+        resultValue.put("changeset", BexValues.list(
+                Collections.singletonList(BexValues.map(patch))));
+        ComputeResultValidationException failure = assertThrows(
+                ComputeResultValidationException.class,
+                () -> emitter.plan(
+                        executionResult(BexValues.map(resultValue)),
+                        null,
+                        false));
+        assertEquals(expectedMessage, failure.getMessage());
     }
 
     private static BexValue listThrowingOnSize(final RuntimeException failure) {

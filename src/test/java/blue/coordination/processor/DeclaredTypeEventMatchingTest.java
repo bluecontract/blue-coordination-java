@@ -8,7 +8,6 @@ import blue.language.processor.HandlerMatchContext;
 import blue.language.processor.HandlerMatchContextFactory;
 import blue.language.provider.SequentialNodeProvider;
 import blue.language.utils.BlueIdCalculator;
-import blue.language.utils.NodeProviderWrapper;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.ChatWorkflowOperation;
 import blue.repo.coordination.OperationRequest;
@@ -313,10 +312,13 @@ class DeclaredTypeEventMatchingTest {
         }
 
         private Blue configuredBlue() {
-            Blue blue = BlueRepository.latest().configure(new Blue());
+            BlueRepository repository = BlueRepository.latest();
+            Blue blue = new Blue()
+                    .nodeProvider(repository.nodeProvider())
+                    .typeClassResolver(repository.typeClassResolver());
             NodeProvider repositoryProvider = blue.getNodeProvider();
             blue.nodeProvider(new SequentialNodeProvider(
-                    NodeProviderWrapper.unverified(new MapProvider(definitions)),
+                    new MapProvider(definitions),
                     repositoryProvider));
             return blue;
         }

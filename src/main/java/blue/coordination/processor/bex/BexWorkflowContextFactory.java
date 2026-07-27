@@ -67,17 +67,8 @@ public final class BexWorkflowContextFactory {
     }
 
     public BexValue currentContractBinding(StepExecutionContext context) {
-        BexValue base = context.currentContractFrozenNode() != null
+        return context.currentContractFrozenNode() != null
                 ? BexValues.frozen(context.currentContractFrozenNode())
                 : BexValues.nodeCursorTrustedImmutable(context.currentContractNodeRef());
-        String channel = context.workflow().getChannelKey();
-        if (channel == null || channel.trim().isEmpty()) {
-            return base;
-        }
-        BexValue existing = base.get("channel");
-        if (!existing.isUndefined() && existing.isScalar() && !existing.asText().trim().isEmpty()) {
-            return base;
-        }
-        return BexValues.overlay(base, "channel", BexValues.scalar(channel.trim()));
     }
 }

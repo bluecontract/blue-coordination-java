@@ -2,8 +2,6 @@ package blue.coordination.processor;
 
 import blue.language.Blue;
 import blue.language.model.Node;
-import blue.language.processor.ChannelEvaluationContext;
-import blue.language.processor.ChannelProcessor;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorStatus;
 import blue.repo.BlueRepository;
@@ -51,7 +49,7 @@ class PublishedTimelineChannelResolutionTest {
         DocumentProcessingResult result = fixture.blue.initializeDocument(
                 fixture.blue.preprocess(document(fixture)));
 
-        assertSuccessfulSnapshot(result);
+        assertSuccessfulSnapshot(fixture, result);
         assertResolvedBinding(fixture, result.document().getAsNode("/contracts/timeline"));
     }
 
@@ -73,24 +71,26 @@ class PublishedTimelineChannelResolutionTest {
         DocumentProcessingResult first = fixture.blue.processDocument(initialized,
                 timelineEntry(fixture.blue, BigInteger.ONE, "first"));
 
-        assertSuccessfulSnapshot(first);
-        assertCheckpoint(first.document(), BigInteger.ONE, "first");
+        assertSuccessfulSnapshot(fixture, first);
+        assertCheckpoint(first.document(), BigInteger.ONE);
 
         DocumentProcessingResult second = fixture.blue.processDocument(first.document().clone(),
                 timelineEntry(fixture.blue, BigInteger.valueOf(2), "second"));
 
-        assertSuccessfulSnapshot(second);
-        assertCheckpoint(second.document(), BigInteger.valueOf(2), "second");
+        assertSuccessfulSnapshot(fixture, second);
+        assertCheckpoint(second.document(), BigInteger.valueOf(2));
         assertFinitePrevEntryBoundary(fixture.blue.resolve(
                 timelineEntry(fixture.blue, BigInteger.valueOf(2), "second")));
     }
 
-    private static Fixture fixture(boolean alwaysMatchingProcessor) {
+    private static Fixture fixture(boolean timelineProcessorOnly) {
         BlueRepository repository = BlueRepository.latest();
-        Blue blue = repository.configure(new Blue());
-        if (alwaysMatchingProcessor) {
+        Blue blue = new Blue()
+                .nodeProvider(repository.nodeProvider())
+                .typeClassResolver(repository.typeClassResolver());
+        if (timelineProcessorOnly) {
             blue.registerContractProcessor(TimelineChannel.blueId(),
-                    new AlwaysMatchingTimelineChannelProcessor());
+                    new TimelineChannelProcessor());
         } else {
             CoordinationProcessors.registerWith(blue);
         }
@@ -117,24 +117,28 @@ class PublishedTimelineChannelResolutionTest {
         return blue.preprocess(blue.objectToNode(entry));
     }
 
-    private static void assertSuccessfulSnapshot(DocumentProcessingResult result) {
-        assertFalse(result.capabilityFailure(), result.failureReason());
-        assertEquals(ProcessorStatus.SUCCESS, result.status(), result.failureReason());
-        assertNotNull(result.snapshot());
-        assertEquals(result.snapshot().blueId(), result.snapshot().frozenCanonicalRoot().blueId());
+    private static void assertSuccessfulSnapshot(Fixture fixture,
+                                                 DocumentProcessingResult result) {
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
+        assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
+        assertNotNull(ProcessingResultTestSupport.snapshot(fixture.blue, result));
+        assertEquals(ProcessingResultTestSupport.blueId(result),
+                ProcessingResultTestSupport.snapshot(fixture.blue, result)
+                        .frozenCanonicalRoot().blueId());
     }
 
-    private static void assertCheckpoint(Node document, BigInteger timestamp, String message) {
-        Node event = document.getAsNode("/contracts/checkpoint/lastEvents/timeline");
-        assertNotNull(event);
-        assertNotNull(event.getType());
-        assertTrue(event.getType().isReferenceOnly());
-        assertEquals(TimelineEntry.blueId(), event.getType().getBlueId());
-        assertEquals("timeline-1", event.getAsText("/timeline/timelineId"));
-        assertEquals("account-1", event.getAsText("/actor/accountId"));
-        assertFalse(event.getProperties().containsKey("sequence"));
-        assertEquals(timestamp, event.get("/timestamp"));
-        assertEquals(message, event.getAsText("/message/message"));
+    private static void assertCheckpoint(
+            Node document,
+            BigInteger timestamp) {
+        Node subject = document.getAsNode(
+                "/contracts/checkpoint/entries/timeline/subject");
+        assertNotNull(subject);
+        assertEquals(2, subject.getProperties().size());
+        assertEquals(
+                TimelineExternalSubscriptionFunctions
+                        .TIMELINE_ORDER_SUBJECT_VERSION,
+                subject.getAsText("/semantics"));
+        assertEquals(timestamp, subject.get("/timestamp"));
     }
 
     private static void assertFinitePrevEntryBoundary(Node resolvedTimelineEntry) {
@@ -156,19 +160,6 @@ class PublishedTimelineChannelResolutionTest {
         Node actorType = fixture.repository.nodeByName(Actor.qualifiedName())
                 .orElseThrow(() -> new AssertionError("Published repository is missing Coordination/Actor"));
         assertTrue(fixture.blue.nodeMatchesType(channel.getAsNode("/actor"), actorType));
-    }
-
-    private static final class AlwaysMatchingTimelineChannelProcessor
-            implements ChannelProcessor<TimelineChannel> {
-        @Override
-        public Class<TimelineChannel> contractType() {
-            return TimelineChannel.class;
-        }
-
-        @Override
-        public boolean matches(TimelineChannel contract, ChannelEvaluationContext context) {
-            return true;
-        }
     }
 
     private static final class Fixture {

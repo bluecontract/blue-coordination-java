@@ -88,9 +88,9 @@ contracts:
         provideHotelOrder:
           channel: travelAgencyChannel
         restaurantOrderEvents:
-          childPath: /restaurantOrder
+          sourcePath: /restaurantOrder
         hotelOrderEvents:
-          childPath: /hotelOrder
+          sourcePath: /hotelOrder
         restaurantOrderConfirmed:
           channel: restaurantOrderEvents
         hotelOrderConfirmed:

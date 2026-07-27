@@ -24,17 +24,6 @@ final class BlueSemanticIdentity {
         return left != null && right != null && identity(left).equals(identity(right));
     }
 
-    static boolean matchesType(Node node, Node expectedType) {
-        if (node == null || expectedType == null) {
-            return false;
-        }
-        if (node.isReferenceOnly()) {
-            identity(node);
-            return true;
-        }
-        return CONTEXT.get().blue.nodeMatchesType(node, expectedType);
-    }
-
     private static String identity(Node node) {
         if (node.isReferenceOnly()) {
             return BlueIds.requireBlueIdOrCyclicMember(node.getBlueId(), "Semantic identity reference");
@@ -67,7 +56,10 @@ final class BlueSemanticIdentity {
     }
 
     private static final class IdentityContext {
-        private final Blue blue = BlueRepository.latest().configure(new Blue());
+        private final BlueRepository repository = BlueRepository.latest();
+        private final Blue blue = new Blue()
+                .nodeProvider(repository.nodeProvider())
+                .typeClassResolver(repository.typeClassResolver());
         private final Map<String, String> valueIdentities =
                 new LinkedHashMap<String, String>(IDENTITY_CACHE_SIZE, 0.75f, true) {
                     @Override

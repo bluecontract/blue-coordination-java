@@ -4,6 +4,22 @@ plugins {
 
 rootProject.name = 'blue-coordination-java'
 
+def localBlueLanguage = file('../blue-language-java')
+def useLocalBlueLanguage = providers.gradleProperty('useLocalBlueLanguage')
+        .map { it.toBoolean() }
+        .getOrElse(false)
+if (useLocalBlueLanguage) {
+    if (!localBlueLanguage.isDirectory()) {
+        throw new GradleException(
+                "Local blue-language-java build is missing at ${localBlueLanguage}")
+    }
+    includeBuild(localBlueLanguage) {
+        dependencySubstitution {
+            substitute module('blue.language:blue-language-java') using project(':')
+        }
+    }
+}
+
 def localBlueRepository = file('../blue-repository-java')
 if (providers.gradleProperty('useLocalBlueRepository').map { it.toBoolean() }.getOrElse(false)
         && localBlueRepository.isDirectory()) {

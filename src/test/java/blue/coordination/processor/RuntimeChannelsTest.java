@@ -3,6 +3,7 @@ package blue.coordination.processor;
 import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
+import blue.language.processor.ProcessorStatus;
 import blue.language.processor.registry.RuntimeBlueIds;
 import blue.repo.BlueRepository;
 import java.math.BigInteger;
@@ -34,7 +35,7 @@ class RuntimeChannelsTest {
         DocumentProcessingResult result = processChat(fixture, document, 1);
 
         assertEquals(BigInteger.valueOf(5), result.document().get("/counter"));
-        assertContainsChatMessage(result.triggeredEvents(), "updated /counter from 0 to 5");
+        assertContainsChatMessage(result.events(), "updated /counter from 0 to 5");
     }
 
     @Test
@@ -54,8 +55,8 @@ class RuntimeChannelsTest {
 
         DocumentProcessingResult result = processChat(fixture, document, 1);
 
-        assertContainsChatMessage(result.triggeredEvents(), "counter updated");
-        assertNoChatMessage(result.triggeredEvents(), "name updated");
+        assertContainsChatMessage(result.events(), "counter updated");
+        assertNoChatMessage(result.events(), "name updated");
     }
 
     @Test
@@ -79,7 +80,7 @@ class RuntimeChannelsTest {
                 .getProperties().get("profile")
                 .getProperties().get("name")
                 .getValue());
-        assertContainsChatMessage(result.triggeredEvents(), "updated /profile/name from Grace to Ada");
+        assertContainsChatMessage(result.events(), "updated /profile/name from Grace to Ada");
     }
 
     @Test
@@ -102,7 +103,7 @@ class RuntimeChannelsTest {
 
         assertEquals(BigInteger.valueOf(5), result.document().get("/counter"));
         assertEquals(BigInteger.valueOf(9), result.document().get("/other"));
-        assertSingleChatMessage(result.triggeredEvents(), "specific replace");
+        assertSingleChatMessage(result.events(), "specific replace");
     }
 
     @Test
@@ -126,11 +127,18 @@ class RuntimeChannelsTest {
                 updateDocumentStep("replace", "/child/counter", new Node().value(99))));
         Node document = initializedDocument(fixture, document(fixture.repository, 0, contracts)
                 .properties("child", childDocument(1, new LinkedHashMap<String, Node>())));
+        String inputJson = fixture.blue.nodeToJson(document);
 
         DocumentProcessingResult result = processChat(fixture, document, 1);
 
+        assertEquals(ProcessorStatus.RUNTIME_FATAL,
+                result.status(),
+                ProcessingResultTestSupport.diagnosticMessage(result));
+        assertEquals(inputJson, fixture.blue.nodeToJson(result.document()),
+                "the boundary violation must roll back the complete invocation");
         assertEquals(BigInteger.valueOf(1), result.document().get("/child/counter"));
-        assertEquals("fatal", result.document().get("/contracts/terminated/cause"));
+        assertTrue(result.events().isEmpty());
+        assertNull(nodeAt(result.document(), "/contracts/terminated"));
     }
 
     @Test
@@ -157,7 +165,7 @@ class RuntimeChannelsTest {
 
         assertEquals("Replacement Child", nodeAt(result.document(), "/child").getName());
         assertNull(nodeAt(result.document(), "/child/marker"));
-        assertNoChatMessage(result.triggeredEvents(), "post-cutoff");
+        assertNoChatMessage(result.events(), "post-cutoff");
     }
 
     @Test
@@ -167,8 +175,8 @@ class RuntimeChannelsTest {
 
         DocumentProcessingResult result = processChat(fixture, document, 1);
 
-        assertContainsChatMessage(result.triggeredEvents(), "parent saw child emitted");
-        assertNoChatMessage(result.triggeredEvents(), "parent saw other child emitted");
+        assertContainsChatMessage(result.events(), "parent saw child emitted");
+        assertNoChatMessage(result.events(), "parent saw other child emitted");
     }
 
     @Test
@@ -178,8 +186,8 @@ class RuntimeChannelsTest {
 
         DocumentProcessingResult result = processChat(fixture, document, 1);
 
-        assertNoChatMessage(result.triggeredEvents(), "parent saw child emitted");
-        assertNoChatMessage(result.triggeredEvents(), "parent saw other child emitted");
+        assertNoChatMessage(result.events(), "parent saw child emitted");
+        assertNoChatMessage(result.events(), "parent saw other child emitted");
     }
 
     @Test
@@ -197,7 +205,7 @@ class RuntimeChannelsTest {
         assertEquals(BigInteger.ONE, afterSecond.get("/counter"));
         Node checkpoint = nodeAt(afterSecond, "/contracts/checkpoint");
         assertNotNull(checkpoint);
-        assertNotNull(nodeAt(checkpoint, "/lastEvents/owner"));
+        assertNotNull(nodeAt(checkpoint, "/entries/owner/subject"));
     }
 
     @Test
@@ -219,7 +227,7 @@ class RuntimeChannelsTest {
         Node initialized = initializedDocument(fixture, document(fixture.repository, 0, contracts));
         initialized.getContracts().properties("checkpoint", new Node()
                 .type(new Node().blueId(RuntimeBlueIds.CHANNEL_EVENT_CHECKPOINT))
-                .properties("lastEvents", new Node().properties(new LinkedHashMap<String, Node>())));
+                .properties("entries", new Node().properties(new LinkedHashMap<String, Node>())));
         initialized.getContracts().properties("extraCheckpoint", new Node()
                 .type(new Node().blueId(RuntimeBlueIds.CHANNEL_EVENT_CHECKPOINT)));
 
@@ -239,7 +247,7 @@ class RuntimeChannelsTest {
                 .properties("child", childDocument(0, childContracts));
     }
 
-    private static Node embeddedBridgeDocument(BlueRepository repository, String childPath) {
+    private static Node embeddedBridgeDocument(BlueRepository repository, String sourcePath) {
         Map<String, Node> childContracts = ownerChannelContracts();
         childContracts.put("emit", directWorkflow("owner", triggerEventStep(chatMessageEvent("child emitted"))));
 
@@ -254,7 +262,7 @@ class RuntimeChannelsTest {
                         new Node().value("/otherChild"))));
         rootContracts.put("embeddedEvents", new Node()
                 .type("Embedded Node Channel")
-                .properties("childPath", new Node().value(childPath)));
+                .properties("sourcePath", new Node().value(sourcePath)));
         rootContracts.put("childObserver", directWorkflowMatching("embeddedEvents",
                 new Node()
                         .type("Coordination/Chat Message")

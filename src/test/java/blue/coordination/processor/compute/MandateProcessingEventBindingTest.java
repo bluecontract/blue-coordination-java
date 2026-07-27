@@ -36,16 +36,18 @@ class MandateProcessingEventBindingTest {
         Fixture fixture = fixture();
         DocumentProcessingResult initialized = fixture.initialize(mandateDocument());
         assertEquals(StatusPending.blueId(),
-                initialized.canonicalDocument().getAsText("/status/type/blueId"));
+                initialized.document().getAsText("/status/type/blueId"));
 
-        DocumentProcessingResult result = fixture.process(initialized.snapshot(),
+        DocumentProcessingResult result = fixture.process(
+                blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                        fixture.blue, initialized),
                 fixture.confirmAuthorityEvent(PROCESSING_EVENT_TIMESTAMP));
 
         assertSuccess(result);
         // Declared-type event matching owns final lifecycle state; this case isolates processingEvent.
         assertEquals(BigInteger.valueOf(PROCESSING_EVENT_TIMESTAMP),
                 result.document().get("/authorityConfirmedAt"));
-        assertTrue(result.triggeredEvents().stream().anyMatch(event -> event.getType() != null
+        assertTrue(result.events().stream().anyMatch(event -> event.getType() != null
                 && MandateAuthorityConfirmed.blueId().equals(event.getType().getBlueId())));
         assertTrue(fixture.metrics.processEventSnapshotAttempts() > 0L);
         assertEquals(fixture.metrics.processEventSnapshotAttempts(),
@@ -133,7 +135,7 @@ class MandateProcessingEventBindingTest {
     }
 
     private static void assertSuccess(DocumentProcessingResult result) {
-        assertEquals(ProcessorStatus.SUCCESS, result.status(), result.failureReason());
+        assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
     }
 
     private static Fixture fixture() {

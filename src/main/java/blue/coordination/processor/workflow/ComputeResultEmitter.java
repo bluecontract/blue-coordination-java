@@ -52,6 +52,7 @@ final class ComputeResultEmitter {
             return new ComputeEffectPlan(patches,
                     events,
                     termination.requested,
+                    termination.cause,
                     termination.reason,
                     returnedChangeset || !patches.isEmpty());
         } catch (ComputeResultValidationException ex) {
@@ -88,7 +89,9 @@ final class ComputeResultEmitter {
             }
         }
         if (plan.terminationRequested()) {
-            context.processorContext().terminateGracefully(plan.terminationReason());
+            context.processorContext().terminate(
+                    plan.terminationCause(),
+                    plan.terminationReason());
             if (metrics != null) {
                 metrics.incrementSuccessfulComputeTerminationRequests();
             }
@@ -117,9 +120,6 @@ final class ComputeResultEmitter {
             if (event == null || event.isUndefined() || event.isNull()) {
                 throw invalid("Compute result events cannot contain undefined/null entries");
             }
-            if (!event.isObject()) {
-                throw invalid("Compute result events must contain object entries");
-            }
             try {
                 converted.add(BexNodeWriter.toNode(event));
             } catch (RuntimeException ex) {
@@ -141,18 +141,25 @@ final class ComputeResultEmitter {
             throw invalid("Compute result termination must be an object");
         }
         for (String key : termination.keys()) {
-            if (!"reason".equals(key)) {
+            if (!"cause".equals(key) && !"reason".equals(key)) {
                 throw invalid("Compute result termination contains unsupported properties");
             }
         }
+        BexValue cause = termination.get("cause");
+        if (cause == null || cause.isUndefined() || cause.isNull()
+                || !"text".equals(BexValues.kind(cause))
+                || cause.asText().isEmpty()) {
+            throw invalid(
+                    "Compute result termination cause must be non-empty Text");
+        }
         BexValue reason = termination.get("reason");
         if (reason == null || reason.isUndefined() || reason.isNull()) {
-            return Termination.requested(null);
+            return Termination.requested(cause.asText(), null);
         }
         if (!"text".equals(BexValues.kind(reason))) {
             throw invalid("Compute result termination reason must be Text");
         }
-        return Termination.requested(reason.asText());
+        return Termination.requested(cause.asText(), reason.asText());
     }
 
     private List<FrozenJsonPatch> changesetPatches(BexExecutionResult result,
@@ -209,18 +216,23 @@ final class ComputeResultEmitter {
         if (item == null || item.isUndefined() || item.isNull() || !item.isObject()) {
             throw invalid("Compute result changeset entry " + index + " must be an object");
         }
-        String op = textValue(item.get("op"));
-        String path = textValue(item.get("path"));
+        String op = patchTextValue(item.get("op"), index, "op");
+        String path = patchTextValue(item.get("path"), index, "path");
         if (!"add".equals(op) && !"replace".equals(op) && !"remove".equals(op)) {
             throw invalid("Invalid patch op in Compute result changeset");
         }
-        if (path == null || path.trim().isEmpty()) {
+        if (path == null || path.isEmpty()) {
             throw invalid("Compute result changeset entry " + index + " missing path");
         }
         FrozenNode nodeValue = null;
-        if (!"remove".equals(op)) {
-            BexValue val = item.get("val");
-            if (val.isUndefined()) {
+        BexValue val = item.get("val");
+        if ("remove".equals(op)) {
+            if (item.keys().contains("val")) {
+                throw invalid("Compute result changeset entry " + index
+                        + " val must be absent for remove");
+            }
+        } else {
+            if (val == null || val.isUndefined()) {
                 throw invalid("Compute result changeset entry " + index + " missing val");
             }
             nodeValue = freezePatchValue(val);
@@ -228,14 +240,26 @@ final class ComputeResultEmitter {
         return new WorkflowPatchEntry(op, path, nodeValue);
     }
 
+    private String patchTextValue(BexValue value,
+                                  int index,
+                                  String field) {
+        if (value == null || value.isUndefined() || value.isNull()) {
+            return null;
+        }
+        if (!"text".equals(BexValues.kind(value))) {
+            throw invalid("Compute result changeset entry " + index
+                    + " field '" + field + "' must be Text");
+        }
+        return value.asText();
+    }
+
     private FrozenJsonPatch toPatch(WorkflowPatchEntry entry,
                                     StepExecutionContext context) {
-        String normalizedOp = entry.op().trim().toLowerCase();
         String path = resolvedPointer(entry.path(), context);
-        if ("remove".equals(normalizedOp)) {
+        if ("remove".equals(entry.op())) {
             return FrozenJsonPatch.remove(path);
         }
-        if ("add".equals(normalizedOp)) {
+        if ("add".equals(entry.op())) {
             return FrozenJsonPatch.add(path, entry.val());
         }
         // patchEntry has already restricted this branch to replace.
@@ -247,8 +271,14 @@ final class ComputeResultEmitter {
         if (entry == null) {
             throw invalid("Compute result accumulated patch is incomplete");
         }
-        String normalizedOp = entry.op().trim().toLowerCase();
-        boolean remove = "remove".equals(normalizedOp);
+        String op = entry.op();
+        boolean remove = "remove".equals(op);
+        if (!remove && !"add".equals(op) && !"replace".equals(op)) {
+            throw invalid("Invalid accumulated patch op in Compute result");
+        }
+        if (remove && entry.val() != null && !entry.val().isUndefined()) {
+            throw invalid("Compute result accumulated remove patch val must be absent");
+        }
         if (!remove && (entry.val() == null || entry.val().isUndefined())) {
             throw invalid("Compute result patch value is required");
         }
@@ -257,7 +287,7 @@ final class ComputeResultEmitter {
             return FrozenJsonPatch.remove(path);
         }
         FrozenNode value = freezePatchValue(entry.val());
-        if ("add".equals(normalizedOp)) {
+        if ("add".equals(op)) {
             return FrozenJsonPatch.add(path, value);
         }
         // BexPatchEntry has already restricted this branch to replace.
@@ -284,13 +314,10 @@ final class ComputeResultEmitter {
             if (preview == null) {
                 return;
             }
-            if (metrics != null) {
-                metrics.addMetric("frozenPatchesHandedToLanguage", patches.size());
-                metrics.addMetric("frozenPatchValuesHandedToLanguage", frozenValueCount);
-            }
             context.processorContext().applyPreviewedFrozenPatches(patches, preview);
             previewTransferred = true;
             if (metrics != null) {
+                metrics.addMetric("frozenPatchesHandedToLanguage", patches.size());
                 metrics.addMetric("frozenPatchValuesHandedToLanguage", frozenValueCount);
             }
             applied = true;
@@ -340,7 +367,7 @@ final class ComputeResultEmitter {
             }
             BexValue val = item.get("val");
             if (entry.val() == null || entry.val().isUndefined()) {
-                if (val != null && !val.isUndefined() && !val.isNull()) {
+                if (item.keys().contains("val")) {
                     return false;
                 }
             } else if (val == null || val.isUndefined()) {
@@ -415,13 +442,18 @@ final class ComputeResultEmitter {
     }
 
     private static final class Termination {
-        private static final Termination ABSENT = new Termination(false, null);
+        private static final Termination ABSENT =
+                new Termination(false, null, null);
 
         private final boolean requested;
+        private final String cause;
         private final String reason;
 
-        private Termination(boolean requested, String reason) {
+        private Termination(boolean requested,
+                            String cause,
+                            String reason) {
             this.requested = requested;
+            this.cause = cause;
             this.reason = reason;
         }
 
@@ -429,8 +461,9 @@ final class ComputeResultEmitter {
             return ABSENT;
         }
 
-        private static Termination requested(String reason) {
-            return new Termination(true, reason);
+        private static Termination requested(String cause,
+                                             String reason) {
+            return new Termination(true, cause, reason);
         }
     }
 }

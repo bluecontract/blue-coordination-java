@@ -49,7 +49,9 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
 
         Node authored = support.yamlResource(DOCUMENT_RESOURCE);
         assertNoRootTemplates(authored);
-        ResolvedSnapshot current = support.initialize(authored).snapshot();
+        ResolvedSnapshot current =
+                blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                        support.blue, support.initialize(authored));
         assertEquals("Awaiting PayNote", current.resolvedNodeAt("/order/status").getValue());
         assertEquals("20-21 June weekend", current.resolvedNodeAt("/package/title").getValue());
         assertEquals("Deluxe Room", current.resolvedNodeAt("/package/roomType").getValue());
@@ -61,27 +63,30 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
         // that request at /paynote and asks Card Processor to authorize 499 PLN.
         DocumentProcessingResult paynoteDelivered = processMeasured(metrics, "deliverPaynote", support, current,
                 operationEvent(support, "travel-agency", 1, "deliverPaynote", packagePaynote(support)));
-        assertFalse(paynoteDelivered.capabilityFailure(), paynoteDelivered.failureReason());
-        current = paynoteDelivered.snapshot();
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(paynoteDelivered), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(paynoteDelivered));
+        current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                support.blue, paynoteDelivered);
         Node currentDocument = paynoteDelivered.document();
         assertEquals("Waiting for PayNote capture", currentDocument.get("/order/status"));
         assertEquals(Boolean.TRUE, currentDocument.get("/order/paynoteDelivered"));
         assertEquals("Package PayNote", currentDocument.get("/paynote/name"));
         assertEquals("/paynote", currentDocument.get("/contracts/embeddedPaynotes/paths/0"));
-        assertContainsEventKind(paynoteDelivered.triggeredEvents(), "PayNote Authorization Requested");
+        assertContainsEventKind(paynoteDelivered.events(), "PayNote Authorization Requested");
 
         // Card Processor authorizes the PayNote. Before this point, component orders are illegal.
         DocumentProcessingResult authorized = processMeasured(metrics, "confirmAuthorization", support, current,
                 operationEvent(support, "card-processor", 2, "confirmAuthorization", new Node()));
-        assertFalse(authorized.capabilityFailure(), authorized.failureReason());
-        current = authorized.snapshot();
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(authorized), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(authorized));
+        current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                support.blue, authorized);
         assertEquals("Authorized", authorized.document().get("/paynote/status"));
 
         // Travel Agency provides the restaurant document as a request to PayNote.
         DocumentProcessingResult restaurantProvided = processMeasured(metrics, "provideRestaurantOrder", support, current,
                 operationEvent(support, "travel-agency", 3, "provideRestaurantOrder", restaurantOrder(support)));
-        assertFalse(restaurantProvided.capabilityFailure(), restaurantProvided.failureReason());
-        current = restaurantProvided.snapshot();
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(restaurantProvided), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(restaurantProvided));
+        current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                support.blue, restaurantProvided);
         currentDocument = restaurantProvided.document();
         assertEquals("Restaurant Order", currentDocument.get("/paynote/restaurantOrder/name"));
         assertEquals(Boolean.TRUE, currentDocument.get("/paynote/restaurantOrderProvided"));
@@ -90,8 +95,9 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
         // Travel Agency provides the hotel document as a separate request to PayNote.
         DocumentProcessingResult hotelProvided = processMeasured(metrics, "provideHotelOrder", support, current,
                 operationEvent(support, "travel-agency", 4, "provideHotelOrder", hotelOrder(support)));
-        assertFalse(hotelProvided.capabilityFailure(), hotelProvided.failureReason());
-        current = hotelProvided.snapshot();
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(hotelProvided), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(hotelProvided));
+        current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                support.blue, hotelProvided);
         currentDocument = hotelProvided.document();
         assertEquals("Hotel Order", currentDocument.get("/paynote/hotelOrder/name"));
         assertEquals(Boolean.TRUE, currentDocument.get("/paynote/hotelOrderProvided"));
@@ -101,8 +107,9 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
         // is still blocked because the hotel order has not confirmed yet.
         DocumentProcessingResult restaurantConfirmed = processMeasured(metrics, "restaurantConfirm", support, current,
                 operationEvent(support, "restaurant", 5, "confirm", new Node()));
-        assertFalse(restaurantConfirmed.capabilityFailure(), restaurantConfirmed.failureReason());
-        current = restaurantConfirmed.snapshot();
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(restaurantConfirmed), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(restaurantConfirmed));
+        current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                support.blue, restaurantConfirmed);
         currentDocument = restaurantConfirmed.document();
         assertEquals("Confirmed", currentDocument.get("/paynote/restaurantOrder/status"));
         assertEquals(Boolean.TRUE, currentDocument.get("/paynote/restaurantConfirmed"));
@@ -112,8 +119,9 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
         // capture request for Card Processor.
         DocumentProcessingResult hotelConfirmed = processMeasured(metrics, "hotelConfirm", support, current,
                 operationEvent(support, "hotel", 6, "confirm", new Node()));
-        assertFalse(hotelConfirmed.capabilityFailure(), hotelConfirmed.failureReason());
-        current = hotelConfirmed.snapshot();
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(hotelConfirmed), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(hotelConfirmed));
+        current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                support.blue, hotelConfirmed);
         currentDocument = hotelConfirmed.document();
         assertEquals("Confirmed", currentDocument.get("/paynote/hotelOrder/status"));
         assertEquals(Boolean.TRUE, currentDocument.get("/paynote/hotelConfirmed"));
@@ -123,12 +131,12 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
         // a Document Update Channel and switches to Ready to use.
         DocumentProcessingResult captured = processMeasured(metrics, "confirmCapture", support, current,
                 operationEvent(support, "card-processor", 7, "confirmCapture", new Node()));
-        assertFalse(captured.capabilityFailure(), captured.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(captured), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(captured));
         currentDocument = captured.document();
         assertEquals("Captured", currentDocument.get("/paynote/status"));
         assertEquals(Boolean.TRUE, currentDocument.get("/paynote/captured"));
         assertEquals("Ready to use", currentDocument.get("/order/status"));
-        assertContainsEventKind(captured.triggeredEvents(), "Package Order Ready to Use");
+        assertContainsEventKind(captured.events(), "Package Order Ready to Use");
 
         assertEquals(0L, metrics.updateIndividualPatchApplications());
         assertEquals(metrics.updateBatchPatchApplications(), metrics.directBexChangesetHits());
@@ -143,7 +151,10 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
     @Test
     void illegalPackagePaynoteAndComponentOrderOperationsFailClosed() {
         ComputeWorkflowTestSupport support = support(null);
-        ResolvedSnapshot current = support.initialize(support.yamlResource(DOCUMENT_RESOURCE)).snapshot();
+        ResolvedSnapshot current =
+                blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                        support.blue,
+                        support.initialize(support.yamlResource(DOCUMENT_RESOURCE)));
 
         // Illegal: wrong PayNote amount. The package order only accepts the exact 499 PLN PayNote for
         // this Hotel Badura + Cud Malina weekend package. This is rejected by deliverPaynote.request
@@ -152,12 +163,15 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
         wrongPaynote.getProperties().put("amount", new Node().value(498));
         DocumentProcessingResult wrongPaynoteResult = support.blue.processDocument(current,
                 operationEvent(support, "travel-agency", 11, "deliverPaynote", wrongPaynote));
-        assertFalse(wrongPaynoteResult.capabilityFailure(), wrongPaynoteResult.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(wrongPaynoteResult), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(wrongPaynoteResult));
         assertFalse(wrongPaynoteResult.document().getProperties().containsKey("paynote"));
         assertEquals("Awaiting PayNote", wrongPaynoteResult.document().get("/order/status"));
 
-        current = support.blue.processDocument(current,
-                operationEvent(support, "travel-agency", 12, "deliverPaynote", packagePaynote(support))).snapshot();
+        current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                support.blue,
+                support.blue.processDocument(current,
+                        operationEvent(support, "travel-agency", 12,
+                                "deliverPaynote", packagePaynote(support))));
 
         // Illegal: Travel Agency cannot provide component orders until Card Processor authorizes the
         // embedded PayNote.
@@ -165,22 +179,31 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
                 operationEvent(support, "travel-agency", 13, "provideHotelOrder", hotelOrder(support)));
         assertRuntimeFatal(beforeAuthorization, "after PayNote authorization");
 
-        current = support.blue.processDocument(current,
-                operationEvent(support, "card-processor", 14, "confirmAuthorization", new Node())).snapshot();
+        current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                support.blue,
+                support.blue.processDocument(current,
+                        operationEvent(support, "card-processor", 14,
+                                "confirmAuthorization", new Node())));
 
         // Illegal: provideRestaurantOrder rejects a hotel document at operation-request matching time.
         // Restaurant and hotel fulfillment documents are intentionally specific and not interchangeable.
         DocumentProcessingResult wrongRestaurantDocument = support.blue.processDocument(current,
                 operationEvent(support, "travel-agency", 15, "provideRestaurantOrder", hotelOrder(support)));
-        assertFalse(wrongRestaurantDocument.capabilityFailure(), wrongRestaurantDocument.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(wrongRestaurantDocument), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(wrongRestaurantDocument));
         assertFalse(wrongRestaurantDocument.document().getAsNode("/paynote").getProperties()
                 .containsKey("restaurantOrder"));
         assertEquals(Boolean.FALSE, wrongRestaurantDocument.document().get("/paynote/restaurantOrderProvided"));
 
-        current = support.blue.processDocument(current,
-                operationEvent(support, "travel-agency", 16, "provideRestaurantOrder", restaurantOrder(support))).snapshot();
-        current = support.blue.processDocument(current,
-                operationEvent(support, "travel-agency", 17, "provideHotelOrder", hotelOrder(support))).snapshot();
+        current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                support.blue,
+                support.blue.processDocument(current,
+                        operationEvent(support, "travel-agency", 16,
+                                "provideRestaurantOrder", restaurantOrder(support))));
+        current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                support.blue,
+                support.blue.processDocument(current,
+                        operationEvent(support, "travel-agency", 17,
+                                "provideHotelOrder", hotelOrder(support))));
 
         // Illegal: Card Processor cannot capture before both Restaurant and Hotel have confirmed.
         DocumentProcessingResult earlyCapture = support.blue.processDocument(current,
@@ -216,14 +239,14 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
                                          BexProcessingMetrics.Snapshot before,
                                          BexProcessingMetrics.Snapshot after) {
         System.out.printf(Locale.ROOT,
-                "[offer-paynote metrics] %s wall=%.3fms status=%s gas=%d events=%d snapshot=%s failure=%s%n",
+                "[offer-paynote metrics] %s wall=%.3fms status=%s gas=%d events=%d document=%s failure=%s%n",
                 label,
                 nanosToMs(wallNanos),
                 result.status(),
                 result.totalGas(),
-                result.triggeredEvents().size(),
-                result.snapshot() != null,
-                result.failureReason());
+                result.events().size(),
+                result.document() != null,
+                blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         System.out.printf(Locale.ROOT,
                 "  processor blue=%.3fms process=%.3fms preprocess=%.3fms bundle=%.3fms actualBundle=%.3fms reuse=%.3fms cacheKey=%.3fms bundleHits=%d bundleMisses=%d built=%d reused=%d%n",
                 ms(after.blueProcessDocumentNanos, before.blueProcessDocumentNanos),
@@ -563,10 +586,10 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
                 "    paths: []",
                 "  restaurantOrderEvents:",
                 "    type: Embedded Node Channel",
-                "    childPath: /restaurantOrder",
+                "    sourcePath: /restaurantOrder",
                 "  hotelOrderEvents:",
                 "    type: Embedded Node Channel",
-                "    childPath: /hotelOrder",
+                "    sourcePath: /hotelOrder",
                 "  restaurantOrderConfirmed:",
                 "    type: Coordination/Sequential Workflow",
                 "    channel: restaurantOrderEvents",
@@ -796,8 +819,8 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
     }
 
     private static void assertRuntimeFatal(DocumentProcessingResult result, String expectedMessage) {
-        assertEquals(ProcessorStatus.RUNTIME_FATAL, result.status(), result.failureReason());
-        if (result.failureReason() != null && result.failureReason().contains(expectedMessage)) {
+        assertEquals(ProcessorStatus.RUNTIME_FATAL, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
+        if (blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result) != null && blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result).contains(expectedMessage)) {
             return;
         }
         assertTrue(containsStringValue(result.document(), expectedMessage),

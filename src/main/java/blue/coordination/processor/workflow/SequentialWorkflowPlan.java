@@ -8,18 +8,15 @@ import blue.repo.coordination.TerminateProcessing;
 import blue.repo.coordination.TriggerEvent;
 import blue.repo.coordination.UpdateDocument;
 
-import java.math.BigDecimal;
-import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.IdentityHashMap;
 import java.util.List;
-import java.util.Map;
 
 /** Immutable execution structure for one exact frozen workflow contract. */
 final class SequentialWorkflowPlan {
     private static final long PLAN_BASE_BYTES = 128L;
     private static final long STEP_PLAN_BYTES = 96L;
+    private static final long RETAINED_EXACT_STEP_BYTES = 96L;
 
     private final FrozenNode.ResolvedStructuralKey contractIdentity;
     private final List<StepPlan> steps;
@@ -135,17 +132,22 @@ final class SequentialWorkflowPlan {
     }
 
     private static long estimateWeight(FrozenNode contractNode, List<StepPlan> steps) {
-        WeightEstimator identityEstimator = new WeightEstimator();
-        WeightEstimator retainedStepEstimator = new WeightEstimator();
-        long weight = PLAN_BASE_BYTES;
-        // The exact structural key retains representation data comparable to
-        // one traversal of the frozen graph.
-        weight = saturatedAdd(weight, identityEstimator.node(contractNode));
+        /*
+         * The cache key already owns the exact structural identity and each
+         * step retains an exact frozen node. Weight bookkeeping is deliberately
+         * shallow: workflow planning must not recursively traverse exact
+         * Update/Trigger payloads merely to estimate their size.
+         */
+        long weight = PLAN_BASE_BYTES
+                + (contractNode != null ? RETAINED_EXACT_STEP_BYTES : 0L);
         for (StepPlan step : steps) {
             weight = saturatedAdd(weight, STEP_PLAN_BYTES);
-            weight = saturatedAdd(weight, retainedStepEstimator.string(step.key));
-            weight = saturatedAdd(weight, retainedStepEstimator.string(step.kind));
-            weight = saturatedAdd(weight, retainedStepEstimator.node(step.frozenStep));
+            weight = saturatedAdd(weight, stringWeight(step.key));
+            weight = saturatedAdd(weight, stringWeight(step.kind));
+            if (step.frozenStep != null) {
+                weight = saturatedAdd(
+                        weight, RETAINED_EXACT_STEP_BYTES);
+            }
             if (step.staticUpdatePlan != null) {
                 weight = saturatedAdd(weight, step.staticUpdatePlan.approximateWeightBytes());
             }
@@ -158,6 +160,12 @@ final class SequentialWorkflowPlan {
             return Long.MAX_VALUE;
         }
         return left + right;
+    }
+
+    private static long stringWeight(String value) {
+        return value == null
+                ? 0L
+                : 40L + 2L * value.length();
     }
 
     static final class StepPlan {
@@ -221,63 +229,4 @@ final class SequentialWorkflowPlan {
         }
     }
 
-    private static final class WeightEstimator {
-        private final IdentityHashMap<FrozenNode, Boolean> visited = new IdentityHashMap<FrozenNode, Boolean>();
-
-        private long node(FrozenNode node) {
-            if (node == null || visited.put(node, Boolean.TRUE) != null) {
-                return 0L;
-            }
-            long weight = 160L;
-            weight = saturatedAdd(weight, string(node.getName()));
-            weight = saturatedAdd(weight, string(node.getDescription()));
-            weight = saturatedAdd(weight, string(node.getReferenceBlueId()));
-            weight = saturatedAdd(weight, string(node.getMergePolicy()));
-            weight = saturatedAdd(weight, string(node.getPreviousBlueId()));
-            weight = saturatedAdd(weight, scalar(node.getValue()));
-            weight = saturatedAdd(weight, node(node.getType()));
-            weight = saturatedAdd(weight, node(node.getItemType()));
-            weight = saturatedAdd(weight, node(node.getKeyType()));
-            weight = saturatedAdd(weight, node(node.getValueType()));
-            weight = saturatedAdd(weight, node(node.getContracts()));
-            weight = saturatedAdd(weight, node(node.getBlue()));
-            if (node.getSchema() != null) {
-                weight = saturatedAdd(weight, 256L);
-            }
-            if (node.getItems() != null) {
-                weight = saturatedAdd(weight, 24L + 8L * node.getItems().size());
-                for (FrozenNode item : node.getItems()) {
-                    weight = saturatedAdd(weight, node(item));
-                }
-            }
-            if (node.getProperties() != null) {
-                weight = saturatedAdd(weight, 48L + 48L * node.getProperties().size());
-                for (Map.Entry<String, FrozenNode> entry : node.getProperties().entrySet()) {
-                    weight = saturatedAdd(weight, string(entry.getKey()));
-                    weight = saturatedAdd(weight, node(entry.getValue()));
-                }
-            }
-            return weight;
-        }
-
-        private long string(String value) {
-            return value == null ? 0L : 40L + 2L * value.length();
-        }
-
-        private long scalar(Object value) {
-            if (value == null) {
-                return 0L;
-            }
-            if (value instanceof String) {
-                return string((String) value);
-            }
-            if (value instanceof BigInteger) {
-                return 48L + ((BigInteger) value).bitLength() / 8L;
-            }
-            if (value instanceof BigDecimal) {
-                return 64L;
-            }
-            return 24L;
-        }
-    }
 }

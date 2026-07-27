@@ -61,7 +61,7 @@ class UpdateDocumentBatchApplyIntegrationTest {
 
         DocumentProcessingResult result = support.processRun(document);
 
-        assertFalse(result.capabilityFailure(), result.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertEquals("second", result.document().getAsText("/status"));
         assertEquals(BigInteger.ONE, result.document().get("/count"));
         assertEquals(3L, metrics.patchesApplied());
@@ -112,11 +112,11 @@ class UpdateDocumentBatchApplyIntegrationTest {
         DocumentProcessingResult result = support.processRun(document,
                 new Node().properties("status", new Node().value("active")));
 
-        assertFalse(result.capabilityFailure(), result.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertEquals("active", result.document().get("/status"));
-        assertEquals(1, result.triggeredEvents().size());
-        assertEquals("Status Applied", result.triggeredEvents().get(0).get("/kind"));
-        assertEquals("active", result.triggeredEvents().get(0).get("/status"));
+        assertEquals(1, result.events().size());
+        assertEquals("Status Applied", result.events().get(0).get("/kind"));
+        assertEquals("active", result.events().get(0).get("/status"));
         assertEquals(1L, metrics.patchesApplied());
         assertEquals(1L, metrics.updateBatchPatchApplications());
         assertEquals(0L, metrics.updateIndividualPatchApplications());
@@ -155,7 +155,7 @@ class UpdateDocumentBatchApplyIntegrationTest {
                         .properties("detail", new Node().value("detail"))
                         .properties("status", new Node().value("existing")));
 
-        assertFalse(result.capabilityFailure(), result.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertEquals("existing", result.document().get("/status"));
         assertEquals(2L, metrics.patchesApplied());
         assertEquals(2L, metrics.updateBatchPatchApplications());
@@ -170,7 +170,7 @@ class UpdateDocumentBatchApplyIntegrationTest {
     }
 
     @Test
-    void updateDocumentRejectsBexOperatorsInStaticChangeset() {
+    void updateDocumentPreservesDollarPrefixedLiteralValues() {
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -187,8 +187,11 @@ class UpdateDocumentBatchApplyIntegrationTest {
         DocumentProcessingResult result = support.processRun(document,
                 new Node().properties("status", new Node().value("existing")));
 
-        assertEquals(ProcessorStatus.RUNTIME_FATAL, result.status(), result.failureReason());
-        assertTrue(result.failureReason().contains("Update Document changeset must be static"));
+        assertEquals(ProcessorStatus.SUCCESS, result.status(),
+                blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
+        assertEquals("event", result.document().get("/status/$binding/name"));
+        assertEquals("/message/request/status",
+                result.document().get("/status/$binding/path"));
     }
 
     private static long metric(BexProcessingMetrics metrics, String name) {

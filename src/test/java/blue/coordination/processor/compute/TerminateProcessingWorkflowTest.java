@@ -31,31 +31,66 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TerminateProcessingWorkflowTest {
     @Test
-    void terminateProcessingWithoutReasonTerminatesGracefully() {
-        DocumentProcessingResult result = runDeclarative(null, null);
+    void terminateProcessingWithoutReasonUsesExactApplicationCause() {
+        DocumentProcessingResult result = runDeclarative(
+                null, "workflow-completed", null);
 
-        assertGracefulTermination(result, null);
+        assertApplicationTermination(result, "workflow-completed", null);
     }
 
     @Test
-    void terminateProcessingPassesReasonUnchanged() {
-        DocumentProcessingResult result = runDeclarative(null, "Workflow completed");
+    void terminateProcessingPassesCauseAndReasonUnchanged() {
+        DocumentProcessingResult result = runDeclarative(
+                null, "workflow-completed", "Workflow completed");
 
-        assertGracefulTermination(result, "Workflow completed");
+        assertApplicationTermination(
+                result, "workflow-completed", "Workflow completed");
     }
 
     @Test
     void terminateProcessingEmptyReasonUsesCoreOmissionSemantics() {
-        DocumentProcessingResult result = runDeclarative(null, "");
+        DocumentProcessingResult result = runDeclarative(
+                null, "workflow-completed", "");
 
-        assertGracefulTermination(result, null);
+        assertApplicationTermination(result, "workflow-completed", null);
     }
 
     @Test
     void terminateProcessingPreservesWhitespaceReason() {
-        DocumentProcessingResult result = runDeclarative(null, "   ");
+        DocumentProcessingResult result = runDeclarative(
+                null, "workflow-completed", "   ");
 
-        assertGracefulTermination(result, "   ");
+        assertApplicationTermination(result, "workflow-completed", "   ");
+    }
+
+    @Test
+    void terminateProcessingRejectsMissingAndEmptyCause() {
+        for (String cause : Arrays.asList(null, "")) {
+            DocumentProcessingResult result = runDeclarative(
+                    null, cause, "must-not-terminate");
+
+            assertRuntimeFailure(
+                    result,
+                    "Terminate Processing cause must be non-empty Text");
+        }
+    }
+
+    @Test
+    void terminateProcessingRejectsNonTextCause() {
+        for (String causeYaml : Arrays.asList(
+                "7",
+                "true",
+                "[]",
+                String.join("\n", "", "    $emptyObject: true"))) {
+            DocumentProcessingResult result = runSteps(null, String.join("\n",
+                    "- name: Invalid Cause",
+                    "  type: Coordination/Terminate Processing",
+                    "  cause: " + causeYaml));
+
+            assertRuntimeFailure(
+                    result,
+                    "Terminate Processing cause and reason must be Text");
+        }
     }
 
     @Test
@@ -73,7 +108,7 @@ class TerminateProcessingWorkflowTest {
                 "  event:",
                 "    type: Coordination/Event",
                 "    kind: before-stop",
-                terminateStep("stop-now"),
+                terminateStep("workflow-stopped", "stop-now"),
                 "- name: Later Patch",
                 "  type: Coordination/Update Document",
                 "  changeset:",
@@ -86,7 +121,7 @@ class TerminateProcessingWorkflowTest {
                 "    type: Coordination/Event",
                 "    kind: must-not-emit"));
 
-        assertGracefulTermination(result, "stop-now");
+        assertApplicationTermination(result, "workflow-stopped", "stop-now");
         assertEquals("changed-before-stop", result.document().get("/status"));
         assertEquals(Arrays.asList("before-stop"), kinds(result, "before-stop", "must-not-emit"));
         assertTrue(indexOfKind(result, "before-stop")
@@ -103,6 +138,7 @@ class TerminateProcessingWorkflowTest {
                 () -> runSteps(metrics, String.join("\n",
                         "- name: Invalid Dynamic Reason",
                         "  type: Coordination/Terminate Processing",
+                        "  cause: dynamic-reason-test",
                         "  reason:",
                         "    $document: /status")));
 
@@ -114,13 +150,13 @@ class TerminateProcessingWorkflowTest {
     @Test
     void terminateProcessingIsRegisteredInDefaultAndConfiguredBexRunners() {
         DocumentProcessingResult defaultRunner = runDeclarativeWithSupport(
-                ComputeWorkflowTestSupport.create(), "default");
+                ComputeWorkflowTestSupport.create(), "default-run", null);
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         DocumentProcessingResult configuredRunner = runDeclarativeWithSupport(
-                support(metrics), "configured");
+                support(metrics), "configured-run", null);
 
-        assertGracefulTermination(defaultRunner, "default");
-        assertGracefulTermination(configuredRunner, "configured");
+        assertApplicationTermination(defaultRunner, "default-run", null);
+        assertApplicationTermination(configuredRunner, "configured-run", null);
         assertEquals(1L, metrics.declarativeTerminationSteps());
     }
 
@@ -131,19 +167,22 @@ class TerminateProcessingWorkflowTest {
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create(
                 CoordinationProcessorOptions.builder().sequentialWorkflowRunner(runner).build());
 
-        DocumentProcessingResult result = runDeclarativeWithSupport(support, "unsupported");
+        DocumentProcessingResult result = runDeclarativeWithSupport(
+                support, "unsupported-run", null);
 
         assertEquals(ProcessorStatus.RUNTIME_FATAL, result.status());
-        assertTrue(result.failureReason().contains(
+        assertTrue(blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result).contains(
                 "Unsupported sequential workflow step: Coordination/Terminate Processing"));
     }
 
     @Test
     void terminateProcessingAddsNoBexCompilationOrEvaluation() {
         BexProcessingMetrics metrics = new BexProcessingMetrics();
-        DocumentProcessingResult result = runDeclarative(metrics, "static reason");
+        DocumentProcessingResult result = runDeclarative(
+                metrics, "static-termination", "static reason");
 
-        assertGracefulTermination(result, "static reason");
+        assertApplicationTermination(
+                result, "static-termination", "static reason");
         assertEquals(0L, metrics.bexCompiledExecutions());
         assertEquals(0L, metrics.bexCompileCacheHits());
         assertEquals(0L, metrics.bexCompileCacheMisses());
@@ -175,9 +214,10 @@ class TerminateProcessingWorkflowTest {
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create(
                 CoordinationProcessorOptions.builder().sequentialWorkflowRunner(runner).build());
 
-        DocumentProcessingResult result = runDeclarativeWithSupport(support, "no-result");
+        DocumentProcessingResult result = runDeclarativeWithSupport(
+                support, "no-result", null);
 
-        assertGracefulTermination(result, "no-result");
+        assertApplicationTermination(result, "no-result", null);
         assertTrue(observed.get().isTerminal());
         assertFalse(observed.get().hasValue());
         assertEquals(1L, metrics.declarativeTerminationSteps());
@@ -197,6 +237,7 @@ class TerminateProcessingWorkflowTest {
                 "  do:",
                 "    - $return:",
                 "        termination:",
+                "          cause: workflow-completed",
                 "          reason: same-reason"));
         DocumentProcessingResult declarative = runSteps(null, String.join("\n",
                 "- name: Before Declarative",
@@ -205,10 +246,10 @@ class TerminateProcessingWorkflowTest {
                 "    - op: replace",
                 "      path: /status",
                 "      val: completed",
-                terminateStep("same-reason")));
+                terminateStep("workflow-completed", "same-reason")));
 
-        assertEquals(ProcessorStatus.SUCCESS, compute.status(), compute.failureReason());
-        assertEquals(ProcessorStatus.SUCCESS, declarative.status(), declarative.failureReason());
+        assertEquals(ProcessorStatus.SUCCESS, compute.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(compute));
+        assertEquals(ProcessorStatus.SUCCESS, declarative.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(declarative));
         assertEquals(compute.document().get("/status"), declarative.document().get("/status"));
         assertEquals(terminationValue(compute, "cause"), terminationValue(declarative, "cause"));
         assertEquals(terminationValue(compute, "reason"), terminationValue(declarative, "reason"));
@@ -228,12 +269,14 @@ class TerminateProcessingWorkflowTest {
                 "    channel: ownerChannel",
                 "    steps:",
                 "      - type: Coordination/Terminate Processing",
+                "        cause: first-handler",
                 "        reason: first-reason",
                 "  second:",
                 "    type: Coordination/Sequential Workflow",
                 "    channel: ownerChannel",
                 "    steps:",
                 "      - type: Coordination/Terminate Processing",
+                "        cause: second-handler",
                 "        reason: second-reason"))).document();
         Node event = TestTimelineProvider.timelineEntry(support.blue,
                 support.repository,
@@ -243,19 +286,22 @@ class TerminateProcessingWorkflowTest {
 
         DocumentProcessingResult result = support.process(document, event);
 
-        assertGracefulTermination(result, "first-reason");
+        assertApplicationTermination(result, "first-handler", "first-reason");
         assertEquals(1L, metrics.declarativeTerminationSteps());
     }
 
-    private static DocumentProcessingResult runDeclarative(BexProcessingMetrics metrics, String reason) {
-        return runSteps(metrics, terminateStep(reason));
+    private static DocumentProcessingResult runDeclarative(BexProcessingMetrics metrics,
+                                                           String cause,
+                                                           String reason) {
+        return runSteps(metrics, terminateStep(cause, reason));
     }
 
     private static DocumentProcessingResult runDeclarativeWithSupport(ComputeWorkflowTestSupport support,
+                                                                      String cause,
                                                                       String reason) {
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
-                indent(terminateStep(reason), 6)));
+                indent(terminateStep(cause, reason), 6)));
         return support.processRun(document);
     }
 
@@ -275,10 +321,13 @@ class TerminateProcessingWorkflowTest {
                 .build());
     }
 
-    private static String terminateStep(String reason) {
+    private static String terminateStep(String cause, String reason) {
         String step = String.join("\n",
                 "- name: Stop Processing",
                 "  type: Coordination/Terminate Processing");
+        if (cause != null) {
+            step += "\n  cause: '" + cause.replace("'", "''") + "'";
+        }
         if (reason == null) {
             return step;
         }
@@ -292,16 +341,26 @@ class TerminateProcessingWorkflowTest {
         return prefix + value.replace("\n", "\n" + prefix);
     }
 
-    private static void assertGracefulTermination(DocumentProcessingResult result, String reason) {
-        assertEquals(ProcessorStatus.SUCCESS, result.status(), result.failureReason());
-        assertEquals("graceful", terminationValue(result, "cause"));
+    private static void assertApplicationTermination(DocumentProcessingResult result,
+                                                     String cause,
+                                                     String reason) {
+        assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
+        assertEquals(cause, terminationValue(result, "cause"));
         assertEquals(reason, terminationValue(result, "reason"));
+    }
+
+    private static void assertRuntimeFailure(DocumentProcessingResult result,
+                                             String reasonFragment) {
+        String diagnostic =
+                blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result);
+        assertEquals(ProcessorStatus.RUNTIME_FATAL, result.status(), diagnostic);
+        assertTrue(diagnostic != null && diagnostic.contains(reasonFragment), diagnostic);
     }
 
     private static List<String> kinds(DocumentProcessingResult result, String... selected) {
         List<String> allowed = Arrays.asList(selected);
         List<String> actual = new ArrayList<String>();
-        for (Node event : result.triggeredEvents()) {
+        for (Node event : result.events()) {
             Object kind = scalarProperty(event, "kind");
             if (kind instanceof String && allowed.contains(kind)) {
                 actual.add((String) kind);
@@ -312,7 +371,7 @@ class TerminateProcessingWorkflowTest {
 
     private static List<Object> lifecycleCauses(DocumentProcessingResult result) {
         List<Object> causes = new ArrayList<Object>();
-        for (Node event : result.triggeredEvents()) {
+        for (Node event : result.events()) {
             Object cause = scalarProperty(event, "cause");
             if (cause != null) {
                 causes.add(cause);
@@ -322,8 +381,8 @@ class TerminateProcessingWorkflowTest {
     }
 
     private static int indexOfKind(DocumentProcessingResult result, String kind) {
-        for (int i = 0; i < result.triggeredEvents().size(); i++) {
-            if (kind.equals(scalarProperty(result.triggeredEvents().get(i), "kind"))) {
+        for (int i = 0; i < result.events().size(); i++) {
+            if (kind.equals(scalarProperty(result.events().get(i), "kind"))) {
                 return i;
             }
         }
@@ -331,8 +390,8 @@ class TerminateProcessingWorkflowTest {
     }
 
     private static int indexOfType(DocumentProcessingResult result, String blueId) {
-        for (int i = 0; i < result.triggeredEvents().size(); i++) {
-            Node event = result.triggeredEvents().get(i);
+        for (int i = 0; i < result.events().size(); i++) {
+            Node event = result.events().get(i);
             if (event.getType() != null && blueId.equals(event.getType().getBlueId())) {
                 return i;
             }

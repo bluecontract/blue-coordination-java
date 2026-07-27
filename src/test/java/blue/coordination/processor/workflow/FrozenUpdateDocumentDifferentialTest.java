@@ -4,6 +4,7 @@ import blue.bex.api.BexEngine;
 import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationProcessors;
 import blue.coordination.processor.CoordinationTestResources;
+import blue.coordination.processor.ProcessingResultTestSupport;
 import blue.coordination.processor.TestTimelineProvider;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.Blue;
@@ -16,6 +17,7 @@ import blue.language.processor.WorkingDocument;
 import blue.language.processor.model.FrozenJsonPatch;
 import blue.language.processor.model.JsonPatch;
 import blue.language.snapshot.FrozenNode;
+import blue.language.snapshot.ResolvedSnapshot;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.ChatMessage;
 import blue.repo.coordination.SequentialWorkflowStep;
@@ -108,7 +110,7 @@ class FrozenUpdateDocumentDifferentialTest {
     }
 
     @Test
-    void gracefulTerminationKeepsPriorChangesAndSkipsLaterPatchProduction() {
+    void applicationTerminationKeepsPriorChangesAndSkipsLaterPatchProduction() {
         Outcome frozen = run(false, new DocumentFactory() {
             @Override
             public Node build(BlueRepository repository) {
@@ -126,6 +128,10 @@ class FrozenUpdateDocumentDifferentialTest {
         assertEquals("before termination", frozen.document.getAsText("/status"));
         assertNull(nodeAt(frozen.document, "/mustNotAppear"));
         assertNotNull(frozen.document.get("/contracts/terminated"));
+        assertEquals("update-workflow-complete",
+                frozen.document.get("/contracts/terminated/cause"));
+        assertEquals("finished intentionally",
+                frozen.document.get("/contracts/terminated/reason"));
         assertEquals(1L, metric(frozen.metrics, "frozenPatchesHandedToLanguage"));
     }
 
@@ -251,6 +257,7 @@ class FrozenUpdateDocumentDifferentialTest {
         contracts.put("writer", directWorkflow("owner",
                 updateDocumentStep(patch("replace", "/status", new Node().value("before termination"))),
                 new Node().type("Coordination/Terminate Processing")
+                        .properties("cause", new Node().value("update-workflow-complete"))
                         .properties("reason", new Node().value("finished intentionally")),
                 updateDocumentStep(patch("add", "/mustNotAppear", new Node().value(true)))));
         return root(repository, contracts).properties("status", new Node().value("initial"));
@@ -346,24 +353,26 @@ class FrozenUpdateDocumentDifferentialTest {
                     1,
                     TestTimelineProvider.chatMessage("run"));
             DocumentProcessingResult result = blue.processDocument(initialized, event);
-            List<String> triggeredEventsJson = new ArrayList<String>(result.triggeredEvents().size());
-            for (Node triggered : result.triggeredEvents()) {
+            List<String> triggeredEventsJson = new ArrayList<String>(result.events().size());
+            for (Node triggered : result.events()) {
                 triggeredEventsJson.add(blue.nodeToJson(triggered));
             }
+            ResolvedSnapshot resultSnapshot =
+                    ProcessingResultTestSupport.snapshot(blue, result);
             return new Outcome(result.document().clone(),
-                    result.snapshot() != null
-                            ? result.snapshot().frozenCanonicalRoot().resolvedStructuralKey()
+                    resultSnapshot != null
+                            ? resultSnapshot.frozenCanonicalRoot().resolvedStructuralKey()
                             : null,
-                    result.snapshot() != null
-                            ? result.snapshot().frozenResolvedRoot().resolvedStructuralKey()
+                    resultSnapshot != null
+                            ? resultSnapshot.frozenResolvedRoot().resolvedStructuralKey()
                             : null,
-                    result.blueId(),
+                    ProcessingResultTestSupport.blueId(result),
                     triggeredEventsJson,
                     result.totalGas(),
                     result.status(),
-                    result.errorCategory(),
-                    result.failureReason(),
-                    metrics);
+                    ProcessingResultTestSupport.diagnosticCategory(result),
+                    ProcessingResultTestSupport.diagnosticMessage(result),
+                    metrics.snapshot());
         } finally {
             try {
                 blue.close();
@@ -393,8 +402,8 @@ class FrozenUpdateDocumentDifferentialTest {
         assertEquals(legacy.failureReason, frozen.failureReason, "failure reason");
     }
 
-    private static long metric(BexProcessingMetrics metrics, String name) {
-        Long value = metrics.languageCounters().get(name);
+    private static long metric(BexProcessingMetrics.Snapshot metrics, String name) {
+        Long value = metrics.languageCounters.get(name);
         return value != null ? value.longValue() : 0L;
     }
 
@@ -420,7 +429,7 @@ class FrozenUpdateDocumentDifferentialTest {
         private final ProcessorStatus status;
         private final ProcessorErrorCategory errorCategory;
         private final String failureReason;
-        private final BexProcessingMetrics metrics;
+        private final BexProcessingMetrics.Snapshot metrics;
 
         private Outcome(Node document,
                         Object canonicalKey,
@@ -431,7 +440,7 @@ class FrozenUpdateDocumentDifferentialTest {
                         ProcessorStatus status,
                         ProcessorErrorCategory errorCategory,
                         String failureReason,
-                        BexProcessingMetrics metrics) {
+                        BexProcessingMetrics.Snapshot metrics) {
             this.document = document;
             this.canonicalKey = canonicalKey;
             this.resolvedKey = resolvedKey;

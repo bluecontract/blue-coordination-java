@@ -243,12 +243,7 @@ public final class SequentialWorkflowRunner implements AutoCloseable {
     }
 
     private FrozenNode rawContractNode(ProcessorExecutionContext context) {
-        String pointer = contractPointer(context);
-        if (pointer == null) {
-            return context.frozenContractNode();
-        }
-        FrozenNode frozen = context.canonicalFrozenAt(pointer);
-        return frozen != null ? frozen : context.frozenContractNode();
+        return context.frozenContractNode();
     }
 
     private WorkingDocument rootWorkingDocument(ProcessorExecutionContext context) {
@@ -263,21 +258,4 @@ public final class SequentialWorkflowRunner implements AutoCloseable {
         return workingDocument;
     }
 
-    private String contractPointer(ProcessorExecutionContext context) {
-        String key = context.contractKey();
-        if (key == null || key.trim().isEmpty()) {
-            return null;
-        }
-        String scope = context.scopePath();
-        String contracts = appendPointer(scope == null || scope.trim().isEmpty() ? "/" : scope, "contracts");
-        return appendPointer(contracts, key.trim());
-    }
-
-    private String appendPointer(String parent, String segment) {
-        String escaped = segment.replace("~", "~0").replace("/", "~1");
-        if (parent == null || parent.isEmpty() || "/".equals(parent)) {
-            return "/" + escaped;
-        }
-        return parent + "/" + escaped;
-    }
 }

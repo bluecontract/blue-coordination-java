@@ -1,0 +1,140 @@
+package blue.coordination.processor;
+
+import blue.language.model.Node;
+import blue.language.processor.ExternalChannelFunctionContext;
+import blue.language.processor.ExternalChannelMemberSnapshot;
+import blue.language.processor.ExternalChannelSubscriptionFunctions;
+import blue.repo.coordination.CompositeTimelineChannel;
+
+import java.util.List;
+
+final class CompositeTimelineExternalSubscriptionFunctions
+        implements ExternalChannelSubscriptionFunctions<
+        CompositeTimelineChannel> {
+
+    static final CompositeTimelineExternalSubscriptionFunctions INSTANCE =
+            new CompositeTimelineExternalSubscriptionFunctions();
+    static final String ORDER_SUBJECT_VERSION =
+            "blue.coordination/1.0/composite-timeline-order-subject";
+
+    private CompositeTimelineExternalSubscriptionFunctions() {
+    }
+
+    @Override
+    public List<String> channelKeys(
+            CompositeTimelineChannel immutableContractSnapshot,
+            ExternalChannelFunctionContext context) {
+        OperationRequestRoutingFunctions
+                .declareTargetChannelFamilies(
+                        immutableContractSnapshot,
+                        context);
+        return TimelineMemberSubscriptions.unionChannelKeys(
+                members(immutableContractSnapshot, context));
+    }
+
+    @Override
+    public List<String> eventKeys(
+            Node exactEvent,
+            ExternalChannelFunctionContext context) {
+        return TimelineMemberSubscriptions.timelineEventKeys(
+                exactEvent, context);
+    }
+
+    @Override
+    public boolean accepts(
+            CompositeTimelineChannel immutableContractSnapshot,
+            Node exactEvent,
+            ExternalChannelFunctionContext context) {
+        return winning(immutableContractSnapshot,
+                exactEvent, context) != null;
+    }
+
+    @Override
+    public Node payload(
+            CompositeTimelineChannel immutableContractSnapshot,
+            Node exactEvent,
+            ExternalChannelFunctionContext context) {
+        return OperationRequestRoutingFunctions
+                .payload(exactEvent, context);
+    }
+
+    @Override
+    public Node checkpointSubject(
+            CompositeTimelineChannel immutableContractSnapshot,
+            Node exactEvent,
+            Node exactPayload,
+            ExternalChannelFunctionContext context) {
+        TimelineMemberSubscriptions.WinningMember winner =
+                requireWinner(immutableContractSnapshot,
+                        exactEvent, context);
+        return TimelineProviderSupport.memberTimelineOrderSubject(
+                ORDER_SUBJECT_VERSION,
+                winner.member(),
+                winner.evaluation().checkpointSubject());
+    }
+
+    @Override
+    public String handlerChannelKey(
+            CompositeTimelineChannel immutableContractSnapshot,
+            Node exactEvent,
+            Node exactPayload,
+            ExternalChannelFunctionContext context) {
+        return OperationRequestRoutingFunctions
+                .handlerChannelKey(
+                        immutableContractSnapshot,
+                        exactEvent,
+                        context);
+    }
+
+    @Override
+    public String logicalDeliveryKey(
+            CompositeTimelineChannel immutableContractSnapshot,
+            Node exactEvent,
+            Node exactPayload,
+            ExternalChannelFunctionContext context) {
+        return OperationRequestRoutingFunctions
+                .logicalDeliveryKey(
+                        immutableContractSnapshot,
+                        exactEvent,
+                        context);
+    }
+
+    @Override
+    public String checkpointDomainDiscriminator(
+            CompositeTimelineChannel immutableContractSnapshot,
+            ExternalChannelFunctionContext context) {
+        return "coordination.composite-timeline:"
+                + "direct-timeline-members-v1"
+                + "|subject="
+                + ORDER_SUBJECT_VERSION;
+    }
+
+    private TimelineMemberSubscriptions.WinningMember winning(
+            CompositeTimelineChannel contract,
+            Node exactEvent,
+            ExternalChannelFunctionContext context) {
+        return TimelineMemberSubscriptions.winning(
+                members(contract, context), exactEvent);
+    }
+
+    private TimelineMemberSubscriptions.WinningMember requireWinner(
+            CompositeTimelineChannel contract,
+            Node exactEvent,
+            ExternalChannelFunctionContext context) {
+        TimelineMemberSubscriptions.WinningMember winner =
+                winning(contract, exactEvent, context);
+        if (winner == null) {
+            throw new IllegalStateException(
+                    "Composite Timeline payload requires an accepting "
+                            + "member");
+        }
+        return winner;
+    }
+
+    private List<ExternalChannelMemberSnapshot> members(
+            CompositeTimelineChannel contract,
+            ExternalChannelFunctionContext context) {
+        return TimelineMemberSubscriptions.compositeMembers(
+                contract, context);
+    }
+}

@@ -9,6 +9,7 @@ import blue.repo.BlueRepository;
 import blue.repo.coordination.ChatMessage;
 import blue.repo.coordination.StatusCompleted;
 import java.math.BigInteger;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,9 +30,9 @@ class TriggerEventStepExecutorTest {
 
         DocumentProcessingResult result = processChat(fixture, document);
 
-        assertEquals(1, result.triggeredEvents().size());
-        assertEventType(result.triggeredEvents().get(0), ChatMessage.qualifiedName(), ChatMessage.blueId());
-        assertEquals("Hello World", result.triggeredEvents().get(0).get("/message"));
+        assertEquals(1, result.events().size());
+        assertEventType(result.events().get(0), ChatMessage.qualifiedName(), ChatMessage.blueId());
+        assertEquals("Hello World", result.events().get(0).get("/message"));
     }
 
     @Test
@@ -45,11 +46,11 @@ class TriggerEventStepExecutorTest {
 
         DocumentProcessingResult result = processChat(fixture, document);
 
-        assertEquals(BigInteger.valueOf(2), result.triggeredEvents().get(0).get("/amount"));
+        assertEquals(BigInteger.valueOf(2), result.events().get(0).get("/amount"));
     }
 
     @Test
-    void bexOperatorPayloadFailsClearly() {
+    void dollarPrefixedLiteralPayloadIsEmittedExactly() {
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, directWorkflowDocument(fixture.repository,
                 0,
@@ -57,7 +58,12 @@ class TriggerEventStepExecutorTest {
 
         DocumentProcessingResult result = processChat(fixture, document);
 
-        assertRuntimeFatal(result, "Trigger Event event must be static");
+        assertEquals(
+                ProcessorStatus.SUCCESS,
+                result.status(),
+                ProcessingResultTestSupport.diagnosticMessage(result));
+        assertEquals(1, result.events().size());
+        assertEquals("/counter", result.events().get(0).get("/$document"));
     }
 
     @Test
@@ -73,7 +79,7 @@ class TriggerEventStepExecutorTest {
     }
 
     @Test
-    void namedEventOnlyFailsClearlyAsMissingSemanticPayload() {
+    void namedEventOnlyRemainsAnExactIdentityBearingPayload() {
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, directWorkflowDocument(fixture.repository,
                 0,
@@ -81,9 +87,57 @@ class TriggerEventStepExecutorTest {
 
         DocumentProcessingResult result = processChat(fixture, document);
 
-        // Trigger Event requires semantic payload content such as type, value,
-        // properties, items, or a blueId; name/description-only metadata is not emitted.
-        assertRuntimeFatal(result, "Trigger Event step must declare event payload");
+        assertEquals(
+                ProcessorStatus.SUCCESS,
+                result.status(),
+                ProcessingResultTestSupport.diagnosticMessage(result));
+        assertEquals(1, result.events().size());
+        assertEquals("Named Event Only", result.events().get(0).getName());
+    }
+
+    @Test
+    void emptyListEventRemainsAnExactListPayload() {
+        Fixture fixture = configuredFixture();
+        Node document = initializedDocument(
+                fixture,
+                directWorkflowDocument(
+                        fixture.repository,
+                        0,
+                        triggerEventStep(
+                                new Node().items(
+                                        Collections.<Node>emptyList()))));
+
+        DocumentProcessingResult result = processChat(fixture, document);
+
+        assertEquals(
+                ProcessorStatus.SUCCESS,
+                result.status(),
+                ProcessingResultTestSupport.diagnosticMessage(result));
+        assertEquals(1, result.events().size());
+        assertTrue(result.events().get(0).getItems().isEmpty());
+    }
+
+    @Test
+    void emptyObjectEventRemainsAnExactOccurrence() {
+        Fixture fixture = configuredFixture();
+        Node document = initializedDocument(
+                fixture,
+                directWorkflowDocument(
+                        fixture.repository,
+                        0,
+                        triggerEventStep(
+                                new Node().properties(
+                                        Collections.<String, Node>emptyMap()))));
+
+        DocumentProcessingResult result = processChat(fixture, document);
+
+        assertEquals(
+                ProcessorStatus.SUCCESS,
+                result.status(),
+                ProcessingResultTestSupport.diagnosticMessage(result));
+        assertEquals(1, result.events().size());
+        assertTrue(result.events().get(0).getProperties() == null
+                || result.events().get(0).getProperties().isEmpty());
     }
 
     @Test
@@ -93,8 +147,8 @@ class TriggerEventStepExecutorTest {
 
         DocumentProcessingResult result = processChat(fixture, document);
 
-        assertContainsEventType(result.triggeredEvents(), StatusCompleted.qualifiedName(), StatusCompleted.blueId());
-        assertContainsChatMessage(result.triggeredEvents(), "Triggered consumer ran");
+        assertContainsEventType(result.events(), StatusCompleted.qualifiedName(), StatusCompleted.blueId());
+        assertContainsChatMessage(result.events(), "Triggered consumer ran");
     }
 
     @Test
@@ -104,8 +158,12 @@ class TriggerEventStepExecutorTest {
         DocumentProcessingResult result = fixture.blue.initializeDocument(
                 fixture.blue.preprocess(lifecycleProducerDocument(fixture.repository)));
 
-        assertContainsEventType(result.triggeredEvents(), StatusCompleted.qualifiedName(), StatusCompleted.blueId());
-        assertContainsChatMessage(result.triggeredEvents(), "Init triggered consumer");
+        assertEquals(
+                ProcessorStatus.SUCCESS,
+                result.status(),
+                ProcessingResultTestSupport.diagnosticMessage(result));
+        assertContainsEventType(result.events(), StatusCompleted.qualifiedName(), StatusCompleted.blueId());
+        assertContainsChatMessage(result.events(), "Init triggered consumer");
     }
 
     @Test
@@ -231,8 +289,8 @@ class TriggerEventStepExecutorTest {
     }
 
     private static void assertTriggeredChatMessage(DocumentProcessingResult result, String expectedMessage) {
-        assertEquals(1, result.triggeredEvents().size());
-        assertContainsChatMessage(result.triggeredEvents(), expectedMessage);
+        assertEquals(1, result.events().size());
+        assertContainsChatMessage(result.events(), expectedMessage);
     }
 
     private static void assertContainsChatMessage(List<Node> events, String expectedMessage) {
@@ -242,7 +300,8 @@ class TriggerEventStepExecutorTest {
                 return;
             }
         }
-        assertFalse(true, "Expected triggered chat message: " + expectedMessage);
+        assertFalse(true, "Expected triggered chat message: "
+                + expectedMessage + " in " + events);
     }
 
     private static void assertContainsEventType(List<Node> events, String qualifiedName, String blueId) {
@@ -251,7 +310,8 @@ class TriggerEventStepExecutorTest {
                 return;
             }
         }
-        assertFalse(true, "Expected triggered event type: " + qualifiedName);
+        assertFalse(true, "Expected triggered event type: "
+                + qualifiedName + " in " + events);
     }
 
     private static void assertEventType(Node event, String qualifiedName, String blueId) {
@@ -260,9 +320,9 @@ class TriggerEventStepExecutorTest {
     }
 
     private static void assertRuntimeFatal(DocumentProcessingResult result, String expectedMessage) {
-        assertEquals(ProcessorStatus.RUNTIME_FATAL, result.status(), result.failureReason());
-        assertTrue(result.failureReason() != null && result.failureReason().contains(expectedMessage),
-                result.failureReason());
+        assertEquals(ProcessorStatus.RUNTIME_FATAL, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
+        assertTrue(blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result) != null && blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result).contains(expectedMessage),
+                blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
     }
 
     private static boolean isEventType(Node event, String qualifiedName, String blueId) {

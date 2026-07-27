@@ -120,7 +120,7 @@ class RepresentativeWorkflowLifecycleSmokeTest {
     }
 
     private static void assertSuccess(DocumentProcessingResult result) {
-        assertEquals(ProcessorStatus.SUCCESS, result.status(), result.failureReason());
+        assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
     }
 
     private static Node subscriptionUpdate(String subscriptionId,
@@ -216,7 +216,9 @@ class RepresentativeWorkflowLifecycleSmokeTest {
             DocumentProcessingResult paynoteInitialized = support.blue.initializeDocument(
                     support.yamlResource(PAYNOTE_RESOURCE));
             assertSuccess(paynoteInitialized);
-            paynoteSnapshot = paynoteInitialized.snapshot();
+            paynoteSnapshot =
+                    blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                            support.blue, paynoteInitialized);
             paynoteEvent = CoordinationTestResources.operationRequestEvent(
                     support.blue,
                     support.repository,
@@ -239,8 +241,10 @@ class RepresentativeWorkflowLifecycleSmokeTest {
                     support.blue.initializeDocument(resolvedMandate);
             assertSuccess(mandateInitialized);
             assertEquals(StatusPending.blueId(),
-                    mandateInitialized.canonicalDocument().getAsText("/status/type/blueId"));
-            mandateSnapshot = mandateInitialized.snapshot();
+                    mandateInitialized.document().getAsText("/status/type/blueId"));
+            mandateSnapshot =
+                    blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                            support.blue, mandateInitialized);
             mandateEvent = TestTimelineProvider.timelineEntry(
                     support.blue,
                     support.repository,
@@ -255,7 +259,9 @@ class RepresentativeWorkflowLifecycleSmokeTest {
             DocumentProcessingResult embeddedInitialized = support.initialize(
                     embeddedDocument());
             assertSuccess(embeddedInitialized);
-            embeddedSnapshot = embeddedInitialized.snapshot();
+            embeddedSnapshot =
+                    blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                            support.blue, embeddedInitialized);
             embeddedEvent = CoordinationTestResources.operationRequestEvent(
                     support.blue,
                     support.repository,

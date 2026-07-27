@@ -6,6 +6,29 @@ Audience: maintainers of `blue-repository`, `blue-repository-java`,
 `blue-language-java`, `blue-coordination-java`, and the Blue Contracts and
 Coordination specifications
 
+> **Historical routing note (2026-07-27).** This plan predates the final generic
+> routing API delivered by `blue-language-java` commit
+> `0a6a40d18578df784f674148d1e8b6a4319bfe49`. Task 2 and the routing mechanics
+> in Task 4 remain useful semantic background, but references to extending
+> `ChannelDelivery`, copying fields through `ChannelEvaluation`, or returning
+> routed delivery objects are superseded. The implemented API uses
+> `ExternalChannelSubscriptionFunctions.handlerChannelKey(...)` and
+> `logicalDeliveryKey(...)`, with immutable member lookup through
+> `ExternalChannelFunctionContext`. New work must target those function outputs,
+> not restore the historical delivery-object design. Artifact coordinates and
+> remaining registry/BEX gates elsewhere in this document are also historical
+> plan inputs, not a statement that the final Coordination registry is present.
+>
+> **Open kernel defect.** At commit `0a6a40d18578`, verified Phase-B
+> classification filters the runtime bundle to the accepting source before
+> re-evaluating these event functions. A declared
+> `membersByEffectiveType(...)` dependency can therefore see peers during
+> header evaluation but not during delivery classification. The enabled
+> Coordination cross-channel regressions remain red until Language carries the
+> header-declared dependency surface into Phase B. The current context also
+> enumerates External Channels only, while the final target rule requires a
+> read-only lookup for any same-scope Channel.
+
 ## Objective
 
 Coordination V2 is a layered contract and runtime change. It is not one feature
@@ -457,6 +480,11 @@ Reviewers should verify:
 
 # Task 2: Add Routed External-Channel Delivery to Core
 
+> **Superseded API shape.** Language commit `0a6a40d18578` implements this
+> task's source/checkpoint-versus-handler semantics through external-channel
+> subscription function outputs. The `ChannelDelivery` and `ChannelEvaluation`
+> changes below describe the earlier proposal only.
+
 ## Goal
 
 Allow a trusted external Channel processor to accept a Processing Event through
@@ -786,6 +814,17 @@ Reviewers should verify:
 ---
 
 # Task 4: Route Operation Requests to Effective Channels
+
+> **Current implementation direction.** Coordination supplies the target
+> channel and source-independent logical route through the generic function
+> outputs delivered in Language `0a6a40d18578`. Timeline, Composite Timeline,
+> and All Timelines sources retain their own acceptance and checkpoint
+> identities; they do not construct routed `ChannelDelivery` instances. This
+> wiring is implemented, but the open Phase-B dependency-surface defect
+> described at the top of this document currently blocks a valid peer target
+> in an actual verified PROCESS run. The parser recognizes a bare Operation
+> Request, but the installed production external functions preselect Timeline
+> Entries only, so a bare request currently has no production source path.
 
 ## Goal
 

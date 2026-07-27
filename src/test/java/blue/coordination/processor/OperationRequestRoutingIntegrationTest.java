@@ -7,13 +7,14 @@ import blue.coordination.processor.workflow.WorkflowStepResult;
 import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.ChannelCheckpointContext;
-import blue.language.processor.ChannelDelivery;
 import blue.language.processor.ChannelEvaluation;
 import blue.language.processor.ChannelEvaluationContext;
 import blue.language.processor.ChannelProcessor;
 import blue.language.processor.DocumentProcessingResult;
+import blue.language.processor.ExternalChannelSubscriptionFunctions;
 import blue.language.processor.ProcessingMetricsSink;
 import blue.language.processor.ProcessorStatus;
+import blue.language.utils.JsonPointer;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.Authority;
 import blue.repo.coordination.Compute;
@@ -94,7 +95,7 @@ class OperationRequestRoutingIntegrationTest {
     }
 
     @Test
-    void sourceEventFilterRejectsBeforeRouting() {
+    void sourceDefinitionDoesNotFilterExternalAcceptance() {
         Fixture fixture = fixture();
         Map<String, Node> contracts = baseContracts();
         contracts.get(ALICE_CHANNEL).properties("definition", new Node()
@@ -113,7 +114,8 @@ class OperationRequestRoutingIntegrationTest {
 
         assertSuccess(result);
         assertEquals(BigInteger.ZERO, result.document().get("/counter"));
-        assertNull(checkpoint(result.document(), ALICE_CHANNEL));
+        assertEquals(BigInteger.valueOf(1_001),
+                checkpoint(result.document(), ALICE_CHANNEL).get("/timestamp"));
     }
 
     @Test
@@ -274,33 +276,30 @@ class OperationRequestRoutingIntegrationTest {
     }
 
     @Test
-    void firstCompositeSourceSuppliesPayloadWhileDuplicateSourcesCheckpoint() {
+    void compositeAndDirectSourcesInvokeTargetOnceAndPersistOwnCheckpoints() {
         RecordingMetrics metrics = new RecordingMetrics();
         Fixture fixture = fixture(metrics, null);
         Map<String, Node> contracts = baseContracts();
         contracts.get(ALICE_CHANNEL).properties("order", new Node().value(0));
         contracts.put("aliceComposite", composite(-10, ALICE_CHANNEL));
-        contracts.put("recordWinner", recordMetadataOperation(
-                BOB_CHANNEL, "compositeSourceChannelKey"));
+        contracts.put("increment", incrementOperation(BOB_CHANNEL));
         Node initialized = initialize(fixture, contracts);
 
         DocumentProcessingResult result = process(fixture,
                 initialized,
                 1,
-                request("recordWinner", BOB_CHANNEL, new Node().value(7)));
+                request("increment", BOB_CHANNEL, new Node().value(7)));
 
         assertSuccess(result);
-        assertEquals(ALICE_CHANNEL, result.document().get("/winner"));
+        assertEquals(BigInteger.ONE, result.document().get("/counter"));
         assertNotNull(checkpoint(result.document(), ALICE_CHANNEL));
         assertNotNull(checkpoint(result.document(), "aliceComposite"));
         assertNull(checkpoint(result.document(), "aliceComposite::" + ALICE_CHANNEL));
-        assertEquals(1, metrics.routedDeliveries);
-        assertEquals(1, metrics.deduplicatedDeliveries);
         assertEquals(1, metrics.handlersExecuted);
     }
 
     @Test
-    void firstAllTimelinesSourceSuppliesPayloadWhileDuplicateSourcesCheckpoint() {
+    void allTimelinesAndDirectSourcesInvokeTargetOnceAndPersistOwnCheckpoints() {
         RecordingMetrics metrics = new RecordingMetrics();
         Fixture fixture = fixture(metrics, null);
         Map<String, Node> contracts = baseContracts();
@@ -308,22 +307,19 @@ class OperationRequestRoutingIntegrationTest {
         contracts.put("all", new Node()
                 .type("Coordination/All Timelines Channel")
                 .properties("order", new Node().value(-10)));
-        contracts.put("recordWinner", recordMetadataOperation(
-                BOB_CHANNEL, "allTimelinesSourceChannelKey"));
+        contracts.put("increment", incrementOperation(BOB_CHANNEL));
         Node initialized = initialize(fixture, contracts);
 
         DocumentProcessingResult result = process(fixture,
                 initialized,
                 1,
-                request("recordWinner", BOB_CHANNEL, new Node().value(7)));
+                request("increment", BOB_CHANNEL, new Node().value(7)));
 
         assertSuccess(result);
-        assertEquals(ALICE_CHANNEL, result.document().get("/winner"));
+        assertEquals(BigInteger.ONE, result.document().get("/counter"));
         assertNotNull(checkpoint(result.document(), ALICE_CHANNEL));
         assertNotNull(checkpoint(result.document(), "all"));
         assertNull(checkpoint(result.document(), "all::" + ALICE_CHANNEL));
-        assertEquals(1, metrics.routedDeliveries);
-        assertEquals(1, metrics.deduplicatedDeliveries);
         assertEquals(1, metrics.handlersExecuted);
     }
 
@@ -344,8 +340,6 @@ class OperationRequestRoutingIntegrationTest {
         assertEquals(BigInteger.ONE, result.document().get("/counter"));
         assertNotNull(checkpoint(result.document(), ALICE_CHANNEL));
         assertNotNull(checkpoint(result.document(), "aliceMirror"));
-        assertEquals(1, metrics.routedDeliveries);
-        assertEquals(1, metrics.deduplicatedDeliveries);
         assertEquals(1, metrics.handlersExecuted);
     }
 
@@ -386,15 +380,15 @@ class OperationRequestRoutingIntegrationTest {
                 request("fail", BOB_CHANNEL, new Node().value(7)));
 
         assertEquals(ProcessorStatus.RUNTIME_FATAL, result.status());
-        assertTrue(result.failureReason().contains("target handler failed"), result.failureReason());
+        assertTrue(blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result).contains("target handler failed"), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertNull(checkpoint(result.document(), ALICE_CHANNEL));
     }
 
     @Test
-    void targetGracefulTerminationPersistsNoSourceCheckpoint() {
+    void targetApplicationTerminationPersistsNoSourceCheckpoint() {
         SequentialWorkflowRunner runner = new SequentialWorkflowRunner(
                 Collections.<WorkflowStepExecutor<? extends SequentialWorkflowStep>>singletonList(
-                        new GracefulTerminationExecutor()));
+                        new ApplicationTerminationExecutor()));
         Fixture fixture = fixture(null, runner);
         Map<String, Node> contracts = baseContracts();
         contracts.put("finish", operation(BOB_CHANNEL,
@@ -407,7 +401,7 @@ class OperationRequestRoutingIntegrationTest {
                 1,
                 request("finish", BOB_CHANNEL, new Node().value(7)));
 
-        assertEquals(ProcessorStatus.SUCCESS, result.status(), result.failureReason());
+        assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertNull(checkpoint(result.document(), ALICE_CHANNEL));
     }
 
@@ -432,27 +426,6 @@ class OperationRequestRoutingIntegrationTest {
         assertEquals(BigInteger.ONE, replay.document().get("/counter"));
         assertEquals(handlersAfterFirst, metrics.handlersExecuted);
         assertTrue(replay.totalGas() < first.totalGas());
-    }
-
-    @Test
-    void invalidTrustedRouteMetadataRemainsCoreFatal() {
-        Fixture fixture = fixture();
-        fixture.blue.registerContractProcessor(TimelineChannel.blueId(),
-                new InvalidRouteTimelineProcessor());
-        Map<String, Node> contracts = new LinkedHashMap<String, Node>();
-        contracts.put(ALICE_CHANNEL, timelineChannel(ALICE_TIMELINE, ALICE_ACTOR));
-        Node initialized = initialize(fixture, contracts);
-
-        DocumentProcessingResult result = fixture.blue.processDocument(initialized,
-                timelineEntry(fixture,
-                        ALICE_TIMELINE,
-                        ALICE_ACTOR,
-                        1,
-                        TestTimelineProvider.chatMessage("route")));
-
-        assertEquals(ProcessorStatus.RUNTIME_FATAL, result.status());
-        assertTrue(result.failureReason().contains("same-scope Channel"), result.failureReason());
-        assertNull(checkpoint(result.document(), ALICE_CHANNEL));
     }
 
     private static Map<String, Node> baseContracts() {
@@ -489,12 +462,6 @@ class OperationRequestRoutingIntegrationTest {
         return operation(channel,
                 new Node().type("Integer"),
                 replaceStep("/captured", bexBinding("event")));
-    }
-
-    private static Node recordMetadataOperation(String channel, String metadataKey) {
-        return operation(channel,
-                new Node().type("Integer"),
-                replaceStep("/winner", bexBinding("event/meta/" + metadataKey)));
     }
 
     private static Node operation(String channel, Node requestPattern, Node... steps) {
@@ -609,7 +576,9 @@ class OperationRequestRoutingIntegrationTest {
 
     private static Node checkpoint(Node document, String key) {
         try {
-            return document.getAsNode("/contracts/checkpoint/lastEvents/" + key);
+            return document.getAsNode("/contracts/checkpoint/entries/"
+                    + JsonPointer.escape(key)
+                    + "/subject");
         } catch (IllegalArgumentException ex) {
             return null;
         }
@@ -633,7 +602,7 @@ class OperationRequestRoutingIntegrationTest {
     }
 
     private static void assertSuccess(DocumentProcessingResult result) {
-        assertEquals(ProcessorStatus.SUCCESS, result.status(), result.failureReason());
+        assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
     }
 
     private static final class Fixture {
@@ -647,19 +616,7 @@ class OperationRequestRoutingIntegrationTest {
     }
 
     private static final class RecordingMetrics implements ProcessingMetricsSink {
-        private int routedDeliveries;
-        private int deduplicatedDeliveries;
         private int handlersExecuted;
-
-        @Override
-        public void incrementRoutedChannelDeliveries() {
-            routedDeliveries++;
-        }
-
-        @Override
-        public void incrementDeduplicatedChannelDeliveries() {
-            deduplicatedDeliveries++;
-        }
 
         @Override
         public void incrementHandlersExecuted() {
@@ -667,7 +624,7 @@ class OperationRequestRoutingIntegrationTest {
         }
     }
 
-    private static final class GracefulTerminationExecutor
+    private static final class ApplicationTerminationExecutor
             implements WorkflowStepExecutor<Compute> {
         @Override
         public boolean supports(SequentialWorkflowStep step) {
@@ -676,28 +633,10 @@ class OperationRequestRoutingIntegrationTest {
 
         @Override
         public WorkflowStepResult execute(Compute step, StepExecutionContext context) {
-            context.processorContext().terminateGracefully("operation complete");
+            context.processorContext().terminate(
+                    "operation-complete",
+                    "operation complete");
             return WorkflowStepResult.none();
-        }
-    }
-
-    private static final class InvalidRouteTimelineProcessor
-            implements ChannelProcessor<TimelineChannel> {
-        @Override
-        public Class<TimelineChannel> contractType() {
-            return TimelineChannel.class;
-        }
-
-        @Override
-        public ChannelEvaluation evaluate(TimelineChannel contract,
-                                          ChannelEvaluationContext context) {
-            return ChannelEvaluation.matchDeliveries(Collections.singletonList(
-                    ChannelDelivery.of(context.event(),
-                            null,
-                            null,
-                            null,
-                            "missing",
-                            "invalid-route")));
         }
     }
 
@@ -706,6 +645,12 @@ class OperationRequestRoutingIntegrationTest {
         @Override
         public Class<TimelineChannel> contractType() {
             return TimelineChannel.class;
+        }
+
+        @Override
+        public ExternalChannelSubscriptionFunctions<TimelineChannel>
+        externalSubscriptionFunctions() {
+            return TimelineExternalSubscriptionFunctions.INSTANCE;
         }
 
         @Override
@@ -721,8 +666,7 @@ class OperationRequestRoutingIntegrationTest {
 
         @Override
         public boolean isNewerEvent(TimelineChannel contract, ChannelCheckpointContext context) {
-            return !ALICE_CHANNEL.equals(context.channelKey())
-                    && TimelineProviderSupport.isNewerOrSameTimelineEvent(context);
+            return !ALICE_CHANNEL.equals(context.channelKey());
         }
     }
 }

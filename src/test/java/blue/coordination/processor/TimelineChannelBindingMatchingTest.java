@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TimelineChannelBindingMatchingTest {
@@ -169,7 +170,11 @@ class TimelineChannelBindingMatchingTest {
         ChannelEvaluation evaluation = evaluateComposite(composite, event, withMatch);
 
         assertTrue(evaluation.matches());
-        assertEquals("matching", evaluation.event().getAsText("/meta/compositeSourceChannelKey"));
+        assertEquals(
+                TimelineProviderSupport.eventId(event),
+                TimelineProviderSupport.eventId(evaluation.event()));
+        assertNull(evaluation.event().getAsNode(
+                "/meta/compositeSourceChannelKey"));
     }
 
     @Test
@@ -188,7 +193,11 @@ class TimelineChannelBindingMatchingTest {
         ChannelEvaluation evaluation = evaluateAll(event, withMatch);
 
         assertTrue(evaluation.matches());
-        assertEquals("matching", evaluation.event().getAsText("/meta/allTimelinesSourceChannelKey"));
+        assertEquals(
+                TimelineProviderSupport.eventId(event),
+                TimelineProviderSupport.eventId(evaluation.event()));
+        assertNull(evaluation.event().getAsNode(
+                "/meta/allTimelinesSourceChannelKey"));
     }
 
     private static ChannelEvaluation evaluateTimeline(TimelineChannel channel, Node event) {

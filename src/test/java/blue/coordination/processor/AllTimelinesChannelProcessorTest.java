@@ -24,7 +24,7 @@ class AllTimelinesChannelProcessorTest {
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = matchingChildren();
         contracts.put("all", allTimelines());
-        contracts.put("handler", sourceReportingHandler());
+        contracts.put("handler", fixedHandler("union"));
         Node initialized = initializedDocument(fixture, contracts);
 
         DocumentProcessingResult result = process(fixture,
@@ -34,8 +34,11 @@ class AllTimelinesChannelProcessorTest {
                 10,
                 "hello");
 
-        assertChatCount(result.triggeredEvents(), "childA", 1);
-        assertNotNull(checkpoint(result.document(), "all"));
+        assertChatCount(result.events(), "union", 1);
+        assertAllCheckpointSubject(
+                checkpoint(result.document(), "all"),
+                BigInteger.TEN,
+                "childA");
         assertNull(checkpoint(result.document(), "all::childA"));
         assertNull(checkpoint(result.document(), "all::childB"));
     }
@@ -46,7 +49,7 @@ class AllTimelinesChannelProcessorTest {
         Map<String, Node> ordered = matchingChildren();
         ordered.get("childB").properties("order", new Node().value(-1));
         ordered.put("all", allTimelines());
-        ordered.put("handler", sourceReportingHandler());
+        ordered.put("handler", fixedHandler("union"));
 
         DocumentProcessingResult orderWinner = process(fixture,
                 initializedDocument(fixture, ordered),
@@ -55,14 +58,18 @@ class AllTimelinesChannelProcessorTest {
                 1,
                 "order");
 
-        assertChatCount(orderWinner.triggeredEvents(), "childB", 1);
+        assertChatCount(orderWinner.events(), "union", 1);
+        assertAllCheckpointSubject(
+                checkpoint(orderWinner.document(), "all"),
+                BigInteger.ONE,
+                "childB");
 
         Fixture keyFixture = configuredFixture();
         Map<String, Node> tied = new LinkedHashMap<String, Node>();
         tied.put("childB", TestTimelineProvider.channel(TIMELINE, ACTOR));
         tied.put("childA", TestTimelineProvider.channel(TIMELINE, ACTOR));
         tied.put("all", allTimelines());
-        tied.put("handler", sourceReportingHandler());
+        tied.put("handler", fixedHandler("union"));
 
         DocumentProcessingResult keyWinner = process(keyFixture,
                 initializedDocument(keyFixture, tied),
@@ -71,7 +78,11 @@ class AllTimelinesChannelProcessorTest {
                 1,
                 "key");
 
-        assertChatCount(keyWinner.triggeredEvents(), "childA", 1);
+        assertChatCount(keyWinner.events(), "union", 1);
+        assertAllCheckpointSubject(
+                checkpoint(keyWinner.document(), "all"),
+                BigInteger.ONE,
+                "childA");
     }
 
     @Test
@@ -96,11 +107,16 @@ class AllTimelinesChannelProcessorTest {
                 100,
                 "bob");
 
-        assertEquals("bob-timeline",
-                checkpoint(bob.document(), "all").getAsText("/timeline/timelineId"));
-        assertEquals(BigInteger.valueOf(100), checkpoint(bob.document(), "all").get("/timestamp"));
-        assertEquals(BigInteger.valueOf(100), checkpoint(bob.document(), "alice").get("/timestamp"));
-        assertEquals(BigInteger.valueOf(100), checkpoint(bob.document(), "bob").get("/timestamp"));
+        assertAllCheckpointSubject(
+                checkpoint(bob.document(), "all"),
+                BigInteger.valueOf(100),
+                "bob");
+        assertDirectCheckpointSubject(
+                checkpoint(bob.document(), "alice"),
+                BigInteger.valueOf(100));
+        assertDirectCheckpointSubject(
+                checkpoint(bob.document(), "bob"),
+                BigInteger.valueOf(100));
     }
 
     @Test
@@ -121,6 +137,29 @@ class AllTimelinesChannelProcessorTest {
         assertNull(checkpoint(result.document(), "all"));
     }
 
+    @Test
+    void allTimelinesWithNoTimelineMembersAcceptsNothing() {
+        Fixture fixture = configuredFixture();
+        Map<String, Node> contracts = new LinkedHashMap<String, Node>();
+        contracts.put("all", allTimelines());
+        Node initialized = initializedDocument(fixture, contracts);
+
+        DocumentProcessingResult result = process(
+                fixture,
+                initialized,
+                TIMELINE,
+                ACTOR,
+                1,
+                "unmatched");
+
+        assertEquals(
+                ProcessorStatus.SUCCESS,
+                result.status(),
+                blue.coordination.processor.ProcessingResultTestSupport
+                        .diagnosticMessage(result));
+        assertNull(checkpoint(result.document(), "all"));
+    }
+
     private static Map<String, Node> matchingChildren() {
         Map<String, Node> contracts = new LinkedHashMap<String, Node>();
         contracts.put("childA", TestTimelineProvider.channel(TIMELINE, ACTOR));
@@ -132,21 +171,12 @@ class AllTimelinesChannelProcessorTest {
         return new Node().type("Coordination/All Timelines Channel");
     }
 
-    private static Node sourceReportingHandler() {
-        return handler(new Node().properties("$binding",
-                new Node().value("event/meta/allTimelinesSourceChannelKey")));
-    }
-
-    private static Node handler(Node message) {
-        Node append = new Node().properties("$appendEvent",
-                new Node().properties("$merge", new Node().items(
-                        new Node().properties("type", new Node().value("Coordination/Chat Message")),
-                        new Node().properties("message", message))));
+    private static Node fixedHandler(String message) {
         Node step = new Node()
-                .type("Coordination/Compute")
-                .properties("do", new Node().items(
-                        append,
-                        new Node().properties("$return", new Node().value(true))));
+                .type("Coordination/Trigger Event")
+                .properties(
+                        "event",
+                        TestTimelineProvider.chatMessage(message));
         return new Node()
                 .type("Coordination/Sequential Workflow")
                 .properties("channel", new Node().value("all"))
@@ -159,7 +189,7 @@ class AllTimelinesChannelProcessorTest {
                 .name("All Timelines V2 Test")
                 .properties("contracts", new Node().properties(contracts));
         DocumentProcessingResult initialized = fixture.blue.initializeDocument(fixture.blue.preprocess(document));
-        assertEquals(ProcessorStatus.SUCCESS, initialized.status(), initialized.failureReason());
+        assertEquals(ProcessorStatus.SUCCESS, initialized.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(initialized));
         return initialized.document();
     }
 
@@ -188,10 +218,44 @@ class AllTimelinesChannelProcessorTest {
 
     private static Node checkpoint(Node document, String key) {
         try {
-            return document.getAsNode("/contracts/checkpoint/lastEvents/" + key);
+            return document.getAsNode(
+                    "/contracts/checkpoint/entries/"
+                            + escapePointerSegment(key)
+                            + "/subject");
         } catch (IllegalArgumentException ex) {
             return null;
         }
+    }
+
+    private static String escapePointerSegment(String value) {
+        return value.replace("~", "~0").replace("/", "~1");
+    }
+
+    private static void assertAllCheckpointSubject(
+            Node subject,
+            BigInteger timestamp,
+            String memberKey) {
+        assertNotNull(subject);
+        assertEquals(4, subject.getProperties().size());
+        assertEquals(
+                AllTimelinesExternalSubscriptionFunctions
+                        .ORDER_SUBJECT_VERSION,
+                subject.getAsText("/semantics"));
+        assertEquals(timestamp, subject.get("/timestamp"));
+        assertEquals(memberKey, subject.getAsText("/memberKey"));
+        assertNotNull(subject.getAsText("/memberDomain"));
+    }
+
+    private static void assertDirectCheckpointSubject(
+            Node subject,
+            BigInteger timestamp) {
+        assertNotNull(subject);
+        assertEquals(2, subject.getProperties().size());
+        assertEquals(
+                TimelineExternalSubscriptionFunctions
+                        .TIMELINE_ORDER_SUBJECT_VERSION,
+                subject.getAsText("/semantics"));
+        assertEquals(timestamp, subject.get("/timestamp"));
     }
 
     private static void assertChatCount(List<Node> events, String message, int expected) {

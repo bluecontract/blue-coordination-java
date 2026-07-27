@@ -45,12 +45,13 @@ class MandateDeclaredTypeEventMatchingTest {
 
         long handlersBeforeConfirmation = fixture.metrics.handlersExecuted();
         DocumentProcessingResult activated = fixture.process(
-                initialized.snapshot(),
+                blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                        fixture.blue, initialized),
                 fixture.confirmAuthorityEvent());
 
         assertSuccess(activated);
         assertEquals(StatusActive.blueId(),
-                activated.canonicalDocument().getAsText("/status/type/blueId"));
+                activated.document().getAsText("/status/type/blueId"));
         assertEquals(BigInteger.valueOf(EVENT_TIMESTAMP), activated.document().get("/activatedAt"));
         assertEquals(2L, fixture.metrics.handlersExecuted() - handlersBeforeConfirmation);
         assertEquals(0L, fixture.metrics.successfulComputeTerminationRequests());
@@ -64,24 +65,27 @@ class MandateDeclaredTypeEventMatchingTest {
         Fixture fixture = fixture();
         DocumentProcessingResult initialized = fixture.initialize(mandateDocument(false, true));
         DocumentProcessingResult confirmed = fixture.process(
-                initialized.snapshot(),
+                blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                        fixture.blue, initialized),
                 fixture.confirmAuthorityEvent());
         assertSuccess(confirmed);
         assertEquals(StatusAuthorityConfirmed.blueId(),
-                confirmed.canonicalDocument().getAsText("/status/type/blueId"));
+                confirmed.document().getAsText("/status/type/blueId"));
         long handlersBeforeFatal = fixture.metrics.handlersExecuted();
 
         DocumentProcessingResult fatal = fixture.process(
-                confirmed.snapshot(),
+                blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                        fixture.blue, confirmed),
                 fixture.fatalProbeEvent());
 
-        assertEquals(ProcessorStatus.RUNTIME_FATAL, fatal.status(), fatal.failureReason());
-        assertTrue(fatal.failureReason().contains("Unsupported sequential workflow step"),
-                fatal.failureReason());
+        assertEquals(ProcessorStatus.RUNTIME_FATAL, fatal.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(fatal));
+        assertTrue(blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(fatal).contains("Unsupported sequential workflow step"),
+                blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(fatal));
         assertEquals(StatusAuthorityConfirmed.blueId(),
-                fatal.canonicalDocument().getAsText("/status/type/blueId"));
+                fatal.document().getAsText("/status/type/blueId"));
         assertEquals(1L, fixture.metrics.handlersExecuted() - handlersBeforeFatal);
-        assertEquals(1, eventsOfType(fatal, RuntimeBlueIds.DOCUMENT_PROCESSING_FATAL_ERROR));
+        assertTrue(fatal.events().isEmpty(),
+                "Deterministic failures must expose no Root events");
     }
 
     private static Node mandateDocument(boolean activateOnConfirmation, boolean fatalProbe) {
@@ -107,7 +111,7 @@ class MandateDeclaredTypeEventMatchingTest {
 
     private static int eventsOfType(DocumentProcessingResult result, String blueId) {
         int count = 0;
-        for (Node event : result.triggeredEvents()) {
+        for (Node event : result.events()) {
             if (event.getType() != null && blueId.equals(event.getType().getBlueId())) {
                 count++;
             }
@@ -116,7 +120,7 @@ class MandateDeclaredTypeEventMatchingTest {
     }
 
     private static void assertSuccess(DocumentProcessingResult result) {
-        assertEquals(ProcessorStatus.SUCCESS, result.status(), result.failureReason());
+        assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
     }
 
     private static Fixture fixture() {

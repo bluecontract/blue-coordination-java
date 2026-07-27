@@ -17,9 +17,22 @@ final class NodeUtil {
 
     static boolean isEmpty(Node node) {
         return node == null
-                || (node.getValue() == null
-                && empty(node.getItems())
-                && empty(node.getProperties()));
+                || (node.getName() == null
+                && node.getDescription() == null
+                && node.getType() == null
+                && node.getItemType() == null
+                && node.getKeyType() == null
+                && node.getValueType() == null
+                && node.getValue() == null
+                && node.getItems() == null
+                && empty(node.getProperties())
+                && node.getContracts() == null
+                && node.getBlueId() == null
+                && node.getSchema() == null
+                && node.getMergePolicy() == null
+                && node.getPreviousBlueId() == null
+                && node.getPosition() == null
+                && node.getBlue() == null);
     }
 
     static Object rawScalar(Node node) {
@@ -37,7 +50,13 @@ final class NodeUtil {
 
     static String text(Node node) {
         Object raw = rawScalar(node);
-        return raw != null ? String.valueOf(raw) : null;
+        if (raw == null) {
+            return null;
+        }
+        if (!(raw instanceof String)) {
+            throw new IllegalArgumentException("Expected Text scalar");
+        }
+        return (String) raw;
     }
 
     static String textProperty(Node node, String key) {
@@ -52,17 +71,11 @@ final class NodeUtil {
         if (raw instanceof Boolean) {
             return ((Boolean) raw).booleanValue();
         }
-        if (raw instanceof String) {
-            return Boolean.parseBoolean((String) raw);
-        }
-        return defaultValue;
+        throw new IllegalArgumentException("Expected Boolean scalar for " + key);
     }
 
     private static boolean empty(Map<?, ?> map) {
         return map == null || map.isEmpty();
     }
 
-    private static boolean empty(Iterable<?> items) {
-        return items == null || !items.iterator().hasNext();
-    }
 }

@@ -1,0 +1,232 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:blue:coordination:selective-processing-report:1",
+  "title": "Blue Coordination selective-processing evidence report",
+  "description": "Deterministic evidence for routing, fragmentation, semantic parity, provider locality, and scale tests. Timestamps, elapsed-time gates, absolute paths, and machine-specific fields are intentionally excluded.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schemaVersion",
+    "status",
+    "identities",
+    "testCountScope",
+    "testCounts",
+    "sections",
+    "unavailableSuites"
+  ],
+  "properties": {
+    "schema": {
+      "const": "urn:blue:coordination:selective-processing-report:1"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "status": {
+      "enum": [
+        "passed",
+        "partial",
+        "failed"
+      ]
+    },
+    "identities": {
+      "type": "object",
+      "description": "Declared exact dependency, registry, fixture, and source revision baselines. The report producer is responsible for validating or clearly labeling each identity.",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "testCountScope": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Exact scope counted by the top-level testCounts object; section metrics may summarize separately observed commands."
+    },
+    "testCounts": {
+      "$ref": "#/$defs/testCounts"
+    },
+    "sections": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/section"
+      }
+    },
+    "unavailableSuites": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/unavailableSuite"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "passed"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "testCounts": {
+            "properties": {
+              "failed": {
+                "const": 0
+              }
+            }
+          },
+          "sections": {
+            "items": {
+              "properties": {
+                "status": {
+                  "const": "passed"
+                }
+              }
+            }
+          },
+          "unavailableSuites": {
+            "maxItems": 0
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "testCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total",
+        "passed",
+        "failed",
+        "skipped"
+      ],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "passed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skipped": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "section": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "caseCount",
+        "cases",
+        "facts",
+        "metrics",
+        "orderedStreams",
+        "identitySets"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "blocked",
+            "failed",
+            "not-run"
+          ]
+        },
+        "caseCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cases": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "facts": {
+          "$ref": "#/$defs/stringMap"
+        },
+        "metrics": {
+          "$ref": "#/$defs/nonNegativeIntegerMap"
+        },
+        "orderedStreams": {
+          "type": "object",
+          "description": "Independently ordered native streams such as causal trace, gas trace, semantic demands, and provider requests. No inter-stream chronology is implied.",
+          "additionalProperties": {
+            "$ref": "#/$defs/stringArray"
+          }
+        },
+        "identitySets": {
+          "type": "object",
+          "description": "Lexically sorted identity sets such as allowed, demanded, loaded, and forbidden BlueIds.",
+          "additionalProperties": {
+            "$ref": "#/$defs/uniqueStringArray"
+          }
+        }
+      }
+    },
+    "unavailableSuite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "reason"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "stringArray": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "uniqueStringArray": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "stringMap": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "nonNegativeIntegerMap": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    }
+  }
+}

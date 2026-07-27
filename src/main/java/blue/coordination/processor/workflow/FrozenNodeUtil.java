@@ -13,9 +13,22 @@ final class FrozenNodeUtil {
     }
 
     static boolean isEmpty(FrozenNode node) {
-        return node == null || (node.getValue() == null
-                && (node.getItems() == null || node.getItems().isEmpty())
-                && (node.getProperties() == null || node.getProperties().isEmpty()));
+        return node == null || (node.getName() == null
+                && node.getDescription() == null
+                && node.getType() == null
+                && node.getItemType() == null
+                && node.getKeyType() == null
+                && node.getValueType() == null
+                && node.getValue() == null
+                && node.getItems() == null
+                && (node.getProperties() == null || node.getProperties().isEmpty())
+                && node.getContracts() == null
+                && node.getReferenceBlueId() == null
+                && node.getSchema() == null
+                && node.getMergePolicy() == null
+                && node.getPreviousBlueId() == null
+                && node.getPosition() == null
+                && node.getBlue() == null);
     }
 
     static Object rawScalar(FrozenNode node) {
@@ -33,7 +46,13 @@ final class FrozenNodeUtil {
 
     static String text(FrozenNode node) {
         Object raw = rawScalar(node);
-        return raw != null ? String.valueOf(raw) : null;
+        if (raw == null) {
+            return null;
+        }
+        if (!(raw instanceof String)) {
+            throw new IllegalArgumentException("Expected Text scalar");
+        }
+        return (String) raw;
     }
 
     static String textProperty(FrozenNode node, String key) {
@@ -48,27 +67,21 @@ final class FrozenNodeUtil {
         if (raw instanceof Boolean) {
             return ((Boolean) raw).booleanValue();
         }
-        if (raw instanceof String) {
-            return Boolean.parseBoolean((String) raw);
-        }
-        return defaultValue;
+        throw new IllegalArgumentException("Expected Boolean scalar for " + key);
     }
 
     static Long integer(FrozenNode node) {
         Object raw = rawScalar(node);
         if (raw instanceof BigInteger) {
-            return Long.valueOf(((BigInteger) raw).longValue());
+            return Long.valueOf(((BigInteger) raw).longValueExact());
         }
-        if (raw instanceof Number) {
+        if (raw instanceof Byte || raw instanceof Short
+                || raw instanceof Integer || raw instanceof Long) {
             return Long.valueOf(((Number) raw).longValue());
         }
-        if (raw instanceof String) {
-            try {
-                return Long.valueOf((String) raw);
-            } catch (NumberFormatException ignored) {
-                return null;
-            }
+        if (raw == null) {
+            return null;
         }
-        return null;
+        throw new IllegalArgumentException("Expected Integer scalar");
     }
 }

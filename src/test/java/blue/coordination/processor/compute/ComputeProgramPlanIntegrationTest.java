@@ -27,8 +27,8 @@ class ComputeProgramPlanIntegrationTest {
         DocumentProcessingResult first = support.processRun(document);
         DocumentProcessingResult second = support.processRun(first.document());
 
-        assertFalse(first.capabilityFailure(), first.failureReason());
-        assertFalse(second.capabilityFailure(), second.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(first), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(first));
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(second), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(second));
         assertEquals(1L, metrics.computePlanCacheMisses());
         assertEquals(1L, metrics.computePlanCacheHits());
         assertEquals(1L, metrics.computePlansBuilt());
@@ -89,8 +89,10 @@ class ComputeProgramPlanIntegrationTest {
         Node documentA = inlineDocument(support, "A");
         Node documentB = inlineDocument(support, "B");
 
-        assertFalse(support.processRun(documentA).capabilityFailure());
-        assertFalse(support.processRun(documentB).capabilityFailure());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport
+                .isCapabilityFailure(support.processRun(documentA)));
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport
+                .isCapabilityFailure(support.processRun(documentB)));
 
         assertEquals(2L, metrics.computePlanCacheMisses());
         assertEquals(0L, metrics.computePlanCacheHits());
@@ -181,15 +183,15 @@ class ComputeProgramPlanIntegrationTest {
     }
 
     private static Node onlyEvent(DocumentProcessingResult result) {
-        assertEquals(1, result.triggeredEvents().size(), result.failureReason());
-        return result.triggeredEvents().get(0);
+        assertEquals(1, result.events().size(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
+        return result.events().get(0);
     }
 
     private static void assertRuntimeFatal(DocumentProcessingResult result,
                                            String expectedMessage) {
-        assertEquals(ProcessorStatus.RUNTIME_FATAL, result.status(), result.failureReason());
-        assertTrue(result.failureReason() != null
-                        && result.failureReason().contains(expectedMessage),
-                result.failureReason());
+        assertEquals(ProcessorStatus.RUNTIME_FATAL, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
+        assertTrue(blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result) != null
+                        && blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result).contains(expectedMessage),
+                blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
     }
 }

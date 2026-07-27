@@ -5,6 +5,7 @@ import blue.language.processor.ChannelCheckpointContext;
 import blue.language.processor.ChannelEvaluation;
 import blue.language.processor.ChannelEvaluationContext;
 import blue.language.processor.ChannelProcessor;
+import blue.language.processor.ExternalChannelSubscriptionFunctions;
 import blue.language.processor.model.ChannelContract;
 import blue.repo.coordination.AllTimelinesChannel;
 import blue.repo.coordination.TimelineChannel;
@@ -17,6 +18,12 @@ public final class AllTimelinesChannelProcessor implements ChannelProcessor<AllT
     }
 
     @Override
+    public ExternalChannelSubscriptionFunctions<AllTimelinesChannel>
+    externalSubscriptionFunctions() {
+        return AllTimelinesExternalSubscriptionFunctions.INSTANCE;
+    }
+
+    @Override
     public ChannelEvaluation evaluate(AllTimelinesChannel contract, ChannelEvaluationContext context) {
         Node event = context.event();
         if (!CoordinationEventNodes.isTimelineEntry(event)) {
@@ -26,10 +33,8 @@ public final class AllTimelinesChannelProcessor implements ChannelProcessor<AllT
         if (matching == null) {
             return ChannelEvaluation.noMatch();
         }
-        return TimelineProviderSupport.preserveUnionDelivery(matching.evaluation,
-                event,
-                "allTimelinesSourceChannelKey",
-                matching.channelKey);
+        return TimelineProviderSupport.preserveUnionPayload(
+                matching.evaluation, event);
     }
 
     private MatchingTimeline matchingTimeline(ChannelEvaluationContext context) {
@@ -66,8 +71,12 @@ public final class AllTimelinesChannelProcessor implements ChannelProcessor<AllT
     }
 
     @Override
-    public boolean isNewerEvent(AllTimelinesChannel contract, ChannelCheckpointContext context) {
-        return TimelineProviderSupport.isNewerOrDifferentTimelineEvent(context);
+    public boolean isNewerEvent(AllTimelinesChannel contract,
+                                ChannelCheckpointContext context) {
+        return TimelineProviderSupport.isNewerTimelineSubject(
+                context,
+                AllTimelinesExternalSubscriptionFunctions
+                        .ORDER_SUBJECT_VERSION);
     }
 
     private int order(ChannelContract contract) {

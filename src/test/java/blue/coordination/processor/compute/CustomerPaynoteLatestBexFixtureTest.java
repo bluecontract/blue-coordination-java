@@ -55,9 +55,10 @@ class CustomerPaynoteLatestBexFixtureTest {
         assertNotNull(result.document());
         assertEquals("Global Package Fulfillment Automation - Weekend Stay + Wine Dinner",
                 result.document().getName());
-        assertFalse(result.triggeredEvents().isEmpty(),
+        assertFalse(result.events().isEmpty(),
                 "Expected the admin update workflow to emit snapshot events; checkpoint timestamp="
-                        + result.document().get("/contracts/checkpoint/lastEvents/sampleAdminChannel/timestamp"));
+                        + result.document().get(
+                        "/contracts/checkpoint/entries/sampleAdminChannel/subject/timestamp"));
         assertContainsEventType(result,
                 SNAPSHOT_RESOLVED_TYPE,
                 CoordinationTestResources.testTypeAliases(fixture.repository).get(SNAPSHOT_RESOLVED_TYPE));
@@ -89,15 +90,15 @@ class CustomerPaynoteLatestBexFixtureTest {
     }
 
     private static void assertContainsEventType(DocumentProcessingResult result, String expectedType, String expectedBlueId) {
-        for (Node event : result.triggeredEvents()) {
+        for (Node event : result.events()) {
             if (isEventType(event, expectedType, expectedBlueId)) {
                 return;
             }
         }
         throw new AssertionError("Expected triggered event type: " + expectedType
-                + ", actual count: " + result.triggeredEvents().size()
+                + ", actual count: " + result.events().size()
                 + ", actual types: " + triggeredEventTypes(result)
-                + ", first event: " + (result.triggeredEvents().isEmpty() ? null : result.triggeredEvents().get(0)));
+                + ", first event: " + (result.events().isEmpty() ? null : result.events().get(0)));
     }
 
     private static boolean isEventType(Node event, String expectedType, String expectedBlueId) {
@@ -120,7 +121,7 @@ class CustomerPaynoteLatestBexFixtureTest {
 
     private static String triggeredEventTypes(DocumentProcessingResult result) {
         StringBuilder builder = new StringBuilder();
-        for (Node event : result.triggeredEvents()) {
+        for (Node event : result.events()) {
             if (builder.length() > 0) {
                 builder.append(", ");
             }

@@ -2,13 +2,14 @@ package blue.coordination.processor;
 
 import blue.language.Blue;
 import blue.language.model.Node;
-import blue.language.processor.ChannelDelivery;
 import blue.language.processor.ChannelEvaluation;
 import blue.language.processor.ChannelEvaluationContext;
 import blue.language.processor.ChannelEvaluationContextFactory;
 import blue.language.processor.ChannelProcessor;
 import blue.language.processor.HandlerMatchContextFactory;
 import blue.language.processor.model.ChannelContract;
+import blue.language.provider.BasicNodeProvider;
+import blue.language.provider.SequentialNodeProvider;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.ChatMessage;
 import blue.repo.coordination.OperationRequest;
@@ -20,7 +21,6 @@ import blue.repo.myos.PrincipalActor;
 import java.math.BigInteger;
 import java.util.Collections;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -37,46 +37,63 @@ class OperationRequestRoutingEvaluationTest {
     private static final String ACTOR = "alice-account";
 
     @Test
-    void generatedOperationRequestRoutesToDeclaredChannel() {
+    void generatedOperationRequestRemainsTheExactSingleTimelinePayload() {
         Fixture fixture = fixture();
         Node event = entry(fixture, request("increment", TARGET, new Node().value(7)));
 
         ChannelEvaluation evaluation = evaluate(fixture, event, channels());
 
-        ChannelDelivery delivery = onlyDelivery(evaluation);
-        assertEquals(TARGET, delivery.handlerChannelKey());
-        assertEquals(OperationRequest.blueId() + ":increment", delivery.logicalDeliveryKey());
-        assertNull(delivery.checkpointKey());
-        assertNull(delivery.shouldProcess());
-        assertNull(delivery.eventId());
-        assertEquals(BigInteger.TEN, delivery.event().get("/timestamp"));
-        assertEquals(BigInteger.valueOf(7), delivery.event().get("/message/request"));
+        assertOrdinary(evaluation, event);
+        assertEquals(BigInteger.TEN, evaluation.event().get("/timestamp"));
+        assertEquals(BigInteger.valueOf(7),
+                evaluation.event().get("/message/request"));
     }
 
     @Test
-    void sameChannelTimelineRequestUsesTheSameRoutedPath() {
+    void sameChannelTimelineRequestAlsoRemainsAnExactPayload() {
         Fixture fixture = fixture();
         Map<String, ChannelContract> channels = channels();
         Node event = entry(fixture, request("increment", SOURCE, new Node().value(7)));
 
-        ChannelDelivery delivery = onlyDelivery(evaluate(fixture, event, channels));
-
-        assertEquals(SOURCE, delivery.handlerChannelKey());
-        assertEquals(OperationRequest.blueId() + ":increment", delivery.logicalDeliveryKey());
+        assertOrdinary(evaluate(fixture, event, channels), event);
     }
 
     @Test
-    void compatibleOperationRequestSubtypeInheritsRoutingAndRetainsFields() {
+    void compatibleOperationRequestSubtypeRetainsExactFields() {
         Fixture fixture = fixture();
-        Node message = requestWithType(compatibleSubtype(fixture), "increment", TARGET, new Node().value(7))
+        Node message = requestWithType(compatibleSubtype(), "increment", TARGET, new Node().value(7))
                 .properties("specializedField", new Node().value("preserved"));
         Node event = entry(fixture, TestTimelineProvider.chatMessage("placeholder"))
                 .properties("message", message);
 
-        ChannelDelivery delivery = onlyDelivery(evaluate(fixture, event, channels()));
+        ChannelEvaluation evaluation = evaluate(fixture, event, channels());
 
-        assertEquals(TARGET, delivery.handlerChannelKey());
-        assertEquals("preserved", delivery.event().get("/message/specializedField"));
+        assertOrdinary(evaluation, event);
+        assertEquals("preserved",
+                evaluation.event().get("/message/specializedField"));
+    }
+
+    @Test
+    void repositoryRc10MaterializedOperationRequestTypeFailsClosed() {
+        Fixture fixture = fixture();
+        Node materializedType = fixture.repository
+                .nodeByBlueId(OperationRequest.blueId())
+                .orElseThrow(() -> new AssertionError(
+                        "Operation Request type is absent"))
+                .clone()
+                .blueId(null);
+        Node request = requestWithType(
+                materializedType,
+                "increment",
+                TARGET,
+                new Node().value(7));
+
+        CoordinationEventNodes.OperationRequestView view =
+                CoordinationEventNodes.operationRequest(request);
+
+        assertNull(view,
+                "rc10 materialized Coordination identities are invalid under "
+                        + "the final Language verifier; the final registry is required");
     }
 
     @Test
@@ -196,58 +213,43 @@ class OperationRequestRoutingEvaluationTest {
     }
 
     @Test
-    void unionDeliveryPreservesRouteMetadataAndOwnsItsCheckpoint() {
+    void unionPreservesTheExactChildPayloadWithoutSyntheticMetadata() {
         Node event = new Node()
                 .properties("payload", new Node().value("selected"))
                 .properties("meta", new Node()
                         .properties("existing", new Node().value("retained")));
-        ChannelDelivery child = ChannelDelivery.of(event,
-                "child-event-id",
-                "child-checkpoint",
-                Boolean.FALSE,
-                TARGET,
-                "logical-route");
+        ChannelEvaluation evaluation = TimelineProviderSupport.preserveUnionPayload(
+                ChannelEvaluation.match(event, "child-event-id"),
+                new Node().properties("fallback", new Node().value(true)));
 
-        ChannelEvaluation evaluation = TimelineProviderSupport.preserveUnionDelivery(
-                ChannelEvaluation.matchDeliveries(Collections.singletonList(child)),
-                new Node().properties("fallback", new Node().value(true)),
-                "compositeSourceChannelKey",
-                SOURCE);
-
-        ChannelDelivery union = onlyDelivery(evaluation);
-        assertEquals("selected", union.event().get("/payload"));
-        assertEquals("retained", union.event().get("/meta/existing"));
-        assertEquals(SOURCE, union.event().get("/meta/compositeSourceChannelKey"));
-        assertEquals("child-event-id", union.eventId());
-        assertNull(union.checkpointKey());
-        assertEquals(Boolean.FALSE, union.shouldProcess());
-        assertEquals(TARGET, union.handlerChannelKey());
-        assertEquals("logical-route", union.logicalDeliveryKey());
+        assertTrue(evaluation.matches());
+        assertEquals("selected", evaluation.event().get("/payload"));
+        assertEquals("retained", evaluation.event().get("/meta/existing"));
+        assertNull(TimelineProviderSupport.property(
+                evaluation.event().getAsNode("/meta"),
+                "compositeSourceChannelKey"));
+        assertEquals("child-event-id", evaluation.eventId());
     }
 
     @Test
     void unionOrdinaryDeliveryUsesFallbackAndPreservesEventId() {
         Node fallback = new Node().properties("payload", new Node().value("fallback"));
 
-        ChannelEvaluation evaluation = TimelineProviderSupport.preserveUnionDelivery(
+        ChannelEvaluation evaluation = TimelineProviderSupport.preserveUnionPayload(
                 ChannelEvaluation.match(null, "ordinary-id"),
-                fallback,
-                "compositeSourceChannelKey",
-                SOURCE);
+                fallback);
 
         assertTrue(evaluation.matches());
         assertEquals("fallback", evaluation.event().get("/payload"));
-        assertEquals(SOURCE, evaluation.event().get("/meta/compositeSourceChannelKey"));
+        assertNull(TimelineProviderSupport.property(evaluation.event(), "meta"));
         assertEquals("ordinary-id", evaluation.eventId());
     }
 
     @Test
     void unionWithoutChildOrFallbackEventDoesNotMatch() {
-        ChannelEvaluation evaluation = TimelineProviderSupport.preserveUnionDelivery(
+        ChannelEvaluation evaluation = TimelineProviderSupport.preserveUnionPayload(
                 ChannelEvaluation.match(null),
-                null,
-                "compositeSourceChannelKey",
-                SOURCE);
+                null);
 
         assertFalse(evaluation.matches());
     }
@@ -272,6 +274,39 @@ class OperationRequestRoutingEvaluationTest {
     }
 
     @Test
+    void operationMatcherTreatsPureReferenceMessageLikeInlineRequest() {
+        Fixture fixture = fixture();
+        Node requestContent = new Node()
+                .name("Referenced Operation Request")
+                .type(new Node().blueId(OperationRequest.blueId()))
+                .properties("operation", new Node().value("increment"))
+                .properties("channel", new Node().value(TARGET))
+                .properties("request", new Node().value(7));
+        BasicNodeProvider requestProvider =
+                new BasicNodeProvider(requestContent);
+        String requestBlueId = requestProvider.getBlueIdByName(
+                "Referenced Operation Request");
+        fixture.blue.nodeProvider(new SequentialNodeProvider(
+                requestProvider,
+                fixture.blue.getNodeProvider()));
+        Node event = entry(
+                fixture,
+                new Node().blueId(requestBlueId));
+        SequentialWorkflowOperation operation =
+                new SequentialWorkflowOperation();
+        operation.request(resolvedPattern(fixture, "Integer"));
+        operation.setKey("increment");
+
+        assertTrue(new OperationRequestMatcher().matches(
+                operation,
+                HandlerMatchContextFactory.create(
+                        fixture.blue,
+                        "increment",
+                        TARGET,
+                        event)));
+    }
+
+    @Test
     void requestMayBeAbsentOnlyForAnEmptyOperationPattern() {
         Fixture fixture = fixture();
         Node event = entry(fixture, resolvedRequest(fixture, "run", TARGET));
@@ -285,6 +320,14 @@ class OperationRequestRoutingEvaluationTest {
         operation.request(resolvedPattern(fixture, "Integer"));
         assertFalse(matcher.matches(operation,
                 HandlerMatchContextFactory.create(fixture.blue, "run", TARGET, event)));
+
+        operation.request(new Node().name("Required Request"));
+        assertFalse(matcher.matches(operation,
+                HandlerMatchContextFactory.create(
+                        fixture.blue,
+                        "run",
+                        TARGET,
+                        event)));
     }
 
     @Test
@@ -343,17 +386,9 @@ class OperationRequestRoutingEvaluationTest {
 
     private static void assertOrdinary(ChannelEvaluation evaluation, Node expectedEvent) {
         assertTrue(evaluation.matches());
-        assertTrue(evaluation.deliveries().isEmpty());
         assertNotNull(evaluation.event());
         assertEquals(TimelineProviderSupport.eventId(expectedEvent),
                 TimelineProviderSupport.eventId(evaluation.event()));
-    }
-
-    private static ChannelDelivery onlyDelivery(ChannelEvaluation evaluation) {
-        assertTrue(evaluation.matches());
-        List<ChannelDelivery> deliveries = evaluation.deliveries();
-        assertEquals(1, deliveries.size());
-        return deliveries.get(0);
     }
 
     private static Map<String, ChannelContract> channels() {
@@ -411,11 +446,10 @@ class OperationRequestRoutingEvaluationTest {
                 .properties("request", payload);
     }
 
-    private static Node compatibleSubtype(Fixture fixture) {
-        Node subtype = new Node()
+    private static Node compatibleSubtype() {
+        return new Node()
                 .name("Specialized Operation Request")
                 .type(new Node().blueId(OperationRequest.blueId()));
-        return subtype.blueId(blue.language.utils.BlueIdCalculator.calculateBlueId(subtype));
     }
 
     private static Node resolvedPattern(Fixture fixture, String type) {

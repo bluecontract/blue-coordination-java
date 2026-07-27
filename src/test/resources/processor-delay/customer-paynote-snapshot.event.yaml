@@ -98,12 +98,12 @@ message:
                       path: "/BuildComponentAttachment/changeset"
           embeddedHotelOrderEvents:
             type: { blueId: "Fjbu3QpnUaTruDTcTidETCX2N5STyv7KYxT42PCzGHxm" }
-            childPath:
+            sourcePath:
               type: { blueId: "GX7CFUmSDrE2MzptunLCCdZwnuwwrenRQqEnHL4x3uoC" }
               value: "/embeddedDocs/hotelOrder"
           embeddedRestaurantOrderEvents:
             type: { blueId: "Fjbu3QpnUaTruDTcTidETCX2N5STyv7KYxT42PCzGHxm" }
-            childPath:
+            sourcePath:
               type: { blueId: "GX7CFUmSDrE2MzptunLCCdZwnuwwrenRQqEnHL4x3uoC" }
               value: "/embeddedDocs/restaurantOrder"
           processEmbeddedComponentOrders:

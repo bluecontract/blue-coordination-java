@@ -1,6 +1,5 @@
 package blue.coordination.processor.workflow;
 
-import blue.coordination.processor.RepositoryTypeAliasPreprocessor;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.model.Node;
 import blue.language.snapshot.FrozenNode;
@@ -10,29 +9,15 @@ import java.util.Map;
 
 final class ComputeProgramNormalizer {
     private static final String NORMALIZATION_VERSION =
-            "compute-program-v2|repository-aliases-3.0.0-rc.10";
+            "compute-program-v3|exact-registered-types";
 
-    private final RepositoryTypeAliasPreprocessor typeAliasPreprocessor;
     private final BexProcessingMetrics metrics;
 
     ComputeProgramNormalizer() {
-        this(new RepositoryTypeAliasPreprocessor(), null);
+        this(null);
     }
 
     ComputeProgramNormalizer(BexProcessingMetrics metrics) {
-        this(new RepositoryTypeAliasPreprocessor(), metrics);
-    }
-
-    ComputeProgramNormalizer(RepositoryTypeAliasPreprocessor typeAliasPreprocessor) {
-        this(typeAliasPreprocessor, null);
-    }
-
-    private ComputeProgramNormalizer(RepositoryTypeAliasPreprocessor typeAliasPreprocessor,
-                                     BexProcessingMetrics metrics) {
-        if (typeAliasPreprocessor == null) {
-            throw new IllegalArgumentException("typeAliasPreprocessor must not be null");
-        }
-        this.typeAliasPreprocessor = typeAliasPreprocessor;
         this.metrics = metrics;
     }
 
@@ -42,10 +27,9 @@ final class ComputeProgramNormalizer {
 
     /**
      * Normalizes only the authored Compute projection of a frozen step. This
-     * avoids materializing unrelated resolved-contract content. The selected
-     * subtrees still use the mutable alias preprocessor as a conservative,
-     * semantics-preserving cold-path fallback; the resulting frozen plan is
-     * reused on every warm invocation.
+     * avoids materializing unrelated resolved-contract content. Registered
+     * type identities are preserved exactly; no runtime alias rewriting is
+     * applied. The resulting frozen plan is reused on every warm invocation.
      */
     FrozenNode program(FrozenNode stepNode) {
         if (metrics != null) {
@@ -78,7 +62,7 @@ final class ComputeProgramNormalizer {
         if (!properties.isEmpty()) {
             program.properties(properties);
         }
-        return typeAliasPreprocessor.preprocess(program);
+        return program;
     }
 
     Node definition(Node definitionNode) {
@@ -90,7 +74,7 @@ final class ComputeProgramNormalizer {
         if (!properties.isEmpty()) {
             definition.properties(properties);
         }
-        return typeAliasPreprocessor.preprocess(definition);
+        return definition;
     }
 
     private Node frozenProgramInput(FrozenNode source) {
@@ -193,10 +177,7 @@ final class ComputeProgramNormalizer {
     }
 
     private boolean hasAuthoredContent(Node node) {
-        return node != null
-                && (node.getValue() != null
-                || (node.getItems() != null && !node.getItems().isEmpty())
-                || (node.getProperties() != null && !node.getProperties().isEmpty()));
+        return !NodeUtil.isEmpty(node);
     }
 
     private void copyMetadata(Node target, Node source) {

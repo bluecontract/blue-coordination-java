@@ -28,13 +28,16 @@ class RepositoryStyleCounterDocumentTest {
 
         DocumentProcessingResult initialized = fixture.blue.initializeDocument(authored);
 
-        assertFalse(initialized.capabilityFailure(), initialized.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(initialized), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(initialized));
         assertTrue(fixture.blue.isInitialized(initialized.document()));
-        assertNotNull(initialized.snapshot());
-        assertNotNull(initialized.blueId());
-        String initializedDocumentId = initialized.resolvedDocument().getAsText("/contracts/initialized/documentId");
+        assertNotNull(ProcessingResultTestSupport.snapshot(fixture.blue, initialized));
+        assertNotNull(ProcessingResultTestSupport.blueId(initialized));
+        String initializedDocumentId = ProcessingResultTestSupport
+                .resolvedDocument(fixture.blue, initialized)
+                .getAsText("/contracts/initialized/documentId");
         assertNotNull(initializedDocumentId);
-        assertNull(property(property(initialized.resolvedDocument(), "contracts"), "checkpoint"));
+        assertNull(property(property(ProcessingResultTestSupport.resolvedDocument(
+                fixture.blue, initialized), "contracts"), "checkpoint"));
 
         Node event = TestTimelineProvider.timelineEntry(fixture.blue,
                 fixture.repository,
@@ -42,26 +45,36 @@ class RepositoryStyleCounterDocumentTest {
                 1777987926,
                 operationRequest("increment", 5));
 
-        DocumentProcessingResult result = fixture.blue.processDocument(initialized.snapshot(), event);
+        DocumentProcessingResult result = fixture.blue.processDocument(
+                ProcessingResultTestSupport.snapshot(fixture.blue, initialized), event);
 
-        assertFalse(result.capabilityFailure(), result.failureReason());
-        assertNotNull(result.snapshot());
-        assertNotNull(result.blueId());
-        assertEquals(BigInteger.valueOf(5), result.resolvedDocument().get("/counter"));
-        assertEquals(1, result.triggeredEvents().size());
-        assertEquals("Counter was incremented by 5 and is now 5",
-                result.triggeredEvents().get(0).getAsText("/message"));
-
-        Node resolved = result.resolvedDocument();
-        assertEquals(initializedDocumentId, resolved.getAsText("/contracts/initialized/documentId"));
-        assertEquals(TIMELINE_ID, resolved.getAsText("/contracts/checkpoint/lastEvents/ownerChannel/timeline/timelineId"));
-        assertEquals(BigInteger.valueOf(1777987926L),
-                resolved.get("/contracts/checkpoint/lastEvents/ownerChannel/timestamp"));
-        assertEquals("increment",
-                resolved.getAsText("/contracts/checkpoint/lastEvents/ownerChannel/message/operation"));
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
+        assertNotNull(ProcessingResultTestSupport.snapshot(fixture.blue, result));
+        assertNotNull(ProcessingResultTestSupport.blueId(result));
         assertEquals(BigInteger.valueOf(5),
-                resolved.get("/contracts/checkpoint/lastEvents/ownerChannel/message/request"));
-        assertNotNull(resolved.get("/contracts/checkpoint/lastEvents/ownerChannel"));
+                ProcessingResultTestSupport.resolvedDocument(fixture.blue, result)
+                        .get("/counter"));
+        assertEquals(1, result.events().size());
+        assertEquals("Counter was incremented by 5 and is now 5",
+                result.events().get(0).getAsText("/message"));
+
+        Node resolved = ProcessingResultTestSupport.resolvedDocument(
+                fixture.blue, result);
+        assertEquals(initializedDocumentId, resolved.getAsText("/contracts/initialized/documentId"));
+        Node checkpoint = property(
+                property(resolved, "contracts"), "checkpoint");
+        Node checkpointEntries = property(checkpoint, "entries");
+        Node checkpointEntry = property(checkpointEntries, "ownerChannel");
+        Node checkpointSubject = property(checkpointEntry, "subject");
+        assertNotNull(checkpointSubject);
+        assertEquals(
+                TimelineExternalSubscriptionFunctions
+                        .TIMELINE_ORDER_SUBJECT_VERSION,
+                checkpointSubject.getAsText("/semantics"));
+        assertEquals(BigInteger.valueOf(1777987926L),
+                checkpointSubject.get("/timestamp"));
+        assertNull(property(checkpointSubject, "timeline"));
+        assertNull(property(checkpointSubject, "message"));
     }
 
     private static Node richCounterDocument(Fixture fixture) {

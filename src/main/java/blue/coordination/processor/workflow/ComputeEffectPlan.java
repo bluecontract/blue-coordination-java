@@ -19,6 +19,7 @@ final class ComputeEffectPlan {
     private final List<FrozenJsonPatch> patches;
     private final List<FrozenNode> events;
     private final boolean terminationRequested;
+    private final String terminationCause;
     private final String terminationReason;
     private final boolean changesetHandled;
     private final AtomicBoolean bufferingClaimed = new AtomicBoolean();
@@ -26,6 +27,7 @@ final class ComputeEffectPlan {
     ComputeEffectPlan(List<FrozenJsonPatch> patches,
                       List<Node> events,
                       boolean terminationRequested,
+                      String terminationCause,
                       String terminationReason,
                       boolean changesetHandled) {
         List<FrozenJsonPatch> frozenPatches = new ArrayList<FrozenJsonPatch>(patches.size());
@@ -46,7 +48,18 @@ final class ComputeEffectPlan {
             frozenEvents.add(FrozenNode.fromResolvedNode(event));
         }
         this.events = Collections.unmodifiableList(frozenEvents);
+        if (terminationRequested
+                && (terminationCause == null || terminationCause.isEmpty())) {
+            throw new IllegalArgumentException(
+                    "Compute termination cause must be non-empty Text");
+        }
+        if (!terminationRequested
+                && (terminationCause != null || terminationReason != null)) {
+            throw new IllegalArgumentException(
+                    "Absent Compute termination cannot carry cause or reason");
+        }
         this.terminationRequested = terminationRequested;
+        this.terminationCause = terminationCause;
         this.terminationReason = terminationReason;
         this.changesetHandled = changesetHandled;
     }
@@ -61,6 +74,10 @@ final class ComputeEffectPlan {
 
     boolean terminationRequested() {
         return terminationRequested;
+    }
+
+    String terminationCause() {
+        return terminationCause;
     }
 
     String terminationReason() {

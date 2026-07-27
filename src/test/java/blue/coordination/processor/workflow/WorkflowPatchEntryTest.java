@@ -5,7 +5,6 @@ import blue.language.snapshot.FrozenNode;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -43,14 +42,17 @@ class WorkflowPatchEntryTest {
     }
 
     @Test
-    void removeIgnoresCallerOwnedValueWithoutFreezingIt() {
-        Node irrelevantValue = new Node()
-                .blueId("GX7CFUmSDrE2MzptunLCCdZwnuwwrenRQqEnHL4x3uoC")
-                .properties("expanded", new Node().value("ignored"));
+    void removeValueIsPreservedForExactShapeValidation() {
+        Node forbiddenValue = new Node()
+                .properties("expanded", new Node().value("forbidden"));
 
         WorkflowPatchEntry entry = new WorkflowPatchEntry(
-                " REMOVE ", "/payload", irrelevantValue);
+                "remove", "/payload", forbiddenValue);
+        forbiddenValue.getProperties().get("expanded").value("mutated");
 
-        assertNull(entry.val());
+        assertEquals("remove", entry.op());
+        assertTrue(entry.val().isStrictCanonical());
+        assertEquals("forbidden",
+                entry.val().getProperties().get("expanded").getValue());
     }
 }

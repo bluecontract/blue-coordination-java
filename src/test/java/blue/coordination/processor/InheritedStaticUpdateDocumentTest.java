@@ -8,7 +8,6 @@ import blue.language.processor.ProcessorStatus;
 import blue.language.processor.registry.RuntimeBlueIds;
 import blue.language.provider.BasicNodeProvider;
 import blue.language.provider.SequentialNodeProvider;
-import blue.language.utils.NodeProviderWrapper;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.DocumentStatus;
 import blue.repo.coordination.SequentialWorkflow;
@@ -25,7 +24,10 @@ class InheritedStaticUpdateDocumentTest {
 
     @Test
     void inheritedStaticPatchWritesItsAuthoredValueFromTheResolvedContractView() {
-        Blue blue = BlueRepository.latest().configure(new Blue());
+        BlueRepository repository = BlueRepository.latest();
+        Blue blue = new Blue()
+                .nodeProvider(repository.nodeProvider())
+                .typeClassResolver(repository.typeClassResolver());
         NodeProvider repositoryProvider = blue.getNodeProvider();
         BasicNodeProvider documentTypes = new BasicNodeProvider();
         documentTypes.addSingleNodes(documentType(new Node()
@@ -33,19 +35,21 @@ class InheritedStaticUpdateDocumentTest {
                 .type(reference(StatusInProgress.blueId()))));
         String documentTypeId = documentTypes.getBlueIdByName("Inherited Static Update Document");
         blue.nodeProvider(new SequentialNodeProvider(
-                NodeProviderWrapper.unverified(documentTypes),
+                documentTypes,
                 repositoryProvider));
         CoordinationProcessors.registerWith(blue);
 
         DocumentProcessingResult result = blue.initializeDocument(
                 blue.resolveToSnapshot(new Node().type(reference(documentTypeId))));
 
-        assertEquals(ProcessorStatus.SUCCESS, result.status(), result.failureReason());
-        assertNull(result.failureReason());
-        Node canonicalStatus = result.canonicalDocument().getProperties().get("status");
+        assertEquals(ProcessorStatus.SUCCESS, result.status(),
+                ProcessingResultTestSupport.diagnosticMessage(result));
+        assertNull(result.diagnostic());
+        Node canonicalStatus = result.document().getProperties().get("status");
         assertEquals(StatusInProgress.blueId(), canonicalStatus.getType().getBlueId());
         assertEquals("Authored status", canonicalStatus.getName());
-        assertEquals("active", result.resolvedDocument().getAsText("/status/mode"));
+        assertEquals("active", ProcessingResultTestSupport
+                .resolvedDocument(blue, result).getAsText("/status/mode"));
         assertNull(canonicalStatus.getDescription(),
                 "metadata inherited by Json Patch Entry.val must not become document content");
     }

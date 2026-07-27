@@ -47,12 +47,12 @@ class BexCounterResourceWorkflowTest {
 
         DocumentProcessingResult result = fixture.blue.processDocument(initialized.document(), event);
 
-        assertFalse(result.capabilityFailure(), result.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertNotNull(result.document());
         assertEquals(BigInteger.ONE, result.document().get("/counter"));
-        assertEquals(1, result.triggeredEvents().size());
+        assertEquals(1, result.events().size());
         assertEquals("Counter was incremented by 1 and is now 1",
-                result.triggeredEvents().get(0).getAsText("/message"));
+                result.events().get(0).getAsText("/message"));
     }
 
     private static Fixture configuredFixture() {

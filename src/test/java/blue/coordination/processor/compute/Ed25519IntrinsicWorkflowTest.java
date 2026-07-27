@@ -29,7 +29,7 @@ class Ed25519IntrinsicWorkflowTest {
         DocumentProcessingResult result = support.process(document,
                 support.operationRequest("hotel", 1, "checkIn", "hotelChannel", hotelRequest()));
 
-        assertFalse(result.capabilityFailure(), result.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertEquals(Boolean.TRUE, result.document().get("/usedNonces/customerA/hotel-nonce-1"));
         assertEquals("Hotel Access Granted", onlyEvent(result).get("/kind"));
         assertEquals("customerA", onlyEvent(result).get("/userId"));
@@ -45,7 +45,7 @@ class Ed25519IntrinsicWorkflowTest {
                 support.operationRequest("admin", 1, "approveAction", "adminChannel",
                         approvalRequest("alice", "alice-nonce-1", ALICE_SIGNATURE)));
 
-        assertFalse(afterAlice.capabilityFailure(), afterAlice.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(afterAlice), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(afterAlice));
         assertEquals("Admin Approval Recorded", onlyEvent(afterAlice).get("/kind"));
         assertEquals(Boolean.TRUE, afterAlice.document().get("/approvals/delete-file-123/alice"));
 
@@ -53,7 +53,7 @@ class Ed25519IntrinsicWorkflowTest {
                 support.operationRequest("admin", 2, "approveAction", "adminChannel",
                         approvalRequest("bob", "bob-nonce-1", BOB_SIGNATURE)));
 
-        assertFalse(afterBob.capabilityFailure(), afterBob.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(afterBob), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(afterBob));
         assertEquals("Admin Action Executed", onlyEvent(afterBob).get("/kind"));
         assertEquals(Boolean.TRUE, afterBob.document().get("/approvals/delete-file-123/alice"));
         assertEquals(Boolean.TRUE, afterBob.document().get("/approvals/delete-file-123/bob"));
@@ -98,7 +98,7 @@ class Ed25519IntrinsicWorkflowTest {
     }
 
     private static Node onlyEvent(DocumentProcessingResult result) {
-        assertEquals(1, result.triggeredEvents().size());
-        return result.triggeredEvents().get(0);
+        assertEquals(1, result.events().size());
+        return result.events().get(0);
     }
 }

@@ -26,7 +26,8 @@ class EmbeddedTerminationWorkflowTest {
 
         assertSuccess(childResult);
         assertEquals("changed-before-stop", childResult.document().get("/child/status"));
-        assertEquals("graceful", childResult.document().get("/child/contracts/terminated/cause"));
+        assertEquals("embedded-workflow-complete",
+                childResult.document().get("/child/contracts/terminated/cause"));
         assertEquals("embedded-complete", childResult.document().get("/child/contracts/terminated/reason"));
         assertNull(nodeAt(childResult.document(), "/contracts/terminated"));
         assertEquals(1L, fixture.metrics.declarativeTerminationSteps());
@@ -37,7 +38,8 @@ class EmbeddedTerminationWorkflowTest {
         assertSuccess(rootResult);
         assertEquals("root-still-active", rootResult.document().get("/rootStatus"));
         assertNull(nodeAt(rootResult.document(), "/contracts/terminated"));
-        assertEquals("graceful", rootResult.document().get("/child/contracts/terminated/cause"));
+        assertEquals("embedded-workflow-complete",
+                rootResult.document().get("/child/contracts/terminated/cause"));
     }
 
     @Test
@@ -78,8 +80,11 @@ class EmbeddedTerminationWorkflowTest {
         childContracts.put("childChannel", TestTimelineProvider.channel("child"));
         childContracts.put("runChild", operation("childChannel",
                 updateStep("/status", "changed-before-stop"),
-                computeTermination ? computeTerminateStep("embedded-complete")
-                        : declarativeTerminateStep("embedded-complete"),
+                computeTermination
+                        ? computeTerminateStep(
+                                "embedded-workflow-complete", "embedded-complete")
+                        : declarativeTerminateStep(
+                                "embedded-workflow-complete", "embedded-complete"),
                 updateStep("/status", "must-not-run")));
 
         return new Node()
@@ -109,18 +114,20 @@ class EmbeddedTerminationWorkflowTest {
                         .properties("val", new Node().value(value))));
     }
 
-    private static Node declarativeTerminateStep(String reason) {
+    private static Node declarativeTerminateStep(String cause, String reason) {
         return new Node()
                 .type("Coordination/Terminate Processing")
+                .properties("cause", new Node().value(cause))
                 .properties("reason", new Node().value(reason));
     }
 
-    private static Node computeTerminateStep(String reason) {
+    private static Node computeTerminateStep(String cause, String reason) {
         return new Node()
                 .type("Coordination/Compute")
                 .properties("do", new Node().items(new Node()
                         .properties("$return", new Node()
                                 .properties("termination", new Node()
+                                        .properties("cause", new Node().value(cause))
                                         .properties("reason", new Node().value(reason))))));
     }
 
@@ -134,7 +141,7 @@ class EmbeddedTerminationWorkflowTest {
     }
 
     private static void assertSuccess(DocumentProcessingResult result) {
-        assertEquals(ProcessorStatus.SUCCESS, result.status(), result.failureReason());
+        assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
     }
 
     private static Fixture fixture() {

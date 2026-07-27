@@ -8,6 +8,7 @@ import blue.bex.result.BexExecutionResult;
 import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationProcessors;
 import blue.coordination.processor.CoordinationTestResources;
+import blue.coordination.processor.ProcessingResultTestSupport;
 import blue.coordination.processor.RepositoryTypeAliasPreprocessor;
 import blue.coordination.processor.TestTimelineProvider;
 import blue.coordination.processor.bex.BexProcessingMetrics;
@@ -15,6 +16,7 @@ import blue.coordination.processor.bex.BexWorkflowContextFactory;
 import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
+import blue.language.processor.GasMeter;
 import blue.language.processor.ProcessorErrorCategory;
 import blue.language.processor.ProcessorFatalException;
 import blue.language.processor.ProcessorStatus;
@@ -23,6 +25,7 @@ import blue.language.processor.model.FrozenJsonPatch;
 import blue.language.processor.model.JsonPatch;
 import blue.language.processor.registry.RuntimeBlueIds;
 import blue.language.snapshot.FrozenNode;
+import blue.language.snapshot.ResolvedSnapshot;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.Compute;
 import blue.repo.coordination.SequentialWorkflowStep;
@@ -70,10 +73,11 @@ class FrozenComputeDifferentialTest {
         assertEquals("final", frozen.document.get("/status"));
         assertFalse(hasPath(frozen.document, "/removeMe"));
         assertFalse(hasPath(frozen.document, "/mustNotRun"));
-        assertEquals("graceful", frozen.document.get("/contracts/terminated/cause"));
+        assertEquals("compute-effects-complete",
+                frozen.document.get("/contracts/terminated/cause"));
         assertEquals("compute complete", frozen.document.get("/contracts/terminated/reason"));
         assertNull(frozen.channelCheckpoint,
-                "graceful termination must not persist the source-channel checkpoint");
+                "application termination must not persist the source-channel checkpoint");
         assertEquals(Arrays.asList("first", "second"), selectedKinds(frozen.documentEvents));
         assertTrue(indexOfKind(frozen.documentEvents, "second")
                         < indexOfType(frozen.documentEvents,
@@ -115,7 +119,7 @@ class FrozenComputeDifferentialTest {
             Node aliasesResolved = new RepositoryTypeAliasPreprocessor(
                     CoordinationTestResources.testTypeAliases(repository)).preprocess(authored);
             Node initialized = blue.initializeDocument(blue.preprocess(aliasesResolved)).document();
-            Map<String, Long> languageCountersBeforeRun = metrics.languageCounters();
+            BexProcessingMetrics.Snapshot metricsBeforeRun = metrics.snapshot();
             Node event = TestTimelineProvider.timelineEntry(blue,
                     repository,
                     "owner",
@@ -123,28 +127,30 @@ class FrozenComputeDifferentialTest {
                     TestTimelineProvider.chatMessage("run"));
 
             DocumentProcessingResult result = blue.processDocument(initialized, event);
-            List<Node> documentEvents = immutableClones(result.triggeredEvents());
+            List<Node> documentEvents = immutableClones(result.events());
+            ResolvedSnapshot resultSnapshot =
+                    ProcessingResultTestSupport.snapshot(blue, result);
             return new Outcome(result.document().clone(),
-                    result.snapshot() != null
-                            ? result.snapshot().frozenCanonicalRoot().resolvedStructuralKey()
+                    resultSnapshot != null
+                            ? resultSnapshot.frozenCanonicalRoot().resolvedStructuralKey()
                             : null,
-                    result.snapshot() != null
-                            ? result.snapshot().frozenResolvedRoot().resolvedStructuralKey()
+                    resultSnapshot != null
+                            ? resultSnapshot.frozenResolvedRoot().resolvedStructuralKey()
                             : null,
-                    result.blueId(),
+                    ProcessingResultTestSupport.blueId(result),
                     jsonEvents(blue, documentEvents, false),
                     jsonEvents(blue, documentEvents, true),
                     result.totalGas(),
                     result.status(),
-                    result.errorCategory(),
-                    result.failureReason(),
+                    ProcessingResultTestSupport.diagnosticCategory(result),
+                    ProcessingResultTestSupport.diagnosticMessage(result),
                     jsonAt(blue, result.document(), "/contracts/terminated"),
                     jsonAt(blue,
                             result.document(),
-                            "/contracts/checkpoint/lastEvents/ownerChannel"),
+                            "/contracts/checkpoint/entries/ownerChannel/subject"),
                     documentEvents,
-                    metrics,
-                    languageCountersBeforeRun);
+                    metrics.snapshot(),
+                    metricsBeforeRun);
         } finally {
             try {
                 blue.close();
@@ -210,6 +216,7 @@ class FrozenComputeDifferentialTest {
                 "                - type: Coordination/Event",
                 "                  kind: second",
                 "              termination:",
+                "                cause: compute-effects-complete",
                 "                reason: compute complete",
                 "      - name: Must not run after termination",
                 "        type: Coordination/Update Document",
@@ -345,8 +352,8 @@ class FrozenComputeDifferentialTest {
     }
 
     private static long metricDelta(Outcome outcome, String name) {
-        return metric(outcome.metrics.languageCounters(), name)
-                - metric(outcome.languageCountersBeforeRun, name);
+        return metric(outcome.metrics.languageCounters, name)
+                - metric(outcome.metricsBeforeRun.languageCounters, name);
     }
 
     private static long metric(Map<String, Long> counters, String name) {
@@ -368,8 +375,8 @@ class FrozenComputeDifferentialTest {
         private final String terminationMarker;
         private final String channelCheckpoint;
         private final List<Node> documentEvents;
-        private final BexProcessingMetrics metrics;
-        private final Map<String, Long> languageCountersBeforeRun;
+        private final BexProcessingMetrics.Snapshot metrics;
+        private final BexProcessingMetrics.Snapshot metricsBeforeRun;
 
         private Outcome(Node document,
                         Object canonicalKey,
@@ -384,8 +391,8 @@ class FrozenComputeDifferentialTest {
                         String terminationMarker,
                         String channelCheckpoint,
                         List<Node> documentEvents,
-                        BexProcessingMetrics metrics,
-                        Map<String, Long> languageCountersBeforeRun) {
+                        BexProcessingMetrics.Snapshot metrics,
+                        BexProcessingMetrics.Snapshot metricsBeforeRun) {
             this.document = document;
             this.canonicalKey = canonicalKey;
             this.resolvedKey = resolvedKey;
@@ -400,7 +407,7 @@ class FrozenComputeDifferentialTest {
             this.channelCheckpoint = channelCheckpoint;
             this.documentEvents = documentEvents;
             this.metrics = metrics;
-            this.languageCountersBeforeRun = languageCountersBeforeRun;
+            this.metricsBeforeRun = metricsBeforeRun;
         }
     }
 
@@ -470,9 +477,14 @@ class FrozenComputeDifferentialTest {
                 BexExecutionContext bexContext = contextFactory.create(context, gasLimit);
                 BexExecutionResult execution = bexEngine.compileAndExecute(source, bexContext);
                 metrics.addBexMetrics(execution.metrics());
-                if (execution.gasUsed() > 0L) {
-                    context.processorContext().consumeGas(execution.gasUsed());
-                }
+                GasMeter.ChildGasLedger legacyLedger =
+                        context.processorContext().newRuntimeGasLedger(
+                                "legacyMutableBexTest",
+                                Collections.singletonMap(
+                                        "aggregateExecutionUnit", 1L));
+                legacyLedger.charge(
+                        "aggregateExecutionUnit", execution.gasUsed());
+                context.processorContext().submitRuntimeGasLedger(legacyLedger);
                 ComputeEffectPlan effects = resultPlanner.plan(execution,
                         context,
                         FrozenNodeUtil.booleanProperty(program, "emitEvents", true));
@@ -543,7 +555,9 @@ class FrozenComputeDifferentialTest {
                 metrics.incrementEventsEmitted();
             }
             if (effects.terminationRequested()) {
-                context.processorContext().terminateGracefully(effects.terminationReason());
+                context.processorContext().terminate(
+                        effects.terminationCause(),
+                        effects.terminationReason());
                 metrics.incrementSuccessfulComputeTerminationRequests();
             }
         }

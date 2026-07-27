@@ -7,6 +7,7 @@ import blue.coordination.processor.RepositoryTypeAliasPreprocessor;
 import blue.coordination.processor.TestTimelineProvider;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.coordination.processor.workflow.SequentialWorkflowRunner;
+import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorStatus;
@@ -80,7 +81,7 @@ class LanguageAdoptionMetricsArtifactTest {
             BexProcessingMetrics.Snapshot baseline = fixture.metrics.snapshot();
 
             DocumentProcessingResult result = fixture.support.processRun(document);
-            assertSuccess(result);
+            assertSuccess(fixture.support.blue, result);
             assertEquals("static-updated", result.document().get("/status"));
             assertEquals(BigInteger.ONE, result.document().get("/count"));
             assertEquals(2L, fixture.metrics.patchesApplied());
@@ -125,7 +126,7 @@ class LanguageAdoptionMetricsArtifactTest {
             BexProcessingMetrics.Snapshot baseline = fixture.metrics.snapshot();
 
             DocumentProcessingResult result = fixture.support.processRun(document);
-            assertSuccess(result);
+            assertSuccess(fixture.support.blue, result);
             assertEquals("computed", result.document().get("/status"));
             assertEquals(BigInteger.valueOf(2L), result.document().get("/count"));
             assertEquals(3L, fixture.metrics.patchesApplied());
@@ -148,7 +149,7 @@ class LanguageAdoptionMetricsArtifactTest {
         try {
             DocumentProcessingResult initialized = fixture.support.blue.initializeDocument(
                     fixture.support.yamlResource(PAYNOTE_RESOURCE));
-            assertSuccess(initialized);
+            assertSuccess(fixture.support.blue, initialized);
             BexProcessingMetrics.Snapshot baseline = fixture.metrics.snapshot();
 
             Node event = fixture.support.operationRequest(
@@ -158,9 +159,11 @@ class LanguageAdoptionMetricsArtifactTest {
                     "hotelParticipantChannel",
                     subscriptionUpdate());
             DocumentProcessingResult result = fixture.support.blue.processDocument(
-                    initialized.snapshot(), event);
+                    blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                            fixture.support.blue, initialized),
+                    event);
 
-            assertSuccess(result);
+            assertSuccess(fixture.support.blue, result);
             assertEquals(Boolean.TRUE,
                     result.document().get("/orders/package-order-a/hotelOrder/resalePlaced"));
             return LanguageAdoptionMetricsArtifactWriter.capture(
@@ -186,9 +189,9 @@ class LanguageAdoptionMetricsArtifactTest {
                     fixture.support.blue.preprocess(aliasesResolved));
             DocumentProcessingResult initialized =
                     fixture.support.blue.initializeDocument(resolved);
-            assertSuccess(initialized);
+            assertSuccess(fixture.support.blue, initialized);
             assertEquals(StatusPending.blueId(),
-                    initialized.canonicalDocument().getAsText("/status/type/blueId"));
+                    initialized.document().getAsText("/status/type/blueId"));
             BexProcessingMetrics.Snapshot baseline = fixture.metrics.snapshot();
 
             Node event = TestTimelineProvider.timelineEntry(
@@ -202,9 +205,11 @@ class LanguageAdoptionMetricsArtifactTest {
                             "mandateGuarantorChannel",
                             new Node()));
             DocumentProcessingResult result = fixture.support.blue.processDocument(
-                    initialized.snapshot(), event);
+                    blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                            fixture.support.blue, initialized),
+                    event);
 
-            assertSuccess(result);
+            assertSuccess(fixture.support.blue, result);
             assertEquals(BigInteger.valueOf(7_000_001L),
                     result.document().get("/authorityConfirmedAt"));
             return LanguageAdoptionMetricsArtifactWriter.capture(
@@ -250,10 +255,12 @@ class LanguageAdoptionMetricsArtifactTest {
         return value != null ? value.longValue() : 0L;
     }
 
-    private static void assertSuccess(DocumentProcessingResult result) {
-        assertEquals(ProcessorStatus.SUCCESS, result.status(), result.failureReason());
-        assertNotNull(result.snapshot());
-        assertNotNull(result.blueId());
+    private static void assertSuccess(Blue language, DocumentProcessingResult result) {
+        assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
+        assertNotNull(blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                language, result));
+        assertNotNull(blue.coordination.processor.ProcessingResultTestSupport.blueId(
+                result));
     }
 
     private static void assertJsonScenarios(Path json) throws IOException {
@@ -290,7 +297,8 @@ class LanguageAdoptionMetricsArtifactTest {
             assertEquals(expectedPatches(scenario.path("scenarioId").asText()),
                     proof.path("frozenPatchesHandedToLanguage").asLong());
             assertTrue(proof.path("frozenPatchValuesHandedToLanguage").asLong() > 0L);
-            assertEquals(proof.path("frozenPatchValuesHandedToLanguage").asLong(),
+            assertEquals(
+                    proof.path("frozenPatchValuesHandedToLanguage").asLong() * 2L,
                     proof.path("frozenPatchValuesAccepted").asLong());
             assertEquals(0L, proof.path("mutablePatchesHandedToLanguage").asLong());
             assertEquals(0L, proof.path("mutablePatchValuesFrozen").asLong());

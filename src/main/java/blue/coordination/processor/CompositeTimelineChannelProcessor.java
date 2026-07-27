@@ -5,6 +5,7 @@ import blue.language.processor.ChannelCheckpointContext;
 import blue.language.processor.ChannelEvaluation;
 import blue.language.processor.ChannelEvaluationContext;
 import blue.language.processor.ChannelProcessor;
+import blue.language.processor.ExternalChannelSubscriptionFunctions;
 import blue.language.processor.model.ChannelContract;
 import blue.repo.coordination.CompositeTimelineChannel;
 import blue.repo.coordination.TimelineChannel;
@@ -16,6 +17,12 @@ public final class CompositeTimelineChannelProcessor implements ChannelProcessor
     @Override
     public Class<CompositeTimelineChannel> contractType() {
         return CompositeTimelineChannel.class;
+    }
+
+    @Override
+    public ExternalChannelSubscriptionFunctions<
+            CompositeTimelineChannel> externalSubscriptionFunctions() {
+        return CompositeTimelineExternalSubscriptionFunctions.INSTANCE;
     }
 
     @Override
@@ -63,10 +70,8 @@ public final class CompositeTimelineChannelProcessor implements ChannelProcessor
         if (matching == null) {
             return ChannelEvaluation.noMatch();
         }
-        return TimelineProviderSupport.preserveUnionDelivery(matching.evaluation,
-                context.event(),
-                "compositeSourceChannelKey",
-                matching.channelKey);
+        return TimelineProviderSupport.preserveUnionPayload(
+                matching.evaluation, context.event());
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -77,8 +82,12 @@ public final class CompositeTimelineChannelProcessor implements ChannelProcessor
     }
 
     @Override
-    public boolean isNewerEvent(CompositeTimelineChannel contract, ChannelCheckpointContext context) {
-        return TimelineProviderSupport.isNewerOrDifferentTimelineEvent(context);
+    public boolean isNewerEvent(CompositeTimelineChannel contract,
+                                ChannelCheckpointContext context) {
+        return TimelineProviderSupport.isNewerTimelineSubject(
+                context,
+                CompositeTimelineExternalSubscriptionFunctions
+                        .ORDER_SUBJECT_VERSION);
     }
 
     private String trimToNull(String value) {

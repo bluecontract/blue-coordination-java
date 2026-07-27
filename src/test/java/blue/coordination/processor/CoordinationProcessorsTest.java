@@ -51,6 +51,18 @@ class CoordinationProcessorsTest {
     }
 
     @Test
+    void workflowProcessorsDeclareOnlyStepsAsDeferredExecutableBody() {
+        assertEquals(Collections.singletonList("steps"),
+                new SequentialWorkflowProcessor().executableBodyFields());
+        assertEquals(Collections.singletonList("steps"),
+                new SequentialWorkflowOperationProcessor()
+                        .executableBodyFields());
+        assertEquals(Collections.singletonList("steps"),
+                new ChatWorkflowOperationProcessor()
+                        .executableBodyFields());
+    }
+
+    @Test
     void registerWithBlueInstallsOptionsMetricsAsLanguageSink() {
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         Blue blue = CoordinationTestResources.configuredBlue(BlueRepository.latest());
@@ -143,7 +155,7 @@ class CoordinationProcessorsTest {
                                 "increment", "ownerChannel", new Node().value(7))));
         BexProcessingMetrics.Snapshot after = metrics.snapshot();
 
-        assertFalse(processed.capabilityFailure(), processed.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(processed), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(processed));
         assertEquals(BigInteger.valueOf(3), processed.document().get("/counter"));
         assertEquals(1L, after.preparedPatchSequences - before.preparedPatchSequences);
         assertEquals(3L, after.preparedPatches - before.preparedPatches);
@@ -182,7 +194,7 @@ class CoordinationProcessorsTest {
 
         DocumentProcessingResult result = fixture.blue.initializeDocument(preprocessed);
 
-        assertFalse(result.capabilityFailure(), result.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertTrue(fixture.blue.isInitialized(result.document()));
         assertEquals(BigInteger.ZERO, result.document().getProperties().get("counter").getValue());
         assertFalse(contracts(result.document()).containsKey("checkpoint"));
@@ -203,7 +215,7 @@ class CoordinationProcessorsTest {
                         CoordinationTestResources.operationRequest(
                                 "increment", "missingChannel", new Node().value(7))));
 
-        assertFalse(processed.capabilityFailure(), processed.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(processed), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(processed));
         assertEquals(BigInteger.ZERO, processed.document().getProperties().get("counter").getValue());
     }
 

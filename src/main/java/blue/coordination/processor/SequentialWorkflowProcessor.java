@@ -6,6 +6,8 @@ import blue.language.processor.HandlerProcessor;
 import blue.language.processor.HandlerRegistrationContext;
 import blue.language.processor.ProcessorExecutionContext;
 import blue.repo.coordination.SequentialWorkflow;
+import java.util.Collections;
+import java.util.List;
 
 public final class SequentialWorkflowProcessor implements HandlerProcessor<SequentialWorkflow> {
     private final SequentialWorkflowRunner runner;
@@ -27,13 +29,24 @@ public final class SequentialWorkflowProcessor implements HandlerProcessor<Seque
     }
 
     @Override
+    public List<String> executableBodyFields() {
+        return Collections.singletonList("steps");
+    }
+
+    @Override
     public String deriveChannel(SequentialWorkflow contract, HandlerRegistrationContext context) {
         return contract != null ? contract.getChannel() : null;
     }
 
     @Override
     public boolean matches(SequentialWorkflow contract, HandlerMatchContext context) {
-        return SequentialWorkflowEventMatcher.matches(contract.getEvent(), context);
+        return !CoordinationEventNodes
+                .isRoutableOperationRequestForChannel(
+                        context.event(),
+                        context.channelKey(),
+                        context)
+                && SequentialWorkflowEventMatcher.matches(
+                        contract.getEvent(), context);
     }
 
     @Override

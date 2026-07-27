@@ -63,8 +63,8 @@ class ComputeWorkflowExecutionTest {
         DocumentProcessingResult result = support.processRun(document);
 
         assertEquals("idle", result.document().get("/status"));
-        assertEquals(1, result.triggeredEvents().size());
-        assertEquals("Compute Event", result.triggeredEvents().get(0).get("/kind"));
+        assertEquals(1, result.events().size());
+        assertEquals("Compute Event", result.events().get(0).get("/kind"));
     }
 
     @Test
@@ -114,7 +114,7 @@ class ComputeWorkflowExecutionTest {
 
         DocumentProcessingResult result = support.processRun(document);
 
-        assertTrue(result.triggeredEvents().isEmpty());
+        assertTrue(result.events().isEmpty());
     }
 
     @Test
@@ -471,7 +471,7 @@ class ComputeWorkflowExecutionTest {
 
         DocumentProcessingResult result = support.processRun(document);
 
-        assertTrue(result.triggeredEvents().isEmpty());
+        assertTrue(result.events().isEmpty());
     }
 
     @Test
@@ -624,7 +624,8 @@ class ComputeWorkflowExecutionTest {
                 "          - $return:",
                 "              ok: true"));
 
-        assertFalse(normalDefault.processRun(normalDocument).capabilityFailure());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport
+                .isCapabilityFailure(normalDefault.processRun(normalDocument)));
     }
 
     @Test
@@ -662,9 +663,9 @@ class ComputeWorkflowExecutionTest {
 
         DocumentProcessingResult result = support.processRun(document);
 
-        assertEquals(2, result.triggeredEvents().size());
-        assertEquals("Explicit Events", result.triggeredEvents().get(0).get("/kind"));
-        assertEquals("Accumulator Event", result.triggeredEvents().get(1).get("/kind"));
+        assertEquals(2, result.events().size());
+        assertEquals("Explicit Events", result.events().get(0).get("/kind"));
+        assertEquals("Accumulator Event", result.events().get(1).get("/kind"));
     }
 
     @Test
@@ -876,20 +877,20 @@ class ComputeWorkflowExecutionTest {
     }
 
     private static Node onlyEvent(DocumentProcessingResult result) {
-        assertEquals(1, result.triggeredEvents().size());
-        return result.triggeredEvents().get(0);
+        assertEquals(1, result.events().size());
+        return result.events().get(0);
     }
 
     private static void assertRuntimeFatal(DocumentProcessingResult result, String expectedMessage) {
-        assertEquals(ProcessorStatus.RUNTIME_FATAL, result.status(), result.failureReason());
-        assertTrue(result.failureReason() != null && result.failureReason().contains(expectedMessage),
-                result.failureReason());
+        assertEquals(ProcessorStatus.RUNTIME_FATAL, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
+        assertTrue(blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result) != null && blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result).contains(expectedMessage),
+                blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
     }
 
     private static void assertRuntimeFatalIgnoreCase(DocumentProcessingResult result, String expectedMessage) {
-        assertEquals(ProcessorStatus.RUNTIME_FATAL, result.status(), result.failureReason());
-        assertTrue(result.failureReason() != null
-                        && result.failureReason().toLowerCase().contains(expectedMessage.toLowerCase()),
-                result.failureReason());
+        assertEquals(ProcessorStatus.RUNTIME_FATAL, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
+        assertTrue(blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result) != null
+                        && blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result).toLowerCase().contains(expectedMessage.toLowerCase()),
+                blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
     }
 }

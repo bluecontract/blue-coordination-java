@@ -6,24 +6,22 @@ import blue.repo.BlueRepository;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-public final class RepositoryTypeAliasPreprocessor {
+/**
+ * Benchmark-fixture migration helper for preview repository aliases.
+ *
+ * <p>This source set is not included in the published runtime artifact.</p>
+ */
+final class RepositoryTypeAliasPreprocessor {
     private final Map<String, String> aliases;
 
-    public RepositoryTypeAliasPreprocessor() {
-        this(BlueRepository.latest());
-    }
-
-    public RepositoryTypeAliasPreprocessor(BlueRepository repository) {
-        this(repository != null ? repository.typeAliases() : null);
-    }
-
-    public RepositoryTypeAliasPreprocessor(Map<String, String> aliases) {
-        this.aliases = aliases != null
-                ? new LinkedHashMap<String, String>(aliases)
+    RepositoryTypeAliasPreprocessor(BlueRepository repository) {
+        this.aliases = repository != null
+                ? new LinkedHashMap<String, String>(
+                        repository.typeAliases())
                 : new LinkedHashMap<String, String>();
     }
 
-    public Node preprocess(Node node) {
+    Node preprocess(Node node) {
         if (node == null) {
             return null;
         }
@@ -73,17 +71,14 @@ public final class RepositoryTypeAliasPreprocessor {
     }
 
     private String inlineText(Node node) {
-        if (node == null || !node.isInlineValue() || node.getValue() == null) {
+        if (node == null || !node.isInlineValue()
+                || node.getValue() == null) {
             return null;
         }
         return String.valueOf(node.getValue());
     }
 
     private String aliasFor(String value) {
-        if (value == null) {
-            return null;
-        }
-        return aliases.get(value);
+        return value != null ? aliases.get(value) : null;
     }
-
 }

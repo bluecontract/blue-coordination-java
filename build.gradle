@@ -56,6 +56,14 @@ tasks.withType(JavaCompile).configureEach {
     options.release = 8
 }
 
+tasks.named('compileJava', JavaCompile) {
+    options.compilerArgs.addAll([
+            '-Xlint:deprecation',
+            '-Xlint:-options',
+            '-Werror'
+    ])
+}
+
 configurations {
     binaryCompatibilityBaseline {
         canBeConsumed = false
@@ -191,6 +199,24 @@ tasks.register('languageAdoptionMetricsArtifactTest', Test) { focusedTest ->
     outputs.files(
             layout.buildDirectory.file('reports/language-adoption/scenario-metrics.json'),
             layout.buildDirectory.file('reports/language-adoption/scenario-metrics.csv'))
+}
+
+tasks.register('selectiveCoordinationProcessingTest', Test) { focusedTest ->
+    description = 'Runs focused routing characterization, direct-declaration splitter regressions, physical-locality tests, a limited no-embedding PROCESS parity matrix, and the partial report.'
+    configureFocusedTest(focusedTest, [
+            'blue.coordination.processor.OperationRequestLogicalRoutingTest',
+            'blue.coordination.processor.OperationRequestRoutingEvaluationTest',
+            'blue.coordination.processor.CoordinationDocumentSplitterTest',
+            'blue.coordination.processor.CoordinationDocumentSplitterLocalityTest',
+            'blue.coordination.processor.CoordinationDocumentSplitterDeepLocalityTest',
+            'blue.coordination.processor.CoordinationDocumentSplitterProcessingMatrixTest',
+            'blue.coordination.processor.SelectiveProcessingReportWriterTest',
+            'blue.coordination.processor.SelectiveProcessingReportArtifactTest',
+            'blue.coordination.processor.TimelineCheckpointSubjectTest'
+    ])
+    outputs.file(
+            layout.buildDirectory.file(
+                    'reports/coordination-selective-processing/report.json'))
 }
 
 // Minimal class-file reader used by the verification tasks below. Keeping this

@@ -4,7 +4,7 @@ import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.snapshot.ResolvedSnapshot;
-import blue.language.utils.MergeReverser;
+import blue.language.utils.MinimizedOverlayBuilder;
 import blue.language.utils.NodeToMapListOrValue;
 import blue.repo.BlueRepository;
 import org.junit.jupiter.api.Test;
@@ -28,12 +28,13 @@ class BootstrapDocumentTransportRoundTripTest {
 
         ResolvedSnapshot authored = writer.resolveToSnapshot(source);
         DocumentProcessingResult initialization = writer.initializeDocument(authored);
-        ResolvedSnapshot initialized = initialization.snapshot();
+        ResolvedSnapshot initialized =
+                ProcessingResultTestSupport.snapshot(writer, initialization);
         assertNotNull(initialized.resolvedRoot().getAsNode(
                         "/contracts/declineBootstrap/request/type/type/inResponseTo/type/requestId"),
                 "cold resolution must fully materialize nested inherited Request metadata");
 
-        Node minimized = new MergeReverser().reverseToMinimizedOverlay(
+        Node minimized = new MinimizedOverlayBuilder().build(
                 initialized.resolvedRoot());
         assertFalse(minimized.getContracts().getProperties().containsKey("declineBootstrap"),
                 "the minimized overlay must omit type-derived bootstrap operations");
@@ -54,7 +55,9 @@ class BootstrapDocumentTransportRoundTripTest {
     }
 
     private static Blue configured(BlueRepository repository) {
-        Blue blue = repository.configure(new Blue());
+        Blue blue = new Blue()
+                .nodeProvider(repository.nodeProvider())
+                .typeClassResolver(repository.typeClassResolver());
         CoordinationProcessors.registerWith(blue);
         return blue;
     }

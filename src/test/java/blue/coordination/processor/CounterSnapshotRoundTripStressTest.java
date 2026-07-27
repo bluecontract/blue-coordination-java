@@ -12,7 +12,6 @@ import blue.language.processor.model.JsonPatch;
 import blue.language.snapshot.ResolvedSnapshot;
 import blue.language.provider.BasicNodeProvider;
 import blue.language.provider.SequentialNodeProvider;
-import blue.language.utils.NodeProviderWrapper;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.ChatMessage;
 import blue.repo.coordination.TimelineChannel;
@@ -34,7 +33,8 @@ class CounterSnapshotRoundTripStressTest {
         DocumentProcessingResult initialized = fixture.blue.initializeDocument(
                 fixture.blue.preprocess(bexOnlyCounterDocument(fixture.counterIncrementHandlerBlueId)
                         .blue(fixture.repository.typeAliasBlue())));
-        ResolvedSnapshot currentSnapshot = initialized.snapshot();
+        ResolvedSnapshot currentSnapshot =
+                ProcessingResultTestSupport.snapshot(fixture.blue, initialized);
         assertNotNull(currentSnapshot);
 
         long started = System.nanoTime();
@@ -50,19 +50,23 @@ class CounterSnapshotRoundTripStressTest {
                     i,
                     chatMessage("tick " + i));
             if (i > 1) {
-                // Canonical child fragments may omit context-derived types; compare the
-                // resolved event view when treating the nested timeline as a document.
-                Node previous = currentSnapshot.resolvedNodeAt(
-                        "/contracts/checkpoint/lastEvents/ownerChannel");
-                CoordinationEventNodes.TimelineEntryView previousEntry =
-                        CoordinationEventNodes.timelineEntry(previous);
+                Node previousSubject = currentSnapshot.resolvedNodeAt(
+                        "/contracts/checkpoint/entries/ownerChannel/subject");
                 CoordinationEventNodes.TimelineEntryView currentEntry =
                         CoordinationEventNodes.timelineEntry(event);
-                assertNotNull(previousEntry);
+                assertNotNull(previousSubject);
                 assertNotNull(currentEntry);
-                assertTrue(BlueSemanticIdentity.equals(
-                        currentEntry.timeline(), previousEntry.timeline()));
-                assertTrue(currentEntry.timestamp().compareTo(previousEntry.timestamp()) > 0);
+                assertEquals(
+                        TimelineExternalSubscriptionFunctions
+                                .TIMELINE_ORDER_SUBJECT_VERSION,
+                        TimelineProviderSupport.textProperty(
+                                previousSubject, "semantics"));
+                Node previousTimestamp =
+                        TimelineProviderSupport.property(
+                                previousSubject, "timestamp");
+                assertNotNull(previousTimestamp);
+                assertTrue(currentEntry.timestamp().compareTo(
+                        (BigInteger) previousTimestamp.getValue()) > 0);
                 TimelineChannel channel = fixture.blue.nodeToObject(
                         currentSnapshot.resolvedNodeAt("/contracts/ownerChannel"),
                         TimelineChannel.class);
@@ -71,25 +75,33 @@ class CounterSnapshotRoundTripStressTest {
 
             DocumentProcessingResult result = fixture.blue.processDocument(currentSnapshot, event);
 
-            assertNotNull(result.snapshot(), "iteration " + i + " should return a snapshot");
-            assertNotNull(result.blueId(), "iteration " + i + " should return a BlueId");
+            ResolvedSnapshot resultSnapshot =
+                    ProcessingResultTestSupport.snapshot(fixture.blue, result);
+            String resultBlueId = ProcessingResultTestSupport.blueId(result);
+            assertNotNull(resultSnapshot,
+                    "iteration " + i + " should return a snapshot");
+            assertNotNull(resultBlueId,
+                    "iteration " + i + " should return a BlueId");
             assertTrue(result.totalGas() > 0, "iteration " + i + " should charge gas");
-            assertEquals(1, result.triggeredEvents().size(), "iteration " + i + " should emit one event");
-            assertEquals(BigInteger.valueOf(i), result.resolvedDocument().get("/counter"));
-            assertCounterMessage(result.triggeredEvents().get(0), i);
+            assertEquals(1, result.events().size(), "iteration " + i + " should emit one event");
+            assertEquals(BigInteger.valueOf(i),
+                    ProcessingResultTestSupport.resolvedDocument(
+                            fixture.blue, result).get("/counter"));
+            assertCounterMessage(result.events().get(0), i);
 
             totalGas += result.totalGas();
             maxGas = Math.max(maxGas, result.totalGas());
             minGas = Math.min(minGas, result.totalGas());
-            finalBlueId = result.blueId();
+            finalBlueId = resultBlueId;
 
-            String canonicalJson = fixture.blue.nodeToJson(result.canonicalDocument());
+            String canonicalJson = fixture.blue.nodeToJson(result.document());
             Fixture coldFixture = configuredFixture();
             Node parsedCanonical = coldFixture.blue.parseSourceJson(canonicalJson);
             ResolvedSnapshot loadedSnapshot = coldFixture.blue.loadSnapshot(parsedCanonical);
 
-            assertEquals(result.blueId(), loadedSnapshot.blueId(), "iteration " + i + " should preserve BlueId");
-            assertSnapshotRoundTrip(result.snapshot(), loadedSnapshot);
+            assertEquals(resultBlueId, loadedSnapshot.blueId(),
+                    "iteration " + i + " should preserve BlueId");
+            assertSnapshotRoundTrip(resultSnapshot, loadedSnapshot);
             currentSnapshot = loadedSnapshot;
             fixture = coldFixture;
         }
@@ -182,7 +194,7 @@ class CounterSnapshotRoundTripStressTest {
         String counterIncrementHandlerBlueId = testTypes.getBlueIdByName(
                 "Counter Increment Handler");
         blue.nodeProvider(new SequentialNodeProvider(
-                NodeProviderWrapper.unverified(testTypes), repositoryProvider));
+                testTypes, repositoryProvider));
         CoordinationProcessors.registerWith(blue);
         blue.registerExternalContractType(counterIncrementHandlerBlueId,
                 counterIncrementHandlerType,

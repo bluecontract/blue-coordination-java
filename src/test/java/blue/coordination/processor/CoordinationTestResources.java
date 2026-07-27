@@ -66,7 +66,9 @@ public final class CoordinationTestResources {
     }
 
     public static Blue configuredBlue(BlueRepository repository) {
-        return repository.configure(new Blue());
+        return new Blue()
+                .nodeProvider(repository.nodeProvider())
+                .typeClassResolver(repository.typeClassResolver());
     }
 
     public static String simpleTimelineChannelYaml(String key, String timelineId, int indent) {

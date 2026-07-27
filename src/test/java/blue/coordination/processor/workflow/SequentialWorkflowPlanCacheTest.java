@@ -126,6 +126,23 @@ class SequentialWorkflowPlanCacheTest {
     }
 
     @Test
+    void retainedExactStepWeightDoesNotTraverseTriggerPayload() {
+        List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors =
+                Collections.<WorkflowStepExecutor<? extends SequentialWorkflowStep>>singletonList(
+                        countingTriggerExecutor(new AtomicInteger()));
+        FrozenNode small = triggerContract(new Node().value("small"));
+        Node largeEvent = new Node().value("leaf");
+        for (int index = 0; index < 128; index++) {
+            largeEvent = new Node().properties("nested", largeEvent);
+        }
+        FrozenNode large = triggerContract(largeEvent);
+
+        assertEquals(
+                buildPlan(small, executors).approximateWeightBytes(),
+                buildPlan(large, executors).approximateWeightBytes());
+    }
+
+    @Test
     void clearAndCloseReleaseRetainedWeightAndPreventRepopulation() {
         FrozenNode contract = contract("Clear", "Run");
         List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors =
@@ -271,5 +288,14 @@ class SequentialWorkflowPlanCacheTest {
                 .description(description)
                 .properties("steps", new Node().items(step));
         return FrozenNode.fromResolvedNode(contract);
+    }
+
+    private static FrozenNode triggerContract(Node event) {
+        Node step = new Node()
+                .name("Run")
+                .type("Coordination/Trigger Event")
+                .properties("event", event);
+        return FrozenNode.fromResolvedNode(
+                new Node().properties("steps", new Node().items(step)));
     }
 }

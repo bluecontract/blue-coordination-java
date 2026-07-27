@@ -4,12 +4,19 @@ import blue.language.processor.ChannelCheckpointContext;
 import blue.language.processor.ChannelEvaluation;
 import blue.language.processor.ChannelEvaluationContext;
 import blue.language.processor.ChannelProcessor;
+import blue.language.processor.ExternalChannelSubscriptionFunctions;
 import blue.repo.coordination.TimelineChannel;
 
 public final class TimelineChannelProcessor implements ChannelProcessor<TimelineChannel> {
     @Override
     public Class<TimelineChannel> contractType() {
         return TimelineChannel.class;
+    }
+
+    @Override
+    public ExternalChannelSubscriptionFunctions<TimelineChannel>
+    externalSubscriptionFunctions() {
+        return TimelineExternalSubscriptionFunctions.INSTANCE;
     }
 
     @Override
@@ -23,7 +30,11 @@ public final class TimelineChannelProcessor implements ChannelProcessor<Timeline
     }
 
     @Override
-    public boolean isNewerEvent(TimelineChannel contract, ChannelCheckpointContext context) {
-        return TimelineProviderSupport.isNewerOrSameTimelineEvent(context);
+    public boolean isNewerEvent(TimelineChannel contract,
+                                ChannelCheckpointContext context) {
+        return TimelineProviderSupport.isNewerTimelineSubject(
+                context,
+                TimelineExternalSubscriptionFunctions
+                        .TIMELINE_ORDER_SUBJECT_VERSION);
     }
 }

@@ -69,7 +69,10 @@ class PaynoteReducedDefinitionWorkflowTest {
         loadYamlMs = elapsedMs(start);
 
         start = System.nanoTime();
-        initializedSnapshot = fixture.blue.initializeDocument(document).snapshot();
+        initializedSnapshot =
+                blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                        fixture.blue,
+                        fixture.blue.initializeDocument(document));
         initializeMs = elapsedMs(start);
 
         start = System.nanoTime();
@@ -104,12 +107,15 @@ class PaynoteReducedDefinitionWorkflowTest {
         double coldHotelMs = elapsedMs(start);
 
         start = System.nanoTime();
-        DocumentProcessingResult coldRestaurant = fixture.blue.processDocument(coldHotel.snapshot(), restaurantEvent);
+        DocumentProcessingResult coldRestaurant = fixture.blue.processDocument(
+                blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                        fixture.blue, coldHotel),
+                restaurantEvent);
         double coldRestaurantMs = elapsedMs(start);
         BexProcessingMetrics.Snapshot afterCold = metrics.snapshot();
 
-        assertFalse(coldHotel.capabilityFailure(), coldHotel.failureReason());
-        assertFalse(coldRestaurant.capabilityFailure(), coldRestaurant.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(coldHotel), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(coldHotel));
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(coldRestaurant), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(coldRestaurant));
         assertEquals(Boolean.TRUE, coldRestaurant.document().get("/orders/package-order-a/hotelOrder/resalePlaced"));
         assertEquals(Boolean.TRUE, coldRestaurant.document().get("/orders/package-order-a/restaurantOrder/resalePlaced"));
 
@@ -118,12 +124,15 @@ class PaynoteReducedDefinitionWorkflowTest {
         double warmHotelMs = elapsedMs(start);
 
         start = System.nanoTime();
-        DocumentProcessingResult warmRestaurant = fixture.blue.processDocument(warmHotel.snapshot(), restaurantEvent);
+        DocumentProcessingResult warmRestaurant = fixture.blue.processDocument(
+                blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                        fixture.blue, warmHotel),
+                restaurantEvent);
         double warmRestaurantMs = elapsedMs(start);
         BexProcessingMetrics.Snapshot afterWarm = metrics.snapshot();
 
-        assertFalse(warmHotel.capabilityFailure(), warmHotel.failureReason());
-        assertFalse(warmRestaurant.capabilityFailure(), warmRestaurant.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(warmHotel), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(warmHotel));
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(warmRestaurant), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(warmRestaurant));
         assertEquals(Boolean.TRUE, warmRestaurant.document().get("/orders/package-order-a/hotelOrder/resalePlaced"));
         assertEquals(Boolean.TRUE, warmRestaurant.document().get("/orders/package-order-a/restaurantOrder/resalePlaced"));
 
@@ -153,10 +162,10 @@ class PaynoteReducedDefinitionWorkflowTest {
         DocumentProcessingResult hotelResult = fixture.blue.processDocument(initializedSnapshot, hotelEvent);
         printTiming("process hotel participant operation", start);
 
-        assertFalse(hotelResult.capabilityFailure(), hotelResult.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(hotelResult), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(hotelResult));
         assertEquals("placed",
                 hotelResult.document().getAsText("/resaleOrderRequests/hotel-request-a/status"),
-                hotelResult.triggeredEvents().toString());
+                hotelResult.events().toString());
         assertEquals("hotel-order-session-a",
                 hotelResult.document().getAsText("/resaleOrderRequests/hotel-request-a/orderSessionId"));
         assertEquals(Boolean.TRUE, hotelResult.document().get("/orders/package-order-a/hotelOrder/resalePlaced"));
@@ -170,14 +179,17 @@ class PaynoteReducedDefinitionWorkflowTest {
                 hotelResult.document().getAsText("/componentOrderRefsBySessionId/hotel-order-session-a/packageOrderSessionId"));
         assertEquals("hotelOrder",
                 hotelResult.document().getAsText("/componentOrderRefsBySessionId/hotel-order-session-a/component"));
-        assertContainsType(hotelResult.triggeredEvents(), "Sample/Document Initial Snapshot Requested");
-        assertContainsType(hotelResult.triggeredEvents(), "Sample/Subscribe to Session Requested");
+        assertContainsType(hotelResult.events(), "Sample/Document Initial Snapshot Requested");
+        assertContainsType(hotelResult.events(), "Sample/Subscribe to Session Requested");
 
         start = System.nanoTime();
-        DocumentProcessingResult restaurantResult = fixture.blue.processDocument(hotelResult.snapshot(), restaurantEvent);
+        DocumentProcessingResult restaurantResult = fixture.blue.processDocument(
+                blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                        fixture.blue, hotelResult),
+                restaurantEvent);
         printTiming("process restaurant participant operation", start);
 
-        assertFalse(restaurantResult.capabilityFailure(), restaurantResult.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(restaurantResult), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(restaurantResult));
         assertNotNull(restaurantResult.document());
         assertEquals("placed", restaurantResult.document().getAsText("/resaleOrderRequests/restaurant-request-a/status"));
         assertEquals("restaurant-order-session-a",
@@ -194,8 +206,8 @@ class PaynoteReducedDefinitionWorkflowTest {
         assertEquals("restaurantOrder",
                 restaurantResult.document().getAsText("/componentOrderRefsBySessionId/restaurant-order-session-a/component"));
         assertEquals(Boolean.TRUE, restaurantResult.document().get("/orders/package-order-a/hotelOrder/resalePlaced"));
-        assertContainsType(restaurantResult.triggeredEvents(), "Sample/Document Initial Snapshot Requested");
-        assertContainsType(restaurantResult.triggeredEvents(), "Sample/Subscribe to Session Requested");
+        assertContainsType(restaurantResult.events(), "Sample/Document Initial Snapshot Requested");
+        assertContainsType(restaurantResult.events(), "Sample/Subscribe to Session Requested");
         printTiming("total reduced paynote flow", totalStart);
         printMetricsDelta("reduced paynote flow metrics", before, metrics.snapshot());
     }
@@ -208,26 +220,26 @@ class PaynoteReducedDefinitionWorkflowTest {
         DocumentProcessingResult coldHotel = fixture.blue.processDocument(initializedSnapshot, hotelEvent);
         double coldHotelMs = elapsedMs(start);
         BexProcessingMetrics.Snapshot afterHotelCold = metrics.snapshot();
-        assertFalse(coldHotel.capabilityFailure(), coldHotel.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(coldHotel), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(coldHotel));
 
         start = System.nanoTime();
         DocumentProcessingResult warmHotel = fixture.blue.processDocument(initializedSnapshot, hotelEvent);
         double warmHotelMs = elapsedMs(start);
         BexProcessingMetrics.Snapshot afterHotelWarm = metrics.snapshot();
-        assertFalse(warmHotel.capabilityFailure(), warmHotel.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(warmHotel), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(warmHotel));
 
         BexProcessingMetrics.Snapshot beforeRestaurantCold = metrics.snapshot();
         start = System.nanoTime();
         DocumentProcessingResult coldRestaurant = fixture.blue.processDocument(initializedSnapshot, restaurantEvent);
         double coldRestaurantMs = elapsedMs(start);
         BexProcessingMetrics.Snapshot afterRestaurantCold = metrics.snapshot();
-        assertFalse(coldRestaurant.capabilityFailure(), coldRestaurant.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(coldRestaurant), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(coldRestaurant));
 
         start = System.nanoTime();
         DocumentProcessingResult warmRestaurant = fixture.blue.processDocument(initializedSnapshot, restaurantEvent);
         double warmRestaurantMs = elapsedMs(start);
         BexProcessingMetrics.Snapshot afterRestaurantWarm = metrics.snapshot();
-        assertFalse(warmRestaurant.capabilityFailure(), warmRestaurant.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(warmRestaurant), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(warmRestaurant));
 
         System.out.printf(Locale.ROOT,
                 "Paynote reduced BEX same-path cold/warm timing - coldHotelMs: %.3fms, warmHotelMs: %.3fms, " +
@@ -246,9 +258,12 @@ class PaynoteReducedDefinitionWorkflowTest {
     @Order(4)
     void eventProcessingOnlyTimingAfterWarmup() {
         DocumentProcessingResult warmHotel = fixture.blue.processDocument(initializedSnapshot, hotelEvent);
-        assertFalse(warmHotel.capabilityFailure(), warmHotel.failureReason());
-        DocumentProcessingResult warmRestaurant = fixture.blue.processDocument(warmHotel.snapshot(), restaurantEvent);
-        assertFalse(warmRestaurant.capabilityFailure(), warmRestaurant.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(warmHotel), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(warmHotel));
+        DocumentProcessingResult warmRestaurant = fixture.blue.processDocument(
+                blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                        fixture.blue, warmHotel),
+                restaurantEvent);
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(warmRestaurant), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(warmRestaurant));
 
         BexProcessingMetrics.Snapshot before = metrics.snapshot();
         long start = System.nanoTime();
@@ -256,12 +271,15 @@ class PaynoteReducedDefinitionWorkflowTest {
         double processHotelMs = elapsedMs(start);
 
         start = System.nanoTime();
-        DocumentProcessingResult restaurantResult = fixture.blue.processDocument(hotelResult.snapshot(), restaurantEvent);
+        DocumentProcessingResult restaurantResult = fixture.blue.processDocument(
+                blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                        fixture.blue, hotelResult),
+                restaurantEvent);
         double processRestaurantMs = elapsedMs(start);
         BexProcessingMetrics.Snapshot after = metrics.snapshot();
 
-        assertFalse(hotelResult.capabilityFailure(), hotelResult.failureReason());
-        assertFalse(restaurantResult.capabilityFailure(), restaurantResult.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(hotelResult), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(hotelResult));
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(restaurantResult), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(restaurantResult));
         assertEquals(Boolean.TRUE, restaurantResult.document().get("/orders/package-order-a/hotelOrder/resalePlaced"));
         assertEquals(Boolean.TRUE, restaurantResult.document().get("/orders/package-order-a/restaurantOrder/resalePlaced"));
 

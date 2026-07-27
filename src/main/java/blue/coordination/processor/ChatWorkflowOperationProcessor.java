@@ -7,6 +7,8 @@ import blue.language.processor.HandlerRegistrationContext;
 import blue.language.processor.ProcessorExecutionContext;
 import blue.repo.coordination.ChatWorkflowOperation;
 import blue.repo.coordination.SequentialWorkflow;
+import java.util.Collections;
+import java.util.List;
 
 public final class ChatWorkflowOperationProcessor implements HandlerProcessor<ChatWorkflowOperation> {
     private final SequentialWorkflowRunner runner;
@@ -26,6 +28,11 @@ public final class ChatWorkflowOperationProcessor implements HandlerProcessor<Ch
     @Override
     public Class<ChatWorkflowOperation> contractType() {
         return ChatWorkflowOperation.class;
+    }
+
+    @Override
+    public List<String> executableBodyFields() {
+        return Collections.singletonList("steps");
     }
 
     @Override

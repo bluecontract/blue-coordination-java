@@ -46,7 +46,7 @@ class MustUnderstandContractsTest {
 
         DocumentProcessingResult result = initialize(fixture, document);
 
-        assertFalse(result.capabilityFailure(), result.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertTrue(fixture.blue.isInitialized(result.document()));
     }
 
@@ -62,7 +62,7 @@ class MustUnderstandContractsTest {
 
         DocumentProcessingResult result = initialize(fixture, document);
 
-        assertFalse(result.capabilityFailure(), result.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertTrue(fixture.blue.isInitialized(result.document()));
     }
 
@@ -95,7 +95,7 @@ class MustUnderstandContractsTest {
                         1,
                         TestTimelineProvider.chatMessage("hello")));
 
-        assertFalse(result.capabilityFailure(), result.failureReason());
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertNotNull(checkpointEvent(result.document(), "owner"));
     }
 
@@ -104,10 +104,10 @@ class MustUnderstandContractsTest {
     }
 
     private static void assertCapabilityFailure(DocumentProcessingResult result, String reason) {
-        assertTrue(result.capabilityFailure(), result.failureReason());
-        assertTrue(result.failureReason().contains(reason), result.failureReason());
+        assertTrue(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
+        assertTrue(blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result).contains(reason), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertEquals(0L, result.totalGas());
-        assertTrue(result.triggeredEvents().isEmpty());
+        assertTrue(result.events().isEmpty());
         assertFalse(hasInitializedMarker(result.document()));
     }
 
@@ -119,8 +119,9 @@ class MustUnderstandContractsTest {
     private static Node checkpointEvent(Node document, String key) {
         Node contracts = property(document, "contracts");
         Node checkpoint = property(contracts, "checkpoint");
-        Node lastEvents = property(checkpoint, "lastEvents");
-        return property(lastEvents, key);
+        Node entries = property(checkpoint, "entries");
+        Node entry = property(entries, key);
+        return property(entry, "subject");
     }
 
     private static Map<String, Node> contract(String key, Node contract) {

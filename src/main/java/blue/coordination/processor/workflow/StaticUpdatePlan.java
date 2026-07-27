@@ -5,11 +5,10 @@ import blue.language.model.Node;
 import blue.language.processor.model.FrozenJsonPatch;
 import blue.language.processor.model.JsonPatch;
 import blue.language.snapshot.FrozenNode;
-import blue.language.utils.MergeReverser;
+import blue.language.utils.MinimizedOverlayBuilder;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -22,6 +21,8 @@ import java.util.Map;
  * execution.</p>
  */
 final class StaticUpdatePlan {
+    private static final long RETAINED_EXACT_VALUE_BYTES = 96L;
+
     private final List<PatchTemplate> patches;
     private final String validationFailure;
     private final long approximateWeightBytes;
@@ -39,22 +40,17 @@ final class StaticUpdatePlan {
     }
 
     static StaticUpdatePlan compile(FrozenNode changeset, BexProcessingMetrics metrics) {
-        String bexPath = StaticPayloadValidator.firstBexOperatorPath(changeset, "");
-        if (bexPath != null) {
-            return invalid("Update Document changeset must be static; BEX operator object is not allowed at "
-                    + bexPath);
-        }
         if (changeset == null || changeset.getItems() == null) {
             return invalid("Update Document changeset must be a static patch list");
         }
         List<PatchTemplate> templates = new ArrayList<PatchTemplate>(changeset.getItems().size());
-        MergeReverser mergeReverser = new MergeReverser();
+        MinimizedOverlayBuilder overlayBuilder = new MinimizedOverlayBuilder();
         long weight = 96L;
         for (int index = 0; index < changeset.getItems().size(); index++) {
             FrozenNode item = changeset.getItems().get(index);
             boolean resolvedConstruction = item != null && !item.isStrictCanonical();
             if (resolvedConstruction) {
-                Node authoredItem = mergeReverser.reverseToMinimizedOverlay(item.toNode());
+                Node authoredItem = overlayBuilder.build(item.toNode());
                 item = authoredItem != null ? FrozenNode.fromNode(authoredItem) : null;
             }
             Map<String, FrozenNode> properties = item != null ? item.getProperties() : null;
@@ -72,25 +68,29 @@ final class StaticUpdatePlan {
                 return invalid("Update Document changeset entry " + index
                         + " field 'path' must be text");
             }
-            if (op.value == null || op.value.trim().isEmpty()) {
+            if (op.value == null || op.value.isEmpty()) {
                 return invalid("Update Document patch operation is required");
             }
-            if (path.value == null || path.value.trim().isEmpty()) {
+            if (path.value == null || path.value.isEmpty()) {
                 return invalid("Update Document patch path is required");
             }
-            String normalizedOp = op.value.trim().toLowerCase(java.util.Locale.ROOT);
             JsonPatch.Op patchOp;
-            if ("add".equals(normalizedOp)) {
+            if ("add".equals(op.value)) {
                 patchOp = JsonPatch.Op.ADD;
-            } else if ("replace".equals(normalizedOp)) {
+            } else if ("replace".equals(op.value)) {
                 patchOp = JsonPatch.Op.REPLACE;
-            } else if ("remove".equals(normalizedOp)) {
+            } else if ("remove".equals(op.value)) {
                 patchOp = JsonPatch.Op.REMOVE;
             } else {
                 return invalid("Unsupported Update Document patch operation: " + op.value);
             }
             FrozenNode value = null;
-            if (patchOp != JsonPatch.Op.REMOVE) {
+            if (patchOp == JsonPatch.Op.REMOVE) {
+                if (properties.containsKey("val")) {
+                    return invalid(
+                            "Update Document patch value must be absent for remove");
+                }
+            } else {
                 value = properties.get("val");
                 if (value == null) {
                     return invalid("Update Document patch value is required for operation: "
@@ -108,7 +108,12 @@ final class StaticUpdatePlan {
                 }
             }
             templates.add(new PatchTemplate(patchOp, path.value, value));
-            weight += 72L + stringWeight(path.value) + frozenWeight(value);
+            /*
+             * Exact admitted values are retained by identity. Cache
+             * bookkeeping must not recursively walk or charge their payload.
+             */
+            weight += 72L + stringWeight(path.value)
+                    + (value != null ? RETAINED_EXACT_VALUE_BYTES : 0L);
         }
         return new StaticUpdatePlan(templates, null, weight);
     }
@@ -148,43 +153,6 @@ final class StaticUpdatePlan {
 
     private static long stringWeight(String value) {
         return value != null ? 40L + (long) value.length() * 2L : 0L;
-    }
-
-    private static long frozenWeight(FrozenNode node) {
-        return frozenWeight(node, new IdentityHashMap<FrozenNode, Boolean>());
-    }
-
-    private static long frozenWeight(FrozenNode node,
-                                     IdentityHashMap<FrozenNode, Boolean> visited) {
-        if (node == null || visited.put(node, Boolean.TRUE) != null) {
-            return 0L;
-        }
-        long weight = 96L
-                + stringWeight(node.getName())
-                + stringWeight(node.getDescription())
-                + stringWeight(node.getReferenceBlueId());
-        if (node.getValue() instanceof String) {
-            weight += stringWeight((String) node.getValue());
-        } else if (node.getValue() != null) {
-            weight += 32L;
-        }
-        if (node.getItems() != null) {
-            weight += 16L + (long) node.getItems().size() * 8L;
-            for (FrozenNode item : node.getItems()) {
-                weight += frozenWeight(item, visited);
-            }
-        }
-        if (node.getProperties() != null) {
-            weight += 32L + (long) node.getProperties().size() * 40L;
-            for (Map.Entry<String, FrozenNode> entry : node.getProperties().entrySet()) {
-                weight += stringWeight(entry.getKey()) + frozenWeight(entry.getValue(), visited);
-            }
-        }
-        weight += frozenWeight(node.getType(), visited);
-        weight += frozenWeight(node.getItemType(), visited);
-        weight += frozenWeight(node.getKeyType(), visited);
-        weight += frozenWeight(node.getValueType(), visited);
-        return weight;
     }
 
     static final class PatchTemplate {

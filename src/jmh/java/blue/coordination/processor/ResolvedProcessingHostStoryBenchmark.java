@@ -49,7 +49,9 @@ public class ResolvedProcessingHostStoryBenchmark {
     @Setup(Level.Trial)
     public void setUp() {
         BlueRepository repository = BlueRepository.latest();
-        blue = repository.configure(new Blue());
+        blue = new Blue()
+                .nodeProvider(repository.nodeProvider())
+                .typeClassResolver(repository.typeClassResolver());
         CoordinationProcessors.registerWith(blue, CoordinationProcessorOptions.builder().build());
 
         sourceDocument = preprocess(repository, document());
@@ -121,7 +123,7 @@ public class ResolvedProcessingHostStoryBenchmark {
 
     private void assertExpectedResult(DocumentProcessingResult result) {
         requireSuccess(result, "verification");
-        Node resolved = result.resolvedDocument();
+        Node resolved = blue.resolve(result.document());
         for (int workflow = 1; workflow <= WORKFLOWS; workflow++) {
             Integer actual = resolved.getAsInteger("/workflow" + workflow + "Counter");
             if (!Integer.valueOf(EXPECTED_COUNTER).equals(actual)) {
@@ -131,7 +133,7 @@ public class ResolvedProcessingHostStoryBenchmark {
     }
 
     private static Node storedEpoch(DocumentProcessingResult result, String phase) {
-        Node canonical = result.canonicalDocument();
+        Node canonical = result.document();
         if (canonical == null) {
             throw new IllegalStateException(phase + " did not produce a canonical epoch");
         }
@@ -141,7 +143,9 @@ public class ResolvedProcessingHostStoryBenchmark {
     private static void requireSuccess(DocumentProcessingResult result, String phase) {
         if (result == null || result.status() != ProcessorStatus.SUCCESS) {
             throw new IllegalStateException(phase + " failed: "
-                    + (result != null ? result.failureReason() : "missing result"));
+                    + (result != null && result.diagnostic() != null
+                    ? result.diagnostic().message()
+                    : "missing result"));
         }
     }
 

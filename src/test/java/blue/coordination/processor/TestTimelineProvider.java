@@ -2,10 +2,10 @@ package blue.coordination.processor;
 
 import blue.language.Blue;
 import blue.language.model.Node;
-import blue.language.processor.ChannelCheckpointContext;
 import blue.language.processor.ChannelEvaluation;
 import blue.language.processor.ChannelEvaluationContext;
 import blue.language.processor.ChannelProcessor;
+import blue.language.processor.ExternalChannelSubscriptionFunctions;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.ChatMessage;
 import blue.repo.coordination.Timeline;
@@ -100,6 +100,12 @@ public final class TestTimelineProvider {
         }
 
         @Override
+        public ExternalChannelSubscriptionFunctions<TimelineChannel>
+        externalSubscriptionFunctions() {
+            return TimelineExternalSubscriptionFunctions.INSTANCE;
+        }
+
+        @Override
         public ChannelEvaluation evaluate(TimelineChannel contract, ChannelEvaluationContext context) {
             return TimelineProviderSupport.evaluateTimelineEntry(contract, context);
         }
@@ -109,9 +115,5 @@ public final class TestTimelineProvider {
             return TimelineProviderSupport.eventId(context.event());
         }
 
-        @Override
-        public boolean isNewerEvent(TimelineChannel contract, ChannelCheckpointContext context) {
-            return TimelineProviderSupport.isNewerOrSameTimelineEvent(context);
-        }
     }
 }

@@ -47,7 +47,9 @@ class DynamicEmbeddedParticipantsWorkflowTest {
                         .build());
 
         DocumentProcessingResult initialized = support.initialize(support.yamlResource(DOCUMENT_RESOURCE));
-        ResolvedSnapshot current = initialized.snapshot();
+        ResolvedSnapshot current =
+                blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                        support.blue, initialized);
         Node currentDocument = initialized.document();
 
         assertNotNull(currentDocument.getAsNode("/embeddedTemplate"));
@@ -62,8 +64,9 @@ class DynamicEmbeddedParticipantsWorkflowTest {
             // composite-channel entry.
             DocumentProcessingResult result = support.blue.processDocument(current,
                     operationEvent(support, "alice", i, "createEmbedded"));
-            assertFalse(result.capabilityFailure(), result.failureReason());
-            current = result.snapshot();
+            assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
+            current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                    support.blue, result);
             currentDocument = result.document();
         }
 
@@ -85,8 +88,9 @@ class DynamicEmbeddedParticipantsWorkflowTest {
             // inside /embedded_i and emits a chat message from the child document scope.
             DocumentProcessingResult chatResult = support.blue.processDocument(current,
                     operationEvent(support, "embedded-" + participantNumber, timestamp, "say"));
-            assertFalse(chatResult.capabilityFailure(), chatResult.failureReason());
-            current = chatResult.snapshot();
+            assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(chatResult), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(chatResult));
+            current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                    support.blue, chatResult);
             currentDocument = chatResult.document();
 
             // Bob checks the root counter after each embedded chat. The check is intentionally a
@@ -94,8 +98,9 @@ class DynamicEmbeddedParticipantsWorkflowTest {
             // operations can interact with the same state.
             DocumentProcessingResult bobCheck = support.blue.processDocument(current,
                     operationEvent(support, "bob", 100 + i, "checkChatCount"));
-            assertFalse(bobCheck.capabilityFailure(), bobCheck.failureReason());
-            current = bobCheck.snapshot();
+            assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(bobCheck), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(bobCheck));
+            current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                    support.blue, bobCheck);
             currentDocument = bobCheck.document();
 
             assertEquals(BigInteger.valueOf(i + 1), currentDocument.get("/chatMessagesSeen"));

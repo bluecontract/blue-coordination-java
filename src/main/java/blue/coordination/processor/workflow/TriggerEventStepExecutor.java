@@ -6,8 +6,6 @@ import blue.language.snapshot.FrozenNode;
 import blue.repo.coordination.SequentialWorkflowStep;
 import blue.repo.coordination.TriggerEvent;
 
-import java.util.Map;
-
 public final class TriggerEventStepExecutor implements WorkflowStepExecutor<TriggerEvent> {
     private final BexProcessingMetrics metrics;
 
@@ -35,23 +33,31 @@ public final class TriggerEventStepExecutor implements WorkflowStepExecutor<Trig
             if (metrics != null) {
                 metrics.incrementTriggerEventStepsExecuted();
             }
-            FrozenNode rawEvent = FrozenNodeUtil.property(context.stepFrozenNode(), "event");
-            if (!hasDeclaredEvent(context.stepFrozenNode())) {
-                context.processorContext().throwFatal("Trigger Event step must declare event payload");
-                return WorkflowStepResult.none();
-            }
-            if (StaticPayloadValidator.rejectBexOperators(rawEvent,
-                    context,
-                    "Trigger Event event")) {
-                return WorkflowStepResult.none();
-            }
-            Node event = step.getEvent();
-            if (isEmpty(event)) {
+            FrozenNode rawStep = context.stepFrozenNode();
+            Node event;
+            if (rawStep != null) {
+                if (rawStep.getProperties() == null
+                        || !rawStep.getProperties().containsKey("event")) {
+                    context.processorContext().throwFatal(
+                            "Trigger Event step must declare event payload");
+                    return WorkflowStepResult.none();
+                }
+                FrozenNode rawEvent =
+                        rawStep.getProperties().get("event");
+                if (rawEvent == null) {
+                    context.processorContext().throwFatal(
+                            "Trigger Event step must declare event payload");
+                    return WorkflowStepResult.none();
+                }
+                event = rawEvent.toNode();
+            } else if (step.getEvent() != null) {
+                event = step.getEvent().clone();
+            } else {
                 context.processorContext().throwFatal("Trigger Event step must declare event payload");
                 return WorkflowStepResult.none();
             }
             long emitStart = System.nanoTime();
-            context.processorContext().emitEvent(event.clone());
+            context.processorContext().emitEvent(event);
             if (metrics != null) {
                 metrics.addTriggerEmitEventNanos(System.nanoTime() - emitStart);
             }
@@ -63,50 +69,4 @@ public final class TriggerEventStepExecutor implements WorkflowStepExecutor<Trig
         }
     }
 
-    private static boolean hasDeclaredEvent(Node stepNode) {
-        if (stepNode == null) {
-            return true;
-        }
-        if (stepNode.getProperties() == null || !stepNode.getProperties().containsKey("event")) {
-            return false;
-        }
-        return !isEmpty(stepNode.getProperties().get("event"));
-    }
-
-    private static boolean hasDeclaredEvent(FrozenNode stepNode) {
-        if (stepNode == null) {
-            return true;
-        }
-        if (stepNode.getProperties() == null || !stepNode.getProperties().containsKey("event")) {
-            return false;
-        }
-        return !FrozenNodeUtil.isEmpty(stepNode.getProperties().get("event"));
-    }
-
-    private static boolean isEmpty(Node node) {
-        if (node == null) {
-            return true;
-        }
-        return node.getType() == null
-                && node.getItemType() == null
-                && node.getKeyType() == null
-                && node.getValueType() == null
-                && node.getValue() == null
-                && empty(node.getItems())
-                && empty(node.getProperties())
-                && node.getBlueId() == null
-                && node.getSchema() == null
-                && node.getMergePolicy() == null
-                && node.getPreviousBlueId() == null
-                && node.getPosition() == null
-                && node.getBlue() == null;
-    }
-
-    private static boolean empty(Map<?, ?> map) {
-        return map == null || map.isEmpty();
-    }
-
-    private static boolean empty(Iterable<?> items) {
-        return items == null || !items.iterator().hasNext();
-    }
 }

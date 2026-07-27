@@ -5120,11 +5120,11 @@
                     },
                     "embeddedHotelOrderEvents": {
                       "type": "Embedded Node Channel",
-                      "childPath": "/embeddedDocs/hotelOrder"
+                      "sourcePath": "/embeddedDocs/hotelOrder"
                     },
                     "embeddedRestaurantOrderEvents": {
                       "type": "Embedded Node Channel",
-                      "childPath": "/embeddedDocs/restaurantOrder"
+                      "sourcePath": "/embeddedDocs/restaurantOrder"
                     },
                     "processEmbeddedComponentOrders": {
                       "type": "Process Embedded",
@@ -8812,7 +8812,7 @@
                     },
                     "embeddedOrderEvents": {
                       "type": "Embedded Node Channel",
-                      "childPath": "/embeddedDocs/order"
+                      "sourcePath": "/embeddedDocs/order"
                     },
                     "completeOnFulfillmentEvent": {
                       "type": "Coordination/Sequential Workflow",

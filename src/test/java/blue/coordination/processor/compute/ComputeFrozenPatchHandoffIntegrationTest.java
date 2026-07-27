@@ -41,7 +41,7 @@ class ComputeFrozenPatchHandoffIntegrationTest {
 
         DocumentProcessingResult result = support.processRun(document);
 
-        assertEquals(ProcessorStatus.SUCCESS, result.status(), result.failureReason());
+        assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertEquals("ownerChannel", result.document().get("/copiedChannel"));
         assertEquals(1L, metrics.directBexChangesetHits());
         assertEquals(1L, metrics.bexPatchFrozenDirectConversions());
@@ -49,7 +49,7 @@ class ComputeFrozenPatchHandoffIntegrationTest {
         assertEquals(1L, delta(metrics, before, "frozenPatchesHandedToLanguage"));
         assertEquals(2L, delta(metrics, before, "frozenPatchValuesAccepted"),
                 "the frozen value is accepted during preview and runtime consumption");
-        assertEquals(2L, delta(metrics, before, "frozenPatchValuesHandedToLanguage"));
+        assertEquals(1L, delta(metrics, before, "frozenPatchValuesHandedToLanguage"));
         assertEquals(0L, delta(metrics, before, "mutablePatchValuesFrozen"));
         assertEquals(0L, delta(metrics, before, "frozenPatchValuesMaterialized"));
     }
@@ -81,6 +81,7 @@ class ComputeFrozenPatchHandoffIntegrationTest {
                         "                - type: Coordination/Event",
                         "                  kind: second",
                         "              termination:",
+                        "                cause: compute-effects-complete",
                         "                reason: complete",
                         "      - name: MustNotRun",
                         "        type: Coordination/Update Document",
@@ -92,11 +93,12 @@ class ComputeFrozenPatchHandoffIntegrationTest {
 
         DocumentProcessingResult result = support.processRun(document);
 
-        assertEquals(ProcessorStatus.SUCCESS, result.status(), result.failureReason());
+        assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertEquals("changed", result.document().get("/status"));
         assertEquals("value", result.document().get("/added/nested"));
         assertFalse(hasPath(result.document(), "/removeMe"));
-        assertEquals("graceful", result.document().get("/contracts/terminated/cause"));
+        assertEquals("compute-effects-complete",
+                result.document().get("/contracts/terminated/cause"));
         assertEquals("complete", result.document().get("/contracts/terminated/reason"));
         assertEquals(Arrays.asList("first", "second"), selectedKinds(result));
         assertTrue(indexOfKind(result, "second") < indexOfType(result,
@@ -109,7 +111,7 @@ class ComputeFrozenPatchHandoffIntegrationTest {
         assertEquals(3L, delta(metrics, before, "frozenPatchesHandedToLanguage"));
         assertEquals(4L, delta(metrics, before, "frozenPatchValuesAccepted"),
                 "each add/replace value is accepted by preview and runtime consumption");
-        assertEquals(4L, delta(metrics, before, "frozenPatchValuesHandedToLanguage"));
+        assertEquals(2L, delta(metrics, before, "frozenPatchValuesHandedToLanguage"));
         assertEquals(0L, delta(metrics, before, "mutablePatchValuesFrozen"));
         assertEquals(0L, delta(metrics, before, "frozenPatchValuesMaterialized"));
         assertEquals(2L, metrics.eventsEmitted());
@@ -141,7 +143,7 @@ class ComputeFrozenPatchHandoffIntegrationTest {
 
     private static List<String> selectedKinds(DocumentProcessingResult result) {
         List<String> selected = new ArrayList<String>();
-        for (Node event : result.triggeredEvents()) {
+        for (Node event : result.events()) {
             Object kind = valueAt(event, "/kind");
             if ("first".equals(kind) || "second".equals(kind)) {
                 selected.add((String) kind);
@@ -151,8 +153,8 @@ class ComputeFrozenPatchHandoffIntegrationTest {
     }
 
     private static int indexOfKind(DocumentProcessingResult result, String kind) {
-        for (int index = 0; index < result.triggeredEvents().size(); index++) {
-            if (kind.equals(valueAt(result.triggeredEvents().get(index), "/kind"))) {
+        for (int index = 0; index < result.events().size(); index++) {
+            if (kind.equals(valueAt(result.events().get(index), "/kind"))) {
                 return index;
             }
         }
@@ -168,8 +170,8 @@ class ComputeFrozenPatchHandoffIntegrationTest {
     }
 
     private static int indexOfType(DocumentProcessingResult result, String typeBlueId) {
-        for (int index = 0; index < result.triggeredEvents().size(); index++) {
-            Node event = result.triggeredEvents().get(index);
+        for (int index = 0; index < result.events().size(); index++) {
+            Node event = result.events().get(index);
             if (event.getType() != null && typeBlueId.equals(event.getType().getBlueId())) {
                 return index;
             }

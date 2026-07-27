@@ -2,15 +2,12 @@ package blue.coordination.processor;
 
 import blue.language.model.Node;
 import blue.language.processor.ChannelCheckpointContext;
-import blue.language.processor.ChannelDelivery;
 import blue.language.processor.ChannelEvaluation;
 import blue.language.processor.ChannelEvaluationContext;
+import blue.language.processor.ExternalChannelMemberSnapshot;
 import blue.language.utils.BlueIdCalculator;
-import blue.repo.coordination.OperationRequest;
 import blue.repo.coordination.TimelineChannel;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.math.BigInteger;
 
 public final class TimelineProviderSupport {
     private TimelineProviderSupport() {
@@ -22,26 +19,11 @@ public final class TimelineProviderSupport {
         if (entry == null) {
             return ChannelEvaluation.noMatch();
         }
-        if (!matchesTimelineAndActor(contract, entry) || !matchesEventFilter(contract, eventNode)) {
+        if (!TimelineExternalSubscriptionFunctions.INSTANCE
+                .accepts(contract, eventNode)) {
             return ChannelEvaluation.noMatch();
         }
-        return acceptedTimelineEntry(eventNode, context);
-    }
-
-    private static ChannelEvaluation acceptedTimelineEntry(Node eventNode,
-                                                            ChannelEvaluationContext context) {
-        CoordinationEventNodes.OperationRequestView request =
-                CoordinationEventNodes.operationRequest(eventNode);
-        if (request == null || !request.routable() || context.channel(request.channel()) == null) {
-            return ChannelEvaluation.match(eventNode);
-        }
-        ChannelDelivery delivery = ChannelDelivery.of(eventNode,
-                null,
-                null,
-                null,
-                request.channel(),
-                OperationRequest.blueId() + ":" + request.operation());
-        return ChannelEvaluation.matchDeliveries(Collections.singletonList(delivery));
+        return ChannelEvaluation.match(eventNode, eventId(eventNode));
     }
 
     static boolean matchesTimelineAndActor(TimelineChannel contract,
@@ -54,63 +36,18 @@ public final class TimelineProviderSupport {
                         entry.actor(), contract.getActor());
     }
 
-    public static boolean matchesEventFilter(TimelineChannel contract, Node eventNode) {
-        Node definition = contract.getDefinition();
-        return definition == null || CoordinationEventNodes.matchesPattern(eventNode, definition);
-    }
-
-    static ChannelEvaluation preserveUnionDelivery(ChannelEvaluation childEvaluation,
-                                                    Node fallbackEvent,
-                                                    String metadataKey,
-                                                    String sourceChannelKey) {
-        List<ChannelDelivery> childDeliveries = childEvaluation.deliveries();
-        if (!childDeliveries.isEmpty()) {
-            List<ChannelDelivery> unionDeliveries =
-                    new ArrayList<ChannelDelivery>(childDeliveries.size());
-            for (ChannelDelivery childDelivery : childDeliveries) {
-                unionDeliveries.add(ChannelDelivery.of(
-                        withSourceMetadata(childDelivery.event(), metadataKey, sourceChannelKey),
-                        childDelivery.eventId(),
-                        null,
-                        childDelivery.shouldProcess(),
-                        childDelivery.handlerChannelKey(),
-                        childDelivery.logicalDeliveryKey()));
-            }
-            return ChannelEvaluation.matchDeliveries(unionDeliveries);
-        }
+    static ChannelEvaluation preserveUnionPayload(ChannelEvaluation childEvaluation,
+                                                  Node fallbackEvent) {
         Node deliveryEvent = childEvaluation.event() != null
                 ? childEvaluation.event()
                 : fallbackEvent;
         return deliveryEvent != null
-                ? ChannelEvaluation.match(
-                        withSourceMetadata(deliveryEvent, metadataKey, sourceChannelKey),
-                        childEvaluation.eventId())
+                ? ChannelEvaluation.match(deliveryEvent, childEvaluation.eventId())
                 : ChannelEvaluation.noMatch();
     }
 
     public static String eventId(Node eventNode) {
         return eventNode != null ? BlueIdCalculator.calculateBlueId(eventNode.clone().blue(null)) : null;
-    }
-
-    private static Node withSourceMetadata(Node event,
-                                           String metadataKey,
-                                           String sourceChannelKey) {
-        Node copy = event.clone();
-        Node meta = property(copy, "meta");
-        if (meta == null) {
-            meta = new Node();
-            copy.properties("meta", meta);
-        }
-        meta.properties(metadataKey, new Node().value(sourceChannelKey));
-        return copy;
-    }
-
-    public static boolean isNewerOrSameTimelineEvent(ChannelCheckpointContext context) {
-        return isNewerTimelineEvent(context, false);
-    }
-
-    public static boolean isNewerOrDifferentTimelineEvent(ChannelCheckpointContext context) {
-        return isNewerTimelineEvent(context, true);
     }
 
     public static Node property(Node node, String key) {
@@ -126,29 +63,145 @@ public final class TimelineProviderSupport {
         return value instanceof String ? (String) value : null;
     }
 
-    private static boolean isNewerTimelineEvent(ChannelCheckpointContext context,
-                                                boolean acceptDifferentTimeline) {
-        CoordinationEventNodes.TimelineEntryView current =
-                CoordinationEventNodes.timelineEntry(context.event());
-        if (current == null) {
-            return false;
+    static Node timelineOrderSubject(
+            CoordinationEventNodes.TimelineEntryView entry) {
+        if (entry == null) {
+            throw new IllegalArgumentException(
+                    "Timeline order subject requires a Timeline Entry");
         }
-        Node previousEvent = context.lastEvent();
-        if (previousEvent == null) {
-            return true;
+        return new Node()
+                .properties("semantics",
+                        new Node().value(
+                                TimelineExternalSubscriptionFunctions
+                                        .TIMELINE_ORDER_SUBJECT_VERSION))
+                .properties("timestamp",
+                        new Node().value(entry.timestamp()));
+    }
+
+    static Node memberTimelineOrderSubject(
+            String semantics,
+            ExternalChannelMemberSnapshot member,
+            Node exactMemberSubject) {
+        TimelineOrder memberOrder = timelineOrder(
+                exactMemberSubject,
+                TimelineExternalSubscriptionFunctions
+                        .TIMELINE_ORDER_SUBJECT_VERSION);
+        if (memberOrder == null) {
+            throw new IllegalArgumentException(
+                    "Timeline member order subject requires the selected "
+                            + "member's exact Timeline subject");
+        }
+        return new Node()
+                .properties("semantics", new Node().value(semantics))
+                .properties("timestamp",
+                        new Node().value(memberOrder.timestamp))
+                .properties("memberKey",
+                        new Node().value(member.channelKey()))
+                .properties("memberDomain",
+                        new Node().value(
+                                member.checkpointDomainBlueId()));
+    }
+
+    static boolean isNewerTimelineSubject(
+            ChannelCheckpointContext context,
+            String expectedSemantics) {
+        TimelineOrder current = timelineOrder(
+                context.currentSubject(), expectedSemantics);
+        if (current == null) {
+            throw new IllegalArgumentException(
+                    "Current Timeline checkpoint has no exact order "
+                            + "subject");
         }
         if (context.eventSignature() != null
-                && context.eventSignature().equals(context.lastEventSignature())) {
+                && context.eventSignature().equals(
+                context.lastEventSignature())) {
             return false;
         }
-        CoordinationEventNodes.TimelineEntryView previous =
-                CoordinationEventNodes.timelineEntry(previousEvent);
+        Node previousSubject = context.lastEvent();
+        if (previousSubject == null) {
+            return true;
+        }
+        TimelineOrder previous =
+                timelineOrder(previousSubject, expectedSemantics);
         if (previous == null) {
-            return false;
+            throw new IllegalArgumentException(
+                    "Stored Timeline checkpoint subject is malformed");
         }
-        if (!BlueSemanticIdentity.equals(current.timeline(), previous.timeline())) {
-            return acceptDifferentTimeline;
+        if (current.memberKey == null) {
+            return current.timestamp.compareTo(
+                    previous.timestamp) > 0;
         }
-        return current.timestamp().compareTo(previous.timestamp()) > 0;
+        boolean sameMember =
+                current.memberKey.equals(previous.memberKey)
+                        && current.memberDomain.equals(
+                        previous.memberDomain);
+        if (!sameMember) {
+            /*
+             * Composite and All Timelines preserve the established Timeline
+             * policy: each selected semantic member is an independent source.
+             * The generic feeder owns cross-source canonical ordering; this
+             * checkpoint only rejects replays/non-increasing timestamps from
+             * the same frozen member lineage.
+             */
+            return true;
+        }
+        return current.timestamp.compareTo(
+                previous.timestamp) > 0;
     }
+
+    private static TimelineOrder timelineOrder(Node node,
+                                               String expectedSemantics) {
+        String semantics = textProperty(node, "semantics");
+        if (!expectedSemantics.equals(semantics)) {
+            return null;
+        }
+        Node timestampNode = property(node, "timestamp");
+        Object rawTimestamp =
+                timestampNode != null
+                        ? timestampNode.getValue()
+                        : null;
+        BigInteger timestamp = integer(rawTimestamp);
+        String memberKey = textProperty(node, "memberKey");
+        String memberDomain = textProperty(node, "memberDomain");
+        boolean direct = TimelineExternalSubscriptionFunctions
+                .TIMELINE_ORDER_SUBJECT_VERSION.equals(
+                        expectedSemantics);
+        if (timestamp == null
+                || direct && (memberKey != null || memberDomain != null)
+                || !direct && (memberKey == null
+                || memberKey.isEmpty()
+                || memberDomain == null
+                || memberDomain.isEmpty())) {
+            return null;
+        }
+        return new TimelineOrder(
+                timestamp, memberKey, memberDomain);
+    }
+
+    private static BigInteger integer(Object value) {
+        if (value instanceof BigInteger) {
+            return (BigInteger) value;
+        }
+        if (value instanceof Byte || value instanceof Short
+                || value instanceof Integer || value instanceof Long) {
+            return BigInteger.valueOf(
+                    ((Number) value).longValue());
+        }
+        return null;
+    }
+
+    private static final class TimelineOrder {
+        private final BigInteger timestamp;
+        private final String memberKey;
+        private final String memberDomain;
+
+        private TimelineOrder(BigInteger timestamp,
+                              String memberKey,
+                              String memberDomain) {
+            this.timestamp = timestamp;
+            this.memberKey = memberKey;
+            this.memberDomain = memberDomain;
+        }
+    }
+
 }

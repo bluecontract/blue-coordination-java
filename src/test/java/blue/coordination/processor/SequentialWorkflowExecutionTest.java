@@ -79,12 +79,12 @@ class SequentialWorkflowExecutionTest {
         Node document = initializedDocument(fixture, counterDocument(fixture.repository, 0, true));
         Node afterFirst = processOperationRequest(fixture, document, "owner", 1, "increment", 7);
         assertEquals(BigInteger.ONE,
-                afterFirst.get("/contracts/checkpoint/lastEvents/ownerChannel/timestamp"));
+                afterFirst.get("/contracts/checkpoint/entries/ownerChannel/subject/timestamp"));
 
         Node afterSecond = processOperationRequest(fixture, afterFirst, "owner", 2, "increment", 5);
 
         assertEquals(BigInteger.valueOf(2),
-                afterSecond.get("/contracts/checkpoint/lastEvents/ownerChannel/timestamp"));
+                afterSecond.get("/contracts/checkpoint/entries/ownerChannel/subject/timestamp"));
         assertCounter(afterSecond, 12);
     }
 
@@ -692,20 +692,20 @@ class SequentialWorkflowExecutionTest {
     }
 
     private static void assertRuntimeFatal(DocumentProcessingResult result, String expectedMessage) {
-        assertEquals(ProcessorStatus.RUNTIME_FATAL, result.status(), result.failureReason());
-        assertTrue(result.failureReason() != null && result.failureReason().contains(expectedMessage),
-                result.failureReason());
+        assertEquals(ProcessorStatus.RUNTIME_FATAL, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
+        assertTrue(blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result) != null && blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result).contains(expectedMessage),
+                blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
     }
 
     private static void assertTriggeredChatMessage(DocumentProcessingResult result, String expectedMessage) {
-        for (Node event : result.triggeredEvents()) {
+        for (Node event : result.events()) {
             if (isChatMessage(event)
                     && expectedMessage.equals(event.get("/message"))) {
                 return;
             }
         }
         throw new AssertionError("Expected triggered chat message: " + expectedMessage
-                + " in " + result.triggeredEvents());
+                + " in " + result.events());
     }
 
     private static boolean isChatMessage(Node event) {

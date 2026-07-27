@@ -3,8 +3,6 @@ package blue.coordination.processor.workflow;
 import blue.language.model.Node;
 import blue.language.snapshot.FrozenNode;
 
-import java.util.Locale;
-
 final class WorkflowPatchEntry {
     private final String op;
     private final String path;
@@ -13,13 +11,13 @@ final class WorkflowPatchEntry {
     WorkflowPatchEntry(String op, String path, Node val) {
         this.op = op;
         this.path = path;
-        this.val = isRemove(op) || val == null ? null : FrozenNode.fromNode(val);
+        this.val = val != null ? FrozenNode.fromNode(val) : null;
     }
 
     WorkflowPatchEntry(String op, String path, FrozenNode val) {
         this.op = op;
         this.path = path;
-        this.val = isRemove(op) ? null : canonicalSnapshot(val);
+        this.val = canonicalSnapshot(val);
     }
 
     String op() {
@@ -41,7 +39,4 @@ final class WorkflowPatchEntry {
         return FrozenNode.fromNode(value.toNode());
     }
 
-    private static boolean isRemove(String op) {
-        return op != null && "remove".equals(op.trim().toLowerCase(Locale.ROOT));
-    }
 }
