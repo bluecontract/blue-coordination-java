@@ -20,6 +20,9 @@ public final class HandlerMatchContextFactory {
                 channelKey,
                 event,
                 markers,
-                new ContractMatchingService(blue));
+                new ContractMatchingService(blue),
+                new RuntimeWorkSession(
+                        new GasMeter(),
+                        RuntimeWorkSession.Mode.PROCESSING));
     }
 }

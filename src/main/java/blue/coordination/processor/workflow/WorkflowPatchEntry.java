@@ -3,6 +3,13 @@ package blue.coordination.processor.workflow;
 import blue.language.model.Node;
 import blue.language.snapshot.FrozenNode;
 
+/**
+ * Immutable workflow patch value retained between sequential step
+ * executions.
+ *
+ * <p>Patch values are canonicalized to frozen snapshots at construction so a
+ * later step cannot observe caller mutation.</p>
+ */
 final class WorkflowPatchEntry {
     private final String op;
     private final String path;
@@ -36,7 +43,8 @@ final class WorkflowPatchEntry {
         if (value == null || value.isStrictCanonical()) {
             return value;
         }
-        return FrozenNode.fromNode(value.toNode());
+        return FrozenNode.fromNode(
+                FrozenNodeUtil.authoredOverlay(value));
     }
 
 }

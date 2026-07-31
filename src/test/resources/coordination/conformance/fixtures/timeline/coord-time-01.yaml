@@ -1,0 +1,60 @@
+schema: blue-coordination-fixture/1.0
+id: coord-time-01
+vectors:
+- COORD-TIME-01
+category: timeline
+description: Entries from several timelines are processed only after completeness and preserve the feeder's verified platform order.
+operation: timeline-order
+input:
+  entries:
+  - type: { blueId: "7L685pBvjNNrBPq6tNv53kfPEBMDkoRu7MdVMTqdcyR2" }
+    timeline:
+      type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+      timelineId: A
+    timestamp: 100
+    actor:
+      type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+      accountId: alice
+    message:
+      kind: A1
+    fixtureId: A1
+  - type: { blueId: "7L685pBvjNNrBPq6tNv53kfPEBMDkoRu7MdVMTqdcyR2" }
+    timeline:
+      type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+      timelineId: B
+    timestamp: 90
+    actor:
+      type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+      accountId: bob
+    message:
+      kind: B1
+    fixtureId: B1
+  - type: { blueId: "7L685pBvjNNrBPq6tNv53kfPEBMDkoRu7MdVMTqdcyR2" }
+    timeline:
+      type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+      timelineId: A
+    timestamp: 110
+    actor:
+      type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+      accountId: alice
+    message:
+      kind: A2
+    fixtureId: A2
+    prevEntry:
+      blueId: 2s2Nk8a9CaUBPLeHiPHSqveLciPJbP6QNnXQLVDxQwBz
+  completeness:
+  - timelineId: A
+    completeBefore: 120
+  - timelineId: B
+    completeBefore: 120
+expected:
+  assertions:
+  - actual: feeder.status
+    op: equals
+    expected: ready
+  - actual: feeder.orderedEntryIds
+    op: sequenceEquals
+    expected:
+    - A1
+    - B1
+    - A2

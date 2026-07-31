@@ -1,0 +1,43 @@
+schema: blue-coordination-fixture/1.0
+id: coord-time-03
+vectors:
+- COORD-TIME-03
+category: timeline
+description: Equal timestamps on different Timelines preserve verified platform order; no cross-Timeline timestamp or identity ordering is invented.
+operation: timeline-order
+input:
+  entries:
+  - type: { blueId: "7L685pBvjNNrBPq6tNv53kfPEBMDkoRu7MdVMTqdcyR2" }
+    timeline:
+      type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+      timelineId: B
+    timestamp: 100
+    actor:
+      type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+      accountId: bob
+    message:
+      kind: tie
+    fixtureId: B-tie
+  - type: { blueId: "7L685pBvjNNrBPq6tNv53kfPEBMDkoRu7MdVMTqdcyR2" }
+    timeline:
+      type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+      timelineId: A
+    timestamp: 100
+    actor:
+      type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+      accountId: alice
+    message:
+      kind: tie
+    fixtureId: A-tie
+  completeness:
+  - timelineId: A
+    completeBefore: 101
+  - timelineId: B
+    completeBefore: 101
+expected:
+  assertions:
+  - actual: feeder.orderedEntryIds
+    op: sequenceEquals
+    expected:
+    - B-tie
+    - A-tie

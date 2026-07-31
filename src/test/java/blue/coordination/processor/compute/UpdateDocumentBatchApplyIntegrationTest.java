@@ -29,7 +29,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class UpdateDocumentBatchApplyIntegrationTest {
     @Test
-    void computeChangesetUsesLanguageBatchApplyAndPreservesPatchOrder() {
+    void shouldUseBatchApplyAndPreserveComputePatchOrder() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create(
                 CoordinationProcessorOptions.builder()
@@ -59,8 +60,10 @@ class UpdateDocumentBatchApplyIntegrationTest {
                         "              events:",
                         "                $events: true")))).document();
 
+        // When
         DocumentProcessingResult result = support.processRun(document);
 
+        // Then
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertEquals("second", result.document().getAsText("/status"));
         assertEquals(BigInteger.ONE, result.document().get("/count"));
@@ -74,7 +77,8 @@ class UpdateDocumentBatchApplyIntegrationTest {
     }
 
     @Test
-    void pureBexComputeEventUsesBatchApply() {
+    void shouldUseBatchApplyForPureBexComputeEvent() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create(
                 CoordinationProcessorOptions.builder()
@@ -109,9 +113,11 @@ class UpdateDocumentBatchApplyIntegrationTest {
                 "              events:",
                 "                $events: true"));
 
+        // When
         DocumentProcessingResult result = support.processRun(document,
                 new Node().properties("status", new Node().value("active")));
 
+        // Then
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertEquals("active", result.document().get("/status"));
         assertEquals(1, result.events().size());
@@ -125,7 +131,8 @@ class UpdateDocumentBatchApplyIntegrationTest {
     }
 
     @Test
-    void literalUpdateDocumentChangesetsUseBatchApply() {
+    void shouldUseBatchApplyForLiteralUpdateDocumentChangesets() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create(
                 CoordinationProcessorOptions.builder()
@@ -150,11 +157,13 @@ class UpdateDocumentBatchApplyIntegrationTest {
         long mutableFrozenBefore = metric(metrics, "mutablePatchValuesFrozen");
         long frozenMaterializedBefore = metric(metrics, "frozenPatchValuesMaterialized");
 
+        // When
         DocumentProcessingResult result = support.processRun(document,
                 new Node()
                         .properties("detail", new Node().value("detail"))
                         .properties("status", new Node().value("existing")));
 
+        // Then
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertEquals("existing", result.document().get("/status"));
         assertEquals(2L, metrics.patchesApplied());
@@ -170,7 +179,8 @@ class UpdateDocumentBatchApplyIntegrationTest {
     }
 
     @Test
-    void updateDocumentPreservesDollarPrefixedLiteralValues() {
+    void shouldPreserveDollarPrefixedLiteralValuesInUpdateDocument() {
+        // Given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -184,9 +194,11 @@ class UpdateDocumentBatchApplyIntegrationTest {
                 "                name: event",
                 "                path: /message/request/status"));
 
+        // When
         DocumentProcessingResult result = support.processRun(document,
                 new Node().properties("status", new Node().value("existing")));
 
+        // Then
         assertEquals(ProcessorStatus.SUCCESS, result.status(),
                 blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertEquals("event", result.document().get("/status/$binding/name"));

@@ -19,35 +19,69 @@ class RepositoryStyleCounterDocumentTest {
     private static final String TIMELINE_ID = "bb13b2d9-3df9-5fea-9fdf-dd4f0ae74486";
 
     @Test
-    void richCounterDocumentInitializesAndProcessesIncrementOperation() {
+    void shouldInitializeRichCounterWithoutCheckpointState() {
+        // Given
         Fixture fixture = configuredFixture();
         Node authored = richCounterDocument(fixture);
 
-        assertNull(property(property(authored, "contracts"), "initialized"));
-        assertNull(property(property(authored, "contracts"), "checkpoint"));
-
+        // When
         DocumentProcessingResult initialized = fixture.blue.initializeDocument(authored);
 
+        // Then
+        assertNull(property(property(authored, "contracts"), "initialized"));
+        assertNull(property(property(authored, "contracts"), "checkpoint"));
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(initialized), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(initialized));
         assertTrue(fixture.blue.isInitialized(initialized.document()));
         assertNotNull(ProcessingResultTestSupport.snapshot(fixture.blue, initialized));
         assertNotNull(ProcessingResultTestSupport.blueId(initialized));
-        String initializedDocumentId = ProcessingResultTestSupport
-                .resolvedDocument(fixture.blue, initialized)
-                .getAsText("/contracts/initialized/documentId");
-        assertNotNull(initializedDocumentId);
+        Node initializedDocument =
+                ProcessingResultTestSupport
+                        .snapshot(fixture.blue, initialized)
+                        .canonicalNodeAt(
+                                "/contracts/initialized/document");
+        assertNotNull(initializedDocument);
+        assertNotNull(initializedDocument.getBlueId());
+        assertNull(
+                property(
+                        property(
+                                ProcessingResultTestSupport
+                                        .resolvedDocument(
+                                                fixture.blue,
+                                                initialized)
+                                        .getContracts(),
+                                "initialized"),
+                        "documentId"));
         assertNull(property(property(ProcessingResultTestSupport.resolvedDocument(
                 fixture.blue, initialized), "contracts"), "checkpoint"));
+    }
 
+    @Test
+    void shouldProcessIncrementAndWriteTimelineCheckpoint() {
+        // Given
+        Fixture fixture = configuredFixture();
+        Node authored = richCounterDocument(fixture);
+        DocumentProcessingResult initialized =
+                fixture.blue.initializeDocument(authored);
+        Node initializedDocument =
+                ProcessingResultTestSupport
+                        .snapshot(fixture.blue, initialized)
+                        .canonicalNodeAt(
+                                "/contracts/initialized/document");
+        assertNotNull(initializedDocument);
+        String initializedDocumentBlueId =
+                initializedDocument.getBlueId();
+        assertNotNull(initializedDocumentBlueId);
         Node event = TestTimelineProvider.timelineEntry(fixture.blue,
                 fixture.repository,
                 TIMELINE_ID,
                 1777987926,
                 operationRequest("increment", 5));
 
+        // When
         DocumentProcessingResult result = fixture.blue.processDocument(
                 ProcessingResultTestSupport.snapshot(fixture.blue, initialized), event);
 
+        // Then
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertNotNull(ProcessingResultTestSupport.snapshot(fixture.blue, result));
         assertNotNull(ProcessingResultTestSupport.blueId(result));
@@ -60,7 +94,15 @@ class RepositoryStyleCounterDocumentTest {
 
         Node resolved = ProcessingResultTestSupport.resolvedDocument(
                 fixture.blue, result);
-        assertEquals(initializedDocumentId, resolved.getAsText("/contracts/initialized/documentId"));
+        Node retainedInitializedDocument =
+                ProcessingResultTestSupport
+                        .snapshot(fixture.blue, result)
+                        .canonicalNodeAt(
+                                "/contracts/initialized/document");
+        assertNotNull(retainedInitializedDocument);
+        assertEquals(
+                initializedDocumentBlueId,
+                retainedInitializedDocument.getBlueId());
         Node checkpoint = property(
                 property(resolved, "contracts"), "checkpoint");
         Node checkpointEntries = property(checkpoint, "entries");

@@ -3,7 +3,6 @@ package blue.coordination.processor.compute;
 import blue.bex.api.BexEngine;
 import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationTestResources;
-import blue.coordination.processor.RepositoryTypeAliasPreprocessor;
 import blue.coordination.processor.TestTimelineProvider;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.coordination.processor.workflow.SequentialWorkflowRunner;
@@ -45,15 +44,18 @@ class LanguageAdoptionMetricsArtifactTest {
             "build", "reports", "language-adoption");
 
     @Test
-    void writesJsonAndCsvForRequiredRepresentativeScenarios() throws Exception {
+    void shouldWriteJsonAndCsvForRequiredRepresentativeScenarios() throws Exception {
+        // Given
         List<LanguageAdoptionMetricsArtifactWriter.Scenario> scenarios = Arrays.asList(
                 staticUpdateDocumentScenario(),
                 multiPatchComputeScenario(),
                 payNoteFixtureScenario(),
                 mandateFixtureScenario());
 
+        // When
         LanguageAdoptionMetricsArtifactWriter.write(REPORT_DIRECTORY, scenarios);
 
+        // Then
         Path json = REPORT_DIRECTORY.resolve(LanguageAdoptionMetricsArtifactWriter.JSON_FILE_NAME);
         Path csv = REPORT_DIRECTORY.resolve(LanguageAdoptionMetricsArtifactWriter.CSV_FILE_NAME);
         assertTrue(Files.isRegularFile(json));
@@ -182,11 +184,12 @@ class LanguageAdoptionMetricsArtifactTest {
         OwnedScenario fixture = new OwnedScenario();
         try {
             Node mandate = mandateDocument();
-            mandate.blue(fixture.support.repository.typeAliasBlue());
-            Node aliasesResolved = new RepositoryTypeAliasPreprocessor(
-                    fixture.support.repository).preprocess(mandate);
             ResolvedSnapshot resolved = fixture.support.blue.resolveToSnapshot(
-                    fixture.support.blue.preprocess(aliasesResolved));
+                    CoordinationTestResources
+                            .preprocessWithFixedRepository(
+                                    fixture.support.blue,
+                                    fixture.support.repository,
+                                    mandate));
             DocumentProcessingResult initialized =
                     fixture.support.blue.initializeDocument(resolved);
             assertSuccess(fixture.support.blue, initialized);
@@ -226,7 +229,7 @@ class LanguageAdoptionMetricsArtifactTest {
 
     private static Node subscriptionUpdate() {
         return new Node()
-                .type("Sample/Subscription Update")
+                .type("MyOS/Subscription Update")
                 .properties("subscriptionId", new Node().value("hotel-resale-agreement"))
                 .properties("targetSessionId", new Node().value("hotel-agreement-session"))
                 .properties("update", new Node()

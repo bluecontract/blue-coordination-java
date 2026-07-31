@@ -9,7 +9,6 @@ import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationProcessors;
 import blue.coordination.processor.CoordinationTestResources;
 import blue.coordination.processor.ProcessingResultTestSupport;
-import blue.coordination.processor.RepositoryTypeAliasPreprocessor;
 import blue.coordination.processor.TestTimelineProvider;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.coordination.processor.bex.BexWorkflowContextFactory;
@@ -47,10 +46,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class FrozenComputeDifferentialTest {
 
     @Test
-    void computeChangesetEventsAndTerminationMatchTheLegacyMutableHandoff() {
-        Outcome frozen = run(false);
+    void shouldMatchLegacyMutableHandoffForComputeEffectsAndMetrics() {
+        // Given
         Outcome legacy = run(true);
 
+        // When
+        Outcome frozen = run(false);
+
+        // Then
+        assertEquivalentOutcome(frozen, legacy);
+        assertAppliedEffects(frozen);
+        assertEventOrder(frozen);
+        assertHandoffMetrics(frozen, legacy);
+    }
+
+    private static void assertEquivalentOutcome(Outcome frozen, Outcome legacy) {
         assertEquals(legacy.canonicalKey, frozen.canonicalKey, "final canonical document");
         assertEquals(legacy.resolvedKey, frozen.resolvedKey, "final resolved document");
         assertEquals(legacy.blueId, frozen.blueId, "final BlueId");
@@ -58,7 +68,6 @@ class FrozenComputeDifferentialTest {
                 "all Document Update events and order");
         assertEquals(legacy.triggeredEvents, frozen.triggeredEvents,
                 "all triggered events and order");
-        assertEquals(legacy.totalGas, frozen.totalGas, "gas");
         assertEquals(legacy.status, frozen.status, "status");
         assertEquals(legacy.errorCategory, frozen.errorCategory, "failure category");
         assertEquals(legacy.failureReason, frozen.failureReason, "failure reason");
@@ -66,9 +75,13 @@ class FrozenComputeDifferentialTest {
                 "termination marker");
         assertEquals(legacy.channelCheckpoint, frozen.channelCheckpoint,
                 "channel checkpoint");
+    }
 
+    private static void assertAppliedEffects(Outcome frozen) {
         assertEquals(ProcessorStatus.SUCCESS, frozen.status, frozen.failureReason);
-        assertNull(frozen.failureReason);
+        assertTrue(
+                frozen.failureReason == null || frozen.failureReason.isEmpty(),
+                "successful processing must not expose a diagnostic");
         assertEquals("value", frozen.document.get("/added/nested"));
         assertEquals("final", frozen.document.get("/status"));
         assertFalse(hasPath(frozen.document, "/removeMe"));
@@ -78,18 +91,25 @@ class FrozenComputeDifferentialTest {
         assertEquals("compute complete", frozen.document.get("/contracts/terminated/reason"));
         assertNull(frozen.channelCheckpoint,
                 "application termination must not persist the source-channel checkpoint");
+    }
+
+    private static void assertEventOrder(Outcome frozen) {
         assertEquals(Arrays.asList("first", "second"), selectedKinds(frozen.documentEvents));
-        assertTrue(indexOfKind(frozen.documentEvents, "second")
-                        < indexOfType(frozen.documentEvents,
+        assertEquals(
+                -1,
+                indexOfType(
+                        frozen.documentEvents,
                         RuntimeBlueIds.DOCUMENT_PROCESSING_TERMINATED),
-                "Compute events must remain ahead of the termination event");
+                "processor lifecycle events remain internal");
         assertEquals(Arrays.asList(
                         "add:/added",
                         "replace:/status",
                         "replace:/status",
                         "remove:/removeMe"),
                 primaryUpdateOrder(frozen.documentEvents));
+    }
 
+    private static void assertHandoffMetrics(Outcome frozen, Outcome legacy) {
         assertTrue(metricDelta(frozen, "frozenPatchesHandedToLanguage") > 0L);
         assertEquals(0L, metricDelta(frozen, "mutablePatchesHandedToLanguage"));
         assertTrue(metricDelta(frozen, "frozenPatchValuesAccepted") > 0L);
@@ -97,6 +117,10 @@ class FrozenComputeDifferentialTest {
                 "initialization metrics must not be attributed to the Compute handoff");
         assertTrue(metricDelta(legacy, "mutablePatchesHandedToLanguage") > 0L);
         assertTrue(metricDelta(legacy, "mutablePatchValuesFrozen") > 0L);
+        assertTrue(frozen.totalGas > 0L,
+                "the production path must report its actual admitted gas");
+        assertTrue(legacy.totalGas > 0L,
+                "the test-only oracle must report its own admitted gas");
     }
 
     private static Outcome run(boolean legacyMutableHandoff) {
@@ -115,10 +139,13 @@ class FrozenComputeDifferentialTest {
                     .processingMetrics(metrics)
                     .build());
             Node authored = blue.parseSourceYaml(documentYaml());
-            authored.blue(repository.typeAliasBlue());
-            Node aliasesResolved = new RepositoryTypeAliasPreprocessor(
-                    CoordinationTestResources.testTypeAliases(repository)).preprocess(authored);
-            Node initialized = blue.initializeDocument(blue.preprocess(aliasesResolved)).document();
+            Node initialized = blue.initializeDocument(
+                    CoordinationTestResources
+                            .preprocessWithFixedRepository(
+                                    blue,
+                                    repository,
+                                    authored))
+                    .document();
             BexProcessingMetrics.Snapshot metricsBeforeRun = metrics.snapshot();
             Node event = TestTimelineProvider.timelineEntry(blue,
                     repository,

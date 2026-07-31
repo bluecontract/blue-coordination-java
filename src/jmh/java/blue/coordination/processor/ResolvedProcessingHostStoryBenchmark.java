@@ -7,8 +7,11 @@ import blue.language.processor.ProcessorStatus;
 import blue.language.snapshot.ResolvedSnapshot;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.ChatMessage;
+import blue.repo.coordination.Compute;
 import blue.repo.coordination.PrincipalActor;
+import blue.repo.coordination.SequentialWorkflow;
 import blue.repo.coordination.Timeline;
+import blue.repo.coordination.TimelineChannel;
 import blue.repo.coordination.TimelineEntry;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -53,6 +56,7 @@ public class ResolvedProcessingHostStoryBenchmark {
                 .nodeProvider(repository.nodeProvider())
                 .typeClassResolver(repository.typeClassResolver());
         CoordinationProcessors.registerWith(blue, CoordinationProcessorOptions.builder().build());
+        CoordinationDeliveryPlanning.currentRootCompatibility(blue);
 
         sourceDocument = preprocess(repository, document());
         sourceJsonBytes = blue.nodeToJson(sourceDocument).getBytes(StandardCharsets.UTF_8).length;
@@ -151,8 +155,7 @@ public class ResolvedProcessingHostStoryBenchmark {
 
     private Node preprocess(BlueRepository repository, Node document) {
         document.blue(repository.typeAliasBlue());
-        Node aliasesResolved = new RepositoryTypeAliasPreprocessor(repository).preprocess(document);
-        return blue.preprocess(aliasesResolved);
+        return blue.preprocess(document);
     }
 
     private static Node document() {
@@ -190,18 +193,18 @@ public class ResolvedProcessingHostStoryBenchmark {
 
     private static Node timelineChannel() {
         return new Node()
-                .type("Coordination/Timeline Channel")
+                .type(typeReference(TimelineChannel.blueId()))
                 .properties("timeline", new Node()
-                        .type("Coordination/Timeline")
+                        .type(typeReference(Timeline.blueId()))
                         .properties("providerId", new Node().value("test-provider"))
                         .properties("timelineId", new Node().value("owner")))
                 .properties("actor", new Node()
-                        .type("Coordination/Principal Actor"));
+                        .type(typeReference(PrincipalActor.blueId())));
     }
 
     private static Node workflow(String counterPath) {
         return new Node()
-                .type("Coordination/Sequential Workflow")
+                .type(typeReference(SequentialWorkflow.blueId()))
                 .properties("channel", new Node().value("ownerChannel"))
                 .properties("steps", new Node().items(
                         incrementStep(counterPath),
@@ -213,7 +216,7 @@ public class ResolvedProcessingHostStoryBenchmark {
                 new Node().properties("$document", new Node().value(counterPath)),
                 new Node().value(1)));
         return new Node()
-                .type("Coordination/Compute")
+                .type(typeReference(Compute.blueId()))
                 .properties("do", new Node().items(
                         new Node().properties("$appendChange", new Node()
                                 .properties("op", new Node().value("replace"))
@@ -230,12 +233,16 @@ public class ResolvedProcessingHostStoryBenchmark {
                 .actor(new PrincipalActor())
                 .timestamp(BigInteger.valueOf(7_000_000L + entryNumber));
         Node message = new Node()
-                .type(ChatMessage.qualifiedName())
+                .type(typeReference(ChatMessage.blueId()))
                 .properties("message", new Node().value("entry-" + entryNumber));
         Node event = blue.objectToNode(entry)
                 .properties("timestamp", new Node().value(7_000_000L + entryNumber))
                 .properties("message", message)
                 .blue(repository.typeAliasBlue());
         return blue.preprocess(event).blue(null);
+    }
+
+    private static Node typeReference(String blueId) {
+        return new Node().blueId(blueId);
     }
 }

@@ -4,6 +4,12 @@ import blue.language.model.Node;
 
 import java.util.Map;
 
+/**
+ * Strict scalar and property accessors for mutable workflow input nodes.
+ *
+ * <p>This class mirrors {@link FrozenNodeUtil} at the authored-input boundary
+ * and intentionally performs no type coercion or reference materialization.</p>
+ */
 final class NodeUtil {
     private NodeUtil() {
     }
@@ -42,7 +48,8 @@ final class NodeUtil {
         if (node.getValue() != null) {
             return node.getValue();
         }
-        if (node.getProperties() != null && node.getProperties().containsKey("value")) {
+        if (node.getProperties() != null
+                && node.getProperties().containsKey("value")) {
             return rawScalar(node.getProperties().get("value"));
         }
         return null;
@@ -63,7 +70,10 @@ final class NodeUtil {
         return text(property(node, key));
     }
 
-    static boolean booleanProperty(Node node, String key, boolean defaultValue) {
+    static boolean booleanProperty(
+            Node node,
+            String key,
+            boolean defaultValue) {
         Object raw = rawScalar(property(node, key));
         if (raw == null) {
             return defaultValue;

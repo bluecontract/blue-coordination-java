@@ -11,9 +11,28 @@ import org.bouncycastle.crypto.signers.Ed25519Signer;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.Collections;
+import java.util.Map;
 
+/**
+ * Closed intrinsic registry contributed by Coordination to hosted BEX
+ * workflows.
+ *
+ * <p>Intrinsic names, gas weights, and semantic identity are stable release
+ * inputs; callers may extend the returned registry without changing the
+ * built-in definitions.</p>
+ */
 public final class CoordinationBexIntrinsics {
+    public static final String COMMON_CRYPTO_REGISTRY_IDENTITY =
+            "blue-repository/Common/CryptoEd25519Verify@"
+                    + CryptoEd25519Verify.blueId();
+    public static final String COMMON_CRYPTO_ED25519_VERIFY_COUNTER =
+            "signatureVerification";
     public static final long COMMON_CRYPTO_ED25519_VERIFY_GAS = 500L;
+    private static final Map<String, Long> COMMON_CRYPTO_ED25519_VERIFY_COUNTERS =
+            Collections.singletonMap(
+                    COMMON_CRYPTO_ED25519_VERIFY_COUNTER,
+                    COMMON_CRYPTO_ED25519_VERIFY_GAS);
 
     private CoordinationBexIntrinsics() {
     }
@@ -24,12 +43,19 @@ public final class CoordinationBexIntrinsics {
 
     public static BexIntrinsicRegistry registerCommon(BexIntrinsicRegistry registry) {
         BexIntrinsicRegistry base = registry != null ? registry : BexIntrinsicRegistry.empty();
-        return base.with(CryptoEd25519Verify.class, commonCryptoEd25519Verify());
+        return base.with(
+                CryptoEd25519Verify.class,
+                COMMON_CRYPTO_REGISTRY_IDENTITY,
+                COMMON_CRYPTO_ED25519_VERIFY_COUNTERS,
+                commonCryptoEd25519Verify());
     }
 
     public static BexIntrinsicProcessor commonCryptoEd25519Verify() {
         return invocation -> {
-            invocation.chargeGas(COMMON_CRYPTO_ED25519_VERIFY_GAS);
+            invocation.charge(
+                    COMMON_CRYPTO_ED25519_VERIFY_COUNTER,
+                    1L,
+                    "ed25519-signature-verification");
             return BexValues.scalar(verifyEd25519(invocation));
         };
     }

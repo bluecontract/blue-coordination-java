@@ -3,7 +3,6 @@ package blue.coordination.processor.compute;
 import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationProcessors;
 import blue.coordination.processor.CoordinationTestResources;
-import blue.coordination.processor.RepositoryTypeAliasPreprocessor;
 import blue.coordination.processor.TestTimelineProvider;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.Blue;
@@ -34,21 +33,23 @@ class MandateDeclaredTypeEventMatchingTest {
     private static final int EVENT_TIMESTAMP = 7_000_001;
 
     @Test
-    void initializationExecutesExactlyOnceAndActivationSelectsOnlyItsHandler() {
+    void shouldInitializeOnceAndSelectOnlyTheActivationHandler() {
+        // Given
         Fixture fixture = fixture();
 
+        // When
         DocumentProcessingResult initialized = fixture.initialize(mandateDocument(true, false));
-
-        assertSuccess(initialized);
-        assertEquals(1L, fixture.metrics.handlersExecuted());
-        assertEquals(1L, fixture.metrics.workflowStepsExecuted());
-
         long handlersBeforeConfirmation = fixture.metrics.handlersExecuted();
+        long stepsBeforeConfirmation = fixture.metrics.workflowStepsExecuted();
         DocumentProcessingResult activated = fixture.process(
                 blue.coordination.processor.ProcessingResultTestSupport.snapshot(
                         fixture.blue, initialized),
                 fixture.confirmAuthorityEvent());
 
+        // Then
+        assertSuccess(initialized);
+        assertEquals(1L, handlersBeforeConfirmation);
+        assertEquals(1L, stepsBeforeConfirmation);
         assertSuccess(activated);
         assertEquals(StatusActive.blueId(),
                 activated.document().getAsText("/status/type/blueId"));
@@ -61,23 +62,26 @@ class MandateDeclaredTypeEventMatchingTest {
     }
 
     @Test
-    void fatalLifecycleDeliveryDoesNotReselectInitialization() {
+    void shouldNotReselectInitializationAfterFatalLifecycleDelivery() {
+        // Given
         Fixture fixture = fixture();
+
+        // When
         DocumentProcessingResult initialized = fixture.initialize(mandateDocument(false, true));
         DocumentProcessingResult confirmed = fixture.process(
                 blue.coordination.processor.ProcessingResultTestSupport.snapshot(
                         fixture.blue, initialized),
                 fixture.confirmAuthorityEvent());
-        assertSuccess(confirmed);
-        assertEquals(StatusAuthorityConfirmed.blueId(),
-                confirmed.document().getAsText("/status/type/blueId"));
         long handlersBeforeFatal = fixture.metrics.handlersExecuted();
-
         DocumentProcessingResult fatal = fixture.process(
                 blue.coordination.processor.ProcessingResultTestSupport.snapshot(
                         fixture.blue, confirmed),
                 fixture.fatalProbeEvent());
 
+        // Then
+        assertSuccess(confirmed);
+        assertEquals(StatusAuthorityConfirmed.blueId(),
+                confirmed.document().getAsText("/status/type/blueId"));
         assertEquals(ProcessorStatus.RUNTIME_FATAL, fatal.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(fatal));
         assertTrue(blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(fatal).contains("Unsupported sequential workflow step"),
                 blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(fatal));
@@ -146,9 +150,12 @@ class MandateDeclaredTypeEventMatchingTest {
         }
 
         private DocumentProcessingResult initialize(Node document) {
-            document.blue(repository.typeAliasBlue());
-            Node aliasesResolved = new RepositoryTypeAliasPreprocessor(repository).preprocess(document);
-            ResolvedSnapshot snapshot = blue.resolveToSnapshot(blue.preprocess(aliasesResolved));
+            ResolvedSnapshot snapshot = blue.resolveToSnapshot(
+                    CoordinationTestResources
+                            .preprocessWithFixedRepository(
+                                    blue,
+                                    repository,
+                                    document));
             assertMaterializedDeclaredType(snapshot,
                     "/contracts/initializeMandate/event/type",
                     RuntimeBlueIds.DOCUMENT_PROCESSING_INITIATED);

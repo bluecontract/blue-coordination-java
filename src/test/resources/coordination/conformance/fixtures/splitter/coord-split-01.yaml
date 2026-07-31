@@ -1,0 +1,76 @@
+schema: blue-coordination-fixture/1.0
+id: coord-split-01
+vectors:
+- COORD-SPLIT-01
+category: splitter
+description: No-embedding split preserves the selected operation body and cuts all unselected executable bodies.
+operation: split
+input:
+  root:
+    state: 0
+    contracts:
+      participant:
+        type: { blueId: "8aohWT7jcoaC1j2siQzBxoKM8HhQ4HF13BkZDNnq5UHf" }
+        timeline:
+          type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+          timelineId: A
+        actor:
+          type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+          accountId: alice
+      selected:
+        type: { blueId: "6rnGvP1BUsBpbtvuvJ1vy6hS7psoUJVBEXXsFeRma82V" }
+        channel: participant
+        request: {}
+        steps:
+        - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+          changeset:
+          - op: replace
+            path: /state
+            val: 1
+      decoy:
+        type: { blueId: "6rnGvP1BUsBpbtvuvJ1vy6hS7psoUJVBEXXsFeRma82V" }
+        channel: participant
+        request: {}
+        steps:
+        - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+          changeset:
+          - op: replace
+            path: /state
+            val: 2
+  event:
+    type: { blueId: "7L685pBvjNNrBPq6tNv53kfPEBMDkoRu7MdVMTqdcyR2" }
+    timeline:
+      type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+      timelineId: A
+    timestamp: 100
+    actor:
+      type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+      accountId: alice
+    message:
+      type: { blueId: "93PyhYJyekVeSvQcFi5u8moU5fbfKcbD68BCRtzE8ZLz" }
+      channel: participant
+      operation: selected
+      request: {}
+    fixtureId: E
+  feeder:
+    managedRootRevision: 1
+    indexedRootRevision: 1
+    eligibleSourceChannelKeys:
+    - participant
+  splitter:
+    mode: external-operation
+    targetScope: /
+    operationKey: selected
+    allowedBodyKeys:
+    - selected
+    forbiddenBodyKeys:
+    - decoy
+    strict: true
+expected:
+  assertions:
+  - actual: trace.forbiddenDemands
+    op: sequenceEquals
+    expected: []
+  - actual: splitter.fragmentCount
+    op: greaterThan
+    expected: 1

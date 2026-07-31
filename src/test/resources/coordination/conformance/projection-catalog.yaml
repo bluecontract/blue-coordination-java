@@ -1,0 +1,76 @@
+schema: blue.coordination/projection-catalog/1.0
+projections:
+- id: timeline-entry-subscription
+  version: blue.coordination/1.0/timeline-entry-projection-v3
+  maximumEventKeys: 9
+  channelBinding: exact declared Timeline subtype plus timelineId and exact declared Actor subtype plus accountId
+  eventBinding: bounded ancestor projections for verified Timeline Entry timeline and actor headers
+  broadFallback: bindings with additional pattern structure
+- id: operation-request-routing
+  version: blue.coordination/1.0/operation-routing-v1
+  payload: exact original Timeline Entry
+  logicalCoalescing: source deliveries coalesce by target channel, operation, and request identity
+- id: timeline-checkpoint-subject
+  version: blue.coordination/1.0/timeline-order-subject-v3
+  order: preserve verified platform order across Timelines; validate strictly increasing timestamp only within one exact Timeline
+behaviorAssertionSurface:
+  actualProjections:
+  - feeder.checkpointOwnerKeys
+  - feeder.eligibleSourceChannelKeys
+  - feeder.handlerChannelKey
+  - feeder.logicalDeliveryCount
+  - feeder.missingCompleteness
+  - feeder.orderedEntryIds
+  - feeder.reason
+  - feeder.status
+  - mandate.activatedAt
+  - mandate.authorityConfirmedAt
+  - mandate.eligible
+  - mandate.reason
+  - mandate.status
+  - mandate.terminatedAt
+  - result.diagnostic.category
+  - result.document
+  - result.document.seen
+  - result.document.state
+  - result.document.sum
+  - result.events
+  - result.status
+  - result.totalGas
+  - runtime.namedLedgerMergedOnce
+  - runtime.opaqueGasAccepted
+  - runtime.recursiveSizeCounterPresent
+  - splitter.fragmentCount
+  - splitter.fragmentMetadata
+  - splitter.opaqueCyclicEdges
+  - splitter.totalGraphBytes
+  - trace.bexChildMergeCount
+  - trace.checkpointWrites
+  - trace.documentUpdateOrder
+  - trace.externalDeliveryOrder
+  - trace.forbiddenDemands
+  - trace.handlerExecutions
+  - trace.internalEventOrder
+  - trace.namedGas
+  - trace.processingEventBlueIdStable
+  - trace.semanticDemands
+  - trace.workflowSteps
+  expectedProjections:
+  - input.root
+  - input.initializedRoot
+  - splitter.selectedBytes
+representationProviderSemantics:
+  partial: one exact verified Root-fragment fetch by BlueId; downstream fragment references remain unresolved
+  batched: lexically sorted lazy provider-prefetch windows of at most 16 public single-BlueId lookups
+  warm: exact Root fragment is prefetched into the provider cache before PROCESS
+expectedProjectionSemantics:
+  input.initializedRoot: exact deterministic initialized Root produced from input.root before processing
+  splitter.selectedBytes: canonical UTF-8 bytes of structural and declared allowed document fragments plus all Event fragments
+candidateUnavailableRuntimeOrTraceProjections: []
+strictSplitterProviderRequiredFor:
+- splitter.fragmentMetadata
+- splitter.selectedBytes
+- trace.semanticDemands
+- trace.forbiddenDemands
+candidateBlockers:
+- local Repository provider bodies do not verify at their manifest BlueIds

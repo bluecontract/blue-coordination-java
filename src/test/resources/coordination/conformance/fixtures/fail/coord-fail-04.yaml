@@ -1,0 +1,132 @@
+schema: blue-coordination-fixture/1.0
+id: coord-fail-04
+vectors:
+- COORD-FAIL-04
+category: fail
+description: Large finite BEX iteration is stopped by the live child limit and causes whole-invocation rollback.
+operation: gas-integration
+input:
+  root:
+    contracts:
+      alice:
+        type: { blueId: "8aohWT7jcoaC1j2siQzBxoKM8HhQ4HF13BkZDNnq5UHf" }
+        timeline:
+          type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+          timelineId: A
+        actor:
+          type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+          accountId: alice
+      run:
+        type: { blueId: "6rnGvP1BUsBpbtvuvJ1vy6hS7psoUJVBEXXsFeRma82V" }
+        channel: alice
+        request: {}
+        steps:
+        - type: { blueId: "4qGDz5yJxXc9dr8bsBE1B2Tg4AWuR4qHPU9H6T29m3KZ" }
+          do:
+          - $forEach:
+              in:
+              - 0
+              - 1
+              - 2
+              - 3
+              - 4
+              - 5
+              - 6
+              - 7
+              - 8
+              - 9
+              - 10
+              - 11
+              - 12
+              - 13
+              - 14
+              - 15
+              - 16
+              - 17
+              - 18
+              - 19
+              - 20
+              - 21
+              - 22
+              - 23
+              - 24
+              - 25
+              - 26
+              - 27
+              - 28
+              - 29
+              - 30
+              - 31
+              - 32
+              - 33
+              - 34
+              - 35
+              - 36
+              - 37
+              - 38
+              - 39
+              - 40
+              - 41
+              - 42
+              - 43
+              - 44
+              - 45
+              - 46
+              - 47
+              - 48
+              - 49
+              - 50
+              - 51
+              - 52
+              - 53
+              - 54
+              - 55
+              - 56
+              - 57
+              - 58
+              - 59
+              - 60
+              - 61
+              - 62
+              - 63
+              item: x
+              do:
+              - $appendEvent:
+                  x:
+                    $var: x
+  event:
+    type: { blueId: "7L685pBvjNNrBPq6tNv53kfPEBMDkoRu7MdVMTqdcyR2" }
+    timeline:
+      type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+      timelineId: A
+    timestamp: 100
+    actor:
+      type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+      accountId: alice
+    message:
+      type: { blueId: "93PyhYJyekVeSvQcFi5u8moU5fbfKcbD68BCRtzE8ZLz" }
+      channel: alice
+      operation: run
+      request: {}
+    fixtureId: E
+  feeder:
+    managedRootRevision: 1
+    indexedRootRevision: 1
+    eligibleSourceChannelKeys:
+    - alice
+  gasLimit: 2000
+  parentRemainingGas: 2000
+expected:
+  assertions:
+  - actual: result.status
+    op: equals
+    expected: gas-limit-exceeded
+  - actual: result.document
+    op: equalsProjection
+    expectedProjection: input.initializedRoot
+  - actual: result.events
+    op: sequenceEquals
+    expected: []
+  - actual: runtime.namedLedgerMergedOnce
+    op: equals
+    expected: true

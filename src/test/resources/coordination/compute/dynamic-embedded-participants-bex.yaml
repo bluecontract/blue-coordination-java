@@ -263,11 +263,23 @@ contracts:
   embeddedDocs:
     type: Process Embedded
     paths: []
-  # Composite channel over all generated embedded timelines. It starts empty and createEmbedded appends
-  # one generated timeline contract key per created participant.
+  # A valid inert member keeps the Composite subscription surface well-formed before Alice creates
+  # the first participant. No test event uses this timeline or actor.
+  embeddedBootstrapTimeline:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: Coordination/Timeline
+      providerId: test-provider
+      timelineId: embedded-bootstrap
+    actor:
+      type: MyOS/Principal Actor
+      accountId: embedded-bootstrap
+  # Composite channel over the inert bootstrap member and all generated embedded timelines.
+  # createEmbedded appends one generated timeline contract key per created participant.
   allEmbeddedTimelines:
     type: Coordination/Composite Timeline Channel
-    channels: []
+    channels:
+      - embeddedBootstrapTimeline
   embeddedTimelineObserver:
     type: Coordination/Sequential Workflow
     channel: allEmbeddedTimelines

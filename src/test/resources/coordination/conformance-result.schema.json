@@ -1,0 +1,210 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "blue.coordination/conformance-result/1.0",
+  "title": "Blue Coordination executable conformance receipt",
+  "description": "Same-run evidence for the reissued fixed-Repository Coordination package. Structural package checks alone cannot produce this receipt.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "blueLanguageCommit",
+    "blueLanguageJarSha256",
+    "blueBexCommit",
+    "blueBexJarSha256",
+    "fixedRepositoryManifestSha256",
+    "fixturePackageIdentity",
+    "fixedRepositoryVersion",
+    "fixedRepositoryVersionBlueId",
+    "blueRepositoryCommit",
+    "blueRepositoryJarSha256",
+    "blueCoordinationCommit",
+    "coordinationJarSha256",
+    "coordinationSourcesJarSha256",
+    "coordinationJavadocJarSha256",
+    "coordinationSourceArchiveSha256",
+    "coordinationSpecification",
+    "portableGasSchedule",
+    "portableGasManifestIdentity",
+    "portableGasManifestSha256",
+    "hostQuotaSchedule",
+    "hostQuotaManifestSha256",
+    "vectorCount",
+    "behaviorFixtureCount",
+    "portableGasFixtureCount",
+    "hostQuotaFixtureCount",
+    "fixtureFileCount",
+    "executionCaseCount",
+    "passed",
+    "failures",
+    "skips",
+    "executionCases"
+  ],
+  "properties": {
+    "schema": {
+      "const": "blue.coordination/conformance-result/1.0"
+    },
+    "status": {
+      "const": "complete"
+    },
+    "blueLanguageCommit": {
+      "const": "9706b604d54d59e843f2d0540c1a892470d1aa5c"
+    },
+    "blueLanguageJarSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "blueBexCommit": {
+      "const": "395c484111f8c4e9e0e98d2db7f1c5b0777bd5a8"
+    },
+    "blueBexJarSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "fixedRepositoryManifestSha256": {
+      "const": "d044edd678d3bf0b4a4c1e60c7176fd6449a9ebd6a4ecce4e1eaa36d4a895859"
+    },
+    "fixturePackageIdentity": {
+      "const": "sha256:5bb35f5697deb1a43e684df03c637abe575d01aab736bcbe0be9322aab2a93ff"
+    },
+    "fixedRepositoryVersion": {
+      "const": "1.3.0"
+    },
+    "fixedRepositoryVersionBlueId": {
+      "const": "msCV6VLe4Y1hayq2RnPbuzqZbroowpfBKexXoXBirZq"
+    },
+    "blueRepositoryCommit": {
+      "const": "63be6b7d8d2752b5a8c90f38e672859e9b3949a1"
+    },
+    "blueRepositoryJarSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "blueCoordinationCommit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "coordinationJarSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "coordinationSourcesJarSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "coordinationJavadocJarSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "coordinationSourceArchiveSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "coordinationSpecification": {
+      "const": "blue-coordination/1.0"
+    },
+    "portableGasSchedule": {
+      "const": "blue-coordination/gas/1.0"
+    },
+    "portableGasManifestIdentity": {
+      "const": "sha256:45ab8de5985255ba947c5abb6e44cdbd61ca56b5c9fe8ea2617d60e729f26293"
+    },
+    "portableGasManifestSha256": {
+      "const": "9fcdc22563152cdd8cb37f9ea739477ced5f7a9e3088aecaf246812c3a3c6bab"
+    },
+    "hostQuotaSchedule": {
+      "const": "blue-coordination/host-quotas/1.0"
+    },
+    "hostQuotaManifestSha256": {
+      "const": "48ebee7646e0bdcf75743944e5d5c11aa9055f39e39a5444d5a03db0b6044f74"
+    },
+    "vectorCount": {
+      "const": 56
+    },
+    "behaviorFixtureCount": {
+      "const": 55
+    },
+    "portableGasFixtureCount": {
+      "const": 14
+    },
+    "hostQuotaFixtureCount": {
+      "const": 7
+    },
+    "fixtureFileCount": {
+      "const": 76
+    },
+    "executionCaseCount": {
+      "const": 86
+    },
+    "passed": {
+      "const": 86
+    },
+    "failures": {
+      "const": 0
+    },
+    "skips": {
+      "const": 0
+    },
+    "executionCases": {
+      "type": "array",
+      "minItems": 86,
+      "maxItems": 86,
+      "items": {
+        "$ref": "#/$defs/executionCase"
+      }
+    }
+  },
+  "$defs": {
+    "executionCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "fixture",
+        "kind",
+        "operation",
+        "variant",
+        "vectors",
+        "status"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fixture": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^fixtures/(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+\\.yaml$"
+        },
+        "kind": {
+          "enum": [
+            "behavior",
+            "portable-gas",
+            "host-quota"
+          ]
+        },
+        "operation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "variant": {
+          "type": "string",
+          "minLength": 1
+        },
+        "vectors": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "status": {
+          "const": "passed"
+        }
+      }
+    }
+  }
+}

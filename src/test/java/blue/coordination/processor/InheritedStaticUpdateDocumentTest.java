@@ -23,11 +23,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class InheritedStaticUpdateDocumentTest {
 
     @Test
-    void inheritedStaticPatchWritesItsAuthoredValueFromTheResolvedContractView() {
+    void shouldWriteInheritedStaticPatchValueFromResolvedContractView() {
+        // Given
         BlueRepository repository = BlueRepository.latest();
-        Blue blue = new Blue()
-                .nodeProvider(repository.nodeProvider())
-                .typeClassResolver(repository.typeClassResolver());
+        Blue blue = repository.configure(new Blue());
         NodeProvider repositoryProvider = blue.getNodeProvider();
         BasicNodeProvider documentTypes = new BasicNodeProvider();
         documentTypes.addSingleNodes(documentType(new Node()
@@ -39,9 +38,11 @@ class InheritedStaticUpdateDocumentTest {
                 repositoryProvider));
         CoordinationProcessors.registerWith(blue);
 
+        // When
         DocumentProcessingResult result = blue.initializeDocument(
                 blue.resolveToSnapshot(new Node().type(reference(documentTypeId))));
 
+        // Then
         assertEquals(ProcessorStatus.SUCCESS, result.status(),
                 ProcessingResultTestSupport.diagnosticMessage(result));
         assertNull(result.diagnostic());
@@ -55,14 +56,17 @@ class InheritedStaticUpdateDocumentTest {
     }
 
     @Test
-    void authoredReferenceWithSiblingPayloadRemainsInvalid() {
+    void shouldRejectAuthoredReferenceWithSiblingPayload() {
+        // Given
         BasicNodeProvider documentTypes = new BasicNodeProvider();
 
+        // When
         IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
                 () -> documentTypes.addSingleNodes(documentType(new Node()
                         .blueId(StatusInProgress.blueId())
                         .properties("mode", new Node().value("tampered")))));
 
+        // Then
         assertTrue(failure.getMessage().contains(
                 "\"blueId\" nodes must be reference-only and cannot contain sibling fields"));
     }

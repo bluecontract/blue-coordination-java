@@ -37,7 +37,7 @@ final class SelectiveProcessingReportWriter {
     static final int SCHEMA_VERSION = 1;
 
     private static final Set<String> REPORT_STATUSES =
-            immutableSet("passed", "partial", "failed");
+            immutableSet("complete", "failed");
     private static final Set<String> SECTION_STATUSES =
             immutableSet("passed", "blocked", "failed", "not-run");
 
@@ -122,21 +122,32 @@ final class SelectiveProcessingReportWriter {
             this.unavailableSuites =
                     orderedUniqueUnavailableSuites(
                             unavailableSuites);
-            if ("passed".equals(status)) {
-                if (this.testCounts.failed != 0) {
+            if ("complete".equals(status)) {
+                if (this.testCounts.total == 0) {
                     throw new IllegalArgumentException(
-                            "A passed report cannot contain failed tests");
+                            "A complete report must contain executed tests");
+                }
+                if (this.testCounts.failed != 0
+                        || this.testCounts.skipped != 0) {
+                    throw new IllegalArgumentException(
+                            "A complete report cannot contain failed or skipped tests");
                 }
                 if (!this.unavailableSuites.isEmpty()) {
                     throw new IllegalArgumentException(
-                            "A passed report cannot name unavailable suites");
+                            "A complete report cannot name unavailable suites");
                 }
                 for (Section section : this.sections) {
                     if (!"passed".equals(section.status)) {
                         throw new IllegalArgumentException(
-                                "A passed report cannot contain a "
+                                "A complete report cannot contain a "
                                         + section.status
                                         + " section: "
+                                        + section.id);
+                    }
+                    if (section.cases.isEmpty()) {
+                        throw new IllegalArgumentException(
+                                "A complete report cannot contain an "
+                                        + "empty passed section: "
                                         + section.id);
                     }
                 }

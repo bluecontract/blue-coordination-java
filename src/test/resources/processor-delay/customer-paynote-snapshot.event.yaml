@@ -6,14 +6,14 @@ timeline:
   timelineId: "admin-timeline"
 timestamp: 1700000000000
 actor:
-  type: "Sample/Principal Actor"
+  type: "MyOS/Principal Actor"
   accountId: "0"
 message:
   type: "Coordination/Operation Request"
   operation: "sampleAdminUpdate"
   channel: "sampleAdminChannel"
   request:
-    - type: "Sample/Document Initial Snapshot Resolved"
+    - type: "MyOS/Document Initial Snapshot Resolved"
       inResponseTo:
         requestId:
           type: { blueId: "GX7CFUmSDrE2MzptunLCCdZwnuwwrenRQqEnHL4x3uoC" }

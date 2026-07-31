@@ -4,10 +4,19 @@ import blue.language.model.Node;
 import blue.language.processor.ExternalChannelFunctionContext;
 import blue.language.processor.ExternalChannelMemberSnapshot;
 import blue.language.processor.ExternalChannelSubscriptionFunctions;
+import blue.language.processor.GasChargeContext;
 import blue.repo.coordination.CompositeTimelineChannel;
 
 import java.util.List;
 
+/**
+ * Immutable subscription behavior for an explicitly declared union of
+ * Timeline Channel members.
+ *
+ * <p>The member list is resolved through Language's effective-channel
+ * catalog, so base Timeline Channels and verified subtypes share the same
+ * matching, checkpoint, and logical-delivery rules.</p>
+ */
 final class CompositeTimelineExternalSubscriptionFunctions
         implements ExternalChannelSubscriptionFunctions<
         CompositeTimelineChannel> {
@@ -15,7 +24,7 @@ final class CompositeTimelineExternalSubscriptionFunctions
     static final CompositeTimelineExternalSubscriptionFunctions INSTANCE =
             new CompositeTimelineExternalSubscriptionFunctions();
     static final String ORDER_SUBJECT_VERSION =
-            "blue.coordination/1.0/composite-timeline-order-subject";
+            "blue.coordination/1.0/composite-timeline-order-subject-v3";
 
     private CompositeTimelineExternalSubscriptionFunctions() {
     }
@@ -24,12 +33,20 @@ final class CompositeTimelineExternalSubscriptionFunctions
     public List<String> channelKeys(
             CompositeTimelineChannel immutableContractSnapshot,
             ExternalChannelFunctionContext context) {
-        OperationRequestRoutingFunctions
-                .declareTargetChannelFamilies(
-                        immutableContractSnapshot,
-                        context);
-        return TimelineMemberSubscriptions.unionChannelKeys(
-                members(immutableContractSnapshot, context));
+        return CoordinationRuntimeGas.inComponent(
+                context.runtimeWorkSession(),
+                () -> {
+                    List<ExternalChannelMemberSnapshot> members =
+                            members(
+                                    immutableContractSnapshot,
+                                    context);
+                    chargeMemberVisits(
+                            context,
+                            members.size(),
+                            "project Composite Timeline member keys");
+                    return TimelineMemberSubscriptions
+                            .unionChannelKeys(members);
+                });
     }
 
     @Override
@@ -83,6 +100,7 @@ final class CompositeTimelineExternalSubscriptionFunctions
                 .handlerChannelKey(
                         immutableContractSnapshot,
                         exactEvent,
+                        exactPayload,
                         context);
     }
 
@@ -96,6 +114,7 @@ final class CompositeTimelineExternalSubscriptionFunctions
                 .logicalDeliveryKey(
                         immutableContractSnapshot,
                         exactEvent,
+                        exactPayload,
                         context);
     }
 
@@ -103,8 +122,11 @@ final class CompositeTimelineExternalSubscriptionFunctions
     public String checkpointDomainDiscriminator(
             CompositeTimelineChannel immutableContractSnapshot,
             ExternalChannelFunctionContext context) {
+        OperationRequestRoutingFunctions
+                .declareTargetChannelCatalog(
+                        context);
         return "coordination.composite-timeline:"
-                + "direct-timeline-members-v1"
+                + "direct-timeline-members-v2"
                 + "|subject="
                 + ORDER_SUBJECT_VERSION;
     }
@@ -113,8 +135,19 @@ final class CompositeTimelineExternalSubscriptionFunctions
             CompositeTimelineChannel contract,
             Node exactEvent,
             ExternalChannelFunctionContext context) {
-        return TimelineMemberSubscriptions.winning(
-                members(contract, context), exactEvent);
+        return CoordinationRuntimeGas.inComponent(
+                context.runtimeWorkSession(),
+                () -> {
+                    List<ExternalChannelMemberSnapshot> members =
+                            members(contract, context);
+                    return TimelineMemberSubscriptions.winning(
+                            members,
+                            exactEvent,
+                            () -> chargeMemberVisits(
+                                    context,
+                                    1,
+                                    "evaluate Composite Timeline member"));
+                });
     }
 
     private TimelineMemberSubscriptions.WinningMember requireWinner(
@@ -134,7 +167,22 @@ final class CompositeTimelineExternalSubscriptionFunctions
     private List<ExternalChannelMemberSnapshot> members(
             CompositeTimelineChannel contract,
             ExternalChannelFunctionContext context) {
-        return TimelineMemberSubscriptions.compositeMembers(
+        return TimelineMemberSubscriptions.shallowCompositeMembers(
                 contract, context);
+    }
+
+    private static void chargeMemberVisits(
+            ExternalChannelFunctionContext context,
+            int quantity,
+            String reason) {
+        CoordinationRuntimeGas.charge(
+                context.runtimeWorkSession(),
+                "compositeMemberVisited",
+                quantity,
+                GasChargeContext.of(
+                        context.scopePath(),
+                        context.channelKey(),
+                        null,
+                        reason));
     }
 }

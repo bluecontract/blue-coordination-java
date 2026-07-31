@@ -8,11 +8,11 @@ import blue.language.processor.ChannelEvaluation;
 import blue.language.processor.ChannelEvaluationContext;
 import blue.language.processor.ChannelProcessor;
 import blue.language.processor.ContractMatchingService;
-import blue.language.processor.ContractProcessorRegistry;
-import blue.language.processor.ContractProcessorRegistryBuilder;
+import blue.language.processor.CoordinationFragmentationCatalogHarness;
 import blue.language.processor.CoordinationRoutingHarness;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.DocumentProcessor;
+import blue.language.processor.EffectiveContractSnapshotConstants;
 import blue.language.processor.ExternalDeliveryPlan;
 import blue.language.processor.ExternalDeliverySnapshot;
 import blue.language.processor.ExternalChannelSubscriptionFunctions;
@@ -81,12 +81,23 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                     8128, "coordination-fragment-matrix", 1));
 
     @Test
-    void splitRootAndEventPreserveProcessSemanticsAcrossRepresentations() {
+    void shouldPreserveProcessSemanticsAcrossSplitRepresentations() {
+        // Given
         Scenario scenario = Scenario.create();
-        SemanticProjection baseline = null;
+        List<Variant> variants =
+                Variant.matrix();
 
-        for (Variant variant : Variant.matrix()) {
-            Run run = execute(scenario, variant);
+        // When
+        List<Run> runs =
+                new ArrayList<>();
+        for (Variant variant : variants) {
+            runs.add(execute(
+                    scenario, variant));
+        }
+
+        // Then
+        SemanticProjection baseline = null;
+        for (Run run : runs) {
             assertLocalityAndCheckpoint(run);
             SemanticProjection projection =
                     SemanticProjection.of(run.debug);
@@ -96,14 +107,15 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                 assertEquals(
                         baseline,
                         projection,
-                        "semantic drift for " + variant);
+                        "semantic drift for "
+                                + run.variant);
             }
         }
 
         assertNotNull(baseline);
         assertEquals(ProcessorStatus.SUCCESS, baseline.status);
         assertEquals("processed", baseline.rootValue);
-        assertEquals(8, Variant.matrix().size());
+        assertEquals(8, variants.size());
     }
 
     private static Run execute(
@@ -173,6 +185,8 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
         String context = run.variant.toString();
         DocumentProcessingResult result =
                 run.debug.processResult();
+        Node exactResultDocument =
+                result.document();
 
         assertEquals(
                 ProcessorStatus.SUCCESS,
@@ -182,8 +196,12 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                         result.diagnostic()));
         assertEquals(
                 "processed",
-                textAt(result.document(), "state"),
-                context);
+                textAt(exactResultDocument, "state"),
+                "Language pure-reference Root transition defect: "
+                        + context + ": exact state="
+                        + exactResultDocument.getProperties().get("state")
+                        + ", handlerExecutions="
+                        + run.handlerExecutions);
         assertEquals(
                 1,
                 run.handlerExecutions,
@@ -486,7 +504,7 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                                             RuntimeBlueIds
                                                     .PROCESSING_INITIALIZED_MARKER))
                                     .properties(
-                                            "documentId",
+                                            "document",
                                             scalar(
                                                     "coordination-fragment-matrix")));
             Node selectedChannel = channel(
@@ -528,17 +546,30 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                     BlueIdCalculator.calculateBlueId(
                             inlineRoot);
 
-            ContractProcessorRegistry splitterRegistry =
-                    ContractProcessorRegistryBuilder
-                            .create()
-                            .register(
-                                    new MockHandlerProcessor())
-                            .build();
-            CoordinationDocumentSplitter splitter =
-                    new CoordinationDocumentSplitter(
-                            splitterRegistry);
-            CoordinationDocumentSplitter.SplitGraph document =
-                    splitter.splitDocument(inlineRoot);
+            CoordinationDocumentSplitter.SplitGraph document;
+            DocumentProcessor catalogProcessor =
+                    CoordinationFragmentationCatalogHarness
+                            .processor(
+                                    inlineRoot,
+                                    Collections.singletonMap(
+                                            MockTypeBlueIds
+                                                    .MOCK_HANDLER,
+                                            Collections.singletonList(
+                                                    "result")),
+                                    Collections.singletonMap(
+                                            MockTypeBlueIds
+                                                    .MOCK_EXTERNAL_CHANNEL,
+                                            EffectiveContractSnapshotConstants
+                                                    .Role
+                                                    .EXTERNAL_CHANNEL));
+            try {
+                document =
+                        new CoordinationDocumentSplitter(
+                                catalogProcessor)
+                                .splitDocument(inlineRoot);
+            } finally {
+                catalogProcessor.close();
+            }
             assertEquals(rootBlueId, document.rootBlueId());
             assertEquals(
                     5,
@@ -547,7 +578,7 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                     "all five Handler bodies must be independently retained");
 
             Node directRoot =
-                    document.fragmentedRoot();
+                    document.processingRootView();
             directRoot.getProperties().put(
                     "archive",
                     reference(archiveBlueId));
@@ -582,6 +613,9 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
             String eventBlueId =
                     BlueIdCalculator.calculateBlueId(
                             inlineEvent);
+            CoordinationDocumentSplitter splitter =
+                    CoordinationDocumentSplitter
+                            .forEventSplitting();
             CoordinationDocumentSplitter.SplitGraph event =
                     splitter.splitEvent(inlineEvent);
             CoordinationDocumentSplitter.SplitGraph message =
@@ -603,10 +637,8 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
 
             Map<String, Node> allowed =
                     new LinkedHashMap<>(
-                            document.fragments());
-            allowed.put(
-                    rootBlueId,
-                    directRoot.clone());
+                            processingFragments(
+                                    document));
             allowed.putAll(
                     event.fragments());
             for (String forbiddenBlueId :
@@ -684,6 +716,36 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                     forbidden,
                     plan);
         }
+    }
+
+    private static Map<String, Node> processingFragments(
+            CoordinationDocumentSplitter.SplitGraph graph) {
+        Map<String, Node> result =
+                new LinkedHashMap<>();
+        for (String blueId
+                : graph.fragments().keySet()) {
+            List<Node> provided =
+                    graph.provider()
+                            .fetchByBlueId(
+                                    blueId);
+            assertNotNull(
+                    provided,
+                    "PROCESS provider omitted "
+                            + blueId);
+            assertEquals(
+                    1,
+                    provided.size(),
+                    "PROCESS provider returned ambiguous content for "
+                            + blueId);
+            assertEquals(
+                    blueId,
+                    BlueIdCalculator.calculateBlueId(
+                            provided.get(0)));
+            result.put(
+                    blueId,
+                    provided.get(0).clone());
+        }
+        return result;
     }
 
     private static final class CountingMockHandlerProcessor
@@ -923,13 +985,15 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                 ProcessingDebugResult debug) {
             DocumentProcessingResult result =
                     debug.processResult();
+            Node exactResultDocument =
+                    result.document();
             Node checkpoint = result.document()
                     .getContracts()
                     .getProperties()
                     .get("checkpoint");
             return new SemanticProjection(
                     result.status(),
-                    textAt(result.document(), "state"),
+                    textAt(exactResultDocument, "state"),
                     BlueIdCalculator.calculateBlueId(
                             result.document()),
                     nodeBlueIds(result.events()),
@@ -1227,6 +1291,16 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                 ? root.getProperties().get(
                         property)
                 : null;
+        if (value != null
+                && value.isReferenceOnly()
+                && BlueIdCalculator.calculateBlueId(
+                scalar("processed")
+                        .type(new Node().blueId(
+                                blue.language.utils.Properties
+                                        .TEXT_TYPE_BLUE_ID)))
+                .equals(value.getBlueId())) {
+            return "processed";
+        }
         return value != null
                 && value.getValue() != null
                 ? String.valueOf(

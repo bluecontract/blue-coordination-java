@@ -1,5 +1,7 @@
 package blue.coordination.processor.workflow;
 
+import blue.bex.api.BexGasLedgerHost;
+import blue.bex.api.ProcessorExecutionContextBexGasLedgerHost;
 import blue.language.model.Node;
 import blue.language.processor.ProcessorExecutionContext;
 import blue.language.processor.WorkingDocument;
@@ -12,6 +14,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * Per-step view of the current workflow, immutable selected bodies, prior
+ * results, working document, and workflow-scoped hosted-BEX adapter.
+ *
+ * <p>The context is invocation-local and never represents an independent
+ * embedded-document session.</p>
+ */
 public final class StepExecutionContext {
     private final ProcessorExecutionContext processorContext;
     private final SequentialWorkflow workflow;
@@ -24,6 +33,7 @@ public final class StepExecutionContext {
     private final WorkflowExecutionState.Snapshot workflowStateView;
     private final StaticUpdatePlan staticUpdatePlan;
     private final Node eventRef;
+    private final WorkflowBexGasLedgerHost workflowBexGasLedgerHost;
     private WorkingDocument workingDocument;
 
     public StepExecutionContext(ProcessorExecutionContext processorContext,
@@ -42,6 +52,7 @@ public final class StepExecutionContext {
                 null,
                 stepIndex,
                 stepResults,
+                null,
                 null,
                 null);
     }
@@ -63,6 +74,7 @@ public final class StepExecutionContext {
                 stepIndex,
                 stepResults,
                 null,
+                null,
                 null);
     }
 
@@ -83,6 +95,7 @@ public final class StepExecutionContext {
                 currentContractFrozenNode,
                 stepIndex,
                 stepResults,
+                null,
                 null,
                 workingDocument);
     }
@@ -106,6 +119,7 @@ public final class StepExecutionContext {
                 stepIndex,
                 stepResults,
                 handledChangesetSteps,
+                null,
                 workingDocument);
     }
 
@@ -128,6 +142,7 @@ public final class StepExecutionContext {
                 workflowStateView,
                 null,
                 true,
+                null,
                 workingDocument);
     }
 
@@ -139,6 +154,7 @@ public final class StepExecutionContext {
                          int stepIndex,
                          WorkflowExecutionState.Snapshot workflowStateView,
                          StaticUpdatePlan staticUpdatePlan,
+                         WorkflowBexGasLedgerHost workflowBexGasLedgerHost,
                          WorkingDocument workingDocument) {
         this(processorContext,
                 workflow,
@@ -151,6 +167,7 @@ public final class StepExecutionContext {
                 workflowStateView,
                 staticUpdatePlan,
                 true,
+                workflowBexGasLedgerHost,
                 workingDocument);
     }
 
@@ -164,6 +181,7 @@ public final class StepExecutionContext {
                                  int stepIndex,
                                  Map<String, Object> stepResults,
                                  Set<String> handledChangesetSteps,
+                                 WorkflowBexGasLedgerHost workflowBexGasLedgerHost,
                                  WorkingDocument workingDocument) {
         this(processorContext,
                 workflow,
@@ -176,6 +194,7 @@ public final class StepExecutionContext {
                 WorkflowExecutionState.snapshotOf(stepResults, handledChangesetSteps),
                 null,
                 true,
+                workflowBexGasLedgerHost,
                 workingDocument);
     }
 
@@ -190,6 +209,7 @@ public final class StepExecutionContext {
                                  WorkflowExecutionState.Snapshot workflowStateView,
                                  StaticUpdatePlan staticUpdatePlan,
                                  boolean useSnapshotView,
+                                 WorkflowBexGasLedgerHost workflowBexGasLedgerHost,
                                  WorkingDocument workingDocument) {
         if (processorContext == null) {
             throw new IllegalArgumentException("processorContext must not be null");
@@ -210,11 +230,33 @@ public final class StepExecutionContext {
                 : new WorkflowExecutionState().snapshotView();
         this.staticUpdatePlan = staticUpdatePlan;
         this.eventRef = processorContext.event();
+        this.workflowBexGasLedgerHost = workflowBexGasLedgerHost;
         this.workingDocument = workingDocument;
     }
 
     public ProcessorExecutionContext processorContext() {
         return processorContext;
+    }
+
+    public BexGasLedgerHost bexGasLedgerHost() {
+        return workflowBexGasLedgerHost != null
+                ? workflowBexGasLedgerHost
+                : new ProcessorExecutionContextBexGasLedgerHost(processorContext);
+    }
+
+    /**
+     * Aborts the handler after first finalizing any active workflow-owned BEX
+     * execution adapter. Custom step executors should use this method instead
+     * of calling {@link ProcessorExecutionContext#throwFatal(String)}
+     * directly.
+     *
+     * @param reason deterministic fatal diagnostic
+     */
+    public void throwFatal(String reason) {
+        if (workflowBexGasLedgerHost != null) {
+            workflowBexGasLedgerHost.submitToParent();
+        }
+        processorContext.throwFatal(reason);
     }
 
     public SequentialWorkflow workflow() {
@@ -314,7 +356,7 @@ public final class StepExecutionContext {
         try {
             return workingDocument().previewAndApplyPatches(patches);
         } catch (RuntimeException ex) {
-            processorContext.throwFatal("Working document preview failed: " + ex.getMessage());
+            throwFatal("Working document preview failed: " + ex.getMessage());
             return null;
         }
     }
@@ -326,7 +368,7 @@ public final class StepExecutionContext {
         try {
             return workingDocument().previewAndApplyFrozenPatches(patches);
         } catch (RuntimeException ex) {
-            processorContext.throwFatal("Working document preview failed: " + ex.getMessage());
+            throwFatal("Working document preview failed: " + ex.getMessage());
             return null;
         }
     }

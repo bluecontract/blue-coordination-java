@@ -7,6 +7,10 @@ import blue.language.processor.ChannelProcessor;
 import blue.language.processor.ExternalChannelSubscriptionFunctions;
 import blue.repo.coordination.TimelineChannel;
 
+/**
+ * Implements fixed-repository Timeline Channel subscription, acceptance, and
+ * per-source checkpoint semantics.
+ */
 public final class TimelineChannelProcessor implements ChannelProcessor<TimelineChannel> {
     @Override
     public Class<TimelineChannel> contractType() {

@@ -1,0 +1,67 @@
+schema: blue-coordination-fixture/1.0
+id: coord-wf-04
+vectors:
+- COORD-WF-04
+category: workflow
+description: Terminate Processing commits prior workflow effects and prevents later steps from executing.
+operation: process
+input:
+  root:
+    state: 0
+    contracts:
+      alice:
+        type: { blueId: "8aohWT7jcoaC1j2siQzBxoKM8HhQ4HF13BkZDNnq5UHf" }
+        timeline:
+          type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+          timelineId: A
+        actor:
+          type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+          accountId: alice
+      run:
+        type: { blueId: "6rnGvP1BUsBpbtvuvJ1vy6hS7psoUJVBEXXsFeRma82V" }
+        channel: alice
+        request: {}
+        steps:
+        - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+          changeset:
+          - op: replace
+            path: /state
+            val: 1
+        - type: { blueId: "DacNQ6C6PgsEiE4QfUHmaWBztpEvo2YyXxUcP86ze77w" }
+          reason: done
+        - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+          changeset:
+          - op: replace
+            path: /state
+            val: 2
+  event:
+    type: { blueId: "7L685pBvjNNrBPq6tNv53kfPEBMDkoRu7MdVMTqdcyR2" }
+    timeline:
+      type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+      timelineId: A
+    timestamp: 100
+    actor:
+      type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+      accountId: alice
+    message:
+      type: { blueId: "93PyhYJyekVeSvQcFi5u8moU5fbfKcbD68BCRtzE8ZLz" }
+      channel: alice
+      operation: run
+      request: {}
+    fixtureId: E
+  feeder:
+    managedRootRevision: 1
+    indexedRootRevision: 1
+    eligibleSourceChannelKeys:
+    - alice
+expected:
+  assertions:
+  - actual: result.document.state
+    op: equals
+    expected: 1
+  - actual: result.status
+    op: equals
+    expected: success
+  - actual: trace.workflowSteps
+    op: notContains
+    expected: run:2:Update Document

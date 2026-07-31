@@ -45,6 +45,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  */
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class PaynoteReducedDefinitionWorkflowTest {
+    private static final boolean PRINT_TIMINGS =
+            Boolean.getBoolean("blue.tests.printTimings");
     private static final String DOCUMENT_RESOURCE = "/processor-delay/paynote-resale-reduced-bex.yaml";
     private static Fixture fixture;
     private static BexProcessingMetrics metrics;
@@ -100,8 +102,11 @@ class PaynoteReducedDefinitionWorkflowTest {
 
     @Test
     @Order(1)
-    void eventProcessingOnlyTimingColdAndWarm() {
+    void shouldMeasureColdAndWarmEventProcessing() {
+        // Given
         BexProcessingMetrics.Snapshot beforeCold = metrics.snapshot();
+
+        // When
         long start = System.nanoTime();
         DocumentProcessingResult coldHotel = fixture.blue.processDocument(initializedSnapshot, hotelEvent);
         double coldHotelMs = elapsedMs(start);
@@ -113,11 +118,6 @@ class PaynoteReducedDefinitionWorkflowTest {
                 restaurantEvent);
         double coldRestaurantMs = elapsedMs(start);
         BexProcessingMetrics.Snapshot afterCold = metrics.snapshot();
-
-        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(coldHotel), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(coldHotel));
-        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(coldRestaurant), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(coldRestaurant));
-        assertEquals(Boolean.TRUE, coldRestaurant.document().get("/orders/package-order-a/hotelOrder/resalePlaced"));
-        assertEquals(Boolean.TRUE, coldRestaurant.document().get("/orders/package-order-a/restaurantOrder/resalePlaced"));
 
         start = System.nanoTime();
         DocumentProcessingResult warmHotel = fixture.blue.processDocument(initializedSnapshot, hotelEvent);
@@ -131,12 +131,17 @@ class PaynoteReducedDefinitionWorkflowTest {
         double warmRestaurantMs = elapsedMs(start);
         BexProcessingMetrics.Snapshot afterWarm = metrics.snapshot();
 
+        // Then
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(coldHotel), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(coldHotel));
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(coldRestaurant), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(coldRestaurant));
+        assertEquals(Boolean.TRUE, coldRestaurant.document().get("/orders/package-order-a/hotelOrder/resalePlaced"));
+        assertEquals(Boolean.TRUE, coldRestaurant.document().get("/orders/package-order-a/restaurantOrder/resalePlaced"));
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(warmHotel), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(warmHotel));
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(warmRestaurant), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(warmRestaurant));
         assertEquals(Boolean.TRUE, warmRestaurant.document().get("/orders/package-order-a/hotelOrder/resalePlaced"));
         assertEquals(Boolean.TRUE, warmRestaurant.document().get("/orders/package-order-a/restaurantOrder/resalePlaced"));
 
-        System.out.printf(Locale.ROOT,
+        printTimingOutput(
                 "Paynote reduced BEX cold/warm timing - coldHotelMs: %.3fms, coldRestaurantMs: %.3fms, " +
                         "warmHotelMs: %.3fms, warmRestaurantMs: %.3fms%n",
                 coldHotelMs,
@@ -153,95 +158,97 @@ class PaynoteReducedDefinitionWorkflowTest {
 
     @Test
     @Order(2)
-    void twoParticipantsCallDifferentOperationsBackedBySharedComputeDefinition() {
+    void shouldProcessHotelParticipantOperationWithSharedDefinition() {
+        // Given
         long totalStart = System.nanoTime();
         BexProcessingMetrics.Snapshot before = metrics.snapshot();
         printSetupTimings();
 
+        // When
         long start = System.nanoTime();
         DocumentProcessingResult hotelResult = fixture.blue.processDocument(initializedSnapshot, hotelEvent);
         printTiming("process hotel participant operation", start);
 
-        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(hotelResult), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(hotelResult));
-        assertEquals("placed",
-                hotelResult.document().getAsText("/resaleOrderRequests/hotel-request-a/status"),
-                hotelResult.events().toString());
-        assertEquals("hotel-order-session-a",
-                hotelResult.document().getAsText("/resaleOrderRequests/hotel-request-a/orderSessionId"));
-        assertEquals(Boolean.TRUE, hotelResult.document().get("/orders/package-order-a/hotelOrder/resalePlaced"));
-        assertEquals("hotel-order-session-a",
-                hotelResult.document().getAsText("/orders/package-order-a/hotelOrder/sessionId"));
-        assertEquals("snapshot:component:hotel:hotel-order-session-a",
-                hotelResult.document().getAsText("/orders/package-order-a/hotelOrder/snapshotRequestId"));
-        assertEquals("agreement-linked:hotel:hotel-order-session-a",
-                hotelResult.document().getAsText("/orders/package-order-a/hotelOrder/subscriptionId"));
-        assertEquals("package-order-a",
-                hotelResult.document().getAsText("/componentOrderRefsBySessionId/hotel-order-session-a/packageOrderSessionId"));
-        assertEquals("hotelOrder",
-                hotelResult.document().getAsText("/componentOrderRefsBySessionId/hotel-order-session-a/component"));
-        assertContainsType(hotelResult.events(), "Sample/Document Initial Snapshot Requested");
-        assertContainsType(hotelResult.events(), "Sample/Subscribe to Session Requested");
-
-        start = System.nanoTime();
-        DocumentProcessingResult restaurantResult = fixture.blue.processDocument(
-                blue.coordination.processor.ProcessingResultTestSupport.snapshot(
-                        fixture.blue, hotelResult),
-                restaurantEvent);
-        printTiming("process restaurant participant operation", start);
-
-        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(restaurantResult), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(restaurantResult));
-        assertNotNull(restaurantResult.document());
-        assertEquals("placed", restaurantResult.document().getAsText("/resaleOrderRequests/restaurant-request-a/status"));
-        assertEquals("restaurant-order-session-a",
-                restaurantResult.document().getAsText("/resaleOrderRequests/restaurant-request-a/orderSessionId"));
-        assertEquals(Boolean.TRUE, restaurantResult.document().get("/orders/package-order-a/restaurantOrder/resalePlaced"));
-        assertEquals("restaurant-order-session-a",
-                restaurantResult.document().getAsText("/orders/package-order-a/restaurantOrder/sessionId"));
-        assertEquals("snapshot:component:restaurant:restaurant-order-session-a",
-                restaurantResult.document().getAsText("/orders/package-order-a/restaurantOrder/snapshotRequestId"));
-        assertEquals("agreement-linked:restaurant:restaurant-order-session-a",
-                restaurantResult.document().getAsText("/orders/package-order-a/restaurantOrder/subscriptionId"));
-        assertEquals("package-order-a",
-                restaurantResult.document().getAsText("/componentOrderRefsBySessionId/restaurant-order-session-a/packageOrderSessionId"));
-        assertEquals("restaurantOrder",
-                restaurantResult.document().getAsText("/componentOrderRefsBySessionId/restaurant-order-session-a/component"));
-        assertEquals(Boolean.TRUE, restaurantResult.document().get("/orders/package-order-a/hotelOrder/resalePlaced"));
-        assertContainsType(restaurantResult.events(), "Sample/Document Initial Snapshot Requested");
-        assertContainsType(restaurantResult.events(), "Sample/Subscribe to Session Requested");
+        // Then
+        assertParticipantOperationResult(
+                hotelResult,
+                "hotel-request-a",
+                "hotelOrder",
+                "hotel-order-session-a",
+                "snapshot:component:hotel:hotel-order-session-a",
+                "agreement-linked:hotel:hotel-order-session-a");
         printTiming("total reduced paynote flow", totalStart);
         printMetricsDelta("reduced paynote flow metrics", before, metrics.snapshot());
     }
 
     @Test
     @Order(3)
-    void sameEventPathColdAndWarmTiming() {
+    void shouldProcessRestaurantParticipantOperationWithSharedDefinition() {
+        // Given
+        DocumentProcessingResult hotelResult =
+                fixture.blue.processDocument(
+                        initializedSnapshot,
+                        hotelEvent);
+
+        // When
+        DocumentProcessingResult restaurantResult =
+                fixture.blue.processDocument(
+                        blue.coordination.processor
+                                .ProcessingResultTestSupport
+                                .snapshot(
+                                        fixture.blue,
+                                        hotelResult),
+                        restaurantEvent);
+
+        // Then
+        assertParticipantOperationResult(
+                restaurantResult,
+                "restaurant-request-a",
+                "restaurantOrder",
+                "restaurant-order-session-a",
+                "snapshot:component:restaurant:restaurant-order-session-a",
+                "agreement-linked:restaurant:restaurant-order-session-a");
+        assertEquals(
+                Boolean.TRUE,
+                restaurantResult.document().get(
+                        "/orders/package-order-a/hotelOrder/resalePlaced"));
+    }
+
+    @Test
+    @Order(4)
+    void shouldMeasureColdAndWarmTimingForSameEventPath() {
+        // Given
         BexProcessingMetrics.Snapshot beforeHotelCold = metrics.snapshot();
+
+        // When
         long start = System.nanoTime();
         DocumentProcessingResult coldHotel = fixture.blue.processDocument(initializedSnapshot, hotelEvent);
         double coldHotelMs = elapsedMs(start);
         BexProcessingMetrics.Snapshot afterHotelCold = metrics.snapshot();
-        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(coldHotel), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(coldHotel));
 
         start = System.nanoTime();
         DocumentProcessingResult warmHotel = fixture.blue.processDocument(initializedSnapshot, hotelEvent);
         double warmHotelMs = elapsedMs(start);
         BexProcessingMetrics.Snapshot afterHotelWarm = metrics.snapshot();
-        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(warmHotel), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(warmHotel));
 
         BexProcessingMetrics.Snapshot beforeRestaurantCold = metrics.snapshot();
         start = System.nanoTime();
         DocumentProcessingResult coldRestaurant = fixture.blue.processDocument(initializedSnapshot, restaurantEvent);
         double coldRestaurantMs = elapsedMs(start);
         BexProcessingMetrics.Snapshot afterRestaurantCold = metrics.snapshot();
-        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(coldRestaurant), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(coldRestaurant));
 
         start = System.nanoTime();
         DocumentProcessingResult warmRestaurant = fixture.blue.processDocument(initializedSnapshot, restaurantEvent);
         double warmRestaurantMs = elapsedMs(start);
         BexProcessingMetrics.Snapshot afterRestaurantWarm = metrics.snapshot();
+
+        // Then
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(coldHotel), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(coldHotel));
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(warmHotel), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(warmHotel));
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(coldRestaurant), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(coldRestaurant));
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(warmRestaurant), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(warmRestaurant));
 
-        System.out.printf(Locale.ROOT,
+        printTimingOutput(
                 "Paynote reduced BEX same-path cold/warm timing - coldHotelMs: %.3fms, warmHotelMs: %.3fms, " +
                         "coldRestaurantMs: %.3fms, warmRestaurantMs: %.3fms%n",
                 coldHotelMs,
@@ -255,8 +262,9 @@ class PaynoteReducedDefinitionWorkflowTest {
     }
 
     @Test
-    @Order(4)
-    void eventProcessingOnlyTimingAfterWarmup() {
+    @Order(5)
+    void shouldMeasureEventProcessingAfterWarmup() {
+        // Given
         DocumentProcessingResult warmHotel = fixture.blue.processDocument(initializedSnapshot, hotelEvent);
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(warmHotel), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(warmHotel));
         DocumentProcessingResult warmRestaurant = fixture.blue.processDocument(
@@ -265,6 +273,7 @@ class PaynoteReducedDefinitionWorkflowTest {
                 restaurantEvent);
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(warmRestaurant), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(warmRestaurant));
 
+        // When
         BexProcessingMetrics.Snapshot before = metrics.snapshot();
         long start = System.nanoTime();
         DocumentProcessingResult hotelResult = fixture.blue.processDocument(initializedSnapshot, hotelEvent);
@@ -278,18 +287,91 @@ class PaynoteReducedDefinitionWorkflowTest {
         double processRestaurantMs = elapsedMs(start);
         BexProcessingMetrics.Snapshot after = metrics.snapshot();
 
+        // Then
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(hotelResult), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(hotelResult));
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(restaurantResult), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(restaurantResult));
         assertEquals(Boolean.TRUE, restaurantResult.document().get("/orders/package-order-a/hotelOrder/resalePlaced"));
         assertEquals(Boolean.TRUE, restaurantResult.document().get("/orders/package-order-a/restaurantOrder/resalePlaced"));
 
-        System.out.printf(Locale.ROOT,
+        printTimingOutput(
                 "Paynote reduced BEX event-only timing - processHotelMs: %.3fms, processRestaurantMs: %.3fms%n",
                 processHotelMs,
                 processRestaurantMs);
         printMetricsDelta("event-only metrics delta", before, after);
         assertEquals(2L, after.updateBatchPatchApplications - before.updateBatchPatchApplications);
         assertEquals(0L, after.updateIndividualPatchApplications - before.updateIndividualPatchApplications);
+    }
+
+    private static void assertParticipantOperationResult(
+            DocumentProcessingResult result,
+            String requestId,
+            String component,
+            String orderSessionId,
+            String snapshotRequestId,
+            String subscriptionId) {
+        assertFalse(
+                blue.coordination.processor
+                        .ProcessingResultTestSupport
+                        .isCapabilityFailure(result),
+                blue.coordination.processor
+                        .ProcessingResultTestSupport
+                        .diagnosticMessage(result));
+        assertNotNull(result.document());
+        assertEquals(
+                "placed",
+                result.document().getAsText(
+                        "/resaleOrderRequests/"
+                                + requestId
+                                + "/status"),
+                result.events().toString());
+        assertEquals(
+                orderSessionId,
+                result.document().getAsText(
+                        "/resaleOrderRequests/"
+                                + requestId
+                                + "/orderSessionId"));
+        assertEquals(
+                Boolean.TRUE,
+                result.document().get(
+                        "/orders/package-order-a/"
+                                + component
+                                + "/resalePlaced"));
+        assertEquals(
+                orderSessionId,
+                result.document().getAsText(
+                        "/orders/package-order-a/"
+                                + component
+                                + "/sessionId"));
+        assertEquals(
+                snapshotRequestId,
+                result.document().getAsText(
+                        "/orders/package-order-a/"
+                                + component
+                                + "/snapshotRequestId"));
+        assertEquals(
+                subscriptionId,
+                result.document().getAsText(
+                        "/orders/package-order-a/"
+                                + component
+                                + "/subscriptionId"));
+        assertEquals(
+                "package-order-a",
+                result.document().getAsText(
+                        "/componentOrderRefsBySessionId/"
+                                + orderSessionId
+                                + "/packageOrderSessionId"));
+        assertEquals(
+                component,
+                result.document().getAsText(
+                        "/componentOrderRefsBySessionId/"
+                                + orderSessionId
+                                + "/component"));
+        assertContainsType(
+                result.events(),
+                "MyOS/Document Initial Snapshot Requested");
+        assertContainsType(
+                result.events(),
+                "MyOS/Subscribe to Session Requested");
     }
 
     private static Node participantOperation(Fixture fixture,
@@ -321,7 +403,7 @@ class PaynoteReducedDefinitionWorkflowTest {
                                            String requestId,
                                            String orderSessionId) {
         return new Node()
-                .type("Sample/Subscription Update")
+                .type("MyOS/Subscription Update")
                 .properties("subscriptionId", new Node().value(subscriptionId))
                 .properties("targetSessionId", new Node().value(targetSessionId))
                 .properties("update", new Node()
@@ -357,7 +439,7 @@ class PaynoteReducedDefinitionWorkflowTest {
     }
 
     private static void printTiming(String label, long startNanos) {
-        System.out.printf(Locale.ROOT, "Paynote reduced BEX timing - %s: %.3fms%n",
+        printTimingOutput("Paynote reduced BEX timing - %s: %.3fms%n",
                 label,
                 elapsedMs(startNanos));
     }
@@ -367,11 +449,11 @@ class PaynoteReducedDefinitionWorkflowTest {
     }
 
     private static void printSetupTimings() {
-        System.out.printf(Locale.ROOT, "Paynote reduced BEX setup timing - setupBlueMs: %.3fms%n", setupBlueMs);
-        System.out.printf(Locale.ROOT, "Paynote reduced BEX setup timing - loadYamlMs: %.3fms%n", loadYamlMs);
-        System.out.printf(Locale.ROOT, "Paynote reduced BEX setup timing - initializeMs: %.3fms%n", initializeMs);
-        System.out.printf(Locale.ROOT, "Paynote reduced BEX setup timing - buildHotelEventMs: %.3fms%n", buildHotelEventMs);
-        System.out.printf(Locale.ROOT, "Paynote reduced BEX setup timing - buildRestaurantEventMs: %.3fms%n", buildRestaurantEventMs);
+        printTimingOutput("Paynote reduced BEX setup timing - setupBlueMs: %.3fms%n", setupBlueMs);
+        printTimingOutput("Paynote reduced BEX setup timing - loadYamlMs: %.3fms%n", loadYamlMs);
+        printTimingOutput("Paynote reduced BEX setup timing - initializeMs: %.3fms%n", initializeMs);
+        printTimingOutput("Paynote reduced BEX setup timing - buildHotelEventMs: %.3fms%n", buildHotelEventMs);
+        printTimingOutput("Paynote reduced BEX setup timing - buildRestaurantEventMs: %.3fms%n", buildRestaurantEventMs);
     }
 
     private static void printMetrics(String label, BexProcessingMetrics.Snapshot snapshot) {
@@ -402,7 +484,7 @@ class PaynoteReducedDefinitionWorkflowTest {
                                      long eventsEmitted,
                                      long computeProgramNormalizations,
                                      long computeDefinitionNormalizations) {
-        System.out.printf(Locale.ROOT,
+        printTimingOutput(
                 "Paynote reduced BEX %s - workflowSteps=%d, computeSteps=%d, updateSteps=%d, triggerSteps=%d, " +
                         "directChangesetHits=%d, patchesApplied=%d, " +
                         "batchPatchApplications=%d, individualPatchApplications=%d, eventsEmitted=%d, " +
@@ -440,7 +522,7 @@ class PaynoteReducedDefinitionWorkflowTest {
     }
 
     private static void printTimingMetrics(String label, BexProcessingMetrics.Snapshot snapshot) {
-        System.out.printf(Locale.ROOT,
+        printTimingOutput(
                 "Paynote reduced BEX %s timing metrics - workflowRunnerMs=%.3f, computeStepMs=%.3f, " +
                         "definitionResolveMs=%.3f, contextBuildMs=%.3f, programSourceBuildMs=%.3f, " +
                         "compileExecuteMs=%.3f, bexCompileMs=%.3f, bexExecuteMs=%.3f, " +
@@ -515,7 +597,7 @@ class PaynoteReducedDefinitionWorkflowTest {
     private static void printTimingMetricsDelta(String label,
                                                 BexProcessingMetrics.Snapshot before,
                                                 BexProcessingMetrics.Snapshot after) {
-        System.out.printf(Locale.ROOT,
+        printTimingOutput(
                 "Paynote reduced BEX %s timing metrics - workflowRunnerMs=%.3f, computeStepMs=%.3f, " +
                         "definitionResolveMs=%.3f, contextBuildMs=%.3f, programSourceBuildMs=%.3f, " +
                         "compileExecuteMs=%.3f, bexCompileMs=%.3f, bexExecuteMs=%.3f, " +
@@ -626,7 +708,7 @@ class PaynoteReducedDefinitionWorkflowTest {
         long processorUnattributed = Math.max(0L, processDocumentNanos - attributed);
         long blueUnattributed = Math.max(0L,
                 blueProcessDocumentNanos - processDocumentNanos - resultSnapshotAttachNanos);
-        System.out.printf(Locale.ROOT,
+        printTimingOutput(
                 "Paynote reduced BEX %s outer processing metrics - blueProcessDocumentMs=%.3f, " +
                         "processorProcessDocumentMs=%.3f, resultSnapshotAttachMs=%.3f, " +
                         "blueIdCalculationMs=%.3f, eventPreprocessMs=%.3f, bundleLoadMs=%.3f, " +
@@ -681,7 +763,7 @@ class PaynoteReducedDefinitionWorkflowTest {
                                                long batchPatchCommitNanos,
                                                long documentUpdateBeforeMaterializations,
                                                long documentUpdateAfterMaterializations) {
-        System.out.printf(Locale.ROOT,
+        printTimingOutput(
                 "Paynote reduced BEX %s batch patch metrics - patchBoundaryMs=%.3f, patchGasMs=%.3f, " +
                         "documentUpdateRoutingMs=%.3f, documentUpdateEventsBuilt=%d, " +
                         "documentUpdateEventsSkippedNoChannel=%d, batchPlanningMs=%.3f, " +
@@ -703,6 +785,17 @@ class PaynoteReducedDefinitionWorkflowTest {
 
     private static double nanosToMs(long nanos) {
         return nanos / 1_000_000.0d;
+    }
+
+    private static void printTimingOutput(
+            String format,
+            Object... arguments) {
+        if (PRINT_TIMINGS) {
+            System.out.printf(
+                    Locale.ROOT,
+                    format,
+                    arguments);
+        }
     }
 
     private static Fixture configuredFixture(BexProcessingMetrics metrics) {

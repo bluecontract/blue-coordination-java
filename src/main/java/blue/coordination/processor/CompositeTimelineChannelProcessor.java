@@ -13,6 +13,14 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+/**
+ * Evaluates the deterministic union of the Timeline Channels explicitly
+ * listed by a Composite Timeline Channel.
+ *
+ * <p>Duplicate member keys are evaluated once. Concrete member processors
+ * retain authority over Timeline acceptance, while this processor coalesces
+ * successful members into one logical external delivery.</p>
+ */
 public final class CompositeTimelineChannelProcessor implements ChannelProcessor<CompositeTimelineChannel> {
     @Override
     public Class<CompositeTimelineChannel> contractType() {

@@ -1,0 +1,24 @@
+fixtureSchema: blue.coordination/direct-portable-gas-fixture/1.0
+id: coordination-gas-terminate-processing-step
+operation: direct-portable-gas
+input:
+  counter: terminateProcessingStep
+  quantity: 12
+  context:
+    scopePath: /
+    contractKey: gas-micro
+    logicalPath: /terminateProcessingStep
+    reason: direct-portable-gas:terminateProcessingStep
+expected:
+  totalGas: 36
+  trace:
+  - sequence: 0
+    namespace: coordination.00000000
+    counter: terminateProcessingStep
+    quantity: 12
+    weight: 3
+    subtotal: 36
+    scopePath: /
+    contractKey: gas-micro
+    logicalPath: /terminateProcessingStep
+    reason: direct-portable-gas:terminateProcessingStep

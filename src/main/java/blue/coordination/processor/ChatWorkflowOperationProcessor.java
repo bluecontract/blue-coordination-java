@@ -10,6 +10,10 @@ import blue.repo.coordination.SequentialWorkflow;
 import java.util.Collections;
 import java.util.List;
 
+/**
+ * Routes a fixed-repository Chat Workflow Operation and executes its ordered
+ * workflow steps after the owning Operation Request matches.
+ */
 public final class ChatWorkflowOperationProcessor implements HandlerProcessor<ChatWorkflowOperation> {
     private final SequentialWorkflowRunner runner;
     private final OperationRequestMatcher matcher = new OperationRequestMatcher();
@@ -37,7 +41,11 @@ public final class ChatWorkflowOperationProcessor implements HandlerProcessor<Ch
 
     @Override
     public String deriveChannel(ChatWorkflowOperation contract, HandlerRegistrationContext context) {
-        String channel = trimToNull(contract.getChannel());
+        String channel = HandlerChannelResolver.resolve(
+                contract != null
+                        ? contract.getChannel()
+                        : null,
+                context);
         if (channel != null && !context.hasContract(channel)) {
             throw new IllegalStateException("Chat workflow operation '" + context.handlerKey()
                     + "' references unknown channel '" + channel + "'");
@@ -55,11 +63,4 @@ public final class ChatWorkflowOperationProcessor implements HandlerProcessor<Ch
         runner.execute(new SequentialWorkflow().steps(contract.getSteps()), context);
     }
 
-    private static String trimToNull(String value) {
-        if (value == null) {
-            return null;
-        }
-        String trimmed = value.trim();
-        return trimmed.isEmpty() ? null : trimmed;
-    }
 }

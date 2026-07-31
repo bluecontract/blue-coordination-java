@@ -2,6 +2,7 @@ package blue.coordination.processor;
 
 import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationProcessors;
+import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.coordination.processor.workflow.SequentialWorkflowRunner;
 import blue.coordination.processor.workflow.StepExecutionContext;
 import blue.coordination.processor.workflow.UpdateDocumentStepExecutor;
@@ -9,8 +10,16 @@ import blue.coordination.processor.workflow.WorkflowStepExecutor;
 import blue.coordination.processor.workflow.WorkflowStepResult;
 import blue.language.Blue;
 import blue.language.model.Node;
+import blue.language.processor.CoordinationConfiguredProcessorFactory;
+import blue.language.processor.CoordinationRoutingHarness;
 import blue.language.processor.DocumentProcessingResult;
+import blue.language.processor.DocumentProcessor;
+import blue.language.processor.ProcessingDebugResult;
 import blue.language.processor.ProcessorStatus;
+import blue.language.processor.VerifiedExecutionEvidence;
+import blue.language.snapshot.FrozenNode;
+import blue.language.snapshot.ResolvedSnapshot;
+import blue.language.utils.BlueIdCalculator;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.ChatMessage;
 import blue.repo.coordination.SequentialWorkflowStep;
@@ -26,112 +35,322 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SequentialWorkflowExecutionTest {
 
     @Test
-    void sequentialWorkflowOperationDerivesAndMatchesOperationRequest() {
+    void shouldExecuteNamedOperationRequestHandlerAndWorkflowStep() {
+        // Given
+        BexProcessingMetrics metrics = new BexProcessingMetrics();
+        CoordinationProcessorOptions options =
+                CoordinationProcessorOptions.builder()
+                        .processingMetrics(metrics)
+                        .build();
+        Fixture fixture = configuredCoordinationFixture(options);
+        Node document = initializedDocument(
+                fixture,
+                counterDocument(
+                        fixture.repository, 0, true));
+        Node event = operationRequestEvent(
+                fixture,
+                "owner",
+                1,
+                "increment",
+                new Node().value(7));
+
+        // When
+        DocumentProcessingResult result =
+                fixture.blue.processDocument(
+                        document, event);
+
+        // Then
+        assertEquals(
+                ProcessorStatus.SUCCESS,
+                result.status(),
+                blue.coordination.processor
+                        .ProcessingResultTestSupport
+                        .diagnosticMessage(result));
+        assertTrue(
+                metrics.handlerMatchAttempts() > 0L,
+                metrics.snapshot().toString());
+        assertTrue(
+                metrics.handlersExecuted() > 0L,
+                metrics.snapshot().toString());
+        assertTrue(
+                metrics.workflowStepsExecuted() > 0L,
+                metrics.snapshot().toString());
+    }
+
+    @Test
+    void shouldDeriveAndMatchOperationRequestForWorkflowOperation() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, counterDocument(fixture.repository, 0, true));
 
+        // When
         Node processed = processOperationRequest(fixture, document, "owner", 1, "increment", 7);
 
+        // Then
         assertCounter(processed, 7);
     }
 
     @Test
-    void wrongOperationDoesNotRun() {
+    void shouldNotRunForWrongOperation() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, counterDocument(fixture.repository, 0, false));
 
+        // When
         Node processed = processOperationRequest(fixture, document, "owner", 1, "decrement", 7);
 
+        // Then
         assertCounter(processed, 0);
     }
 
     @Test
-    void wrongRequestTypeDoesNotRun() {
+    void shouldNotRunForWrongRequestType() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, counterDocument(fixture.repository, 0, true));
 
         Node event = operationRequestEvent(fixture, "owner", 1, "increment", new Node().value("text"));
+
+        // When
         Node processed = fixture.blue.processDocument(document, event).document();
 
+        // Then
         assertCounter(processed, 0);
     }
 
     @Test
-    void duplicateRequestDoesNotRunTwice() {
+    void shouldNotRunDuplicateRequestTwice() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, counterDocument(fixture.repository, 0, true));
         Node event = operationRequestEvent(fixture, "owner", 1, "increment", new Node().value(7));
 
+        // When
         Node afterFirst = fixture.blue.processDocument(document, event).document();
         Node afterSecond = fixture.blue.processDocument(afterFirst, event).document();
 
+        // Then
         assertCounter(afterSecond, 7);
     }
 
     @Test
-    void newerRequestRunsAfterPreviousRequest() {
-        Fixture fixture = configuredFixture();
-        Node document = initializedDocument(fixture, counterDocument(fixture.repository, 0, true));
-        Node afterFirst = processOperationRequest(fixture, document, "owner", 1, "increment", 7);
+    void shouldRunNewerRequestAfterPreviousRequest() {
+        // Given
+        Node firstIncrement = new Node().value(7);
+        BexProcessingMetrics metrics =
+                new BexProcessingMetrics();
+        Fixture fixture =
+                configuredCoordinationFixture(
+                        CoordinationProcessorOptions
+                                .builder()
+                                .processingMetrics(
+                                        metrics)
+                                .build());
+        Node contractSurface =
+                fixture.blue.preprocess(
+                        counterDocument(
+                                fixture.repository, 0, true));
+        Node document = initializedDocument(
+                fixture,
+                contractSurface);
+        ProcessingDebugResult firstExecution =
+                fixture.blue.getDocumentProcessor()
+                        .processDocumentWithTrace(
+                                document,
+                                operationRequestEvent(
+                                        fixture,
+                                        "owner",
+                                        1,
+                                        "increment",
+                                        firstIncrement.clone()));
+        DocumentProcessingResult firstResult =
+                firstExecution.processResult();
+        assertEquals(
+                ProcessorStatus.SUCCESS,
+                firstResult.status(),
+                blue.coordination.processor
+                        .ProcessingResultTestSupport
+                        .diagnosticMessage(firstResult));
+        ResolvedSnapshot afterFirstSnapshot =
+                firstExecution.resultingSnapshot();
+        assertNotNull(
+                afterFirstSnapshot,
+                "successful PROCESS must expose its authoritative snapshot");
+        FrozenNode canonicalCounter =
+                afterFirstSnapshot.canonicalAt(
+                        "/counter");
+        FrozenNode resolvedCounter =
+                afterFirstSnapshot.resolvedAt(
+                        "/counter");
+        assertNotNull(
+                canonicalCounter,
+                "resulting snapshot must retain canonical /counter");
+        assertNotNull(
+                resolvedCounter,
+                "resulting snapshot must retain resolved /counter");
+        assertEquals(
+                BlueIdCalculator.calculateBlueId(
+                        firstIncrement),
+                canonicalCounter.blueId(),
+                "canonical /counter must retain the first result identity");
+        assertFalse(
+                resolvedCounter.isReferenceOnly(),
+                "resolved /counter must retain authoritative scalar content");
+        assertEquals(
+                BigInteger.valueOf(7),
+                resolvedCounter.getValue(),
+                "resolved /counter must retain the first result value");
+        Node afterFirst = firstResult.document();
+        Object firstTimestamp =
+                afterFirst.get("/contracts/checkpoint/entries/ownerChannel/subject/timestamp");
+        Node secondEvent = operationRequestEvent(
+                fixture,
+                "owner",
+                2,
+                "increment",
+                new Node().value(5));
+        VerifiedExecutionEvidence secondEvidence =
+                CoordinationRoutingHarness.evidence(
+                        fixture.blue.getDocumentProcessor(),
+                        afterFirstSnapshot.canonicalRoot(),
+                        afterFirstSnapshot.canonicalRoot(),
+                        secondEvent,
+                        CoordinationRoutingHarness
+                                .DeliveryOccurrence.at(
+                                        "/", "ownerChannel"));
+        BexProcessingMetrics.Snapshot beforeSecond =
+                metrics.snapshot();
+
+        // When
+        DocumentProcessingResult secondResult;
+        try (DocumentProcessor secondProcessor =
+                     CoordinationConfiguredProcessorFactory
+                             .withExecutionEvidencePlan(
+                                     fixture.blue,
+                                     null,
+                                     secondEvidence)) {
+            secondResult =
+                    secondProcessor.processDocumentWithTrace(
+                                    afterFirstSnapshot,
+                                    secondEvent,
+                                    secondEvidence)
+                            .processResult();
+        }
+        Node afterSecond = secondResult.document();
+
+        // Then
+        assertEquals(
+                ProcessorStatus.SUCCESS,
+                secondResult.status(),
+                blue.coordination.processor
+                        .ProcessingResultTestSupport
+                        .diagnosticMessage(secondResult)
+                        + "; "
+                        + secondProcessMetrics(
+                                beforeSecond,
+                                metrics.snapshot()));
         assertEquals(BigInteger.ONE,
-                afterFirst.get("/contracts/checkpoint/entries/ownerChannel/subject/timestamp"));
-
-        Node afterSecond = processOperationRequest(fixture, afterFirst, "owner", 2, "increment", 5);
-
+                firstTimestamp);
         assertEquals(BigInteger.valueOf(2),
                 afterSecond.get("/contracts/checkpoint/entries/ownerChannel/subject/timestamp"));
         assertCounter(afterSecond, 12);
     }
 
+    private static String secondProcessMetrics(
+            BexProcessingMetrics.Snapshot before,
+            BexProcessingMetrics.Snapshot after) {
+        return "secondProcessMetrics={"
+                + "handlers="
+                + (after.handlersExecuted
+                        - before.handlersExecuted)
+                + ", computeSteps="
+                + (after.computeStepsExecuted
+                        - before.computeStepsExecuted)
+                + ", bexCompiled="
+                + (after.bexCompiledExecutions
+                        - before.bexCompiledExecutions)
+                + ", directChangesets="
+                + (after.directBexChangesetHits
+                        - before.directBexChangesetHits)
+                + ", patchConversions="
+                + (after.directBexPatchEntryConversions
+                        - before.directBexPatchEntryConversions)
+                + ", patchesApplied="
+                + (after.patchesApplied
+                        - before.patchesApplied)
+                + ", documentDirectReads="
+                + (after.bexDocumentViewFrozenDirectHits
+                        - before.bexDocumentViewFrozenDirectHits)
+                + ", documentRootFallbacks="
+                + (after.bexDocumentViewFrozenRootFallbackHits
+                        - before.bexDocumentViewFrozenRootFallbackHits)
+                + "}";
+    }
+
     @Test
-    void decrementComputeWorks() {
+    void shouldDecrementCounterWithCompute() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, counterDocument(fixture.repository, 10, true));
 
+        // When
         Node processed = processOperationRequest(fixture, document, "owner", 1, "decrement", 3);
 
+        // Then
         assertCounter(processed, 7);
     }
 
     @Test
-    void multipleComputeStepsSeePreviousStepState() {
+    void shouldExposePreviousStateToLaterComputeSteps() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, doubleIncrementDocument(fixture.repository));
 
+        // When
         Node processed = processOperationRequest(fixture, document, "owner", 1, "increment", 2);
 
+        // Then
         assertCounter(processed, 4);
     }
 
     @Test
-    void directSequentialWorkflowExecutesUpdateDocument() {
+    void shouldExecuteUpdateDocumentInDirectWorkflow() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, directWorkflowDocument(fixture.repository));
         Node event = chatTimelineEntry(fixture, "owner", 1, "run");
 
+        // When
         Node processed = fixture.blue.processDocument(document, event).document();
 
+        // Then
         assertCounter(processed, 5);
     }
 
     @Test
-    void unsupportedStepFailsExplicitly() {
+    void shouldFailExplicitlyForUnsupportedStep() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, unsupportedStepDocument(fixture.repository));
         Node event = chatTimelineEntry(fixture, "owner", 1, "run");
 
+        // When
         DocumentProcessingResult result = fixture.blue.processDocument(document, event);
 
+        // Then
         assertRuntimeFatal(result, "Unsupported sequential workflow step");
     }
 
     @Test
-    void coordinationProcessorOptionsInjectsSequentialWorkflowRunner() {
+    void shouldInjectWorkflowRunnerFromProcessorOptions() {
+        // Given
         WorkflowStepExecutor<UpdateDocument> injectedExecutor = new WorkflowStepExecutor<UpdateDocument>() {
             @Override
             public boolean supports(SequentialWorkflowStep step) {
@@ -155,6 +374,7 @@ class SequentialWorkflowExecutionTest {
                 0,
                 new Node().value(1)));
 
+        // When
         DocumentProcessingResult result = processOperationRequestResult(fixture,
                 document,
                 "owner",
@@ -162,23 +382,28 @@ class SequentialWorkflowExecutionTest {
                 "increment",
                 new Node().value(7));
 
+        // Then
         assertRuntimeFatal(result, "injected runner");
     }
 
     @Test
-    void literalUpdateValuesPassThrough() {
+    void shouldPassThroughLiteralUpdateValues() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, staticUpdateDocument(fixture.repository,
                 0,
                 new Node().properties("nested", new Node().value(true))));
 
+        // When
         Node processed = processOperationRequest(fixture, document, "owner", 1, "increment", 7);
 
+        // Then
         assertEquals(Boolean.TRUE, processed.get("/counter/nested"));
     }
 
     @Test
-    void stepResultsAreCollected() {
+    void shouldCollectStepResults() {
+        // Given
         final AtomicReference<Map<String, Object>> seenResults = new AtomicReference<Map<String, Object>>();
         WorkflowStepExecutor<UpdateDocument> first = new WorkflowStepExecutor<UpdateDocument>() {
             @Override
@@ -209,52 +434,83 @@ class SequentialWorkflowExecutionTest {
         Node document = initializedDocument(fixture, stepResultsDocument(fixture.repository));
         Node event = chatTimelineEntry(fixture, "owner", 1, "run");
 
+        // When
         fixture.blue.processDocument(document, event);
 
+        // Then
         assertEquals(1, seenResults.get().size());
         assertEquals("a", seenResults.get().get("Step1"));
     }
 
     @Test
-    void patchPathResolvesAgainstEmbeddedScope() {
+    void shouldResolvePatchPathAgainstEmbeddedScope() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, embeddedScopeDocument(fixture.repository));
         Node event = operationRequestEvent(fixture, "owner", 1, "increment", new Node().value(7));
 
-        Node processed = fixture.blue.processDocument(document, event).document();
+        // When
+        DocumentProcessingResult result =
+                fixture.blue.processDocument(document, event);
+        Node processed = result.document();
 
-        assertEquals(BigInteger.valueOf(100), processed.get("/counter"));
-        assertEquals(BigInteger.valueOf(7), processed.get("/child/counter"));
+        // Then
+        assertEquals(ProcessorStatus.SUCCESS,
+                result.status(),
+                blue.coordination.processor.ProcessingResultTestSupport
+                        .diagnosticMessage(result));
+        assertExactInteger(
+                processed,
+                "/counter",
+                100);
+        assertExactInteger(
+                processed,
+                "/child/counter",
+                7);
     }
 
     @Test
-    void computeEventStepSeesUpdatedDocument() {
+    void shouldExposeUpdatedDocumentToComputeEventStep() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, directWorkflowStepsDocument(fixture.repository,
                 0,
                 updateDocumentStep("replace", "/counter", new Node().value(5)),
                 computeAppendChatMessageStep(bexConcat(new Node().value("counter is "), bexText(bexDocument("/counter"))))));
 
+        // When
         DocumentProcessingResult result = processChat(fixture, document, "owner", 1, "run");
 
+        // Then
+        assertEquals(
+                ProcessorStatus.SUCCESS,
+                result.status(),
+                "Language hosted BEX semantic-output provenance defect: "
+                        + blue.coordination.processor
+                        .ProcessingResultTestSupport
+                        .diagnosticMessage(result));
         assertCounter(result.document(), 5);
         assertTriggeredChatMessage(result, "counter is 5");
     }
 
     @Test
-    void triggerEventStepEmitsEvent() {
+    void shouldEmitEventFromTriggerEventStep() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, directWorkflowStepsDocument(fixture.repository,
                 0,
                 triggerEventStep("Workflow finished")));
 
+        // When
         DocumentProcessingResult result = processChat(fixture, document, "owner", 1, "run");
 
+        // Then
         assertTriggeredChatMessage(result, "Workflow finished");
     }
 
     @Test
-    void fullCounterWorkflowEmitsChatMessageWithTriggerEvent() {
+    void shouldEmitChatMessageFromFullCounterWorkflow() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, counterWorkflowDocument(fixture.repository,
                 0,
@@ -265,6 +521,7 @@ class SequentialWorkflowExecutionTest {
                         new Node().value(" and is now "),
                         bexText(bexDocument("/counter"))))));
 
+        // When
         DocumentProcessingResult result = processOperationRequestResult(fixture,
                 document,
                 "owner",
@@ -272,12 +529,21 @@ class SequentialWorkflowExecutionTest {
                 "increment",
                 new Node().value(7));
 
+        // Then
+        assertEquals(
+                ProcessorStatus.SUCCESS,
+                result.status(),
+                "Language hosted BEX semantic-output provenance defect: "
+                        + blue.coordination.processor
+                        .ProcessingResultTestSupport
+                        .diagnosticMessage(result));
         assertCounter(result.document(), 7);
         assertTriggeredChatMessage(result, "Counter was incremented by 7 and is now 7");
     }
 
     @Test
-    void updateDocumentDoesNotCreateStepResult() {
+    void shouldNotCreateStepResultForUpdateDocument() {
+        // Given
         final AtomicReference<Integer> seenResultCount = new AtomicReference<Integer>();
         WorkflowStepExecutor<TriggerEvent> inspectStep = new WorkflowStepExecutor<TriggerEvent>() {
             @Override
@@ -301,14 +567,17 @@ class SequentialWorkflowExecutionTest {
                 updateDocumentStep("replace", "/counter", new Node().value(3)),
                 triggerEventStep("ignored").name("Inspect")));
 
+        // When
         Node processed = processChat(fixture, document, "owner", 1, "run").document();
 
+        // Then
         assertCounter(processed, 3);
         assertEquals(Integer.valueOf(0), seenResultCount.get());
     }
 
     @Test
-    void nullStepResultIsPreserved() {
+    void shouldPreserveNullStepResult() {
+        // Given
         final AtomicReference<Boolean> sawNullResult = new AtomicReference<Boolean>();
         final AtomicReference<Boolean> firstCall = new AtomicReference<Boolean>(Boolean.TRUE);
         WorkflowStepExecutor<TriggerEvent> executor = new WorkflowStepExecutor<TriggerEvent>() {
@@ -337,14 +606,17 @@ class SequentialWorkflowExecutionTest {
                 triggerEventStep("ignored").name("MaybeNull"),
                 triggerEventStep("inspect").name("Inspect")));
 
+        // When
         Node processed = processChat(fixture, document, "owner", 1, "run").document();
 
+        // Then
         assertCounter(processed, 0);
         assertEquals(Boolean.TRUE, sawNullResult.get());
     }
 
     @Test
-    void workflowPlanReusesExactContractAndReplansChangedContract() {
+    void shouldReuseExactWorkflowPlanAndReplanChangedContract() {
+        // Given
         AtomicInteger supportsCalls = new AtomicInteger();
         WorkflowStepExecutor<TriggerEvent> executor = new WorkflowStepExecutor<TriggerEvent>() {
             @Override
@@ -362,6 +634,7 @@ class SequentialWorkflowExecutionTest {
                 Arrays.<WorkflowStepExecutor<? extends SequentialWorkflowStep>>asList(executor));
         Fixture fixture = configuredFixture(null, runner);
 
+        // When
         Node first = initializedDocument(fixture, directWorkflowStepsDocument(fixture.repository,
                 0,
                 "same contract",
@@ -379,6 +652,7 @@ class SequentialWorkflowExecutionTest {
                 triggerEventStep("ignored")));
         processChat(fixture, changed, "owner", 1, "run");
 
+        // Then
         assertEquals(2, supportsCalls.get());
         assertEquals(2, runner.workflowPlanCacheSize());
         assertTrue(runner.workflowPlanCacheWeightBytes() > 0L);
@@ -651,6 +925,10 @@ class SequentialWorkflowExecutionTest {
 
     private static Node initializedDocument(Fixture fixture, Node document) {
         DocumentProcessingResult result = fixture.blue.initializeDocument(fixture.blue.preprocess(document));
+        assertEquals(ProcessorStatus.SUCCESS,
+                result.status(),
+                blue.coordination.processor.ProcessingResultTestSupport
+                        .diagnosticMessage(result));
         return result.document();
     }
 
@@ -688,7 +966,35 @@ class SequentialWorkflowExecutionTest {
     }
 
     private static void assertCounter(Node document, int expected) {
-        assertEquals(BigInteger.valueOf(expected), document.get("/counter"));
+        assertExactInteger(
+                document,
+                "/counter",
+                expected);
+    }
+
+    private static void assertExactInteger(
+            Node document,
+            String path,
+            int expected) {
+        Object actual =
+                document.get(
+                        path);
+        assertNotNull(
+                actual,
+                path + " must be present");
+        assertEquals(
+                BlueIdCalculator.calculateBlueId(
+                        new Node().value(
+                                BigInteger.valueOf(
+                                        expected))),
+                actual instanceof Node
+                        ? ((Node) actual).isReferenceOnly()
+                                ? ((Node) actual).getBlueId()
+                                : BlueIdCalculator.calculateBlueId(
+                                        (Node) actual)
+                        : BlueIdCalculator.calculateBlueId(
+                                new Node().value(actual)),
+                path + " must preserve the exact canonical value identity");
     }
 
     private static void assertRuntimeFatal(DocumentProcessingResult result, String expectedMessage) {

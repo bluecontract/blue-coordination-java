@@ -1,0 +1,91 @@
+schema: blue-coordination-fixture/1.0
+id: coord-wf-08
+vectors:
+- COORD-WF-08
+category: workflow
+description: The exact fixed Chat Workflow Operation adapts its Chat Message request into the seeded first event before executing appended steps, while the accepted source owns the checkpoint.
+operation: process
+input:
+  root:
+    contracts:
+      alice:
+        type: { blueId: "8aohWT7jcoaC1j2siQzBxoKM8HhQ4HF13BkZDNnq5UHf" }
+        timeline:
+          type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+          timelineId: A
+        actor:
+          type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+          accountId: alice
+      chat:
+        type: { blueId: "HEsvBsA9jjaozbhgbqiG8mgGvn9NPrat2q2fe1Lmd3fe" }
+        channel: alice
+        request:
+          type: { blueId: "2n7NRp1ia8woKAsWbyB6dBjnfEXmtTd7C5VQVmYcGe4i" }
+          message: hello
+        steps:
+          type: { blueId: "8DSFoWG9MqRSUhStqoPLrwVQiYByRh18NWbDEarN8MKF" }
+          mergePolicy: append-only
+          items:
+          - name: Emit Arrived Chat Event
+            description: Emits the Chat Message payload from the arriving Operation Request.
+            type: { blueId: "4qGDz5yJxXc9dr8bsBE1B2Tg4AWuR4qHPU9H6T29m3KZ" }
+            do:
+              items:
+              - $appendEvent:
+                  $event:
+                    type: { blueId: "GX7CFUmSDrE2MzptunLCCdZwnuwwrenRQqEnHL4x3uoC" }
+                    value: /message/request
+          - type: { blueId: "Dg3nc6K9P7AWn4K1dpGCAKG3YXJjsUWRhG3YxfqyLTeK" }
+            event:
+              type: { blueId: "2n7NRp1ia8woKAsWbyB6dBjnfEXmtTd7C5VQVmYcGe4i" }
+              message: moderation-complete
+  event:
+    type: { blueId: "7L685pBvjNNrBPq6tNv53kfPEBMDkoRu7MdVMTqdcyR2" }
+    timeline:
+      type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+      timelineId: A
+    timestamp: 100
+    actor:
+      type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+      accountId: alice
+    message:
+      type: { blueId: "93PyhYJyekVeSvQcFi5u8moU5fbfKcbD68BCRtzE8ZLz" }
+      channel: alice
+      operation: chat
+      request:
+        type: { blueId: "2n7NRp1ia8woKAsWbyB6dBjnfEXmtTd7C5VQVmYcGe4i" }
+        message: hello
+    fixtureId: E
+  feeder:
+    managedRootRevision: 1
+    indexedRootRevision: 1
+    eligibleSourceChannelKeys:
+    - alice
+expected:
+  assertions:
+  - actual: result.status
+    op: equals
+    expected: success
+  - actual: result.events
+    op: sequenceEquals
+    expected:
+    - type: { blueId: "2n7NRp1ia8woKAsWbyB6dBjnfEXmtTd7C5VQVmYcGe4i" }
+      message: hello
+    - type: { blueId: "2n7NRp1ia8woKAsWbyB6dBjnfEXmtTd7C5VQVmYcGe4i" }
+      message: moderation-complete
+  - actual: trace.workflowSteps
+    op: sequenceEquals
+    expected:
+    - chat:0:Compute
+    - chat:1:Trigger Event
+  - actual: trace.handlerExecutions
+    op: sequenceEquals
+    expected:
+    - chat
+  - actual: feeder.handlerChannelKey
+    op: equals
+    expected: alice
+  - actual: feeder.checkpointOwnerKeys
+    op: sequenceEquals
+    expected:
+    - alice

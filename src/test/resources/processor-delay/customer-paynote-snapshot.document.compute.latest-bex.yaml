@@ -1,7 +1,7 @@
 {
   "name": "Global Package Fulfillment Automation - Weekend Stay + Wine Dinner",
   "description": "Investor-side setup automation that watches package offer and agreement anchors and coordinates concurrent public checkouts.",
-  "type": "Sample/Sample Admin Base",
+  "type": "MyOS/MyOS Admin Base",
   "contracts": {
     "sampleAdminChannel": {
       "description": "Sample Admin (accountId=0) — posts operational progress/decisions via sampleAdminUpdate",
@@ -19,7 +19,7 @@
         "timelineId": "admin-timeline"
       },
       "actor": {
-        "type": "Sample/Principal Actor",
+        "type": "MyOS/Principal Actor",
         "accountId": "0",
         "email": {
           "description": "Email address associated with the Sample timeline",
@@ -76,7 +76,7 @@
         "timelineId": "investor-timeline"
       },
       "actor": {
-        "type": "Sample/Principal Actor",
+        "type": "MyOS/Principal Actor",
         "accountId": "investor-uid",
         "email": {
           "description": "Email address associated with the Sample timeline",
@@ -110,7 +110,7 @@
       }
     },
     "sessionInteraction": {
-      "type": "Sample/Sample Session Interaction"
+      "type": "MyOS/MyOS Session Interaction"
     },
     "automationSection": {
       "type": "Coordination/Document Section",
@@ -676,7 +676,7 @@
       "channel": "triggeredEventChannel",
       "event": {
         "description": "Optional matcher payload used by the handler's processor to further restrict events.",
-        "type": "Sample/Subscription to Session Initiated",
+        "type": "MyOS/Subscription to Session Initiated",
         "inResponseTo": {
           "type": {
             "name": "Correlation",
@@ -731,7 +731,7 @@
       "channel": "triggeredEventChannel",
       "event": {
         "description": "Optional matcher payload used by the handler's processor to further restrict events.",
-        "type": "Sample/Subscription to Session Initiated",
+        "type": "MyOS/Subscription to Session Initiated",
         "inResponseTo": {
           "type": {
             "name": "Correlation",
@@ -786,7 +786,7 @@
       "channel": "triggeredEventChannel",
       "event": {
         "description": "Optional matcher payload used by the handler's processor to further restrict events.",
-        "type": "Sample/Subscription to Session Initiated",
+        "type": "MyOS/Subscription to Session Initiated",
         "inResponseTo": {
           "type": {
             "name": "Correlation",
@@ -841,7 +841,7 @@
       "channel": "triggeredEventChannel",
       "event": {
         "description": "Optional matcher payload used by the handler's processor to further restrict events.",
-        "type": "Sample/Subscription to Session Initiated",
+        "type": "MyOS/Subscription to Session Initiated",
         "inResponseTo": {
           "type": {
             "name": "Correlation",
@@ -903,7 +903,7 @@
       "channel": "triggeredEventChannel",
       "event": {
         "description": "Optional matcher payload used by the handler's processor to further restrict events.",
-        "type": "Sample/Subscription to Session Initiated",
+        "type": "MyOS/Subscription to Session Initiated",
         "inResponseTo": {
           "type": {
             "name": "Correlation",
@@ -968,7 +968,7 @@
       "channel": "triggeredEventChannel",
       "event": {
         "description": "Optional matcher payload used by the handler's processor to further restrict events.",
-        "type": "Sample/Subscription to Session Initiated",
+        "type": "MyOS/Subscription to Session Initiated",
         "inResponseTo": {
           "type": {
             "name": "Correlation",
@@ -1033,12 +1033,12 @@
       "channel": "triggeredEventChannel",
       "event": {
         "description": "Optional matcher payload used by the handler's processor to further restrict events.",
-        "type": "Sample/Subscription Update",
+        "type": "MyOS/Subscription Update",
         "subscriptionId": "investor-payment-targets",
         "targetSessionId": "investor-payment-session",
         "update": {
           "description": "The update (subscription event) from the target session.",
-          "type": "Sample/Payment Target Prepared",
+          "type": "MyOS/Payment Target Prepared",
           "inResponseTo": {
             "type": {
               "name": "Correlation",
@@ -1061,7 +1061,7 @@
           },
           "allowedPayer": {
             "description": "Optional effective payer restriction echoed back to the caller.",
-            "type": "Sample/Sample User",
+            "type": "MyOS/MyOS User",
             "accountId": {
               "description": "Stable Sample user identifier.",
               "type": "Text"
@@ -1091,7 +1091,7 @@
           },
           "recipient": {
             "description": "Prepared recipient reference.",
-            "type": "Sample/Sample Balance Account",
+            "type": "MyOS/MyOS Balance Account",
             "token": {
               "description": "Opaque prepared recipient token.",
               "type": "Text"
@@ -1119,7 +1119,7 @@
       "channel": "triggeredEventChannel",
       "event": {
         "description": "Optional matcher payload used by the handler's processor to further restrict events.",
-        "type": "Sample/Subscription Update",
+        "type": "MyOS/Subscription Update",
         "subscriptionId": "hotel-resale-agreement",
         "targetSessionId": "hotel-agreement-session",
         "update": {
@@ -1168,7 +1168,7 @@
       "channel": "triggeredEventChannel",
       "event": {
         "description": "Optional matcher payload used by the handler's processor to further restrict events.",
-        "type": "Sample/Subscription Update",
+        "type": "MyOS/Subscription Update",
         "subscriptionId": "restaurant-resale-agreement",
         "targetSessionId": "restaurant-agreement-session",
         "update": {
@@ -1217,7 +1217,7 @@
       "channel": "triggeredEventChannel",
       "event": {
         "description": "Optional matcher payload used by the handler's processor to further restrict events.",
-        "type": "Sample/Subscription Update",
+        "type": "MyOS/Subscription Update",
         "subscriptionId": {
           "description": "The ID of the subscription.",
           "type": "Text"
@@ -1274,7 +1274,7 @@
       "channel": "triggeredEventChannel",
       "event": {
         "description": "Optional matcher payload used by the handler's processor to further restrict events.",
-        "type": "Sample/Subscription Update",
+        "type": "MyOS/Subscription Update",
         "subscriptionId": {
           "description": "The ID of the subscription.",
           "type": "Text"
@@ -1331,7 +1331,7 @@
       "channel": "triggeredEventChannel",
       "event": {
         "description": "Optional matcher payload used by the handler's processor to further restrict events.",
-        "type": "Sample/Subscription Update",
+        "type": "MyOS/Subscription Update",
         "subscriptionId": {
           "description": "The ID of the subscription.",
           "type": "Text"
@@ -1366,7 +1366,7 @@
       "channel": "triggeredEventChannel",
       "event": {
         "description": "Optional matcher payload used by the handler's processor to further restrict events.",
-        "type": "Sample/Subscription Update",
+        "type": "MyOS/Subscription Update",
         "subscriptionId": {
           "description": "The ID of the subscription.",
           "type": "Text"
@@ -1401,7 +1401,7 @@
       "channel": "triggeredEventChannel",
       "event": {
         "description": "Optional matcher payload used by the handler's processor to further restrict events.",
-        "type": "Sample/Document Initial Snapshot Resolved",
+        "type": "MyOS/Document Initial Snapshot Resolved",
         "inResponseTo": {
           "type": {
             "name": "Correlation",
@@ -1449,7 +1449,7 @@
       "channel": "triggeredEventChannel",
       "event": {
         "description": "Optional matcher payload used by the handler's processor to further restrict events.",
-        "type": "Sample/Document Initial Snapshot Resolved",
+        "type": "MyOS/Document Initial Snapshot Resolved",
         "inResponseTo": {
           "type": {
             "name": "Correlation",
@@ -1498,7 +1498,7 @@
       "channel": "triggeredEventChannel",
       "event": {
         "description": "Optional matcher payload used by the handler's processor to further restrict events.",
-        "type": "Sample/Document Initial Snapshot Resolved",
+        "type": "MyOS/Document Initial Snapshot Resolved",
         "inResponseTo": {
           "type": {
             "name": "Correlation",
@@ -1547,7 +1547,7 @@
       "channel": "triggeredEventChannel",
       "event": {
         "description": "Optional matcher payload used by the handler's processor to further restrict events.",
-        "type": "Sample/Document Initial Snapshot Unresolved",
+        "type": "MyOS/Document Initial Snapshot Unresolved",
         "inResponseTo": {
           "type": {
             "name": "Correlation",
@@ -1594,7 +1594,7 @@
           "type": "Coordination/Timeline Entry",
           "actor": {
             "description": "Actor attribution for the creator of this entry.",
-            "type": "Sample/Principal Actor",
+            "type": "MyOS/Principal Actor",
             "accountId": "0"
           },
           "message": {
@@ -1658,7 +1658,7 @@
           },
           "timeline": {
             "description": "The timeline this entry belongs to.",
-            "type": "Sample/Sample Timeline",
+            "type": "MyOS/MyOS Timeline",
             "timelineId": "admin-timeline",
             "accountId": {
               "description": "Identifier for the Sample account associated with this timeline",
@@ -2628,7 +2628,7 @@
                         },
                         {
                           "$appendEvent": {
-                            "type": "Sample/Subscribe to Session Requested",
+                            "type": "MyOS/Subscribe to Session Requested",
                             "targetSessionId": {
                               "$document": "/investorPaymentAccountSessionId"
                             },
@@ -2636,10 +2636,10 @@
                               "id": "investor-payment-targets",
                               "events": [
                                 {
-                                  "type": "Sample/Payment Target Prepared"
+                                  "type": "MyOS/Payment Target Prepared"
                                 },
                                 {
-                                  "type": "Sample/Payment Target Preparation Failed"
+                                  "type": "MyOS/Payment Target Preparation Failed"
                                 }
                               ]
                             }
@@ -2669,7 +2669,7 @@
                         },
                         {
                           "$appendEvent": {
-                            "type": "Sample/Subscribe to Session Requested",
+                            "type": "MyOS/Subscribe to Session Requested",
                             "targetSessionId": {
                               "$document": "/hotelAgreementSessionId"
                             },
@@ -2686,7 +2686,7 @@
                         },
                         {
                           "$appendEvent": {
-                            "type": "Sample/Subscribe to Session Requested",
+                            "type": "MyOS/Subscribe to Session Requested",
                             "targetSessionId": {
                               "$document": "/restaurantAgreementSessionId"
                             },
@@ -3081,7 +3081,7 @@
                       "then": [
                         {
                           "$appendEvent": {
-                            "type": "Sample/Subscribe to Session Requested",
+                            "type": "MyOS/Subscribe to Session Requested",
                             "targetSessionId": {
                               "$var": "targetSessionId"
                             },
@@ -3252,7 +3252,7 @@
                       "then": [
                         {
                           "$appendEvent": {
-                            "type": "Sample/Document Initial Snapshot Requested",
+                            "type": "MyOS/Document Initial Snapshot Requested",
                             "onBehalfOf": "investorChannel",
                             "targetSessionId": {
                               "$var": "targetSessionId"
@@ -3267,7 +3267,7 @@
                         },
                         {
                           "$appendEvent": {
-                            "type": "Sample/Subscribe to Session Requested",
+                            "type": "MyOS/Subscribe to Session Requested",
                             "targetSessionId": {
                               "$var": "targetSessionId"
                             },
@@ -5849,7 +5849,7 @@
                   },
                   {
                     "$appendEvent": {
-                      "type": "Sample/Call Operation Requested",
+                      "type": "MyOS/Call Operation Requested",
                       "onBehalfOf": "investorChannel",
                       "targetSessionId": {
                         "$var": "sessionId"
@@ -5894,7 +5894,7 @@
                   },
                   {
                     "$appendEvent": {
-                      "type": "Sample/Call Operation Requested",
+                      "type": "MyOS/Call Operation Requested",
                       "onBehalfOf": "investorChannel",
                       "targetSessionId": {
                         "$document": "/investorPaymentAccountSessionId"
@@ -6318,7 +6318,7 @@
             },
             {
               "$appendEvent": {
-                "type": "Sample/Call Operation Requested",
+                "type": "MyOS/Call Operation Requested",
                 "onBehalfOf": "investorChannel",
                 "targetSessionId": {
                   "$var": "sessionId"
@@ -7603,7 +7603,7 @@
                   },
                   {
                     "$appendEvent": {
-                      "type": "Sample/Document Initial Snapshot Requested",
+                      "type": "MyOS/Document Initial Snapshot Requested",
                       "onBehalfOf": "investorChannel",
                       "requestId": {
                         "$var": "snapshotRequestId"
@@ -7664,7 +7664,7 @@
                   },
                   {
                     "$appendEvent": {
-                      "type": "Sample/Subscribe to Session Requested",
+                      "type": "MyOS/Subscribe to Session Requested",
                       "onBehalfOf": "investorChannel",
                       "targetSessionId": {
                         "$var": "orderSessionId"
@@ -8040,7 +8040,7 @@
             },
             {
               "$appendEvent": {
-                "type": "Sample/Call Operation Requested",
+                "type": "MyOS/Call Operation Requested",
                 "onBehalfOf": "investorChannel",
                 "targetSessionId": {
                   "$var": "agreementSessionId"
@@ -8617,7 +8617,7 @@
             },
             {
               "$appendEvent": {
-                "type": "Sample/Call Operation Requested",
+                "type": "MyOS/Call Operation Requested",
                 "onBehalfOf": "investorChannel",
                 "targetSessionId": {
                   "$var": "packageOrderSessionId"
@@ -9190,7 +9190,7 @@
                 "then": [
                   {
                     "$appendEvent": {
-                      "type": "Sample/Document Initial Snapshot Requested",
+                      "type": "MyOS/Document Initial Snapshot Requested",
                       "onBehalfOf": "investorChannel",
                       "requestId": {
                         "$concat": [
@@ -9262,7 +9262,7 @@
             },
             {
               "$appendEvent": {
-                "type": "Sample/Call Operation Requested",
+                "type": "MyOS/Call Operation Requested",
                 "onBehalfOf": "investorChannel",
                 "targetSessionId": {
                   "$document": "/investorPaymentAccountSessionId"
@@ -9286,7 +9286,7 @@
                     ]
                   },
                   "recipient": {
-                    "type": "Sample/Sample Balance Account",
+                    "type": "MyOS/MyOS Balance Account",
                     "token": {
                       "$var": "token"
                     }
@@ -9835,7 +9835,7 @@
             },
             {
               "$appendEvent": {
-                "type": "Sample/Call Operation Requested",
+                "type": "MyOS/Call Operation Requested",
                 "onBehalfOf": "investorChannel",
                 "targetSessionId": {
                   "$var": "packageOrderSessionId"
@@ -9904,7 +9904,7 @@
                   },
                   {
                     "$appendEvent": {
-                      "type": "Sample/Call Operation Requested",
+                      "type": "MyOS/Call Operation Requested",
                       "onBehalfOf": "investorChannel",
                       "targetSessionId": {
                         "$var": "packagePayNoteSessionId"

@@ -3,10 +3,10 @@ package blue.coordination.processor;
 import blue.language.model.Node;
 import blue.language.processor.ExternalChannelFunctionContext;
 import blue.language.processor.ExternalChannelSubscriptionFunctions;
+import blue.language.processor.GasChargeContext;
 import blue.repo.coordination.TimelineChannel;
 import blue.repo.coordination.TimelineEntry;
 
-import java.util.Collections;
 import java.util.List;
 
 /**
@@ -17,65 +17,80 @@ import java.util.List;
  * uses the processor-owned verified pattern matcher so inline and pure
  * reference representations are equivalent.</p>
  */
-final class TimelineExternalSubscriptionFunctions
-        implements ExternalChannelSubscriptionFunctions<TimelineChannel> {
+final class TimelineExternalSubscriptionFunctions<T extends TimelineChannel>
+        implements ExternalChannelSubscriptionFunctions<T> {
 
-    static final TimelineExternalSubscriptionFunctions INSTANCE =
-            new TimelineExternalSubscriptionFunctions();
+    static final TimelineExternalSubscriptionFunctions<TimelineChannel>
+            INSTANCE =
+            new TimelineExternalSubscriptionFunctions<TimelineChannel>();
 
     static final String TIMELINE_ENTRY_KEY =
-            "blue.coordination/1.0/timeline-entry";
+            TimelineSubscriptionProjection.BROAD_KEY;
     static final String TIMELINE_ORDER_SUBJECT_VERSION =
-            "blue.coordination/1.0/timeline-order-subject";
+            "blue.coordination/1.0/timeline-order-subject-v3";
 
     private TimelineExternalSubscriptionFunctions() {
     }
 
+    @SuppressWarnings("unchecked")
+    static <S extends TimelineChannel>
+    TimelineExternalSubscriptionFunctions<S> forSubtype() {
+        return (TimelineExternalSubscriptionFunctions<S>)
+                (TimelineExternalSubscriptionFunctions<?>)
+                        INSTANCE;
+    }
+
     @Override
-    public List<String> channelKeys(TimelineChannel immutableContractSnapshot) {
-        if (immutableContractSnapshot == null
-                || immutableContractSnapshot.getTimeline() == null
-                || immutableContractSnapshot.getActor() == null) {
-            throw new IllegalArgumentException(
-                    "Timeline Channel requires immutable timeline and actor headers");
-        }
-        return Collections.singletonList(TIMELINE_ENTRY_KEY);
+    public List<String> channelKeys(T immutableContractSnapshot) {
+        /*
+         * Context-free, out-of-band callers have no verified header
+         * materializer. Keep that surface sound; PROCESS always uses the
+         * context-aware selective projection below.
+         */
+        TimelineSubscriptionProjection.channelKeys(
+                immutableContractSnapshot);
+        return java.util.Collections.singletonList(
+                TimelineSubscriptionProjection.BROAD_KEY);
     }
 
     @Override
     public List<String> channelKeys(
-            TimelineChannel immutableContractSnapshot,
+            T immutableContractSnapshot,
             ExternalChannelFunctionContext context) {
-        List<String> keys =
-                channelKeys(immutableContractSnapshot);
-        OperationRequestRoutingFunctions
-                .declareTargetChannelFamilies(
-                        immutableContractSnapshot,
-                        context);
-        return keys;
+        return TimelineSubscriptionProjection.channelKeys(
+                immutableContractSnapshot);
     }
 
     @Override
     public List<String> eventKeys(Node exactEvent) {
-        return CoordinationEventNodes.isTimelineEntry(exactEvent)
-                ? Collections.singletonList(TIMELINE_ENTRY_KEY)
-                : Collections.<String>emptyList();
+        CoordinationEventNodes.TimelineEntryView entry =
+                CoordinationEventNodes.timelineEntry(exactEvent);
+        if (entry == null) {
+            return java.util.Collections.emptyList();
+        }
+        /*
+         * The context-free surface cannot safely materialize header
+         * references. Keep it sound with the bounded broad key; the processor
+         * path below supplies the selective verified projection.
+         */
+        return java.util.Collections.singletonList(
+                TimelineSubscriptionProjection.BROAD_KEY);
     }
 
     @Override
     public List<String> eventKeys(
             Node exactEvent,
             ExternalChannelFunctionContext context) {
-        return CoordinationEventNodes.isTimelineEntry(
-                exactEvent, context)
-                ? Collections.singletonList(TIMELINE_ENTRY_KEY)
-                : Collections.<String>emptyList();
+        return TimelineSubscriptionProjection.eventKeys(
+                exactEvent,
+                context);
     }
 
     @Override
-    public boolean accepts(TimelineChannel immutableContractSnapshot,
+    public boolean accepts(T immutableContractSnapshot,
                            Node exactEvent) {
-        if (!eventKeys(exactEvent).contains(TIMELINE_ENTRY_KEY)) {
+        if (CoordinationEventNodes.timelineEntry(exactEvent)
+                == null) {
             return false;
         }
         CoordinationEventNodes.TimelineEntryView entry =
@@ -86,19 +101,31 @@ final class TimelineExternalSubscriptionFunctions
 
     @Override
     public boolean accepts(
-            TimelineChannel immutableContractSnapshot,
+            T immutableContractSnapshot,
             Node exactEvent,
             ExternalChannelFunctionContext context) {
         CoordinationEventNodes.TimelineEntryView entry =
                 CoordinationEventNodes.timelineEntry(
                         exactEvent, context);
-        return immutableContractSnapshot != null
-                && entry != null
-                && CoordinationEventNodes.matchesGeneratedBinding(
+        if (immutableContractSnapshot == null
+                || entry == null) {
+            return false;
+        }
+        chargeBindingComparison(
+                context,
+                "compare Timeline binding");
+        boolean timelineMatches =
+                CoordinationEventNodes.matchesGeneratedBinding(
                 entry.timeline(),
                 immutableContractSnapshot.getTimeline(),
-                context)
-                && CoordinationEventNodes.matchesGeneratedBinding(
+                context);
+        if (!timelineMatches) {
+            return false;
+        }
+        chargeBindingComparison(
+                context,
+                "compare Actor binding");
+        return CoordinationEventNodes.matchesGeneratedBinding(
                 entry.actor(),
                 immutableContractSnapshot.getActor(),
                 context);
@@ -106,7 +133,7 @@ final class TimelineExternalSubscriptionFunctions
 
     @Override
     public Node payload(
-            TimelineChannel immutableContractSnapshot,
+            T immutableContractSnapshot,
             Node exactEvent,
             ExternalChannelFunctionContext context) {
         return OperationRequestRoutingFunctions
@@ -114,7 +141,7 @@ final class TimelineExternalSubscriptionFunctions
     }
 
     @Override
-    public Node checkpointSubject(TimelineChannel immutableContractSnapshot,
+    public Node checkpointSubject(T immutableContractSnapshot,
                                   Node exactEvent,
                                   Node exactPayload) {
         if (!accepts(
@@ -130,7 +157,7 @@ final class TimelineExternalSubscriptionFunctions
 
     @Override
     public Node checkpointSubject(
-            TimelineChannel immutableContractSnapshot,
+            T immutableContractSnapshot,
             Node exactEvent,
             Node exactPayload,
             ExternalChannelFunctionContext context) {
@@ -147,7 +174,7 @@ final class TimelineExternalSubscriptionFunctions
 
     @Override
     public String handlerChannelKey(
-            TimelineChannel immutableContractSnapshot,
+            T immutableContractSnapshot,
             Node exactEvent,
             Node exactPayload,
             ExternalChannelFunctionContext context) {
@@ -155,12 +182,13 @@ final class TimelineExternalSubscriptionFunctions
                 .handlerChannelKey(
                         immutableContractSnapshot,
                         exactEvent,
+                        exactPayload,
                         context);
     }
 
     @Override
     public String logicalDeliveryKey(
-            TimelineChannel immutableContractSnapshot,
+            T immutableContractSnapshot,
             Node exactEvent,
             Node exactPayload,
             ExternalChannelFunctionContext context) {
@@ -168,16 +196,44 @@ final class TimelineExternalSubscriptionFunctions
                 .logicalDeliveryKey(
                         immutableContractSnapshot,
                         exactEvent,
+                        exactPayload,
                         context);
     }
 
     @Override
     public String checkpointDomainDiscriminator(
-            TimelineChannel immutableContractSnapshot) {
+            T immutableContractSnapshot) {
         channelKeys(immutableContractSnapshot);
         return "coordination.timeline-entry:"
                 + TimelineEntry.blueId()
+                + "|projection="
+                + TimelineSubscriptionProjection.VERSION
                 + "|subject="
                 + TIMELINE_ORDER_SUBJECT_VERSION;
+    }
+
+    @Override
+    public String checkpointDomainDiscriminator(
+            T immutableContractSnapshot,
+            ExternalChannelFunctionContext context) {
+        OperationRequestRoutingFunctions
+                .declareTargetChannelCatalog(
+                        context);
+        return checkpointDomainDiscriminator(
+                immutableContractSnapshot);
+    }
+
+    private static void chargeBindingComparison(
+            ExternalChannelFunctionContext context,
+            String reason) {
+        CoordinationRuntimeGas.charge(
+                context.runtimeWorkSession(),
+                "timelineBindingCompared",
+                1L,
+                GasChargeContext.of(
+                        context.scopePath(),
+                        context.channelKey(),
+                        null,
+                        reason));
     }
 }

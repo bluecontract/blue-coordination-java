@@ -22,7 +22,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RuntimeChannelsTest {
 
     @Test
-    void runtimeDocumentUpdateChannelReceivesUpdateEvents() {
+    void shouldEnsureThatRuntimeDocumentUpdateChannelReceivesUpdateEvents() {
+        // Given
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = ownerChannelContracts();
         contracts.put("updates", documentUpdateChannel("/counter"));
@@ -32,14 +33,22 @@ class RuntimeChannelsTest {
                 computeAppendChatMessageStep(documentUpdateMessage())));
         Node document = initializedDocument(fixture, document(fixture.repository, 0, contracts));
 
+        // When
         DocumentProcessingResult result = processChat(fixture, document, 1);
 
+        // Then
+        assertEquals(ProcessorStatus.SUCCESS,
+                result.status(),
+                "Language hosted BEX semantic-output provenance defect: "
+                        + ProcessingResultTestSupport
+                        .diagnosticMessage(result));
         assertEquals(BigInteger.valueOf(5), result.document().get("/counter"));
         assertContainsChatMessage(result.events(), "updated /counter from 0 to 5");
     }
 
     @Test
-    void documentUpdateChannelPathFilteringUsesRepositoryTypes() {
+    void shouldEnsureThatDocumentUpdateChannelPathFilteringUsesRepositoryTypes() {
+        // Given
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = ownerChannelContracts();
         contracts.put("counterUpdates", documentUpdateChannel("/counter"));
@@ -53,14 +62,17 @@ class RuntimeChannelsTest {
                 triggerEventStep(chatMessageEvent("name updated"))));
         Node document = initializedDocument(fixture, document(fixture.repository, 0, contracts));
 
+        // When
         DocumentProcessingResult result = processChat(fixture, document, 1);
 
+        // Then
         assertContainsChatMessage(result.events(), "counter updated");
         assertNoChatMessage(result.events(), "name updated");
     }
 
     @Test
-    void nestedUpdatesPropagateToParentWatchers() {
+    void shouldEnsureThatNestedUpdatesPropagateToParentWatchers() {
+        // Given
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = ownerChannelContracts();
         contracts.put("profileUpdates", documentUpdateChannel("/profile"));
@@ -74,8 +86,15 @@ class RuntimeChannelsTest {
                         .properties("name", new Node().value("Grace")));
         Node initialized = initializedDocument(fixture, document);
 
+        // When
         DocumentProcessingResult result = processChat(fixture, initialized, 1);
 
+        // Then
+        assertEquals(ProcessorStatus.SUCCESS,
+                result.status(),
+                "Language hosted BEX semantic-output provenance defect: "
+                        + ProcessingResultTestSupport
+                        .diagnosticMessage(result));
         assertEquals("Ada", result.document()
                 .getProperties().get("profile")
                 .getProperties().get("name")
@@ -84,7 +103,8 @@ class RuntimeChannelsTest {
     }
 
     @Test
-    void updateEventCanBeMatchedMoreSpecifically() {
+    void shouldEnsureThatUpdateEventCanBeMatchedMoreSpecifically() {
+        // Given
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = ownerChannelContracts();
         contracts.put("allUpdates", documentUpdateChannel("/"));
@@ -99,27 +119,36 @@ class RuntimeChannelsTest {
                 triggerEventStep(chatMessageEvent("specific replace"))));
         Node document = initializedDocument(fixture, document(fixture.repository, 0, contracts));
 
+        // When
         DocumentProcessingResult result = processChat(fixture, document, 1);
 
+        // Then
         assertEquals(BigInteger.valueOf(5), result.document().get("/counter"));
         assertEquals(BigInteger.valueOf(9), result.document().get("/other"));
         assertSingleChatMessage(result.events(), "specific replace");
     }
 
     @Test
-    void embeddedChildProcessesExternalEventWithRealProcessEmbeddedType() {
+    void shouldEnsureThatEmbeddedChildProcessesExternalEventWithRealProcessEmbeddedType() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, embeddedOperationDocument(fixture.repository));
 
+        // When
         DocumentProcessingResult result = fixture.blue.processDocument(document,
                 operationRequestEvent(fixture, 1, "increment", new Node().value(7)));
 
+        // Then
+        assertEquals(ProcessorStatus.SUCCESS,
+                result.status(),
+                ProcessingResultTestSupport.diagnosticMessage(result));
         assertEquals(BigInteger.valueOf(100), result.document().get("/counter"));
         assertEquals(BigInteger.valueOf(7), result.document().get("/child/counter"));
     }
 
     @Test
-    void parentCannotPatchIntoEmbeddedScope() {
+    void shouldEnsureThatParentCannotPatchIntoEmbeddedScope() {
+        // Given
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = ownerChannelContracts();
         contracts.put("embedded", processEmbedded("/child"));
@@ -129,8 +158,10 @@ class RuntimeChannelsTest {
                 .properties("child", childDocument(1, new LinkedHashMap<String, Node>())));
         String inputJson = fixture.blue.nodeToJson(document);
 
+        // When
         DocumentProcessingResult result = processChat(fixture, document, 1);
 
+        // Then
         assertEquals(ProcessorStatus.RUNTIME_FATAL,
                 result.status(),
                 ProcessingResultTestSupport.diagnosticMessage(result));
@@ -142,7 +173,8 @@ class RuntimeChannelsTest {
     }
 
     @Test
-    void replacingEmbeddedNodeCutsOffChildScopeWithinRun() {
+    void shouldEnsureThatReplacingEmbeddedNodeCutsOffChildScopeWithinRun() {
+        // Given
         Fixture fixture = configuredFixture();
         Map<String, Node> childContracts = ownerChannelContracts();
         childContracts.put("probe", directWorkflow("owner",
@@ -161,37 +193,55 @@ class RuntimeChannelsTest {
         Node document = initializedDocument(fixture, document(fixture.repository, 0, rootContracts)
                 .properties("child", childDocument(0, childContracts)));
 
+        // When
         DocumentProcessingResult result = processChat(fixture, document, 1);
 
+        // Then
         assertEquals("Replacement Child", nodeAt(result.document(), "/child").getName());
         assertNull(nodeAt(result.document(), "/child/marker"));
         assertNoChatMessage(result.events(), "post-cutoff");
     }
 
     @Test
-    void embeddedNodeChannelBridgesConfiguredChildEmissions() {
+    void shouldEnsureThatEmbeddedNodeChannelBridgesConfiguredChildEmissions() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, embeddedBridgeDocument(fixture.repository, "/child"));
 
+        // When
         DocumentProcessingResult result = processChat(fixture, document, 1);
 
-        assertContainsChatMessage(result.events(), "parent saw child emitted");
+        // Then
+        assertEquals(ProcessorStatus.SUCCESS,
+                result.status(),
+                ProcessingResultTestSupport.diagnosticMessage(result));
+        assertTrue(
+                containsChatMessage(
+                        result.events(),
+                        "parent saw child emitted"),
+                "Language Embedded Node Channel bridge defect: "
+                        + "the configured child emission did not reach "
+                        + "the root observer");
         assertNoChatMessage(result.events(), "parent saw other child emitted");
     }
 
     @Test
-    void embeddedNodeChannelDoesNotBridgeWrongChildPath() {
+    void shouldEnsureThatEmbeddedNodeChannelDoesNotBridgeWrongChildPath() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, embeddedBridgeDocument(fixture.repository, "/missingChild"));
 
+        // When
         DocumentProcessingResult result = processChat(fixture, document, 1);
 
+        // Then
         assertNoChatMessage(result.events(), "parent saw child emitted");
         assertNoChatMessage(result.events(), "parent saw other child emitted");
     }
 
     @Test
-    void duplicateExternalEventsAreSkippedWithRealRepositoryChannelCheckpointShape() {
+    void shouldEnsureThatDuplicateExternalEventsAreSkippedWithRealRepositoryChannelCheckpointShape() {
+        // Given
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = ownerChannelContracts();
         contracts.put("writer", directWorkflow("owner",
@@ -200,8 +250,10 @@ class RuntimeChannelsTest {
         Node event = chatTimelineEntry(fixture, 1);
 
         Node afterFirst = fixture.blue.processDocument(initialized, event).document();
+        // When
         Node afterSecond = fixture.blue.processDocument(afterFirst, event).document();
 
+        // Then
         assertEquals(BigInteger.ONE, afterSecond.get("/counter"));
         Node checkpoint = nodeAt(afterSecond, "/contracts/checkpoint");
         assertNotNull(checkpoint);
@@ -209,11 +261,14 @@ class RuntimeChannelsTest {
     }
 
     @Test
-    void checkpointDeclaredUnderWrongKeyFails() {
+    void shouldEnsureThatCheckpointDeclaredUnderWrongKeyFails() {
+        // Given
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = ownerChannelContracts();
+        // When
         contracts.put("wrongCheckpoint", new Node().type("Channel Event Checkpoint"));
 
+        // Then
         IllegalStateException ex = assertThrows(IllegalStateException.class,
                 () -> fixture.blue.initializeDocument(fixture.blue.preprocess(document(fixture.repository, 0, contracts))));
 
@@ -221,7 +276,8 @@ class RuntimeChannelsTest {
     }
 
     @Test
-    void multipleCheckpointMarkersInOneScopeFail() {
+    void shouldEnsureThatMultipleCheckpointMarkersInOneScopeFail() {
+        // Given
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = ownerChannelContracts();
         Node initialized = initializedDocument(fixture, document(fixture.repository, 0, contracts));
@@ -231,8 +287,24 @@ class RuntimeChannelsTest {
         initialized.getContracts().properties("extraCheckpoint", new Node()
                 .type(new Node().blueId(RuntimeBlueIds.CHANNEL_EVENT_CHECKPOINT)));
 
-        assertThrows(RuntimeException.class,
-                () -> fixture.blue.processDocument(fixture.blue.preprocess(initialized), chatTimelineEntry(fixture, 1)));
+        // When
+        DocumentProcessingResult result =
+                fixture.blue.processDocument(
+                        fixture.blue.preprocess(initialized),
+                        chatTimelineEntry(fixture, 1));
+
+        // Then
+        assertEquals(
+                ProcessorStatus.INVALID_PROCESSING_DOCUMENT,
+                result.status(),
+                ProcessingResultTestSupport.diagnosticMessage(result));
+        assertTrue(
+                ProcessingResultTestSupport
+                        .diagnosticMessage(result)
+                        .contains(
+                                "Channel Event Checkpoint must use "
+                                        + "reserved key 'checkpoint'"),
+                ProcessingResultTestSupport.diagnosticMessage(result));
     }
 
     private static Node embeddedOperationDocument(BlueRepository repository) {
@@ -416,7 +488,13 @@ class RuntimeChannelsTest {
     }
 
     private static Node initializedDocument(Fixture fixture, Node document) {
-        return fixture.blue.initializeDocument(fixture.blue.preprocess(document)).document();
+        DocumentProcessingResult result =
+                fixture.blue.initializeDocument(
+                        fixture.blue.preprocess(document));
+        assertEquals(ProcessorStatus.SUCCESS,
+                result.status(),
+                ProcessingResultTestSupport.diagnosticMessage(result));
+        return result.document();
     }
 
     private static DocumentProcessingResult processChat(Fixture fixture, Node document, int timestamp) {
@@ -468,12 +546,21 @@ class RuntimeChannelsTest {
     }
 
     private static void assertContainsChatMessage(List<Node> events, String expectedMessage) {
+        assertTrue(
+                containsChatMessage(
+                        events, expectedMessage),
+                "Expected chat message: " + expectedMessage);
+    }
+
+    private static boolean containsChatMessage(
+            List<Node> events,
+            String expectedMessage) {
         for (Node event : events) {
             if (isChatMessage(event, expectedMessage)) {
-                return;
+                return true;
             }
         }
-        assertFalse(true, "Expected chat message: " + expectedMessage);
+        return false;
     }
 
     private static void assertNoChatMessage(List<Node> events, String message) {

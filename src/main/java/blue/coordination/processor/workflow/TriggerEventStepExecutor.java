@@ -2,10 +2,16 @@ package blue.coordination.processor.workflow;
 
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.model.Node;
+import blue.language.processor.CoordinationProcessHeaderBridge;
 import blue.language.snapshot.FrozenNode;
+import blue.language.utils.BlueIdCalculator;
 import blue.repo.coordination.SequentialWorkflowStep;
 import blue.repo.coordination.TriggerEvent;
 
+/**
+ * Normalizes a fixed Trigger Event step and delegates event emission to the
+ * parent Contracts processing boundary.
+ */
 public final class TriggerEventStepExecutor implements WorkflowStepExecutor<TriggerEvent> {
     private final BexProcessingMetrics metrics;
 
@@ -27,7 +33,7 @@ public final class TriggerEventStepExecutor implements WorkflowStepExecutor<Trig
         long stepStart = System.nanoTime();
         try {
             if (step == null) {
-                context.processorContext().throwFatal("Trigger Event step payload is invalid");
+                context.throwFatal("Trigger Event step payload is invalid");
                 return WorkflowStepResult.none();
             }
             if (metrics != null) {
@@ -38,22 +44,24 @@ public final class TriggerEventStepExecutor implements WorkflowStepExecutor<Trig
             if (rawStep != null) {
                 if (rawStep.getProperties() == null
                         || !rawStep.getProperties().containsKey("event")) {
-                    context.processorContext().throwFatal(
+                    context.throwFatal(
                             "Trigger Event step must declare event payload");
                     return WorkflowStepResult.none();
+                } else {
+                    FrozenNode rawEvent =
+                            rawStep.getProperties().get("event");
+                    if (rawEvent == null) {
+                        context.throwFatal(
+                                "Trigger Event step must declare event payload");
+                        return WorkflowStepResult.none();
+                    }
+                    event = exactEvent(
+                            rawEvent, step, context);
                 }
-                FrozenNode rawEvent =
-                        rawStep.getProperties().get("event");
-                if (rawEvent == null) {
-                    context.processorContext().throwFatal(
-                            "Trigger Event step must declare event payload");
-                    return WorkflowStepResult.none();
-                }
-                event = rawEvent.toNode();
             } else if (step.getEvent() != null) {
                 event = step.getEvent().clone();
             } else {
-                context.processorContext().throwFatal("Trigger Event step must declare event payload");
+                context.throwFatal("Trigger Event step must declare event payload");
                 return WorkflowStepResult.none();
             }
             long emitStart = System.nanoTime();
@@ -67,6 +75,34 @@ public final class TriggerEventStepExecutor implements WorkflowStepExecutor<Trig
                 metrics.addTriggerStepNanos(System.nanoTime() - stepStart);
             }
         }
+    }
+
+    private Node exactEvent(
+            FrozenNode rawEvent,
+            TriggerEvent step,
+            StepExecutionContext context) {
+        Node authored =
+                FrozenNodeUtil.authoredOverlay(
+                        rawEvent);
+        Node resolved =
+                step.getEvent();
+        if (!authored.isReferenceOnly()
+                || resolved == null
+                || resolved.isReferenceOnly()) {
+            return authored;
+        }
+        Node exactResolved =
+                CoordinationProcessHeaderBridge
+                        .canonicalExactCopy(resolved);
+        String calculated =
+                BlueIdCalculator.calculateBlueId(
+                        exactResolved);
+        if (!authored.getBlueId().equals(calculated)) {
+            context.throwFatal(
+                    "Trigger Event selected payload identity changed");
+            return authored;
+        }
+        return exactResolved;
     }
 
 }

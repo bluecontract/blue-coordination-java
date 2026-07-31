@@ -16,7 +16,64 @@ jobs:
     env:
       CI: true
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out Coordination
+        uses: actions/checkout@v4
+        with:
+          path: blue-contract-java
+
+      - name: Load immutable local-composite source lock
+        id: source-lock
+        run: |
+          LOCK_FILE="blue-contract-java/gradle/blue-sibling-lock.properties"
+          test -f "$LOCK_FILE"
+          test "$(wc -l < "$LOCK_FILE")" -eq 3
+          test "$(grep -Ec '^(blueLanguageCommit|blueBexCommit|blueRepositoryCommit)=[0-9a-f]{40}$' "$LOCK_FILE")" -eq 3
+          test "$(grep -c '^blueLanguageCommit=' "$LOCK_FILE")" -eq 1
+          test "$(grep -c '^blueBexCommit=' "$LOCK_FILE")" -eq 1
+          test "$(grep -c '^blueRepositoryCommit=' "$LOCK_FILE")" -eq 1
+          BLUE_LANGUAGE_REF="$(sed -n 's/^blueLanguageCommit=//p' "$LOCK_FILE")"
+          BLUE_BEX_REF="$(sed -n 's/^blueBexCommit=//p' "$LOCK_FILE")"
+          BLUE_REPOSITORY_REF="$(sed -n 's/^blueRepositoryCommit=//p' "$LOCK_FILE")"
+          [[ "$BLUE_LANGUAGE_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BLUE_BEX_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BLUE_REPOSITORY_REF" =~ ^[0-9a-f]{40}$ ]]
+          echo "blue_language_ref=$BLUE_LANGUAGE_REF" >> "$GITHUB_OUTPUT"
+          echo "blue_bex_ref=$BLUE_BEX_REF" >> "$GITHUB_OUTPUT"
+          echo "blue_repository_ref=$BLUE_REPOSITORY_REF" >> "$GITHUB_OUTPUT"
+
+      - name: Check out blue-language-java sibling
+        uses: actions/checkout@v4
+        with:
+          repository: bluecontract/blue-language-java
+          ref: ${{ steps.source-lock.outputs.blue_language_ref }}
+          path: blue-language-java
+
+      - name: Check out blue-bex-java sibling
+        uses: actions/checkout@v4
+        with:
+          repository: bluecontract/blue-bex-java
+          ref: ${{ steps.source-lock.outputs.blue_bex_ref }}
+          path: blue-bex-java
+
+      - name: Check out blue-repository-java sibling
+        uses: actions/checkout@v4
+        with:
+          repository: bluecontract/blue-repo-java
+          ref: ${{ steps.source-lock.outputs.blue_repository_ref }}
+          path: blue-repository-java
+
+      - name: Verify exact clean local-composite sources
+        env:
+          BLUE_LANGUAGE_REF: ${{ steps.source-lock.outputs.blue_language_ref }}
+          BLUE_BEX_REF: ${{ steps.source-lock.outputs.blue_bex_ref }}
+          BLUE_REPOSITORY_REF: ${{ steps.source-lock.outputs.blue_repository_ref }}
+        run: |
+          test "$(git -C blue-language-java rev-parse HEAD)" = "$BLUE_LANGUAGE_REF"
+          test "$(git -C blue-bex-java rev-parse HEAD)" = "$BLUE_BEX_REF"
+          test "$(git -C blue-repository-java rev-parse HEAD)" = "$BLUE_REPOSITORY_REF"
+          test -z "$(git -C blue-language-java status --porcelain -uall)"
+          test -z "$(git -C blue-bex-java status --porcelain -uall)"
+          test -z "$(git -C blue-repository-java status --porcelain -uall)"
 
       - name: Check out blue-quickjs
         uses: actions/checkout@v4
@@ -72,17 +129,34 @@ jobs:
         uses: gradle/gradle-build-action@v2
 
       - name: Execute Java 8 core build
-        run: ./gradlew :clean :build -Dblue.quickjs.root="$GITHUB_WORKSPACE/blue-quickjs"
+        run: ./gradlew :clean :finalCoordinationVerification :build -Dblue.quickjs.root="$GITHUB_WORKSPACE/blue-quickjs"
+        working-directory: blue-contract-java
+
+      - name: Re-verify protected local-composite sources after build
+        if: always()
+        env:
+          BLUE_LANGUAGE_REF: ${{ steps.source-lock.outputs.blue_language_ref }}
+          BLUE_BEX_REF: ${{ steps.source-lock.outputs.blue_bex_ref }}
+          BLUE_REPOSITORY_REF: ${{ steps.source-lock.outputs.blue_repository_ref }}
+        run: |
+          test "$(git -C blue-language-java rev-parse HEAD)" = "$BLUE_LANGUAGE_REF"
+          test "$(git -C blue-bex-java rev-parse HEAD)" = "$BLUE_BEX_REF"
+          test "$(git -C blue-repository-java rev-parse HEAD)" = "$BLUE_REPOSITORY_REF"
+          test -z "$(git -C blue-language-java status --porcelain -uall)"
+          test -z "$(git -C blue-bex-java status --porcelain -uall)"
+          test -z "$(git -C blue-repository-java status --porcelain -uall)"
 
       - name: Archive test results
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: core-java8-test-results
-          path: build/reports
+          path: blue-contract-java/build/reports
 
       - name: Archive libs
         uses: actions/upload-artifact@v4
         with:
           name: core-java8-libs
-          path: build/libs
+          path: |
+            blue-contract-java/build/libs
+            blue-contract-java/build/distributions

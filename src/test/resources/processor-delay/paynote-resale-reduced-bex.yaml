@@ -121,7 +121,7 @@ contracts:
     type: Coordination/Sequential Workflow
     channel: triggeredEventChannel
     event:
-      type: Sample/Subscription Update
+      type: MyOS/Subscription Update
       subscriptionId: hotel-resale-agreement
       targetSessionId: hotel-agreement-session
       update:
@@ -137,7 +137,7 @@ contracts:
     type: Coordination/Sequential Workflow
     channel: triggeredEventChannel
     event:
-      type: Sample/Subscription Update
+      type: MyOS/Subscription Update
       subscriptionId: restaurant-resale-agreement
       targetSessionId: restaurant-agreement-session
       update:
@@ -547,7 +547,7 @@ contracts:
                         sourceSessionId:
                           $var: orderSessionId
                       path: /type
-                      val: Sample/Document Initial Snapshot Requested
+                      val: MyOS/Document Initial Snapshot Requested
           - $if:
               cond:
                 $empty:
@@ -589,7 +589,7 @@ contracts:
                             - type: Coordination/Event
                               kind: Order Confirmed
                       path: /type
-                      val: Sample/Subscribe to Session Requested
+                      val: MyOS/Subscribe to Session Requested
           - $return: {}
       recordPlacedResaleOrder:
         args:

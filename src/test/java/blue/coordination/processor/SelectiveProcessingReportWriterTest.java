@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -29,11 +30,13 @@ class SelectiveProcessingReportWriterTest {
     Path temporaryDirectory;
 
     @Test
-    void writesDeterministicSortedEvidenceAndPreservesNativeStreamOrder()
+    void shouldWriteDeterministicSortedEvidenceAndPreserveNativeStreamOrder()
             throws Exception {
+        // Given
         Path firstDirectory = temporaryDirectory.resolve("first");
         Path secondDirectory = temporaryDirectory.resolve("second");
 
+        // When
         SelectiveProcessingReportWriter.write(
                 firstDirectory, report(false));
         SelectiveProcessingReportWriter.write(
@@ -45,6 +48,8 @@ class SelectiveProcessingReportWriterTest {
         byte[] second = Files.readAllBytes(
                 secondDirectory.resolve(
                         SelectiveProcessingReportWriter.FILE_NAME));
+
+        // Then
         assertArrayEquals(first, second);
         assertTrue(
                 new String(first, StandardCharsets.UTF_8)
@@ -57,7 +62,7 @@ class SelectiveProcessingReportWriterTest {
         assertEquals(
                 SelectiveProcessingReportWriter.SCHEMA_VERSION,
                 root.path("schemaVersion").asInt());
-        assertEquals("partial", root.path("status").asText());
+        assertEquals("complete", root.path("status").asText());
         assertEquals(
                 "fixture-report",
                 root.path("testCountScope").asText());
@@ -88,24 +93,21 @@ class SelectiveProcessingReportWriterTest {
         assertEquals("blue-z", demanded.get(1).asText());
 
         assertEquals(
-                "compute-runtime",
-                root.path("unavailableSuites")
-                        .get(0)
-                        .path("id")
-                        .asText());
-        assertEquals(
-                "final-registry",
-                root.path("unavailableSuites")
-                        .get(1)
-                        .path("id")
-                        .asText());
+                0,
+                root.path("unavailableSuites").size());
     }
 
     @Test
-    void schemaResourceMatchesWriterIdentity() throws Exception {
+    void shouldMatchSchemaResourceToWriterIdentity()
+            throws Exception {
+        // Given
         InputStream stream = getClass().getResourceAsStream(
                 "/coordination/selective-processing-report.schema.json");
+
+        // When
         assertNotNull(stream);
+
+        // Then
         try {
             JsonNode schema = new ObjectMapper().readTree(stream);
             assertEquals(
@@ -129,79 +131,205 @@ class SelectiveProcessingReportWriterTest {
     }
 
     @Test
-    void rejectsInconsistentCountsAndInconsistentPassedReports() {
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new SelectiveProcessingReportWriter.TestCounts(
-                        2, 1, 0, 0));
+    void shouldRejectInconsistentTestCounts() {
+        // Given
+        int total = 2;
+        int passed = 1;
 
-        final SelectiveProcessingReportWriter.Section section =
+        // When
+        IllegalArgumentException failure =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> new SelectiveProcessingReportWriter.TestCounts(
+                                total, passed, 0, 0));
+
+        // Then
+        assertEquals(
+                "total must equal passed + failed + skipped",
+                failure.getMessage());
+    }
+
+    @Test
+    void shouldRejectDuplicateReportSections() {
+        // Given
+        final SelectiveProcessingReportWriter.Section routing =
                 section("routing");
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new SelectiveProcessingReportWriter.Report(
-                        "partial",
-                        Collections.singletonMap(
-                                "languageGitCommit", "0a6a40d18578"),
-                        "fixture-report",
-                        new SelectiveProcessingReportWriter.TestCounts(
-                                1, 1, 0, 0),
-                        Arrays.asList(section, section),
-                        Collections.<SelectiveProcessingReportWriter
-                                .UnavailableSuite>emptyList()));
 
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new SelectiveProcessingReportWriter.Report(
-                        "passed",
-                        Collections.singletonMap(
-                                "languageGitCommit", "0a6a40d18578"),
-                        "fixture-report",
-                        new SelectiveProcessingReportWriter.TestCounts(
-                                1, 1, 0, 0),
-                        Collections.singletonList(section),
-                        Collections.singletonList(
-                                new SelectiveProcessingReportWriter
-                                        .UnavailableSuite(
-                                        "final-registry",
-                                        "Final Coordination registry absent"))));
+        // When
+        IllegalArgumentException failure =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> new SelectiveProcessingReportWriter.Report(
+                                "failed",
+                                identities(),
+                                "fixture-report",
+                                new SelectiveProcessingReportWriter.TestCounts(
+                                        1, 1, 0, 0),
+                                Arrays.asList(routing, routing),
+                                Collections.<SelectiveProcessingReportWriter
+                                        .UnavailableSuite>emptyList()));
 
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new SelectiveProcessingReportWriter.Report(
-                        "passed",
-                        Collections.singletonMap(
-                                "languageGitCommit", "0a6a40d18578"),
-                        "fixture-report",
-                        new SelectiveProcessingReportWriter.TestCounts(
-                                1, 0, 1, 0),
-                        Collections.singletonList(
-                                new SelectiveProcessingReportWriter.Section(
-                                        "routing",
-                                        "passed",
-                                        Collections.singletonList(
-                                                "cross-channel"),
-                                        Collections.<String, String>emptyMap(),
-                                        Collections.<String, Long>emptyMap(),
-                                        Collections.<String, List<String>>
-                                                emptyMap(),
-                                        Collections.<String, List<String>>
-                                                emptyMap())),
-                        Collections.<SelectiveProcessingReportWriter
-                                .UnavailableSuite>emptyList()));
+        // Then
+        assertEquals(
+                "Duplicate section id: routing",
+                failure.getMessage());
+    }
 
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new SelectiveProcessingReportWriter.Report(
+    @Test
+    void shouldRejectUnavailableSuitesFromACompleteReport() {
+        // Given
+        SelectiveProcessingReportWriter.UnavailableSuite unavailable =
+                new SelectiveProcessingReportWriter.UnavailableSuite(
+                        "final-registry",
+                        "Final Coordination registry absent");
+
+        // When
+        IllegalArgumentException failure =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> completeReport(
+                                new SelectiveProcessingReportWriter.TestCounts(
+                                        1, 1, 0, 0),
+                                Collections.singletonList(
+                                        section("routing")),
+                                Collections.singletonList(unavailable)));
+
+        // Then
+        assertEquals(
+                "A complete report cannot name unavailable suites",
+                failure.getMessage());
+    }
+
+    @Test
+    void shouldRejectFailedTestsFromACompleteReport() {
+        // Given
+        SelectiveProcessingReportWriter.TestCounts counts =
+                new SelectiveProcessingReportWriter.TestCounts(
+                        1, 0, 1, 0);
+
+        // When
+        IllegalArgumentException failure =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> completeReport(
+                                counts,
+                                Collections.singletonList(
+                                        section("routing")),
+                                Collections.<SelectiveProcessingReportWriter
+                                        .UnavailableSuite>emptyList()));
+
+        // Then
+        assertEquals(
+                "A complete report cannot contain failed or skipped tests",
+                failure.getMessage());
+    }
+
+    @Test
+    void shouldRejectSkippedTestsFromACompleteReport() {
+        // Given
+        SelectiveProcessingReportWriter.TestCounts counts =
+                new SelectiveProcessingReportWriter.TestCounts(
+                        1, 0, 0, 1);
+
+        // When
+        IllegalArgumentException failure =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> completeReport(
+                                counts,
+                                Collections.singletonList(
+                                        section("routing")),
+                                Collections.<SelectiveProcessingReportWriter
+                                        .UnavailableSuite>emptyList()));
+
+        // Then
+        assertEquals(
+                "A complete report cannot contain failed or skipped tests",
+                failure.getMessage());
+    }
+
+    @Test
+    void shouldRejectZeroExecutedTestsFromACompleteReport() {
+        // Given
+        SelectiveProcessingReportWriter.TestCounts counts =
+                new SelectiveProcessingReportWriter.TestCounts(
+                        0, 0, 0, 0);
+
+        // When
+        IllegalArgumentException failure =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> completeReport(
+                                counts,
+                                Collections.singletonList(
+                                        section("routing")),
+                                Collections.<SelectiveProcessingReportWriter
+                                        .UnavailableSuite>emptyList()));
+
+        // Then
+        assertEquals(
+                "A complete report must contain executed tests",
+                failure.getMessage());
+    }
+
+    @Test
+    void shouldRejectANonPassedSectionFromACompleteReport() {
+        // Given
+        SelectiveProcessingReportWriter.Section notRun =
+                new SelectiveProcessingReportWriter.Section(
+                        "routing",
+                        "not-run",
+                        Collections.singletonList("routing-case"),
+                        Collections.<String, String>emptyMap(),
+                        Collections.<String, Long>emptyMap(),
+                        Collections.<String, List<String>>emptyMap(),
+                        Collections.<String, List<String>>emptyMap());
+
+        // When
+        IllegalArgumentException failure =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> completeReport(
+                                new SelectiveProcessingReportWriter.TestCounts(
+                                        1, 1, 0, 0),
+                                Collections.singletonList(notRun),
+                                Collections.<SelectiveProcessingReportWriter
+                                        .UnavailableSuite>emptyList()));
+
+        // Then
+        assertEquals(
+                "A complete report cannot contain a not-run section: routing",
+                failure.getMessage());
+    }
+
+    @Test
+    void shouldRejectAnEmptyPassedSectionFromACompleteReport() {
+        // Given
+        SelectiveProcessingReportWriter.Section empty =
+                new SelectiveProcessingReportWriter.Section(
+                        "routing",
                         "passed",
-                        Collections.singletonMap(
-                                "languageGitCommit", "0a6a40d18578"),
-                        "fixture-report",
-                        new SelectiveProcessingReportWriter.TestCounts(
-                                1, 1, 0, 0),
-                        Collections.singletonList(section("routing")),
-                        Collections.<SelectiveProcessingReportWriter
-                                .UnavailableSuite>emptyList()));
+                        Collections.<String>emptyList(),
+                        Collections.<String, String>emptyMap(),
+                        Collections.<String, Long>emptyMap(),
+                        Collections.<String, List<String>>emptyMap(),
+                        Collections.<String, List<String>>emptyMap());
+
+        // When
+        IllegalArgumentException failure =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> completeReport(
+                                new SelectiveProcessingReportWriter.TestCounts(
+                                        1, 1, 0, 0),
+                                Collections.singletonList(empty),
+                                Collections.<SelectiveProcessingReportWriter
+                                        .UnavailableSuite>emptyList()));
+
+        // Then
+        assertEquals(
+                "A complete report cannot contain an empty passed section: routing",
+                failure.getMessage());
     }
 
     private static SelectiveProcessingReportWriter.Report report(
@@ -210,18 +338,18 @@ class SelectiveProcessingReportWriterTest {
                 new LinkedHashMap<String, String>();
         if (reverseInputOrder) {
             identities.put(
-                    "repositoryDependency",
-                    "blue-repo-java:3.0.0-rc.10");
+                    "repositoryLocalProject",
+                    "../blue-repository-java@local-composite");
             identities.put(
                     "languageGitCommit",
-                    "0a6a40d18578df784f674148d1e8b6a4319bfe49");
+                    "0000000000000000000000000000000000000001");
         } else {
             identities.put(
                     "languageGitCommit",
-                    "0a6a40d18578df784f674148d1e8b6a4319bfe49");
+                    "0000000000000000000000000000000000000001");
             identities.put(
-                    "repositoryDependency",
-                    "blue-repo-java:3.0.0-rc.10");
+                    "repositoryLocalProject",
+                    "../blue-repository-java@local-composite");
         }
 
         SelectiveProcessingReportWriter.Section routing =
@@ -233,27 +361,15 @@ class SelectiveProcessingReportWriterTest {
                         ? Arrays.asList(routing, scale)
                         : Arrays.asList(scale, routing);
 
-        SelectiveProcessingReportWriter.UnavailableSuite registry =
-                new SelectiveProcessingReportWriter.UnavailableSuite(
-                        "final-registry",
-                        "Final Coordination registry absent");
-        SelectiveProcessingReportWriter.UnavailableSuite compute =
-                new SelectiveProcessingReportWriter.UnavailableSuite(
-                        "compute-runtime",
-                        "Manifest-bound BEX counter stream absent");
-        List<SelectiveProcessingReportWriter.UnavailableSuite> unavailable =
-                reverseInputOrder
-                        ? Arrays.asList(registry, compute)
-                        : Arrays.asList(compute, registry);
-
         return new SelectiveProcessingReportWriter.Report(
-                "partial",
+                "complete",
                 identities,
                 "fixture-report",
                 new SelectiveProcessingReportWriter.TestCounts(
-                        3, 2, 0, 1),
+                        3, 3, 0, 0),
                 sections,
-                unavailable);
+                Collections.<SelectiveProcessingReportWriter
+                        .UnavailableSuite>emptyList());
     }
 
     private static SelectiveProcessingReportWriter.Section routingSection(
@@ -307,11 +423,31 @@ class SelectiveProcessingReportWriterTest {
             String id) {
         return new SelectiveProcessingReportWriter.Section(
                 id,
-                "not-run",
-                Collections.<String>emptyList(),
+                "passed",
+                Collections.singletonList(id + "-case"),
                 Collections.<String, String>emptyMap(),
                 Collections.<String, Long>emptyMap(),
                 Collections.<String, List<String>>emptyMap(),
                 Collections.<String, List<String>>emptyMap());
+    }
+
+    private static SelectiveProcessingReportWriter.Report completeReport(
+            SelectiveProcessingReportWriter.TestCounts counts,
+            Collection<SelectiveProcessingReportWriter.Section> sections,
+            Collection<SelectiveProcessingReportWriter.UnavailableSuite>
+                    unavailableSuites) {
+        return new SelectiveProcessingReportWriter.Report(
+                "complete",
+                identities(),
+                "fixture-report",
+                counts,
+                sections,
+                unavailableSuites);
+    }
+
+    private static Map<String, String> identities() {
+        return Collections.singletonMap(
+                "languageGitCommit",
+                "9706b604d54d59e843f2d0540c1a892470d1aa5c");
     }
 }

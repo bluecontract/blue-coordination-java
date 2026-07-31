@@ -34,58 +34,74 @@ class TimelineChannelBindingMatchingTest {
     private static final TimelineChannelProcessor TIMELINE_PROCESSOR = new TimelineChannelProcessor();
 
     @Test
-    void matchingTimelineAndActorAccepts() {
+    void shouldEnsureThatMatchingTimelineAndActorAccepts() {
+        // Given
         Fixture fixture = configuredFixture();
 
+        // When
         ChannelEvaluation evaluation = evaluateTimeline(
                 channel(TIMELINE, ACTOR),
                 resolvedEvent(fixture, TIMELINE, ACTOR));
 
+        // Then
         assertTrue(evaluation.matches());
     }
 
     @Test
-    void differentTimelineRejects() {
+    void shouldEnsureThatDifferentTimelineRejects() {
+        // Given
         Fixture fixture = configuredFixture();
 
+        // When
         ChannelEvaluation evaluation = evaluateTimeline(
                 channel(TIMELINE, ACTOR),
                 resolvedEvent(fixture, "different-timeline", ACTOR));
 
+        // Then
         assertFalse(evaluation.matches());
     }
 
     @Test
-    void differentActorRejects() {
+    void shouldEnsureThatDifferentActorRejects() {
+        // Given
         Fixture fixture = configuredFixture();
 
+        // When
         ChannelEvaluation evaluation = evaluateTimeline(
                 channel(TIMELINE, ACTOR),
                 resolvedEvent(fixture, TIMELINE, "different-account"));
 
+        // Then
         assertFalse(evaluation.matches());
     }
 
     @Test
-    void missingFixedTimelineFieldRejects() {
+    void shouldEnsureThatMissingFixedTimelineFieldRejects() {
+        // Given
         Fixture fixture = configuredFixture();
         Node event = resolvedEvent(fixture, TIMELINE, ACTOR);
+        // When
         event.getAsNode("/timeline").getProperties().remove("timelineId");
 
+        // Then
         assertFalse(evaluateTimeline(channel(TIMELINE, ACTOR), event).matches());
     }
 
     @Test
-    void missingFixedActorFieldRejects() {
+    void shouldEnsureThatMissingFixedActorFieldRejects() {
+        // Given
         Fixture fixture = configuredFixture();
         Node event = resolvedEvent(fixture, TIMELINE, ACTOR);
+        // When
         event.getAsNode("/actor").getProperties().remove("accountId");
 
+        // Then
         assertFalse(evaluateTimeline(channel(TIMELINE, ACTOR), event).matches());
     }
 
     @Test
-    void additionalTimelineFieldsDoNotReject() {
+    void shouldEnsureThatAdditionalTimelineFieldsDoNotReject() {
+        // Given
         Fixture fixture = configuredFixture();
         MyOSTimeline configuredTimeline = new MyOSTimeline();
         configuredTimeline.timelineId(TIMELINE);
@@ -94,45 +110,56 @@ class TimelineChannelBindingMatchingTest {
         Node event = resolvedEvent(fixture, entryTimeline, principal(ACTOR));
         event.getAsNode("/timeline").properties("providerExtension", new Node().value("present"));
 
+        // When
         ChannelEvaluation evaluation = evaluateTimeline(
                 channel(configuredTimeline, principal(ACTOR)),
                 event);
 
+        // Then
         assertTrue(evaluation.matches());
     }
 
     @Test
-    void additionalActorFieldsDoNotReject() {
+    void shouldEnsureThatAdditionalActorFieldsDoNotReject() {
+        // Given
         Fixture fixture = configuredFixture();
         MyOSAgentActor configuredActor = new MyOSAgentActor().accountId(ACTOR);
         MyOSAgentActor entryActor = new MyOSAgentActor().accountId(ACTOR);
         entryActor.onBehalfOf(principal("represented-account"));
 
+        // When
         ChannelEvaluation evaluation = evaluateTimeline(
                 channel(timeline(TIMELINE), configuredActor),
                 resolvedEvent(fixture, timeline(TIMELINE), entryActor));
 
+        // Then
         assertTrue(evaluation.matches());
     }
 
     @Test
-    void missingRequiredEntryBindingRejects() {
+    void shouldEnsureThatMissingRequiredEntryBindingRejects() {
+        // Given
         Fixture fixture = configuredFixture();
         Node missingTimeline = resolvedEvent(fixture, TIMELINE, ACTOR);
         missingTimeline.getProperties().remove("timeline");
         Node missingActor = resolvedEvent(fixture, TIMELINE, ACTOR);
         missingActor.getProperties().remove("actor");
 
+        // When
         TimelineChannel channel = channel(TIMELINE, ACTOR);
+        // Then
         assertFalse(evaluateTimeline(channel, missingTimeline).matches());
         assertFalse(evaluateTimeline(channel, missingActor).matches());
     }
 
     @Test
-    void missingConfiguredBindingRejects() {
+    void shouldEnsureThatMissingConfiguredBindingRejects() {
+        // Given
         Fixture fixture = configuredFixture();
+        // When
         Node event = resolvedEvent(fixture, TIMELINE, ACTOR);
 
+        // Then
         assertFalse(evaluateTimeline(
                 new TimelineChannel().actor(principal(ACTOR)), event).matches());
         assertFalse(evaluateTimeline(
@@ -140,25 +167,31 @@ class TimelineChannelBindingMatchingTest {
     }
 
     @Test
-    void missingMatchingInputsReject() {
+    void shouldEnsureThatMissingMatchingInputsReject() {
+        // Given
         Fixture fixture = configuredFixture();
+        // When
         CoordinationEventNodes.TimelineEntryView entry = CoordinationEventNodes.timelineEntry(
                 resolvedEvent(fixture, TIMELINE, ACTOR));
 
+        // Then
         assertFalse(TimelineProviderSupport.matchesTimelineAndActor(null, entry));
         assertFalse(TimelineProviderSupport.matchesTimelineAndActor(
                 channel(TIMELINE, ACTOR), null));
     }
 
     @Test
-    void compositeDelegatesCorrectedActorMatch() {
+    void shouldEnsureThatCompositeDelegatesCorrectedActorMatch() {
+        // Given
         Fixture fixture = configuredFixture();
         Node event = resolvedEvent(fixture, TIMELINE, ACTOR);
         Map<String, ChannelContract> wrongOnly = channels(
                 "wrong", channel(TIMELINE, "different-account"));
+        // When
         CompositeTimelineChannel wrongOnlyComposite = new CompositeTimelineChannel()
                 .channels(Collections.singletonList("wrong"));
 
+        // Then
         assertFalse(evaluateComposite(wrongOnlyComposite, event, wrongOnly).matches());
 
         Map<String, ChannelContract> withMatch = channels(
@@ -173,17 +206,23 @@ class TimelineChannelBindingMatchingTest {
         assertEquals(
                 TimelineProviderSupport.eventId(event),
                 TimelineProviderSupport.eventId(evaluation.event()));
-        assertNull(evaluation.event().getAsNode(
-                "/meta/compositeSourceChannelKey"));
+        assertNull(
+                TimelineProviderSupport.property(
+                        evaluation.event(),
+                        "meta"),
+                "Composite delivery must not synthesize metadata");
     }
 
     @Test
-    void allTimelinesDelegatesCorrectedActorMatch() {
+    void shouldEnsureThatAllTimelinesDelegatesCorrectedActorMatch() {
+        // Given
         Fixture fixture = configuredFixture();
         Node event = resolvedEvent(fixture, TIMELINE, ACTOR);
+        // When
         Map<String, ChannelContract> wrongOnly = channels(
                 "wrong", channel(TIMELINE, "different-account"));
 
+        // Then
         assertFalse(evaluateAll(event, wrongOnly).matches());
 
         Map<String, ChannelContract> withMatch = channels(
@@ -196,8 +235,11 @@ class TimelineChannelBindingMatchingTest {
         assertEquals(
                 TimelineProviderSupport.eventId(event),
                 TimelineProviderSupport.eventId(evaluation.event()));
-        assertNull(evaluation.event().getAsNode(
-                "/meta/allTimelinesSourceChannelKey"));
+        assertNull(
+                TimelineProviderSupport.property(
+                        evaluation.event(),
+                        "meta"),
+                "All Timelines delivery must not synthesize metadata");
     }
 
     private static ChannelEvaluation evaluateTimeline(TimelineChannel channel, Node event) {

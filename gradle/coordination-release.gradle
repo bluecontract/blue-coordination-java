@@ -1,0 +1,2908 @@
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+import groovy.xml.XmlSlurper
+import org.gradle.api.GradleException
+import org.gradle.api.tasks.testing.Test
+
+/*
+ * Always-truthful release evidence.
+ *
+ * The ordinary test and verification tasks remain hard failures.  This
+ * capture lane is deliberately separate: it executes the same test classes
+ * with ignoreFailures enabled only so a red candidate can still leave an
+ * exact machine-readable receipt.  finalCoordinationVerification reads that
+ * receipt and fails whenever releaseEligible is false.
+ */
+
+def releaseReportDirectory =
+        layout.buildDirectory.dir(
+                'reports/coordination-release')
+def baselineSource =
+        file('gradle/coordination-release-baseline.json')
+def baselineReport =
+        layout.buildDirectory.file(
+                'reports/coordination-release/baseline.json')
+def finalJsonReport =
+        layout.buildDirectory.file(
+                'reports/coordination-release/final.json')
+def finalMarkdownReport =
+        layout.buildDirectory.file(
+                'reports/coordination-release/final.md')
+def releaseTestResults =
+        layout.buildDirectory.dir(
+                'test-results/coordinationReleaseEvidenceTest')
+def releaseHardTestResults =
+        layout.buildDirectory.dir(
+                'test-results/test')
+def releaseFlagshipEvidence =
+        layout.buildDirectory.file(
+                'reports/coordination-flagship/trace.md')
+def releaseLoopEvidence =
+        layout.buildDirectory.file(
+                'reports/coordination-loops/trace-prefixes.json')
+def releaseFixedRepositoryEvidence =
+        layout.buildDirectory.file(
+                'reports/coordination-release/fixed-repository.json')
+def releaseExternalBlockerCatalog =
+        new JsonSlurper().parse(
+                file('gradle/coordination-external-blockers.json'))
+def releaseExternalProbes =
+        releaseExternalBlockerCatalog.blockers.collectMany {
+            blocker ->
+                blocker.probes.collect {
+                    probe ->
+                        [
+                                blockerId:
+                                        blocker.id,
+                                owner    :
+                                        blocker.owner,
+                                test     :
+                                        probe.test,
+                                messageContains:
+                                        probe.messageContains
+                        ]
+                }
+        }
+def releasePublishedAlignmentEvidence =
+        layout.buildDirectory.file(
+                'reports/local-composite/'
+                        + 'published-version-alignment.properties')
+def releaseConformanceReceipt =
+        layout.buildDirectory.file(
+                'reports/coordination-conformance/results.json')
+def releaseSiblingSourceLock =
+        file('gradle/blue-sibling-lock.properties')
+def releaseConformancePackage =
+        file('src/test/resources/coordination/conformance')
+
+def releaseFocusedTaskNames =
+        new ArrayList<String>(
+                project.ext
+                        .coordinationReleaseFocusedTaskNames)
+
+/*
+ * Every name here is a task-level release assertion, not merely another way
+ * of selecting JUnit classes.  Recording all of them in final.json prevents
+ * a broad all-tests lane from hiding a failed doLast assertion, a missing
+ * same-run receipt, or an exact-evidence parser that never ran.
+ */
+def releaseRequiredGateTaskNames =
+        new ArrayList<String>(
+                new LinkedHashSet<String>(
+                        [
+                                'clean',
+                                'generateCoordinationBaselineReport'
+                        ]
+                                + releaseFocusedTaskNames
+                                + [
+                                'coordinationReleaseEvidenceTest',
+                                'verifyCoordinationConformanceReceiptIdentities',
+                                'verifyExactCoordinationFlagshipEvidence',
+                                'verifyExactCoordinationLoopEvidence',
+                                'verifyNestedLocalCompositeDependencies',
+                                'writeLocalCompositeDependencyEvidence',
+                                'verifyPublishedDependencyAlignment',
+                                'generateCoordinationPublicApiReport',
+                                'binaryCompatibilityCheck',
+                                'verifyJava8Bytecode',
+                                'verifyReproducibleArchives',
+                                'verifyReleaseGitDiffCheck',
+                                'jmh',
+                                'check',
+                                'jar',
+                                'sourcesJar',
+                                'javadocJar',
+                                'sourceArchive'
+                        ]))
+
+def sha256FileRelease = { File source ->
+    if (source == null || !source.isFile()) {
+        return null
+    }
+    def digest =
+            java.security.MessageDigest
+                    .getInstance('SHA-256')
+    source.withInputStream { input ->
+        byte[] buffer = new byte[8192]
+        int read
+        while ((read = input.read(buffer)) >= 0) {
+            if (read > 0) {
+                digest.update(buffer, 0, read)
+            }
+        }
+    }
+    digest.digest().collect {
+        String.format(
+                java.util.Locale.ROOT,
+                '%02x',
+                it & 0xff)
+    }.join()
+}
+
+def readReleaseProperties = { File source ->
+    if (source == null || !source.isFile()) {
+        return null
+    }
+    def properties = new Properties()
+    source.withInputStream {
+        properties.load(it)
+    }
+    def normalized =
+            new TreeMap<String, String>()
+    properties.each { key, value ->
+        normalized.put(
+                key.toString(),
+                value.toString())
+    }
+    normalized
+}
+
+def calculatedReleaseConformanceIdentity = {
+    File packageDirectory ->
+        if (packageDirectory == null
+                || !packageDirectory.isDirectory()) {
+            return null
+        }
+        def entries =
+                fileTree(packageDirectory)
+                        .files.collect { source ->
+                    [
+                            source  : source,
+                            relative:
+                                    packageDirectory.toPath()
+                                            .relativize(
+                                                    source.toPath())
+                                            .toString()
+                                            .replace(
+                                                    java.io.File
+                                                            .separatorChar,
+                                                    '/' as char)
+                    ]
+                }.sort { left, right ->
+                    left.relative <=> right.relative
+                }
+        if (entries.isEmpty()) {
+            return null
+        }
+        def digest =
+                java.security.MessageDigest
+                        .getInstance('SHA-256')
+        entries.each { entry ->
+            byte[] content = entry.source.bytes
+            if (entry.relative == 'manifest.yaml') {
+                String normalized =
+                        new String(
+                                content,
+                                'UTF-8')
+                                .replaceAll(
+                                        '(?m)^packageIdentity:.*$',
+                                        'packageIdentity: null')
+                content =
+                        normalized.getBytes(
+                                'UTF-8')
+            }
+            digest.update(
+                    entry.relative.getBytes(
+                            'UTF-8'))
+            digest.update(0 as byte)
+            digest.update(content)
+            digest.update(0 as byte)
+        }
+        'sha256:' + digest.digest().collect {
+            String.format(
+                    java.util.Locale.ROOT,
+                    '%02x',
+                    it & 0xff)
+        }.join()
+}
+
+def releaseTaskOutcome = { String taskName ->
+    def task = tasks.named(taskName).get()
+    def state = task.state
+    String status
+    if (state.failure != null) {
+        status = 'failed'
+    } else if (state.noSource) {
+        status = 'no-source'
+    } else if (state.upToDate
+            || state.skipMessage == 'FROM-CACHE'
+            || (state.executed && !state.skipped)) {
+        status = 'passed'
+    } else if (state.skipped) {
+        status = 'skipped'
+    } else {
+        status = 'not-executed'
+    }
+    [
+            status     : status,
+            executed   : state.executed,
+            didWork    : state.didWork,
+            upToDate   : state.upToDate,
+            fromCache  :
+                    state.skipMessage
+                            == 'FROM-CACHE',
+            skipped    : state.skipped,
+            skipMessage:
+                    state.skipMessage,
+            failure    :
+                    state.failure == null
+                            ? null
+                            : state.failure.message
+    ]
+}
+
+def gitReleaseText = {
+    File directory, String... arguments ->
+        def command = new ArrayList<String>()
+        command.add('git')
+        command.addAll(Arrays.asList(arguments))
+        Process process = new ProcessBuilder(command)
+                .directory(directory)
+                .redirectErrorStream(true)
+                .start()
+        String output =
+                process.inputStream
+                        .getText('UTF-8')
+                        .trim()
+        int exitCode = process.waitFor()
+        if (exitCode != 0) {
+            throw new GradleException(
+                    "Git command failed in ${directory}: "
+                            + command + '\n' + output)
+        }
+        output
+}
+
+def projectReleaseState = { File directory ->
+    String status = gitReleaseText(
+            directory,
+            'status',
+            '--porcelain',
+            '--untracked-files=all')
+    [
+            state  : status.isEmpty() ? 'clean' : 'dirty',
+            entries:
+                    status.isEmpty()
+                            ? 0L
+                            : (long) status.readLines().size()
+    ]
+}
+
+def readCzReleaseVersion = { File directory ->
+    File source = new File(directory, '.cz.toml')
+    if (!source.isFile()) {
+        return null
+    }
+    def match = source.readLines('UTF-8').find {
+        it ==~ /\s*version\s*=\s*"[^"]+"\s*/
+    }
+    if (match == null) {
+        return null
+    }
+    def matcher =
+            java.util.regex.Pattern
+                    .compile(/"([^"]+)"/)
+                    .matcher(match)
+    matcher.find() ? matcher.group(1) : null
+}
+
+def yamlReleaseScalar = { File source, String key ->
+    if (source == null || !source.isFile()) {
+        return null
+    }
+    String prefix = key + ':'
+    def matches = source.readLines('UTF-8').findAll {
+        it.startsWith(prefix)
+    }
+    if (matches.size() != 1) {
+        return null
+    }
+    String value =
+            matches[0]
+                    .substring(prefix.length())
+                    .trim()
+    value.isEmpty() ? null : value
+}
+
+def javaReleaseStringConstant = {
+    File source, String constantName ->
+        if (source == null || !source.isFile()) {
+            return null
+        }
+        def matcher =
+                java.util.regex.Pattern.compile(
+                        '(?s)\\b(?:public\\s+)?static\\s+final\\s+String\\s+'
+                                + java.util.regex.Pattern.quote(
+                                constantName)
+                                + '\\s*=\\s*"([^"]+)"\\s*;')
+                        .matcher(
+                                source.getText('UTF-8'))
+        def values = new ArrayList<String>()
+        while (matcher.find()) {
+            values.add(
+                    matcher.group(1))
+        }
+        values.size() == 1
+                ? values[0]
+                : null
+}
+
+def yamlProjectionVersionRelease = {
+    File source, String projectionId ->
+        if (source == null || !source.isFile()) {
+            return null
+        }
+        boolean selected = false
+        for (String line : source.readLines('UTF-8')) {
+            String trimmed = line.trim()
+            if (trimmed.startsWith('- id:')) {
+                selected =
+                        trimmed.substring(
+                                '- id:'.length())
+                                .trim()
+                                == projectionId
+                continue
+            }
+            if (selected
+                    && trimmed.startsWith('version:')) {
+                String value =
+                        trimmed.substring(
+                                'version:'.length())
+                                .trim()
+                return value.isEmpty()
+                        ? null
+                        : value
+            }
+        }
+        null
+}
+
+def classifyReleaseFailure = {
+    String className,
+    String testName,
+    String message ->
+    String value = message == null ? '' : message
+    String normalizedTestName =
+            testName != null
+                    && testName.endsWith('()')
+                    ? testName.substring(
+                    0, testName.length() - 2)
+                    : testName
+    def dynamicTestName =
+            normalizedTestName == null
+                    ? null
+                    : (normalizedTestName =~
+                    /^[0-9]+: (.+)$/)
+    if (dynamicTestName != null
+            && dynamicTestName.matches()
+            && className
+            == 'blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest') {
+        normalizedTestName =
+                dynamicTestName.group(1)
+    }
+    String testId =
+            className + '#' + normalizedTestName
+    def exactExternalProbe =
+            releaseExternalProbes.find {
+                it.test == testId
+                        && value.contains(
+                        it.messageContains)
+            }
+    if (exactExternalProbe != null) {
+        return 'dependency-evidence-before-coordination'
+    }
+    def fixedRepositoryAuditTestIds = [
+            'blue.coordination.processor.'
+                    + 'FixedRepositoryBoundSourceProviderTest'
+                    + '#shouldVerifyEveryFixedRepositoryDefinition'
+                    + 'UnderBoundSourceContent()',
+            'blue.coordination.processor.'
+                    + 'LocalFixedRepositoryCompatibilityTest'
+                    + '#shouldResolveEveryRequiredGeneratedType'
+                    + 'AtItsManifestBlueId()'
+    ] as Set
+    boolean fixedRepositoryAudit =
+            fixedRepositoryAuditTestIds.contains(
+                    testId)
+    def fixedMandateTestIds = [
+            'blue.coordination.processor.mandate.'
+                    + 'DocumentResponderMandateEligibilityTest'
+                    + '#shouldAuthorizeVerifiedDocumentResponder'
+                    + 'MandateSubtype()',
+            'blue.coordination.processor.mandate.'
+                    + 'OperationMandateEligibilityTest'
+                    + '#shouldAuthorizeVerifiedOperationMandateSubtype()',
+            'blue.coordination.processor.mandate.'
+                    + 'OperationMandateEligibilityTest'
+                    + '#shouldRejectDifferentFixedMandateType()'
+    ] as Set
+    boolean fixedMandateEvidence =
+            value.contains(
+                    'invalid-exact-mandate-evidence')
+                    && (fixedMandateTestIds.contains(
+                    testId)
+                    || (className
+                    == 'blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest'
+                    && testName
+                    ==~ /^[0-9]+: coord-mand-[0-9]+@[a-z0-9-]+$/))
+    def checkpointCoalescingTestIds = [
+            'blue.coordination.processor.'
+                    + 'AllTimelinesChannelProcessorTest'
+                    + '#shouldEnsureThatAllTimelinesWithSeveral'
+                    + 'MatchingChildrenDeliversOnce()',
+            'blue.coordination.processor.'
+                    + 'AllTimelinesChannelProcessorTest'
+                    + '#shouldSelectTheFirstMatchingAllTimelines'
+                    + 'ChildKeyWhenOrdersTie()',
+            'blue.coordination.processor.'
+                    + 'AllTimelinesChannelProcessorTest'
+                    + '#shouldConsumePlatformDeliveryOrderAcrossTimelines()',
+            'blue.coordination.processor.'
+                    + 'CompositeTimelineChannelProcessorTest'
+                    + '#shouldEnsureThatDirectChildAndUnionHandlersMayBothRun()',
+            'blue.coordination.processor.'
+                    + 'TimelineSubtypeAggregateTest'
+                    + '#shouldIncludeGeneratedMyosMembersInComposite'
+                    + 'AndCoalesceTheirDelivery()',
+            'blue.coordination.processor.'
+                    + 'TimelineSubtypeAggregateTest'
+                    + '#shouldIncludeGeneratedMyosMembersInAllTimelines'
+                    + 'AndExcludeUnrelatedChannels()'
+    ] as Set
+    def invalidExecutionEvidenceTestIds = [
+            'blue.coordination.processor.compute.'
+                    + 'ComputeProgramPlanIntegrationTest'
+                    + '#shouldKeepInvalidDefinitionProviderEvidence'
+                    + 'OutOfRuntimeFatal()'
+    ] as Set
+    def processEmbeddedRoutingTestIds = [
+            'blue.coordination.processor.compute.'
+                    + 'OfferPaynoteEmbeddedOrdersWorkflowTest'
+                    + '#shouldEmbedRestaurantAndHotelOrders'
+                    + 'AfterAuthorization()',
+            'blue.coordination.processor.compute.'
+                    + 'OfferPaynoteEmbeddedOrdersWorkflowTest'
+                    + '#shouldMakePackageReadyAfterCapturing'
+                    + 'ConfirmedComponentOrders()',
+            'blue.coordination.processor.compute.'
+                    + 'OfferPaynoteEmbeddedOrdersWorkflowTest'
+                    + '#shouldRequestCaptureOnlyAfterBoth'
+                    + 'ComponentOrdersConfirm()',
+            'blue.coordination.processor.compute.'
+                    + 'OfferPaynoteEmbeddedOrdersWorkflowTest'
+                    + '#shouldRejectCaptureBeforeBoth'
+                    + 'ComponentOrdersConfirm()',
+            'blue.coordination.processor.compute.'
+                    + 'OfferPaynoteEmbeddedOrdersWorkflowTest'
+                    + '#shouldRejectComponentOrderBefore'
+                    + 'PaynoteAuthorization()',
+            'blue.coordination.processor.compute.'
+                    + 'OfferPaynoteEmbeddedOrdersWorkflowTest'
+                    + '#shouldAuthorizeDeliveredPackagePaynote()',
+            'blue.coordination.processor.compute.'
+                    + 'OfferPaynoteEmbeddedOrdersWorkflowTest'
+                    + '#shouldPreserveSnapshotOptimizations'
+                    + 'AcrossPackageLifecycle()'
+    ] as Set
+    def handlerMaterializationTestIds = [
+            'blue.coordination.processor.'
+                    + 'OperationRequestLogicalRoutingTest'
+                    + '#shouldEnsureThatFragmentedWhitespaceOperation'
+                    + 'KeepsOrdinarySourceDelivery()'
+    ] as Set
+    def flagshipDeliveryEvidenceTestIds = [
+            'blue.coordination.processor.'
+                    + 'CoordinationComplexEmbeddedDeterminismFlagshipTest'
+                    + '#shouldExposeOnlyOrderedRootEventsAcrossEvery'
+                    + 'RepresentationProviderVariant()',
+            'blue.coordination.processor.'
+                    + 'CoordinationComplexEmbeddedDeterminismFlagshipTest'
+                    + '#shouldKeepDescendantEventsInternalAcrossEvery'
+                    + 'RepresentationProviderVariant()'
+    ] as Set
+    def hostedBexOutputTestIds = [
+            'blue.coordination.processor.RuntimeChannelsTest'
+                    + '#shouldEnsureThatRuntimeDocumentUpdateChannel'
+                    + 'ReceivesUpdateEvents()',
+            'blue.coordination.processor.RuntimeChannelsTest'
+                    + '#shouldEnsureThatNestedUpdatesPropagateTo'
+                    + 'ParentWatchers()',
+            'blue.coordination.processor.SequentialWorkflowExecutionTest'
+                    + '#shouldExposeUpdatedDocumentToComputeEventStep()',
+            'blue.coordination.processor.SequentialWorkflowExecutionTest'
+                    + '#shouldEmitChatMessageFromFullCounterWorkflow()'
+    ] as Set
+    def embeddedBridgeTestIds = [
+            'blue.coordination.processor.RuntimeChannelsTest'
+                    + '#shouldEnsureThatEmbeddedNodeChannelBridges'
+                    + 'ConfiguredChildEmissions()'
+    ] as Set
+    def admittedExactBexTestIds = [
+            'blue.coordination.processor.compute.'
+                    + 'DynamicEmbeddedParticipantsWorkflowTest'
+                    + '#shouldCountChatsAfterAliceAddsEmbeddedParticipants()'
+    ] as Set
+    def pureReferenceRootTransitionTestIds = [
+            'blue.coordination.processor.'
+                    + 'CoordinationDocumentSplitterProcessingMatrixTest'
+                    + '#shouldPreserveProcessSemanticsAcross'
+                    + 'SplitRepresentations()'
+    ] as Set
+    boolean explicitlyAttributedLanguageFailure =
+            (checkpointCoalescingTestIds.contains(
+                    testId)
+                    && value.contains(
+                    'Language checkpoint coalescing defect'))
+                    || (invalidExecutionEvidenceTestIds.contains(
+                    testId)
+                    && value.contains(
+                    'Language invalid-execution-evidence '
+                            + 'classification defect:'))
+                    || (processEmbeddedRoutingTestIds.contains(
+                    testId)
+                    && value.contains(
+                    'Language Process Embedded routing defect:'))
+                    || (handlerMaterializationTestIds.contains(
+                    testId)
+                    && value.contains(
+                    'Language handler-match reference materialization '
+                            + 'defect:'))
+                    || (flagshipDeliveryEvidenceTestIds.contains(
+                    testId)
+                    && value.contains(
+                    'Language flagship external-delivery evidence drift:'))
+                    || (hostedBexOutputTestIds.contains(
+                    testId)
+                    && value.contains(
+                    'Language hosted BEX semantic-output provenance defect:'))
+                    || (embeddedBridgeTestIds.contains(
+                    testId)
+                    && value.contains(
+                    'Language Embedded Node Channel bridge defect:'))
+                    || (admittedExactBexTestIds.contains(
+                    testId)
+                    && value.contains(
+                    'BEX admitted-exact canonical materialization defect:'))
+                    || (pureReferenceRootTransitionTestIds.contains(
+                    testId)
+                    && value.contains(
+                    'Language pure-reference Root transition defect:'))
+    boolean fixedBexConformanceFailure =
+            className
+            == 'blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest'
+                    && testName
+                    ==~ /^[0-9]+: coord-wf-08@[a-z0-9-]+$/
+                    && value.contains(
+                    'Unsupported BEX output value kind')
+    fixedRepositoryAudit
+            || fixedMandateEvidence
+            || explicitlyAttributedLanguageFailure
+            || fixedBexConformanceFailure
+            ? 'dependency-evidence-before-coordination'
+            : 'coordination-behavior-or-evidence'
+}
+
+def readReleaseJUnit = { File directory ->
+    def records = new ArrayList<Map<String, Object>>()
+    long required = 0L
+    def malformedSuites =
+            new ArrayList<String>()
+    def resultFiles = fileTree(directory) {
+        include 'TEST-*.xml'
+    }.files.sort { left, right ->
+        left.name <=> right.name
+    }
+    resultFiles.each { resultFile ->
+        def suite =
+                new XmlSlurper(
+                        false, false)
+                        .parse(resultFile)
+        String declaredTests =
+                suite.@tests.toString()
+        if (!(declaredTests ==~ /[0-9]+/)) {
+            malformedSuites.add(
+                    resultFile.name
+                            + ':missing-tests-count')
+        } else {
+            required +=
+                    Long.parseLong(
+                            declaredTests)
+        }
+        suite.testcase.each { testCase ->
+            def failure =
+                    testCase.failure.size() > 0
+                            ? testCase.failure[0]
+                            : (testCase.error.size() > 0
+                            ? testCase.error[0]
+                            : null)
+            String status =
+                    failure != null
+                            ? 'failed'
+                            : (testCase.skipped.size() > 0
+                            ? 'skipped'
+                            : 'passed')
+            String message =
+                    failure == null
+                            ? null
+                            : failure.@message.toString()
+            records.add([
+                    id       :
+                            testCase.@classname.toString()
+                                    + '#'
+                                    + testCase.@name.toString(),
+                    className:
+                            testCase.@classname.toString(),
+                    name     :
+                            testCase.@name.toString(),
+                    status   : status,
+                    category :
+                            status == 'failed'
+                                    ? classifyReleaseFailure(
+                                    testCase.@classname
+                                            .toString(),
+                                    testCase.@name
+                                            .toString(),
+                                    message)
+                                    : status,
+                    message  : message
+            ])
+        }
+    }
+    records.sort { left, right ->
+        left.id <=> right.id
+    }
+    long failed = records.count {
+        it.status == 'failed'
+    }
+    long skipped = records.count {
+        it.status == 'skipped'
+    }
+    long executed =
+            (long) records.size()
+    long notExecuted =
+            Math.max(
+                    0L,
+                    required - executed)
+    if (executed > required) {
+        malformedSuites.add(
+                'executed-testcases-exceed-declared-tests')
+    }
+    [
+            total       : required,
+            required    : required,
+            executed    : executed,
+            passed      : executed
+                    - failed - skipped,
+            failed      : failed,
+            skipped     : skipped,
+            notExecuted : notExecuted,
+            resultFiles : (long) resultFiles.size(),
+            malformed   : malformedSuites,
+            records     : records
+    ]
+}
+
+def classConformanceResult = {
+    Map<String, Object> evidence,
+    String className,
+    Long required,
+    String exactNamePattern ->
+        def pattern =
+                java.util.regex.Pattern.compile(
+                        exactNamePattern)
+        def records = evidence.records.findAll {
+            it.className == className
+                    && pattern.matcher(
+                    it.name)
+                    .matches()
+        }
+        long passed = records.count {
+            it.status == 'passed'
+        }
+        long failed = records.count {
+            it.status == 'failed'
+        }
+        long skipped = records.count {
+            it.status == 'skipped'
+        }
+        [
+                required   : required,
+                executed   : (long) records.size(),
+                passed     : passed,
+                failed     : failed,
+                skipped    : skipped,
+                notExecuted:
+                        Math.max(
+                                0L,
+                                required
+                                        - (long) records.size())
+        ]
+}
+
+def readReleaseFlagshipLocality = { File source ->
+    def empty = [
+            status                         : 'missing',
+            matrixRows                     : 0L,
+            forbiddenProviderDemandCount   : null,
+            forbiddenBackendLoadCount      : null,
+            totals                         : [:],
+            variants                       : [:],
+            identitySets                   : [:],
+            invalidReasons                 :
+                    ['flagship evidence is missing']
+    ]
+    if (source == null || !source.isFile()) {
+        return empty
+    }
+    try {
+        def exactEvidence =
+                project.ext
+                        .coordinationReleaseReadExactFlagshipEvidence
+                        .call(source)
+        List<String> lines =
+                source.readLines('UTF-8')
+        def expectedVariants = [
+                'descendants-only',
+                'Root D1,D2'
+        ]
+        def identitySets =
+                exactEvidence.identitySets
+
+        def metricNames = [
+                'requested',
+                'backendLoaded',
+                'backendTrips',
+                'requestedBytes',
+                'backendLoadedBytes',
+                'selectedBodies',
+                'selectedBytes',
+                'gas'
+        ]
+        def zeroMetrics = {
+            def values =
+                    new LinkedHashMap<String, Long>()
+            metricNames.each {
+                values.put(it, 0L)
+            }
+            values
+        }
+        def totals = zeroMetrics()
+        def variants =
+                new LinkedHashMap<String, Object>()
+        expectedVariants.each {
+            variants.put(
+                    it,
+                    zeroMetrics())
+        }
+        def rowPattern =
+                java.util.regex.Pattern.compile(
+                        '^\\| (descendants-only|Root D1,D2) '
+                                + '\\| (INLINE|REFERENCES|PARTIAL|SPLITTER) '
+                                + '\\| (COLD|WARM) '
+                                + '\\| (ONE_FRAGMENT|BOUNDED_BATCH) '
+                                + '\\| SUCCESS '
+                                + '\\| ([0-9]+) \\| ([0-9]+) \\| ([0-9]+) '
+                                + '\\| ([0-9]+) \\| ([0-9]+) \\| ([0-9]+) '
+                                + '\\| ([0-9]+) \\| ([0-9]+) \\|$')
+        long matrixRows = 0L
+        lines.each { line ->
+            def matcher =
+                    rowPattern.matcher(
+                            line)
+            if (matcher.matches()) {
+                matrixRows++
+                def variantMetrics =
+                        variants.get(
+                                matcher.group(1))
+                for (int index = 0;
+                     index < metricNames.size();
+                     index++) {
+                    String name =
+                            metricNames[index]
+                    long value =
+                            Long.parseLong(
+                                    matcher.group(
+                                            index + 5))
+                    totals.put(
+                            name,
+                            totals.get(name)
+                                    + value)
+                    variantMetrics.put(
+                            name,
+                            variantMetrics.get(name)
+                                    + value)
+                }
+            }
+        }
+
+        def invalidReasons =
+                new ArrayList<String>()
+        if (matrixRows != 32L) {
+            invalidReasons.add(
+                    "expected 32 matrix rows, found ${matrixRows}")
+        }
+        def localityBytes =
+                exactEvidence.localityBytes
+        if (!(localityBytes instanceof Map)
+                || !(localityBytes
+                .storedFragmentBytes instanceof Map)
+                || !(localityBytes
+                .forbiddenDecoyFragmentBytes instanceof Map)
+                || !(localityBytes
+                .selectedBodyBytes instanceof Map)) {
+            invalidReasons.add(
+                    'strict parser returned no locality-byte totals')
+        } else {
+            expectedVariants.each { expectedVariant ->
+                def variantMetrics =
+                        variants.get(
+                                expectedVariant)
+                variantMetrics.put(
+                        'storedFragmentBytes',
+                        localityBytes
+                                .storedFragmentBytes
+                                .get(
+                                expectedVariant))
+                variantMetrics.put(
+                        'forbiddenDecoyFragmentBytes',
+                        localityBytes
+                                .forbiddenDecoyFragmentBytes
+                                .get(
+                                expectedVariant))
+                variantMetrics.put(
+                        'selectedBodyBytesPerRun',
+                        localityBytes
+                                .selectedBodyBytes
+                                .get(
+                                expectedVariant))
+            }
+        }
+
+        long forbiddenProviderDemandCount = 0L
+        long forbiddenBackendLoadCount = 0L
+        expectedVariants.each { expectedVariant ->
+            String prefix =
+                    expectedVariant + '/'
+            def selected =
+                    identitySets.get(
+                            prefix
+                                    + 'Selected body BlueIds')
+            def requested =
+                    identitySets.get(
+                            prefix
+                                    + 'Provider requested BlueIds')
+            def backendLoaded =
+                    identitySets.get(
+                            prefix
+                                    + 'Provider backend-loaded BlueIds')
+            def forbidden =
+                    identitySets.get(
+                            prefix
+                                    + 'Forbidden BlueIds')
+            if (!(selected instanceof List)
+                    || !(requested instanceof List)
+                    || !(backendLoaded instanceof List)
+                    || !(forbidden instanceof List)) {
+                invalidReasons.add(
+                        'missing identity-set inventory for '
+                                + expectedVariant)
+            } else {
+                def forbiddenSet =
+                        new LinkedHashSet<String>(
+                                forbidden)
+                def demandedForbidden =
+                        new LinkedHashSet<String>(
+                                requested)
+                demandedForbidden.retainAll(
+                        forbiddenSet)
+                forbiddenProviderDemandCount +=
+                        demandedForbidden.size()
+                def loadedForbidden =
+                        new LinkedHashSet<String>(
+                                backendLoaded)
+                loadedForbidden.retainAll(
+                        forbiddenSet)
+                forbiddenBackendLoadCount +=
+                        loadedForbidden.size()
+            }
+        }
+        [
+                status:
+                        invalidReasons.isEmpty()
+                                ? 'verified'
+                                : 'invalid',
+                matrixRows:
+                        matrixRows,
+                forbiddenProviderDemandCount:
+                        forbiddenProviderDemandCount,
+                forbiddenBackendLoadCount:
+                        forbiddenBackendLoadCount,
+                totals:
+                        totals,
+                variants:
+                        variants,
+                identitySets:
+                        identitySets,
+                invalidReasons:
+                        invalidReasons
+        ]
+    } catch (Exception invalidEvidence) {
+        [
+                status:
+                        'invalid',
+                matrixRows:
+                        0L,
+                forbiddenProviderDemandCount:
+                        null,
+                forbiddenBackendLoadCount:
+                        null,
+                totals:
+                        [:],
+                variants:
+                        [:],
+                identitySets:
+                        [:],
+                invalidReasons:
+                        [
+                                invalidEvidence.message
+                                        ?: invalidEvidence
+                                        .class.name
+                        ]
+        ]
+    }
+}
+
+def releaseEvidenceTest =
+        tasks.register(
+                'coordinationReleaseEvidenceTest',
+                Test) { capture ->
+    group = 'verification'
+    description = 'Executes every Coordination test while retaining red same-run release evidence.'
+    testClassesDirs =
+            sourceSets.test.output.classesDirs
+    classpath =
+            sourceSets.test.runtimeClasspath
+    dependsOn tasks.named('testClasses')
+    useJUnitPlatform()
+    ignoreFailures = true
+    maxHeapSize = '2g'
+    maxParallelForks = 1
+    forkEvery = 0L
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion =
+                JavaLanguageVersion.of(8)
+    }
+    reports {
+        junitXml.required = true
+        html.required = true
+    }
+    testLogging {
+        events 'PASSED', 'FAILED', 'SKIPPED'
+        showStandardStreams = true
+    }
+    systemProperty(
+            'coordination.flagship.report',
+            releaseFlagshipEvidence
+                    .get().asFile.absolutePath)
+    systemProperty(
+            'coordination.loop.report',
+            releaseLoopEvidence
+                    .get().asFile.absolutePath)
+    systemProperty(
+            'coordination.fixed.repository.report',
+            releaseFixedRepositoryEvidence
+                    .get().asFile.absolutePath)
+    outputs.upToDateWhen { false }
+    doFirst {
+        delete(
+                releaseFlagshipEvidence
+                        .get().asFile,
+                releaseLoopEvidence
+                        .get().asFile,
+                releaseFixedRepositoryEvidence
+                        .get().asFile)
+    }
+}
+
+def generateCoordinationBaselineReport =
+        tasks.register(
+                'generateCoordinationBaselineReport') {
+    group = 'verification'
+    description = 'Restores the immutable pre-edit Coordination baseline after clean.'
+    inputs.file(baselineSource)
+    outputs.file(baselineReport)
+    outputs.upToDateWhen { false }
+    doLast {
+        if (!baselineSource.isFile()) {
+            throw new GradleException(
+                    "Coordination baseline source is missing: "
+                            + baselineSource)
+        }
+        def parsed =
+                new JsonSlurper()
+                        .parse(baselineSource)
+        if (!(parsed instanceof Map)
+                || parsed.schema
+                != 'blue.coordination/release-baseline/1.0'
+                || parsed.fullTest?.total != 781
+                || parsed.fullTest?.passed != 542
+                || parsed.fullTest
+                        ?.failedBecauseOfCoordinationBehavior
+                        != 123
+                || parsed.fullTest
+                        ?.failedBeforeCoordinationBehaviorBecauseOfDependencyEvidence
+                        != 116) {
+            throw new GradleException(
+                    "Coordination baseline source is not the "
+                            + "captured pre-edit result")
+        }
+        File target =
+                baselineReport.get().asFile
+        target.parentFile.mkdirs()
+        target.bytes = baselineSource.bytes
+    }
+}
+
+def writeReleaseReportingFailure = {
+    Exception reportingFailure ->
+        def releaseGates =
+                new LinkedHashMap<String, Object>()
+        releaseRequiredGateTaskNames.each { taskName ->
+            try {
+                releaseGates.put(
+                        taskName,
+                        releaseTaskOutcome(
+                                taskName))
+            } catch (Exception unavailableState) {
+                releaseGates.put(
+                        taskName,
+                        [
+                                status     : 'not-executed',
+                                executed   : false,
+                                didWork    : false,
+                                upToDate   : false,
+                                fromCache  : false,
+                                skipped    : false,
+                                skipMessage: null,
+                                failure    :
+                                        unavailableState.message
+                                                ?: unavailableState
+                                                .class.name
+                        ])
+            }
+        }
+        String failureMessage =
+                reportingFailure.message
+                        ?: reportingFailure.class.name
+        def report = [
+                schema:
+                        'blue.coordination/release-result/1.0',
+                status:
+                        'blocked',
+                requiredReleaseGates:
+                        releaseGates,
+                releaseEligible:
+                        false,
+                blockingReasons:
+                        [
+                                'Release-report generation failed: '
+                                        + reportingFailure.class.name
+                                        + ': '
+                                        + failureMessage
+                        ],
+                reportingFailure:
+                        [
+                                type   :
+                                        reportingFailure.class.name,
+                                message:
+                                        failureMessage
+                        ]
+        ]
+        File jsonFile =
+                finalJsonReport.get().asFile
+        jsonFile.parentFile.mkdirs()
+        jsonFile.setText(
+                JsonOutput.prettyPrint(
+                        JsonOutput.toJson(report))
+                        + '\n',
+                'UTF-8')
+        File markdownFile =
+                finalMarkdownReport.get().asFile
+        markdownFile.parentFile.mkdirs()
+        markdownFile.withWriter('UTF-8') { writer ->
+            writer.writeLine(
+                    '# Blue Coordination release verification')
+            writer.writeLine('')
+            writer.writeLine('- Release eligible: `false`')
+            writer.writeLine('')
+            writer.writeLine('## Blocking reasons')
+            writer.writeLine('')
+            writer.writeLine(
+                    '- Release-report generation failed: `'
+                            + reportingFailure.class.name
+                            + '`: '
+                            + failureMessage)
+            writer.writeLine('')
+            writer.writeLine(
+                    'This fail-closed receipt replaced any previous '
+                            + 'report from an earlier invocation.')
+        }
+}
+
+def generateCoordinationReleaseFinalReport =
+        tasks.register(
+                'generateCoordinationReleaseFinalReport') {
+    group = 'verification'
+    description = 'Always writes exact release JSON/Markdown, including all blockers for red candidates.'
+    /*
+     * Deliberately has no task dependencies. It is the finalizer that records
+     * missing, failed, skipped, and not-executed hard gates; depending on any
+     * hard gate here would suppress the report when that dependency fails.
+     */
+    outputs.files(
+            finalJsonReport,
+            finalMarkdownReport)
+    outputs.upToDateWhen { false }
+    doFirst {
+        delete(
+                finalJsonReport.get().asFile,
+                finalMarkdownReport.get().asFile)
+    }
+    doLast {
+        try {
+        def blockers =
+                new ArrayList<String>()
+        def releaseGates =
+                new LinkedHashMap<String, Object>()
+        releaseRequiredGateTaskNames.each { taskName ->
+            def outcome =
+                    releaseTaskOutcome(
+                            taskName)
+            releaseGates.put(
+                    taskName,
+                    outcome)
+            if (outcome.status != 'passed') {
+                blockers.add(
+                        "Required release gate ${taskName} is "
+                                + "${outcome.status}.")
+            }
+        }
+
+        def focusedSuites =
+                new LinkedHashMap<String, Object>()
+        releaseFocusedTaskNames.each { taskName ->
+            Map<String, Object> suite =
+                    readReleaseJUnit(
+                            layout.buildDirectory.dir(
+                                    "test-results/${taskName}")
+                                    .get().asFile)
+            focusedSuites.put(
+                    taskName,
+                    [
+                            required   :
+                                    suite.required,
+                            executed   :
+                                    suite.executed,
+                            passed     :
+                                    suite.passed,
+                            failed     :
+                                    suite.failed,
+                            skipped    :
+                                    suite.skipped,
+                            notExecuted:
+                                    suite.notExecuted,
+                            resultFiles:
+                                    suite.resultFiles,
+                            malformed  :
+                                    suite.malformed
+                    ])
+            if (suite.required <= 0L
+                    || suite.executed
+                    != suite.required
+                    || suite.failed != 0L
+                    || suite.skipped != 0L
+                    || suite.notExecuted != 0L
+                    || !suite.malformed.isEmpty()) {
+                blockers.add(
+                        "Focused suite ${taskName} is missing, "
+                                + 'incomplete, malformed, or red.')
+            }
+        }
+
+        Map<String, Object> releaseEvidenceTests =
+                readReleaseJUnit(
+                        releaseTestResults
+                                .get().asFile)
+        Map<String, Object> hardTests =
+                readReleaseJUnit(
+                        releaseHardTestResults
+                                .get().asFile)
+        boolean usingHardTestFallback =
+                releaseEvidenceTests.required <= 0L
+                        && hardTests.required > 0L
+        Map<String, Object> tests =
+                usingHardTestFallback
+                        ? hardTests
+                        : releaseEvidenceTests
+        if (tests.required <= 0L
+                || tests.executed
+                != tests.required
+                || tests.notExecuted != 0L
+                || !tests.malformed.isEmpty()) {
+            blockers.add(
+                    'The same-run release test XML is missing, '
+                            + 'malformed, or incomplete.')
+        }
+        if (tests.failed != 0L
+                || tests.skipped != 0L) {
+            blockers.add(
+                    "Same-run tests are not green: "
+                            + "${tests.failed} failed, "
+                            + "${tests.skipped} skipped.")
+        }
+        boolean fullSuiteInventoryMatches =
+                releaseEvidenceTests.required > 0L
+                        && hardTests.required > 0L
+                        && hardTests.executed
+                        == hardTests.required
+                        && hardTests.notExecuted == 0L
+                        && hardTests.malformed.isEmpty()
+                        && hardTests.records.collect {
+                    it.id
+                } == releaseEvidenceTests.records.collect {
+                    it.id
+                }
+        if (!fullSuiteInventoryMatches) {
+            blockers.add(
+                    'The hard full-suite and release-evidence JUnit '
+                            + 'inventories do not match exactly.')
+        }
+
+        def behavior = classConformanceResult(
+                tests,
+                'blue.coordination.processor.'
+                        + 'CoordinationBehaviorFixtureHarnessTest',
+                65L,
+                '^[0-9]+: coord-(?:chan|e2e|fail|mand|route|split|time|wf)-[0-9]+@[a-z0-9-]+$')
+        def portableGas = classConformanceResult(
+                tests,
+                'blue.language.processor.'
+                        + 'CoordinationDirectPortableGasMicrofixtureTest',
+                14L,
+                '^shouldExecuteDirectPortableGasMicrofixture'
+                        + '\\[[0-9]+\\] coordination/conformance/fixtures/'
+                        + 'gas-micro/[A-Za-z0-9]+\\.yaml$')
+        def hostQuota = classConformanceResult(
+                tests,
+                'blue.coordination.processor.'
+                        + 'CoordinationHostQuotaFixtureTest',
+                7L,
+                '^coordination-host-[a-z0-9-]+ '
+                        + '\\[[a-z0-9-]+\\.yaml\\]$')
+        def totalConformance = [
+                required   : 86L,
+                executed   :
+                        behavior.executed
+                                + portableGas.executed
+                                + hostQuota.executed,
+                passed     :
+                        behavior.passed
+                                + portableGas.passed
+                                + hostQuota.passed,
+                failed     :
+                        behavior.failed
+                                + portableGas.failed
+                                + hostQuota.failed,
+                skipped    :
+                        behavior.skipped
+                                + portableGas.skipped
+                                + hostQuota.skipped,
+                notExecuted:
+                        behavior.notExecuted
+                                + portableGas.notExecuted
+                                + hostQuota.notExecuted
+        ]
+        if (behavior.executed != 65L
+                || behavior.passed != 65L
+                || portableGas.executed != 14L
+                || portableGas.passed != 14L
+                || hostQuota.executed != 7L
+                || hostQuota.passed != 7L
+                || totalConformance.executed != 86L
+                || totalConformance.passed != 86L
+                || totalConformance.failed != 0L
+                || totalConformance.skipped != 0L) {
+            blockers.add(
+                    'Closed executable conformance is not '
+                            + '65/65 behavior, 14/14 portable gas, '
+                            + '7/7 host quota, and 86/86 total.')
+        }
+
+        def flagshipRecords =
+                tests.records.findAll {
+                    it.className
+                            == ('blue.coordination.processor.'
+                            + 'CoordinationComplexEmbeddedDeterminismFlagshipTest')
+                }
+        boolean flagshipTestsGreen =
+                !flagshipRecords.isEmpty()
+                        && flagshipRecords.every {
+                    it.status == 'passed'
+                }
+        long flagshipRuns = 0L
+        File flagshipFile =
+                releaseFlagshipEvidence
+                        .get().asFile
+        def flagshipLocality =
+                readReleaseFlagshipLocality(
+                        flagshipFile)
+        if (flagshipTestsGreen
+                && flagshipLocality.status
+                == 'verified'
+                && flagshipLocality.matrixRows
+                == 32L) {
+            flagshipRuns = 32L
+        }
+        if (flagshipRuns != 32L) {
+            blockers.add(
+                    'The exact flagship representation/provider '
+                            + "matrix is ${flagshipRuns}/32.")
+        }
+        if (flagshipLocality
+                .forbiddenProviderDemandCount != 0L
+                || flagshipLocality
+                .forbiddenBackendLoadCount != 0L) {
+            blockers.add(
+                    'Flagship provider locality is not exact: '
+                            + flagshipLocality.invalidReasons
+                            + ', forbidden demands='
+                            + flagshipLocality
+                            .forbiddenProviderDemandCount
+                            + ', forbidden backend loads='
+                            + flagshipLocality
+                            .forbiddenBackendLoadCount
+                            + '.')
+        }
+
+        Long traceEntries = null
+        fileTree(
+                releaseTestResults
+                        .get().asFile) {
+            include 'TEST-*.xml'
+        }.files.each { resultFile ->
+            def suite =
+                    new XmlSlurper(
+                            false, false)
+                            .parse(resultFile)
+            if (suite.@name.toString()
+                    == ('blue.coordination.processor.'
+                    + 'CoordinationRuntimeGasScalingTest')) {
+                suite.'system-out'.text()
+                        .readLines()
+                        .findAll {
+                            it.startsWith(
+                                    'coordination.maximumRuntimeTraceEntriesObserved=')
+                        }.each { line ->
+                            traceEntries =
+                                    Long.valueOf(
+                                            line.substring(
+                                                    line.indexOf('=') + 1))
+                        }
+            }
+        }
+        boolean traceGreen =
+                traceEntries != null
+                        && traceEntries.longValue()
+                        == 516L
+        if (!traceGreen) {
+            blockers.add(
+                    'The same-run repeated-counter trace did not '
+                            + 'prove exactly 516 retained entries.')
+        }
+
+        def projectionAlgorithmIdentities =
+                new TreeSet<String>()
+        def coordinationRuntimeRegistryIdentities =
+                new TreeSet<String>()
+        fileTree(
+                releaseTestResults
+                        .get().asFile) {
+            include 'TEST-*.xml'
+        }.files.each { resultFile ->
+            def suite =
+                    new XmlSlurper(
+                            false, false)
+                            .parse(resultFile)
+            suite.'system-out'.text()
+                    .readLines()
+                    .each { line ->
+                if (line.startsWith(
+                        'coordination.subscriptionProjectionAlgorithmIdentity=')) {
+                    projectionAlgorithmIdentities.add(
+                            line.substring(
+                                    line.indexOf('=') + 1))
+                }
+                if (line.startsWith(
+                        'coordination.runtimeRegistryIdentity=')) {
+                    coordinationRuntimeRegistryIdentities.add(
+                            line.substring(
+                                    line.indexOf('=') + 1))
+                }
+            }
+        }
+        String projectionAlgorithmIdentity =
+                projectionAlgorithmIdentities.size() == 1
+                        ? projectionAlgorithmIdentities.first()
+                        : null
+        String coordinationRuntimeRegistryIdentity =
+                coordinationRuntimeRegistryIdentities.size() == 1
+                        ? coordinationRuntimeRegistryIdentities.first()
+                        : null
+        if (projectionAlgorithmIdentity == null
+                || coordinationRuntimeRegistryIdentity == null) {
+            blockers.add(
+                    'Same-run subscription projection/runtime '
+                            + 'identities are missing or inconsistent.')
+        }
+
+        File repositoryManifest =
+                file('../blue-repository-java/'
+                        + 'src/main/resources/blue/repo/manifest.json')
+        File conformanceManifestForRepository =
+                file('src/test/resources/coordination/conformance/'
+                        + 'manifest.yaml')
+        def repositoryManifestValue =
+                repositoryManifest.isFile()
+                        ? new JsonSlurper()
+                        .parse(repositoryManifest)
+                        : [:]
+        String expectedRepositoryBlueId =
+                yamlReleaseScalar(
+                        conformanceManifestForRepository,
+                        'fixedRepositoryVersionBlueId')
+        String expectedRepositoryVersion =
+                yamlReleaseScalar(
+                        conformanceManifestForRepository,
+                        'fixedRepositoryVersion')
+        boolean repositoryManifestCompatible =
+                repositoryManifestValue.repositoryVersion
+                        == expectedRepositoryVersion
+                        && repositoryManifestValue
+                        .repositoryVersionBlueId
+                        == expectedRepositoryBlueId
+        if (!repositoryManifestCompatible) {
+            blockers.add(
+                    'The observed fixed Repository manifest identity '
+                            + repositoryManifestValue
+                            .repositoryVersionBlueId
+                            + ' does not equal the conformance-bound '
+                            + expectedRepositoryBlueId + '.')
+        }
+
+        File fixedCatalogReport =
+                releaseFixedRepositoryEvidence
+                        .get().asFile
+        def fixedCatalog =
+                fixedCatalogReport.isFile()
+                        ? new JsonSlurper()
+                        .parse(fixedCatalogReport)
+                        : [
+                        status         : 'not-executed',
+                        providerMode   : null,
+                        total          : 0L,
+                        verified       : 0L,
+                        failed         : 0L,
+                        cyclicSetCount: 0L
+                ]
+
+        def dependencyDirectories = [
+                coordination: projectDir,
+                language    :
+                        file('../blue-language-java'),
+                bex         :
+                        file('../blue-bex-java'),
+                repository  :
+                        file('../blue-repository-java')
+        ]
+        def sourceStates =
+                new LinkedHashMap<String, Object>()
+        dependencyDirectories.each { key, directory ->
+            sourceStates.put(
+                    key,
+                    projectReleaseState(directory))
+        }
+        sourceStates.each { key, value ->
+            if (value.state != 'clean') {
+                blockers.add(
+                        "${key} source state is ${value.state} "
+                                + "(${value.entries} paths).")
+            }
+        }
+
+        File binaryReport =
+                file("$buildDir/reports/binary-compatibility/"
+                        + 'blue-coordination-java.txt')
+        def binaryReportLines =
+                binaryReport.isFile()
+                        ? binaryReport.readLines('UTF-8')
+                        : []
+        def binaryCompatibilityBreaks =
+                binaryReportLines.findAll {
+                    it.startsWith(
+                            'documentedPreFinalRemoval=')
+                            || it.startsWith(
+                            'problem=')
+                }
+        String binaryCompatibility =
+                binaryReport.isFile()
+                        && binaryReportLines
+                        .contains('compatible=true')
+                        && binaryCompatibilityBreaks
+                        .isEmpty()
+                        ? 'passed'
+                        : (binaryReport.isFile()
+                        ? 'failed'
+                        : 'not-executed')
+        if (binaryCompatibility != 'passed') {
+            blockers.add(
+                    'Binary compatibility did not pass in the '
+                            + 'same release graph.')
+        }
+
+        File bytecodeReport =
+                file("$buildDir/reports/bytecode/"
+                        + 'java8-bytecode.txt')
+        String javaBytecode =
+                bytecodeReport.isFile()
+                        && bytecodeReport.readLines('UTF-8')
+                        .contains('compatible=true')
+                        ? 'java-8'
+                        : (bytecodeReport.isFile()
+                        ? 'incompatible'
+                        : 'not-executed')
+        if (javaBytecode != 'java-8') {
+            blockers.add(
+                    'Java 8 bytecode verification did not pass '
+                            + 'in the same release graph.')
+        }
+
+        File reproducibilityReport =
+                file("$buildDir/reports/reproducibility/"
+                        + 'archives.txt')
+        boolean reproducible =
+                reproducibilityReport.isFile()
+                        && reproducibilityReport
+                        .readLines('UTF-8')
+                        .findAll {
+                            it.endsWith('.reproducible=true')
+                        }.size() == 4
+        if (!reproducible) {
+            blockers.add(
+                    'All four Coordination-owned archives were not '
+                            + 'proved byte-for-byte reproducible.')
+        }
+
+        File jmhReport =
+                file("$buildDir/reports/jmh/jmh-results.json")
+        def jmhResults =
+                jmhReport.isFile()
+                        ? new JsonSlurper()
+                        .parse(jmhReport)
+                        : []
+        def requiredJmhParameters = [
+                'blue.coordination.processor.SubscriptionProjectionPlanningBenchmark.projectCurrent':
+                        [
+                                parameter: 'channelCount',
+                                values   : [
+                                        '10',
+                                        '100',
+                                        '1000',
+                                        '10000'
+                                ] as Set,
+                                metrics  : [
+                                        'snapshotOccurrences',
+                                        'snapshotBytes'
+                                ] as Set
+                        ],
+                'blue.coordination.processor.SubscriptionProjectionPlanningBenchmark.planSparseIndexedEvent':
+                        [
+                                parameter: 'channelCount',
+                                values   : [
+                                        '10',
+                                        '100',
+                                        '1000',
+                                        '10000'
+                                ] as Set,
+                                metrics  : [
+                                        'snapshotOccurrences',
+                                        'snapshotBytes',
+                                        'plannerCandidates',
+                                        'providerDemandCount',
+                                        'providerDemandBytes'
+                                ] as Set
+                        ],
+                'blue.coordination.processor.FragmentAdmissionBenchmark.splitAndAdmitFreshInventory':
+                        [
+                                parameter: 'leafCount',
+                                values   : [
+                                        '10',
+                                        '100',
+                                        '1000'
+                                ] as Set,
+                                metrics  : [
+                                        'admittedFragments',
+                                        'fragmentCount',
+                                        'inventoryBytes'
+                                ] as Set
+                        ],
+                'blue.coordination.processor.FragmentAdmissionBenchmark.admitFreshInventory':
+                        [
+                                parameter: 'leafCount',
+                                values   : [
+                                        '10',
+                                        '100',
+                                        '1000'
+                                ] as Set,
+                                metrics  : [
+                                        'admittedFragments',
+                                        'fragmentCount',
+                                        'inventoryBytes'
+                                ] as Set
+                        ],
+                'blue.coordination.processor.FragmentAdmissionBenchmark.admitRepeatedInventory':
+                        [
+                                parameter: 'leafCount',
+                                values   : [
+                                        '10',
+                                        '100',
+                                        '1000'
+                                ] as Set,
+                                metrics  : [
+                                        'idempotentFragments',
+                                        'fragmentCount',
+                                        'inventoryBytes'
+                                ] as Set
+                        ],
+                'blue.coordination.processor.ResolvedProcessingHostStoryBenchmark.resolveInitializeAndProcessFiveEvents':
+                        [
+                                parameter: null,
+                                values   : [] as Set,
+                                metrics  : [] as Set
+                        ],
+                'blue.coordination.processor.ComputeEffectPlanBenchmark.processComputeEffects':
+                        [
+                                parameter: 'effects',
+                                values   : [
+                                        'changeset',
+                                        'events',
+                                        'changesetEvents',
+                                        'changesetEventsTermination'
+                                ] as Set,
+                                metrics  : [] as Set
+                        ]
+        ]
+        def invalidJmhResults = []
+        if (jmhResults instanceof List) {
+            requiredJmhParameters.each {
+                benchmarkName, requirement ->
+                def matching = jmhResults.findAll {
+                    it.benchmark == benchmarkName
+                }
+                def observedValues =
+                        requirement.parameter == null
+                                ? [] as Set
+                                : matching.collect {
+                            String.valueOf(
+                                    (it.params ?: [:])
+                                            .get(
+                                            requirement.parameter))
+                        } as Set
+                if (matching.isEmpty()) {
+                    invalidJmhResults.add(
+                            "${benchmarkName}: missing")
+                } else if (requirement.parameter != null
+                        && observedValues != requirement.values) {
+                    invalidJmhResults.add(
+                            "${benchmarkName}: expected "
+                                    + "${requirement.parameter}="
+                                    + requirement.values
+                                    + ", observed "
+                                    + observedValues)
+                }
+                matching.each { result ->
+                    def primary =
+                            result.primaryMetric
+                                    instanceof Map
+                                    ? result.primaryMetric
+                                    : [:]
+                    def secondary =
+                            result.secondaryMetrics
+                                    instanceof Map
+                                    ? result.secondaryMetrics
+                                    : [:]
+                    def missingMetrics =
+                            requirement.metrics
+                                    .findAll {
+                                        !secondary.containsKey(it)
+                                    }
+                    boolean allocationEvidence =
+                            secondary.keySet().any {
+                                it.toString().startsWith(
+                                        'gc.alloc.rate')
+                            }
+                    boolean elapsedDistribution =
+                            (primary.rawData
+                                    instanceof List
+                                    && !primary.rawData.isEmpty())
+                                    || (primary.scorePercentiles
+                                    instanceof Map
+                                    && !primary
+                                    .scorePercentiles
+                                    .isEmpty())
+                    boolean validScoreError =
+                            primary.scoreError
+                                    instanceof Number
+                                    || primary.scoreError == 'NaN'
+                    if (!(primary.score instanceof Number)
+                            || !validScoreError
+                            || !(primary.scoreUnit
+                            instanceof String)
+                            || !elapsedDistribution
+                            || missingMetrics
+                            || !allocationEvidence) {
+                        invalidJmhResults.add(
+                                "${benchmarkName} "
+                                        + (result.params ?: [:])
+                                        + ": incomplete elapsed/allocation/"
+                                        + "locality metrics; missing="
+                                        + missingMetrics)
+                    }
+                }
+            }
+        }
+        if (!(jmhResults instanceof List)
+                || jmhResults.isEmpty()
+                || !invalidJmhResults.isEmpty()) {
+            blockers.add(
+                    'JMH projection/planning/splitter locality '
+                            + 'evidence is incomplete: '
+                            + (invalidJmhResults.isEmpty()
+                            ? 'no results'
+                            : invalidJmhResults.join('; ')))
+        }
+        def benchmarkEvidence =
+                jmhResults instanceof List
+                        ? jmhResults.collect { result ->
+                    [
+                            benchmark:
+                                    result.benchmark,
+                            parameters:
+                                    result.params ?: [:],
+                            mode:
+                                    result.mode,
+                            primaryMetric:
+                                    result.primaryMetric ?: [:],
+                            secondaryMetrics:
+                                    result.secondaryMetrics ?: [:]
+                    ]
+                }
+                        : []
+
+        File apiReport =
+                file("$buildDir/reports/coordination-release/api.json")
+        def api =
+                apiReport.isFile()
+                        ? new JsonSlurper()
+                        .parse(apiReport)
+                        : [:]
+        if (!(api.publicApiDigest instanceof String)) {
+            blockers.add(
+                    'The canonical public API digest is missing.')
+        }
+
+        File gasManifest =
+                file('src/main/resources/blue/coordination/processor/'
+                        + 'coordination-gas-1.0.yaml')
+        File hostQuotaManifest =
+                file('src/main/resources/blue/coordination/processor/'
+                        + 'coordination-host-quotas-1.0.yaml')
+        File fixtureManifest =
+                file('src/test/resources/coordination/conformance/'
+                        + 'manifest.yaml')
+        File runtimeRegistrations =
+                file('src/test/resources/coordination/conformance/'
+                        + 'runtime-registrations.yaml')
+        File projectionCatalog =
+                file('src/test/resources/coordination/conformance/'
+                        + 'projection-catalog.yaml')
+        File timelineProjectionSource =
+                file('src/main/java/blue/coordination/processor/'
+                        + 'TimelineSubscriptionProjection.java')
+        File documentSplitterSource =
+                file('src/main/java/blue/coordination/processor/'
+                        + 'CoordinationDocumentSplitter.java')
+        File fixedRepositoryBlueSource =
+                file('../blue-repository-java/'
+                        + 'src/main/resources/blue/repo/'
+                        + 'BlueRepository.blue')
+        File currentJar =
+                tasks.named('jar').get()
+                        .archiveFile.get().asFile
+        File sourcesJar =
+                tasks.named('sourcesJar').get()
+                        .archiveFile.get().asFile
+        File javadocJar =
+                tasks.named('javadocJar').get()
+                        .archiveFile.get().asFile
+        File sourceArchive =
+                tasks.named('sourceArchive').get()
+                        .archiveFile.get().asFile
+        String gasPackageIdentity =
+                yamlReleaseScalar(
+                        gasManifest,
+                        'packageIdentity')
+        String hostQuotaScheduleIdentity =
+                yamlReleaseScalar(
+                        hostQuotaManifest,
+                        'schedule')
+        String fixturePackageIdentity =
+                yamlReleaseScalar(
+                        fixtureManifest,
+                        'packageIdentity')
+        String declaredPortableGasRawSha256 =
+                yamlReleaseScalar(
+                        fixtureManifest,
+                        'portableGasRawSha256')
+        String declaredHostQuotaRawSha256 =
+                yamlReleaseScalar(
+                        fixtureManifest,
+                        'hostQuotaRawSha256')
+        String observedPortableGasRawSha256 =
+                sha256FileRelease(gasManifest)
+        String observedHostQuotaRawSha256 =
+                sha256FileRelease(hostQuotaManifest)
+        boolean portableGasManifestBindingMatches =
+                declaredPortableGasRawSha256 != null
+                        && declaredPortableGasRawSha256
+                        == observedPortableGasRawSha256
+        boolean hostQuotaManifestBindingMatches =
+                declaredHostQuotaRawSha256 != null
+                        && declaredHostQuotaRawSha256
+                        == observedHostQuotaRawSha256
+        String timelineEntryProjectionIdentity =
+                javaReleaseStringConstant(
+                        timelineProjectionSource,
+                        'VERSION')
+        String catalogTimelineEntryProjectionIdentity =
+                yamlProjectionVersionRelease(
+                        projectionCatalog,
+                        'timeline-entry-subscription')
+        String fragmentationProfileIdentity =
+                javaReleaseStringConstant(
+                        documentSplitterSource,
+                        'FRAGMENTATION_PROFILE_ID')
+        if (gasPackageIdentity == null
+                || hostQuotaScheduleIdentity == null
+                || fixturePackageIdentity == null) {
+            blockers.add(
+                    'A same-run gas, host-quota, or fixture package '
+                            + 'identity is missing.')
+        }
+        if (!portableGasManifestBindingMatches
+                || !hostQuotaManifestBindingMatches) {
+            blockers.add(
+                    'The conformance package gas-manifest byte bindings '
+                            + 'are missing or stale: portable declared='
+                            + declaredPortableGasRawSha256
+                            + ', portable observed='
+                            + observedPortableGasRawSha256
+                            + ', host declared='
+                            + declaredHostQuotaRawSha256
+                            + ', host observed='
+                            + observedHostQuotaRawSha256
+                            + '.')
+        }
+        if (timelineEntryProjectionIdentity == null
+                || timelineEntryProjectionIdentity
+                != catalogTimelineEntryProjectionIdentity
+                || fragmentationProfileIdentity == null) {
+            blockers.add(
+                    'Timeline projection or fragmentation identity is '
+                            + 'missing from, or inconsistent with, the '
+                            + 'same-run project constants/resources.')
+        }
+
+        String calculatedFixturePackageIdentity =
+                calculatedReleaseConformanceIdentity(
+                        releaseConformancePackage)
+        boolean fixturePackageIdentityMatches =
+                fixturePackageIdentity != null
+                        && fixturePackageIdentity
+                        == calculatedFixturePackageIdentity
+        if (!fixturePackageIdentityMatches) {
+            blockers.add(
+                    'The conformance package identity is stale: declared '
+                            + fixturePackageIdentity
+                            + ', calculated '
+                            + calculatedFixturePackageIdentity
+                            + '.')
+        }
+
+        def conformanceManifestState = [
+                status:
+                        yamlReleaseScalar(
+                                fixtureManifest,
+                                'status'),
+                releaseEligible:
+                        yamlReleaseScalar(
+                                fixtureManifest,
+                                'releaseEligible'),
+                normativeExecutionComplete:
+                        yamlReleaseScalar(
+                                fixtureManifest,
+                                'normativeExecutionComplete'),
+                receiptWritten:
+                        yamlReleaseScalar(
+                                fixtureManifest,
+                                'receiptWritten'),
+                executedBehaviorCaseCount:
+                        yamlReleaseScalar(
+                                fixtureManifest,
+                                'executedBehaviorCaseCount'),
+                executedPortableGasCaseCount:
+                        yamlReleaseScalar(
+                                fixtureManifest,
+                                'executedPortableGasCaseCount'),
+                executedHostQuotaCaseCount:
+                        yamlReleaseScalar(
+                                fixtureManifest,
+                                'executedHostQuotaCaseCount')
+        ]
+        boolean conformanceManifestComplete =
+                conformanceManifestState
+                == [
+                        status:
+                                'complete',
+                        releaseEligible:
+                                'true',
+                        normativeExecutionComplete:
+                                'true',
+                        receiptWritten:
+                                'true',
+                        executedBehaviorCaseCount:
+                                '65',
+                        executedPortableGasCaseCount:
+                                '14',
+                        executedHostQuotaCaseCount:
+                                '7'
+                ]
+        boolean conformanceManifestCandidate =
+                conformanceManifestState
+                == [
+                        status:
+                                'candidate',
+                        releaseEligible:
+                                'false',
+                        normativeExecutionComplete:
+                                'false',
+                        receiptWritten:
+                                'false',
+                        executedBehaviorCaseCount:
+                                '0',
+                        executedPortableGasCaseCount:
+                                '14',
+                        executedHostQuotaCaseCount:
+                                '0'
+                ]
+
+        File conformanceReceiptFile =
+                releaseConformanceReceipt
+                        .get().asFile
+        def conformanceReceiptValue = [:]
+        String conformanceReceiptParseError = null
+        if (conformanceReceiptFile.isFile()) {
+            try {
+                conformanceReceiptValue =
+                        new JsonSlurper()
+                                .parse(
+                                        conformanceReceiptFile)
+            } catch (Exception invalidReceipt) {
+                conformanceReceiptParseError =
+                        invalidReceipt.message
+                                ?: invalidReceipt.class.name
+            }
+        }
+        boolean conformanceReceiptComplete =
+                conformanceReceiptValue
+                instanceof Map
+                        && conformanceReceiptValue.schema
+                        == ('blue.coordination/'
+                        + 'conformance-result/1.0')
+                        && conformanceReceiptValue.status
+                        == 'complete'
+                        && conformanceReceiptValue
+                        .executionCaseCount == 86L
+                        && conformanceReceiptValue.passed
+                        == 86L
+                        && conformanceReceiptValue.failures
+                        == 0L
+                        && conformanceReceiptValue.skips
+                        == 0L
+                        && conformanceReceiptValue
+                        .executionCases instanceof List
+                        && conformanceReceiptValue
+                        .executionCases.size() == 86
+                        && conformanceReceiptValue
+                        .executionCases.every {
+                    it instanceof Map
+                            && it.status == 'passed'
+                }
+                        && conformanceReceiptValue
+                        .fixturePackageIdentity
+                        == fixturePackageIdentity
+        boolean sameRunConformanceGreen =
+                totalConformance.required == 86L
+                        && totalConformance.executed == 86L
+                        && totalConformance.passed == 86L
+                        && totalConformance.failed == 0L
+                        && totalConformance.skipped == 0L
+                        && totalConformance.notExecuted == 0L
+        if (!conformanceManifestComplete) {
+            blockers.add(
+                    'Release conformance manifest metadata is not the '
+                            + 'exact complete/true/65+14+7 state: '
+                            + conformanceManifestState + '.')
+        }
+        if (!conformanceReceiptComplete) {
+            blockers.add(
+                    'The closed same-run 86-case conformance receipt is '
+                            + 'missing, malformed, incomplete, or stale'
+                            + (conformanceReceiptParseError == null
+                            ? '.'
+                            : ': '
+                            + conformanceReceiptParseError
+                            + '.'))
+        }
+        if ((conformanceManifestComplete
+                && (!sameRunConformanceGreen
+                || !conformanceReceiptComplete))
+                || (conformanceReceiptComplete
+                && (!sameRunConformanceGreen
+                || !conformanceManifestComplete))
+                || (!conformanceManifestComplete
+                && !conformanceManifestCandidate)) {
+            blockers.add(
+                    'Conformance manifest, same-run JUnit result, and '
+                            + 'closed receipt are not mutually coherent.')
+        }
+
+        def coordinates =
+                new LinkedHashMap<String, Object>()
+        dependencyDirectories.each {
+            key, directory ->
+                coordinates.put(
+                        key,
+                        [
+                                commit:
+                                        gitReleaseText(
+                                                directory,
+                                                'rev-parse',
+                                                'HEAD'),
+                                version:
+                                        readCzReleaseVersion(
+                                                directory),
+                                sourceState:
+                                        sourceStates.get(key)
+                        ])
+        }
+        coordinates.coordination.coordinate =
+                "blue.coordination:blue-coordination-java:${project.version}"
+        coordinates.language.coordinate =
+                "blue.language:blue-language-java:${coordinates.language.version}${System.getenv('CI') ? '' : '-SNAPSHOT'}"
+        coordinates.bex.coordinate =
+                "blue.bex:blue-bex-java:${coordinates.bex.version}${System.getenv('CI') ? '' : '-SNAPSHOT'}"
+        coordinates.repository.coordinate =
+                "blue.repo:blue-repo-java:${coordinates.repository.version}${System.getenv('CI') ? '' : '-SNAPSHOT'}"
+
+        def publishedAlignmentProperties =
+                readReleaseProperties(
+                        releasePublishedAlignmentEvidence
+                                .get().asFile)
+        String exactPublishedLanguageCoordinate =
+                "blue.language:blue-language-java:${coordinates.language.version}"
+        boolean publishedAlignmentVerified =
+                publishedAlignmentProperties
+                instanceof Map
+                        && (publishedAlignmentProperties
+                        .keySet() as Set)
+                        == ([
+                        'schema',
+                        'status',
+                        'expected.coordinate',
+                        'requested.coordinate'
+                ] as Set)
+                        && publishedAlignmentProperties.schema
+                        == ('blue.coordination/'
+                        + 'published-dependency-alignment/1.0')
+                        && publishedAlignmentProperties.status
+                        == 'verified'
+                        && publishedAlignmentProperties
+                        .get('expected.coordinate')
+                        == exactPublishedLanguageCoordinate
+                        && publishedAlignmentProperties
+                        .get('requested.coordinate')
+                        == exactPublishedLanguageCoordinate
+        def publishedAlignment = [
+                evidencePresent:
+                        releasePublishedAlignmentEvidence
+                                .get().asFile.isFile(),
+                evidenceSha256:
+                        sha256FileRelease(
+                                releasePublishedAlignmentEvidence
+                                        .get().asFile),
+                expectedCoordinate:
+                        publishedAlignmentProperties
+                                ?.get(
+                                'expected.coordinate'),
+                requestedCoordinate:
+                        publishedAlignmentProperties
+                                ?.get(
+                                'requested.coordinate'),
+                status:
+                        publishedAlignmentProperties
+                                ?.get('status')
+                                ?: 'not-executed',
+                verified:
+                        publishedAlignmentVerified
+        ]
+        if (!publishedAlignmentVerified) {
+            blockers.add(
+                    'BEX published dependency alignment is not verified: '
+                            + publishedAlignment + '.')
+        }
+
+        def sourceLockProperties =
+                readReleaseProperties(
+                        releaseSiblingSourceLock)
+        def expectedSourceLockKeys = [
+                'blueLanguageCommit',
+                'blueBexCommit',
+                'blueRepositoryCommit'
+        ] as Set
+        boolean sourceLockShapeValid =
+                sourceLockProperties instanceof Map
+                        && (sourceLockProperties
+                        .keySet() as Set)
+                        == expectedSourceLockKeys
+                        && sourceLockProperties.values().every {
+                    it ==~ /[0-9a-f]{40}/
+                }
+        def sourceLockComparisons =
+                new LinkedHashMap<String, Object>()
+        [
+                blueLanguageCommit  :
+                        coordinates.language.commit,
+                blueBexCommit       :
+                        coordinates.bex.commit,
+                blueRepositoryCommit:
+                        coordinates.repository.commit
+        ].each { key, observed ->
+            String locked =
+                    sourceLockProperties
+                            ?.get(
+                            key.toString())
+            sourceLockComparisons.put(
+                    key.toString(),
+                    [
+                            locked  : locked,
+                            observed: observed,
+                            matches :
+                                    locked != null
+                                            && locked
+                                            == observed
+                    ])
+        }
+        boolean siblingSourceLocksVerified =
+                sourceLockShapeValid
+                        && sourceLockComparisons
+                        .values().every {
+                    it.matches
+                }
+        def siblingSourceLocks = [
+                status:
+                        siblingSourceLocksVerified
+                                ? 'verified'
+                                : 'mismatch-or-invalid',
+                lockFileSha256:
+                        sha256FileRelease(
+                                releaseSiblingSourceLock),
+                comparisons:
+                        sourceLockComparisons
+        ]
+        if (!siblingSourceLocksVerified) {
+            blockers.add(
+                    'Sibling HEAD commits do not exactly match '
+                            + 'gradle/blue-sibling-lock.properties: '
+                            + sourceLockComparisons + '.')
+        }
+
+        def artifacts = [
+                coordinationJarSha256:
+                        sha256FileRelease(currentJar),
+                coordinationSourcesJarSha256:
+                        sha256FileRelease(sourcesJar),
+                coordinationJavadocJarSha256:
+                        sha256FileRelease(javadocJar),
+                coordinationSourceArchiveSha256:
+                        sha256FileRelease(sourceArchive),
+                languageJarSha256:
+                        sha256FileRelease(
+                                file('../blue-language-java/build/libs/'
+                                        + 'blue-language-java-'
+                                        + coordinates.language.version
+                                        + (System.getenv('CI')
+                                        ? ''
+                                        : '-SNAPSHOT')
+                                        + '.jar')),
+                bexJarSha256:
+                        sha256FileRelease(
+                                file('../blue-bex-java/build/libs/'
+                                        + 'blue-bex-java-'
+                                        + coordinates.bex.version
+                                        + (System.getenv('CI')
+                                        ? ''
+                                        : '-SNAPSHOT')
+                                        + '.jar')),
+                repositoryJarSha256:
+                        sha256FileRelease(
+                                file('../blue-repository-java/build/libs/'
+                                        + 'blue-repo-java-'
+                                        + coordinates.repository.version
+                                        + (System.getenv('CI')
+                                        ? ''
+                                        : '-SNAPSHOT')
+                                        + '.jar')),
+                gasManifestSha256:
+                        observedPortableGasRawSha256,
+                hostQuotaManifestSha256:
+                        observedHostQuotaRawSha256,
+                fixtureManifestSha256:
+                        sha256FileRelease(fixtureManifest),
+                conformanceReceiptSha256:
+                        sha256FileRelease(
+                                conformanceReceiptFile),
+                siblingSourceLockSha256:
+                        sha256FileRelease(
+                                releaseSiblingSourceLock),
+                publishedDependencyAlignmentSha256:
+                        sha256FileRelease(
+                                releasePublishedAlignmentEvidence
+                                        .get().asFile),
+                runtimeRegistrationInventorySha256:
+                        sha256FileRelease(runtimeRegistrations),
+                projectionCatalogSha256:
+                        sha256FileRelease(projectionCatalog),
+                fixedRepositoryManifestSha256:
+                        sha256FileRelease(repositoryManifest),
+                fixedRepositoryBlueSourceSha256:
+                        sha256FileRelease(fixedRepositoryBlueSource)
+        ]
+        def dependencyArtifactSha256s = [
+                language  : artifacts.languageJarSha256,
+                bex       : artifacts.bexJarSha256,
+                repository: artifacts.repositoryJarSha256
+        ]
+        dependencyArtifactSha256s.each { name, value ->
+            if (!(value instanceof String)
+                    || !(value ==~ /[0-9a-f]{64}/)) {
+                blockers.add(
+                        "${name} dependency artifact SHA-256 is "
+                                + 'missing or malformed.')
+            }
+        }
+
+        def expectedConformanceReceiptIdentities = [
+                blueLanguageCommit:
+                        coordinates.language.commit,
+                blueLanguageJarSha256:
+                        artifacts.languageJarSha256,
+                blueBexCommit:
+                        coordinates.bex.commit,
+                blueBexJarSha256:
+                        artifacts.bexJarSha256,
+                blueRepositoryCommit:
+                        coordinates.repository.commit,
+                blueRepositoryJarSha256:
+                        artifacts.repositoryJarSha256,
+                blueCoordinationCommit:
+                        coordinates.coordination.commit,
+                coordinationJarSha256:
+                        artifacts.coordinationJarSha256,
+                coordinationSourcesJarSha256:
+                        artifacts
+                                .coordinationSourcesJarSha256,
+                coordinationJavadocJarSha256:
+                        artifacts
+                                .coordinationJavadocJarSha256,
+                coordinationSourceArchiveSha256:
+                        artifacts
+                                .coordinationSourceArchiveSha256,
+                fixturePackageIdentity:
+                        fixturePackageIdentity,
+                fixedRepositoryVersion:
+                        repositoryManifestValue
+                                .repositoryVersion,
+                fixedRepositoryVersionBlueId:
+                        repositoryManifestValue
+                                .repositoryVersionBlueId,
+                fixedRepositoryManifestSha256:
+                        artifacts
+                                .fixedRepositoryManifestSha256,
+                portableGasManifestIdentity:
+                        gasPackageIdentity,
+                portableGasManifestSha256:
+                        artifacts.gasManifestSha256,
+                hostQuotaSchedule:
+                        hostQuotaScheduleIdentity,
+                hostQuotaManifestSha256:
+                        artifacts.hostQuotaManifestSha256
+        ]
+        def conformanceReceiptIdentityComparisons =
+                new LinkedHashMap<String, Object>()
+        expectedConformanceReceiptIdentities.each {
+            key, expected ->
+                Object observed =
+                        conformanceReceiptValue
+                                .get(
+                                key.toString())
+                conformanceReceiptIdentityComparisons.put(
+                        key.toString(),
+                        [
+                                expected: expected,
+                                observed: observed,
+                                matches :
+                                        expected != null
+                                                && expected
+                                                == observed
+                        ])
+        }
+        boolean conformanceReceiptIdentitiesMatch =
+                conformanceReceiptComplete
+                        && conformanceReceiptIdentityComparisons
+                        .values().every {
+                    it.matches
+                }
+        if (!conformanceReceiptIdentitiesMatch) {
+            blockers.add(
+                    'The closed conformance receipt is not bound to all '
+                            + 'same-run source and artifact identities.')
+        }
+
+        boolean fixedCatalogCountsMatch =
+                fixedCatalog.total == 1107L
+                        && fixedCatalog.verified
+                        == fixedCatalog.total
+                        && fixedCatalog.failed == 0L
+                        && fixedCatalog.cyclicSetCount == 10L
+                        && fixedCatalog.cyclicMemberCount == 27L
+                        && fixedCatalog.entries instanceof List
+                        && fixedCatalog.entries.size()
+                        == fixedCatalog.total
+                        && fixedCatalog.entries.every {
+                    it.outcome == 'FOUND'
+                }
+                        && fixedCatalog.entries.count {
+                    it.cyclicMember == true
+                } == fixedCatalog.cyclicMemberCount
+        boolean fixedCatalogIdentityMatches =
+                fixedCatalog.schema
+                        == ('blue.coordination/'
+                        + 'fixed-repository-catalog-audit/1.0')
+                        && fixedCatalog.status == 'verified'
+                        && fixedCatalog.providerMode
+                        == 'BOUND_SOURCE_CONTENT'
+                        && fixedCatalog.repositoryCoordinate
+                        == coordinates.repository.coordinate
+                        && fixedCatalog.repositoryVersion
+                        == repositoryManifestValue.repositoryVersion
+                        && fixedCatalog.repositoryManifestBlueId
+                        == repositoryManifestValue
+                        .repositoryVersionBlueId
+                        && fixedCatalog.repositoryManifestSha256
+                        == artifacts.fixedRepositoryManifestSha256
+                        && fixedCatalog.repositoryCommit
+                        == coordinates.repository.commit
+                        && fixedCatalog.repositoryArtifactSha256
+                        == artifacts.repositoryJarSha256
+                        && (fixedCatalog.repositoryArtifactSha256
+                        instanceof String)
+                        && (fixedCatalog.repositoryArtifactSha256
+                        ==~ /[0-9a-f]{64}/)
+        if (!fixedCatalogCountsMatch
+                || !fixedCatalogIdentityMatches) {
+            blockers.add(
+                    'The complete 1,107-definition fixed Repository '
+                            + 'BOUND_SOURCE_CONTENT audit is not green or '
+                            + 'does not match the same-run Repository '
+                            + 'source, manifest, artifact, and cyclic-set '
+                            + 'identities.')
+        }
+
+        def failureCases =
+                tests.records.findAll {
+                    it.status == 'failed'
+                }.collect {
+                    [
+                            id      : it.id,
+                            category: it.category,
+                            message : it.message
+                    ]
+                }
+        def skippedCases =
+                tests.records.findAll {
+                    it.status == 'skipped'
+                }.collect {
+                    it.id
+                }
+        long dependencyEvidenceFailures =
+                tests.records.count {
+                    it.status == 'failed'
+                            && it.category
+                            == 'dependency-evidence-before-coordination'
+                }
+        long coordinationEvidenceFailures =
+                tests.failed - dependencyEvidenceFailures
+
+        boolean releaseEligible =
+                blockers.isEmpty()
+        def report = [
+                schema :
+                        'blue.coordination/release-result/1.0',
+                status :
+                        releaseEligible
+                                ? 'complete'
+                                : 'blocked',
+                repository:
+                        coordinates.coordination,
+                dependencies:
+                        [
+                                language  :
+                                        coordinates.language,
+                                bex       :
+                                        coordinates.bex,
+                                repository:
+                                        coordinates.repository
+                        ],
+                requiredReleaseGates:
+                        releaseGates,
+                focusedSuites:
+                        focusedSuites,
+                siblingSourceLocks:
+                        siblingSourceLocks,
+                publishedDependencyAlignment:
+                        publishedAlignment,
+                runtimeIdentities:
+                        [
+                                languageCoreRegistry:
+                                        'sha256:b705171a6ca62c990792bcb78db9d921caf5b0ed06370648b9a81769d69dd71e',
+                                contractsRuntimeRegistry:
+                                        'sha256:67ce3101449c5bca9e6093b081da239d5d699fdc02182a058d3ad795c6c6120b',
+                                coordinationRuntimeRegistry:
+                                        coordinationRuntimeRegistryIdentity,
+                                coordinationRuntimeRegistrationInventorySha256:
+                                        artifacts.runtimeRegistrationInventorySha256,
+                                coordinationProjectionCatalogSha256:
+                                        artifacts.projectionCatalogSha256
+                        ],
+                gasManifestIdentity:
+                        gasPackageIdentity,
+                hostQuotaScheduleIdentity:
+                        hostQuotaScheduleIdentity,
+                fixturePackageIdentity:
+                        fixturePackageIdentity,
+                subscriptionProjectionAlgorithmIdentity:
+                        projectionAlgorithmIdentity,
+                timelineEntryProjectionIdentity:
+                        timelineEntryProjectionIdentity,
+                fragmentationProfileIdentity:
+                        fragmentationProfileIdentity,
+                publicApiDigest:
+                        api.publicApiDigest,
+                tests :
+                        [
+                                total  :
+                                        tests.required,
+                                required:
+                                        tests.required,
+                                executed:
+                                        tests.executed,
+                                passed :
+                                        tests.passed,
+                                failed :
+                                        tests.failed,
+                                skipped:
+                                        tests.skipped,
+                                notExecuted:
+                                        tests.notExecuted,
+                                resultFiles:
+                                        tests.resultFiles,
+                                malformed:
+                                        tests.malformed,
+                                hardFullSuiteInventoryMatches:
+                                        fullSuiteInventoryMatches,
+                                hardTestFallbackUsed:
+                                        usingHardTestFallback,
+                                failedBeforeCoordinationBehaviorBecauseOfDependencyEvidence:
+                                        dependencyEvidenceFailures,
+                                failedBecauseOfCoordinationBehaviorOrEvidence:
+                                        coordinationEvidenceFailures,
+                                failedCases:
+                                        failureCases,
+                                skippedCases:
+                                        skippedCases
+                        ],
+                conformance:
+                        [
+                                behavior   : behavior,
+                                portableGas:
+                                        portableGas,
+                                hostQuota  : hostQuota,
+                                total      :
+                                        totalConformance
+                        ],
+                conformanceClosure:
+                        [
+                                declaredPackageIdentity:
+                                        fixturePackageIdentity,
+                                calculatedPackageIdentity:
+                                        calculatedFixturePackageIdentity,
+                                packageIdentityMatches:
+                                        fixturePackageIdentityMatches,
+                                gasManifestBindings:
+                                        [
+                                                portable:
+                                                        [
+                                                                declared:
+                                                                        declaredPortableGasRawSha256,
+                                                                observed:
+                                                                        observedPortableGasRawSha256,
+                                                                matches:
+                                                                        portableGasManifestBindingMatches
+                                                        ],
+                                                hostQuota:
+                                                        [
+                                                                declared:
+                                                                        declaredHostQuotaRawSha256,
+                                                                observed:
+                                                                        observedHostQuotaRawSha256,
+                                                                matches:
+                                                                        hostQuotaManifestBindingMatches
+                                                        ]
+                                        ],
+                                manifest:
+                                        conformanceManifestState,
+                                manifestComplete:
+                                        conformanceManifestComplete,
+                                manifestCandidate:
+                                        conformanceManifestCandidate,
+                                sameRunTestsGreen:
+                                        sameRunConformanceGreen,
+                                receiptPresent:
+                                        conformanceReceiptFile
+                                                .isFile(),
+                                receiptComplete:
+                                        conformanceReceiptComplete,
+                                receiptSha256:
+                                        artifacts
+                                                .conformanceReceiptSha256,
+                                receiptIdentityMatches:
+                                        conformanceReceiptIdentitiesMatch,
+                                receiptIdentityComparisons:
+                                        conformanceReceiptIdentityComparisons,
+                                parseError:
+                                        conformanceReceiptParseError
+                        ],
+                flagship:
+                        [
+                                required: 32L,
+                                passed  : flagshipRuns
+                        ],
+                repeatedCounterTrace:
+                        [
+                                requiredEntries: 516L,
+                                observedEntries:
+                                        traceEntries,
+                                passed         :
+                                        traceGreen
+                        ],
+                fixedRepository:
+                        [
+                                expectedManifestBlueId:
+                                        expectedRepositoryBlueId,
+                                observedManifestBlueId:
+                                        repositoryManifestValue
+                                                .repositoryVersionBlueId,
+                                manifestCompatible:
+                                        repositoryManifestCompatible,
+                                catalogCountsMatch:
+                                        fixedCatalogCountsMatch,
+                                sameRunIdentityMatch:
+                                        fixedCatalogIdentityMatches,
+                                catalogAudit:
+                                        fixedCatalog
+                        ],
+                providerLocality:
+                        [
+                                status:
+                                        flagshipLocality.status,
+                                matrixRows:
+                                        flagshipLocality.matrixRows,
+                                forbiddenProviderDemandCount:
+                                        flagshipLocality
+                                                .forbiddenProviderDemandCount,
+                                forbiddenBackendLoadCount:
+                                        flagshipLocality
+                                                .forbiddenBackendLoadCount,
+                                totals:
+                                        flagshipLocality.totals,
+                                variants:
+                                        flagshipLocality.variants,
+                                identitySets:
+                                        flagshipLocality.identitySets,
+                                invalidReasons:
+                                        flagshipLocality
+                                                .invalidReasons,
+                                flagshipEvidencePresent:
+                                        flagshipFile.isFile(),
+                                loopEvidencePresent:
+                                        releaseLoopEvidence
+                                                .get().asFile
+                                                .isFile(),
+                                jmhBenchmarkCount:
+                                        jmhResults instanceof List
+                                                ? jmhResults.size()
+                                                : 0,
+                                benchmarkResults:
+                                        benchmarkEvidence
+                        ],
+                forbiddenProviderDemandCount:
+                        flagshipLocality
+                                .forbiddenProviderDemandCount,
+                binaryCompatibility:
+                        binaryCompatibility,
+                binaryCompatibilityBreaks:
+                        binaryCompatibilityBreaks,
+                javaBytecode:
+                        javaBytecode,
+                archiveReproducibility:
+                        reproducible
+                                ? 'passed'
+                                : 'failed-or-not-executed',
+                artifacts:
+                        artifacts,
+                releaseEligible:
+                        releaseEligible,
+                blockingReasons:
+                        new ArrayList<String>(
+                                new LinkedHashSet<String>(
+                                        blockers))
+        ]
+        File jsonFile =
+                finalJsonReport.get().asFile
+        jsonFile.parentFile.mkdirs()
+        jsonFile.setText(
+                JsonOutput.prettyPrint(
+                        JsonOutput.toJson(report))
+                        + '\n',
+                'UTF-8')
+        File markdownFile =
+                finalMarkdownReport.get().asFile
+        markdownFile.parentFile.mkdirs()
+        markdownFile.withWriter('UTF-8') { writer ->
+            writer.writeLine(
+                    '# Blue Coordination release verification')
+            writer.writeLine('')
+            writer.writeLine(
+                    "- Release eligible: `${releaseEligible}`")
+            writer.writeLine(
+                    "- Tests: `${tests.passed}/${tests.required}` "
+                            + "passed; `${tests.failed}` failed; "
+                            + "`${tests.skipped}` skipped; "
+                            + "`${tests.notExecuted}` not executed")
+            writer.writeLine(
+                    "- Conformance: `${totalConformance.passed}/86`")
+            writer.writeLine(
+                    "- Flagship: `${flagshipRuns}/32`")
+            writer.writeLine(
+                    "- Repeated-counter trace: "
+                            + "`${traceEntries ?: 'not-executed'}/516`")
+            writer.writeLine(
+                    "- Fixed Repository: "
+                            + "`${fixedCatalog.verified ?: 0}/"
+                            + "${fixedCatalog.total ?: 1107}`")
+            writer.writeLine(
+                    "- Public API: `${api.publicApiDigest ?: 'missing'}`")
+            writer.writeLine(
+                    '- Sibling source locks: '
+                            + "`${siblingSourceLocks.status}`")
+            writer.writeLine(
+                    '- Published dependency alignment: '
+                            + "`${publishedAlignment.status}`")
+            writer.writeLine(
+                    '- Forbidden provider demands: '
+                            + "`${flagshipLocality.forbiddenProviderDemandCount}`")
+            writer.writeLine('')
+            writer.writeLine('## Blocking reasons')
+            writer.writeLine('')
+            if (report.blockingReasons.isEmpty()) {
+                writer.writeLine('- None.')
+            } else {
+                report.blockingReasons.each {
+                    writer.writeLine("- ${it}")
+                }
+            }
+            writer.writeLine('')
+            writer.writeLine('## Exact source identities')
+            writer.writeLine('')
+            coordinates.each { key, value ->
+                writer.writeLine(
+                        "- `${key}`: `${value.commit}` / "
+                                + "`${value.version}` / "
+                                + "`${value.sourceState.state}`")
+            }
+            writer.writeLine('')
+            writer.writeLine('## Artifact SHA-256')
+            writer.writeLine('')
+            artifacts.each { key, value ->
+                writer.writeLine(
+                        "- `${key}`: `${value ?: 'missing'}`")
+            }
+            writer.writeLine('')
+            writer.writeLine(
+                    'This report is written even for a red candidate. '
+                            + 'A dependency-evidence failure is never '
+                            + 'reported as a passing Coordination result.')
+        }
+        } catch (Exception reportingFailure) {
+            logger.error(
+                    'Coordination release report generation failed.',
+                    reportingFailure)
+            writeReleaseReportingFailure(
+                    reportingFailure)
+        }
+    }
+}
+
+def finalCoordinationVerification =
+        tasks.register(
+                'finalCoordinationVerification') {
+    group = 'verification'
+    description = 'Runs the clean hard release graph, writes evidence after every gate completes, and rejects every blocker.'
+    dependsOn(
+            releaseRequiredGateTaskNames.collect {
+                tasks.named(it)
+            })
+    finalizedBy generateCoordinationReleaseFinalReport
+}
+
+generateCoordinationReleaseFinalReport.configure {
+    doLast {
+        if (!gradle.taskGraph.hasTask(
+                finalCoordinationVerification.get())) {
+            return
+        }
+        File reportFile =
+                finalJsonReport.get().asFile
+        if (!reportFile.isFile()) {
+            throw new GradleException(
+                    'Coordination release report is missing.')
+        }
+        def report =
+                new JsonSlurper()
+                        .parse(reportFile)
+        if (report.releaseEligible != true
+                || !(report.blockingReasons instanceof List)
+                || !report.blockingReasons.isEmpty()
+                || !(report.requiredReleaseGates instanceof Map)
+                || report.requiredReleaseGates.size()
+                != releaseRequiredGateTaskNames.size()
+                || report.requiredReleaseGates.values().any {
+                    it.status != 'passed'
+                }
+                || report.siblingSourceLocks?.status
+                != 'verified'
+                || report.publishedDependencyAlignment
+                ?.verified != true
+                || report.tests?.executed
+                != report.tests?.required
+                || report.tests?.notExecuted != 0
+                || report.conformanceClosure
+                ?.manifestComplete != true
+                || report.conformanceClosure
+                ?.receiptComplete != true
+                || report.conformanceClosure
+                ?.receiptIdentityMatches != true
+                || report.forbiddenProviderDemandCount
+                != 0) {
+            throw new GradleException(
+                    'Coordination release remains blocked; see '
+                            + reportFile)
+        }
+    }
+}
+
+/*
+ * Every hard gate finalizes the same report task. Gradle schedules that shared
+ * finalizer after the hard gates that can run, while still reaching it when
+ * one gate fails and normal execution stops without --continue. Attaching the
+ * finalizer only to `clean` and constraining it with `mustRunAfter` all gates
+ * suppresses it after an early failure because the unexecuted ordering
+ * predecessors can never be satisfied. The predicate keeps standalone hard
+ * gates from creating a release receipt unless the final graph was requested.
+ */
+generateCoordinationReleaseFinalReport.configure {
+    /*
+     * Prefer the report after every hard gate while keeping the ordering
+     * soft. A hard mustRunAfter edge suppresses this finalizer when an early
+     * failure prevents later gates from executing; no ordering lets the
+     * shared finalizer race a still-running Test task and observe incomplete
+     * JUnit evidence.
+     */
+    shouldRunAfter(
+            releaseRequiredGateTaskNames.collect {
+                tasks.named(it)
+            })
+    onlyIf {
+        gradle.taskGraph.hasTask(
+                finalCoordinationVerification.get())
+                || gradle.startParameter.taskNames.any { requested ->
+            requested
+                    == 'generateCoordinationReleaseFinalReport'
+                    || requested.endsWith(
+                    ':generateCoordinationReleaseFinalReport')
+        }
+    }
+}
+releaseRequiredGateTaskNames.each { taskName ->
+    tasks.named(taskName).configure {
+        finalizedBy(
+                generateCoordinationReleaseFinalReport)
+    }
+}
+
+/*
+ * When clean and any other task share a graph, every producer runs after
+ * clean.  Depending on clean alone does not order sibling dependencies and
+ * can otherwise let a compiler or archive run before the deletion task.
+ */
+def coordinationReleaseClean =
+        tasks.named('clean')
+tasks.configureEach { candidate ->
+    if (candidate.name != 'clean') {
+        candidate.mustRunAfter(
+                coordinationReleaseClean)
+    }
+}
+
+ext.finalCoordinationVerificationTask =
+        finalCoordinationVerification

@@ -1,0 +1,76 @@
+schema: blue-coordination-fixture/1.0
+id: coord-chan-07
+vectors:
+- COORD-CHAN-07
+category: channel
+description: An explicitly registered MyOS Timeline Channel is also a first-class member of Composite and All Timelines subscriptions.
+operation: channel-classify
+input:
+  root:
+    contracts:
+      myos:
+        type: { blueId: "8dZK68CdFFjRKFf7dX9QDc55WUESNyeBsUSTF8tq8cki" }
+        timeline:
+          type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+          timelineId: MYOS
+        actor:
+          type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+          accountId: myos-account
+        accountId: myos-account
+        email: myos@example.test
+      composite:
+        type: { blueId: "3Q53ttkVniDP3jYGstwhmX7Yu12qMqNaG1bfCYzcmg2Q" }
+        channels:
+        - myos
+      all:
+        type: { blueId: "BXrf1Yd17giWBF41wZBqkZDczMMwqb64r9dBArweYuxT" }
+  event:
+    type: { blueId: "7L685pBvjNNrBPq6tNv53kfPEBMDkoRu7MdVMTqdcyR2" }
+    timeline:
+      type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+      timelineId: MYOS
+    timestamp: 100
+    actor:
+      type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+      accountId: myos-account
+    message:
+      kind: myos-subtype
+    fixtureId: MYOS-ENTRY
+  feeder:
+    managedRootRevision: 1
+    indexedRootRevision: 1
+    eligibleSourceChannelKeys:
+    - all
+    - composite
+    - myos
+expected:
+  assertions:
+  - actual: result.status
+    op: equals
+    expected: success
+  - actual: feeder.eligibleSourceChannelKeys
+    op: contains
+    expected:
+    - all
+    - composite
+    - myos
+  - actual: feeder.logicalDeliveryCount
+    op: equals
+    expected: 3
+  - actual: feeder.checkpointOwnerKeys
+    op: contains
+    expected:
+    - all
+    - composite
+    - myos
+  - actual: trace.externalDeliveryOrder
+    op: contains
+    expected:
+    - /:all
+    - /:composite
+    - /:myos
+  - actual: trace.namedGas
+    op: present
+  - actual: trace.forbiddenDemands
+    op: sequenceEquals
+    expected: []

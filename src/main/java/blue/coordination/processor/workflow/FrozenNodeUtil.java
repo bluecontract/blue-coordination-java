@@ -1,15 +1,35 @@
 package blue.coordination.processor.workflow;
 
+import blue.language.model.Node;
+import blue.language.processor.CoordinationProcessHeaderBridge;
 import blue.language.snapshot.FrozenNode;
 
 import java.math.BigInteger;
 
+/**
+ * Strict scalar and property accessors for immutable workflow snapshots.
+ *
+ * <p>The methods preserve the distinction between absence and the wrong Blue
+ * scalar kind; callers receive deterministic validation failures instead of
+ * Java coercions.</p>
+ */
 final class FrozenNodeUtil {
     private FrozenNodeUtil() {
     }
 
     static FrozenNode property(FrozenNode node, String key) {
-        return node != null && node.getProperties() != null ? node.getProperties().get(key) : null;
+        return node != null && node.getProperties() != null
+                ? node.getProperties().get(key)
+                : null;
+    }
+
+    static Node authoredOverlay(FrozenNode node) {
+        if (node == null) {
+            return null;
+        }
+        return CoordinationProcessHeaderBridge
+                .canonicalExactCopy(
+                        node.toNode());
     }
 
     static boolean isEmpty(FrozenNode node) {
@@ -21,7 +41,8 @@ final class FrozenNodeUtil {
                 && node.getValueType() == null
                 && node.getValue() == null
                 && node.getItems() == null
-                && (node.getProperties() == null || node.getProperties().isEmpty())
+                && (node.getProperties() == null
+                || node.getProperties().isEmpty())
                 && node.getContracts() == null
                 && node.getReferenceBlueId() == null
                 && node.getSchema() == null
@@ -38,7 +59,8 @@ final class FrozenNodeUtil {
         if (node.getValue() != null) {
             return node.getValue();
         }
-        if (node.getProperties() != null && node.getProperties().containsKey("value")) {
+        if (node.getProperties() != null
+                && node.getProperties().containsKey("value")) {
             return rawScalar(node.getProperties().get("value"));
         }
         return null;
@@ -59,7 +81,10 @@ final class FrozenNodeUtil {
         return text(property(node, key));
     }
 
-    static boolean booleanProperty(FrozenNode node, String key, boolean defaultValue) {
+    static boolean booleanProperty(
+            FrozenNode node,
+            String key,
+            boolean defaultValue) {
         Object raw = rawScalar(property(node, key));
         if (raw == null) {
             return defaultValue;

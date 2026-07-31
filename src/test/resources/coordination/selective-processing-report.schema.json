@@ -9,6 +9,17 @@
     "schema",
     "schemaVersion",
     "status",
+    "coordinationSpecification",
+    "behaviorConformance",
+    "portableGasConformance",
+    "hostQuotaConformance",
+    "totalConformance",
+    "flagshipRuns",
+    "maximumRuntimeTraceEntriesObserved",
+    "forbiddenProviderDemandCount",
+    "binaryApiResult",
+    "java8BytecodeResult",
+    "archiveReproducibilityResult",
     "identities",
     "testCountScope",
     "testCounts",
@@ -24,9 +35,55 @@
     },
     "status": {
       "enum": [
-        "passed",
-        "partial",
+        "complete",
         "failed"
+      ]
+    },
+    "coordinationSpecification": {
+      "const": "blue-coordination/1.0"
+    },
+    "behaviorConformance": {
+      "$ref": "#/$defs/executionResult"
+    },
+    "portableGasConformance": {
+      "$ref": "#/$defs/executionResult"
+    },
+    "hostQuotaConformance": {
+      "$ref": "#/$defs/executionResult"
+    },
+    "totalConformance": {
+      "$ref": "#/$defs/executionResult"
+    },
+    "flagshipRuns": {
+      "$ref": "#/$defs/executionResult"
+    },
+    "maximumRuntimeTraceEntriesObserved": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "forbiddenProviderDemandCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "binaryApiResult": {
+      "enum": [
+        "compatible",
+        "incompatible",
+        "blocked"
+      ]
+    },
+    "java8BytecodeResult": {
+      "enum": [
+        "compatible",
+        "incompatible",
+        "blocked"
+      ]
+    },
+    "archiveReproducibilityResult": {
+      "enum": [
+        "reproducible",
+        "not-reproducible",
+        "blocked"
       ]
     },
     "identities": {
@@ -65,7 +122,7 @@
       "if": {
         "properties": {
           "status": {
-            "const": "passed"
+            "const": "complete"
           }
         },
         "required": [
@@ -74,9 +131,83 @@
       },
       "then": {
         "properties": {
+          "behaviorConformance": {
+            "properties": {
+              "required": {
+                "const": 65
+              },
+              "passed": {
+                "const": 65
+              }
+            }
+          },
+          "portableGasConformance": {
+            "properties": {
+              "required": {
+                "const": 14
+              },
+              "passed": {
+                "const": 14
+              }
+            }
+          },
+          "hostQuotaConformance": {
+            "properties": {
+              "required": {
+                "const": 7
+              },
+              "passed": {
+                "const": 7
+              }
+            }
+          },
+          "totalConformance": {
+            "properties": {
+              "required": {
+                "const": 86
+              },
+              "passed": {
+                "const": 86
+              }
+            }
+          },
+          "flagshipRuns": {
+            "properties": {
+              "required": {
+                "const": 32
+              },
+              "passed": {
+                "const": 32
+              }
+            }
+          },
+          "maximumRuntimeTraceEntriesObserved": {
+            "const": 516
+          },
+          "forbiddenProviderDemandCount": {
+            "const": 0
+          },
+          "binaryApiResult": {
+            "const": "compatible"
+          },
+          "java8BytecodeResult": {
+            "const": "compatible"
+          },
+          "archiveReproducibilityResult": {
+            "const": "reproducible"
+          },
           "testCounts": {
             "properties": {
+              "total": {
+                "minimum": 1
+              },
+              "passed": {
+                "minimum": 1
+              },
               "failed": {
+                "const": 0
+              },
+              "skipped": {
                 "const": 0
               }
             }
@@ -86,6 +217,12 @@
               "properties": {
                 "status": {
                   "const": "passed"
+                },
+                "caseCount": {
+                  "minimum": 1
+                },
+                "cases": {
+                  "minItems": 1
                 }
               }
             }
@@ -98,6 +235,24 @@
     }
   ],
   "$defs": {
+    "executionResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required",
+        "passed"
+      ],
+      "properties": {
+        "required": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "passed": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
     "testCounts": {
       "type": "object",
       "additionalProperties": false,

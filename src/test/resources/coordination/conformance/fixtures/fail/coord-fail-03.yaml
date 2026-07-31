@@ -1,0 +1,65 @@
+schema: blue-coordination-fixture/1.0
+id: coord-fail-03
+vectors:
+- COORD-FAIL-03
+category: fail
+description: Recursive BEX reaches the released runtime guard and cannot become an infinite execution loop.
+operation: gas-integration
+input:
+  root:
+    contracts:
+      alice:
+        type: { blueId: "8aohWT7jcoaC1j2siQzBxoKM8HhQ4HF13BkZDNnq5UHf" }
+        timeline:
+          type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+          timelineId: A
+        actor:
+          type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+          accountId: alice
+      run:
+        type: { blueId: "6rnGvP1BUsBpbtvuvJ1vy6hS7psoUJVBEXXsFeRma82V" }
+        channel: alice
+        request: {}
+        steps:
+        - type: { blueId: "4qGDz5yJxXc9dr8bsBE1B2Tg4AWuR4qHPU9H6T29m3KZ" }
+          functions:
+            f:
+              args: []
+              expr:
+                $call:
+                  function: f
+                  args: []
+          entry: f
+  event:
+    type: { blueId: "7L685pBvjNNrBPq6tNv53kfPEBMDkoRu7MdVMTqdcyR2" }
+    timeline:
+      type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+      timelineId: A
+    timestamp: 100
+    actor:
+      type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+      accountId: alice
+    message:
+      type: { blueId: "93PyhYJyekVeSvQcFi5u8moU5fbfKcbD68BCRtzE8ZLz" }
+      channel: alice
+      operation: run
+      request: {}
+    fixtureId: E
+  feeder:
+    managedRootRevision: 1
+    indexedRootRevision: 1
+    eligibleSourceChannelKeys:
+    - alice
+  gasLimit: 6000
+  parentRemainingGas: 6000
+expected:
+  assertions:
+  - actual: result.status
+    op: equals
+    expected: runtime-fatal
+  - actual: result.diagnostic.category
+    op: equals
+    expected: RuntimeExecutionFailure
+  - actual: result.document
+    op: equalsProjection
+    expectedProjection: input.initializedRoot

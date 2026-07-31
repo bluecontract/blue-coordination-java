@@ -1,11 +1,18 @@
 package blue.coordination.processor.compute;
 
 import blue.coordination.processor.CoordinationProcessorOptions;
+import blue.coordination.processor.ProcessingResultTestSupport;
 import blue.coordination.processor.bex.BexProcessingMetrics;
+import blue.language.NodeProvider;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
+import blue.language.processor.ProcessorErrorCategory;
 import blue.language.processor.ProcessorStatus;
+import blue.language.provider.BasicNodeProvider;
+import blue.language.provider.NodeProviderResult;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -13,7 +20,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ComputeProgramPlanIntegrationTest {
     @Test
-    void unchangedInlineComputeMissesOnceThenReusesItsFrozenPlan() {
+    void shouldReuseFrozenPlanForUnchangedInlineCompute() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeWorkflowTestSupport support = support(metrics);
         Node document = support.initializedOperationWorkflow(String.join("\n",
@@ -24,9 +32,11 @@ class ComputeProgramPlanIntegrationTest {
                 "          - $return:",
                 "              value: warm"));
 
+        // When
         DocumentProcessingResult first = support.processRun(document);
         DocumentProcessingResult second = support.processRun(first.document());
 
+        // Then
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(first), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(first));
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(second), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(second));
         assertEquals(1L, metrics.computePlanCacheMisses());
@@ -39,14 +49,17 @@ class ComputeProgramPlanIntegrationTest {
     }
 
     @Test
-    void referencedDefinitionIsReadFrozenEveryTimeButNormalizedOnlyOnMiss() {
+    void shouldNormalizeReferencedDefinitionOnlyOnCacheMiss() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeWorkflowTestSupport support = support(metrics);
         Node document = definitionDocument(support, "Warm Definition");
 
+        // When
         DocumentProcessingResult first = support.processRun(document);
         DocumentProcessingResult second = support.processRun(first.document());
 
+        // Then
         assertEquals("Warm Definition", onlyEvent(first).get("/kind"));
         assertEquals("Warm Definition", onlyEvent(second).get("/kind"));
         assertEquals(1L, metrics.computePlanCacheMisses());
@@ -60,17 +73,20 @@ class ComputeProgramPlanIntegrationTest {
     }
 
     @Test
-    void sameContractAndStepNamesAcrossDocumentsUseExactDefinitionIdentity() {
+    void shouldUseExactDefinitionIdentityAcrossDocuments() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeWorkflowTestSupport support = support(metrics);
         Node documentA = definitionDocument(support, "Definition A");
         Node documentB = definitionDocument(support, "Definition B");
 
+        // When
         DocumentProcessingResult firstA = support.processRun(documentA);
         DocumentProcessingResult firstB = support.processRun(documentB);
         DocumentProcessingResult warmA = support.processRun(firstA.document());
         DocumentProcessingResult warmB = support.processRun(firstB.document());
 
+        // Then
         assertEquals("Definition A", onlyEvent(firstA).get("/kind"));
         assertEquals("Definition B", onlyEvent(firstB).get("/kind"));
         assertEquals("Definition A", onlyEvent(warmA).get("/kind"));
@@ -83,17 +99,110 @@ class ComputeProgramPlanIntegrationTest {
     }
 
     @Test
-    void changedStepContentBuildsASeparatePlan() {
+    void shouldMaterializePureBlueIdDefinitionThroughSelectedWorkflowProvider() {
+        // Given
+        BexProcessingMetrics metrics =
+                new BexProcessingMetrics();
+        Node exactDefinition =
+                exactProviderDefinition();
+        BasicNodeProvider definitionProvider =
+                new BasicNodeProvider(exactDefinition);
+        String definitionBlueId =
+                definitionProvider.getBlueIdByName(
+                        exactDefinition.getName());
+        ComputeWorkflowTestSupport support =
+                ComputeWorkflowTestSupport.create(
+                        CoordinationProcessorOptions.builder()
+                                .processingMetrics(metrics)
+                                .build(),
+                        definitionProvider);
+        Node document = referencedDefinitionDocument(
+                support,
+                definitionBlueId);
+
+        // When
+        DocumentProcessingResult cold =
+                support.processRun(document);
+        DocumentProcessingResult warm =
+                support.processRun(cold.document());
+
+        // Then
+        assertEquals(
+                "Provider Definition",
+                onlyEvent(cold).get("/kind"));
+        assertEquals(
+                "Provider Definition",
+                onlyEvent(warm).get("/kind"));
+        assertEquals(1L, metrics.computePlanCacheMisses());
+        assertEquals(1L, metrics.computePlanCacheHits());
+        assertEquals(1L, metrics.computePlansBuilt());
+        assertEquals(
+                1L,
+                metrics.computeDefinitionNormalizations());
+    }
+
+    @Test
+    void shouldKeepInvalidDefinitionProviderEvidenceOutOfRuntimeFatal() {
+        // Given
+        Node exactDefinition =
+                exactProviderDefinition();
+        BasicNodeProvider identityProvider =
+                new BasicNodeProvider(exactDefinition);
+        String definitionBlueId =
+                identityProvider.getBlueIdByName(
+                        exactDefinition.getName());
+        NodeProvider invalidProvider =
+                invalidEvidenceProvider(
+                        definitionBlueId);
+        ComputeWorkflowTestSupport support =
+                ComputeWorkflowTestSupport.create(
+                        CoordinationProcessorOptions.builder()
+                                .build(),
+                        invalidProvider);
+        Node document = referencedDefinitionDocument(
+                support,
+                definitionBlueId);
+
+        // When
+        DocumentProcessingResult result =
+                support.processRun(document);
+
+        // Then
+        assertEquals(
+                ProcessorStatus.INVALID_PROCESSING_DOCUMENT,
+                result.status(),
+                "Language invalid-execution-evidence classification defect: "
+                        + ProcessingResultTestSupport
+                                .diagnosticMessage(result));
+        assertEquals(
+                ProcessorErrorCategory
+                        .InvalidExternalChannelSnapshot,
+                ProcessingResultTestSupport
+                        .diagnosticCategory(result));
+        assertTrue(
+                ProcessingResultTestSupport
+                        .diagnosticMessage(result)
+                        .contains(
+                                "forged definition evidence"));
+    }
+
+    @Test
+    void shouldBuildSeparatePlanForChangedStepContent() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeWorkflowTestSupport support = support(metrics);
         Node documentA = inlineDocument(support, "A");
         Node documentB = inlineDocument(support, "B");
 
-        assertFalse(blue.coordination.processor.ProcessingResultTestSupport
-                .isCapabilityFailure(support.processRun(documentA)));
-        assertFalse(blue.coordination.processor.ProcessingResultTestSupport
-                .isCapabilityFailure(support.processRun(documentB)));
+        // When
+        DocumentProcessingResult resultA = support.processRun(documentA);
+        DocumentProcessingResult resultB = support.processRun(documentB);
 
+        // Then
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport
+                .isCapabilityFailure(resultA));
+        assertFalse(blue.coordination.processor.ProcessingResultTestSupport
+                .isCapabilityFailure(resultB));
         assertEquals(2L, metrics.computePlanCacheMisses());
         assertEquals(0L, metrics.computePlanCacheHits());
         assertEquals(2L, metrics.computePlansBuilt());
@@ -102,7 +211,8 @@ class ComputeProgramPlanIntegrationTest {
     }
 
     @Test
-    void malformedProgramAndFatalResultNeverPoisonPlanCache() {
+    void shouldNotCacheMalformedProgramPlan() {
+        // Given
         BexProcessingMetrics malformedMetrics = new BexProcessingMetrics();
         ComputeWorkflowTestSupport malformedSupport = support(malformedMetrics);
         Node malformed = malformedSupport.initialize(malformedSupport.yaml(
@@ -120,12 +230,21 @@ class ComputeProgramPlanIntegrationTest {
                                 "        definition: computeLogic",
                                 "        entry: missing")))).document();
 
-        assertRuntimeFatal(malformedSupport.processRun(malformed), "Unknown entry function");
-        assertRuntimeFatal(malformedSupport.processRun(malformed), "Unknown entry function");
+        // When
+        DocumentProcessingResult first = malformedSupport.processRun(malformed);
+        DocumentProcessingResult second = malformedSupport.processRun(malformed);
+
+        // Then
+        assertRuntimeFatal(first, "Unknown entry function");
+        assertRuntimeFatal(second, "Unknown entry function");
         assertEquals(2L, malformedMetrics.computePlanCacheMisses());
         assertEquals(0L, malformedMetrics.computePlanCacheHits());
         assertEquals(2L, malformedMetrics.computePlansBuilt());
+    }
 
+    @Test
+    void shouldNotCachePlanAfterFatalComputeResult() {
+        // Given
         BexProcessingMetrics fatalMetrics = new BexProcessingMetrics();
         ComputeWorkflowTestSupport fatalSupport = support(fatalMetrics);
         Node fatal = fatalSupport.initializedOperationWorkflow(String.join("\n",
@@ -136,8 +255,13 @@ class ComputeProgramPlanIntegrationTest {
                 "          - $return:",
                 "              events: malformed"));
 
-        assertRuntimeFatal(fatalSupport.processRun(fatal), "Compute result events must be a list");
-        assertRuntimeFatal(fatalSupport.processRun(fatal), "Compute result events must be a list");
+        // When
+        DocumentProcessingResult first = fatalSupport.processRun(fatal);
+        DocumentProcessingResult second = fatalSupport.processRun(fatal);
+
+        // Then
+        assertRuntimeFatal(first, "Compute result events must be a list");
+        assertRuntimeFatal(second, "Compute result events must be a list");
         assertEquals(2L, fatalMetrics.computePlanCacheMisses());
         assertEquals(0L, fatalMetrics.computePlanCacheHits());
         assertEquals(2L, fatalMetrics.computePlansBuilt());
@@ -180,6 +304,79 @@ class ComputeProgramPlanIntegrationTest {
                         "        type: Coordination/Compute",
                         "        definition: computeLogic",
                         "        entry: build")))).document();
+    }
+
+    private static Node referencedDefinitionDocument(
+            ComputeWorkflowTestSupport support,
+            String definitionBlueId) {
+        return support.initialize(
+                support.yaml(
+                        support.operationWorkflowDocument(
+                                String.join(
+                                        "\n",
+                                        "    steps:",
+                                        "      - name: Build",
+                                        "        type: Coordination/Compute",
+                                        "        definition:",
+                                        "          blueId: "
+                                                + definitionBlueId,
+                                        "        entry: build"))))
+                .document();
+    }
+
+    private static Node exactProviderDefinition() {
+        Node returnedEvent =
+                new Node().properties(
+                        "kind",
+                        new Node().properties(
+                                "$const",
+                                new Node().value("kind")));
+        Node returnedResult =
+                new Node().properties(
+                        "events",
+                        new Node().items(returnedEvent));
+        Node buildFunction =
+                new Node().properties(
+                        "do",
+                        new Node().items(
+                                new Node().properties(
+                                        "$return",
+                                        returnedResult)));
+        return new Node()
+                .name("Exact Provider Compute Definition")
+                .description(
+                        "Metadata retained across hosted normalization")
+                .properties(
+                        "constants",
+                        new Node().properties(
+                                "kind",
+                                new Node().value(
+                                        "Provider Definition")))
+                .properties(
+                        "functions",
+                        new Node().properties(
+                                "build",
+                                buildFunction));
+    }
+
+    private static NodeProvider invalidEvidenceProvider(
+            final String definitionBlueId) {
+        return new NodeProvider() {
+            @Override
+            public List<Node> fetchByBlueId(String blueId) {
+                return null;
+            }
+
+            @Override
+            public NodeProviderResult fetchResultByBlueId(
+                    String blueId) {
+                if (definitionBlueId.equals(blueId)) {
+                    return NodeProviderResult.invalidEvidence(
+                            "forged definition evidence");
+                }
+                return NodeProviderResult.notFound();
+            }
+        };
     }
 
     private static Node onlyEvent(DocumentProcessingResult result) {

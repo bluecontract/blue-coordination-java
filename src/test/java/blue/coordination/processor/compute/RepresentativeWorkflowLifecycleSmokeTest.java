@@ -3,7 +3,6 @@ package blue.coordination.processor.compute;
 import blue.bex.api.BexEngine;
 import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationTestResources;
-import blue.coordination.processor.RepositoryTypeAliasPreprocessor;
 import blue.coordination.processor.TestTimelineProvider;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.coordination.processor.workflow.SequentialWorkflowRunner;
@@ -37,7 +36,8 @@ class RepresentativeWorkflowLifecycleSmokeTest {
     private static final long TWO_GIB = 2L * 1024L * 1024L * 1024L;
 
     @Test
-    void repeatedPayNoteMandateAndEmbeddedRunsPlateauAndReleaseOwnedState() {
+    void shouldPlateauAndReleaseStateAcrossRepresentativeWorkflowRuns() {
+        // Given
         assertEquals("1.8", System.getProperty("java.specification.version"),
                 "memoryIntegrationTest must keep the Java 8 compatibility runtime");
         assertTrue(Runtime.getRuntime().maxMemory() <= TWO_GIB,
@@ -45,6 +45,7 @@ class RepresentativeWorkflowLifecycleSmokeTest {
 
         OwnedFixture fixture = new OwnedFixture();
         try {
+            // When
             fixture.prepare();
             fixture.assertTransientStateAtBaseline("after fixture preparation");
 
@@ -60,6 +61,7 @@ class RepresentativeWorkflowLifecycleSmokeTest {
                         "repetition " + repetition);
             }
 
+            // Then
             assertTrue(fixture.metrics.workflowStepsExecuted() > 0L);
             assertTrue(fixture.metrics.computeStepsExecuted() > 0L);
             assertTrue(fixture.metrics.workflowPlanWeightBytes() > 0L);
@@ -128,7 +130,7 @@ class RepresentativeWorkflowLifecycleSmokeTest {
                                            String requestId,
                                            String orderSessionId) {
         return new Node()
-                .type("Sample/Subscription Update")
+                .type("MyOS/Subscription Update")
                 .properties("subscriptionId", new Node().value(subscriptionId))
                 .properties("targetSessionId", new Node().value(targetSessionId))
                 .properties("update", new Node()
@@ -232,11 +234,12 @@ class RepresentativeWorkflowLifecycleSmokeTest {
                             "hotel-order-session-a"));
 
             Node mandate = mandateDocument();
-            mandate.blue(support.repository.typeAliasBlue());
-            Node aliasesResolved = new RepositoryTypeAliasPreprocessor(
-                    support.repository).preprocess(mandate);
             ResolvedSnapshot resolvedMandate = support.blue.resolveToSnapshot(
-                    support.blue.preprocess(aliasesResolved));
+                    CoordinationTestResources
+                            .preprocessWithFixedRepository(
+                                    support.blue,
+                                    support.repository,
+                                    mandate));
             DocumentProcessingResult mandateInitialized =
                     support.blue.initializeDocument(resolvedMandate);
             assertSuccess(mandateInitialized);

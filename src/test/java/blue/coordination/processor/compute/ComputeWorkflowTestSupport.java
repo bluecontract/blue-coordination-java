@@ -1,12 +1,14 @@
 package blue.coordination.processor.compute;
 
+import blue.coordination.processor.CoordinationDeliveryPlanning;
 import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationProcessors;
-import blue.coordination.processor.RepositoryTypeAliasPreprocessor;
 import blue.coordination.processor.CoordinationTestResources;
 import blue.language.Blue;
+import blue.language.NodeProvider;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
+import blue.language.provider.SequentialNodeProvider;
 import blue.repo.BlueRepository;
 
 final class ComputeWorkflowTestSupport {
@@ -25,17 +27,33 @@ final class ComputeWorkflowTestSupport {
     }
 
     static ComputeWorkflowTestSupport create(CoordinationProcessorOptions options) {
+        return create(options, null);
+    }
+
+    static ComputeWorkflowTestSupport create(
+            CoordinationProcessorOptions options,
+            NodeProvider localProvider) {
         BlueRepository repository = BlueRepository.latest();
         Blue blue = CoordinationTestResources.configuredBlue(repository);
+        if (localProvider != null) {
+            blue.nodeProvider(
+                    new SequentialNodeProvider(
+                            localProvider,
+                            blue.getNodeProvider()));
+        }
         CoordinationProcessors.registerWith(blue, options);
+        CoordinationDeliveryPlanning.currentRootCompatibility(
+                blue.getDocumentProcessor());
         return new ComputeWorkflowTestSupport(repository, blue);
     }
 
     Node yaml(String source) {
         Node node = blue.parseSourceYaml(source);
-        node.blue(repository.typeAliasBlue());
-        Node aliasesResolved = new RepositoryTypeAliasPreprocessor(repository).preprocess(node);
-        return blue.preprocess(aliasesResolved);
+        return CoordinationTestResources
+                .preprocessWithFixedRepository(
+                        blue,
+                        repository,
+                        node);
     }
 
     Node yamlResource(String resourcePath) {
@@ -43,8 +61,12 @@ final class ComputeWorkflowTestSupport {
     }
 
     DocumentProcessingResult initialize(Node document) {
-        Node aliasesResolved = new RepositoryTypeAliasPreprocessor(repository).preprocess(document);
-        return blue.initializeDocument(blue.preprocess(aliasesResolved));
+        return blue.initializeDocument(
+                CoordinationTestResources
+                        .preprocessWithFixedRepository(
+                                blue,
+                                repository,
+                                document));
     }
 
     DocumentProcessingResult process(Node snapshot, Node event) {

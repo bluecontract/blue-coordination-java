@@ -4,6 +4,7 @@ import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
+import blue.language.processor.ProcessorStatus;
 import blue.language.snapshot.ResolvedSnapshot;
 import java.math.BigInteger;
 import org.junit.jupiter.api.Test;
@@ -39,7 +40,8 @@ class DynamicEmbeddedParticipantsWorkflowTest {
     private static final int CHAT_MESSAGES = 5;
 
     @Test
-    void aliceAddsEmbeddedParticipantDocumentsAndBobWaitsUntilMainDocumentCountsFiveChats() {
+    void shouldCountChatsAfterAliceAddsEmbeddedParticipants() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create(
                 CoordinationProcessorOptions.builder()
@@ -52,35 +54,52 @@ class DynamicEmbeddedParticipantsWorkflowTest {
                         support.blue, initialized);
         Node currentDocument = initialized.document();
 
+        // Initialized fixture inspection
+        // The initialized dynamic-participant document is inspected.
+
+        // Baseline assertions
         assertNotNull(currentDocument.getAsNode("/embeddedTemplate"));
         assertNotNull(currentDocument.getAsNode("/contractTemplates/embeddedTimeline"));
         assertNotNull(currentDocument.getAsNode("/contractTemplates/embeddedBridge"));
         assertNotNull(currentDocument.getAsNode("/contractTemplates/embeddedChatCounter"));
         assertFalse(currentDocument.getProperties().containsKey("embeddedTemplates"));
 
+        // When
         for (int i = 1; i <= EMBEDDED_PARTICIPANTS; i++) {
             // Alice creates /embedded_i plus the root contracts that make this new document routable:
             // a simple timeline channel, an embedded-node bridge, a chat counter workflow, and a
             // composite-channel entry.
             DocumentProcessingResult result = support.blue.processDocument(current,
                     operationEvent(support, "alice", i, "createEmbedded"));
+            assertEquals(ProcessorStatus.SUCCESS,
+                    result.status(),
+                    "BEX admitted-exact canonical materialization defect: "
+                            + blue.coordination.processor
+                            .ProcessingResultTestSupport
+                            .diagnosticMessage(result));
             assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
             current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
                     support.blue, result);
             currentDocument = result.document();
         }
 
+        // Embedded creation assertions
         assertEquals(BigInteger.valueOf(EMBEDDED_PARTICIPANTS), currentDocument.get("/nextEmbeddedNumber"));
+        assertEquals(
+                "embeddedBootstrapTimeline",
+                currentDocument.get(
+                        "/contracts/allEmbeddedTimelines/channels/0"));
         for (int i = 1; i <= EMBEDDED_PARTICIPANTS; i++) {
             assertEmbeddedParticipant(currentDocument, i);
             assertEquals("/embedded_" + i, currentDocument.get("/contracts/embeddedDocs/paths/" + (i - 1)));
             assertEquals("embedded_" + i + "_timeline",
-                    currentDocument.get("/contracts/allEmbeddedTimelines/channels/" + (i - 1)));
+                    currentDocument.get("/contracts/allEmbeddedTimelines/channels/" + i));
             assertNotNull(currentDocument.getAsNode("/contracts/embedded_" + i + "_timeline"));
             assertNotNull(currentDocument.getAsNode("/contracts/embedded_" + i + "_bridge"));
             assertNotNull(currentDocument.getAsNode("/contracts/embedded_" + i + "_chatCounter"));
         }
 
+        // Embedded chat and root-check flow
         for (int i = 0; i < CHAT_MESSAGES; i++) {
             int participantNumber = i + 1;
             int timestamp = 10 + i;
@@ -88,6 +107,11 @@ class DynamicEmbeddedParticipantsWorkflowTest {
             // inside /embedded_i and emits a chat message from the child document scope.
             DocumentProcessingResult chatResult = support.blue.processDocument(current,
                     operationEvent(support, "embedded-" + participantNumber, timestamp, "say"));
+            assertEquals(ProcessorStatus.SUCCESS,
+                    chatResult.status(),
+                    blue.coordination.processor
+                            .ProcessingResultTestSupport
+                            .diagnosticMessage(chatResult));
             assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(chatResult), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(chatResult));
             current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
                     support.blue, chatResult);
@@ -98,6 +122,11 @@ class DynamicEmbeddedParticipantsWorkflowTest {
             // operations can interact with the same state.
             DocumentProcessingResult bobCheck = support.blue.processDocument(current,
                     operationEvent(support, "bob", 100 + i, "checkChatCount"));
+            assertEquals(ProcessorStatus.SUCCESS,
+                    bobCheck.status(),
+                    blue.coordination.processor
+                            .ProcessingResultTestSupport
+                            .diagnosticMessage(bobCheck));
             assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(bobCheck), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(bobCheck));
             current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
                     support.blue, bobCheck);
@@ -108,6 +137,7 @@ class DynamicEmbeddedParticipantsWorkflowTest {
             assertEquals(Boolean.valueOf(i + 1 >= 5), currentDocument.get("/success"));
         }
 
+        // Then
         assertEquals(Boolean.TRUE, currentDocument.get("/success"));
         long expectedPatchApplications = EMBEDDED_PARTICIPANTS + (CHAT_MESSAGES * 3L);
         assertEquals(expectedPatchApplications, metrics.directBexChangesetHits(),

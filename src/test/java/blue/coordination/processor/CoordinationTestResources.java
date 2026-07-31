@@ -1,5 +1,6 @@
 package blue.coordination.processor;
 
+import blue.coordination.processor.merge.CoordinationMerging;
 import blue.language.Blue;
 import blue.language.model.Node;
 import blue.repo.BlueRepository;
@@ -12,14 +13,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
-import java.util.Map;
 
 public final class CoordinationTestResources {
-    private static final String LEGACY_SAMPLE_NAMESPACE = "My" + "OS";
-    private static final String LEGACY_SAMPLE_CAMEL = "my" + "Os";
-    private static final String LEGACY_SAMPLE_LOWER = "my" + "os";
-
     private CoordinationTestResources() {
     }
 
@@ -44,31 +39,76 @@ public final class CoordinationTestResources {
 
     public static Node yamlResource(Blue blue, BlueRepository repository, String resourcePath) {
         Node node = blue.parseSourceYaml(readResource(resourcePath));
-        node.blue(repository.typeAliasBlue());
-        Node aliasesResolved = new RepositoryTypeAliasPreprocessor(testTypeAliases(repository)).preprocess(node);
-        return blue.preprocess(aliasesResolved);
+        return preprocessWithFixedRepository(
+                blue,
+                repository,
+                node);
     }
 
-    public static Map<String, String> testTypeAliases(BlueRepository repository) {
-        Map<String, String> aliases = repository != null && repository.typeAliases() != null
-                ? new LinkedHashMap<String, String>(repository.typeAliases())
-                : new LinkedHashMap<String, String>();
-        Map<String, String> additionalAliases = new LinkedHashMap<String, String>();
-        for (Map.Entry<String, String> entry : aliases.entrySet()) {
-            String alias = entry.getKey();
-            String neutralAlias = neutralSampleAlias(alias);
-            if (!alias.equals(neutralAlias)) {
-                additionalAliases.put(neutralAlias, entry.getValue());
-            }
+    /**
+     * Applies only the fixed Repository-authored preprocessing graph through
+     * the Language runtime. No local alias map or recursive type rewrite is
+     * permitted in Coordination fixtures.
+     */
+    public static Node preprocessWithFixedRepository(
+            Blue blue,
+            BlueRepository repository,
+            Node authored) {
+        if (blue == null) {
+            throw new IllegalArgumentException(
+                    "blue must not be null");
         }
-        aliases.putAll(additionalAliases);
-        return aliases;
+        if (repository == null
+                || !BlueRepository.LATEST.equals(
+                repository.repositoryVersion())) {
+            throw new IllegalArgumentException(
+                    "repository must be the fixed "
+                            + BlueRepository.LATEST
+                            + " Repository release");
+        }
+        Node source =
+                authored != null
+                        ? authored.clone()
+                        : new Node();
+        source.blue(repository.typeAliasBlue());
+        return blue.preprocess(source);
     }
 
     public static Blue configuredBlue(BlueRepository repository) {
-        return new Blue()
-                .nodeProvider(repository.nodeProvider())
-                .typeClassResolver(repository.typeClassResolver());
+        /*
+         * Generic behavior fixtures intentionally remain independent from
+         * the fixed-Repository release-evidence gate. The dedicated
+         * fixedRepositoryBlue path below is the only lane that can satisfy
+         * that gate.
+        */
+        Blue blue = repository.configure(new Blue());
+        /*
+         * Runtime registration installs this same workflow-AST adapter
+         * idempotently. Install it before the host-owned delivery planner so
+         * Language's configuration refresh cannot invalidate the planner.
+         */
+        CoordinationMerging.install(blue);
+        CoordinationDeliveryPlanning.currentRootCompatibility(
+                blue.getDocumentProcessor());
+        return blue;
+    }
+
+    /**
+     * Configures the exact local fixed Repository through the released
+     * bound-source-content verification boundary.
+     *
+     * <p>This method deliberately does not choose a delivery-planning mode.
+     * Tests that exercise registration without a host plan use this method;
+     * compatibility-mode tests use {@link #configuredBlue(BlueRepository)}.</p>
+     */
+    public static Blue fixedRepositoryBlue(
+            BlueRepository repository) {
+        Blue blue = new Blue();
+        FixedRepositoryBoundSourceProvider
+                .configureReleaseRuntime(
+                        repository,
+                        blue);
+        return blue;
     }
 
     public static String simpleTimelineChannelYaml(String key, String timelineId, int indent) {
@@ -102,14 +142,16 @@ public final class CoordinationTestResources {
                                              String operation,
                                              String channel,
                                              Node request) {
-        Node requestWithResolvedAliases = new RepositoryTypeAliasPreprocessor(
-                testTypeAliases(repository)).preprocess(
-                request != null ? request.clone() : new Node());
         return TestTimelineProvider.timelineEntry(blue,
                 repository,
                 timelineId,
                 timestamp,
-                operationRequest(operation, channel, requestWithResolvedAliases));
+                operationRequest(
+                        operation,
+                        channel,
+                        request != null
+                                ? request.clone()
+                                : new Node()));
     }
 
     private static String normalizeResourcePath(String resourcePath) {
@@ -117,12 +159,6 @@ public final class CoordinationTestResources {
             throw new IllegalArgumentException("resourcePath must not be null");
         }
         return resourcePath.startsWith("/") ? resourcePath.substring(1) : resourcePath;
-    }
-
-    private static String neutralSampleAlias(String alias) {
-        return alias.replace(LEGACY_SAMPLE_NAMESPACE, "Sample")
-                .replace(LEGACY_SAMPLE_CAMEL, "sample")
-                .replace(LEGACY_SAMPLE_LOWER, "sample");
     }
 
     private static String spaces(int count) {

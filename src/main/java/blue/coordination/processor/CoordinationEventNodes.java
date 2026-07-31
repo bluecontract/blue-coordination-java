@@ -3,42 +3,41 @@ package blue.coordination.processor;
 import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.model.Schema;
+import blue.language.processor.ContractMatchingService;
+import blue.language.processor.CoordinationProcessHeaderBridge;
 import blue.language.processor.ExternalChannelFunctionContext;
+import blue.language.processor.GasChargeContext;
 import blue.language.processor.HandlerMatchContext;
+import blue.language.utils.BlueIdCalculator;
+import blue.language.utils.BlueIds;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.OperationRequest;
 import blue.repo.coordination.TimelineEntry;
-import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.util.List;
-import java.util.Map;
 
+/**
+ * Read-only adapters for the Coordination event headers used by channel
+ * routing and handler matching.
+ *
+ * <p>The context-aware methods are the production path when a header may
+ * contain references: they materialize only the fields needed for the routing
+ * decision and delegate type/pattern evidence to the owning Contracts
+ * context. The context-free methods are intentionally limited to already
+ * available nodes and never create processing state or checkpoints.</p>
+ */
 final class CoordinationEventNodes {
+    private static final String TIMELINE_FIELD = "timeline";
+    private static final String PREVIOUS_ENTRY_FIELD = "prevEntry";
+    private static final String TIMESTAMP_FIELD = "timestamp";
+    private static final String ACTOR_FIELD = "actor";
+    private static final String SOURCE_FIELD = "source";
+    private static final String ON_BEHALF_OF_FIELD = "onBehalfOf";
+    private static final String MESSAGE_FIELD = "message";
+    private static final String OPERATION_FIELD = "operation";
+    private static final String CHANNEL_FIELD = "channel";
+    private static final String REQUEST_FIELD = "request";
+
     private static final BlueRepository REPOSITORY = BlueRepository.latest();
-    private static final ThreadLocal<Blue> BINDING_CONVERTER = new ThreadLocal<Blue>() {
-        @Override
-        protected Blue initialValue() {
-            return new Blue()
-                    .nodeProvider(REPOSITORY.nodeProvider())
-                    .typeClassResolver(REPOSITORY.typeClassResolver());
-        }
-    };
-    private static final ThreadLocal<Blue> FINAL_BINDING_CONVERTER =
-            new ThreadLocal<Blue>() {
-        @Override
-        protected Blue initialValue() {
-            return new Blue();
-        }
-    };
-    private static final ThreadLocal<Blue> LEGACY_TYPE_MATCHER =
-            new ThreadLocal<Blue>() {
-        @Override
-        protected Blue initialValue() {
-            return new Blue()
-                    .nodeProvider(REPOSITORY.nodeProvider())
-                    .typeClassResolver(REPOSITORY.typeClassResolver());
-        }
-    };
     private static final Node TIMELINE_ENTRY_TYPE = new Node()
             .type(new Node().blueId(TimelineEntry.blueId()));
     private static final Node OPERATION_REQUEST_TYPE = new Node()
@@ -62,28 +61,48 @@ final class CoordinationEventNodes {
         if (!isTimelineEntry(projected, context)) {
             return null;
         }
-        return timelineEntryHeader(projected);
+        return timelineEntryHeader(node, projected);
     }
 
     static TimelineEntryView timelineEntryHeader(
             Node node,
             ExternalChannelFunctionContext context) {
         return timelineEntryHeader(
+                node,
                 projectTimelineEntry(node, context));
     }
 
     static TimelineEntryView timelineEntryHeader(Node node) {
-        Node timeline = property(node, "timeline");
-        Node actor = property(node, "actor");
-        BigInteger timestamp = timestamp(node);
-        Node message = property(node, "message");
+        return timelineEntryHeader(node, node);
+    }
+
+    private static TimelineEntryView timelineEntryHeader(
+            Node exactEntry,
+            Node projectedHeader) {
+        Node timeline = property(projectedHeader, TIMELINE_FIELD);
+        Node prevEntry = property(projectedHeader, PREVIOUS_ENTRY_FIELD);
+        Node timestampNode = property(projectedHeader, TIMESTAMP_FIELD);
+        Node actor = property(projectedHeader, ACTOR_FIELD);
+        Node source = property(projectedHeader, SOURCE_FIELD);
+        Node onBehalfOf = property(projectedHeader, ON_BEHALF_OF_FIELD);
+        Node message = property(projectedHeader, MESSAGE_FIELD);
+        BigInteger timestamp = timestamp(projectedHeader);
         if (timeline == null
                 || actor == null
                 || timestamp == null
                 || message == null) {
             return null;
         }
-        return new TimelineEntryView(timeline, actor, timestamp);
+        return new TimelineEntryView(
+                exactEntry,
+                timeline,
+                prevEntry,
+                timestampNode,
+                timestamp,
+                actor,
+                source,
+                onBehalfOf,
+                message);
     }
 
     static boolean isTimelineEntry(Node node) {
@@ -100,9 +119,11 @@ final class CoordinationEventNodes {
                     new Node().blueId(TimelineEntry.blueId()))) {
                 return true;
             }
-            return LEGACY_TYPE_MATCHER.get().nodeMatchesType(
-                    new Node().type(type.clone()),
-                    TIMELINE_ENTRY_TYPE);
+            try (Blue blue = configuredBlue()) {
+                return blue.nodeMatchesType(
+                        new Node().type(type.clone()),
+                        TIMELINE_ENTRY_TYPE);
+            }
         } catch (RuntimeException invalidTypeEvidence) {
             return false;
         }
@@ -126,29 +147,54 @@ final class CoordinationEventNodes {
     }
 
     static BigInteger timestamp(Node node) {
-        return integerProperty(node, "timestamp");
+        return integerProperty(node, TIMESTAMP_FIELD);
     }
 
     static boolean matchesGeneratedBinding(Node candidate, Object configuredBinding) {
         if (configuredBinding == null || candidate == null) {
             return false;
         }
-        Node pattern = BINDING_CONVERTER.get().objectToNode(configuredBinding);
-        return candidate.isReferenceOnly()
-                ? BlueSemanticIdentity.equals(candidate, pattern)
-                : matchesPattern(candidate, pattern);
+        try (Blue blue = configuredBlue()) {
+            Node pattern =
+                    blue.objectToNode(configuredBinding);
+            if (candidate.isReferenceOnly()) {
+                return BlueSemanticIdentity.equals(
+                        candidate, pattern);
+            }
+            return new ContractMatchingService(blue)
+                    .matches(candidate, pattern);
+        }
+    }
+
+    static Node generatedBindingNode(Object configuredBinding) {
+        if (configuredBinding == null) {
+            return null;
+        }
+        try (Blue blue = configuredBlue()) {
+            return blue.objectToNode(configuredBinding);
+        }
+    }
+
+    static Node materializeHeaderValue(
+            Node value,
+            ExternalChannelFunctionContext context) {
+        return materializeIfReference(value, context);
     }
 
     static boolean matchesGeneratedBinding(
             Node candidate,
             Object configuredBinding,
             ExternalChannelFunctionContext context) {
-        return configuredBinding != null
-                && candidate != null
-                && context.matchesPattern(
+        if (configuredBinding == null || candidate == null) {
+            return false;
+        }
+        Node pattern;
+        try (Blue blue = new Blue()) {
+            pattern = blue.objectToNode(configuredBinding);
+        }
+        return context.matchesPattern(
                 candidate,
-                FINAL_BINDING_CONVERTER.get().objectToNode(
-                        configuredBinding));
+                pattern);
     }
 
     static OperationRequestView operationRequest(Node event) {
@@ -158,7 +204,7 @@ final class CoordinationEventNodes {
         if (!isTimelineEntry(event)) {
             return null;
         }
-        Node message = property(event, "message");
+        Node message = property(event, MESSAGE_FIELD);
         return matchesOperationRequestType(message)
                 ? OperationRequestView.from(message)
                 : null;
@@ -167,6 +213,35 @@ final class CoordinationEventNodes {
     static OperationRequestView operationRequest(
             Node event,
             ExternalChannelFunctionContext context) {
+        return operationRequest(
+                event,
+                context,
+                true);
+    }
+
+    /**
+     * Reads the routing view from the exact payload produced by
+     * {@link #operationRequestRoutingPayload(Node,
+     * ExternalChannelFunctionContext)}.
+     *
+     * <p>The payload projection already owns and charged the two semantic
+     * routing-field reads. Language invokes payload, handler routing, and
+     * logical-delivery routing as separate functions, so reparsing that exact
+     * projection must not charge the same reads again.</p>
+     */
+    static OperationRequestView operationRequestFromRoutingPayload(
+            Node exactPayload,
+            ExternalChannelFunctionContext context) {
+        return operationRequest(
+                exactPayload,
+                context,
+                false);
+    }
+
+    private static OperationRequestView operationRequest(
+            Node event,
+            ExternalChannelFunctionContext context,
+            boolean chargeRoutingFields) {
         if (event == null || context == null) {
             return null;
         }
@@ -176,65 +251,109 @@ final class CoordinationEventNodes {
                 projectedEvent,
                 TimelineEntry.blueId())) {
             Node message = materializeIfReference(
-                    property(projectedEvent, "message"),
+                    property(projectedEvent, MESSAGE_FIELD),
                     context);
             return matchesOperationRequestType(
                     message, context)
-                    ? OperationRequestView.from(
-                    message, context)
+                    ? operationRequestView(
+                            message,
+                            context,
+                            chargeRoutingFields)
                     : null;
         }
         if (matchesOperationRequestType(
                 projectedEvent, context)) {
-            return OperationRequestView.from(
-                    projectedEvent, context);
+            return operationRequestView(
+                    projectedEvent,
+                    context,
+                    chargeRoutingFields);
         }
         if (!isTimelineEntry(
                 projectedEvent, context)) {
             return null;
         }
         Node message = materializeIfReference(
-                property(projectedEvent, "message"),
+                property(projectedEvent, MESSAGE_FIELD),
                 context);
         return matchesOperationRequestType(
                 message, context)
-                ? OperationRequestView.from(
-                message, context)
+                ? operationRequestView(
+                message,
+                context,
+                chargeRoutingFields)
                 : null;
+    }
+
+    private static OperationRequestView operationRequestView(
+            Node request,
+            ExternalChannelFunctionContext context,
+            boolean chargeRoutingFields) {
+        return OperationRequestView.from(
+                request,
+                context,
+                chargeRoutingFields);
     }
 
     static Node operationRequestRoutingPayload(
             Node event,
             ExternalChannelFunctionContext context) {
+        String originalEventBlueId =
+                exactIdentity(event);
         Node projectedEvent =
                 materializeIfReference(event, context);
         if (projectedEvent == null) {
             return null;
         }
+        Node payload;
         if (declaresExactType(
                 projectedEvent,
                 TimelineEntry.blueId())) {
-            return projectTimelineOperationRequestPayload(
+            payload = projectTimelineOperationRequestPayload(
+                    projectedEvent, context);
+        } else if (matchesOperationRequestType(
+                projectedEvent, context)) {
+            payload = projectOperationRequestFields(
+                    projectedEvent, context);
+        } else if (!isTimelineEntry(
+                projectedEvent, context)) {
+            payload = projectedEvent.clone();
+        } else {
+            payload = projectTimelineOperationRequestPayload(
                     projectedEvent, context);
         }
-        if (matchesOperationRequestType(
-                projectedEvent, context)) {
-            return projectOperationRequestFields(
-                    projectedEvent, context);
+        /*
+         * A reference-backed event can arrive as exact expanded content with
+         * provider provenance on any node. Hosted runtime output must be
+         * canonical exact content (or a pure reference), never that resolved
+         * hybrid representation.
+         */
+        Node exactPayload =
+                CoordinationProcessHeaderBridge
+                        .canonicalExactCopy(payload);
+        if (CoordinationProcessHeaderBridge
+                .hasSemanticOutputBoundary(
+                        context.runtimeWorkSession())
+                && originalEventBlueId.equals(
+                BlueIdCalculator.calculateBlueId(
+                        exactPayload))) {
+            /*
+             * ChannelRunner carries the exact PROCESS event into the hosted
+             * output boundary under this identity. Returning that identity
+             * preserves the original Timeline Entry without recursively
+             * reopening opaque descendants merely because routing consulted
+             * a direct fragment.
+             */
+            return new Node().blueId(
+                    originalEventBlueId);
         }
-        if (!isTimelineEntry(
-                projectedEvent, context)) {
-            return projectedEvent.clone();
-        }
-        return projectTimelineOperationRequestPayload(
-                projectedEvent, context);
+        return exactPayload;
     }
 
     private static Node projectTimelineOperationRequestPayload(
             Node projectedEvent,
             ExternalChannelFunctionContext context) {
         Node suppliedMessage =
-                property(projectedEvent, "message");
+                property(projectedEvent, MESSAGE_FIELD);
         Node projectedMessage =
                 materializeIfReference(
                         suppliedMessage, context);
@@ -244,10 +363,23 @@ final class CoordinationEventNodes {
         }
         Node payload = projectedEvent.clone();
         payload.getProperties().put(
-                "message",
+                MESSAGE_FIELD,
                 projectOperationRequestFields(
                         projectedMessage, context));
         return payload;
+    }
+
+    private static String exactIdentity(Node node) {
+        Node exact =
+                CoordinationProcessHeaderBridge
+                        .canonicalExactCopy(
+                                java.util.Objects.requireNonNull(
+                                        node, "node"));
+        if (exact.isReferenceOnly()) {
+            return exact.getBlueId();
+        }
+        return BlueIdCalculator.calculateBlueId(
+                exact);
     }
 
     static boolean matchesOperationRequest(
@@ -265,17 +397,17 @@ final class CoordinationEventNodes {
         Node requestPattern = new Node()
                 .type(new Node().blueId(
                         OperationRequest.blueId()))
-                .properties("operation", new Node().value(operation))
-                .properties("channel", new Node().value(channel));
+                .properties(OPERATION_FIELD, new Node().value(operation))
+                .properties(CHANNEL_FIELD, new Node().value(channel));
         if (request != null) {
             Node presencePattern = requestPattern.clone()
-                    .properties("request", new Node()
+                    .properties(REQUEST_FIELD, new Node()
                             .schema(new Schema().required(true)));
             if (!matchesDirectOrTimelineOperationRequest(
                     presencePattern, context)) {
                 return false;
             }
-            requestPattern.properties("request", request.clone());
+            requestPattern.properties(REQUEST_FIELD, request.clone());
         }
         return matchesDirectOrTimelineOperationRequest(
                 requestPattern, context);
@@ -304,13 +436,13 @@ final class CoordinationEventNodes {
                 .type(new Node().blueId(
                         OperationRequest.blueId()))
                 .properties(
-                        "operation",
+                        OPERATION_FIELD,
                         new Node().schema(
                                 new Schema()
                                         .required(true)
                                         .minLength(1)))
                 .properties(
-                        "channel",
+                        CHANNEL_FIELD,
                         new Node().value(channel));
         return matchesDirectOrTimelineOperationRequest(
                 requestPattern, context);
@@ -320,7 +452,7 @@ final class CoordinationEventNodes {
             Node event) {
         Node request = event;
         if (isTimelineEntry(event)) {
-            request = property(event, "message");
+            request = property(event, MESSAGE_FIELD);
         }
         if (request == null) {
             return false;
@@ -329,9 +461,9 @@ final class CoordinationEventNodes {
             return true;
         }
         Node operation = property(
-                request, "operation");
+                request, OPERATION_FIELD);
         Node channel = property(
-                request, "channel");
+                request, CHANNEL_FIELD);
         return operation != null
                 && operation.isReferenceOnly()
                 || channel != null
@@ -347,29 +479,7 @@ final class CoordinationEventNodes {
         return context.matchesEventPattern(new Node()
                 .type(new Node().blueId(
                         TimelineEntry.blueId()))
-                .properties("message", requestPattern));
-    }
-
-    static boolean matchesPattern(Node node, Node pattern) {
-        if (pattern == null) {
-            return true;
-        }
-        if (node == null) {
-            return false;
-        }
-        if (pattern.isReferenceOnly()) {
-            return pattern.getBlueId().equals(node.getBlueId());
-        }
-        if (!typeMatches(node.getType(), pattern.getType())) {
-            return false;
-        }
-        if (!valueMatches(node.getValue(), pattern.getValue())) {
-            return false;
-        }
-        if (!itemsMatch(node.getItems(), pattern.getItems())) {
-            return false;
-        }
-        return propertiesMatch(node.getProperties(), pattern.getProperties());
+                .properties(MESSAGE_FIELD, requestPattern));
     }
 
     private static Node property(Node node, String key) {
@@ -394,9 +504,11 @@ final class CoordinationEventNodes {
                             OperationRequest.blueId()))) {
                 return true;
             }
-            return LEGACY_TYPE_MATCHER.get().nodeMatchesType(
-                    new Node().type(exactType.clone()),
-                    OPERATION_REQUEST_TYPE);
+            try (Blue blue = configuredBlue()) {
+                return blue.nodeMatchesType(
+                        new Node().type(exactType.clone()),
+                        OPERATION_REQUEST_TYPE);
+            }
         } catch (RuntimeException ignored) {
             return false;
         }
@@ -428,6 +540,10 @@ final class CoordinationEventNodes {
                 node.getType().getBlueId());
     }
 
+    private static Blue configuredBlue() {
+        return REPOSITORY.configure(new Blue());
+    }
+
     private static Node materializeIfReference(
             Node node,
             ExternalChannelFunctionContext context) {
@@ -445,15 +561,12 @@ final class CoordinationEventNodes {
                 || projected.getProperties() == null) {
             return projected;
         }
-        String[] fragmentFields = new String[] {
-                "timeline",
-                "actor",
-                "timestamp",
-                "message"
+        String[] scalarHeaderFields = new String[] {
+                TIMESTAMP_FIELD
         };
         Node mutable = projected;
         boolean cloned = false;
-        for (String field : fragmentFields) {
+        for (String field : scalarHeaderFields) {
             Node value = property(projected, field);
             if (value == null || !value.isReferenceOnly()) {
                 continue;
@@ -475,9 +588,18 @@ final class CoordinationEventNodes {
         Node projected = request.clone();
         String[] routingFields =
                 new String[] {
-                        "operation",
-                        "channel"
+                        OPERATION_FIELD,
+                        CHANNEL_FIELD
                 };
+        CoordinationRuntimeGas.charge(
+                context.runtimeWorkSession(),
+                "operationRequestFieldRead",
+                routingFields.length,
+                GasChargeContext.of(
+                        context.scopePath(),
+                        context.channelKey(),
+                        null,
+                        "read Operation Request routing payload fields"));
         for (String field : routingFields) {
             Node supplied = property(
                     request, field);
@@ -532,116 +654,6 @@ final class CoordinationEventNodes {
         return null;
     }
 
-    private static boolean typeMatches(Node nodeType, Node patternType) {
-        if (patternType == null) {
-            return true;
-        }
-        if (nodeType == null) {
-            return false;
-        }
-        try {
-            return BlueSemanticIdentity.equals(
-                    nodeType, patternType);
-        } catch (RuntimeException invalidTypeEvidence) {
-            return false;
-        }
-    }
-
-    private static boolean valueMatches(Object actual, Object expected) {
-        if (expected == null) {
-            return true;
-        }
-        if (actual == null) {
-            return false;
-        }
-        if (actual instanceof Number && expected instanceof Number) {
-            return number(actual).compareTo(number(expected)) == 0;
-        }
-        return expected.equals(actual);
-    }
-
-    private static BigDecimal number(Object value) {
-        if (value instanceof BigDecimal) {
-            return (BigDecimal) value;
-        }
-        if (value instanceof BigInteger) {
-            return new BigDecimal((BigInteger) value);
-        }
-        return new BigDecimal(value.toString());
-    }
-
-    private static boolean itemsMatch(List<Node> actual, List<Node> expected) {
-        if (expected == null) {
-            return true;
-        }
-        if (actual == null) {
-            return false;
-        }
-        for (int i = 0; i < expected.size(); i++) {
-            Node expectedItem = expected.get(i);
-            if (i < actual.size()) {
-                if (!matchesPattern(actual.get(i), expectedItem)) {
-                    return false;
-                }
-            } else if (requiresPresence(expectedItem)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static boolean propertiesMatch(Map<String, Node> actual, Map<String, Node> expected) {
-        if (expected == null) {
-            return true;
-        }
-        if (actual == null) {
-            return false;
-        }
-        for (Map.Entry<String, Node> entry : expected.entrySet()) {
-            Node actualProperty = actual.get(entry.getKey());
-            Node expectedProperty = entry.getValue();
-            if (actualProperty != null) {
-                if (!matchesPattern(actualProperty, expectedProperty)) {
-                    return false;
-                }
-            } else if (requiresPresence(expectedProperty)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static boolean requiresPresence(Node pattern) {
-        if (pattern == null) {
-            return false;
-        }
-        if (pattern.getName() != null
-                || pattern.getDescription() != null
-                || pattern.getType() != null
-                || pattern.getItemType() != null
-                || pattern.getKeyType() != null
-                || pattern.getValueType() != null
-                || pattern.getValue() != null
-                || pattern.getContracts() != null
-                || pattern.getBlueId() != null
-                || pattern.getSchema() != null
-                || pattern.getMergePolicy() != null
-                || pattern.getPreviousBlueId() != null
-                || pattern.getPosition() != null
-                || pattern.getBlue() != null
-                || pattern.getItems() != null) {
-            return true;
-        }
-        if (pattern.getProperties() != null) {
-            for (Node property : pattern.getProperties().values()) {
-                if (requiresPresence(property)) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
     private static Node repositoryType(String qualifiedName) {
         return REPOSITORY.nodeByName(qualifiedName)
                 .orElseThrow(() -> new IllegalStateException(
@@ -649,28 +661,78 @@ final class CoordinationEventNodes {
     }
 
     static final class TimelineEntryView {
+        private final Node exactEntry;
         private final Node timeline;
+        private final Node prevEntry;
+        private final Node timestampNode;
         private final Node actor;
+        private final Node source;
+        private final Node onBehalfOf;
+        private final Node message;
         private final BigInteger timestamp;
 
-        private TimelineEntryView(Node timeline,
+        private TimelineEntryView(Node exactEntry,
+                                  Node timeline,
+                                  Node prevEntry,
+                                  Node timestampNode,
+                                  BigInteger timestamp,
                                   Node actor,
-                                  BigInteger timestamp) {
-            this.timeline = timeline;
-            this.actor = actor;
+                                  Node source,
+                                  Node onBehalfOf,
+                                  Node message) {
+            this.exactEntry = exactEntry.clone();
+            this.timeline = timeline.clone();
+            this.prevEntry = cloneOrNull(prevEntry);
+            this.timestampNode = timestampNode.clone();
             this.timestamp = timestamp;
+            this.actor = actor.clone();
+            this.source = cloneOrNull(source);
+            this.onBehalfOf = cloneOrNull(onBehalfOf);
+            this.message = message.clone();
+        }
+
+        Node exactEntry() {
+            return exactEntry.clone();
         }
 
         Node timeline() {
-            return timeline;
+            return timeline.clone();
+        }
+
+        Node prevEntry() {
+            return cloneOrNull(prevEntry);
+        }
+
+        Node timestampNode() {
+            return timestampNode.clone();
         }
 
         Node actor() {
-            return actor;
+            return actor.clone();
+        }
+
+        Node source() {
+            return cloneOrNull(source);
+        }
+
+        Node onBehalfOf() {
+            return cloneOrNull(onBehalfOf);
+        }
+
+        Node message() {
+            return message.clone();
         }
 
         BigInteger timestamp() {
             return timestamp;
+        }
+
+        String entryBlueId() {
+            return TimelineProviderSupport.eventId(exactEntry);
+        }
+
+        private static Node cloneOrNull(Node node) {
+            return node != null ? node.clone() : null;
         }
     }
 
@@ -686,21 +748,42 @@ final class CoordinationEventNodes {
 
         private static OperationRequestView from(Node requestNode) {
             return new OperationRequestView(
-                    nonBlankTextProperty(requestNode, "operation"),
-                    nonBlankTextProperty(requestNode, "channel"));
+                    nonBlankTextProperty(requestNode, OPERATION_FIELD),
+                    nonBlankTextProperty(requestNode, CHANNEL_FIELD));
         }
 
         private static OperationRequestView from(
                 Node requestNode,
                 ExternalChannelFunctionContext context) {
+            return from(
+                    requestNode,
+                    context,
+                    true);
+        }
+
+        private static OperationRequestView from(
+                Node requestNode,
+                ExternalChannelFunctionContext context,
+                boolean chargeRoutingFields) {
+            if (chargeRoutingFields) {
+                CoordinationRuntimeGas.charge(
+                        context.runtimeWorkSession(),
+                        "operationRequestFieldRead",
+                        2L,
+                        GasChargeContext.of(
+                                context.scopePath(),
+                                context.channelKey(),
+                                null,
+                                "read Operation Request dispatch fields"));
+            }
             return new OperationRequestView(
                     nonBlankTextProperty(
                             requestNode,
-                            "operation",
+                            OPERATION_FIELD,
                             context),
                     nonBlankTextProperty(
                             requestNode,
-                            "channel",
+                            CHANNEL_FIELD,
                             context));
         }
 

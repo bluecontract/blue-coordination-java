@@ -1,0 +1,32 @@
+schema: blue-coordination-fixture/1.0
+id: coord-time-04
+vectors:
+- COORD-TIME-04
+category: timeline
+description: A provider cannot append an entry behind a completeness frontier it already made binding.
+operation: timeline-order
+input:
+  entries:
+  - type: { blueId: "7L685pBvjNNrBPq6tNv53kfPEBMDkoRu7MdVMTqdcyR2" }
+    timeline:
+      type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+      timelineId: A
+    timestamp: 90
+    actor:
+      type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+      accountId: alice
+    message:
+      kind: late
+    fixtureId: late
+  completeness:
+  - timelineId: A
+    completeBefore: 100
+    final: true
+expected:
+  assertions:
+  - actual: feeder.status
+    op: equals
+    expected: ineligible
+  - actual: feeder.reason
+    op: equals
+    expected: provider-backdated-entry-behind-frontier

@@ -11,6 +11,14 @@ import blue.repo.coordination.AllTimelinesChannel;
 import blue.repo.coordination.TimelineChannel;
 import java.util.Map;
 
+/**
+ * Evaluates an All Timelines Channel as the union of every effective
+ * same-scope Timeline Channel, including registered Timeline subtypes.
+ *
+ * <p>Member discovery and dependency identity are supplied by the immutable
+ * Language catalog. This processor delegates concrete acceptance to each
+ * member and returns at most one logical delivery for the union.</p>
+ */
 public final class AllTimelinesChannelProcessor implements ChannelProcessor<AllTimelinesChannel> {
     @Override
     public Class<AllTimelinesChannel> contractType() {

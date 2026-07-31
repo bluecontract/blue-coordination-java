@@ -1,0 +1,447 @@
+schema: blue-coordination-fixture/1.0
+id: coord-split-09
+vectors:
+- COORD-SPLIT-09
+category: splitter
+description: Only explicit Root emissions D1 and D2 become public even though descendants emit many internal events.
+operation: process
+input:
+  root:
+    state:
+      external: null
+      triggered: null
+      updated: null
+    contracts:
+      participant:
+        type: { blueId: "8aohWT7jcoaC1j2siQzBxoKM8HhQ4HF13BkZDNnq5UHf" }
+        timeline:
+          type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+          timelineId: A
+        actor:
+          type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+          accountId: alice
+      selected:
+        type: { blueId: "6rnGvP1BUsBpbtvuvJ1vy6hS7psoUJVBEXXsFeRma82V" }
+        channel: participant
+        request: {}
+        steps:
+        - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+          changeset:
+          - op: replace
+            path: /state/external
+            val: Root
+        - type: { blueId: "Dg3nc6K9P7AWn4K1dpGCAKG3YXJjsUWRhG3YxfqyLTeK" }
+          event:
+            kind: root-public
+            id: D1
+        - type: { blueId: "Dg3nc6K9P7AWn4K1dpGCAKG3YXJjsUWRhG3YxfqyLTeK" }
+          event:
+            kind: root-public
+            id: D2
+      triggered:
+        type: Triggered Event Channel
+      onTriggered:
+        type: { blueId: "HGVWruAeRNXH8kjHbo7cW24PeJuD8hNZa8ZZBDqdVYaX" }
+        channel: triggered
+        steps:
+        - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+          changeset:
+          - op: replace
+            path: /state/triggered
+            val: Root
+      updates:
+        type: Document Update Channel
+        path: /state/external
+      onUpdate:
+        type: { blueId: "HGVWruAeRNXH8kjHbo7cW24PeJuD8hNZa8ZZBDqdVYaX" }
+        channel: updates
+        steps:
+        - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+          changeset:
+          - op: replace
+            path: /state/updated
+            val: Root
+      embedded:
+        type: Process Embedded
+        paths:
+        - /emb1
+      childEvents:
+        type: Embedded Node Channel
+        sourcePath: /emb1
+      onChild:
+        type: { blueId: "HGVWruAeRNXH8kjHbo7cW24PeJuD8hNZa8ZZBDqdVYaX" }
+        channel: childEvents
+        steps:
+        - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+          changeset:
+          - op: replace
+            path: /state/childEvent
+            val: Root
+      decoy0:
+        type: { blueId: "6rnGvP1BUsBpbtvuvJ1vy6hS7psoUJVBEXXsFeRma82V" }
+        channel: participant
+        request: {}
+        steps:
+        - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+          changeset:
+          - op: replace
+            path: /state/decoy
+            val: 0
+      decoy1:
+        type: { blueId: "6rnGvP1BUsBpbtvuvJ1vy6hS7psoUJVBEXXsFeRma82V" }
+        channel: participant
+        request: {}
+        steps:
+        - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+          changeset:
+          - op: replace
+            path: /state/decoy
+            val: 1
+      decoy2:
+        type: { blueId: "6rnGvP1BUsBpbtvuvJ1vy6hS7psoUJVBEXXsFeRma82V" }
+        channel: participant
+        request: {}
+        steps:
+        - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+          changeset:
+          - op: replace
+            path: /state/decoy
+            val: 2
+    emb1:
+      state:
+        external: null
+        triggered: null
+        updated: null
+      contracts:
+        participant:
+          type: { blueId: "8aohWT7jcoaC1j2siQzBxoKM8HhQ4HF13BkZDNnq5UHf" }
+          timeline:
+            type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+            timelineId: A
+          actor:
+            type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+            accountId: alice
+        selected:
+          type: { blueId: "6rnGvP1BUsBpbtvuvJ1vy6hS7psoUJVBEXXsFeRma82V" }
+          channel: participant
+          request: {}
+          steps:
+          - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+            changeset:
+            - op: replace
+              path: /state/external
+              val: Emb1
+          - type: { blueId: "Dg3nc6K9P7AWn4K1dpGCAKG3YXJjsUWRhG3YxfqyLTeK" }
+            event:
+              kind: level-event
+              level: Emb1
+        triggered:
+          type: Triggered Event Channel
+        onTriggered:
+          type: { blueId: "HGVWruAeRNXH8kjHbo7cW24PeJuD8hNZa8ZZBDqdVYaX" }
+          channel: triggered
+          steps:
+          - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+            changeset:
+            - op: replace
+              path: /state/triggered
+              val: Emb1
+        updates:
+          type: Document Update Channel
+          path: /state/external
+        onUpdate:
+          type: { blueId: "HGVWruAeRNXH8kjHbo7cW24PeJuD8hNZa8ZZBDqdVYaX" }
+          channel: updates
+          steps:
+          - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+            changeset:
+            - op: replace
+              path: /state/updated
+              val: Emb1
+        embedded:
+          type: Process Embedded
+          paths:
+          - /emb2
+        childEvents:
+          type: Embedded Node Channel
+          sourcePath: /emb2
+        onChild:
+          type: { blueId: "HGVWruAeRNXH8kjHbo7cW24PeJuD8hNZa8ZZBDqdVYaX" }
+          channel: childEvents
+          steps:
+          - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+            changeset:
+            - op: replace
+              path: /state/childEvent
+              val: Emb1
+        decoy0:
+          type: { blueId: "6rnGvP1BUsBpbtvuvJ1vy6hS7psoUJVBEXXsFeRma82V" }
+          channel: participant
+          request: {}
+          steps:
+          - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+            changeset:
+            - op: replace
+              path: /state/decoy
+              val: 0
+        decoy1:
+          type: { blueId: "6rnGvP1BUsBpbtvuvJ1vy6hS7psoUJVBEXXsFeRma82V" }
+          channel: participant
+          request: {}
+          steps:
+          - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+            changeset:
+            - op: replace
+              path: /state/decoy
+              val: 1
+        decoy2:
+          type: { blueId: "6rnGvP1BUsBpbtvuvJ1vy6hS7psoUJVBEXXsFeRma82V" }
+          channel: participant
+          request: {}
+          steps:
+          - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+            changeset:
+            - op: replace
+              path: /state/decoy
+              val: 2
+      emb2:
+        state:
+          external: null
+          triggered: null
+          updated: null
+        contracts:
+          participant:
+            type: { blueId: "8aohWT7jcoaC1j2siQzBxoKM8HhQ4HF13BkZDNnq5UHf" }
+            timeline:
+              type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+              timelineId: A
+            actor:
+              type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+              accountId: alice
+          selected:
+            type: { blueId: "6rnGvP1BUsBpbtvuvJ1vy6hS7psoUJVBEXXsFeRma82V" }
+            channel: participant
+            request: {}
+            steps:
+            - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+              changeset:
+              - op: replace
+                path: /state/external
+                val: Emb2
+            - type: { blueId: "Dg3nc6K9P7AWn4K1dpGCAKG3YXJjsUWRhG3YxfqyLTeK" }
+              event:
+                kind: level-event
+                level: Emb2
+          triggered:
+            type: Triggered Event Channel
+          onTriggered:
+            type: { blueId: "HGVWruAeRNXH8kjHbo7cW24PeJuD8hNZa8ZZBDqdVYaX" }
+            channel: triggered
+            steps:
+            - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+              changeset:
+              - op: replace
+                path: /state/triggered
+                val: Emb2
+          updates:
+            type: Document Update Channel
+            path: /state/external
+          onUpdate:
+            type: { blueId: "HGVWruAeRNXH8kjHbo7cW24PeJuD8hNZa8ZZBDqdVYaX" }
+            channel: updates
+            steps:
+            - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+              changeset:
+              - op: replace
+                path: /state/updated
+                val: Emb2
+          embedded:
+            type: Process Embedded
+            paths:
+            - /emb3
+          childEvents:
+            type: Embedded Node Channel
+            sourcePath: /emb3
+          onChild:
+            type: { blueId: "HGVWruAeRNXH8kjHbo7cW24PeJuD8hNZa8ZZBDqdVYaX" }
+            channel: childEvents
+            steps:
+            - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+              changeset:
+              - op: replace
+                path: /state/childEvent
+                val: Emb2
+          decoy0:
+            type: { blueId: "6rnGvP1BUsBpbtvuvJ1vy6hS7psoUJVBEXXsFeRma82V" }
+            channel: participant
+            request: {}
+            steps:
+            - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+              changeset:
+              - op: replace
+                path: /state/decoy
+                val: 0
+          decoy1:
+            type: { blueId: "6rnGvP1BUsBpbtvuvJ1vy6hS7psoUJVBEXXsFeRma82V" }
+            channel: participant
+            request: {}
+            steps:
+            - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+              changeset:
+              - op: replace
+                path: /state/decoy
+                val: 1
+          decoy2:
+            type: { blueId: "6rnGvP1BUsBpbtvuvJ1vy6hS7psoUJVBEXXsFeRma82V" }
+            channel: participant
+            request: {}
+            steps:
+            - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+              changeset:
+              - op: replace
+                path: /state/decoy
+                val: 2
+        emb3:
+          state:
+            external: null
+            triggered: null
+            updated: null
+          contracts:
+            participant:
+              type: { blueId: "8aohWT7jcoaC1j2siQzBxoKM8HhQ4HF13BkZDNnq5UHf" }
+              timeline:
+                type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+                timelineId: A
+              actor:
+                type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+                accountId: alice
+            selected:
+              type: { blueId: "6rnGvP1BUsBpbtvuvJ1vy6hS7psoUJVBEXXsFeRma82V" }
+              channel: participant
+              request: {}
+              steps:
+              - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+                changeset:
+                - op: replace
+                  path: /state/external
+                  val: Emb3
+              - type: { blueId: "Dg3nc6K9P7AWn4K1dpGCAKG3YXJjsUWRhG3YxfqyLTeK" }
+                event:
+                  kind: level-event
+                  level: Emb3
+            triggered:
+              type: Triggered Event Channel
+            onTriggered:
+              type: { blueId: "HGVWruAeRNXH8kjHbo7cW24PeJuD8hNZa8ZZBDqdVYaX" }
+              channel: triggered
+              steps:
+              - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+                changeset:
+                - op: replace
+                  path: /state/triggered
+                  val: Emb3
+            updates:
+              type: Document Update Channel
+              path: /state/external
+            onUpdate:
+              type: { blueId: "HGVWruAeRNXH8kjHbo7cW24PeJuD8hNZa8ZZBDqdVYaX" }
+              channel: updates
+              steps:
+              - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+                changeset:
+                - op: replace
+                  path: /state/updated
+                  val: Emb3
+            decoy0:
+              type: { blueId: "6rnGvP1BUsBpbtvuvJ1vy6hS7psoUJVBEXXsFeRma82V" }
+              channel: participant
+              request: {}
+              steps:
+              - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+                changeset:
+                - op: replace
+                  path: /state/decoy
+                  val: 0
+            decoy1:
+              type: { blueId: "6rnGvP1BUsBpbtvuvJ1vy6hS7psoUJVBEXXsFeRma82V" }
+              channel: participant
+              request: {}
+              steps:
+              - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+                changeset:
+                - op: replace
+                  path: /state/decoy
+                  val: 1
+            decoy2:
+              type: { blueId: "6rnGvP1BUsBpbtvuvJ1vy6hS7psoUJVBEXXsFeRma82V" }
+              channel: participant
+              request: {}
+              steps:
+              - type: { blueId: "8FyswTq5moAS2hexCNqdEVSfPbuwesexqrck7Up5gtxp" }
+                changeset:
+                - op: replace
+                  path: /state/decoy
+                  val: 2
+    unrelatedA:
+      blob: A
+    unrelatedB:
+      blob: B
+  event:
+    type: { blueId: "7L685pBvjNNrBPq6tNv53kfPEBMDkoRu7MdVMTqdcyR2" }
+    timeline:
+      type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+      timelineId: A
+    timestamp: 100
+    actor:
+      type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+      accountId: alice
+    message:
+      type: { blueId: "93PyhYJyekVeSvQcFi5u8moU5fbfKcbD68BCRtzE8ZLz" }
+      channel: participant
+      operation: selected
+      request: {}
+    fixtureId: Ultra
+  feeder:
+    managedRootRevision: 1
+    indexedRootRevision: 1
+    eligibleSourceChannelKeys:
+    - /emb1/emb2/emb3:participant
+    - /emb1/emb2:participant
+    - /emb1:participant
+    - /:participant
+  splitter:
+    mode: external-operation
+    targetScope: /emb1/emb2/emb3
+    operationKey: selected
+    allowedBodyKeys:
+    - selected
+    - onTriggered
+    - onUpdate
+    - onChild
+    forbiddenBodyKeys:
+    - decoy0
+    - decoy1
+    - decoy2
+    strict: true
+  variants:
+  - name: root-emits
+    rootForm: fragmented
+    eventForm: fragmented
+    cache: cold
+    batching: unbatched
+    rootEmits: true
+expected:
+  assertions:
+  - actual: result.status
+    op: equals
+    expected: success
+  - actual: result.events
+    op: sequenceEquals
+    expected:
+    - kind: root-public
+      id: D1
+    - kind: root-public
+      id: D2
+  - actual: trace.forbiddenDemands
+    op: sequenceEquals
+    expected: []

@@ -10,7 +10,8 @@ final class SequentialWorkflowEventMatcher {
     }
 
     static boolean matches(Node pattern, HandlerMatchContext context) {
-        if (pattern == null) {
+        if (pattern == null
+                || isEmptyPattern(pattern)) {
             return true;
         }
         Node expectedType = pattern.getType();
@@ -24,5 +25,23 @@ final class SequentialWorkflowEventMatcher {
             return false;
         }
         return context.matchesEventPattern(pattern);
+    }
+
+    private static boolean isEmptyPattern(Node pattern) {
+        return pattern.getType() == null
+                && pattern.getItemType() == null
+                && pattern.getKeyType() == null
+                && pattern.getValueType() == null
+                && pattern.getValue() == null
+                && pattern.getItems() == null
+                && (pattern.getProperties() == null
+                || pattern.getProperties().isEmpty())
+                && pattern.getContracts() == null
+                && pattern.getBlueId() == null
+                && pattern.getSchema() == null
+                && pattern.getMergePolicy() == null
+                && pattern.getPreviousBlueId() == null
+                && pattern.getPosition() == null
+                && pattern.getBlue() == null;
     }
 }

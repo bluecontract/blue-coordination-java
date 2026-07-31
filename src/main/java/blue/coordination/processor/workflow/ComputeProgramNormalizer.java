@@ -3,13 +3,23 @@ package blue.coordination.processor.workflow;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.model.Node;
 import blue.language.snapshot.FrozenNode;
+import blue.language.utils.Nodes;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+/**
+ * Produces the minimal authored Compute/definition projection admitted by
+ * hosted BEX.
+ *
+ * <p>Resolved inheritance and unrelated contract structure are deliberately
+ * excluded from the reusable plan identity. Registered type identities and
+ * authored program fields are retained exactly; this layer never rewrites
+ * repository aliases or performs contract processing.</p>
+ */
 final class ComputeProgramNormalizer {
     private static final String NORMALIZATION_VERSION =
-            "compute-program-v3|exact-registered-types";
+            "compute-program-v5|exact-definition-identity|normalized-bex-source";
 
     private final BexProcessingMetrics metrics;
 
@@ -43,7 +53,39 @@ final class ComputeProgramNormalizer {
             metrics.incrementComputeDefinitionNormalizations();
             metrics.incrementComputeDefinitionMaterializations();
         }
-        return FrozenNode.fromResolvedNode(definition(frozenDefinitionInput(definitionNode)));
+        if (definitionNode == null) {
+            throw new IllegalArgumentException(
+                    "definitionNode must not be null");
+        }
+        /*
+         * A verified provider definition is already immutable exact content.
+         * Projecting it into a new object would replace the authored BlueId
+         * with a hash of the projection and discard metadata. BEX reads only
+         * constants/functions, so retaining the exact source is both safe and
+         * necessary for exact compiled-plan identity.
+         */
+        return definitionNode;
+    }
+
+    /**
+     * Projects the executable fields of an already-verified exact definition.
+     *
+     * <p>The exact provider node remains the plan/cache identity returned by
+     * {@link #definition(FrozenNode)}. BEX, however, requires its
+     * {@code constants}, {@code functions}, function arguments, and statement
+     * lists to be authored containers without inherited Blue metadata. Keep
+     * those two concerns separate instead of discarding the provider identity
+     * or asking BEX to interpret resolved contract structure.</p>
+     */
+    FrozenNode definitionSource(FrozenNode definitionNode) {
+        if (definitionNode == null) {
+            throw new IllegalArgumentException(
+                    "definitionNode must not be null");
+        }
+        return FrozenNode.fromResolvedNode(
+                definitionSource(
+                        frozenDefinitionInput(
+                                definitionNode)));
     }
 
     Node program(Node stepNode) {
@@ -66,11 +108,32 @@ final class ComputeProgramNormalizer {
     }
 
     Node definition(Node definitionNode) {
+        return definitionSource(definitionNode);
+    }
+
+    private Node definitionSource(Node definitionNode) {
+        if (definitionNode == null) {
+            throw new IllegalArgumentException(
+                    "definitionNode must not be null");
+        }
         Node definition = new Node();
         copyMetadata(definition, definitionNode);
-        Map<String, Node> properties = new LinkedHashMap<String, Node>();
-        putIfMeaningful(properties, "constants", authoredMap(NodeUtil.property(definitionNode, "constants")));
-        putIfMeaningful(properties, "functions", normalizeFunctions(NodeUtil.property(definitionNode, "functions")));
+        Map<String, Node> properties =
+                new LinkedHashMap<String, Node>();
+        putIfMeaningful(
+                properties,
+                "constants",
+                authoredMap(
+                        NodeUtil.property(
+                                definitionNode,
+                                "constants")));
+        putIfMeaningful(
+                properties,
+                "functions",
+                normalizeFunctions(
+                        NodeUtil.property(
+                                definitionNode,
+                                "functions")));
         if (!properties.isEmpty()) {
             definition.properties(properties);
         }
@@ -99,7 +162,8 @@ final class ComputeProgramNormalizer {
     private Node frozenDefinitionInput(FrozenNode source) {
         Node input = new Node();
         copyMetadata(input, source);
-        Map<String, Node> properties = new LinkedHashMap<String, Node>();
+        Map<String, Node> properties =
+                new LinkedHashMap<String, Node>();
         copyFrozenProperty(properties, source, "constants");
         copyFrozenProperty(properties, source, "functions");
         if (!properties.isEmpty()) {
@@ -115,7 +179,17 @@ final class ComputeProgramNormalizer {
                 ? source.getProperties().get(key)
                 : null;
         if (value != null) {
-            target.put(key, value.toNode());
+            Node mutable = value.toNode();
+            if ("do".equals(key)) {
+                mutable = normalizeDo(mutable);
+            } else if ("functions".equals(key)) {
+                mutable = normalizeFunctions(mutable);
+            } else if ("constants".equals(key)) {
+                mutable = authoredMap(mutable);
+            }
+            if (mutable != null) {
+                target.put(key, mutable);
+            }
         }
     }
 
@@ -153,7 +227,8 @@ final class ComputeProgramNormalizer {
     }
 
     private Node normalizeStatement(Node statement) {
-        if (NodeUtil.isEmpty(statement)) {
+        if (NodeUtil.isEmpty(statement)
+                || Nodes.isEmptyPlaceholder(statement)) {
             return new Node().properties("$return", new Node());
         }
         return statement.clone();

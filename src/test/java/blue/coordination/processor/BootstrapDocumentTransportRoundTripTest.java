@@ -20,29 +20,30 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 class BootstrapDocumentTransportRoundTripTest {
 
     @Test
-    void initializedBootstrapDocumentRoundTripsThroughMinimizedTransportAcrossFreshRuntime() {
+    void shouldRoundTripInitializedBootstrapThroughMinimizedTransport() {
+        // Given
         BlueRepository repository = BlueRepository.latest();
         Blue writer = configured(repository);
         Node source = writer.parseSourceYaml(bootstrapSource());
         source.blue(repository.typeAliasBlue());
 
+        // When
         ResolvedSnapshot authored = writer.resolveToSnapshot(source);
         DocumentProcessingResult initialization = writer.initializeDocument(authored);
         ResolvedSnapshot initialized =
                 ProcessingResultTestSupport.snapshot(writer, initialization);
-        assertNotNull(initialized.resolvedRoot().getAsNode(
-                        "/contracts/declineBootstrap/request/type/type/inResponseTo/type/requestId"),
-                "cold resolution must fully materialize nested inherited Request metadata");
-
         Node minimized = new MinimizedOverlayBuilder().build(
                 initialized.resolvedRoot());
-        assertFalse(minimized.getContracts().getProperties().containsKey("declineBootstrap"),
-                "the minimized overlay must omit type-derived bootstrap operations");
-
         Blue reader = configured(repository);
         Node stored = reader.parseSourceJson(writer.nodeToJson(minimized));
         ResolvedSnapshot reloaded = reader.resolveToSnapshot(stored);
 
+        // Then
+        assertNotNull(initialized.resolvedRoot().getAsNode(
+                        "/contracts/declineBootstrap/request/type/type/inResponseTo/type/requestId"),
+                "cold resolution must fully materialize nested inherited Request metadata");
+        assertFalse(minimized.getContracts().getProperties().containsKey("declineBootstrap"),
+                "the minimized overlay must omit type-derived bootstrap operations");
         assertEquals(initialized.blueId(), reloaded.blueId(), () ->
                 "canonical difference: " + firstDifference(
                         NodeToMapListOrValue.get(initialized.canonicalRoot()),
@@ -55,9 +56,7 @@ class BootstrapDocumentTransportRoundTripTest {
     }
 
     private static Blue configured(BlueRepository repository) {
-        Blue blue = new Blue()
-                .nodeProvider(repository.nodeProvider())
-                .typeClassResolver(repository.typeClassResolver());
+        Blue blue = repository.configure(new Blue());
         CoordinationProcessors.registerWith(blue);
         return blue;
     }

@@ -10,6 +10,10 @@ import blue.repo.coordination.SequentialWorkflowOperation;
 import java.util.Collections;
 import java.util.List;
 
+/**
+ * Executes a Sequential Workflow Operation selected through Operation Request
+ * source-to-target routing.
+ */
 public final class SequentialWorkflowOperationProcessor implements HandlerProcessor<SequentialWorkflowOperation> {
     private final SequentialWorkflowRunner runner;
     private final OperationRequestMatcher matcher = new OperationRequestMatcher();
@@ -37,7 +41,11 @@ public final class SequentialWorkflowOperationProcessor implements HandlerProces
 
     @Override
     public String deriveChannel(SequentialWorkflowOperation contract, HandlerRegistrationContext context) {
-        String channel = trimToNull(contract.getChannel());
+        String channel = HandlerChannelResolver.resolve(
+                contract != null
+                        ? contract.getChannel()
+                        : null,
+                context);
         if (channel != null && !context.hasContract(channel)) {
             throw new IllegalStateException("Sequential workflow operation '" + context.handlerKey()
                     + "' references unknown channel '" + channel + "'");
@@ -55,11 +63,4 @@ public final class SequentialWorkflowOperationProcessor implements HandlerProces
         runner.execute(new SequentialWorkflow().steps(contract.getSteps()), context);
     }
 
-    private static String trimToNull(String value) {
-        if (value == null) {
-            return null;
-        }
-        String trimmed = value.trim();
-        return trimmed.isEmpty() ? null : trimmed;
-    }
 }

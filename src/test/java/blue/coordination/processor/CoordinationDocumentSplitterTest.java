@@ -1,7 +1,10 @@
 package blue.coordination.processor;
 
+import blue.language.Blue;
 import blue.language.NodeProvider;
 import blue.language.model.Node;
+import blue.language.processor.CoordinationFragmentationCatalogHarness;
+import blue.language.processor.DocumentProcessor;
 import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.VerifiedExecutionEvidence;
 import blue.language.processor.registry.RuntimeBlueIds;
@@ -13,11 +16,11 @@ import blue.language.utils.NodePathEditor;
 import blue.language.utils.NodeTransformer;
 import blue.language.utils.UncheckedObjectMapper;
 import blue.repo.coordination.ChatWorkflowOperation;
+import blue.repo.coordination.Compute;
 import blue.repo.coordination.Operation;
 import blue.repo.coordination.OperationRequest;
 import blue.repo.coordination.SequentialWorkflow;
 import blue.repo.coordination.SequentialWorkflowOperation;
-import blue.repo.coordination.TimelineEntry;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -25,6 +28,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -36,17 +40,39 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class CoordinationDocumentSplitterTest {
 
     private final CoordinationDocumentSplitter splitter =
-            new CoordinationDocumentSplitter();
+            CoordinationDocumentSplitter.forEventSplitting();
 
     @Test
-    void documentSplittingCutsEmbeddedRootsAndRegisteredBodiesOnly() {
+    void shouldFailClosedWhenDocumentSplittingHasNoEffectiveCatalog() {
+        // Given
+        Fixture fixture = fixture();
+
+        // When
+        IllegalStateException failure =
+                assertThrows(
+                        IllegalStateException.class,
+                        () -> splitter.splitDocument(
+                                fixture.root));
+
+        // Then
+        assertTrue(
+                failure.getMessage().contains(
+                        "effective fragmentation catalog"));
+    }
+
+    @Test
+    void shouldClassifyEmbeddedCutsWithoutClassifyingUnrelatedSiblings() {
+        // Given
         Fixture fixture = fixture();
         String exactRootBlueId =
                 BlueIdCalculator.calculateBlueId(fixture.root);
 
+        // When
         CoordinationDocumentSplitter.SplitGraph split =
-                splitter.splitDocument(fixture.root);
+                CoordinationDocumentSplitterTestSupport
+                        .splitDocument(fixture.root);
 
+        // Then
         assertEquals(exactRootBlueId, split.rootBlueId());
         assertEquals(
                 exactRootBlueId,
@@ -70,50 +96,20 @@ class CoordinationDocumentSplitterTest {
                 NodePathEditor.getOrNull(
                         fragmentedRoot, "/sibling");
         assertNotNull(sibling);
-        assertFalse(
+        assertTrue(
                 sibling.isReferenceOnly(),
-                "an unrelated application sibling remains inline");
-
-        Node rootSelectedBody =
-                NodePathEditor.getOrNull(
-                        fragmentedRoot,
-                        "/contracts/rootOperation/steps");
-        assertTrue(rootSelectedBody.isReferenceOnly());
-        assertEquals(
-                fixture.rootBodyBlueId,
-                rootSelectedBody.getBlueId());
-
-        Node chatSelectedBody =
-                NodePathEditor.getOrNull(
-                        fragmentedRoot,
-                        "/contracts/chatOperation/steps");
-        assertTrue(chatSelectedBody.isReferenceOnly());
-        assertEquals(
-                fixture.rootBodyBlueId,
-                chatSelectedBody.getBlueId(),
-                "identical bodies share one content identity");
-
-        Node referencedBody =
-                NodePathEditor.getOrNull(
-                        fragmentedRoot,
-                        "/contracts/referencedOperation/steps");
-        assertTrue(referencedBody.isReferenceOnly());
-        assertEquals(
-                fixture.referencedBodyBlueId,
-                referencedBody.getBlueId());
-        assertFalse(
-                split.fragments().containsKey(
-                        fixture.referencedBodyBlueId),
-                "an already-referenced body is not claimed as local content");
-
-        Node unregisteredSteps =
-                NodePathEditor.getOrNull(
-                        fragmentedRoot,
-                        "/contracts/plainOperation/steps");
-        assertNotNull(unregisteredSteps);
-        assertFalse(
-                unregisteredSteps.isReferenceOnly(),
-                "a steps-shaped field is not executable without exact registry metadata");
+                "the canonical direct-node profile stores every direct child "
+                        + "uniformly");
+        assertTrue(hasEdge(
+                split.edgeOccurrences(),
+                CoordinationDocumentSplitter.EdgeKind
+                        .DOCUMENT_DIRECT_CHILD,
+                "/sibling"));
+        assertFalse(hasEdge(
+                split.edgeOccurrences(),
+                CoordinationDocumentSplitter.EdgeKind
+                        .EMBEDDED_ROOT,
+                "/sibling"));
 
         Node childFragment =
                 fetchOne(
@@ -132,25 +128,6 @@ class CoordinationDocumentSplitterTest {
         assertEquals(
                 fixture.grandchildBlueId,
                 grandchildReference.getBlueId());
-        assertTrue(
-                NodePathEditor.getOrNull(
-                        childFragment,
-                        "/contracts/childWorkflow/steps")
-                        .isReferenceOnly());
-
-        Node rootBody =
-                fetchOne(
-                        split.provider(),
-                        fixture.rootBodyBlueId);
-        assertEquals(
-                fixture.rootBodyBlueId,
-                BlueIdCalculator.calculateBlueId(
-                        rootBody));
-        assertFalse(
-                rootBody.getItems().get(0)
-                        .isReferenceOnly(),
-                "an executable body is retained as one complete coarse fragment");
-
         assertTrue(hasMetadata(
                 split.metadata(),
                 CoordinationDocumentSplitter.FragmentKind.EMBEDDED_ROOT,
@@ -159,14 +136,270 @@ class CoordinationDocumentSplitterTest {
                 split.metadata(),
                 CoordinationDocumentSplitter.FragmentKind.EMBEDDED_ROOT,
                 "/child/grandchild"));
+    }
+
+    @Test
+    void shouldCutRegisteredBodiesAsCanonicalDirectFragments() {
+        // Given
+        Fixture fixture = fixture();
+
+        // When
+        CoordinationDocumentSplitter.SplitGraph split =
+                CoordinationDocumentSplitterTestSupport
+                        .splitDocument(fixture.root);
+
+        // Then
+        assertTrue(hasEdge(
+                split.edgeOccurrences(),
+                CoordinationDocumentSplitter.EdgeKind
+                        .EXECUTABLE_BODY,
+                "/contracts/rootOperation/steps"));
+        assertTrue(hasEdge(
+                split.edgeOccurrences(),
+                CoordinationDocumentSplitter.EdgeKind
+                        .EXECUTABLE_BODY,
+                "/child/contracts/childWorkflow/steps"));
+
+        Node storedRootBody =
+                split.fragments().get(
+                        fixture.rootBodyBlueId);
+        Node processRootBody =
+                fetchOne(
+                        split.provider(),
+                        fixture.rootBodyBlueId);
+        assertEquals(
+                fixture.rootBodyBlueId,
+                BlueIdCalculator.calculateBlueId(
+                        processRootBody));
+        assertTrue(
+                storedRootBody.getItems().get(0)
+                        .isReferenceOnly(),
+                "the stored executable body uses the canonical shallow "
+                        + "profile");
+        assertFalse(
+                processRootBody.getItems().get(0)
+                        .isReferenceOnly(),
+                "the PROCESS profile exposes a demanded step's direct "
+                        + "fragment");
+        assertFalse(
+                NodePathEditor.getOrNull(
+                        processRootBody,
+                        "/0/payload")
+                        .isReferenceOnly(),
+                "the selected step exposes its exact authored payload");
+        assertEquals(
+                "root-step",
+                NodePathEditor.getOrNull(
+                        processRootBody,
+                        "/0/payload/amount")
+                        .getValue());
         assertTrue(hasMetadata(
                 split.metadata(),
                 CoordinationDocumentSplitter.FragmentKind.EXECUTABLE_BODY,
                 "/contracts/rootOperation/steps"));
         assertTrue(hasMetadata(
-                split.metadata(),
-                CoordinationDocumentSplitter.FragmentKind.EXECUTABLE_BODY,
-                "/child/contracts/childWorkflow/steps"));
+                        split.metadata(),
+                        CoordinationDocumentSplitter.FragmentKind.EXECUTABLE_BODY,
+                        "/child/contracts/childWorkflow/steps"));
+    }
+
+    @Test
+    void shouldServeInlineHeadersWithoutChangingCanonicalStoredFragments() {
+        // Given
+        Fixture fixture = fixture();
+        Node exactContract =
+                NodePathEditor.getOrNull(
+                        fixture.root,
+                        "/contracts/rootOperation");
+        String contractBlueId =
+                BlueIdCalculator.calculateBlueId(
+                        exactContract);
+
+        // When
+        CoordinationDocumentSplitter.SplitGraph split =
+                CoordinationDocumentSplitterTestSupport
+                        .splitDocument(fixture.root);
+        Node stored =
+                split.fragments().get(
+                        contractBlueId);
+        Node processHeader =
+                fetchOne(
+                        split.provider(),
+                        contractBlueId);
+        Node processContracts =
+                fetchOne(
+                        split.provider(),
+                        BlueIdCalculator.calculateBlueId(
+                                fixture.root.getContracts()));
+        String rootBlueId =
+                BlueIdCalculator.calculateBlueId(
+                        fixture.root);
+        Node storedRoot =
+                split.fragments().get(
+                        rootBlueId);
+        Node processRoot =
+                fetchOne(
+                        split.provider(),
+                        rootBlueId);
+        Node processChild =
+                fetchOne(
+                        split.provider(),
+                        fixture.childBlueId);
+
+        // Then
+        assertEquals(
+                CoordinationDocumentSplitter
+                        .PROCESS_HEADER_VIEW_PROFILE_ID,
+                split.processHeaderViewProfileIdentity());
+        assertTrue(
+                NodePathEditor.getOrNull(
+                        stored, "/channel")
+                        .isReferenceOnly(),
+                "the immutable storage inventory remains canonical");
+        assertFalse(
+                NodePathEditor.getOrNull(
+                        processHeader, "/channel")
+                        .isReferenceOnly(),
+                "PROCESS receives the exact immutable dispatch header");
+        assertEquals(
+                "timeline",
+                NodePathEditor.getOrNull(
+                        processHeader, "/channel")
+                        .getValue());
+        assertTrue(
+                NodePathEditor.getOrNull(
+                        processHeader, "/steps")
+                        .isReferenceOnly(),
+                "the registered executable body remains cold");
+        assertFalse(
+                NodePathEditor.getOrNull(
+                        processContracts,
+                        "/rootOperation")
+                        .isReferenceOnly(),
+                "the PROCESS contracts-map view exposes a registered header");
+        assertTrue(
+                NodePathEditor.getOrNull(
+                        processContracts,
+                        "/rootOperation/steps")
+                        .isReferenceOnly(),
+                "an inlined registered header still leaves its body cold");
+        assertTrue(
+                NodePathEditor.getOrNull(
+                        processContracts,
+                        "/plainOperation")
+                        .isReferenceOnly(),
+                "the PROCESS contracts-map view leaves unregistered "
+                        + "contracts cold");
+        assertTrue(
+                storedRoot.getContracts()
+                        .isReferenceOnly(),
+                "the canonical stored Root keeps its contracts map shallow");
+        assertFalse(
+                processRoot.getContracts()
+                        .isReferenceOnly(),
+                "the PROCESS Root view exposes its immutable contracts map");
+        Node rootEmbeddedPath =
+                NodePathEditor.getOrNull(
+                        processRoot,
+                        "/contracts/embedded/paths/0");
+        Node childEmbeddedPath =
+                NodePathEditor.getOrNull(
+                        processChild,
+                        "/contracts/embedded/paths/0");
+        assertNotNull(
+                rootEmbeddedPath,
+                UncheckedObjectMapper.JSON_MAPPER
+                        .valueToTree(processRoot)
+                        .toString());
+        assertNotNull(
+                childEmbeddedPath,
+                UncheckedObjectMapper.JSON_MAPPER
+                        .valueToTree(processChild)
+                        .toString());
+        assertEquals(
+                "/child",
+                rootEmbeddedPath.getValue());
+        assertEquals(
+                "/grandchild",
+                childEmbeddedPath.getValue());
+        assertTrue(
+                NodePathEditor.getOrNull(
+                        processRoot,
+                        "/contracts/rootOperation/steps")
+                        .isReferenceOnly(),
+                "the PROCESS scope view does not warm a selected body");
+        assertTrue(
+                NodePathEditor.getOrNull(
+                        processChild,
+                        "/contracts/childWorkflow/steps")
+                        .isReferenceOnly(),
+                "the PROCESS child view does not warm a reactive body");
+        assertEquals(
+                NodeProviderOutcome.NOT_FOUND,
+                split.provider()
+                        .fetchResultByBlueId(
+                                SequentialWorkflow.blueId())
+                        .outcome(),
+                "the PROCESS header view does not expose unrelated content");
+    }
+
+    @Test
+    void shouldLeaveUnregisteredAndReferencedBodiesUnclaimed() {
+        // Given
+        Fixture fixture = fixture();
+
+        // When
+        CoordinationDocumentSplitter.SplitGraph split =
+                CoordinationDocumentSplitterTestSupport
+                        .splitDocument(fixture.root);
+
+        // Then
+        Node reconstructed =
+                split.reconstruct();
+        Node referencedBody =
+                NodePathEditor.getOrNull(
+                        reconstructed,
+                        "/contracts/referencedOperation/steps");
+        assertTrue(referencedBody.isReferenceOnly());
+        assertEquals(
+                fixture.referencedBodyBlueId,
+                referencedBody.getBlueId());
+        assertFalse(
+                split.fragments().containsKey(
+                        fixture.referencedBodyBlueId),
+                "an already-referenced body is not claimed as local content");
+
+        Node unregisteredSteps =
+                NodePathEditor.getOrNull(
+                        reconstructed,
+                        "/contracts/plainOperation/steps");
+        assertNotNull(unregisteredSteps);
+        assertFalse(
+                unregisteredSteps.isReferenceOnly(),
+                "a steps-shaped field is not executable without exact registry metadata");
+    }
+
+    @Test
+    void shouldDeduplicateIdenticalExecutableBodyContent() {
+        // Given
+        Fixture fixture = fixture();
+
+        // When
+        CoordinationDocumentSplitter.SplitGraph split =
+                CoordinationDocumentSplitterTestSupport
+                        .splitDocument(fixture.root);
+
+        // Then
+        assertTrue(hasEdge(
+                split.edgeOccurrences(),
+                CoordinationDocumentSplitter.EdgeKind
+                        .EXECUTABLE_BODY,
+                "/contracts/rootOperation/steps"));
+        assertTrue(hasEdge(
+                split.edgeOccurrences(),
+                CoordinationDocumentSplitter.EdgeKind
+                        .EXECUTABLE_BODY,
+                "/contracts/chatOperation/steps"));
         assertTrue(hasMetadata(
                 split.metadata(),
                 CoordinationDocumentSplitter.FragmentKind.EXECUTABLE_BODY,
@@ -184,11 +417,23 @@ class CoordinationDocumentSplitterTest {
                         split.fragments(),
                         fixture.rootBodyBlueId),
                 "identical executable body content is stored once");
+    }
 
+    @Test
+    void shouldReconstructExactDocumentAndDefensivelyExposeFragments() {
+        // Given
+        Fixture fixture = fixture();
+
+        // When
+        CoordinationDocumentSplitter.SplitGraph split =
+                CoordinationDocumentSplitterTestSupport
+                        .splitDocument(fixture.root);
         Node reconstructed =
                 reconstructAvailable(
                         split.pureReference(),
                         split.provider());
+
+        // Then
         assertEquals(
                 UncheckedObjectMapper.JSON_MAPPER.valueToTree(
                         split.originalRoot()),
@@ -213,7 +458,8 @@ class CoordinationDocumentSplitterTest {
     }
 
     @Test
-    void eventSplittingUsesExactDirectFragments() {
+    void shouldUseExactDirectFragmentsWhenSplittingEvents() {
+        // Given
         Node message = new Node()
                 .properties(
                         "operation", scalar("increment"),
@@ -226,9 +472,11 @@ class CoordinationDocumentSplitterTest {
                         "actor", scalar("alice"),
                         "message", message);
 
+        // When
         CoordinationDocumentSplitter.SplitGraph split =
                 splitter.splitEvent(event);
 
+        // Then
         assertEquals(
                 BlueIdCalculator.calculateBlueId(event),
                 split.rootBlueId());
@@ -277,10 +525,10 @@ class CoordinationDocumentSplitterTest {
     }
 
     @Test
-    void typedTimelineEntryRetainsExternalCyclicMemberType() {
-        assertTrue(
-                TimelineEntry.blueId().contains("#"),
-                "the published Timeline Entry type is a cyclic-set member");
+    void shouldRetainExternalCyclicEventTypeAsOpaqueEdge() {
+        // Given
+        String cyclicMemberBlueId =
+                "GX7CFU287wrZ7qw3LQG7gQi6UUoy1FFpM3tzupQJKi3N#0";
         Node operationRequest = new Node()
                 .type(reference(
                         OperationRequest.blueId()))
@@ -291,17 +539,19 @@ class CoordinationDocumentSplitterTest {
                                 "amount", scalar(3L)));
         Node timelineEntry = new Node()
                 .type(reference(
-                        TimelineEntry.blueId()))
+                        cyclicMemberBlueId))
                 .properties(
                         "timeline", scalar("alice"),
                         "actor", scalar("alice"),
                         "message", operationRequest);
 
+        // When
         CoordinationDocumentSplitter.SplitGraph split =
                 splitter.splitEvent(timelineEntry);
 
+        // Then
         assertEquals(
-                TimelineEntry.blueId(),
+                cyclicMemberBlueId,
                 split.fragmentedRoot()
                         .getType()
                         .getBlueId());
@@ -322,7 +572,7 @@ class CoordinationDocumentSplitterTest {
                 NodeProviderOutcome.NOT_FOUND,
                 split.provider()
                         .fetchResultByBlueId(
-                                TimelineEntry.blueId())
+                                cyclicMemberBlueId)
                         .outcome(),
                 "external cyclic type content is never claimed as a local fragment");
         for (String blueId
@@ -348,37 +598,233 @@ class CoordinationDocumentSplitterTest {
     }
 
     @Test
-    void preparedInputContainsOnlyTwoPureReferencesAndLazyVerifiedProvider() {
-        Fixture fixture = fixture();
-        Node event = new Node()
+    void shouldOpenPureReferenceRootAndInheritedScopeWithLocalProvider() {
+        // Given
+        Node inheritedEmbedded = new Node()
+                .type(reference(
+                        RuntimeBlueIds.PROCESS_EMBEDDED))
                 .properties(
-                        "timeline", scalar("alice"),
-                        "message", scalar("hello"));
-        CoordinationDocumentSplitter.SplitGraph document =
-                splitter.splitDocument(fixture.root);
-        CoordinationDocumentSplitter.SplitGraph splitEvent =
-                splitter.splitEvent(event);
-        NodeProvider combined =
-                new SequentialNodeProvider(
-                        document.provider(),
-                        splitEvent.provider());
+                        "paths",
+                        new Node().items(
+                                scalar("/child")));
+        Node rootType = new Node()
+                .name("Inherited splitter Root")
+                .contracts(
+                        new Node().properties(
+                                "embedded",
+                                inheritedEmbedded));
+        String rootTypeBlueId =
+                BlueIdCalculator.calculateBlueId(
+                        rootType);
+        Node child = new Node().properties(
+                "payload", scalar("present"));
+        String childBlueId =
+                BlueIdCalculator.calculateBlueId(
+                        child);
+        Node document = new Node()
+                .type(reference(rootTypeBlueId))
+                .properties(
+                        "child",
+                        reference(childBlueId));
+        String documentBlueId =
+                BlueIdCalculator.calculateBlueId(
+                        document);
+        Map<String, Node> exactContent =
+                new java.util.LinkedHashMap<>();
+        exactContent.put(
+                rootTypeBlueId,
+                rootType);
+        exactContent.put(
+                childBlueId,
+                child);
+        exactContent.put(
+                documentBlueId,
+                document);
+        NodeProvider localProvider = blueId -> {
+            Node retained =
+                    exactContent.get(blueId);
+            return retained != null
+                    ? Collections.singletonList(
+                            retained.clone())
+                    : null;
+        };
+
+        try (Blue blue =
+                     new Blue(
+                             localProvider)) {
+            // When
+            IllegalStateException missingProvider =
+                    assertThrows(
+                            IllegalStateException.class,
+                            () -> new CoordinationDocumentSplitter(
+                                    blue.getDocumentProcessor())
+                                    .splitDocument(
+                                            reference(
+                                                    documentBlueId)));
+            CoordinationDocumentSplitter.SplitGraph split =
+                    new CoordinationDocumentSplitter(
+                            blue.getDocumentProcessor(),
+                            localProvider)
+                            .splitDocument(
+                                    reference(
+                                            documentBlueId));
+
+            // Then
+            assertTrue(
+                    missingProvider.getMessage().contains(
+                            "exact local NodeProvider"));
+            Node childReference =
+                    NodePathEditor.getOrNull(
+                            split.fragmentedRoot(),
+                            "/child");
+            assertNotNull(childReference);
+            assertTrue(childReference.isReferenceOnly());
+            assertEquals(
+                    childBlueId,
+                    childReference.getBlueId());
+            assertEquals(
+                    documentBlueId,
+                    split.rootBlueId());
+            assertEquals(
+                    childBlueId,
+                    BlueIdCalculator.calculateBlueId(
+                            fetchOne(
+                                    split.provider(),
+                                    childBlueId)));
+            assertTrue(hasMetadata(
+                    split.metadata(),
+                    CoordinationDocumentSplitter.FragmentKind
+                            .EMBEDDED_ROOT,
+                    "/child"));
+        }
+    }
+
+    @Test
+    void shouldLeaveReferencedNestedComputeDefinitionUndemanded() {
+        // Given
+        Node largeDefinition =
+                new Node().properties(
+                        "source",
+                        scalar(
+                                repeat(
+                                        'x',
+                                        64 * 1024)));
+        String definitionBlueId =
+                BlueIdCalculator.calculateBlueId(
+                        largeDefinition);
+        Node laterCompute =
+                new Node()
+                        .type(reference(
+                                Compute.blueId()))
+                        .properties(
+                                "definition",
+                                reference(
+                                        definitionBlueId));
+        Node steps =
+                new Node().items(
+                        new Node().properties(
+                                "label",
+                                scalar("first")),
+                        laterCompute);
+        Node root =
+                new Node().contracts(
+                        new Node().properties(
+                                "workflow",
+                                workflow(
+                                        SequentialWorkflowOperation
+                                                .blueId(),
+                                        steps)));
+        int[] localProviderCalls = {0};
+        NodeProvider localProvider = blueId -> {
+            localProviderCalls[0]++;
+            return definitionBlueId.equals(blueId)
+                    ? Collections.singletonList(
+                            largeDefinition.clone())
+                    : null;
+        };
+        DocumentProcessor catalogProcessor =
+                CoordinationFragmentationCatalogHarness
+                        .processor(
+                                root,
+                                Collections.singletonMap(
+                                        SequentialWorkflowOperation
+                                                .blueId(),
+                                        Collections.singletonList(
+                                                "steps")));
+        try {
+            // When
+            CoordinationDocumentSplitter.SplitGraph split =
+                    new CoordinationDocumentSplitter(
+                            catalogProcessor,
+                            localProvider)
+                            .splitDocument(root);
+
+            // Then
+            assertEquals(
+                    0,
+                    localProviderCalls[0],
+                    "splitting must not open an unreachable later Compute definition");
+            CoordinationDocumentSplitter.EdgeOccurrence
+                    bodyEdge = edgeAt(
+                    split.edgeOccurrences(),
+                    CoordinationDocumentSplitter.EdgeKind
+                            .EXECUTABLE_BODY,
+                    "/contracts/workflow/steps");
+            Node retainedSteps =
+                    Objects.requireNonNull(
+                            split.fragments().get(
+                                    bodyEdge.childBlueId()),
+                            "canonical retained steps")
+                            .clone();
+            Node laterStepReference =
+                    retainedSteps.getItems().get(1);
+            assertTrue(
+                    laterStepReference.isReferenceOnly());
+            Node retainedLaterStep =
+                    fetchOne(
+                            split.provider(),
+                            laterStepReference.getBlueId());
+            Node retainedDefinition =
+                    NodePathEditor.getOrNull(
+                            retainedLaterStep,
+                            "/definition");
+            assertNotNull(retainedDefinition);
+            assertTrue(
+                    retainedDefinition.isReferenceOnly());
+            assertEquals(
+                    definitionBlueId,
+                    retainedDefinition.getBlueId());
+            assertEquals(
+                    0,
+                    localProviderCalls[0],
+                    "reading the selected direct body still leaves its nested "
+                            + "Compute definition lazy");
+        } finally {
+            catalogProcessor.close();
+        }
+    }
+
+    @Test
+    void shouldPreparePureReferencesWithLazyVerifiedProvider() {
+        // Given
+        PreparationFixture fixture =
+                preparationFixture();
         int[] providerCalls = {0};
         NodeProvider counted = blueId -> {
             providerCalls[0]++;
-            return combined.fetchByBlueId(blueId);
+            return fixture.combined.fetchByBlueId(
+                    blueId);
         };
-        VerifiedExecutionEvidence evidence =
-                evidence(
-                        document.rootBlueId(),
-                        splitEvent.rootBlueId());
 
+        // When
         CoordinationDocumentSplitter.PreparedProcessingInput prepared =
                 splitter.prepareForProcessing(
-                        document.rootBlueId(),
-                        splitEvent.rootBlueId(),
-                        evidence,
+                        fixture.document.rootBlueId(),
+                        fixture.event.rootBlueId(),
+                        fixture.evidence,
                         counted);
 
+        // Then
         assertTrue(prepared.document().isReferenceOnly());
         assertTrue(prepared.event().isReferenceOnly());
         assertEquals(
@@ -386,130 +832,165 @@ class CoordinationDocumentSplitterTest {
                 providerCalls[0],
                 "preparation must not consume cold provider fragments");
         assertEquals(
-                document.rootBlueId(),
+                fixture.document.rootBlueId(),
                 prepared.document().getBlueId());
         assertEquals(
-                splitEvent.rootBlueId(),
+                fixture.event.rootBlueId(),
                 prepared.event().getBlueId());
-        assertSame(evidence, prepared.evidence());
+        assertSame(
+                fixture.evidence,
+                prepared.evidence());
         assertEquals(
                 NodeProviderOutcome.FOUND,
                 prepared.provider()
                         .fetchResultByBlueId(
-                                document.rootBlueId())
+                                fixture.document
+                                        .rootBlueId())
                         .outcome());
         assertEquals(
                 NodeProviderOutcome.FOUND,
                 prepared.provider()
                         .fetchResultByBlueId(
-                                splitEvent.rootBlueId())
+                                fixture.event
+                                        .rootBlueId())
                         .outcome());
         assertEquals(2, providerCalls[0]);
 
         prepared.document().blueId(
                 SequentialWorkflow.blueId());
         assertEquals(
-                document.rootBlueId(),
+                fixture.document.rootBlueId(),
                 prepared.document().getBlueId(),
                 "prepared semantic inputs are defensive copies");
+    }
 
+    @Test
+    void shouldRejectPreparedInputBoundToDifferentEventEvidence() {
+        // Given
+        PreparationFixture fixture =
+                preparationFixture();
         VerifiedExecutionEvidence wrongEvent =
                 evidence(
-                        document.rootBlueId(),
-                        fixture.childBlueId);
-        assertThrows(
+                        fixture.document.rootBlueId(),
+                        fixture.source.childBlueId);
+
+        // When
+        IllegalArgumentException failure =
+                assertThrows(
                 IllegalArgumentException.class,
                 () -> splitter.prepareForProcessing(
-                        document.rootBlueId(),
-                        splitEvent.rootBlueId(),
+                        fixture.document.rootBlueId(),
+                        fixture.event.rootBlueId(),
                         wrongEvent,
-                        combined));
+                        fixture.combined));
+
+        // Then
+        assertNotNull(failure);
+    }
+
+    @Test
+    void shouldPreserveMissingAndInvalidFragmentProviderOutcomes() {
+        // Given
+        PreparationFixture fixture =
+                preparationFixture();
+        NodeProvider invalidRoot = blueId ->
+                fixture.document.rootBlueId()
+                        .equals(blueId)
+                        ? Collections.singletonList(
+                        scalar("wrong-root"))
+                        : fixture.combined
+                        .fetchByBlueId(blueId);
+        NodeProvider invalidEvent = blueId ->
+                fixture.event.rootBlueId()
+                        .equals(blueId)
+                        ? Collections.singletonList(
+                        scalar("wrong-event"))
+                        : fixture.combined
+                        .fetchByBlueId(blueId);
+
+        // When
         CoordinationDocumentSplitter.PreparedProcessingInput
                 missingEvent =
                 splitter.prepareForProcessing(
-                        document.rootBlueId(),
-                        splitEvent.rootBlueId(),
-                        evidence,
-                        document.provider());
+                        fixture.document.rootBlueId(),
+                        fixture.event.rootBlueId(),
+                        fixture.evidence,
+                        fixture.document.provider());
+        CoordinationDocumentSplitter.PreparedProcessingInput
+                missingRoot =
+                splitter.prepareForProcessing(
+                        fixture.document.rootBlueId(),
+                        fixture.event.rootBlueId(),
+                        fixture.evidence,
+                        fixture.event.provider());
+        CoordinationDocumentSplitter.PreparedProcessingInput
+                invalidRootInput =
+                splitter.prepareForProcessing(
+                        fixture.document.rootBlueId(),
+                        fixture.event.rootBlueId(),
+                        fixture.evidence,
+                        invalidRoot);
+        CoordinationDocumentSplitter.PreparedProcessingInput
+                invalidEventInput =
+                splitter.prepareForProcessing(
+                        fixture.document.rootBlueId(),
+                        fixture.event.rootBlueId(),
+                        fixture.evidence,
+                        invalidEvent);
+
+        // Then
         assertEquals(
                 NodeProviderOutcome.NOT_FOUND,
                 missingEvent.provider()
                         .fetchResultByBlueId(
-                                splitEvent.rootBlueId())
+                                fixture.event.rootBlueId())
                         .outcome());
-
-        CoordinationDocumentSplitter.PreparedProcessingInput
-                missingRoot =
-                splitter.prepareForProcessing(
-                        document.rootBlueId(),
-                        splitEvent.rootBlueId(),
-                        evidence,
-                        splitEvent.provider());
         assertEquals(
                 NodeProviderOutcome.NOT_FOUND,
                 missingRoot.provider()
                         .fetchResultByBlueId(
-                                document.rootBlueId())
+                                fixture.document
+                                        .rootBlueId())
                         .outcome());
-
-        NodeProvider invalidRoot = blueId ->
-                document.rootBlueId().equals(blueId)
-                        ? Collections.singletonList(
-                                scalar("wrong-root"))
-                        : combined.fetchByBlueId(blueId);
-        CoordinationDocumentSplitter.PreparedProcessingInput
-                invalidRootInput =
-                splitter.prepareForProcessing(
-                        document.rootBlueId(),
-                        splitEvent.rootBlueId(),
-                        evidence,
-                        invalidRoot);
         assertEquals(
                 NodeProviderOutcome.INVALID_EVIDENCE,
                 invalidRootInput.provider()
                         .fetchResultByBlueId(
-                                document.rootBlueId())
+                                fixture.document
+                                        .rootBlueId())
                         .outcome());
-
-        NodeProvider invalidEvent = blueId ->
-                splitEvent.rootBlueId().equals(blueId)
-                        ? Collections.singletonList(
-                                scalar("wrong-event"))
-                        : combined.fetchByBlueId(blueId);
-        CoordinationDocumentSplitter.PreparedProcessingInput
-                invalidEventInput =
-                splitter.prepareForProcessing(
-                        document.rootBlueId(),
-                        splitEvent.rootBlueId(),
-                        evidence,
-                        invalidEvent);
         assertEquals(
                 NodeProviderOutcome.INVALID_EVIDENCE,
                 invalidEventInput.provider()
                         .fetchResultByBlueId(
-                                splitEvent.rootBlueId())
+                                fixture.event.rootBlueId())
                         .outcome());
     }
 
     @Test
-    void malformedEmbeddedPathsFailBeforeProducingFragments() {
+    void shouldFailBeforeProducingFragmentsForMalformedEmbeddedPaths() {
+        // Given
         Node root = new Node()
                 .contracts(new Node().properties(
                         "embedded",
                         processEmbedded("/")));
 
+        // When
         IllegalArgumentException invalid =
                 assertThrows(
                         IllegalArgumentException.class,
-                        () -> splitter.splitDocument(root));
+                        () -> CoordinationDocumentSplitterTestSupport
+                                .splitDocument(root));
 
+        // Then
         assertTrue(
                 invalid.getMessage().contains(
                         "cannot embed its declaring scope"));
     }
 
     @Test
-    void overlappingEmbeddedPathsCutAtNearestDeclaredAncestor() {
+    void shouldCutOverlappingEmbeddedPathsAtNearestDeclaredAncestor() {
+        // Given
         Node grandchild = new Node()
                 .properties(
                         "state",
@@ -539,13 +1020,18 @@ class CoordinationDocumentSplitterTest {
                 BlueIdCalculator.calculateBlueId(
                         grandchild);
 
+        // When
         CoordinationDocumentSplitter.SplitGraph split =
-                splitter.splitDocument(root);
+                CoordinationDocumentSplitterTestSupport
+                        .splitDocument(root);
 
+        // Then
         Node rootFragment =
-                fetchOne(
-                        split.provider(),
-                        rootBlueId);
+                Objects.requireNonNull(
+                        split.fragments().get(
+                                rootBlueId),
+                        "canonical Root fragment")
+                        .clone();
         Node childReference =
                 NodePathEditor.getOrNull(
                         rootFragment,
@@ -559,9 +1045,11 @@ class CoordinationDocumentSplitterTest {
                 childReference.getBlueId());
 
         Node childFragment =
-                fetchOne(
-                        split.provider(),
-                        childBlueId);
+                Objects.requireNonNull(
+                        split.fragments().get(
+                                childBlueId),
+                        "canonical child fragment")
+                        .clone();
         Node grandchildReference =
                 NodePathEditor.getOrNull(
                         childFragment,
@@ -586,10 +1074,15 @@ class CoordinationDocumentSplitterTest {
                 grandchildBlueId,
                 BlueIdCalculator.calculateBlueId(
                         grandchildFragment));
-        assertEquals(
-                3,
-                split.fragments().size(),
-                "every declared Root is retained exactly once");
+        assertTrue(
+                split.fragments().containsKey(
+                        rootBlueId));
+        assertTrue(
+                split.fragments().containsKey(
+                        childBlueId));
+        assertTrue(
+                split.fragments().containsKey(
+                        grandchildBlueId));
 
         Node reconstructed =
                 reconstructAvailable(
@@ -733,6 +1226,14 @@ class CoordinationDocumentSplitterTest {
         return new Node().blueId(blueId);
     }
 
+    private static String repeat(
+            char value,
+            int count) {
+        char[] chars = new char[count];
+        Arrays.fill(chars, value);
+        return new String(chars);
+    }
+
     private static Node fetchOne(
             NodeProvider provider,
             String blueId) {
@@ -783,6 +1284,41 @@ class CoordinationDocumentSplitterTest {
         return false;
     }
 
+    private static boolean hasEdge(
+            List<CoordinationDocumentSplitter.EdgeOccurrence> edges,
+            CoordinationDocumentSplitter.EdgeKind kind,
+            String pointer) {
+        for (CoordinationDocumentSplitter.EdgeOccurrence edge
+                : edges) {
+            if (edge.edgeKind() == kind
+                    && pointer.equals(
+                    edge.absolutePointer())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static CoordinationDocumentSplitter.EdgeOccurrence
+    edgeAt(
+            List<CoordinationDocumentSplitter.EdgeOccurrence> edges,
+            CoordinationDocumentSplitter.EdgeKind kind,
+            String pointer) {
+        for (CoordinationDocumentSplitter.EdgeOccurrence edge
+                : edges) {
+            if (edge.edgeKind() == kind
+                    && pointer.equals(
+                    edge.absolutePointer())) {
+                return edge;
+            }
+        }
+        throw new AssertionError(
+                "No "
+                        + kind
+                        + " edge at "
+                        + pointer);
+    }
+
     private static int metadataCount(
             List<CoordinationDocumentSplitter.FragmentMetadata> metadata,
             CoordinationDocumentSplitter.FragmentKind kind,
@@ -810,6 +1346,31 @@ class CoordinationDocumentSplitterTest {
         return count;
     }
 
+    private PreparationFixture preparationFixture() {
+        Fixture source = fixture();
+        Node event = new Node()
+                .properties(
+                        "timeline", scalar("alice"),
+                        "message", scalar("hello"));
+        CoordinationDocumentSplitter.SplitGraph document =
+                CoordinationDocumentSplitterTestSupport
+                        .splitDocument(source.root);
+        CoordinationDocumentSplitter.SplitGraph splitEvent =
+                splitter.splitEvent(event);
+        NodeProvider combined =
+                new SequentialNodeProvider(
+                        document.provider(),
+                        splitEvent.provider());
+        return new PreparationFixture(
+                source,
+                document,
+                splitEvent,
+                combined,
+                evidence(
+                        document.rootBlueId(),
+                        splitEvent.rootBlueId()));
+    }
+
     private static VerifiedExecutionEvidence evidence(
             String rootBlueId,
             String eventBlueId) {
@@ -824,6 +1385,29 @@ class CoordinationDocumentSplitterTest {
                                         12L,
                                         "entry")))
                 .build();
+    }
+
+    private static final class PreparationFixture {
+        private final Fixture source;
+        private final CoordinationDocumentSplitter.SplitGraph
+                document;
+        private final CoordinationDocumentSplitter.SplitGraph
+                event;
+        private final NodeProvider combined;
+        private final VerifiedExecutionEvidence evidence;
+
+        private PreparationFixture(
+                Fixture source,
+                CoordinationDocumentSplitter.SplitGraph document,
+                CoordinationDocumentSplitter.SplitGraph event,
+                NodeProvider combined,
+                VerifiedExecutionEvidence evidence) {
+            this.source = source;
+            this.document = document;
+            this.event = event;
+            this.combined = combined;
+            this.evidence = evidence;
+        }
     }
 
     private static final class Fixture {

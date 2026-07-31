@@ -3,12 +3,13 @@ package blue.coordination.processor.compute;
 import blue.bex.api.BexEngine;
 import blue.coordination.processor.CoordinationBexIntrinsics;
 import blue.coordination.processor.CoordinationProcessorOptions;
+import blue.coordination.processor.ProcessingResultTestSupport;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
+import blue.language.processor.ProcessorStatus;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class Ed25519IntrinsicWorkflowTest {
     private static final String HOTEL_DOCUMENT = "coordination/compute/ed25519-hotel-access.yaml";
@@ -22,14 +23,17 @@ class Ed25519IntrinsicWorkflowTest {
             "3EXsrtb4nLC37E14iOsREFhFgibnIl6MyYjzAztnUfpNdicSqs3lj4RTHM0N9E8uNCPufItDDxkL4Q8dzem3DQ";
 
     @Test
-    void hotelAccessUsesCommonEd25519IntrinsicToGrantValidSignedRequest() {
+    void shouldGrantHotelAccessForValidEd25519SignedRequest() {
+        // Given
         ComputeWorkflowTestSupport support = supportWithCommonIntrinsics();
         Node document = support.initialize(support.yamlResource(HOTEL_DOCUMENT)).document();
 
+        // When
         DocumentProcessingResult result = support.process(document,
                 support.operationRequest("hotel", 1, "checkIn", "hotelChannel", hotelRequest()));
 
-        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
+        // Then
+        assertSuccess(result);
         assertEquals(Boolean.TRUE, result.document().get("/usedNonces/customerA/hotel-nonce-1"));
         assertEquals("Hotel Access Granted", onlyEvent(result).get("/kind"));
         assertEquals("customerA", onlyEvent(result).get("/userId"));
@@ -37,23 +41,24 @@ class Ed25519IntrinsicWorkflowTest {
     }
 
     @Test
-    void thresholdApprovalExecutesActionAfterTwoValidEd25519Approvals() {
+    void shouldExecuteThresholdActionAfterTwoValidEd25519Approvals() {
+        // Given
         ComputeWorkflowTestSupport support = supportWithCommonIntrinsics();
         Node document = support.initialize(support.yamlResource(THRESHOLD_DOCUMENT)).document();
 
+        // When
         DocumentProcessingResult afterAlice = support.process(document,
                 support.operationRequest("admin", 1, "approveAction", "adminChannel",
                         approvalRequest("alice", "alice-nonce-1", ALICE_SIGNATURE)));
-
-        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(afterAlice), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(afterAlice));
-        assertEquals("Admin Approval Recorded", onlyEvent(afterAlice).get("/kind"));
-        assertEquals(Boolean.TRUE, afterAlice.document().get("/approvals/delete-file-123/alice"));
-
         DocumentProcessingResult afterBob = support.process(afterAlice.document(),
                 support.operationRequest("admin", 2, "approveAction", "adminChannel",
                         approvalRequest("bob", "bob-nonce-1", BOB_SIGNATURE)));
 
-        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(afterBob), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(afterBob));
+        // Then
+        assertSuccess(afterAlice);
+        assertEquals("Admin Approval Recorded", onlyEvent(afterAlice).get("/kind"));
+        assertEquals(Boolean.TRUE, afterAlice.document().get("/approvals/delete-file-123/alice"));
+        assertSuccess(afterBob);
         assertEquals("Admin Action Executed", onlyEvent(afterBob).get("/kind"));
         assertEquals(Boolean.TRUE, afterBob.document().get("/approvals/delete-file-123/alice"));
         assertEquals(Boolean.TRUE, afterBob.document().get("/approvals/delete-file-123/bob"));
@@ -95,6 +100,15 @@ class Ed25519IntrinsicWorkflowTest {
             node.properties(String.valueOf(fields[i]), new Node().value(fields[i + 1]));
         }
         return node;
+    }
+
+    private static void assertSuccess(
+            DocumentProcessingResult result) {
+        assertEquals(
+                ProcessorStatus.SUCCESS,
+                result.status(),
+                ProcessingResultTestSupport
+                        .diagnosticMessage(result));
     }
 
     private static Node onlyEvent(DocumentProcessingResult result) {

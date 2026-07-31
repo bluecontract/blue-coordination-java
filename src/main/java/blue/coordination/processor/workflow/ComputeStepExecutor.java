@@ -4,15 +4,34 @@ import blue.bex.BexException;
 import blue.bex.api.BexEngine;
 import blue.bex.api.BexExecutionContext;
 import blue.bex.api.BexProgramSource;
+import blue.bex.gas.BexGasLimitExceededException;
 import blue.bex.result.BexExecutionResult;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.coordination.processor.bex.BexWorkflowContextFactory;
 import blue.language.model.Node;
+import blue.language.processor.ExecutionEvidenceUnavailableException;
+import blue.language.processor.GasLimitExceededException;
+import blue.language.processor.InvalidExecutionEvidenceException;
+import blue.language.processor.PortableLimitExceededException;
+import blue.language.processor.ProcessorErrorCategory;
+import blue.language.processor.ProcessorFailureException;
 import blue.language.processor.ProcessorFatalException;
 import blue.language.snapshot.FrozenNode;
 import blue.repo.coordination.Compute;
 import blue.repo.coordination.SequentialWorkflowStep;
 
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.Set;
+
+/**
+ * Resolves, compiles, and executes a selected Compute step inside the current
+ * processor-owned workflow and gas session.
+ *
+ * <p>Immutable plans may be cached by exact identity, but semantic output
+ * admission, patches, events, and termination remain owned by the parent
+ * Contracts invocation.</p>
+ */
 public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute>, AutoCloseable {
     private final BexEngine bexEngine;
     private final long defaultGasLimit;
@@ -82,18 +101,11 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute>,
             if (metrics != null) {
                 metrics.incrementComputeStepsExecuted();
             }
-            if (!supportsManifestBoundRuntimeCounters()) {
-                context.processorContext().throwFatal(
-                        "Compute runtime capability is unavailable: "
-                                + "blue-bex-java 1.1 does not expose "
-                                + "manifest-bound named runtime counters");
-                return WorkflowStepResult.none();
-            }
             FrozenNode rawStepNode = context.stepFrozenNode();
             if (rawStepNode == null) {
                 Node mutableStepNode = context.stepNodeRef();
                 if (mutableStepNode == null) {
-                    context.processorContext().throwFatal("Compute step must have a raw step node");
+                    context.throwFatal("Compute step must have a raw step node");
                     return WorkflowStepResult.none();
                 }
                 rawStepNode = FrozenNode.fromResolvedNode(mutableStepNode);
@@ -123,7 +135,10 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute>,
                     });
             ComputeProgramPlan computePlan = lookup.plan();
             long contextStart = System.nanoTime();
-            BexExecutionContext bexContext = contextFactory.create(context, computePlan.gasLimit());
+            BexExecutionContext bexContext = contextFactory.create(
+                    context,
+                    computePlan.gasLimit(),
+                    computePlan.processingEventRequired());
             if (metrics != null) {
                 metrics.addComputeContextBuildNanos(System.nanoTime() - contextStart);
             }
@@ -152,18 +167,23 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute>,
             planCache.publish(lookup);
             return stepResult;
         } catch (ComputeResultValidationException ex) {
+            RuntimeException classified = classifiedBoundaryFailure(ex);
+            if (classified != null) {
+                throw classified;
+            }
             if (metrics != null) {
                 metrics.incrementComputeResultValidationFailures();
             }
-            context.processorContext().throwFatal("Invalid Compute result: " + ex.getMessage());
+            context.throwFatal("Invalid Compute result: " + ex.getMessage());
             return WorkflowStepResult.none();
         } catch (ProcessorFatalException ex) {
             throw ex;
-        } catch (BexException ex) {
-            context.processorContext().throwFatal("Compute failed: " + ex.getMessage());
-            return WorkflowStepResult.none();
         } catch (RuntimeException ex) {
-            context.processorContext().throwFatal("Compute failed: " + ex.getMessage());
+            RuntimeException classified = classifiedBoundaryFailure(ex);
+            if (classified != null) {
+                throw classified;
+            }
+            context.throwFatal("Compute failed: " + ex.getMessage());
             return WorkflowStepResult.none();
         } finally {
             if (metrics != null) {
@@ -184,13 +204,43 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute>,
     }
 
     /**
-     * The Contracts 1.0 child-ledger API cannot accept BEX's legacy aggregate
-     * {@code gasUsed()} value. Keep the evaluator fail-closed until the runtime
-     * supplies a closed, manifest-bound named counter stream that can be
-     * admitted live by the parent ledger.
+     * Returns the first authoritative processor/BEX boundary failure in causal
+     * order. Generic wrappers, including {@link BexException}, are deliberately
+     * transparent so they cannot change the category of their cause.
      */
-    private boolean supportsManifestBoundRuntimeCounters() {
-        return false;
+    static RuntimeException classifiedBoundaryFailure(
+            Throwable failure) {
+        Throwable current = failure;
+        Set<Throwable> visited = Collections.newSetFromMap(
+                new IdentityHashMap<Throwable, Boolean>());
+        while (current != null && visited.add(current)) {
+            if (current instanceof ProcessorFailureException
+                    || current
+                    instanceof ExecutionEvidenceUnavailableException
+                    || current
+                    instanceof InvalidExecutionEvidenceException
+                    || current
+                    instanceof PortableLimitExceededException
+                    || current instanceof GasLimitExceededException) {
+                return (RuntimeException) current;
+            }
+            if (current instanceof BexGasLimitExceededException) {
+                BexGasLimitExceededException exhaustion =
+                        (BexGasLimitExceededException) current;
+                if (exhaustion.hostGasLimitExceeded() != null) {
+                    return exhaustion.hostGasLimitExceeded();
+                }
+                return new ProcessorFailureException(
+                        ProcessorErrorCategory.GasLimitExceeded,
+                        "Compute exhausted its local BEX gas limit before "
+                                + exhaustion.namespace()
+                                + "."
+                                + exhaustion.counterName(),
+                        exhaustion);
+            }
+            current = current.getCause();
+        }
+        return null;
     }
 
     /** Clears reusable Compute plans while keeping this executor usable. */
@@ -222,6 +272,11 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute>,
         FrozenNode definitionNode = rawDefinitionNode != null
                 ? normalizer.definition(rawDefinitionNode)
                 : null;
+        FrozenNode definitionSourceNode =
+                rawDefinitionNode != null
+                        ? normalizer.definitionSource(
+                                rawDefinitionNode)
+                        : null;
         String normalizedEntry = FrozenNodeUtil.textProperty(programNode, "entry");
         // The key is built from the authored effective entry. Retain the
         // normalized value in the source to preserve the pre-cache behavior.
@@ -229,8 +284,11 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute>,
             throw new BexException("Compute entry changed during normalization");
         }
         long sourceStart = System.nanoTime();
-        BexProgramSource source = definitionNode != null
-                ? BexProgramSource.withDefinition(programNode, definitionNode, normalizedEntry)
+        BexProgramSource source = definitionSourceNode != null
+                ? BexProgramSource.withDefinition(
+                        programNode,
+                        definitionSourceNode,
+                        normalizedEntry)
                 : BexProgramSource.inline(programNode);
         if (metrics != null) {
             metrics.incrementComputeProgramSourceBuilds();

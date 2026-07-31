@@ -8,49 +8,100 @@ import blue.repo.coordination.TerminateProcessing;
 import blue.repo.coordination.TriggerEvent;
 import blue.repo.coordination.UpdateDocument;
 
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
-/** Immutable execution structure for one exact frozen workflow contract. */
+/**
+ * Lazily populated execution structure for one exact frozen workflow
+ * contract.
+ *
+ * <p>The shell retains only the contract and one slot per runtime step. An
+ * executor and any static Update Document template are selected only after the
+ * runner has admitted that exact step's portable gas charges. Published step
+ * plans are immutable and may then be reused safely by concurrent
+ * executions.</p>
+ */
 final class SequentialWorkflowPlan {
     private static final long PLAN_BASE_BYTES = 128L;
+    private static final long STEP_SLOT_BYTES = 8L;
     private static final long STEP_PLAN_BYTES = 96L;
+    private static final long RETAINED_EXACT_CONTRACT_BYTES = 96L;
     private static final long RETAINED_EXACT_STEP_BYTES = 96L;
 
+    private final FrozenNode contractNode;
     private final FrozenNode.ResolvedStructuralKey contractIdentity;
-    private final List<StepPlan> steps;
-    private final long approximateWeightBytes;
+    private final StepPlan[] steps;
+    private long approximateWeightBytes;
 
-    private SequentialWorkflowPlan(FrozenNode contractNode, List<StepPlan> steps) {
-        this.contractIdentity = contractNode != null ? contractNode.resolvedStructuralKey() : null;
-        this.steps = Collections.unmodifiableList(new ArrayList<StepPlan>(steps));
-        this.approximateWeightBytes = estimateWeight(contractNode, this.steps);
+    private SequentialWorkflowPlan(
+            FrozenNode contractNode,
+            int stepCount) {
+        this.contractNode = contractNode;
+        this.contractIdentity = contractNode != null
+                ? contractNode.resolvedStructuralKey()
+                : null;
+        this.steps = new StepPlan[stepCount];
+        this.approximateWeightBytes =
+                estimateShellWeight(contractNode, stepCount);
     }
 
-    static SequentialWorkflowPlan build(FrozenNode contractNode,
-                                        List<SequentialWorkflowStep> workflowSteps,
-                                        List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors,
-                                        BexProcessingMetrics metrics) {
-        List<FrozenNode> frozenSteps = stepNodes(contractNode);
-        int plannedStepCount = Math.max(workflowSteps.size(), frozenSteps.size());
-        List<StepPlan> planned = new ArrayList<StepPlan>(plannedStepCount);
-        for (int i = 0; i < plannedStepCount; i++) {
-            FrozenNode frozenStep = i < frozenSteps.size() ? frozenSteps.get(i) : null;
-            SequentialWorkflowStep workflowStep = i < workflowSteps.size() ? workflowSteps.get(i) : null;
-            planned.add(planStep(workflowStep, frozenStep, i, executors, metrics));
+    static SequentialWorkflowPlan build(
+            FrozenNode contractNode,
+            List<SequentialWorkflowStep> workflowSteps) {
+        if (workflowSteps == null) {
+            throw new IllegalArgumentException(
+                    "workflowSteps must not be null");
         }
-        return new SequentialWorkflowPlan(contractNode, planned);
+        return new SequentialWorkflowPlan(
+                contractNode,
+                workflowSteps.size());
     }
 
-    static StepPlan planStep(SequentialWorkflowStep step,
-                             FrozenNode frozenStep,
-                             int index,
-                             List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors,
-                             BexProcessingMetrics metrics) {
+    synchronized PlannedStep planAdmittedStep(
+            SequentialWorkflowStep step,
+            int index,
+            List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors,
+            BexProcessingMetrics metrics) {
+        if (index < 0) {
+            throw new IndexOutOfBoundsException(
+                    "step index must not be negative");
+        }
+        StepPlan cached = index < steps.length
+                ? steps[index]
+                : null;
+        if (cached != null && cached.matches(step)) {
+            return new PlannedStep(cached, false);
+        }
+        StepPlan planned = planStep(
+                step,
+                frozenStep(index),
+                index,
+                executors,
+                metrics);
+        if (cached == null && index < steps.length) {
+            steps[index] = planned;
+            approximateWeightBytes = saturatedAdd(
+                    approximateWeightBytes,
+                    estimateStepWeight(planned));
+            return new PlannedStep(planned, true);
+        }
+        /*
+         * A runtime-class mismatch cannot be shared under the structural cache
+         * key. Execute the exact fallback without replacing a plan that may be
+         * in use concurrently.
+         */
+        return new PlannedStep(planned, false);
+    }
+
+    static StepPlan planStep(
+            SequentialWorkflowStep step,
+            FrozenNode frozenStep,
+            int index,
+            List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors,
+            BexProcessingMetrics metrics) {
         WorkflowStepExecutor<? extends SequentialWorkflowStep> selected = null;
         if (step != null) {
-            for (WorkflowStepExecutor<? extends SequentialWorkflowStep> executor : executors) {
+            for (WorkflowStepExecutor<? extends SequentialWorkflowStep> executor
+                    : executors) {
                 if (metrics != null) {
                     metrics.incrementWorkflowExecutorLookups();
                 }
@@ -63,7 +114,10 @@ final class SequentialWorkflowPlan {
         StaticUpdatePlan staticUpdatePlan = null;
         if (step instanceof UpdateDocument && frozenStep != null) {
             StaticUpdatePlan candidate = StaticUpdatePlan.compile(
-                    FrozenNodeUtil.property(frozenStep, "changeset"), metrics);
+                    FrozenNodeUtil.property(
+                            frozenStep,
+                            "changeset"),
+                    metrics);
             if (candidate.valid()) {
                 staticUpdatePlan = candidate;
                 if (metrics != null) {
@@ -71,13 +125,13 @@ final class SequentialWorkflowPlan {
                 }
             }
         }
-        return new StepPlan(index,
+        return new StepPlan(
+                index,
                 stepKey(frozenStep, index),
                 stepName(step),
                 frozenStep,
                 step != null ? step.getClass() : null,
                 selected,
-                step instanceof TerminateProcessing,
                 staticUpdatePlan);
     }
 
@@ -85,37 +139,42 @@ final class SequentialWorkflowPlan {
         return contractIdentity;
     }
 
-    int stepCount() {
-        return steps.size();
+    synchronized StepPlan step(int index) {
+        return steps[index];
     }
 
-    StepPlan step(int index) {
-        return steps.get(index);
-    }
-
-    long approximateWeightBytes() {
+    synchronized long approximateWeightBytes() {
         return approximateWeightBytes;
     }
 
-    private static List<FrozenNode> stepNodes(FrozenNode contractNode) {
-        if (contractNode == null || contractNode.getProperties() == null) {
-            return Collections.emptyList();
+    private FrozenNode frozenStep(int index) {
+        if (contractNode == null
+                || contractNode.getProperties() == null) {
+            return null;
         }
-        FrozenNode stepsNode = contractNode.getProperties().get("steps");
-        if (stepsNode == null || stepsNode.getItems() == null) {
-            return Collections.emptyList();
+        FrozenNode stepsNode =
+                contractNode.getProperties().get("steps");
+        if (stepsNode == null
+                || stepsNode.getItems() == null
+                || index >= stepsNode.getItems().size()) {
+            return null;
         }
-        return stepsNode.getItems();
+        return stepsNode.getItems().get(index);
     }
 
-    private static String stepKey(FrozenNode stepNode, int index) {
-        if (stepNode != null && stepNode.getName() != null && !stepNode.getName().trim().isEmpty()) {
+    private static String stepKey(
+            FrozenNode stepNode,
+            int index) {
+        if (stepNode != null
+                && stepNode.getName() != null
+                && !stepNode.getName().trim().isEmpty()) {
             return stepNode.getName().trim();
         }
         return "Step" + (index + 1);
     }
 
-    private static String stepName(SequentialWorkflowStep step) {
+    private static String stepName(
+            SequentialWorkflowStep step) {
         if (step == null) {
             return "null sequential workflow step";
         }
@@ -131,32 +190,51 @@ final class SequentialWorkflowPlan {
         return step.getClass().getName();
     }
 
-    private static long estimateWeight(FrozenNode contractNode, List<StepPlan> steps) {
-        /*
-         * The cache key already owns the exact structural identity and each
-         * step retains an exact frozen node. Weight bookkeeping is deliberately
-         * shallow: workflow planning must not recursively traverse exact
-         * Update/Trigger payloads merely to estimate their size.
-         */
-        long weight = PLAN_BASE_BYTES
-                + (contractNode != null ? RETAINED_EXACT_STEP_BYTES : 0L);
-        for (StepPlan step : steps) {
-            weight = saturatedAdd(weight, STEP_PLAN_BYTES);
-            weight = saturatedAdd(weight, stringWeight(step.key));
-            weight = saturatedAdd(weight, stringWeight(step.kind));
-            if (step.frozenStep != null) {
-                weight = saturatedAdd(
-                        weight, RETAINED_EXACT_STEP_BYTES);
-            }
-            if (step.staticUpdatePlan != null) {
-                weight = saturatedAdd(weight, step.staticUpdatePlan.approximateWeightBytes());
-            }
+    private static long estimateShellWeight(
+            FrozenNode contractNode,
+            int stepCount) {
+        long weight = PLAN_BASE_BYTES;
+        if (contractNode != null) {
+            weight = saturatedAdd(
+                    weight,
+                    RETAINED_EXACT_CONTRACT_BYTES);
+        }
+        for (int index = 0; index < stepCount; index++) {
+            weight = saturatedAdd(
+                    weight,
+                    STEP_SLOT_BYTES);
         }
         return Math.max(1L, weight);
     }
 
-    private static long saturatedAdd(long left, long right) {
-        if (right > 0L && left > Long.MAX_VALUE - right) {
+    private static long estimateStepWeight(
+            StepPlan step) {
+        long weight = STEP_PLAN_BYTES;
+        weight = saturatedAdd(
+                weight,
+                stringWeight(step.key));
+        weight = saturatedAdd(
+                weight,
+                stringWeight(step.kind));
+        if (step.frozenStep != null) {
+            weight = saturatedAdd(
+                    weight,
+                    RETAINED_EXACT_STEP_BYTES);
+        }
+        if (step.staticUpdatePlan != null) {
+            weight = saturatedAdd(
+                    weight,
+                    step.staticUpdatePlan
+                            .approximateWeightBytes());
+        }
+        return weight;
+    }
+
+    private static long saturatedAdd(
+            long left,
+            long right) {
+        if (right > 0L
+                && left > Long.MAX_VALUE - right) {
             return Long.MAX_VALUE;
         }
         return left + right;
@@ -168,6 +246,26 @@ final class SequentialWorkflowPlan {
                 : 40L + 2L * value.length();
     }
 
+    static final class PlannedStep {
+        private final StepPlan step;
+        private final boolean published;
+
+        private PlannedStep(
+                StepPlan step,
+                boolean published) {
+            this.step = step;
+            this.published = published;
+        }
+
+        StepPlan step() {
+            return step;
+        }
+
+        boolean published() {
+            return published;
+        }
+    }
+
     static final class StepPlan {
         private final int index;
         private final String key;
@@ -175,24 +273,22 @@ final class SequentialWorkflowPlan {
         private final FrozenNode frozenStep;
         private final Class<?> runtimeStepClass;
         private final WorkflowStepExecutor<? extends SequentialWorkflowStep> executor;
-        private final boolean declarativelyTerminal;
         private final StaticUpdatePlan staticUpdatePlan;
 
-        private StepPlan(int index,
-                         String key,
-                         String kind,
-                         FrozenNode frozenStep,
-                         Class<?> runtimeStepClass,
-                         WorkflowStepExecutor<? extends SequentialWorkflowStep> executor,
-                         boolean declarativelyTerminal,
-                         StaticUpdatePlan staticUpdatePlan) {
+        private StepPlan(
+                int index,
+                String key,
+                String kind,
+                FrozenNode frozenStep,
+                Class<?> runtimeStepClass,
+                WorkflowStepExecutor<? extends SequentialWorkflowStep> executor,
+                StaticUpdatePlan staticUpdatePlan) {
             this.index = index;
             this.key = key;
             this.kind = kind;
             this.frozenStep = frozenStep;
             this.runtimeStepClass = runtimeStepClass;
             this.executor = executor;
-            this.declarativelyTerminal = declarativelyTerminal;
             this.staticUpdatePlan = staticUpdatePlan;
         }
 
@@ -216,17 +312,15 @@ final class SequentialWorkflowPlan {
             return executor;
         }
 
-        boolean matches(SequentialWorkflowStep step) {
-            return step == null ? runtimeStepClass == null : step.getClass() == runtimeStepClass;
-        }
-
-        boolean declarativelyTerminal() {
-            return declarativelyTerminal;
+        boolean matches(
+                SequentialWorkflowStep step) {
+            return step == null
+                    ? runtimeStepClass == null
+                    : step.getClass() == runtimeStepClass;
         }
 
         StaticUpdatePlan staticUpdatePlan() {
             return staticUpdatePlan;
         }
     }
-
 }

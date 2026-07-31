@@ -3,7 +3,6 @@ package blue.coordination.processor.compute;
 import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationProcessors;
 import blue.coordination.processor.CoordinationTestResources;
-import blue.coordination.processor.RepositoryTypeAliasPreprocessor;
 import blue.coordination.processor.TestTimelineProvider;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.Blue;
@@ -32,17 +31,20 @@ class MandateTerminationWorkflowTest {
     private static final int TERMINATION_TIMESTAMP = 7_000_001;
 
     @Test
-    void generatedMandateTerminationAppliesTimestampAndTerminatesExactlyOnce() {
+    void shouldApplyGeneratedMandateTerminationExactlyOnce() {
+        // Given
         Fixture fixture = fixture();
         DocumentProcessingResult initialized = fixture.initialize(mandateDocument(false));
-        assertEquals(1L, fixture.metrics.handlersExecuted());
         long handlersBeforeTermination = fixture.metrics.handlersExecuted();
 
+        // When
         DocumentProcessingResult result = fixture.process(
                 blue.coordination.processor.ProcessingResultTestSupport.snapshot(
                         fixture.blue, initialized),
                 fixture.terminateMandateEvent(TERMINATION_TIMESTAMP));
 
+        // Then
+        assertEquals(1L, handlersBeforeTermination);
         assertSuccess(result);
         assertEquals(StatusTerminated.blueId(),
                 result.document().getAsText("/status/type/blueId"));
@@ -62,12 +64,28 @@ class MandateTerminationWorkflowTest {
         assertEquals(0L, fixture.metrics.declarativeTerminationSteps());
         assertEquals(0L, fixture.metrics.computeResultValidationFailures());
         assertEquals(2L, fixture.metrics.handlersExecuted() - handlersBeforeTermination);
+    }
 
+    @Test
+    void shouldIgnoreDuplicateGeneratedMandateTermination() {
+        // Given
+        Fixture fixture = fixture();
+        DocumentProcessingResult initialized = fixture.initialize(
+                mandateDocument(false));
+        DocumentProcessingResult terminated = fixture.process(
+                blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                        fixture.blue, initialized),
+                fixture.terminateMandateEvent(TERMINATION_TIMESTAMP));
         long handlersBeforeDuplicate = fixture.metrics.handlersExecuted();
+
+        // When
         DocumentProcessingResult duplicate = fixture.process(
                 blue.coordination.processor.ProcessingResultTestSupport.snapshot(
-                        fixture.blue, result),
+                        fixture.blue, terminated),
                 fixture.terminateMandateEvent(TERMINATION_TIMESTAMP));
+
+        // Then
+        assertSuccess(terminated);
         assertSuccess(duplicate);
         assertTrue(eventsOfType(duplicate, MandateTerminated.blueId()).isEmpty());
         assertTrue(eventsOfType(duplicate, RuntimeBlueIds.DOCUMENT_PROCESSING_TERMINATED).isEmpty());
@@ -79,17 +97,20 @@ class MandateTerminationWorkflowTest {
     }
 
     @Test
-    void failedMandateTerminatesWithoutReplacingFailureStateOrTimestamp() {
+    void shouldTerminateFailedMandateWithoutReplacingFailureState() {
+        // Given
         Fixture fixture = fixture();
         DocumentProcessingResult initialized = fixture.initialize(mandateDocument(true));
-        assertEquals(StatusFailed.blueId(), initialized.document().getAsText("/status/type/blueId"));
-        assertNull(initialized.document().getAsNode("/terminatedAt").getValue());
 
+        // When
         DocumentProcessingResult result = fixture.process(
                 blue.coordination.processor.ProcessingResultTestSupport.snapshot(
                         fixture.blue, initialized),
                 fixture.terminateMandateEvent(TERMINATION_TIMESTAMP));
 
+        // Then
+        assertEquals(StatusFailed.blueId(), initialized.document().getAsText("/status/type/blueId"));
+        assertNull(initialized.document().getAsNode("/terminatedAt").getValue());
         assertSuccess(result);
         assertEquals(StatusFailed.blueId(), result.document().getAsText("/status/type/blueId"));
         assertNull(result.document().getAsNode("/terminatedAt").getValue());
@@ -168,9 +189,12 @@ class MandateTerminationWorkflowTest {
         }
 
         private DocumentProcessingResult initialize(Node document) {
-            document.blue(repository.typeAliasBlue());
-            Node aliasesResolved = new RepositoryTypeAliasPreprocessor(repository).preprocess(document);
-            ResolvedSnapshot snapshot = blue.resolveToSnapshot(blue.preprocess(aliasesResolved));
+            ResolvedSnapshot snapshot = blue.resolveToSnapshot(
+                    CoordinationTestResources
+                            .preprocessWithFixedRepository(
+                                    blue,
+                                    repository,
+                                    document));
             DocumentProcessingResult result = blue.initializeDocument(snapshot);
             assertSuccess(result);
             return result;

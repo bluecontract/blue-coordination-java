@@ -5,27 +5,58 @@ plugins {
 rootProject.name = 'blue-coordination-java'
 
 def localBlueLanguage = file('../blue-language-java')
-def useLocalBlueLanguage = providers.gradleProperty('useLocalBlueLanguage')
-        .map { it.toBoolean() }
-        .getOrElse(false)
-if (useLocalBlueLanguage) {
-    if (!localBlueLanguage.isDirectory()) {
-        throw new GradleException(
-                "Local blue-language-java build is missing at ${localBlueLanguage}")
+if (!localBlueLanguage.isDirectory()) {
+    throw new GradleException(
+            "Required local blue-language-java build is missing at ${localBlueLanguage}")
+}
+def localBlueLanguageCanonical = localBlueLanguage.canonicalFile
+def requestedBexLanguageComposite =
+        providers.gradleProperty('blueLanguageCompositePath')
+                .orNull
+                ?.trim()
+if (requestedBexLanguageComposite
+        && file(requestedBexLanguageComposite).canonicalFile
+        != localBlueLanguageCanonical) {
+    throw new GradleException(
+            "blueLanguageCompositePath must resolve to the required local "
+                    + "blue-language-java build at "
+                    + localBlueLanguageCanonical)
+}
+/*
+ * BEX is itself a composite consumer of Language. Gradle project properties
+ * passed to the root are inherited by included builds, while a portable
+ * default cannot be declared in this repository's gradle.properties for a
+ * sibling-relative path. Expose the canonical path as an org.gradle.project
+ * system property before BEX settings are evaluated, so BEX cannot silently
+ * compile against its standalone published Language coordinate.
+ */
+System.setProperty(
+        'org.gradle.project.blueLanguageCompositePath',
+        localBlueLanguageCanonical.absolutePath)
+includeBuild(localBlueLanguage) {
+    dependencySubstitution {
+        substitute module('blue.language:blue-language-java') using project(':')
     }
-    includeBuild(localBlueLanguage) {
-        dependencySubstitution {
-            substitute module('blue.language:blue-language-java') using project(':')
-        }
+}
+
+def localBlueBex = file('../blue-bex-java')
+if (!localBlueBex.isDirectory()) {
+    throw new GradleException(
+            "Required local blue-bex-java build is missing at ${localBlueBex}")
+}
+includeBuild(localBlueBex) {
+    dependencySubstitution {
+        substitute module('blue.bex:blue-bex-java') using project(':')
     }
 }
 
 def localBlueRepository = file('../blue-repository-java')
-if (providers.gradleProperty('useLocalBlueRepository').map { it.toBoolean() }.getOrElse(false)
-        && localBlueRepository.isDirectory()) {
-    includeBuild(localBlueRepository) {
-        dependencySubstitution {
-            substitute module('blue.repo:blue-repo-java') using project(':')
-        }
+if (!localBlueRepository.isDirectory()) {
+    throw new GradleException(
+            "Required local blue-repository-java build is missing at ${localBlueRepository}")
+}
+includeBuild(localBlueRepository) {
+    dependencySubstitution {
+        substitute module('blue.repo:blue-repo-java') using project(':')
     }
 }

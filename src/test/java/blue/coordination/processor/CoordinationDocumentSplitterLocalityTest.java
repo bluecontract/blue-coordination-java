@@ -41,12 +41,18 @@ class CoordinationDocumentSplitterLocalityTest {
     private static final int BODY_BYTES = 16 * 1024;
 
     @Test
-    void providerDemandIsProportionalToSelectedSpineAndBodies() {
+    void shouldDemandOnlySelectedSpineAndBodiesFromProvider() {
+        // Given
         Node root = selectedSpine(0);
+
+        // When
         CoordinationDocumentSplitter.SplitGraph split =
-                new CoordinationDocumentSplitter().splitDocument(root);
+                CoordinationDocumentSplitterTestSupport
+                        .splitDocument(root);
         RecordingProvider provider =
-                new RecordingProvider(split.provider());
+                new RecordingProvider(
+                        canonicalProvider(
+                                split));
         Set<String> expectedDemands =
                 new LinkedHashSet<String>();
 
@@ -55,8 +61,25 @@ class CoordinationDocumentSplitterLocalityTest {
             Node scope = fetch(provider, scopeBlueId);
             expectedDemands.add(scopeBlueId);
 
-            Node selectedBody = NodePathEditor.getOrNull(
-                    scope, "/contracts/selected/steps");
+            Node contracts = fetch(
+                    provider,
+                    scope.getContracts().getBlueId());
+            expectedDemands.add(
+                    scope.getContracts().getBlueId());
+            Node selectedContractReference =
+                    contracts.getProperties().get(
+                            "selected");
+            Node selectedContract = fetch(
+                    provider,
+                    selectedContractReference
+                            .getBlueId());
+            expectedDemands.add(
+                    selectedContractReference
+                            .getBlueId());
+            Node selectedBody =
+                    selectedContract
+                            .getProperties().get(
+                                    "steps");
             assertNotNull(selectedBody);
             assertTrue(selectedBody.isReferenceOnly());
             fetch(provider, selectedBody.getBlueId());
@@ -71,11 +94,13 @@ class CoordinationDocumentSplitterLocalityTest {
             }
         }
 
+        // Then
         assertEquals(expectedDemands, provider.demandedBlueIds());
         assertEquals(
-                (DEPTH + 1) * 2,
+                (DEPTH + 1) * 4,
                 provider.calls(),
-                "one scope fragment and one selected body are read per active scope");
+                "one scope, contract container, selected header, and selected "
+                        + "body are read per active scope");
 
         Set<String> forbidden =
                 new LinkedHashSet<String>(split.fragments().keySet());
@@ -113,19 +138,38 @@ class CoordinationDocumentSplitterLocalityTest {
     }
 
     @Test
-    void rootOnlyPreparationDoesNotReadAnyEmbeddedRoot() {
+    void shouldNotReadEmbeddedRootsForRootOnlyPreparation() {
+        // Given
         Node root = selectedSpine(0);
+
+        // When
         CoordinationDocumentSplitter.SplitGraph split =
-                new CoordinationDocumentSplitter().splitDocument(root);
+                CoordinationDocumentSplitterTestSupport
+                        .splitDocument(root);
         RecordingProvider provider =
-                new RecordingProvider(split.provider());
+                new RecordingProvider(
+                        canonicalProvider(
+                                split));
 
         Node rootFragment =
                 fetch(provider, split.rootBlueId());
-        Node rootBody = NodePathEditor.getOrNull(
-                rootFragment, "/contracts/selected/steps");
+        Node contracts =
+                fetch(
+                        provider,
+                        rootFragment.getContracts()
+                                .getBlueId());
+        Node selected =
+                fetch(
+                        provider,
+                        contracts.getProperties()
+                                .get("selected")
+                                .getBlueId());
+        Node rootBody =
+                selected.getProperties()
+                        .get("steps");
         fetch(provider, rootBody.getBlueId());
 
+        // Then
         Set<String> embeddedRootBlueIds =
                 blueIdsOfKind(
                         split.metadata(),
@@ -137,13 +181,19 @@ class CoordinationDocumentSplitterLocalityTest {
         assertEquals(
                 Arrays.asList(
                         split.rootBlueId(),
+                        rootFragment.getContracts()
+                                .getBlueId(),
+                        contracts.getProperties()
+                                .get("selected")
+                                .getBlueId(),
                         rootBody.getBlueId()),
                 new ArrayList<String>(
                         provider.demandedBlueIds()));
     }
 
     @Test
-    void allRetainedFragmentsReconstructTheExactGraphAndSharedBodiesDeduplicate() {
+    void shouldReconstructExactGraphAndDeduplicateSharedBodies() {
+        // Given
         Node sharedBody = body("shared", BODY_BYTES);
         Node root = new Node()
                 .properties("state", scalar("root"))
@@ -161,13 +211,16 @@ class CoordinationDocumentSplitterLocalityTest {
                                 SequentialWorkflow.blueId(),
                                 body("reactive", 128))));
 
+        // When
         CoordinationDocumentSplitter.SplitGraph split =
-                new CoordinationDocumentSplitter().splitDocument(root);
+                CoordinationDocumentSplitterTestSupport
+                        .splitDocument(root);
         Node reconstructed = expandKnownFragments(
                 split.pureReference(),
                 split.fragments(),
                 new LinkedHashSet<String>());
 
+        // Then
         assertEquals(
                 NodeToMapListOrValue.get(root),
                 NodeToMapListOrValue.get(reconstructed));
@@ -325,6 +378,20 @@ class CoordinationDocumentSplitterLocalityTest {
         assertNotNull(nodes);
         assertEquals(1, nodes.size());
         return nodes.get(0);
+    }
+
+    private static NodeProvider canonicalProvider(
+            CoordinationDocumentSplitter.SplitGraph split) {
+        Map<String, Node> fragments =
+                split.fragments();
+        return blueId -> {
+            Node exact = fragments.get(
+                    blueId);
+            return exact != null
+                    ? Collections.singletonList(
+                            exact.clone())
+                    : null;
+        };
     }
 
     private static Set<String> blueIdsOfKind(

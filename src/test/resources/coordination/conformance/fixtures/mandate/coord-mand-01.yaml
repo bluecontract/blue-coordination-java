@@ -1,0 +1,67 @@
+schema: blue-coordination-fixture/1.0
+id: coord-mand-01
+vectors:
+- COORD-MAND-01
+category: mandate
+description: Valid Mandate initialization produces Pending and materializes default immediate-activation configuration.
+operation: process
+input:
+  root:
+    type: { blueId: "G1G5Rp4bmcmvDrnM53JjXF3YXLwdBFqpqVZtXynrjZPC" }
+    contracts:
+      mandateLifecycleDefinition:
+        type: { blueId: "H4tutBkZAgxJsEDyjDohkZk7dcGxXQqwHMEzVkyh3U9n" }
+        constants:
+          authorityConfirmedMessageType:
+            type: { blueId: "FrxKioNPTEtuWkvxdeFQ66SbPAEUFg19veQMG1J6xo9J" }
+            timestampUs: 0
+          terminatedMessageType:
+            type: { blueId: "C3Y1zAyhCiu9wJ23gYg6vqFnVQyXKZeiHow9CzJ4W9t7" }
+            reason: authored-template
+      mandateGuarantorChannel:
+        type: { blueId: "8aohWT7jcoaC1j2siQzBxoKM8HhQ4HF13BkZDNnq5UHf" }
+        timeline:
+          type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+          timelineId: G
+        actor:
+          type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+          accountId: admin
+      authorityHolderChannel:
+        type: { blueId: "8aohWT7jcoaC1j2siQzBxoKM8HhQ4HF13BkZDNnq5UHf" }
+        timeline:
+          type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+          timelineId: B
+        actor:
+          type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+          accountId: bob
+      authorizedActorChannel:
+        type: { blueId: "8aohWT7jcoaC1j2siQzBxoKM8HhQ4HF13BkZDNnq5UHf" }
+        timeline:
+          type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+          timelineId: A
+        actor:
+          type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+          accountId: alice
+  event:
+    type: { blueId: "7L685pBvjNNrBPq6tNv53kfPEBMDkoRu7MdVMTqdcyR2" }
+    timeline:
+      type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+      timelineId: G
+    timestamp: 10
+    actor:
+      type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+      accountId: admin
+    message:
+      kind: initialize
+    fixtureId: init
+  feeder:
+    managedRootRevision: 1
+    indexedRootRevision: 1
+    eligibleSourceChannelKeys:
+    - mandateGuarantorChannel
+    - mandateTerminationChannel
+expected:
+  assertions:
+  - actual: mandate.status
+    op: equals
+    expected: Coordination/Status Pending

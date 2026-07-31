@@ -9,6 +9,10 @@ import blue.repo.coordination.SequentialWorkflow;
 import java.util.Collections;
 import java.util.List;
 
+/**
+ * Executes a fixed Sequential Workflow handler against the current immutable
+ * contract snapshot and shared processing invocation.
+ */
 public final class SequentialWorkflowProcessor implements HandlerProcessor<SequentialWorkflow> {
     private final SequentialWorkflowRunner runner;
 
@@ -35,7 +39,11 @@ public final class SequentialWorkflowProcessor implements HandlerProcessor<Seque
 
     @Override
     public String deriveChannel(SequentialWorkflow contract, HandlerRegistrationContext context) {
-        return contract != null ? contract.getChannel() : null;
+        return HandlerChannelResolver.resolve(
+                contract != null
+                        ? contract.getChannel()
+                        : null,
+                context);
     }
 
     @Override

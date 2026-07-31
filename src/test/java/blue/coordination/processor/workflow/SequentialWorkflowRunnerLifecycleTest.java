@@ -5,17 +5,21 @@ import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationProcessors;
 import blue.coordination.processor.ProcessingResultTestSupport;
 import blue.coordination.processor.bex.BexProcessingMetrics;
+import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.model.TypeBlueId;
 import blue.language.processor.ChannelEvaluationContext;
 import blue.language.processor.ChannelProcessor;
 import blue.language.processor.CheckpointDomain;
+import blue.language.processor.ContractMatchingService;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.DocumentProcessor;
 import blue.language.processor.ExternalChannelSubscriptionFunctions;
 import blue.language.processor.ExternalDeliveryPlan;
 import blue.language.processor.ExternalDeliverySnapshot;
 import blue.language.processor.ExternalOrderKey;
+import blue.language.processor.GasTraceEntry;
+import blue.language.processor.ProcessingDebugResult;
 import blue.language.processor.ProcessingSnapshotManager;
 import blue.language.processor.ProcessorStatus;
 import blue.language.processor.SubscriptionDelta;
@@ -32,7 +36,9 @@ import blue.repo.coordination.SequentialWorkflowStep;
 import blue.repo.coordination.TerminateProcessing;
 import blue.repo.coordination.TriggerEvent;
 import blue.repo.coordination.UpdateDocument;
+import blue.repo.BlueRepository;
 import java.math.BigInteger;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -53,13 +59,16 @@ class SequentialWorkflowRunnerLifecycleTest {
             "BHRKnD9toWwiU34GJvqLJ3Rtiv6W7Mmubai7CdrA1i3L";
 
     @Test
-    void normalWorkflowCreatesAndClosesOneFrozenWorkingDocument() {
+    void shouldCreateAndCloseOneFrozenWorkingDocumentForNormalWorkflow() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         SequentialWorkflowRunner runner = runner(metrics, frozenObservingExecutor());
         Fixture fixture = fixture(runner, triggerStep());
 
+        // When
         DocumentProcessingResult result = fixture.process();
 
+        // Then
         assertEquals(ProcessorStatus.SUCCESS, result.status(),
                 ProcessingResultTestSupport.diagnosticMessage(result));
         fixture.assertOneWorkflowScopeReleased();
@@ -68,13 +77,16 @@ class SequentialWorkflowRunnerLifecycleTest {
     }
 
     @Test
-    void zeroStepWorkflowStillClosesItsWorkingDocument() {
+    void shouldCloseWorkingDocumentForZeroStepWorkflow() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         SequentialWorkflowRunner runner = runner(metrics);
         Fixture fixture = fixture(runner);
 
+        // When
         DocumentProcessingResult result = fixture.process();
 
+        // Then
         assertEquals(ProcessorStatus.SUCCESS, result.status(),
                 ProcessingResultTestSupport.diagnosticMessage(result));
         fixture.assertOneWorkflowScopeReleased();
@@ -83,7 +95,8 @@ class SequentialWorkflowRunnerLifecycleTest {
     }
 
     @Test
-    void executorExceptionClosesWorkingDocumentAndStillRecordsRunnerTiming() {
+    void shouldCloseWorkingDocumentAndRecordTimingWhenExecutorThrows() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         WorkflowStepExecutor<TriggerEvent> throwing = new WorkflowStepExecutor<TriggerEvent>() {
             @Override
@@ -98,8 +111,10 @@ class SequentialWorkflowRunnerLifecycleTest {
         };
         Fixture fixture = fixture(runner(metrics, throwing), triggerStep());
 
+        // When
         DocumentProcessingResult result = fixture.process();
 
+        // Then
         assertRuntimeFatal(result, "executor exploded");
         fixture.assertOneWorkflowScopeReleased();
         assertTrue(metrics.workflowRunnerNanos() > 0L,
@@ -107,7 +122,8 @@ class SequentialWorkflowRunnerLifecycleTest {
     }
 
     @Test
-    void throwFatalClosesWorkingDocument() {
+    void shouldCloseWorkingDocumentWhenExecutorRequestsFatalFailure() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         WorkflowStepExecutor<TriggerEvent> fatal = new WorkflowStepExecutor<TriggerEvent>() {
             @Override
@@ -117,25 +133,30 @@ class SequentialWorkflowRunnerLifecycleTest {
 
             @Override
             public WorkflowStepResult execute(TriggerEvent step, StepExecutionContext context) {
-                context.processorContext().throwFatal("requested fatal");
+                context.throwFatal("requested fatal");
                 return WorkflowStepResult.none();
             }
         };
         Fixture fixture = fixture(runner(metrics, fatal), triggerStep());
 
+        // When
         DocumentProcessingResult result = fixture.process();
 
+        // Then
         assertRuntimeFatal(result, "requested fatal");
         fixture.assertOneWorkflowScopeReleased();
     }
 
     @Test
-    void declarativeApplicationTerminationClosesAndSkipsLaterPatchStep() {
+    void shouldCloseAndSkipLaterPatchAfterDeclarativeTermination() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
+        AtomicInteger patchSelections = new AtomicInteger();
         AtomicInteger patchExecutions = new AtomicInteger();
         WorkflowStepExecutor<UpdateDocument> forbiddenPatch = new WorkflowStepExecutor<UpdateDocument>() {
             @Override
             public boolean supports(SequentialWorkflowStep step) {
+                patchSelections.incrementAndGet();
                 return step instanceof UpdateDocument;
             }
 
@@ -153,41 +174,250 @@ class SequentialWorkflowRunnerLifecycleTest {
                 terminateStep("finished"),
                 updateStep("replace", "/counter", new Node().value(99)));
 
+        // When
         DocumentProcessingResult result = fixture.process();
 
+        // Then
         assertEquals(ProcessorStatus.SUCCESS, result.status(),
                 ProcessingResultTestSupport.diagnosticMessage(result));
         assertEquals(0, patchExecutions.get(),
                 "no patch-producing step may execute after terminal scope work");
+        assertEquals(0, patchSelections.get(),
+                "a step after termination must not select an executor");
+        assertEquals(0L, metrics.updateStaticTemplatesBuilt(),
+                "a step after termination must not compile a static plan");
+        assertEquals(1L, metrics.workflowExecutorLookups(),
+                "only the reached termination step may be planned");
         assertEquals(BigInteger.ZERO, result.document().get("/counter"));
+        assertEquals(TerminateProcessing.blueId(),
+                result.document().get("/contracts/terminated/cause"));
+        assertEquals("finished",
+                result.document().get("/contracts/terminated/reason"));
         fixture.assertOneWorkflowScopeReleased();
         assertEquals(1L, metrics.declarativeTerminationSteps());
     }
 
     @Test
-    void unavailableComputeCapabilityClosesWorkingDocument() {
+    void shouldNotPopulateStepPlanCacheWhenGasRejectsBeforePlanning() {
+        // Given
+        WorkflowStepExecutor<UpdateDocument> referenceExecutor =
+                noOpUpdateExecutor(new AtomicInteger());
+        ProcessingDebugResult reference =
+                fixture(
+                        runner(
+                                new BexProcessingMetrics(),
+                                referenceExecutor),
+                        updateStep(
+                                "replace",
+                                "/counter",
+                                new Node().value(1)))
+                        .processWithTrace();
+        long admittedBeforeExecution =
+                admittedBefore(
+                        reference,
+                        "workflowStepExecuted");
+        BexProcessingMetrics metrics =
+                new BexProcessingMetrics();
+        AtomicInteger supportsCalls = new AtomicInteger();
+        SequentialWorkflowRunner limitedRunner =
+                runner(
+                        metrics,
+                        noOpUpdateExecutor(supportsCalls));
+        Fixture limited =
+                fixtureWithGasLimit(
+                        limitedRunner,
+                        admittedBeforeExecution,
+                        updateStep(
+                                "replace",
+                                "/counter",
+                                new Node().value(1)));
+
+        // When
+        ProcessingDebugResult rejected =
+                limited.processWithTrace();
+
+        // Then
+        assertEquals(
+                ProcessorStatus.GAS_LIMIT_EXCEEDED,
+                rejected.processResult().status(),
+                ProcessingResultTestSupport
+                        .diagnosticMessage(
+                                rejected.processResult()));
+        assertEquals(0, supportsCalls.get());
+        assertEquals(0L, metrics.workflowExecutorLookups());
+        assertEquals(0L, metrics.updateStaticTemplatesBuilt());
+        assertEquals(0L, metrics.workflowPlansBuilt());
+        assertEquals(
+                0,
+                limitedRunner.workflowPlanCacheSize());
+        assertTrue(
+                hasCoordinationCounter(
+                        rejected,
+                        "workflowStepVisited"));
+        assertFalse(
+                hasCoordinationCounter(
+                        rejected,
+                        "workflowStepExecuted"));
+    }
+
+    @Test
+    void shouldProduceIdenticalGasTraceForColdAndWarmedStepPlans() {
+        // Given
+        BexProcessingMetrics metrics =
+                new BexProcessingMetrics();
+        AtomicInteger supportsCalls = new AtomicInteger();
+        SequentialWorkflowRunner runner =
+                runner(
+                        metrics,
+                        noOpUpdateExecutor(supportsCalls));
+        Node update = updateStep(
+                "replace",
+                "/counter",
+                new Node().value(1));
+        Fixture coldFixture =
+                fixture(runner, update);
+        Fixture warmFixture =
+                fixture(runner, update);
+
+        // When
+        ProcessingDebugResult cold =
+                coldFixture.processWithTrace();
+        ProcessingDebugResult warmed =
+                warmFixture.processWithTrace();
+
+        // Then
+        assertEquals(
+                ProcessorStatus.SUCCESS,
+                cold.processResult().status(),
+                ProcessingResultTestSupport
+                        .diagnosticMessage(
+                                cold.processResult()));
+        assertEquals(
+                ProcessorStatus.SUCCESS,
+                warmed.processResult().status(),
+                ProcessingResultTestSupport
+                        .diagnosticMessage(
+                                warmed.processResult()));
+        assertEquals(
+                gasProjection(cold),
+                gasProjection(warmed));
+        assertEquals(1, supportsCalls.get());
+        assertEquals(
+                1L,
+                metrics.updateStaticTemplatesBuilt());
+        assertEquals(
+                1,
+                runner.workflowPlanCacheSize());
+    }
+
+    @Test
+    void shouldValidateComputeResultAndCloseWorkingDocumentWhenCapabilityIsAvailable() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         SequentialWorkflowRunner runner = SequentialWorkflowRunner.withBexEngine(
                 BexEngine.builder().build(), 100_000L, metrics);
         Fixture fixture = fixture(runner, invalidComputeResultStep());
 
+        // When
         DocumentProcessingResult result = fixture.process();
 
-        assertRuntimeFatal(result, "Compute runtime capability is unavailable");
+        // Then
+        assertRuntimeFatal(result,
+                "Invalid Compute result: Compute result changeset must be a list");
         fixture.assertNoTransientSequenceLeak();
-        assertEquals(0L, metrics.computeResultValidationFailures());
+        assertEquals(1L, metrics.computeResultValidationFailures());
     }
 
     @Test
-    void patchPreviewFailureClosesWorkingDocument() {
+    void shouldMergeOneDistinctHostedLedgerPerComputeStep() {
+        // Given
+        BexProcessingMetrics metrics = new BexProcessingMetrics();
+        SequentialWorkflowRunner runner = SequentialWorkflowRunner.withBexEngine(
+                BexEngine.builder().build(), 100_000L, metrics);
+        Fixture fixture = fixture(runner,
+                returningComputeStep(1),
+                returningComputeStep(2));
+
+        // When
+        ProcessingDebugResult debug =
+                fixture.processWithTrace();
+        DocumentProcessingResult result =
+                debug.processResult();
+
+        // Then
+        assertEquals(ProcessorStatus.SUCCESS, result.status(),
+                ProcessingResultTestSupport.diagnosticMessage(result));
+        assertEquals(2L, metrics.computeStepsExecuted());
+        assertTrue(result.totalGas() > 0L,
+                "every workflow-owned BEX child ledger must reach Contracts");
+        assertEquals(
+                Arrays.asList(
+                        "bex.workflow.00000000.compute.00000000",
+                        "bex.workflow.00000000.compute.00000001"),
+                distinctBexNamespaces(debug));
+        fixture.assertNoTransientSequenceLeak();
+    }
+
+    @Test
+    void shouldMergeAdmittedLedgerPrefixOnceWhenSecondComputeFails() {
+        // Given
+        BexProcessingMetrics metrics = new BexProcessingMetrics();
+        SequentialWorkflowRunner runner = SequentialWorkflowRunner.withBexEngine(
+                BexEngine.builder().build(), 100_000L, metrics);
+        Fixture fixture = fixture(runner,
+                returningComputeStep(1),
+                failingComputeStep("synthetic-boom"));
+
+        // When
+        DocumentProcessingResult result = fixture.process();
+
+        // Then
+        assertRuntimeFatal(result, "Compute failed: synthetic-boom");
+        assertEquals(2L, metrics.computeStepsExecuted());
+        assertTrue(result.totalGas() > 0L,
+                "deterministically admitted BEX gas must survive invocation rollback");
+        fixture.assertNoTransientSequenceLeak();
+    }
+
+    @Test
+    void shouldRetainEarlierComputeLedgerWhenLaterStepFails() {
+        // Given
+        DocumentProcessingResult updateOnly = fixture(
+                SequentialWorkflowRunner.withBexEngine(
+                        BexEngine.builder().build(), 100_000L),
+                updateStep("unsupported", "/counter", new Node().value(7)))
+                .process();
+        Fixture fixture = fixture(
+                SequentialWorkflowRunner.withBexEngine(
+                        BexEngine.builder().build(), 100_000L),
+                returningComputeStep(1),
+                updateStep("unsupported", "/counter", new Node().value(7)));
+
+        // When
+        DocumentProcessingResult result = fixture.process();
+
+        // Then
+        assertRuntimeFatal(result,
+                "Unsupported Update Document patch operation");
+        assertTrue(result.totalGas() > updateOnly.totalGas(),
+                "a later authored-step failure must retain the earlier BEX "
+                        + "child-ledger prefix");
+        fixture.assertNoTransientSequenceLeak();
+    }
+
+    @Test
+    void shouldCloseWorkingDocumentWhenPatchPreviewFails() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         SequentialWorkflowRunner runner = SequentialWorkflowRunner.withBexEngine(
                 BexEngine.builder().build(), 100_000L, metrics);
         Fixture fixture = fixture(runner,
                 updateStep("add", "/counter/child", new Node().value(1)));
 
+        // When
         DocumentProcessingResult result = fixture.process();
 
+        // Then
         assertEquals(ProcessorStatus.RUNTIME_FATAL, result.status(),
                 ProcessingResultTestSupport.diagnosticMessage(result));
         fixture.assertNoTransientSequenceLeak();
@@ -195,7 +425,8 @@ class SequentialWorkflowRunnerLifecycleTest {
     }
 
     @Test
-    void processorFailureAfterPreviewReleasesEverySequenceScope() {
+    void shouldReleaseEverySequenceScopeWhenProcessorFailsAfterPreview() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         final TrackingSnapshotManager snapshotManager = new TrackingSnapshotManager();
         WorkflowStepExecutor<TriggerEvent> previewThenFail =
@@ -220,8 +451,10 @@ class SequentialWorkflowRunnerLifecycleTest {
                 snapshotManager,
                 triggerStep());
 
+        // When
         DocumentProcessingResult result = fixture.process();
 
+        // Then
         assertRuntimeFatal(result, "simulated post-preview failure");
         fixture.assertNoTransientSequenceLeak();
         assertTrue(fixture.snapshotManager.openCalls() >= 2,
@@ -229,15 +462,18 @@ class SequentialWorkflowRunnerLifecycleTest {
     }
 
     @Test
-    void transferredPreviewRemainsValidAfterWorkflowWorkingDocumentCloses() {
+    void shouldKeepTransferredPreviewValidAfterWorkflowDocumentCloses() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         SequentialWorkflowRunner runner = SequentialWorkflowRunner.withBexEngine(
                 BexEngine.builder().build(), 100_000L, metrics);
         Fixture fixture = fixture(runner,
                 updateStep("replace", "/counter", new Node().value(7)));
 
+        // When
         DocumentProcessingResult result = fixture.process();
 
+        // Then
         assertEquals(ProcessorStatus.SUCCESS, result.status(),
                 ProcessingResultTestSupport.diagnosticMessage(result));
         assertEquals(BigInteger.valueOf(7), result.document().get("/counter"),
@@ -247,11 +483,13 @@ class SequentialWorkflowRunnerLifecycleTest {
     }
 
     @Test
-    void tenThousandShortWorkflowsDoNotAccumulateTransientSequenceState() {
+    void shouldNotAccumulateTransientSequenceStateAcrossTenThousandWorkflows() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         SequentialWorkflowRunner runner = runner(metrics, noOpExecutor());
         Fixture fixture = fixture(runner, triggerStep());
 
+        // When
         for (int i = 0; i < 10_000; i++) {
             DocumentProcessingResult result = fixture.process();
             assertEquals(ProcessorStatus.SUCCESS, result.status(),
@@ -260,6 +498,7 @@ class SequentialWorkflowRunnerLifecycleTest {
                     "transient scope leak after repetition " + i);
         }
 
+        // Then
         assertEquals(10_000, fixture.snapshotManager.openCalls());
         assertEquals(10_000, fixture.snapshotManager.releaseCalls());
         assertEquals(10_000L, metrics.workflowDocumentViewsFromFrozen());
@@ -295,6 +534,25 @@ class SequentialWorkflowRunnerLifecycleTest {
         };
     }
 
+    private static WorkflowStepExecutor<UpdateDocument> noOpUpdateExecutor(
+            AtomicInteger supportsCalls) {
+        return new WorkflowStepExecutor<UpdateDocument>() {
+            @Override
+            public boolean supports(
+                    SequentialWorkflowStep step) {
+                supportsCalls.incrementAndGet();
+                return step instanceof UpdateDocument;
+            }
+
+            @Override
+            public WorkflowStepResult execute(
+                    UpdateDocument step,
+                    StepExecutionContext context) {
+                return WorkflowStepResult.none();
+            }
+        };
+    }
+
     @SafeVarargs
     private static SequentialWorkflowRunner runner(
             BexProcessingMetrics metrics,
@@ -309,22 +567,75 @@ class SequentialWorkflowRunnerLifecycleTest {
     private static Fixture fixture(SequentialWorkflowRunner runner,
                                    TrackingSnapshotManager snapshotManager,
                                    Node... steps) {
+        DocumentProcessor processor = processor(
+                runner,
+                snapshotManager,
+                null);
+        DocumentProcessingResult initialized =
+                initialize(
+                        processor,
+                        document(steps));
+        snapshotManager.resetLifecycleCounters();
+        return new Fixture(
+                processor,
+                initialized.document(),
+                snapshotManager);
+    }
+
+    private static Fixture fixtureWithGasLimit(
+            SequentialWorkflowRunner runner,
+            long gasLimit,
+            Node... steps) {
+        TrackingSnapshotManager snapshotManager =
+                new TrackingSnapshotManager();
+        Node authored = document(steps);
+        DocumentProcessor initializer = processor(
+                runner,
+                snapshotManager,
+                null);
+        DocumentProcessingResult initialized =
+                initialize(initializer, authored);
+        snapshotManager.resetLifecycleCounters();
+        DocumentProcessor limited = processor(
+                runner,
+                snapshotManager,
+                Long.valueOf(gasLimit));
+        return new Fixture(
+                limited,
+                initialized.document(),
+                snapshotManager);
+    }
+
+    private static DocumentProcessor processor(
+            SequentialWorkflowRunner runner,
+            TrackingSnapshotManager snapshotManager,
+            Long gasLimit) {
+        Blue blue = BlueRepository.latest().configure(new Blue());
         DocumentProcessor.Builder builder = DocumentProcessor.builder()
                 .withSnapshotManager(snapshotManager)
+                .withMatchingService(new ContractMatchingService(blue))
                 .withExternalDeliveryPlanDeriver(
                         SequentialWorkflowRunnerLifecycleTest::deliveryPlan);
         CoordinationProcessors.configure(builder,
                 CoordinationProcessorOptions.builder()
                         .sequentialWorkflowRunner(runner)
                         .build());
-        DocumentProcessor processor = builder
+        if (gasLimit != null) {
+            builder.withGasLimit(gasLimit.longValue());
+        }
+        return builder
                 .registerContractProcessor(new LifecycleChannelProcessor())
                 .build();
-        DocumentProcessingResult initialized = processor.initializeDocument(document(steps));
+    }
+
+    private static DocumentProcessingResult initialize(
+            DocumentProcessor processor,
+            Node document) {
+        DocumentProcessingResult initialized =
+                processor.initializeDocument(document);
         assertEquals(ProcessorStatus.SUCCESS, initialized.status(),
                 ProcessingResultTestSupport.diagnosticMessage(initialized));
-        snapshotManager.resetLifecycleCounters();
-        return new Fixture(processor, initialized.document(), snapshotManager);
+        return initialized;
     }
 
     private static Node document(Node... steps) {
@@ -384,7 +695,6 @@ class SequentialWorkflowRunnerLifecycleTest {
 
     private static Node terminateStep(String reason) {
         return typed(TerminateProcessing.blueId())
-                .properties("cause", new Node().value("completed"))
                 .properties("reason", new Node().value(reason));
     }
 
@@ -403,14 +713,106 @@ class SequentialWorkflowRunnerLifecycleTest {
                                 .properties("changeset", new Node().value("not-a-list")))));
     }
 
+    private static Node returningComputeStep(int value) {
+        return typed(Compute.blueId())
+                .properties("do", new Node().items(new Node()
+                        .properties("$return", new Node().value(value))));
+    }
+
+    private static Node failingComputeStep(String reason) {
+        return typed(Compute.blueId())
+                .properties("do", new Node().items(new Node()
+                        .properties("$fail", new Node().value(reason))));
+    }
+
     private static Node typed(String blueId) {
         return new Node().type(new Node().blueId(blueId));
     }
 
     private static void assertRuntimeFatal(DocumentProcessingResult result, String message) {
         String diagnostic = ProcessingResultTestSupport.diagnosticMessage(result);
-        assertEquals(ProcessorStatus.RUNTIME_FATAL, result.status(), diagnostic);
-        assertTrue(diagnostic.contains(message), diagnostic);
+        String evidence = result.diagnostic() != null
+                ? diagnostic + " details=" + result.diagnostic().details()
+                : diagnostic;
+        assertEquals(
+                ProcessorStatus.RUNTIME_FATAL,
+                result.status(),
+                evidence);
+        assertTrue(
+                diagnostic.contains(message),
+                evidence);
+    }
+
+    private static long admittedBefore(
+            ProcessingDebugResult result,
+            String counter) {
+        long admitted = 0L;
+        for (GasTraceEntry entry
+                : result.trace().gas()) {
+            if (entry.namespace().startsWith(
+                    "coordination.")
+                    && counter.equals(
+                    entry.counter())) {
+                return admitted;
+            }
+            admitted = Math.addExact(
+                    admitted,
+                    entry.subtotal());
+        }
+        throw new AssertionError(
+                "Missing Coordination gas counter "
+                        + counter);
+    }
+
+    private static boolean hasCoordinationCounter(
+            ProcessingDebugResult result,
+            String counter) {
+        for (GasTraceEntry entry
+                : result.trace().gas()) {
+            if (entry.namespace().startsWith(
+                    "coordination.")
+                    && counter.equals(
+                    entry.counter())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static List<String> gasProjection(
+            ProcessingDebugResult result) {
+        List<String> projection =
+                new ArrayList<String>();
+        for (GasTraceEntry entry
+                : result.trace().gas()) {
+            projection.add(
+                    entry.namespace()
+                            + "|" + entry.counter()
+                            + "|" + entry.quantity()
+                            + "|" + entry.weight()
+                            + "|" + entry.subtotal()
+                            + "|" + entry.scopePath()
+                            + "|" + entry.contractKey()
+                            + "|" + entry.reason());
+        }
+        return projection;
+    }
+
+    private static List<String> distinctBexNamespaces(
+            ProcessingDebugResult result) {
+        List<String> namespaces =
+                new ArrayList<String>();
+        for (GasTraceEntry entry
+                : result.trace().gas()) {
+            if (entry.namespace().startsWith(
+                    "bex.workflow.")
+                    && !namespaces.contains(
+                    entry.namespace())) {
+                namespaces.add(
+                        entry.namespace());
+            }
+        }
+        return namespaces;
     }
 
     private static final class Fixture {
@@ -431,6 +833,19 @@ class SequentialWorkflowRunnerLifecycleTest {
                     .properties("id", new Node().value("run"))
                     .properties("subscriptionKey",
                             new Node().value("channel")));
+        }
+
+        private ProcessingDebugResult processWithTrace() {
+            return processor.processDocumentWithTrace(
+                    initializedDocument,
+                    new Node()
+                            .properties(
+                                    "id",
+                                    new Node().value("run"))
+                            .properties(
+                                    "subscriptionKey",
+                                    new Node().value(
+                                            "channel")));
         }
 
         private void assertOneWorkflowScopeReleased() {

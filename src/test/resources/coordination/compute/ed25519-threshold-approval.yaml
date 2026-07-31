@@ -275,7 +275,7 @@ contracts:
             expr:
               $intrinsic:
                 type:
-                  blueId: Common/Crypto Ed25519 Verify
+                  blueId: 6P98bLNKcsNPUovBBsLu6W3BQnrg6F8TPjhbZhegrDSL
                 publicKey:
                   $var: publicKey
                 message:

@@ -10,6 +10,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicLong;
 
+/**
+ * Thread-safe Coordination and hosted-BEX metrics sink.
+ *
+ * <p>All metric names are bounded and snapshots are immutable, so optional
+ * observability cannot alter workflow semantics or portable gas.</p>
+ */
 public final class BexProcessingMetrics implements ProcessingMetricsSink {
     /**
      * Language currently emits a fixed vocabulary, but keep the adapter safe if a future
@@ -1323,12 +1329,18 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
     /**
      * Number of reusable Language patch-sequence planning sessions. This is the raw value from
      * {@link #incrementPatchSequencesPrepared()}.
+     *
+     * @return number of prepared reusable patch-sequence sessions
      */
     public long preparedPatchSequences() {
         return patchSequencesPrepared.get();
     }
 
-    /** Number of patches accepted by Language sequence sessions. */
+    /**
+     * Number of patches accepted by Language sequence sessions.
+     *
+     * @return number of accepted sequence-session patches
+     */
     public long preparedPatches() {
         return patchesPrepared.get();
     }
@@ -1339,12 +1351,18 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
      * <p>The callback identifies a reusable sequential <em>planning</em> session,
      * not the Language runtime's internal transaction counter, so reports must
      * retain this qualification.</p>
+     *
+     * @return number of reusable Language sequence planning sessions
      */
     public long languageSequenceTransactions() {
         return patchSequencesPrepared.get();
     }
 
-    /** Number of legacy standalone one-patch Language transactions. */
+    /**
+     * Number of standalone one-patch Language transactions.
+     *
+     * @return number of singleton patch transactions
+     */
     public long languageSingletonTransactions() {
         return singletonPatchTransactions.get();
     }
@@ -1373,7 +1391,11 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
         return sequenceSharedSnapshotCacheInserts.get();
     }
 
-    /** Maps to Language's final sequence snapshot-cache insertion callback. */
+    /**
+     * Maps to Language's final sequence snapshot-cache insertion callback.
+     *
+     * @return number of final sequence snapshot-cache insertions
+     */
     public long languageFinalSnapshotPromotions() {
         return sequenceFinalSnapshotCacheInserts.get();
     }
@@ -1466,22 +1488,40 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
         }
     }
 
-    /** Immutable, name-sorted snapshot of Language's generic additive counters. */
+    /**
+     * Immutable, name-sorted snapshot of Language's generic additive counters.
+     *
+     * @return immutable additive-counter values sorted by metric name
+     */
     public Map<String, Long> languageCounters() {
         return immutableSortedValues(languageCounters);
     }
 
-    /** Immutable, name-sorted snapshot of Language's generic current-value gauges. */
+    /**
+     * Immutable, name-sorted snapshot of Language's generic current-value
+     * gauges.
+     *
+     * @return immutable current-value gauges sorted by metric name
+     */
     public Map<String, Long> languageGauges() {
         return immutableSortedValues(languageGauges);
     }
 
-    /** Immutable, name-sorted snapshot of Language's generic high-water gauges. */
+    /**
+     * Immutable, name-sorted snapshot of Language's generic high-water gauges.
+     *
+     * @return immutable high-water gauges sorted by metric name
+     */
     public Map<String, Long> languageHighWaterMarks() {
         return immutableSortedValues(languageHighWaterMarks);
     }
 
-    /** Number of generic metric samples dropped because their new name exceeded the cap. */
+    /**
+     * Number of generic metric samples dropped because their new name exceeded
+     * the cap.
+     *
+     * @return number of metric samples dropped due to the metric-name cap
+     */
     public long droppedLanguageMetricNames() {
         return droppedLanguageMetricNames.get();
     }

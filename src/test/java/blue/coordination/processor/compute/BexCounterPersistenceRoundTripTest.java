@@ -34,7 +34,8 @@ class BexCounterPersistenceRoundTripTest {
     private static final String COUNTER_RESOURCE = "coordination/compute/bex-counter-persistence.yaml";
 
     @Test
-    void serializedCanonicalDocumentCanBeReloadedAndProcessedAcrossOneHundredBexIncrements() {
+    void shouldReloadCanonicalDocumentAcrossOneHundredBexIncrements() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         CoordinationProcessorOptions options = CoordinationProcessorOptions.builder()
                 .processingMetrics(metrics)
@@ -43,9 +44,12 @@ class BexCounterPersistenceRoundTripTest {
 
         long start = System.nanoTime();
 
+        // When
         long initializeStart = System.nanoTime();
         DocumentProcessingResult initialized = support.initialize(support.yamlResource(COUNTER_RESOURCE));
         long initializeNanos = System.nanoTime() - initializeStart;
+
+        // Initialization assertions
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(initialized), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(initialized));
         assertNotNull(blue.coordination.processor.ProcessingResultTestSupport.snapshot(
                 support.blue, initialized));
@@ -62,12 +66,15 @@ class BexCounterPersistenceRoundTripTest {
         long totalDeserializeAndLoadSnapshotNanos = 0L;
         long totalSerializeNanos = 0L;
 
+        // Repeated cold reload and increment
         for (int i = 1; i <= ITERATIONS; i++) {
             ComputeWorkflowTestSupport coldSupport = ComputeWorkflowTestSupport.create(options);
             long loadStart = System.nanoTime();
             ResolvedSnapshot snapshot = deserializeCanonicalAndLoadSnapshot(
                     coldSupport, storedCanonicalJson);
             totalDeserializeAndLoadSnapshotNanos += System.nanoTime() - loadStart;
+
+            // Reload assertion
             assertNotNull(snapshot.blueId(), "stored snapshot should load at iteration " + i);
             storedBlueId = snapshot.blueId();
 
@@ -76,6 +83,7 @@ class BexCounterPersistenceRoundTripTest {
                     operationRequest(coldSupport.blue, coldSupport.repository, i));
             totalProcessNanos += System.nanoTime() - processStart;
 
+            // Increment assertions
             assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
             assertNotNull(
                     blue.coordination.processor.ProcessingResultTestSupport.snapshot(
@@ -97,6 +105,8 @@ class BexCounterPersistenceRoundTripTest {
         long totalNanos = System.nanoTime() - start;
         ResolvedSnapshot finalSnapshot = deserializeCanonicalAndLoadSnapshot(
                 ComputeWorkflowTestSupport.create(options), storedCanonicalJson);
+
+        // Then
         assertEquals(BigInteger.valueOf(ITERATIONS), finalSnapshot.resolvedNodeAt("/counter").getValue());
         assertEquals(ITERATIONS, metrics.updateBatchPatchApplications());
         assertEquals(ITERATIONS, metrics.directBexChangesetHits());

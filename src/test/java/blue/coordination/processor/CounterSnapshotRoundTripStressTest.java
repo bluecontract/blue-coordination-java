@@ -28,7 +28,8 @@ class CounterSnapshotRoundTripStressTest {
     private static final int STRESS_ITERATIONS = 100;
 
     @Test
-    void bexOnlyCounterUpdatesSurviveCanonicalSnapshotRoundTrips() {
+    void shouldPreserveBexOnlyCounterUpdatesAcrossCanonicalSnapshotRoundTrips() {
+        // Given
         Fixture fixture = configuredFixture();
         DocumentProcessingResult initialized = fixture.blue.initializeDocument(
                 fixture.blue.preprocess(bexOnlyCounterDocument(fixture.counterIncrementHandlerBlueId)
@@ -37,12 +38,7 @@ class CounterSnapshotRoundTripStressTest {
                 ProcessingResultTestSupport.snapshot(fixture.blue, initialized);
         assertNotNull(currentSnapshot);
 
-        long started = System.nanoTime();
-        long totalGas = 0L;
-        long maxGas = 0L;
-        long minGas = Long.MAX_VALUE;
-        String finalBlueId = null;
-
+        // When
         for (int i = 1; i <= STRESS_ITERATIONS; i++) {
             Node event = timelineEntry(fixture.blue,
                     fixture.repository,
@@ -88,11 +84,7 @@ class CounterSnapshotRoundTripStressTest {
                     ProcessingResultTestSupport.resolvedDocument(
                             fixture.blue, result).get("/counter"));
             assertCounterMessage(result.events().get(0), i);
-
-            totalGas += result.totalGas();
-            maxGas = Math.max(maxGas, result.totalGas());
-            minGas = Math.min(minGas, result.totalGas());
-            finalBlueId = resultBlueId;
+            assertDeterministicColdReplay(currentSnapshot, event, result, i);
 
             String canonicalJson = fixture.blue.nodeToJson(result.document());
             Fixture coldFixture = configuredFixture();
@@ -106,20 +98,44 @@ class CounterSnapshotRoundTripStressTest {
             fixture = coldFixture;
         }
 
-        long elapsedMillis = (System.nanoTime() - started) / 1_000_000L;
+        // Then
         assertEquals(BigInteger.valueOf(STRESS_ITERATIONS), currentSnapshot.resolvedNodeAt("/counter").getValue());
-        assertNotNull(finalBlueId);
-        assertTrue(totalGas > 0);
-        assertTrue(maxGas > 0);
-        assertTrue(minGas > 0);
-        assertEquals(minGas, maxGas, "equivalent BEX-only increments should charge stable gas");
+        assertNotNull(currentSnapshot.blueId());
+    }
 
-        System.out.println("BEX-only counter snapshot round-trip stress: iterations=" + STRESS_ITERATIONS
-                + ", totalGas=" + totalGas
-                + ", minGas=" + minGas
-                + ", maxGas=" + maxGas
-                + ", finalBlueId=" + finalBlueId
-                + ", elapsedMillis=" + elapsedMillis);
+    private static void assertDeterministicColdReplay(
+            ResolvedSnapshot inputSnapshot,
+            Node event,
+            DocumentProcessingResult expected,
+            int iteration) {
+        Fixture replayFixture = configuredFixture();
+        String canonicalInput =
+                replayFixture.blue.nodeToJson(inputSnapshot.canonicalRoot());
+        ResolvedSnapshot replayInput = replayFixture.blue.loadSnapshot(
+                replayFixture.blue.parseSourceJson(canonicalInput));
+
+        DocumentProcessingResult replay =
+                replayFixture.blue.processDocument(replayInput, event.clone());
+
+        assertEquals(expected.status(), replay.status(),
+                "iteration " + iteration + " should preserve status on replay");
+        assertEquals(expected.totalGas(), replay.totalGas(),
+                "iteration " + iteration
+                        + " should charge the same gas for the same canonical input and event");
+        assertEquals(ProcessingResultTestSupport.blueId(expected),
+                ProcessingResultTestSupport.blueId(replay),
+                "iteration " + iteration + " should preserve the resulting BlueId on replay");
+        assertEquals(expected.events().size(), replay.events().size(),
+                "iteration " + iteration + " should preserve emitted event count on replay");
+        for (int eventIndex = 0;
+             eventIndex < expected.events().size();
+             eventIndex++) {
+            assertEquals(
+                    replayFixture.blue.nodeToJson(expected.events().get(eventIndex)),
+                    replayFixture.blue.nodeToJson(replay.events().get(eventIndex)),
+                    "iteration " + iteration
+                            + " should preserve emitted event " + eventIndex + " on replay");
+        }
     }
 
     private static void assertSnapshotRoundTrip(ResolvedSnapshot expected, ResolvedSnapshot actual) {
@@ -199,6 +215,8 @@ class CounterSnapshotRoundTripStressTest {
         blue.registerExternalContractType(counterIncrementHandlerBlueId,
                 counterIncrementHandlerType,
                 new CounterIncrementHandlerProcessor());
+        CoordinationDeliveryPlanning.currentRootCompatibility(
+                blue.getDocumentProcessor());
         return new Fixture(repository, blue, counterIncrementHandlerBlueId);
     }
 

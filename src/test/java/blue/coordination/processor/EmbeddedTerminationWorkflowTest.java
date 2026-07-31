@@ -6,6 +6,7 @@ import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorStatus;
 import blue.repo.BlueRepository;
+import blue.repo.coordination.TerminateProcessing;
 
 import org.junit.jupiter.api.Test;
 
@@ -17,43 +18,48 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 class EmbeddedTerminationWorkflowTest {
     @Test
-    void terminateProcessingInEmbeddedWorkflowTerminatesOnlyEmbeddedScope() {
+    void shouldTerminateOnlyEmbeddedScopeForTerminateProcessingStep() {
+        // Given
         Fixture fixture = fixture();
         Node initialized = fixture.initialize(documentWithEmbeddedTermination(false));
 
+        // When
         DocumentProcessingResult childResult = fixture.process(initialized,
                 fixture.operationEvent("child", 1, "runChild", "childChannel"));
+        DocumentProcessingResult rootResult = fixture.process(childResult.document(),
+                fixture.operationEvent("root", 1, "runRoot", "rootChannel"));
 
+        // Then
         assertSuccess(childResult);
         assertEquals("changed-before-stop", childResult.document().get("/child/status"));
-        assertEquals("embedded-workflow-complete",
+        assertEquals(TerminateProcessing.blueId(),
                 childResult.document().get("/child/contracts/terminated/cause"));
         assertEquals("embedded-complete", childResult.document().get("/child/contracts/terminated/reason"));
         assertNull(nodeAt(childResult.document(), "/contracts/terminated"));
         assertEquals(1L, fixture.metrics.declarativeTerminationSteps());
 
-        DocumentProcessingResult rootResult = fixture.process(childResult.document(),
-                fixture.operationEvent("root", 1, "runRoot", "rootChannel"));
-
         assertSuccess(rootResult);
         assertEquals("root-still-active", rootResult.document().get("/rootStatus"));
         assertNull(nodeAt(rootResult.document(), "/contracts/terminated"));
-        assertEquals("embedded-workflow-complete",
+        assertEquals(TerminateProcessing.blueId(),
                 rootResult.document().get("/child/contracts/terminated/cause"));
     }
 
     @Test
-    void computeAndDeclarativeTerminationProduceEquivalentEmbeddedEffects() {
+    void shouldProduceEquivalentEmbeddedEffectsForComputeAndDeclarativeTermination() {
+        // Given
         Fixture computeFixture = fixture();
         Fixture declarativeFixture = fixture();
         Node computeDocument = computeFixture.initialize(documentWithEmbeddedTermination(true));
         Node declarativeDocument = declarativeFixture.initialize(documentWithEmbeddedTermination(false));
 
+        // When
         DocumentProcessingResult compute = computeFixture.process(computeDocument,
                 computeFixture.operationEvent("child", 1, "runChild", "childChannel"));
         DocumentProcessingResult declarative = declarativeFixture.process(declarativeDocument,
                 declarativeFixture.operationEvent("child", 1, "runChild", "childChannel"));
 
+        // Then
         assertSuccess(compute);
         assertSuccess(declarative);
         assertEquals(compute.document().get("/child/status"), declarative.document().get("/child/status"));
@@ -82,9 +88,9 @@ class EmbeddedTerminationWorkflowTest {
                 updateStep("/status", "changed-before-stop"),
                 computeTermination
                         ? computeTerminateStep(
-                                "embedded-workflow-complete", "embedded-complete")
-                        : declarativeTerminateStep(
-                                "embedded-workflow-complete", "embedded-complete"),
+                                TerminateProcessing.blueId(),
+                                "embedded-complete")
+                        : declarativeTerminateStep("embedded-complete"),
                 updateStep("/status", "must-not-run")));
 
         return new Node()
@@ -114,10 +120,9 @@ class EmbeddedTerminationWorkflowTest {
                         .properties("val", new Node().value(value))));
     }
 
-    private static Node declarativeTerminateStep(String cause, String reason) {
+    private static Node declarativeTerminateStep(String reason) {
         return new Node()
                 .type("Coordination/Terminate Processing")
-                .properties("cause", new Node().value(cause))
                 .properties("reason", new Node().value(reason));
     }
 

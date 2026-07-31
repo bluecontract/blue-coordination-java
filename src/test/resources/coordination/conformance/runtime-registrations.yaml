@@ -1,0 +1,24 @@
+schema: blue.coordination/runtime-registrations/1.0
+registrations:
+- type: Coordination/Timeline Channel
+  processor: blue.coordination.processor.TimelineChannelProcessor
+- type: Coordination/Composite Timeline Channel
+  processor: blue.coordination.processor.CompositeTimelineChannelProcessor
+- type: Coordination/All Timelines Channel
+  processor: blue.coordination.processor.AllTimelinesChannelProcessor
+- type: Coordination/Operation
+  processor: blue.coordination.processor.OperationProcessor
+- type: Coordination/Chat Workflow Operation
+  processor: blue.coordination.processor.ChatWorkflowOperationProcessor
+- type: Coordination/Sequential Workflow
+  processor: blue.coordination.processor.SequentialWorkflowProcessor
+- type: Coordination/Sequential Workflow Operation
+  processor: blue.coordination.processor.SequentialWorkflowOperationProcessor
+timelineSubtypeRegistration:
+  mode: explicit
+  api: blue.coordination.processor.CoordinationProcessors.registerTimelineSubtype
+  processor: blue.coordination.processor.TimelineChannelSubtypeProcessor
+  semanticsBaseType: Coordination/Timeline Channel
+fixtureExplicitRegistrations:
+- type: MyOS/MyOS Timeline Channel
+  processor: blue.coordination.processor.TimelineChannelSubtypeProcessor

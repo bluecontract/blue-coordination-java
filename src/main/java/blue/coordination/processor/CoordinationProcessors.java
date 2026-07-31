@@ -7,9 +7,18 @@ import blue.coordination.processor.workflow.SequentialWorkflowRunner;
 import blue.language.Blue;
 import blue.language.processor.DocumentProcessor;
 import blue.language.processor.ProcessingMetricsSink;
-import blue.language.utils.TypeClassResolver;
 import blue.repo.BlueRepositoryModels;
+import blue.repo.coordination.TimelineChannel;
 
+/**
+ * Installs the complete fixed-repository Coordination processor set into a
+ * Language runtime or a {@link DocumentProcessor.Builder}.
+ *
+ * <p>Registration reuses the generic Contracts engine for matching,
+ * snapshots, patches, checkpoints, and atomic Root transitions. This facade
+ * contributes only Coordination channels, handlers, and workflow
+ * execution.</p>
+ */
 public final class CoordinationProcessors {
     private CoordinationProcessors() {
     }
@@ -43,6 +52,18 @@ public final class CoordinationProcessors {
         return configure(builder, null);
     }
 
+    /**
+     * Adds Coordination models and processors to the supplied builder.
+     *
+     * <p>Required model mappings are registered into the resolver already
+     * owned by the builder. A resolver installed by the host is therefore
+     * preserved, while an incompatible duplicate mapping still fails
+     * closed.</p>
+     *
+     * @param builder host-owned processor builder
+     * @param options optional Coordination dependency overrides
+     * @return the supplied builder
+     */
     public static DocumentProcessor.Builder configure(DocumentProcessor.Builder builder,
                                                       CoordinationProcessorOptions options) {
         if (builder == null) {
@@ -53,10 +74,9 @@ public final class CoordinationProcessors {
             builder.withProcessingMetricsSink(metrics);
         }
         SequentialWorkflowRunner runner = workflowRunner(options);
-        TypeClassResolver resolver = BlueRepositoryModels.registerAll(
-                new TypeClassResolver("blue.language.processor.model"));
         return builder
-                .withContractTypeResolver(resolver)
+                .scanContractTypes("blue.language.processor.model")
+                .scanContractTypes("blue.repo")
                 .registerContractProcessor(new TimelineChannelProcessor())
                 .registerContractProcessor(new AllTimelinesChannelProcessor())
                 .registerContractProcessor(new CompositeTimelineChannelProcessor())
@@ -64,6 +84,69 @@ public final class CoordinationProcessors {
                 .registerContractProcessor(new ChatWorkflowOperationProcessor(runner))
                 .registerContractProcessor(new SequentialWorkflowProcessor(runner))
                 .registerContractProcessor(new SequentialWorkflowOperationProcessor(runner));
+    }
+
+    /**
+     * Explicitly registers one exact Timeline Channel subtype with the
+     * standard finite Timeline subscription, acceptance, and checkpoint
+     * semantics.
+     *
+     * <p>The configured provider remains responsible for supplying exact
+     * canonical type evidence. Language's verified type matcher, rather than
+     * this Java class relationship, decides whether content is semantically a
+     * Timeline Channel subtype.</p>
+     *
+     * @param <T> exact Timeline Channel subtype model
+     * @param blue configured Language runtime
+     * @param contractType exact subtype model class
+     * @return the supplied runtime
+     */
+    public static <T extends TimelineChannel> Blue
+    registerTimelineSubtype(
+            Blue blue,
+            Class<T> contractType) {
+        Blue exact = requireBlue(blue);
+        exact.registerContractProcessor(
+                new TimelineChannelSubtypeProcessor<T>(
+                        contractType));
+        return exact;
+    }
+
+    /**
+     * Explicitly registers one exact Timeline Channel subtype on a processor
+     * builder.
+     *
+     * @param <T> exact Timeline Channel subtype model
+     * @param builder configured processor builder
+     * @param contractType exact subtype model class
+     * @return the supplied builder
+     */
+    public static <T extends TimelineChannel>
+    DocumentProcessor.Builder registerTimelineSubtype(
+            DocumentProcessor.Builder builder,
+            Class<T> contractType) {
+        DocumentProcessor.Builder exact =
+                requireBuilder(builder);
+        return exact.registerContractProcessor(
+                new TimelineChannelSubtypeProcessor<T>(
+                        contractType));
+    }
+
+    private static Blue requireBlue(Blue blue) {
+        if (blue == null) {
+            throw new IllegalArgumentException(
+                    "blue must not be null");
+        }
+        return blue;
+    }
+
+    private static DocumentProcessor.Builder requireBuilder(
+            DocumentProcessor.Builder builder) {
+        if (builder == null) {
+            throw new IllegalArgumentException(
+                    "builder must not be null");
+        }
+        return builder;
     }
 
     private static BexProcessingMetrics processingMetrics(CoordinationProcessorOptions options) {
@@ -90,10 +173,15 @@ public final class CoordinationProcessors {
         }
         BexEngine bexEngine = options != null && options.bexEngine() != null
                 ? options.bexEngine()
-                : BexEngine.builder().build();
+                : BexEngine.builder()
+                        .intrinsics(CoordinationBexIntrinsics.common())
+                        .build();
         return SequentialWorkflowRunner.withBexEngine(bexEngine,
                 options != null ? options.defaultComputeGasLimit() : 100_000L,
-                processingMetrics(options));
+                processingMetrics(options),
+                options != null
+                        ? options.processingEventIdentityObserver()
+                        : null);
     }
 
     /** Static, allocation-free-per-sample fan-out for preserving an independently installed sink. */

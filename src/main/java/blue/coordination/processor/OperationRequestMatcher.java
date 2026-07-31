@@ -1,16 +1,39 @@
 package blue.coordination.processor;
 
 import blue.language.model.Node;
+import blue.language.processor.GasChargeContext;
 import blue.language.processor.HandlerMatchContext;
 import blue.repo.coordination.SequentialWorkflowOperation;
 
+/**
+ * Matches one Sequential Workflow Operation against a direct or
+ * Timeline-wrapped Operation Request.
+ *
+ * <p>The operation key and selected channel are immutable dispatch headers.
+ * An authored {@code request} is an additional payload pattern; an empty Node
+ * intentionally means that no payload constraint was declared. All provider
+ * evidence and event matching remain owned by the supplied Contracts
+ * context.</p>
+ */
 final class OperationRequestMatcher {
 
     boolean matches(SequentialWorkflowOperation contract, HandlerMatchContext context) {
         if (contract == null || context == null) {
             return false;
         }
-        if (!SequentialWorkflowEventMatcher.matches(contract.getEvent(), context)) {
+        CoordinationRuntimeGas.charge(
+                context.runtimeWorkSession(),
+                "operationCandidateTested",
+                1L,
+                GasChargeContext.of(
+                        context.scopePath(),
+                        context.handlerKey(),
+                        null,
+                        "test Operation candidate"));
+        boolean eventMatches =
+                SequentialWorkflowEventMatcher.matches(
+                        contract.getEvent(), context);
+        if (!eventMatches) {
             return false;
         }
         String operationKey = nonBlank(contract.getKey());
@@ -19,7 +42,8 @@ final class OperationRequestMatcher {
             return false;
         }
         Node requestPattern = contract.getRequest();
-        return CoordinationEventNodes.matchesOperationRequest(
+        boolean requestMatches =
+                CoordinationEventNodes.matchesOperationRequest(
                 context.event(),
                 operationKey,
                 channelKey,
@@ -28,12 +52,16 @@ final class OperationRequestMatcher {
                         ? null
                         : requestPattern,
                 context);
+        return requestMatches;
     }
 
     private boolean isEmptyRequestPattern(Node requestPattern) {
-        return requestPattern.getName() == null
-                && requestPattern.getDescription() == null
-                && requestPattern.getType() == null
+        /*
+         * Repository resolution contributes descriptive metadata from
+         * Operation.request even when the document authored request: {}.
+         * Name and description are documentation, not payload constraints.
+         */
+        return requestPattern.getType() == null
                 && requestPattern.getItemType() == null
                 && requestPattern.getKeyType() == null
                 && requestPattern.getValueType() == null

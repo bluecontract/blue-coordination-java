@@ -1,129 +1,87 @@
-# Complex operations: Coordination verification
+# Complex Coordination verification
 
-Evidence refreshed on 2026-07-21.
+This document describes the current, non-time-based performance and locality
+proofs. It intentionally contains no published Blue dependency coordinates:
+the build requires the sibling composites at `../blue-language-java`,
+`../blue-bex-java`, and `../blue-repository-java`.
 
-## Dependency baseline
+## What is measured
 
-Coordination uses released artifacts from Maven Central:
+The performance contract is semantic locality, deterministic work, and bounded
+resource use—not elapsed time on one machine.
 
-```text
-blue.language:blue-language-java:3.1.0-rc.16
-blue.repo:blue-repo-java:3.0.0-rc.10
-blue.bex:blue-bex-java:1.1.0-rc.2
-```
+- `CoordinationDocumentSplitterLocalityTest` proves provider demand is
+  proportional to the selected scope spine and executable bodies.
+- `CoordinationDocumentSplitterDeepLocalityTest` proves exact reconstruction,
+  shared-body deduplication, and zero demand for cold sibling roots.
+- `CoordinationDocumentSplitterProcessingMatrixTest` compares inline,
+  reference, partial, and splitter-produced representations.
+- `CoordinationComplexEmbeddedDeterminismFlagshipTest` runs the
+  Root/Emb1/Emb2/Emb3 walkthrough across representation, cache, and provider
+  variants while large decoy branches dominate stored bytes. It compares the
+  complete final Root value independently from its BlueId, proves two equal
+  emitted Event values remain two ordered occurrences, and verifies the
+  original causal Event at all four scopes.
+- `CoordinationInfiniteLoopSafetyTest` proves live gas termination, admitted
+  trace prefixes, atomic rollback, and deterministic retry without wall-clock
+  timeouts.
+- `CoordinationHostQuotaRuntimeTest` and
+  `CoordinationHostQuotaFixtureTest` exercise named splitter and Mandate
+  diagnostics through production entry points. These counters enforce
+  preparation/provider limits and never contribute to portable PROCESS gas.
 
-The build pins the Blue Language version. It does not provide a source-composite,
-custom-repository, or version override for that dependency. The staged
-Coordination POM must contain the same rc16 coordinate.
-
-## Implemented processing path
-
-The optimized path preserves observable ordering and identity:
-
-```text
-eligible Timeline Entry
-  -> channel and handler matching
-  -> cached SequentialWorkflowPlan
-  -> one workflow-owned WorkingDocument
-  -> ordered Compute / Update Document / Trigger Event steps
-  -> frozen patch preview and handoff
-  -> Language validation, gas, routing, handlers, and termination
-  -> strict published snapshot, events, gas, markers, and final BlueId
-```
-
-The implementation includes:
-
-- bounded access-order workflow and Compute plan caches;
-- revisioned, read-only workflow result views instead of whole-prefix copies;
-- immutable static Update Document templates;
-- frozen Compute and Update Document patch handoff;
-- failure-safe plan publication and explicit ownership/close paths;
-- generic bounded Language metrics with immutable snapshots;
-- deterministic differential, fixture, memory, artifact, and bytecode checks.
+The flagship writes executable-derived evidence to
+`build/reports/coordination-flagship/trace.md`. Loop prefixes are written to
+`build/reports/coordination-loops/trace-prefixes.json`.
 
 ## Required invariants
 
-The release-oriented checks require:
+Equivalent inputs must produce the same:
 
-- exact final BlueIds, status, gas, and event counts for representative static,
-  multi-patch Compute, PayNote, and Mandate scenarios;
-- no mutable patch values frozen by built-in Coordination paths;
-- no frozen patch-value materialization after handoff;
-- frozen values accepted by Language equal frozen values handed off by
-  Coordination for the measured scenario delta;
-- no singleton Language transactions, stale preview fallbacks, suffix rebases,
-  dropped metric names, or materialized workflow document views;
-- Java 8 class-file compatibility and public binary compatibility;
-- deterministic metrics artifacts and a reproducible source archive.
+- status, resulting Root identity and value;
+- Root-only public event identities and order;
+- the complete original causal Event and timestamp captured at
+  Root/Emb1/Emb2/Emb3;
+- both occurrences of an identical emitted Event in enqueue, dequeue, handler,
+  and delivery order;
+- checkpoint subject;
+- semantic and provider demand sets;
+- selected executable-body identities and canonical bytes per identity;
+- named gas trace and total.
 
-## Verification commands
+Strict providers must report zero forbidden demands. Cache state and physical
+representation may change provider calls, but cannot change semantic results or
+portable gas. The flagship report records sorted selected-body BlueIds,
+`BlueId|canonical-bytes` entries, aggregate selected bytes, and the per-run
+selected body/byte totals. This prevents an equal aggregate size from masking a
+different selected executable closure.
+
+## Verification
 
 ```bash
-./gradlew clean build \
-  workflowPlanDifferentialTest \
-  complexFixtureIntegrationTest \
-  memoryIntegrationTest \
-  languageAdoptionMetricsArtifactTest \
-  sourceArchive \
-  jmhClasses \
-  stageLocalMaven \
-  --rerun-tasks --no-daemon --no-parallel
-
-./gradlew dependencyInsight \
-  --dependency blue-language-java \
-  --configuration runtimeClasspath \
-  --no-daemon
-
-git diff --check
+./gradlew \
+  coordinationFlagshipTest \
+  coordinationLoopSafetyTest \
+  selectiveCoordinationProcessingTest \
+  verifyReproducibleArchives \
+  --offline --no-daemon
 ```
 
-## Evidence locations
+The hard release graph is `finalCoordinationVerification`. It produces the
+identity-bound final report only when every required suite, binary/API check,
+Java 8 check, and reproducibility check passes. Closed conformance additionally
+requires the same-run executable receipt at
+`build/reports/coordination-conformance/results.json`; a package inventory or
+structural fixture parse cannot stand in for execution. The receipt separates
+14 portable process-gas fixtures from 7 nonportable host-quota fixtures.
+Current local-composite integration blockers, when present, are recorded
+precisely in `docs/final-coordination-implementation-blockers.md`; they are
+never converted into a partial-success report.
 
-```text
-build/reports/tests/
-build/reports/language-adoption/scenario-metrics.json
-build/reports/language-adoption/scenario-metrics.csv
-build/reports/binary-compatibility/blue-coordination-java.txt
-build/reports/bytecode/java8-bytecode.txt
-build/staging-deploy/
-build/distributions/
-```
-
-Generated build output, caches, recordings, databases, logs, dumps, and ZIP
-inputs are excluded from the source archive.
-
-## Current result
-
-The 2026-07-21 clean JDK 25 validation resolved
-`blue.language:blue-language-java:3.1.0-rc.16` as an external Maven module and
-completed with no test failures:
-
-| Suite | Tests | Failures |
-| --- | ---: | ---: |
-| Main test suite | 368 | 0 |
-| Workflow-plan differential suite | 124 | 0 |
-| Complex-fixture integration suite | 55 | 0 |
-| Memory integration suite | 17 | 0 |
-| Language-adoption metrics artifact | 1 | 0 |
-
-The four representative artifact scenarios produced these deterministic
-semantic results:
-
-| Scenario | Status | Gas | Events | Final BlueId |
-| --- | --- | ---: | ---: | --- |
-| Mandate authority confirmation | SUCCESS | 9001 | 1 | `3HBTSrB2AZk9RjR4auvjkn9cdz8r6kH6SduBP4atq1co` |
-| Multi-patch Compute | SUCCESS | 234 | 0 | `4LbNZzaixg8mw3g5U7rKknkAvmLkM8zZR7LP7XKEEJxi` |
-| PayNote resale fixture | SUCCESS | 2268 | 3 | `HF2mzumBAMQSCfnSvdcziwkmu2jX1gf8KVMoBZrcxC8N` |
-| Static Update Document | SUCCESS | 174 | 0 | `BEh1MRkKWKg2sG3c7JXDzX1LyMkiS2LEryfVjBrevYqG` |
-
-Every measured scenario had frozen workflow views, zero view misses, zero
-singleton Language transactions, zero suffix rebases, zero stale-preview
-fallbacks, zero Language patch-value materializations, zero dropped metric
-names, and equal frozen patch values accepted and handed to Language. The
-published rc16 strict-canonical counter was present for every scenario.
-
-Binary compatibility passed with 26 baseline and 26 current public API
-classes. All 84 class files remained Java 8 compatible (maximum class-file
-major version 52). The staged POM records rc16 with compile scope. Two
-consecutive metrics-artifact and source-archive generations matched
-byte-for-byte.
+The runtime-gas scaling proof executes a worst-case 129-member Timeline
+aggregate and retains all 516 ordered entries: 129 member visits, 129 header
+reads, 129 Timeline comparisons, and 129 Actor comparisons. Language's
+portable value of 256 bounds distinct counter kinds in one child catalog; it
+does not cap repeated staged trace entries. Coordination therefore preserves
+the exact charge-before-work order and failure prefix without batching,
+reordering, or hiding work.

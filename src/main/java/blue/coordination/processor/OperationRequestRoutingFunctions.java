@@ -1,17 +1,12 @@
 package blue.coordination.processor;
 
 import blue.language.model.Node;
+import blue.language.processor.ChannelLookupResult;
+import blue.language.processor.ChannelMemberSnapshot;
 import blue.language.processor.ExternalChannelFunctionContext;
-import blue.language.processor.ExternalChannelMemberSnapshot;
+import blue.language.processor.GasChargeContext;
 import blue.language.processor.model.ChannelContract;
 import blue.language.utils.BlueIdCalculator;
-import blue.repo.coordination.AllTimelinesChannel;
-import blue.repo.coordination.CompositeTimelineChannel;
-import blue.repo.coordination.TimelineChannel;
-
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Set;
 
 /**
  * Shared immutable routing projection for Coordination Operation Requests.
@@ -23,23 +18,20 @@ final class OperationRequestRoutingFunctions {
     private OperationRequestRoutingFunctions() {
     }
 
-    static void declareTargetChannelFamilies(
-            ChannelContract immutableContractSnapshot,
+    static void declareTargetChannelCatalog(
             ExternalChannelFunctionContext context) {
-        for (String typeBlueId : targetTypeFamilies(
-                immutableContractSnapshot)) {
-            context.membersByEffectiveType(typeBlueId);
-        }
+        context.dependOnSameScopeChannelCatalog();
     }
 
     static String handlerChannelKey(
             ChannelContract immutableContractSnapshot,
             Node exactEvent,
+            Node exactPayload,
             ExternalChannelFunctionContext context) {
         Route route = route(
-                immutableContractSnapshot,
-                exactEvent,
-                context);
+                exactPayload,
+                context,
+                true);
         return route != null
                 ? route.channel
                 : context.channelKey();
@@ -56,11 +48,12 @@ final class OperationRequestRoutingFunctions {
     static String logicalDeliveryKey(
             ChannelContract immutableContractSnapshot,
             Node exactEvent,
+            Node exactPayload,
             ExternalChannelFunctionContext context) {
         Route route = route(
-                immutableContractSnapshot,
-                exactEvent,
-                context);
+                exactPayload,
+                context,
+                false);
         if (route == null) {
             return context.channelKey();
         }
@@ -78,62 +71,46 @@ final class OperationRequestRoutingFunctions {
     }
 
     private static Route route(
-            ChannelContract immutableContractSnapshot,
-            Node exactEvent,
-            ExternalChannelFunctionContext context) {
+            Node exactPayload,
+            ExternalChannelFunctionContext context,
+            boolean chargeTargetLookup) {
         CoordinationEventNodes.OperationRequestView request =
-                CoordinationEventNodes.operationRequest(
-                        exactEvent, context);
+                CoordinationEventNodes
+                        .operationRequestFromRoutingPayload(
+                                exactPayload,
+                                context);
         if (request == null
-                || !request.routable()
-                || !isChannelTarget(
-                immutableContractSnapshot,
-                request.channel(),
-                context)) {
+                || !request.routable()) {
             return null;
         }
+        if (chargeTargetLookup) {
+            /*
+             * Language invokes handler routing before logical-delivery
+             * routing. Both functions validate the same immutable declared
+             * catalog result; the handler function owns the single semantic
+             * target-lookup charge for that accepted source.
+             */
+            CoordinationRuntimeGas.charge(
+                    context.runtimeWorkSession(),
+                    "operationTargetLookup",
+                    1L,
+                    GasChargeContext.of(
+                            context.scopePath(),
+                            context.channelKey(),
+                            null,
+                            "lookup Operation Request target Channel"));
+        }
+        ChannelLookupResult lookup =
+                context.lookupChannel(
+                        request.channel());
+        if (!lookup.isChannel()) {
+            return null;
+        }
+        ChannelMemberSnapshot target =
+                lookup.channel().get();
         return new Route(
                 request.operation(),
-                request.channel());
-    }
-
-    private static boolean isChannelTarget(
-            ChannelContract immutableContractSnapshot,
-            String targetKey,
-            ExternalChannelFunctionContext context) {
-        if (context.channelKey().equals(targetKey)) {
-            return true;
-        }
-        for (String typeBlueId : targetTypeFamilies(
-                immutableContractSnapshot)) {
-            List<ExternalChannelMemberSnapshot> members =
-                    context.membersByEffectiveType(
-                            typeBlueId);
-            for (ExternalChannelMemberSnapshot member : members) {
-                if (member.channelKey().equals(targetKey)) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    private static Set<String> targetTypeFamilies(
-            ChannelContract immutableContractSnapshot) {
-        Set<String> typeBlueIds =
-                new LinkedHashSet<String>();
-        if (immutableContractSnapshot != null
-                && immutableContractSnapshot.getTypeBlueId() != null
-                && !immutableContractSnapshot
-                .getTypeBlueId().isEmpty()) {
-            typeBlueIds.add(
-                    immutableContractSnapshot
-                            .getTypeBlueId());
-        }
-        typeBlueIds.add(TimelineChannel.blueId());
-        typeBlueIds.add(CompositeTimelineChannel.blueId());
-        typeBlueIds.add(AllTimelinesChannel.blueId());
-        return typeBlueIds;
+                target.channelKey());
     }
 
     private static final class Route {

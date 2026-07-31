@@ -4,11 +4,20 @@ import blue.language.model.Node;
 import blue.language.processor.ExternalChannelFunctionContext;
 import blue.language.processor.ExternalChannelMemberSnapshot;
 import blue.language.processor.ExternalChannelSubscriptionFunctions;
+import blue.language.processor.GasChargeContext;
 import blue.repo.coordination.AllTimelinesChannel;
 
 import java.util.Collections;
 import java.util.List;
 
+/**
+ * Immutable subscription behavior for the union of every same-scope Timeline
+ * Channel subtype.
+ *
+ * <p>Membership comes from Language's verified effective-channel catalog.
+ * The first accepting member owns the derived order subject, while the
+ * aggregate still represents one logical source delivery.</p>
+ */
 final class AllTimelinesExternalSubscriptionFunctions
         implements ExternalChannelSubscriptionFunctions<
         AllTimelinesChannel> {
@@ -18,7 +27,7 @@ final class AllTimelinesExternalSubscriptionFunctions
     static final String ALL_TIMELINES_KEY =
             "blue.coordination/1.0/all-timelines";
     static final String ORDER_SUBJECT_VERSION =
-            "blue.coordination/1.0/all-timelines-order-subject";
+            "blue.coordination/1.0/all-timelines-order-subject-v3";
 
     private AllTimelinesExternalSubscriptionFunctions() {
     }
@@ -27,22 +36,28 @@ final class AllTimelinesExternalSubscriptionFunctions
     public List<String> channelKeys(
             AllTimelinesChannel immutableContractSnapshot,
             ExternalChannelFunctionContext context) {
-        OperationRequestRoutingFunctions
-                .declareTargetChannelFamilies(
-                        immutableContractSnapshot,
-                        context);
-        /*
-         * Enumerating the exact Timeline type family records the membership
-         * dependency, including an empty family. Event evaluation can select
-         * any one of those members, so promote every Timeline member header
-         * now as well: the header dependency proof must cover the selected
-         * member's exact checkpoint domain. This remains local to the exact
-         * Timeline runtime family and never resolves unrelated channel types.
-         */
-        for (ExternalChannelMemberSnapshot member : members(context)) {
-            member.checkpointDomainBlueId();
-        }
-        return Collections.singletonList(ALL_TIMELINES_KEY);
+        return CoordinationRuntimeGas.inComponent(
+                context.runtimeWorkSession(),
+                () -> {
+                    /*
+                     * Enumerating the exact Timeline type family records the
+                     * membership dependency, including an empty family. Event
+                     * evaluation can select any member, so promote every
+                     * Timeline member header now as well.
+                     */
+                    List<ExternalChannelMemberSnapshot> members =
+                            members(context);
+                    chargeMemberVisits(
+                            context,
+                            members.size(),
+                            "project All Timelines member headers");
+                    for (ExternalChannelMemberSnapshot member
+                            : members) {
+                        member.checkpointDomainBlueId();
+                    }
+                    return Collections.singletonList(
+                            ALL_TIMELINES_KEY);
+                });
     }
 
     @Override
@@ -96,6 +111,7 @@ final class AllTimelinesExternalSubscriptionFunctions
                 .handlerChannelKey(
                         immutableContractSnapshot,
                         exactEvent,
+                        exactPayload,
                         context);
     }
 
@@ -109,6 +125,7 @@ final class AllTimelinesExternalSubscriptionFunctions
                 .logicalDeliveryKey(
                         immutableContractSnapshot,
                         exactEvent,
+                        exactPayload,
                         context);
     }
 
@@ -116,8 +133,11 @@ final class AllTimelinesExternalSubscriptionFunctions
     public String checkpointDomainDiscriminator(
             AllTimelinesChannel immutableContractSnapshot,
             ExternalChannelFunctionContext context) {
+        OperationRequestRoutingFunctions
+                .declareTargetChannelCatalog(
+                        context);
         return "coordination.all-timelines:"
-                + "timeline-type-family-v1"
+                + "timeline-type-family-v2"
                 + "|subject="
                 + ORDER_SUBJECT_VERSION;
     }
@@ -125,8 +145,19 @@ final class AllTimelinesExternalSubscriptionFunctions
     private TimelineMemberSubscriptions.WinningMember winning(
             Node exactEvent,
             ExternalChannelFunctionContext context) {
-        return TimelineMemberSubscriptions.winning(
-                members(context), exactEvent);
+        return CoordinationRuntimeGas.inComponent(
+                context.runtimeWorkSession(),
+                () -> {
+                    List<ExternalChannelMemberSnapshot> members =
+                            members(context);
+                    return TimelineMemberSubscriptions.winning(
+                            members,
+                            exactEvent,
+                            () -> chargeMemberVisits(
+                                    context,
+                                    1,
+                                    "evaluate All Timelines member"));
+                });
     }
 
     private TimelineMemberSubscriptions.WinningMember requireWinner(
@@ -143,7 +174,22 @@ final class AllTimelinesExternalSubscriptionFunctions
 
     private List<ExternalChannelMemberSnapshot> members(
             ExternalChannelFunctionContext context) {
-        return TimelineMemberSubscriptions.allTimelineMembers(
+        return TimelineMemberSubscriptions.shallowAllTimelineMembers(
                 context);
+    }
+
+    private static void chargeMemberVisits(
+            ExternalChannelFunctionContext context,
+            int quantity,
+            String reason) {
+        CoordinationRuntimeGas.charge(
+                context.runtimeWorkSession(),
+                "allTimelinesMemberVisited",
+                quantity,
+                GasChargeContext.of(
+                        context.scopePath(),
+                        context.channelKey(),
+                        null,
+                        reason));
     }
 }

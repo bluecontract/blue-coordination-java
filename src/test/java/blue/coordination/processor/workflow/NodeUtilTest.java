@@ -19,11 +19,18 @@ class NodeUtilTest {
                     new Node().value("identity"));
 
     @Test
-    void mutableAndFrozenEmptinessRetainIdentityBearingAxes() {
-        assertTrue(NodeUtil.isEmpty(new Node()));
-        assertTrue(FrozenNodeUtil.isEmpty(
-                FrozenNode.fromNode(new Node())));
+    void shouldTreatOnlyAxisFreeMutableAndFrozenNodesAsEmpty() {
+        // Given
+        Node empty = new Node();
+        FrozenNode frozenEmpty = FrozenNode.fromNode(new Node());
 
+        // When
+        boolean mutableEmpty = NodeUtil.isEmpty(empty);
+        boolean immutableEmpty = FrozenNodeUtil.isEmpty(frozenEmpty);
+
+        // Then
+        assertTrue(mutableEmpty);
+        assertTrue(immutableEmpty);
         assertRetained(new Node().name("named"));
         assertRetained(new Node().type(
                 new Node().blueId(VALID_BLUE_ID)));
@@ -33,22 +40,30 @@ class NodeUtilTest {
     }
 
     @Test
-    void scalarReadersDoNotCoerceAcrossContractsTypes() {
-        assertNull(NodeUtil.text(new Node()));
+    void shouldRejectScalarCoercionAcrossContractTypes() {
+        // Given
+        Node absentText = new Node();
+        Node numericText = new Node().value(1);
+        Node textualBoolean = new Node().properties(
+                "flag",
+                new Node().value("true"));
+        FrozenNode oversizedInteger = FrozenNode.fromNode(
+                new Node().value(BigInteger.ONE.shiftLeft(80)));
+
+        // When
+        String missing = NodeUtil.text(absentText);
+
+        // Then
+        assertNull(missing);
         assertThrows(IllegalArgumentException.class,
-                () -> NodeUtil.text(new Node().value(1)));
+                () -> NodeUtil.text(numericText));
         assertThrows(IllegalArgumentException.class,
                 () -> NodeUtil.booleanProperty(
-                        new Node().properties(
-                                "flag",
-                                new Node().value("true")),
+                        textualBoolean,
                         "flag",
                         false));
         assertThrows(ArithmeticException.class,
-                () -> FrozenNodeUtil.integer(
-                        FrozenNode.fromNode(
-                                new Node().value(
-                                        BigInteger.ONE.shiftLeft(80)))));
+                () -> FrozenNodeUtil.integer(oversizedInteger));
     }
 
     private static void assertRetained(Node node) {

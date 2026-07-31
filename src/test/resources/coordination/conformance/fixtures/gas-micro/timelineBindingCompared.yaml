@@ -1,0 +1,24 @@
+fixtureSchema: blue.coordination/direct-portable-gas-fixture/1.0
+id: coordination-gas-timeline-binding-compared
+operation: direct-portable-gas
+input:
+  counter: timelineBindingCompared
+  quantity: 2
+  context:
+    scopePath: /
+    contractKey: gas-micro
+    logicalPath: /timelineBindingCompared
+    reason: direct-portable-gas:timelineBindingCompared
+expected:
+  totalGas: 4
+  trace:
+  - sequence: 0
+    namespace: coordination.00000000
+    counter: timelineBindingCompared
+    quantity: 2
+    weight: 2
+    subtotal: 4
+    scopePath: /
+    contractKey: gas-micro
+    logicalPath: /timelineBindingCompared
+    reason: direct-portable-gas:timelineBindingCompared

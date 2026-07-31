@@ -29,16 +29,20 @@ public final class TestTimelineProvider {
     }
 
     public static Node channel(String timelineId, String actorId) {
-        Node channel = new Node().type(TimelineChannel.qualifiedName());
+        Node channel = new Node().type(
+                new Node().blueId(
+                        TimelineChannel.blueId()));
         if (timelineId != null) {
             channel.properties("timeline", new Node()
-                    .type(Timeline.qualifiedName())
+                    .type(new Node().blueId(
+                            Timeline.blueId()))
                     .properties("providerId", new Node().value("test-provider"))
                     .properties("timelineId", new Node().value(timelineId)));
         }
         if (actorId != null) {
             channel.properties("actor", new Node()
-                    .type(PrincipalActor.qualifiedName())
+                    .type(new Node().blueId(
+                            PrincipalActor.blueId()))
                     .properties("accountId", new Node().value(actorId)));
         }
         return channel;
@@ -72,7 +76,12 @@ public final class TestTimelineProvider {
                 .properties("timestamp", new Node().value(timestamp))
                 .properties("message", message)
                 .blue(repository.typeAliasBlue());
-        return blue.preprocess(event).blue(null);
+        /*
+         * PROCESS receives strict canonical content. The paired resolved
+         * lane remains internal to Language; returning it here would expose
+         * materialized type definitions as mixed BlueId/object nodes.
+         */
+        return blue.resolveToSnapshot(event).canonicalRoot();
     }
 
     public static Node timelineEntryWithProviderSequence(Blue blue,

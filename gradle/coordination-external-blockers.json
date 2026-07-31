@@ -1,0 +1,272 @@
+{
+  "schema": "blue-coordination/external-blockers/1.0",
+  "blockers": [
+    {
+      "id": "language-checkpoint-coalescing",
+      "owner": "blue-language-java",
+      "status": "open",
+      "firstObservedAgainst": {
+        "commit": "9706b604d54d59e843f2d0540c1a892470d1aa5c",
+        "version": "3.1.0-rc.18-SNAPSHOT"
+      },
+      "category": "checkpoint-coalescing",
+      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
+      "notes": "A later handler-group marker write removes a source or aggregate checkpoint already admitted for the same logical delivery.",
+      "probes": [
+        {"test": "blue.coordination.processor.AllTimelinesChannelProcessorTest#shouldEnsureThatAllTimelinesWithSeveralMatchingChildrenDeliversOnce", "messageContains": "Language checkpoint coalescing defect:"},
+        {"test": "blue.coordination.processor.AllTimelinesChannelProcessorTest#shouldSelectTheFirstMatchingAllTimelinesChildKeyWhenOrdersTie", "messageContains": "Language checkpoint coalescing defect:"},
+        {"test": "blue.coordination.processor.AllTimelinesChannelProcessorTest#shouldConsumePlatformDeliveryOrderAcrossTimelines", "messageContains": "Language checkpoint coalescing defect:"},
+        {"test": "blue.coordination.processor.CompositeTimelineChannelProcessorTest#shouldEnsureThatDirectChildAndUnionHandlersMayBothRun", "messageContains": "Language checkpoint coalescing defect:"},
+        {"test": "blue.coordination.processor.TimelineSubtypeAggregateTest#shouldIncludeGeneratedMyosMembersInCompositeAndCoalesceTheirDelivery", "messageContains": "Language checkpoint coalescing defect:"},
+        {"test": "blue.coordination.processor.TimelineSubtypeAggregateTest#shouldIncludeGeneratedMyosMembersInAllTimelinesAndExcludeUnrelatedChannels", "messageContains": "Language checkpoint coalescing defect:"}
+      ]
+    },
+    {
+      "id": "language-mandate-effective-contract-type-refresh",
+      "owner": "blue-language-java",
+      "status": "open",
+      "firstObservedAgainst": {
+        "commit": "9706b604d54d59e843f2d0540c1a892470d1aa5c",
+        "version": "3.1.0-rc.18-SNAPSHOT"
+      },
+      "category": "effective-contract-evidence",
+      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
+      "notes": "After initialization, canonical refresh loses the resolved Timeline Channel contribution and lifecycle delivery either reports a typeless guarantor channel or reselects initialization.",
+      "probes": [
+        {"test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-mand-02@default", "messageContains": "expected Coordination/Status Failed but was Coordination/Status Pending"},
+        {"test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-mand-03@default", "messageContains": "expected Mandate/Status Active but was Coordination/Status Pending"},
+        {"test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-mand-04@default", "messageContains": "expected Mandate/Status Authority Confirmed but was Coordination/Status Pending"},
+        {"test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-mand-05@default", "messageContains": "expected Mandate/Status Terminated but was Coordination/Status Pending"},
+        {"test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-mand-06@default", "messageContains": "Source node value: terminated, target node value: pending"},
+        {"test": "blue.coordination.processor.compute.MandateDeclaredTypeEventMatchingTest#shouldInitializeOnceAndSelectOnlyTheActivationHandler", "messageContains": "Contract 'mandateGuarantorChannel' must declare a type"},
+        {"test": "blue.coordination.processor.compute.MandateDeclaredTypeEventMatchingTest#shouldNotReselectInitializationAfterFatalLifecycleDelivery", "messageContains": "Contract 'mandateGuarantorChannel' must declare a type"},
+        {"test": "blue.coordination.processor.compute.MandateProcessingEventBindingTest#shouldUseRootProcessingEventTimestampForMandateConfirmation", "messageContains": "Contract 'mandateGuarantorChannel' must declare a type"},
+        {"test": "blue.coordination.processor.compute.MandateTerminationWorkflowTest#shouldTerminateFailedMandateWithoutReplacingFailureState", "messageContains": "Contract 'mandateGuarantorChannel' must declare a type"},
+        {"test": "blue.coordination.processor.compute.MandateTerminationWorkflowTest#shouldIgnoreDuplicateGeneratedMandateTermination", "messageContains": "Contract 'mandateGuarantorChannel' must declare a type"},
+        {"test": "blue.coordination.processor.compute.MandateTerminationWorkflowTest#shouldApplyGeneratedMandateTerminationExactlyOnce", "messageContains": "Contract 'mandateGuarantorChannel' must declare a type"},
+        {"test": "blue.coordination.processor.compute.RepresentativeWorkflowLifecycleSmokeTest#shouldPlateauAndReleaseStateAcrossRepresentativeWorkflowRuns", "messageContains": "Contract 'mandateGuarantorChannel' must declare a type"}
+      ]
+    },
+    {
+      "id": "language-flagship-external-delivery-evidence-drift",
+      "owner": "blue-language-java",
+      "status": "open",
+      "firstObservedAgainst": {
+        "commit": "9706b604d54d59e843f2d0540c1a892470d1aa5c",
+        "version": "3.1.0-rc.18-SNAPSHOT"
+      },
+      "category": "external-delivery-evidence",
+      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
+      "notes": "Accepted-new preflight observes different embedded external-delivery evidence from the independently bound plan.",
+      "probes": [
+        {"test": "blue.coordination.processor.CoordinationComplexEmbeddedDeterminismFlagshipTest#shouldExposeOnlyOrderedRootEventsAcrossEveryRepresentationProviderVariant", "messageContains": "Language flagship external-delivery evidence drift:"},
+        {"test": "blue.coordination.processor.CoordinationComplexEmbeddedDeterminismFlagshipTest#shouldKeepDescendantEventsInternalAcrossEveryRepresentationProviderVariant", "messageContains": "Language flagship external-delivery evidence drift:"}
+      ]
+    },
+    {
+      "id": "language-pure-reference-root-transition",
+      "owner": "blue-language-java",
+      "status": "open",
+      "firstObservedAgainst": {
+        "commit": "9706b604d54d59e843f2d0540c1a892470d1aa5c",
+        "version": "3.1.0-rc.18-SNAPSHOT"
+      },
+      "category": "root-transition",
+      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
+      "notes": "A successful handler execution returns a collapsed pure-reference Root instead of its committed exact state.",
+      "probes": [
+        {"test": "blue.coordination.processor.CoordinationDocumentSplitterProcessingMatrixTest#shouldPreserveProcessSemanticsAcrossSplitRepresentations", "messageContains": "Language pure-reference Root transition defect:"}
+      ]
+    },
+    {
+      "id": "fixed-repository-bound-source-evidence",
+      "owner": "blue-repository-java",
+      "status": "open",
+      "firstObservedAgainst": {
+        "commit": "63be6b7d8d2752b5a8c90f38e672859e9b3949a1",
+        "version": "3.0.0-rc.17-SNAPSHOT"
+      },
+      "category": "fixed-repository-evidence",
+      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
+      "notes": "The immutable 1.3.0 catalog contains missing references and schema bodies rejected by the current Language verifier.",
+      "probes": [
+        {"test": "blue.coordination.processor.FixedRepositoryBoundSourceProviderTest#shouldVerifyEveryFixedRepositoryDefinitionUnderBoundSourceContent", "messageContains": "Fixed Repository BOUND_SOURCE_CONTENT incompatibilities:"},
+        {"test": "blue.coordination.processor.LocalFixedRepositoryCompatibilityTest#shouldResolveEveryRequiredGeneratedTypeAtItsManifestBlueId", "messageContains": "Local fixed Repository content is incompatible with the local Language verifier:"}
+      ]
+    },
+    {
+      "id": "language-handler-match-reference-materialization",
+      "owner": "blue-language-java",
+      "status": "open",
+      "firstObservedAgainst": {
+        "commit": "9706b604d54d59e843f2d0540c1a892470d1aa5c",
+        "version": "3.1.0-rc.18-SNAPSHOT"
+      },
+      "category": "handler-match-materialization",
+      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
+      "notes": "Fragmented exact scalar evidence is changed while the handler matcher materializes an Operation Request field.",
+      "probes": [
+        {"test": "blue.coordination.processor.OperationRequestLogicalRoutingTest#shouldEnsureThatFragmentedWhitespaceOperationKeepsOrdinarySourceDelivery", "messageContains": "Language handler-match reference materialization defect:"}
+      ]
+    },
+    {
+      "id": "language-hosted-bex-semantic-output-provenance",
+      "owner": "blue-language-java",
+      "status": "open",
+      "firstObservedAgainst": {
+        "commit": "9706b604d54d59e843f2d0540c1a892470d1aa5c",
+        "version": "3.1.0-rc.18-SNAPSHOT"
+      },
+      "category": "semantic-output-provenance",
+      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
+      "notes": "Hosted BEX output admitted at the semantic boundary is rejected when it re-enters Language's runtime event/update path.",
+      "probes": [
+        {"test": "blue.coordination.processor.RuntimeChannelsTest#shouldEnsureThatNestedUpdatesPropagateToParentWatchers", "messageContains": "Language hosted BEX semantic-output provenance defect:"},
+        {"test": "blue.coordination.processor.RuntimeChannelsTest#shouldEnsureThatRuntimeDocumentUpdateChannelReceivesUpdateEvents", "messageContains": "Language hosted BEX semantic-output provenance defect:"},
+        {"test": "blue.coordination.processor.SequentialWorkflowExecutionTest#shouldExposeUpdatedDocumentToComputeEventStep", "messageContains": "Language hosted BEX semantic-output provenance defect:"},
+        {"test": "blue.coordination.processor.SequentialWorkflowExecutionTest#shouldEmitChatMessageFromFullCounterWorkflow", "messageContains": "Language hosted BEX semantic-output provenance defect:"},
+        {"test": "blue.coordination.processor.compute.LanguageAdoptionMetricsArtifactTest#shouldWriteJsonAndCsvForRequiredRepresentativeScenarios", "messageContains": "Hosted runtime output is not valid exact Blue content"}
+      ]
+    },
+    {
+      "id": "language-embedded-node-channel-bridge",
+      "owner": "blue-language-java",
+      "status": "open",
+      "firstObservedAgainst": {
+        "commit": "9706b604d54d59e843f2d0540c1a892470d1aa5c",
+        "version": "3.1.0-rc.18-SNAPSHOT"
+      },
+      "category": "embedded-event-bridge",
+      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
+      "notes": "A configured Embedded Node Channel does not bridge the selected child emission to its Root observer.",
+      "probes": [
+        {"test": "blue.coordination.processor.RuntimeChannelsTest#shouldEnsureThatEmbeddedNodeChannelBridgesConfiguredChildEmissions", "messageContains": "Language Embedded Node Channel bridge defect:"},
+        {"test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldReadRootProcessingEventFromBridgeHandler", "messageContains": "Property not found: currentSentinel"}
+      ]
+    },
+    {
+      "id": "language-invalid-execution-evidence-classification",
+      "owner": "blue-language-java",
+      "status": "open",
+      "firstObservedAgainst": {
+        "commit": "9706b604d54d59e843f2d0540c1a892470d1aa5c",
+        "version": "3.1.0-rc.18-SNAPSHOT"
+      },
+      "category": "failure-classification",
+      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
+      "notes": "Forged selected-definition evidence reaches runtime-fatal instead of the invalid-processing-document boundary.",
+      "probes": [
+        {"test": "blue.coordination.processor.compute.ComputeProgramPlanIntegrationTest#shouldKeepInvalidDefinitionProviderEvidenceOutOfRuntimeFatal", "messageContains": "Language invalid-execution-evidence classification defect:"}
+      ]
+    },
+    {
+      "id": "language-customer-paynote-dictionary-generalization",
+      "owner": "blue-language-java",
+      "status": "open",
+      "firstObservedAgainst": {
+        "commit": "9706b604d54d59e843f2d0540c1a892470d1aa5c",
+        "version": "3.1.0-rc.18-SNAPSHOT"
+      },
+      "category": "type-generalization",
+      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
+      "notes": "The large exact customer fixture is rejected while Language generalizes a keyType/valueType-bearing Dictionary contribution.",
+      "probes": [
+        {"test": "blue.coordination.processor.compute.CustomerPaynoteLatestBexFixtureTest#shouldProcessSnapshotEventWithLatestCustomerPaynoteBexDocument", "messageContains": "Source node with keyType or valueType must have a Dictionary type"}
+      ]
+    },
+    {
+      "id": "bex-admitted-exact-value-materialization",
+      "owner": "blue-bex-java",
+      "status": "open",
+      "firstObservedAgainst": {
+        "commit": "395c484111f8c4e9e0e98d2db7f1c5b0777bd5a8",
+        "version": "1.1.0-rc.2-SNAPSHOT"
+      },
+      "category": "exact-value-materialization",
+      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
+      "notes": "An already admitted exact BEX value changes identity, or is unavailable, when the selected immutable patch body is materialized.",
+      "probes": [
+        {"test": "blue.coordination.processor.compute.DynamicEmbeddedParticipantsWorkflowTest#shouldCountChatsAfterAliceAddsEmbeddedParticipants", "messageContains": "BEX admitted-exact canonical materialization defect:"},
+        {"test": "blue.coordination.processor.workflow.FrozenUpdateDocumentDifferentialTest#shouldMatchLegacyLaneForOrderedStructuralTypedReferenceAndReentrantUpdates", "messageContains": "Update Document patch value reference has no resolved selected-body value"}
+      ]
+    },
+    {
+      "id": "language-process-embedded-routing",
+      "owner": "blue-language-java",
+      "status": "open",
+      "firstObservedAgainst": {
+        "commit": "9706b604d54d59e843f2d0540c1a892470d1aa5c",
+        "version": "3.1.0-rc.18-SNAPSHOT"
+      },
+      "category": "embedded-routing",
+      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
+      "notes": "Language does not retain the fixed Process Embedded route required for the nested PayNote lifecycle.",
+      "probes": [
+        {"test": "blue.coordination.processor.compute.OfferPaynoteEmbeddedOrdersWorkflowTest#shouldEmbedRestaurantAndHotelOrdersAfterAuthorization", "messageContains": "Language Process Embedded routing defect:"},
+        {"test": "blue.coordination.processor.compute.OfferPaynoteEmbeddedOrdersWorkflowTest#shouldMakePackageReadyAfterCapturingConfirmedComponentOrders", "messageContains": "Language Process Embedded routing defect:"},
+        {"test": "blue.coordination.processor.compute.OfferPaynoteEmbeddedOrdersWorkflowTest#shouldRequestCaptureOnlyAfterBothComponentOrdersConfirm", "messageContains": "Language Process Embedded routing defect:"},
+        {"test": "blue.coordination.processor.compute.OfferPaynoteEmbeddedOrdersWorkflowTest#shouldRejectCaptureBeforeBothComponentOrdersConfirm", "messageContains": "Language Process Embedded routing defect:"},
+        {"test": "blue.coordination.processor.compute.OfferPaynoteEmbeddedOrdersWorkflowTest#shouldRejectComponentOrderBeforePaynoteAuthorization", "messageContains": "Language Process Embedded routing defect:"},
+        {"test": "blue.coordination.processor.compute.OfferPaynoteEmbeddedOrdersWorkflowTest#shouldAuthorizeDeliveredPackagePaynote", "messageContains": "Language Process Embedded routing defect:"},
+        {"test": "blue.coordination.processor.compute.OfferPaynoteEmbeddedOrdersWorkflowTest#shouldPreserveSnapshotOptimizationsAcrossPackageLifecycle", "messageContains": "Language Process Embedded routing defect:"}
+      ]
+    },
+    {
+      "id": "language-paynote-reduced-handler-selection",
+      "owner": "blue-language-java",
+      "status": "open",
+      "firstObservedAgainst": {
+        "commit": "9706b604d54d59e843f2d0540c1a892470d1aa5c",
+        "version": "3.1.0-rc.18-SNAPSHOT"
+      },
+      "category": "handler-selection",
+      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
+      "notes": "The reduced shared-definition PayNote handlers receive no selected delivery, leaving participant requests unchanged and producing no patch batch.",
+      "probes": [
+        {"test": "blue.coordination.processor.compute.PaynoteReducedDefinitionWorkflowTest#shouldMeasureColdAndWarmEventProcessing", "messageContains": "expected: <true> but was: <false>"},
+        {"test": "blue.coordination.processor.compute.PaynoteReducedDefinitionWorkflowTest#shouldProcessHotelParticipantOperationWithSharedDefinition", "messageContains": "expected: <placed> but was: <requested>"},
+        {"test": "blue.coordination.processor.compute.PaynoteReducedDefinitionWorkflowTest#shouldProcessRestaurantParticipantOperationWithSharedDefinition", "messageContains": "expected: <placed> but was: <requested>"},
+        {"test": "blue.coordination.processor.compute.PaynoteReducedDefinitionWorkflowTest#shouldMeasureEventProcessingAfterWarmup", "messageContains": "expected: <true> but was: <false>"}
+      ]
+    },
+    {
+      "id": "language-implicit-initialization-evidence-revalidation",
+      "owner": "blue-language-java",
+      "status": "open",
+      "firstObservedAgainst": {
+        "commit": "9706b604d54d59e843f2d0540c1a892470d1aa5c",
+        "version": "3.1.0-rc.18-SNAPSHOT"
+      },
+      "category": "execution-evidence-revalidation",
+      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
+      "notes": "Language rejects exact compatibility evidence after implicit initialization changes the Root, before Coordination can expose the original processing event.",
+      "probes": [
+        {"test": "blue.coordination.processor.compute.MandateProcessingEventBindingTest#shouldReturnUndefinedForNonIntegerMandateTimestamp", "messageContains": "Complete retained external subscription and activation evidence is unavailable"},
+        {"test": "blue.coordination.processor.compute.MandateProcessingEventBindingTest#shouldReturnUndefinedWhenMandateTimestampIsMissing", "messageContains": "Complete retained external subscription and activation evidence is unavailable"},
+        {"test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldPreservePureReferenceProcessingEventIdentity", "messageContains": "Complete retained external subscription and activation evidence is unavailable"},
+        {"test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldAvoidSnapshotsForWideAndDeepUnusedEvents", "messageContains": "Complete retained external subscription and activation evidence is unavailable"},
+        {"test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldReadProcessingEventDuringImplicitInitialization", "messageContains": "Complete retained external subscription and activation evidence is unavailable"},
+        {"test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldBuildOneSnapshotOnFirstBindingRead", "messageContains": "Complete retained external subscription and activation evidence is unavailable"},
+        {"test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldSupportNonTimelineScalarListAndObjectEvents", "messageContains": "Complete retained external subscription and activation evidence is unavailable"},
+        {"test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldPreserveIndependentSinkAndFanOutLanguageMetrics", "messageContains": "Complete retained external subscription and activation evidence is unavailable"}
+      ]
+    },
+    {
+      "id": "fixed-repository-mandate-subtype-evidence",
+      "owner": "blue-repository-java",
+      "status": "open",
+      "firstObservedAgainst": {
+        "commit": "63be6b7d8d2752b5a8c90f38e672859e9b3949a1",
+        "version": "3.0.0-rc.17-SNAPSHOT"
+      },
+      "category": "exact-mandate-evidence",
+      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
+      "notes": "The immutable fixed subtype bodies fail exact provider verification before generic Mandate eligibility can evaluate them.",
+      "probes": [
+        {"test": "blue.coordination.processor.mandate.DocumentResponderMandateEligibilityTest#shouldAuthorizeVerifiedDocumentResponderMandateSubtype", "messageContains": "expected: <true> but was: <false>"},
+        {"test": "blue.coordination.processor.mandate.OperationMandateEligibilityTest#shouldRejectDifferentFixedMandateType", "messageContains": "expected: <operation-mandate-type-mismatch> but was: <invalid-exact-mandate-evidence>"},
+        {"test": "blue.coordination.processor.mandate.OperationMandateEligibilityTest#shouldAuthorizeVerifiedOperationMandateSubtype", "messageContains": "invalid-exact-mandate-evidence"}
+      ]
+    }
+  ]
+}

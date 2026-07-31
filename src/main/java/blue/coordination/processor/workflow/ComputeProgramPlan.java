@@ -27,6 +27,7 @@ final class ComputeProgramPlan {
     private final long gasLimit;
     private final boolean emitEvents;
     private final boolean returnResult;
+    private final boolean processingEventRequired;
     private final long approximateWeightBytes;
 
     ComputeProgramPlan(FrozenNode programNode,
@@ -55,10 +56,16 @@ final class ComputeProgramPlan {
         this.gasLimit = gasLimit;
         this.emitEvents = emitEvents;
         this.returnResult = returnResult;
+        this.processingEventRequired =
+                containsProcessingEventReference(
+                        programNode)
+                        || containsProcessingEventReference(
+                        definitionNode);
         this.approximateWeightBytes = approximateWeight(rawStepNode,
                 rawDefinitionNode,
                 programNode,
                 definitionNode,
+                source.definitionNode().orElse(null),
                 entry,
                 sourceIdentity);
     }
@@ -95,6 +102,10 @@ final class ComputeProgramPlan {
         return returnResult;
     }
 
+    boolean processingEventRequired() {
+        return processingEventRequired;
+    }
+
     long approximateWeightBytes() {
         return approximateWeightBytes;
     }
@@ -103,6 +114,7 @@ final class ComputeProgramPlan {
                                           FrozenNode rawDefinitionNode,
                                           FrozenNode programNode,
                                           FrozenNode definitionNode,
+                                          FrozenNode sourceDefinitionNode,
                                           String entry,
                                           BexCompiledProgramKey sourceIdentity) {
         long weight = PLAN_OVERHEAD_BYTES;
@@ -115,6 +127,8 @@ final class ComputeProgramPlan {
         IdentityHashMap<FrozenNode, Boolean> planNodes = new IdentityHashMap<FrozenNode, Boolean>();
         weight = saturatedAdd(weight, nodeWeight(programNode, planNodes));
         weight = saturatedAdd(weight, nodeWeight(definitionNode, planNodes));
+        weight = saturatedAdd(weight,
+                nodeWeight(sourceDefinitionNode, planNodes));
         weight = saturatedAdd(weight, stringWeight(entry));
         weight = saturatedAdd(weight, stringWeight(sourceIdentity.programIdentity()));
         weight = saturatedAdd(weight, stringWeight(sourceIdentity.definitionIdentity()));
@@ -172,6 +186,52 @@ final class ComputeProgramPlan {
             }
         }
         return weight;
+    }
+
+    private static boolean containsProcessingEventReference(
+            FrozenNode root) {
+        if (root == null) {
+            return false;
+        }
+        Deque<FrozenNode> pending =
+                new ArrayDeque<FrozenNode>();
+        IdentityHashMap<FrozenNode, Boolean> visited =
+                new IdentityHashMap<FrozenNode, Boolean>();
+        pending.add(root);
+        while (!pending.isEmpty()) {
+            FrozenNode current =
+                    pending.removeFirst();
+            if (current == null
+                    || visited.put(
+                    current, Boolean.TRUE) != null) {
+                continue;
+            }
+            Object value = current.getValue();
+            if (value instanceof String) {
+                String text = (String) value;
+                if ("processingEvent".equals(text)
+                        || text.startsWith(
+                        "processingEvent/")) {
+                    return true;
+                }
+            }
+            Map<String, FrozenNode> properties =
+                    current.getProperties();
+            if (properties != null) {
+                if (properties.containsKey(
+                        "$processingEvent")) {
+                    return true;
+                }
+                pending.addAll(
+                        properties.values());
+            }
+            List<FrozenNode> items =
+                    current.getItems();
+            if (items != null) {
+                pending.addAll(items);
+            }
+        }
+        return false;
     }
 
     private static void pushIfPresent(Deque<FrozenNode> pending, FrozenNode node) {

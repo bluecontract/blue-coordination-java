@@ -26,205 +26,323 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TerminateProcessingWorkflowTest {
     @Test
-    void terminateProcessingWithoutReasonUsesExactApplicationCause() {
-        DocumentProcessingResult result = runDeclarative(
-                null, "workflow-completed", null);
+    void shouldDeriveCauseWhenReasonIsOmitted() {
+        // Given
+        String reason = null;
 
-        assertApplicationTermination(result, "workflow-completed", null);
+        // When
+        DocumentProcessingResult result = runDeclarative(null, reason);
+
+        // Then
+        assertDeclarativeTermination(result, null);
     }
 
     @Test
-    void terminateProcessingPassesCauseAndReasonUnchanged() {
-        DocumentProcessingResult result = runDeclarative(
-                null, "workflow-completed", "Workflow completed");
+    void shouldPreserveStaticReason() {
+        // Given
+        String reason = "Workflow completed";
 
-        assertApplicationTermination(
-                result, "workflow-completed", "Workflow completed");
+        // When
+        DocumentProcessingResult result = runDeclarative(null, reason);
+
+        // Then
+        assertDeclarativeTermination(result, reason);
     }
 
     @Test
-    void terminateProcessingEmptyReasonUsesCoreOmissionSemantics() {
-        DocumentProcessingResult result = runDeclarative(
-                null, "workflow-completed", "");
+    void shouldOmitEmptyReason() {
+        // Given
+        String reason = "";
 
-        assertApplicationTermination(result, "workflow-completed", null);
+        // When
+        DocumentProcessingResult result = runDeclarative(null, reason);
+
+        // Then
+        assertDeclarativeTermination(result, null);
     }
 
     @Test
-    void terminateProcessingPreservesWhitespaceReason() {
-        DocumentProcessingResult result = runDeclarative(
-                null, "workflow-completed", "   ");
+    void shouldPreserveWhitespaceReason() {
+        // Given
+        String reason = "   ";
 
-        assertApplicationTermination(result, "workflow-completed", "   ");
+        // When
+        DocumentProcessingResult result = runDeclarative(null, reason);
+
+        // Then
+        assertDeclarativeTermination(result, reason);
     }
 
     @Test
-    void terminateProcessingRejectsMissingAndEmptyCause() {
-        for (String cause : Arrays.asList(null, "")) {
-            DocumentProcessingResult result = runDeclarative(
-                    null, cause, "must-not-terminate");
+    void shouldRejectAuthoredCause() {
+        // Given
+        String steps = String.join("\n",
+                "- name: Invalid Authored Cause",
+                "  type: Coordination/Terminate Processing",
+                "  cause: workflow-completed",
+                "  reason: must-not-terminate");
 
-            assertRuntimeFailure(
-                    result,
-                    "Terminate Processing cause must be non-empty Text");
-        }
+        // When
+        DocumentProcessingResult result = runSteps(null, steps);
+
+        // Then
+        assertRuntimeFailure(
+                result,
+                "Terminate Processing does not accept an authored cause");
     }
 
     @Test
-    void terminateProcessingRejectsNonTextCause() {
-        for (String causeYaml : Arrays.asList(
-                "7",
-                "true",
-                "[]",
-                String.join("\n", "", "    $emptyObject: true"))) {
-            DocumentProcessingResult result = runSteps(null, String.join("\n",
-                    "- name: Invalid Cause",
-                    "  type: Coordination/Terminate Processing",
-                    "  cause: " + causeYaml));
+    void shouldPreserveDocumentChangesBeforeTermination() {
+        // Given
+        String steps = terminatingSequence();
 
-            assertRuntimeFailure(
-                    result,
-                    "Terminate Processing cause and reason must be Text");
-        }
-    }
+        // When
+        DocumentProcessingResult result = runSteps(null, steps);
 
-    @Test
-    void terminateProcessingStopsEveryLaterStepAndPreservesPrecedingEffects() {
-        BexProcessingMetrics metrics = new BexProcessingMetrics();
-        DocumentProcessingResult result = runSteps(metrics, String.join("\n",
-                "- name: Before Termination Patch",
-                "  type: Coordination/Update Document",
-                "  changeset:",
-                "    - op: replace",
-                "      path: /status",
-                "      val: changed-before-stop",
-                "- name: Before Termination Event",
-                "  type: Coordination/Trigger Event",
-                "  event:",
-                "    type: Coordination/Event",
-                "    kind: before-stop",
-                terminateStep("workflow-stopped", "stop-now"),
-                "- name: Later Patch",
-                "  type: Coordination/Update Document",
-                "  changeset:",
-                "    - op: replace",
-                "      path: /status",
-                "      val: must-not-run",
-                "- name: Later Event",
-                "  type: Coordination/Trigger Event",
-                "  event:",
-                "    type: Coordination/Event",
-                "    kind: must-not-emit"));
-
-        assertApplicationTermination(result, "workflow-stopped", "stop-now");
+        // Then
         assertEquals("changed-before-stop", result.document().get("/status"));
-        assertEquals(Arrays.asList("before-stop"), kinds(result, "before-stop", "must-not-emit"));
-        assertTrue(indexOfKind(result, "before-stop")
-                < indexOfType(result, RuntimeBlueIds.DOCUMENT_PROCESSING_TERMINATED));
+    }
+
+    @Test
+    void shouldPreserveEventsBeforeTermination() {
+        // Given
+        String steps = terminatingSequence();
+
+        // When
+        DocumentProcessingResult result = runSteps(null, steps);
+
+        // Then
+        assertTrue(kinds(result, "before-stop").contains("before-stop"));
+    }
+
+    @Test
+    void shouldSkipEventsAfterTermination() {
+        // Given
+        String steps = terminatingSequence();
+
+        // When
+        DocumentProcessingResult result = runSteps(null, steps);
+
+        // Then
+        assertFalse(kinds(result, "must-not-emit").contains("must-not-emit"));
+    }
+
+    @Test
+    void shouldKeepTerminationLifecycleInternalAfterPrecedingEvents() {
+        // Given
+        String steps = terminatingSequence();
+
+        // When
+        DocumentProcessingResult result = runSteps(null, steps);
+
+        // Then
+        assertTrue(indexOfKind(result, "before-stop") >= 0);
+        assertEquals(
+                -1,
+                indexOfType(
+                        result,
+                        RuntimeBlueIds
+                                .DOCUMENT_PROCESSING_TERMINATED),
+                "processor lifecycle events remain internal");
+    }
+
+    @Test
+    void shouldStopExecutingLaterWorkflowSteps() {
+        // Given
+        BexProcessingMetrics metrics = new BexProcessingMetrics();
+
+        // When
+        runSteps(metrics, terminatingSequence());
+
+        // Then
         assertEquals(3L, metrics.workflowStepsExecuted());
+    }
+
+    @Test
+    void shouldCountDeclarativeTerminationStep() {
+        // Given
+        BexProcessingMetrics metrics = new BexProcessingMetrics();
+
+        // When
+        runSteps(metrics, terminatingSequence());
+
+        // Then
         assertEquals(1L, metrics.declarativeTerminationSteps());
+    }
+
+    @Test
+    void shouldNotCountDeclarativeTerminationAsComputeTermination() {
+        // Given
+        BexProcessingMetrics metrics = new BexProcessingMetrics();
+
+        // When
+        runSteps(metrics, terminatingSequence());
+
+        // Then
         assertEquals(0L, metrics.successfulComputeTerminationRequests());
     }
 
     @Test
-    void terminateProcessingBexShapedReasonFailsTypeResolutionBeforeExecution() {
+    void shouldRejectBexShapedReasonAtExecutionBoundary() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
-        IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
-                () -> runSteps(metrics, String.join("\n",
-                        "- name: Invalid Dynamic Reason",
-                        "  type: Coordination/Terminate Processing",
-                        "  cause: dynamic-reason-test",
-                        "  reason:",
-                        "    $document: /status")));
+        String steps = String.join("\n",
+                "- name: Invalid Dynamic Reason",
+                "  type: Coordination/Terminate Processing",
+                "  reason:",
+                "    $document: /status");
 
-        assertTrue(failure.getMessage().contains("must not have items or properties"));
+        // When
+        DocumentProcessingResult result =
+                runSteps(metrics, steps);
+
+        // Then
+        assertInvalidProcessingDocument(
+                result,
+                "Terminate Processing reason must be Text");
         assertEquals(0L, metrics.declarativeTerminationSteps());
         assertEquals(0L, metrics.bexCompiledExecutions());
     }
 
     @Test
-    void terminateProcessingIsRegisteredInDefaultAndConfiguredBexRunners() {
-        DocumentProcessingResult defaultRunner = runDeclarativeWithSupport(
-                ComputeWorkflowTestSupport.create(), "default-run", null);
+    void shouldRejectNonTextReason() {
+        // Given
+        String steps = String.join("\n",
+                "- name: Invalid Numeric Reason",
+                "  type: Coordination/Terminate Processing",
+                "  reason: 7");
         BexProcessingMetrics metrics = new BexProcessingMetrics();
-        DocumentProcessingResult configuredRunner = runDeclarativeWithSupport(
-                support(metrics), "configured-run", null);
 
-        assertApplicationTermination(defaultRunner, "default-run", null);
-        assertApplicationTermination(configuredRunner, "configured-run", null);
-        assertEquals(1L, metrics.declarativeTerminationSteps());
+        // When
+        DocumentProcessingResult result =
+                runSteps(metrics, steps);
+
+        // Then
+        assertInvalidProcessingDocument(
+                result,
+                "Terminate Processing reason must be Text");
+        assertEquals(0L, metrics.declarativeTerminationSteps());
+        assertEquals(0L, metrics.bexCompiledExecutions());
     }
 
     @Test
-    void runnerWithoutTerminateExecutorNamesUnsupportedStepPrecisely() {
+    void shouldRegisterInDefaultWorkflowRunner() {
+        // Given
+        ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
+
+        // When
+        DocumentProcessingResult defaultRunner = runDeclarativeWithSupport(
+                support, null);
+
+        // Then
+        assertDeclarativeTermination(defaultRunner, null);
+    }
+
+    @Test
+    void shouldRegisterInConfiguredWorkflowRunner() {
+        // Given
+        BexProcessingMetrics metrics = new BexProcessingMetrics();
+
+        // When
+        DocumentProcessingResult configuredRunner = runDeclarativeWithSupport(
+                support(metrics), null);
+
+        // Then
+        assertDeclarativeTermination(configuredRunner, null);
+    }
+
+    @Test
+    void shouldNameUnsupportedStepWithoutTerminateExecutor() {
+        // Given
         SequentialWorkflowRunner runner = new SequentialWorkflowRunner(
                 new ArrayList<WorkflowStepExecutor<? extends SequentialWorkflowStep>>());
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create(
                 CoordinationProcessorOptions.builder().sequentialWorkflowRunner(runner).build());
 
+        // When
         DocumentProcessingResult result = runDeclarativeWithSupport(
-                support, "unsupported-run", null);
+                support, null);
 
+        // Then
         assertEquals(ProcessorStatus.RUNTIME_FATAL, result.status());
         assertTrue(blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result).contains(
                 "Unsupported sequential workflow step: Coordination/Terminate Processing"));
     }
 
     @Test
-    void terminateProcessingAddsNoBexCompilationOrEvaluation() {
+    void shouldAddNoBexCompilation() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
-        DocumentProcessingResult result = runDeclarative(
-                metrics, "static-termination", "static reason");
 
-        assertApplicationTermination(
-                result, "static-termination", "static reason");
+        // When
+        runDeclarative(metrics, "static reason");
+
+        // Then
         assertEquals(0L, metrics.bexCompiledExecutions());
         assertEquals(0L, metrics.bexCompileCacheHits());
         assertEquals(0L, metrics.bexCompileCacheMisses());
-        assertEquals(1L, metrics.declarativeTerminationSteps());
     }
 
     @Test
-    void terminateProcessingExportsNoStepResult() {
-        BexProcessingMetrics metrics = new BexProcessingMetrics();
-        AtomicReference<WorkflowStepResult> observed = new AtomicReference<WorkflowStepResult>();
-        final TerminateProcessingStepExecutor delegate = new TerminateProcessingStepExecutor(metrics);
-        WorkflowStepExecutor<TerminateProcessing> inspector = new WorkflowStepExecutor<TerminateProcessing>() {
-            @Override
-            public boolean supports(SequentialWorkflowStep step) {
-                return delegate.supports(step);
-            }
+    void shouldSupportTerminateProcessingSteps() {
+        // Given
+        TerminateProcessingStepExecutor executor = new TerminateProcessingStepExecutor();
 
-            @Override
-            public WorkflowStepResult execute(TerminateProcessing step, StepExecutionContext context) {
-                WorkflowStepResult result = delegate.execute(step, context);
-                observed.set(result);
-                return result;
-            }
-        };
-        assertTrue(inspector.supports(new TerminateProcessing()));
-        assertFalse(inspector.supports(new Compute()));
-        SequentialWorkflowRunner runner = new SequentialWorkflowRunner(
-                Arrays.<WorkflowStepExecutor<? extends SequentialWorkflowStep>>asList(inspector));
-        ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create(
-                CoordinationProcessorOptions.builder().sequentialWorkflowRunner(runner).build());
+        // When
+        boolean supported = executor.supports(new TerminateProcessing());
 
-        DocumentProcessingResult result = runDeclarativeWithSupport(
-                support, "no-result", null);
-
-        assertApplicationTermination(result, "no-result", null);
-        assertTrue(observed.get().isTerminal());
-        assertFalse(observed.get().hasValue());
-        assertEquals(1L, metrics.declarativeTerminationSteps());
+        // Then
+        assertTrue(supported);
     }
 
     @Test
-    void computeAndDeclarativeTerminationProduceEquivalentRootEffects() {
+    void shouldNotSupportComputeSteps() {
+        // Given
+        TerminateProcessingStepExecutor executor = new TerminateProcessingStepExecutor();
+
+        // When
+        boolean supported = executor.supports(new Compute());
+
+        // Then
+        assertFalse(supported);
+    }
+
+    @Test
+    void shouldReturnTerminalStepResult() {
+        // Given
+        TerminationInspection inspection = terminationInspection();
+
+        // When
+        runDeclarativeWithSupport(inspection.support, null);
+
+        // Then
+        assertTrue(inspection.observed.get().isTerminal());
+    }
+
+    @Test
+    void shouldExportNoStepValue() {
+        // Given
+        TerminationInspection inspection = terminationInspection();
+
+        // When
+        runDeclarativeWithSupport(inspection.support, null);
+
+        // Then
+        assertFalse(inspection.observed.get().hasValue());
+    }
+
+    @Test
+    void shouldProduceEquivalentRootEffectsForComputeAndDeclarativeTermination() {
+        // Given
+        String cause = TerminateProcessing.blueId();
+        String reason = "same-reason";
+
+        // When
         DocumentProcessingResult compute = runSteps(null, String.join("\n",
                 "- name: Before Compute",
                 "  type: Coordination/Update Document",
@@ -237,8 +355,8 @@ class TerminateProcessingWorkflowTest {
                 "  do:",
                 "    - $return:",
                 "        termination:",
-                "          cause: workflow-completed",
-                "          reason: same-reason"));
+                "          cause: " + cause,
+                "          reason: " + reason));
         DocumentProcessingResult declarative = runSteps(null, String.join("\n",
                 "- name: Before Declarative",
                 "  type: Coordination/Update Document",
@@ -246,8 +364,9 @@ class TerminateProcessingWorkflowTest {
                 "    - op: replace",
                 "      path: /status",
                 "      val: completed",
-                terminateStep("workflow-completed", "same-reason")));
+                terminateStep(reason)));
 
+        // Then
         assertEquals(ProcessorStatus.SUCCESS, compute.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(compute));
         assertEquals(ProcessorStatus.SUCCESS, declarative.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(declarative));
         assertEquals(compute.document().get("/status"), declarative.document().get("/status"));
@@ -257,7 +376,8 @@ class TerminateProcessingWorkflowTest {
     }
 
     @Test
-    void duplicateTerminationCannotReplaceFirstCoreReason() {
+    void shouldNotReplaceFirstCoreReasonOnDuplicateTermination() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeWorkflowTestSupport support = support(metrics);
         Node document = support.initialize(support.yaml(String.join("\n",
@@ -269,14 +389,12 @@ class TerminateProcessingWorkflowTest {
                 "    channel: ownerChannel",
                 "    steps:",
                 "      - type: Coordination/Terminate Processing",
-                "        cause: first-handler",
                 "        reason: first-reason",
                 "  second:",
                 "    type: Coordination/Sequential Workflow",
                 "    channel: ownerChannel",
                 "    steps:",
                 "      - type: Coordination/Terminate Processing",
-                "        cause: second-handler",
                 "        reason: second-reason"))).document();
         Node event = TestTimelineProvider.timelineEntry(support.blue,
                 support.repository,
@@ -284,24 +402,106 @@ class TerminateProcessingWorkflowTest {
                 1,
                 TestTimelineProvider.chatMessage("stop"));
 
+        // When
         DocumentProcessingResult result = support.process(document, event);
 
-        assertApplicationTermination(result, "first-handler", "first-reason");
-        assertEquals(1L, metrics.declarativeTerminationSteps());
+        // Then
+        assertDeclarativeTermination(result, "first-reason");
+    }
+
+    @Test
+    void shouldRollBackSourceCheckpointWhenDeclarativeTerminationCutsOffInvocation() {
+        // Given
+        String reason = "checkpoint-rollback";
+        ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
+        Node document = support.initializedOperationWorkflow(String.join("\n",
+                "    steps:",
+                indent(terminateStep(reason), 6)));
+        Node event = support.operationRequest(
+                "owner",
+                17,
+                "run",
+                "ownerChannel",
+                new Node().value("request"));
+
+        // When
+        DocumentProcessingResult result = support.process(document, event);
+
+        // Then
+        assertDeclarativeTermination(result, reason);
+        assertNull(
+                nodeOrNull(
+                        result.document(),
+                        "/contracts/checkpoint/entries/ownerChannel/subject"),
+                "declarative termination must not persist the source checkpoint");
+    }
+
+    private static String terminatingSequence() {
+        return String.join("\n",
+                "- name: Before Termination Patch",
+                "  type: Coordination/Update Document",
+                "  changeset:",
+                "    - op: replace",
+                "      path: /status",
+                "      val: changed-before-stop",
+                "- name: Before Termination Event",
+                "  type: Coordination/Trigger Event",
+                "  event:",
+                "    type: Coordination/Event",
+                "    kind: before-stop",
+                terminateStep("stop-now"),
+                "- name: Later Patch",
+                "  type: Coordination/Update Document",
+                "  changeset:",
+                "    - op: replace",
+                "      path: /status",
+                "      val: must-not-run",
+                "- name: Later Event",
+                "  type: Coordination/Trigger Event",
+                "  event:",
+                "    type: Coordination/Event",
+                "    kind: must-not-emit");
+    }
+
+    private static TerminationInspection terminationInspection() {
+        final AtomicReference<WorkflowStepResult> observed =
+                new AtomicReference<WorkflowStepResult>();
+        final TerminateProcessingStepExecutor delegate =
+                new TerminateProcessingStepExecutor();
+        WorkflowStepExecutor<TerminateProcessing> inspector =
+                new WorkflowStepExecutor<TerminateProcessing>() {
+                    @Override
+                    public boolean supports(SequentialWorkflowStep step) {
+                        return delegate.supports(step);
+                    }
+
+                    @Override
+                    public WorkflowStepResult execute(TerminateProcessing step,
+                                                      StepExecutionContext context) {
+                        WorkflowStepResult result = delegate.execute(step, context);
+                        observed.set(result);
+                        return result;
+                    }
+                };
+        SequentialWorkflowRunner runner = new SequentialWorkflowRunner(
+                Arrays.<WorkflowStepExecutor<? extends SequentialWorkflowStep>>asList(inspector));
+        ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create(
+                CoordinationProcessorOptions.builder()
+                        .sequentialWorkflowRunner(runner)
+                        .build());
+        return new TerminationInspection(support, observed);
     }
 
     private static DocumentProcessingResult runDeclarative(BexProcessingMetrics metrics,
-                                                           String cause,
                                                            String reason) {
-        return runSteps(metrics, terminateStep(cause, reason));
+        return runSteps(metrics, terminateStep(reason));
     }
 
     private static DocumentProcessingResult runDeclarativeWithSupport(ComputeWorkflowTestSupport support,
-                                                                      String cause,
                                                                       String reason) {
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
-                indent(terminateStep(cause, reason), 6)));
+                indent(terminateStep(reason), 6)));
         return support.processRun(document);
     }
 
@@ -321,13 +521,10 @@ class TerminateProcessingWorkflowTest {
                 .build());
     }
 
-    private static String terminateStep(String cause, String reason) {
+    private static String terminateStep(String reason) {
         String step = String.join("\n",
                 "- name: Stop Processing",
                 "  type: Coordination/Terminate Processing");
-        if (cause != null) {
-            step += "\n  cause: '" + cause.replace("'", "''") + "'";
-        }
         if (reason == null) {
             return step;
         }
@@ -341,11 +538,10 @@ class TerminateProcessingWorkflowTest {
         return prefix + value.replace("\n", "\n" + prefix);
     }
 
-    private static void assertApplicationTermination(DocumentProcessingResult result,
-                                                     String cause,
+    private static void assertDeclarativeTermination(DocumentProcessingResult result,
                                                      String reason) {
         assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
-        assertEquals(cause, terminationValue(result, "cause"));
+        assertEquals(TerminateProcessing.blueId(), terminationValue(result, "cause"));
         assertEquals(reason, terminationValue(result, "reason"));
     }
 
@@ -355,6 +551,24 @@ class TerminateProcessingWorkflowTest {
                 blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result);
         assertEquals(ProcessorStatus.RUNTIME_FATAL, result.status(), diagnostic);
         assertTrue(diagnostic != null && diagnostic.contains(reasonFragment), diagnostic);
+    }
+
+    private static void assertInvalidProcessingDocument(
+            DocumentProcessingResult result,
+            String reasonFragment) {
+        String diagnostic =
+                blue.coordination.processor
+                        .ProcessingResultTestSupport
+                        .diagnosticMessage(result);
+        assertEquals(
+                ProcessorStatus.INVALID_PROCESSING_DOCUMENT,
+                result.status(),
+                diagnostic);
+        assertTrue(
+                diagnostic != null
+                        && diagnostic.contains(
+                                reasonFragment),
+                diagnostic);
     }
 
     private static List<String> kinds(DocumentProcessingResult result, String... selected) {
@@ -414,5 +628,26 @@ class TerminateProcessingWorkflowTest {
     private static Object terminationValue(DocumentProcessingResult result, String key) {
         Node marker = terminationMarker(result);
         return marker != null ? scalarProperty(marker, key) : null;
+    }
+
+    private static Node nodeOrNull(
+            Node node,
+            String pointer) {
+        try {
+            return node.getAsNode(pointer);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private static final class TerminationInspection {
+        private final ComputeWorkflowTestSupport support;
+        private final AtomicReference<WorkflowStepResult> observed;
+
+        private TerminationInspection(ComputeWorkflowTestSupport support,
+                                      AtomicReference<WorkflowStepResult> observed) {
+            this.support = support;
+            this.observed = observed;
+        }
     }
 }

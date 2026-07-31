@@ -33,7 +33,8 @@ class BexCounterResourceWorkflowTest {
     private static final String TIMELINE_ID = "counter-timeline";
 
     @Test
-    void counterBexWorkflowProcessesTimelineIncrementOperation() {
+    void shouldProcessTimelineIncrementOperationWithBexCounterWorkflow() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = CoordinationTestResources.yamlResource(fixture.blue, fixture.repository, COUNTER_RESOURCE);
         DocumentProcessingResult initialized = fixture.blue.initializeDocument(document);
@@ -45,8 +46,10 @@ class BexCounterResourceWorkflowTest {
                 "ownerChannel",
                 new Node().value(1));
 
+        // When
         DocumentProcessingResult result = fixture.blue.processDocument(initialized.document(), event);
 
+        // Then
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertNotNull(result.document());
         assertEquals(BigInteger.ONE, result.document().get("/counter"));

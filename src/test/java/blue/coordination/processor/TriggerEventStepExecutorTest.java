@@ -22,21 +22,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class TriggerEventStepExecutorTest {
 
     @Test
-    void emitsStaticEventPayload() {
+    void shouldEmitStaticEventPayload() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, directWorkflowDocument(fixture.repository,
                 0,
                 triggerEventStep(chatMessageEvent("Hello World"))));
 
+        // When
         DocumentProcessingResult result = processChat(fixture, document);
 
+        // Then
         assertEquals(1, result.events().size());
         assertEventType(result.events().get(0), ChatMessage.qualifiedName(), ChatMessage.blueId());
         assertEquals("Hello World", result.events().get(0).get("/message"));
     }
 
     @Test
-    void staticPayloadPreservesNonStringValues() {
+    void shouldPreserveNonStringValuesInStaticPayload() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, directWorkflowDocument(fixture.repository,
                 1,
@@ -44,20 +48,25 @@ class TriggerEventStepExecutorTest {
                         .type("Coordination/Event")
                         .properties("amount", new Node().value(2)))));
 
+        // When
         DocumentProcessingResult result = processChat(fixture, document);
 
+        // Then
         assertEquals(BigInteger.valueOf(2), result.events().get(0).get("/amount"));
     }
 
     @Test
-    void dollarPrefixedLiteralPayloadIsEmittedExactly() {
+    void shouldEmitDollarPrefixedLiteralPayloadExactly() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, directWorkflowDocument(fixture.repository,
                 0,
                 triggerEventStep(new Node().properties("$document", new Node().value("/counter")))));
 
+        // When
         DocumentProcessingResult result = processChat(fixture, document);
 
+        // Then
         assertEquals(
                 ProcessorStatus.SUCCESS,
                 result.status(),
@@ -67,26 +76,32 @@ class TriggerEventStepExecutorTest {
     }
 
     @Test
-    void missingEventFailsClearly() {
+    void shouldFailClearlyWhenEventIsMissing() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, directWorkflowDocument(fixture.repository,
                 0,
                 new Node().type("Coordination/Trigger Event")));
 
+        // When
         DocumentProcessingResult result = processChat(fixture, document);
 
+        // Then
         assertRuntimeFatal(result, "Trigger Event step must declare event payload");
     }
 
     @Test
-    void namedEventOnlyRemainsAnExactIdentityBearingPayload() {
+    void shouldPreserveNamedOnlyEventAsExactIdentityBearingPayload() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, directWorkflowDocument(fixture.repository,
                 0,
                 triggerEventStep(new Node().name("Named Event Only"))));
 
+        // When
         DocumentProcessingResult result = processChat(fixture, document);
 
+        // Then
         assertEquals(
                 ProcessorStatus.SUCCESS,
                 result.status(),
@@ -96,7 +111,8 @@ class TriggerEventStepExecutorTest {
     }
 
     @Test
-    void emptyListEventRemainsAnExactListPayload() {
+    void shouldPreserveEmptyListEventAsExactListPayload() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(
                 fixture,
@@ -107,8 +123,10 @@ class TriggerEventStepExecutorTest {
                                 new Node().items(
                                         Collections.<Node>emptyList()))));
 
+        // When
         DocumentProcessingResult result = processChat(fixture, document);
 
+        // Then
         assertEquals(
                 ProcessorStatus.SUCCESS,
                 result.status(),
@@ -118,7 +136,8 @@ class TriggerEventStepExecutorTest {
     }
 
     @Test
-    void emptyObjectEventRemainsAnExactOccurrence() {
+    void shouldRejectCanonicalEmptyObjectEventAsOmittedPayload() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(
                 fixture,
@@ -129,35 +148,39 @@ class TriggerEventStepExecutorTest {
                                 new Node().properties(
                                         Collections.<String, Node>emptyMap()))));
 
+        // When
         DocumentProcessingResult result = processChat(fixture, document);
 
-        assertEquals(
-                ProcessorStatus.SUCCESS,
-                result.status(),
-                ProcessingResultTestSupport.diagnosticMessage(result));
-        assertEquals(1, result.events().size());
-        assertTrue(result.events().get(0).getProperties() == null
-                || result.events().get(0).getProperties().isEmpty());
+        // Then
+        assertRuntimeFatal(
+                result,
+                "Trigger Event step must declare event payload");
     }
 
     @Test
-    void emittedEventIsDeliveredToRuntimeTriggeredChannel() {
+    void shouldDeliverEmittedEventToRuntimeTriggeredChannel() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, triggeredConsumerDocument(fixture.repository));
 
+        // When
         DocumentProcessingResult result = processChat(fixture, document);
 
+        // Then
         assertContainsEventType(result.events(), StatusCompleted.qualifiedName(), StatusCompleted.blueId());
         assertContainsChatMessage(result.events(), "Triggered consumer ran");
     }
 
     @Test
-    void lifecycleProducerCanTriggerConsumer() {
+    void shouldAllowLifecycleProducerToTriggerConsumer() {
+        // Given
         Fixture fixture = configuredFixture();
 
+        // When
         DocumentProcessingResult result = fixture.blue.initializeDocument(
                 fixture.blue.preprocess(lifecycleProducerDocument(fixture.repository)));
 
+        // Then
         assertEquals(
                 ProcessorStatus.SUCCESS,
                 result.status(),
@@ -167,14 +190,17 @@ class TriggerEventStepExecutorTest {
     }
 
     @Test
-    void triggerEventDoesNotMutateDocumentState() {
+    void shouldNotMutateDocumentStateWhenTriggeringEvent() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, directWorkflowDocument(fixture.repository,
                 9,
                 triggerEventStep(chatMessageEvent("state is external"))));
 
+        // When
         DocumentProcessingResult result = processChat(fixture, document);
 
+        // Then
         assertEquals(BigInteger.valueOf(9), result.document().get("/counter"));
         assertTriggeredChatMessage(result, "state is external");
     }

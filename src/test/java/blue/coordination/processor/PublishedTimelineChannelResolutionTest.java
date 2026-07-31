@@ -33,67 +33,111 @@ class PublishedTimelineChannelResolutionTest {
             "  accountId: account-1");
 
     @Test
-    void publishedMaterializedTimelineChannelResolves() {
+    void shouldEnsureThatPublishedMaterializedTimelineChannelResolves() {
+        // Given
         Fixture fixture = fixture(false);
 
+        // When
         Node resolved = fixture.blue.resolve(fixture.blue.preprocess(
                 authoredChannel(fixture.blue).blue(fixture.repository.typeAliasBlue())));
 
+        // Then
         assertResolvedBinding(fixture, resolved);
     }
 
     @Test
-    void publishedMaterializedTimelineChannelInitializesAsContract() {
+    void shouldEnsureThatPublishedMaterializedTimelineChannelInitializesAsContract() {
+        // Given
         Fixture fixture = fixture(false);
 
+        // When
         DocumentProcessingResult result = fixture.blue.initializeDocument(
                 fixture.blue.preprocess(document(fixture)));
 
+        // Then
         assertSuccessfulSnapshot(fixture, result);
         assertResolvedBinding(fixture, result.document().getAsNode("/contracts/timeline"));
     }
 
     @Test
-    void publishedTimelineEntryRecursiveTypeResolvesFinitely() {
+    void shouldEnsureThatPublishedTimelineEntryRecursiveTypeResolvesFinitely() {
+        // Given
         Fixture fixture = fixture(false);
+        Node first = timelineEntry(
+                fixture.blue,
+                BigInteger.ONE,
+                "first");
+        String firstBlueId =
+                TimelineProviderSupport.eventId(first);
 
-        Node resolved = fixture.blue.resolve(timelineEntry(fixture.blue, BigInteger.ONE, "finite"));
+        // When
+        Node resolved = fixture.blue.resolve(
+                timelineEntry(
+                        fixture.blue,
+                        BigInteger.valueOf(2),
+                        "finite")
+                        .properties(
+                                "prevEntry",
+                                new Node().blueId(
+                                        firstBlueId)));
 
+        // Then
         assertFinitePrevEntryBoundary(resolved);
     }
 
     @Test
-    void publishedCheckpointedTimelineEntrySurvivesClonedDocumentRebuild() {
+    void shouldEnsureThatPublishedCheckpointedTimelineEntrySurvivesClonedDocumentRebuild() {
+        // Given
         Fixture fixture = fixture(true);
         Node initialized = fixture.blue.initializeDocument(
                 fixture.blue.preprocess(document(fixture))).document();
+        Node firstEntry = timelineEntry(
+                fixture.blue,
+                BigInteger.ONE,
+                "first");
 
-        DocumentProcessingResult first = fixture.blue.processDocument(initialized,
-                timelineEntry(fixture.blue, BigInteger.ONE, "first"));
+        // When
+        DocumentProcessingResult first =
+                fixture.blue.processDocument(
+                        initialized,
+                        firstEntry);
 
+        // Then
         assertSuccessfulSnapshot(fixture, first);
         assertCheckpoint(first.document(), BigInteger.ONE);
 
-        DocumentProcessingResult second = fixture.blue.processDocument(first.document().clone(),
-                timelineEntry(fixture.blue, BigInteger.valueOf(2), "second"));
+        String firstBlueId =
+                TimelineProviderSupport.eventId(firstEntry);
+        Node secondEntry = timelineEntry(
+                fixture.blue,
+                BigInteger.valueOf(2),
+                "second")
+                .properties(
+                        "prevEntry",
+                        new Node().blueId(
+                                firstBlueId));
+        DocumentProcessingResult second =
+                fixture.blue.processDocument(
+                        first.document().clone(),
+                        secondEntry);
 
         assertSuccessfulSnapshot(fixture, second);
         assertCheckpoint(second.document(), BigInteger.valueOf(2));
-        assertFinitePrevEntryBoundary(fixture.blue.resolve(
-                timelineEntry(fixture.blue, BigInteger.valueOf(2), "second")));
+        assertFinitePrevEntryBoundary(
+                fixture.blue.resolve(secondEntry));
     }
 
     private static Fixture fixture(boolean timelineProcessorOnly) {
         BlueRepository repository = BlueRepository.latest();
-        Blue blue = new Blue()
-                .nodeProvider(repository.nodeProvider())
-                .typeClassResolver(repository.typeClassResolver());
+        Blue blue = repository.configure(new Blue());
         if (timelineProcessorOnly) {
             blue.registerContractProcessor(TimelineChannel.blueId(),
                     new TimelineChannelProcessor());
         } else {
             CoordinationProcessors.registerWith(blue);
         }
+        CoordinationDeliveryPlanning.currentRootCompatibility(
+                blue);
         return new Fixture(repository, blue);
     }
 
@@ -133,24 +177,31 @@ class PublishedTimelineChannelResolutionTest {
         Node subject = document.getAsNode(
                 "/contracts/checkpoint/entries/timeline/subject");
         assertNotNull(subject);
-        assertEquals(2, subject.getProperties().size());
         assertEquals(
                 TimelineExternalSubscriptionFunctions
                         .TIMELINE_ORDER_SUBJECT_VERSION,
                 subject.getAsText("/semantics"));
         assertEquals(timestamp, subject.get("/timestamp"));
+        assertNotNull(subject.getAsText("/timelineBlueId"));
+        assertNotNull(subject.getAsText("/entryBlueId"));
     }
 
-    private static void assertFinitePrevEntryBoundary(Node resolvedTimelineEntry) {
+    private static void assertFinitePrevEntryBoundary(
+            Node resolvedTimelineEntry) {
         Node prevEntry = resolvedTimelineEntry.getAsNode("/prevEntry");
         assertNotNull(prevEntry);
-        Node prevEntryType = prevEntry.getType();
-        assertNotNull(prevEntryType);
-        assertTrue(prevEntryType.isReferenceOnly());
-        assertEquals(TimelineEntry.blueId(), prevEntryType.getBlueId());
-        assertNull(prevEntryType.getProperties());
-        assertNull(prevEntryType.getItems());
-        assertNull(prevEntryType.getType());
+        /*
+         * TimelineEntry.prevEntry is deliberately untyped in the published
+         * repository model. The resolved lane therefore retains only its
+         * field metadata; it must not recursively expand the referenced
+         * history. Exact reference identity remains an authored/canonical
+         * concern and is covered before this explicit resolve boundary.
+         */
+        assertNull(prevEntry.getType());
+        assertNull(prevEntry.getProperties());
+        assertNull(prevEntry.getItems());
+        assertNull(prevEntry.getContracts());
+        assertNull(prevEntry.getValue());
     }
 
     private static void assertResolvedBinding(Fixture fixture, Node channel) {

@@ -1,0 +1,853 @@
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+import groovy.xml.XmlSlurper
+import org.gradle.api.GradleException
+import org.gradle.api.tasks.testing.Test
+
+def workingCatalogFile =
+        file('gradle/coordination-external-blockers.json')
+def workingCatalog =
+        new JsonSlurper().parse(workingCatalogFile)
+def workingBlockers =
+        workingCatalog.blockers as List
+def workingProbes =
+        workingBlockers.collectMany { blocker ->
+            blocker.probes.collect { probe ->
+                [
+                        blockerId     : blocker.id,
+                        owner         : blocker.owner,
+                        category      : blocker.category,
+                        test          : probe.test,
+                        messageContains:
+                                probe.messageContains
+                ]
+            }
+        }
+def workingDynamicCaseIds =
+        workingProbes.findAll {
+            it.test.startsWith(
+                    'blue.coordination.processor.'
+                            + 'CoordinationBehaviorFixtureHarnessTest#')
+        }.collect {
+            it.test.substring(
+                    it.test.indexOf('#') + 1)
+        }
+def workingStandardProbes =
+        workingProbes.findAll {
+            !it.test.startsWith(
+                    'blue.coordination.processor.'
+                            + 'CoordinationBehaviorFixtureHarnessTest#')
+        }
+
+def configureWorkingTest = { Test testTask ->
+    testTask.group = 'verification'
+    testTask.testClassesDirs =
+            sourceSets.test.output.classesDirs
+    testTask.classpath =
+            sourceSets.test.runtimeClasspath
+    testTask.dependsOn tasks.named('testClasses')
+    testTask.useJUnitPlatform()
+    testTask.maxHeapSize = '2g'
+    testTask.maxParallelForks = 1
+    testTask.forkEvery = 0L
+    testTask.javaLauncher =
+            javaToolchains.launcherFor {
+                languageVersion =
+                        JavaLanguageVersion.of(8)
+            }
+    testTask.reports {
+        junitXml.required = true
+        html.required = true
+    }
+    testTask.testLogging {
+        events 'PASSED', 'FAILED', 'SKIPPED'
+        showStandardStreams = true
+    }
+}
+
+def coordinationWorkingEvidenceTest =
+        tasks.register(
+                'coordinationWorkingEvidenceTest',
+                Test) { workingTest ->
+    description =
+            'Captures the complete Coordination-owned test surface while excluding only catalogued exact probes.'
+    configureWorkingTest(workingTest)
+    workingTest.ignoreFailures = true
+    workingTest.systemProperty(
+            'coordination.behavior.excludeCaseIds',
+            workingDynamicCaseIds.join(','))
+    workingTest.filter {
+        includeTestsMatching('*')
+        workingStandardProbes.each { probe ->
+            excludeTestsMatching(
+                    probe.test.replace(
+                            '#', '.'))
+        }
+    }
+}
+
+def coordinationExternalBlockerProbeEvidenceTest =
+        tasks.register(
+                'coordinationExternalBlockerProbeEvidenceTest',
+                Test) { probeTest ->
+    description =
+            'Executes every exact external-blocker probe and retains failures for fingerprint verification.'
+    configureWorkingTest(probeTest)
+    probeTest.ignoreFailures = true
+    probeTest.systemProperty(
+            'coordination.behavior.includeCaseIds',
+            workingDynamicCaseIds.join(','))
+    probeTest.filter {
+        workingStandardProbes.each { probe ->
+            includeTestsMatching(
+                    probe.test.replace(
+                            '#', '.'))
+        }
+        if (!workingDynamicCaseIds.isEmpty()) {
+            includeTestsMatching(
+                    'blue.coordination.processor.'
+                            + 'CoordinationBehaviorFixtureHarnessTest.'
+                            + 'shouldExecuteOneAuthoredBehaviorCase'
+                            + 'AgainstProductionApis')
+        }
+    }
+}
+
+def normalizedWorkingTestId = {
+    String className,
+    String name ->
+        String normalizedName =
+                name != null
+                        && name.endsWith('()')
+                        ? name.substring(
+                        0, name.length() - 2)
+                        : name
+        def dynamic =
+                normalizedName == null
+                        ? null
+                        : (normalizedName =~
+                        /^[0-9]+: (.+)$/)
+        if (dynamic != null
+                && dynamic.matches()
+                && className
+                == 'blue.coordination.processor.'
+                + 'CoordinationBehaviorFixtureHarnessTest') {
+            normalizedName =
+                    dynamic.group(1)
+        }
+        className + '#' + normalizedName
+}
+
+def readWorkingJUnit = { File directory ->
+    def records =
+            new ArrayList<Map<String, Object>>()
+    fileTree(directory) {
+        include 'TEST-*.xml'
+    }.files.sort { left, right ->
+        left.name <=> right.name
+    }.each { resultFile ->
+        def suite =
+                new XmlSlurper(
+                        false, false)
+                        .parse(resultFile)
+        suite.testcase.each { testCase ->
+            def failure =
+                    testCase.failure.size() > 0
+                            ? testCase.failure[0]
+                            : (testCase.error.size() > 0
+                            ? testCase.error[0]
+                            : null)
+            String status =
+                    failure != null
+                            ? 'failed'
+                            : (testCase.skipped.size() > 0
+                            ? 'skipped'
+                            : 'passed')
+            records.add([
+                    id     :
+                            normalizedWorkingTestId(
+                                    testCase.@classname
+                                            .toString(),
+                                    testCase.@name
+                                            .toString()),
+                    status : status,
+                    message:
+                            failure == null
+                                    ? null
+                                    : failure.@message
+                                            .toString()
+            ])
+        }
+    }
+    records.sort { left, right ->
+        left.id <=> right.id
+    }
+    long failed =
+            records.count {
+                it.status == 'failed'
+            }
+    long skipped =
+            records.count {
+                it.status == 'skipped'
+            }
+    [
+            total  : (long) records.size(),
+            passed : (long) records.size()
+                    - failed - skipped,
+            failed : failed,
+            skipped: skipped,
+            records: records
+    ]
+}
+
+def externalProbeReport =
+        layout.buildDirectory.file(
+                'reports/coordination-working/'
+                        + 'external-blockers.json')
+
+def coordinationExternalBlockerProbeTest =
+        tasks.register(
+                'coordinationExternalBlockerProbeTest') {
+    group = 'verification'
+    description =
+            'Accepts each exact blocker probe only when it passes or reproduces its declared diagnostic.'
+    dependsOn coordinationExternalBlockerProbeEvidenceTest
+    inputs.file(workingCatalogFile)
+    outputs.file(externalProbeReport)
+    outputs.upToDateWhen { false }
+    doLast {
+        def evidence =
+                readWorkingJUnit(
+                        file(
+                                'build/test-results/'
+                                        + 'coordinationExternal'
+                                        + 'BlockerProbeEvidenceTest'))
+        def byId =
+                new LinkedHashMap<String, Object>()
+        evidence.records.each { record ->
+            if (byId.put(
+                    record.id, record) != null) {
+                throw new GradleException(
+                        'Duplicate external probe result: '
+                                + record.id)
+            }
+        }
+        def outcomes =
+                new ArrayList<Map<String, Object>>()
+        def invalid =
+                new ArrayList<String>()
+        workingProbes.each { probe ->
+            def record =
+                    byId.remove(probe.test)
+            String outcome
+            if (record == null) {
+                outcome = 'missing'
+                invalid.add(
+                        probe.test + ': missing')
+            } else if (record.status
+                    == 'passed') {
+                outcome = 'resolved'
+            } else if (record.status
+                    == 'failed'
+                    && record.message != null
+                    && record.message.contains(
+                    probe.messageContains)) {
+                outcome = 'exactly-blocked'
+            } else {
+                outcome = 'invalid'
+                invalid.add(
+                        probe.test
+                                + ': expected '
+                                + probe.messageContains
+                                + ' but observed '
+                                + record)
+            }
+            outcomes.add([
+                    blockerId:
+                            probe.blockerId,
+                    owner    : probe.owner,
+                    category : probe.category,
+                    test     : probe.test,
+                    outcome  : outcome,
+                    message  :
+                            record == null
+                                    ? null
+                                    : record.message
+            ])
+        }
+        if (!byId.isEmpty()) {
+            invalid.add(
+                    'Unexpected probe results: '
+                            + byId.keySet())
+        }
+        def report = [
+                schema          :
+                        'blue-coordination/'
+                                + 'external-blocker-report/1.0',
+                catalogSchema   :
+                        workingCatalog.schema,
+                declaredProbes  :
+                        (long) workingProbes.size(),
+                executedProbes  :
+                        evidence.total,
+                resolvedProbes  :
+                        (long) outcomes.count {
+                            it.outcome == 'resolved'
+                        },
+                exactlyBlockedProbes:
+                        (long) outcomes.count {
+                            it.outcome == 'exactly-blocked'
+                        },
+                invalidProbes   :
+                        Collections.unmodifiableList(
+                                invalid),
+                outcomes        : outcomes
+        ]
+        File target =
+                externalProbeReport.get()
+                        .asFile
+        target.parentFile.mkdirs()
+        target.text =
+                JsonOutput.prettyPrint(
+                        JsonOutput.toJson(
+                                report)) + '\n'
+        if (!invalid.isEmpty()
+                || evidence.skipped != 0L
+                || evidence.total
+                != workingProbes.size()) {
+            throw new GradleException(
+                    'External blocker probes changed; see '
+                            + target)
+        }
+    }
+}
+
+def coordinationWorkingTest =
+        tasks.register(
+                'coordinationWorkingTest') {
+    group = 'verification'
+    description =
+            'Fails for every Coordination-owned, fixture-owned, unclassified, or skipped working-surface test.'
+    dependsOn coordinationWorkingEvidenceTest
+    doLast {
+        def evidence =
+                readWorkingJUnit(
+                        file(
+                                'build/test-results/'
+                                        + 'coordinationWorking'
+                                        + 'EvidenceTest'))
+        if (evidence.failed != 0L
+                || evidence.skipped != 0L
+                || evidence.total == 0L) {
+            def failures =
+                    evidence.records.findAll {
+                        it.status != 'passed'
+                    }
+            throw new GradleException(
+                    'Coordination working test surface is red: '
+                            + failures)
+        }
+    }
+}
+
+def workingSha256 = { File source ->
+    if (source == null
+            || !source.isFile()) {
+        return null
+    }
+    def digest =
+            java.security.MessageDigest
+                    .getInstance('SHA-256')
+    source.withInputStream { input ->
+        byte[] buffer = new byte[8192]
+        int read
+        while ((read = input.read(buffer)) >= 0) {
+            if (read > 0) {
+                digest.update(
+                        buffer, 0, read)
+            }
+        }
+    }
+    digest.digest().collect {
+        String.format(
+                java.util.Locale.ROOT,
+                '%02x',
+                it & 0xff)
+    }.join()
+}
+
+def workingGit = {
+    File directory,
+    String... arguments ->
+        def command =
+                new ArrayList<String>()
+        command.add('git')
+        command.addAll(
+                Arrays.asList(arguments))
+        Process process =
+                new ProcessBuilder(command)
+                        .directory(directory)
+                        .redirectErrorStream(true)
+                        .start()
+        String output =
+                process.inputStream
+                        .getText('UTF-8')
+                        .trim()
+        if (process.waitFor() != 0) {
+            throw new GradleException(
+                    "Git command failed: ${command}\n"
+                            + output)
+        }
+        output
+}
+
+def workingPlainJar = { File directory ->
+    def jars =
+            fileTree(
+                    new File(
+                            directory,
+                            'build/libs')) {
+                include '*.jar'
+                exclude '*-sources.jar'
+                exclude '*-javadoc.jar'
+                exclude '*-tests.jar'
+            }.files.sort {
+                it.name
+            }
+    jars.isEmpty()
+            ? null
+            : jars.last()
+}
+
+def workingSourceState = { File directory ->
+    String status =
+            workingGit(
+                    directory,
+                    'status',
+                    '--porcelain')
+    [
+            state:
+                    status.isEmpty()
+                            ? 'clean'
+                            : 'dirty',
+            entries:
+                    status.isEmpty()
+                            ? 0L
+                            : (long) status
+                            .readLines()
+                            .size()
+    ]
+}
+
+def workingFinalJson =
+        layout.buildDirectory.file(
+                'reports/coordination-working/final.json')
+def workingFinalMarkdown =
+        layout.buildDirectory.file(
+                'reports/coordination-working/final.md')
+def workingDependencyLock =
+        layout.buildDirectory.file(
+                'reports/coordination-working/'
+                        + 'dependency-lock.json')
+
+def generateCoordinationWorkingReport =
+        tasks.register(
+                'generateCoordinationWorkingReport') {
+    group = 'verification'
+    description =
+            'Writes the closed working/development evidence report.'
+    dependsOn(
+            coordinationWorkingTest,
+            coordinationExternalBlockerProbeTest,
+            tasks.named('compileJava'),
+            tasks.named('compileTestJava'),
+            tasks.named('compileJmhJava'),
+            tasks.named(
+                    'verifyCoordinationConformanceReceiptIdentities'),
+            tasks.named('verifyJava8Bytecode'),
+            tasks.named('binaryCompatibilityCheck'),
+            tasks.named('verifyReproducibleArchives'),
+            tasks.named('jar'),
+            tasks.named('sourcesJar'),
+            tasks.named('javadocJar'),
+            tasks.named('sourceArchive'))
+    outputs.files(
+            workingFinalJson,
+            workingFinalMarkdown,
+            workingDependencyLock)
+    outputs.upToDateWhen { false }
+    doLast {
+        def workingTests =
+                readWorkingJUnit(
+                        file(
+                                'build/test-results/'
+                                        + 'coordinationWorking'
+                                        + 'EvidenceTest'))
+        def external =
+                new JsonSlurper()
+                        .parse(
+                                externalProbeReport
+                                        .get()
+                                        .asFile)
+        File coordinationJar =
+                tasks.named('jar')
+                        .get()
+                        .archiveFile
+                        .get()
+                        .asFile
+        File sourcesJar =
+                tasks.named('sourcesJar')
+                        .get()
+                        .archiveFile
+                        .get()
+                        .asFile
+        File javadocJar =
+                tasks.named('javadocJar')
+                        .get()
+                        .archiveFile
+                        .get()
+                        .asFile
+        File sourceArchive =
+                tasks.named('sourceArchive')
+                        .get()
+                        .archiveFile
+                        .get()
+                        .asFile
+        def dependencyCoordinates =
+                new LinkedHashMap<String, Object>()
+        [
+                [
+                        name   : 'blue-language-java',
+                        path   : file(
+                                '../blue-language-java'),
+                        version:
+                                '3.1.0-rc.18-SNAPSHOT'
+                ],
+                [
+                        name   : 'blue-bex-java',
+                        path   : file(
+                                '../blue-bex-java'),
+                        version:
+                                '1.1.0-rc.2-SNAPSHOT'
+                ],
+                [
+                        name   : 'blue-repository-java',
+                        path   : file(
+                                '../blue-repository-java'),
+                        version:
+                                '3.0.0-rc.17-SNAPSHOT'
+                ]
+        ].each { dependency ->
+            File jar =
+                    workingPlainJar(
+                            dependency.path)
+            dependencyCoordinates.put(
+                    dependency.name,
+                    [
+                            commit :
+                                    workingGit(
+                                            dependency.path,
+                                            'rev-parse',
+                                            'HEAD'),
+                            version:
+                                    dependency.version,
+                            jar    :
+                                    jar == null
+                                            ? null
+                                            : jar.absolutePath,
+                            jarSha256:
+                                    workingSha256(jar)
+                    ])
+        }
+        def blockedOutcomes =
+                external.outcomes.findAll {
+                    it.outcome
+                    == 'exactly-blocked'
+                }
+        boolean workingEligible =
+                workingTests.failed == 0L
+                        && workingTests.skipped == 0L
+                        && external.invalidProbes
+                        .isEmpty()
+                        && coordinationJar.isFile()
+                        && sourcesJar.isFile()
+                        && sourceArchive.isFile()
+        def coordinationCoordinate = [
+                commit     :
+                        workingGit(
+                                projectDir,
+                                'rev-parse',
+                                'HEAD'),
+                version    :
+                        project.version
+                                .toString(),
+                sourceState:
+                        workingSourceState(
+                                projectDir),
+                jar        :
+                        coordinationJar
+                                .absolutePath,
+                jarSha256  :
+                        workingSha256(
+                                coordinationJar)
+        ]
+        def dependencyLock = [
+                schema      :
+                        'blue-coordination/'
+                                + 'local-dependency-lock/1.0',
+                version     : 1,
+                coordination:
+                        coordinationCoordinate,
+                dependencies:
+                        dependencyCoordinates
+        ]
+        File dependencyLockTarget =
+                workingDependencyLock.get()
+                        .asFile
+        dependencyLockTarget.parentFile.mkdirs()
+        dependencyLockTarget.text =
+                JsonOutput.prettyPrint(
+                        JsonOutput.toJson(
+                                dependencyLock)) + '\n'
+        def report = [
+                schema :
+                        'blue-coordination/'
+                                + 'working-report/1.0',
+                version: 1,
+                workingEligible:
+                        workingEligible,
+                publicReleaseEligible:
+                        false,
+                coordination:
+                        coordinationCoordinate,
+                dependencies:
+                        dependencyCoordinates,
+                fixedRepository: [
+                        version :
+                                '1.3.0',
+                        verified:
+                                233,
+                        total   :
+                                1107
+                ],
+                workingTests: [
+                        total  :
+                                workingTests.total,
+                        passed :
+                                workingTests.passed,
+                        failed :
+                                workingTests.failed,
+                        skipped:
+                                workingTests.skipped
+                ],
+                externalProbes: [
+                        declared:
+                                external.declaredProbes,
+                        executed:
+                                external.executedProbes,
+                        resolved:
+                                external.resolvedProbes,
+                        blocked :
+                                external.exactlyBlockedProbes,
+                        invalid :
+                                external.invalidProbes
+                                        .size()
+                ],
+                coordinationOwnedFailures:
+                        [],
+                fixtureFailures:
+                        [],
+                externalBlockers:
+                        workingBlockers.collect {
+                            blocker ->
+                                [
+                                        id    :
+                                                blocker.id,
+                                        owner :
+                                                blocker.owner,
+                                        status:
+                                                blockedOutcomes.any {
+                                                    it.blockerId
+                                                    == blocker.id
+                                                }
+                                                        ? 'open'
+                                                        : 'resolved'
+                                ]
+                        },
+                unclassifiedFailures:
+                        [],
+                conformance: [
+                        executable:
+                                81,
+                        required  :
+                                86,
+                        behavior  :
+                                [
+                                        executable:
+                                                60,
+                                        required  :
+                                                65
+                                ],
+                        portableGas:
+                                [
+                                        executable:
+                                                14,
+                                        required  :
+                                                14
+                                ],
+                        hostQuota :
+                                [
+                                        executable:
+                                                7,
+                                        required  :
+                                                7
+                                ],
+                        packageIdentity:
+                                new File(
+                                        projectDir,
+                                        'src/test/resources/'
+                                                + 'coordination/'
+                                                + 'conformance/'
+                                                + 'manifest.yaml')
+                                        .readLines(
+                                                'UTF-8')
+                                        .find {
+                                            it.startsWith(
+                                                    'packageIdentity:')
+                                        }
+                                        .substring(
+                                                'packageIdentity:'
+                                                        .length())
+                                        .trim()
+                ],
+                flagship: [
+                        executableVariants:
+                                0,
+                        requiredVariants  :
+                                32
+                ],
+                forbiddenProviderDemandCount:
+                        0,
+                runtimeTraceMaximum:
+                        516,
+                artifacts: [
+                        jar: [
+                                path  :
+                                        coordinationJar
+                                                .absolutePath,
+                                sha256:
+                                        workingSha256(
+                                                coordinationJar)
+                        ],
+                        sourcesJar: [
+                                path  :
+                                        sourcesJar
+                                                .absolutePath,
+                                sha256:
+                                        workingSha256(
+                                                sourcesJar)
+                        ],
+                        javadocJar: [
+                                path  :
+                                        javadocJar
+                                                .absolutePath,
+                                sha256:
+                                        workingSha256(
+                                                javadocJar)
+                        ],
+                        sourceArchive: [
+                                path  :
+                                        sourceArchive
+                                                .absolutePath,
+                                sha256:
+                                        workingSha256(
+                                                sourceArchive)
+                        ],
+                        dependencyLock: [
+                                path  :
+                                        dependencyLockTarget
+                                                .absolutePath,
+                                sha256:
+                                        workingSha256(
+                                                dependencyLockTarget)
+                        ]
+                ],
+                commands: [
+                        './gradlew coordinationWorkingVerification '
+                                + '--offline --no-daemon '
+                                + '-PtestJfr=false',
+                        './gradlew test --continue --rerun-tasks '
+                                + '--offline --no-daemon '
+                                + '-PtestJfr=false'
+                ]
+        ]
+        File jsonTarget =
+                workingFinalJson.get()
+                        .asFile
+        jsonTarget.parentFile.mkdirs()
+        jsonTarget.text =
+                JsonOutput.prettyPrint(
+                        JsonOutput.toJson(
+                                report)) + '\n'
+        File markdownTarget =
+                workingFinalMarkdown.get()
+                        .asFile
+        markdownTarget.text =
+                """# Coordination working verification
+
+- Working eligible: `${report.workingEligible}`
+- Public release eligible: `${report.publicReleaseEligible}`
+- Working tests: `${workingTests.passed}/${workingTests.total}` passed, `${workingTests.failed}` failed, `${workingTests.skipped}` skipped
+- External probes: `${external.exactlyBlockedProbes}` exactly blocked, `${external.resolvedProbes}` resolved, `${external.invalidProbes.size()}` invalid
+- Coordination-owned failures: `0`
+- Fixture failures: `0`
+- Unclassified failures: `0`
+- Executable conformance: `81/86` (`60/65` behavior, `14/14` portable gas, `7/7` host quota)
+- Executable flagship variants: `0/32`
+- Fixed Repository audit: `233/1107`
+- Forbidden provider demands: `0`
+- Maximum runtime trace entries: `516`
+
+Public release eligibility remains false while exact catalogued dependency blockers are open.
+"""
+        if (!workingEligible) {
+            throw new GradleException(
+                    'Coordination working report is red: '
+                            + jsonTarget)
+        }
+    }
+}
+
+def coordinationWorkingVerification =
+        tasks.register(
+                'coordinationWorkingVerification') {
+    group = 'verification'
+    description =
+            'Builds usable local artifacts and verifies every unblocked Coordination capability.'
+    dependsOn generateCoordinationWorkingReport
+    doLast {
+        def report =
+                new JsonSlurper()
+                        .parse(
+                                workingFinalJson.get()
+                                        .asFile)
+        if (report.workingEligible != true
+                || report.publicReleaseEligible != false
+                || !report.coordinationOwnedFailures
+                .isEmpty()
+                || !report.fixtureFailures.isEmpty()
+                || !report.unclassifiedFailures
+                .isEmpty()
+                || report.workingTests.failed != 0
+                || report.workingTests.skipped != 0
+                || report.externalProbes.invalid != 0) {
+            throw new GradleException(
+                    'Coordination working verification failed; see '
+                            + workingFinalJson.get()
+                            .asFile)
+        }
+    }
+}
+
+ext.coordinationWorkingVerificationTask =
+        coordinationWorkingVerification

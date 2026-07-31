@@ -3,7 +3,6 @@ package blue.coordination.processor.compute;
 import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationProcessors;
 import blue.coordination.processor.CoordinationTestResources;
-import blue.coordination.processor.RepositoryTypeAliasPreprocessor;
 import blue.coordination.processor.TestTimelineProvider;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.Blue;
@@ -32,17 +31,20 @@ class MandateProcessingEventBindingTest {
     private static final int PROCESSING_EVENT_TIMESTAMP = 7_000_001;
 
     @Test
-    void realMandateAuthorityConfirmationUsesRootProcessingEventTimestamp() {
+    void shouldUseRootProcessingEventTimestampForMandateConfirmation() {
+        // Given
         Fixture fixture = fixture();
         DocumentProcessingResult initialized = fixture.initialize(mandateDocument());
-        assertEquals(StatusPending.blueId(),
-                initialized.document().getAsText("/status/type/blueId"));
 
+        // When
         DocumentProcessingResult result = fixture.process(
                 blue.coordination.processor.ProcessingResultTestSupport.snapshot(
                         fixture.blue, initialized),
                 fixture.confirmAuthorityEvent(PROCESSING_EVENT_TIMESTAMP));
 
+        // Then
+        assertEquals(StatusPending.blueId(),
+                initialized.document().getAsText("/status/type/blueId"));
         assertSuccess(result);
         // Declared-type event matching owns final lifecycle state; this case isolates processingEvent.
         assertEquals(BigInteger.valueOf(PROCESSING_EVENT_TIMESTAMP),
@@ -55,20 +57,40 @@ class MandateProcessingEventBindingTest {
     }
 
     @Test
-    void mandateTimestampFunctionReturnsUndefinedWhenTimestampMissing() {
-        assertGuardReturnsUndefined(new Node().properties("kind", scalar("missing-timestamp")));
+    void shouldReturnUndefinedWhenMandateTimestampIsMissing() {
+        // Given
+        Fixture fixture = fixture();
+        Node processEvent = new Node().properties(
+                "kind", scalar("missing-timestamp"));
+
+        // When
+        DocumentProcessingResult result = fixture.process(
+                fixture.preprocess(timestampGuardDocument(fixture.repository)),
+                processEvent);
+
+        // Then
+        assertGuardReturnsUndefined(fixture, result);
     }
 
     @Test
-    void mandateTimestampFunctionReturnsUndefinedForNonIntegerTimestamp() {
-        assertGuardReturnsUndefined(new Node().properties("timestamp", scalar("7000001")));
+    void shouldReturnUndefinedForNonIntegerMandateTimestamp() {
+        // Given
+        Fixture fixture = fixture();
+        Node processEvent = new Node().properties(
+                "timestamp", scalar("7000001"));
+
+        // When
+        DocumentProcessingResult result = fixture.process(
+                fixture.preprocess(timestampGuardDocument(fixture.repository)),
+                processEvent);
+
+        // Then
+        assertGuardReturnsUndefined(fixture, result);
     }
 
-    private static void assertGuardReturnsUndefined(Node processEvent) {
-        Fixture fixture = fixture();
-        DocumentProcessingResult result = fixture.process(
-                fixture.preprocess(timestampGuardDocument(fixture.repository)), processEvent);
-
+    private static void assertGuardReturnsUndefined(
+            Fixture fixture,
+            DocumentProcessingResult result) {
         assertSuccess(result);
         assertEquals("undefined", result.document().get("/observation"));
         assertEquals(1L, fixture.metrics.processEventSnapshotAttempts());
@@ -161,9 +183,12 @@ class MandateProcessingEventBindingTest {
         }
 
         DocumentProcessingResult initialize(Node document) {
-            document.blue(repository.typeAliasBlue());
-            Node aliasesResolved = new RepositoryTypeAliasPreprocessor(repository).preprocess(document);
-            ResolvedSnapshot snapshot = blue.resolveToSnapshot(blue.preprocess(aliasesResolved));
+            ResolvedSnapshot snapshot = blue.resolveToSnapshot(
+                    CoordinationTestResources
+                            .preprocessWithFixedRepository(
+                                    blue,
+                                    repository,
+                                    document));
             DocumentProcessingResult result = blue.initializeDocument(snapshot);
             assertSuccess(result);
             return result;
@@ -190,8 +215,11 @@ class MandateProcessingEventBindingTest {
         }
 
         Node preprocess(Node document) {
-            document.blue(repository.typeAliasBlue());
-            return blue.preprocess(document);
+            return CoordinationTestResources
+                    .preprocessWithFixedRepository(
+                            blue,
+                            repository,
+                            document);
         }
     }
 }

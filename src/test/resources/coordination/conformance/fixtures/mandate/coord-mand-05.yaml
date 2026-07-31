@@ -1,0 +1,79 @@
+schema: blue-coordination-fixture/1.0
+id: coord-mand-05
+vectors:
+- COORD-MAND-05
+category: mandate
+description: Pending or confirmed Mandate may terminate before activation; business termination commits before graceful processor termination.
+operation: process
+input:
+  root:
+    type: { blueId: "G1G5Rp4bmcmvDrnM53JjXF3YXLwdBFqpqVZtXynrjZPC" }
+    contracts:
+      mandateLifecycleDefinition:
+        type: { blueId: "H4tutBkZAgxJsEDyjDohkZk7dcGxXQqwHMEzVkyh3U9n" }
+        constants:
+          authorityConfirmedMessageType:
+            type: { blueId: "FrxKioNPTEtuWkvxdeFQ66SbPAEUFg19veQMG1J6xo9J" }
+            timestampUs: 0
+          terminatedMessageType:
+            type: { blueId: "C3Y1zAyhCiu9wJ23gYg6vqFnVQyXKZeiHow9CzJ4W9t7" }
+            reason: authored-template
+      mandateGuarantorChannel:
+        type: { blueId: "8aohWT7jcoaC1j2siQzBxoKM8HhQ4HF13BkZDNnq5UHf" }
+        timeline:
+          type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+          timelineId: G
+        actor:
+          type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+          accountId: admin
+      authorityHolderChannel:
+        type: { blueId: "8aohWT7jcoaC1j2siQzBxoKM8HhQ4HF13BkZDNnq5UHf" }
+        timeline:
+          type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+          timelineId: B
+        actor:
+          type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+          accountId: bob
+      authorizedActorChannel:
+        type: { blueId: "8aohWT7jcoaC1j2siQzBxoKM8HhQ4HF13BkZDNnq5UHf" }
+        timeline:
+          type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+          timelineId: A
+        actor:
+          type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+          accountId: alice
+    status:
+      type: { blueId: "DUU68ikPqLZ9NwsUGzkCZ92abAUz51ihcZBTJQEty6E1" }
+  event:
+    type: { blueId: "7L685pBvjNNrBPq6tNv53kfPEBMDkoRu7MdVMTqdcyR2" }
+    timeline:
+      type: { blueId: "5VAQp5thYLkzp3FbvYGmVvmdLqqu6pV5vhNgD14XJwpX" }
+      timelineId: B
+    timestamp: 80
+    actor:
+      type: { blueId: "CtsH9hhbLAYcQYv5jYnNhaviKxkEdrwAg8b4KoxEU5Lw" }
+      accountId: bob
+    message:
+      type: { blueId: "93PyhYJyekVeSvQcFi5u8moU5fbfKcbD68BCRtzE8ZLz" }
+      channel: mandateTerminationChannel
+      operation: terminateMandate
+      request:
+        reason: cancel
+    fixtureId: term
+  feeder:
+    managedRootRevision: 1
+    indexedRootRevision: 1
+    eligibleSourceChannelKeys:
+    - authorityHolderChannel
+    - mandateTerminationChannel
+expected:
+  assertions:
+  - actual: mandate.status
+    op: equals
+    expected: Mandate/Status Terminated
+  - actual: mandate.terminatedAt
+    op: equals
+    expected: 80
+  - actual: result.status
+    op: equals
+    expected: success

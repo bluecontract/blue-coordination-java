@@ -15,13 +15,13 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Focused proof that built-in Compute effects use the frozen patch boundary. */
 class ComputeFrozenPatchHandoffIntegrationTest {
 
     @Test
-    void accumulatedChangesetRetainsCanonicalFrozenBindingWithoutNodeMaterialization() {
+    void shouldRetainCanonicalFrozenBindingWithoutNodeMaterialization() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeWorkflowTestSupport support = support(metrics);
         Node document = support.initializedOperationWorkflow(String.join("\n",
@@ -39,8 +39,10 @@ class ComputeFrozenPatchHandoffIntegrationTest {
                 "                $changeset: true"));
         Counters before = Counters.capture(metrics);
 
+        // When
         DocumentProcessingResult result = support.processRun(document);
 
+        // Then
         assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertEquals("ownerChannel", result.document().get("/copiedChannel"));
         assertEquals(1L, metrics.directBexChangesetHits());
@@ -55,7 +57,8 @@ class ComputeFrozenPatchHandoffIntegrationTest {
     }
 
     @Test
-    void independentlyReturnedChangesetEventsAndTerminationKeepEffectOrder() {
+    void shouldKeepEffectOrderForIndependentlyReturnedEffects() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeWorkflowTestSupport support = support(metrics);
         Node document = support.initialize(support.yaml(
@@ -91,8 +94,10 @@ class ComputeFrozenPatchHandoffIntegrationTest {
                         "            val: forbidden")))).document();
         Counters before = Counters.capture(metrics);
 
+        // When
         DocumentProcessingResult result = support.processRun(document);
 
+        // Then
         assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertEquals("changed", result.document().get("/status"));
         assertEquals("value", result.document().get("/added/nested"));
@@ -101,8 +106,12 @@ class ComputeFrozenPatchHandoffIntegrationTest {
                 result.document().get("/contracts/terminated/cause"));
         assertEquals("complete", result.document().get("/contracts/terminated/reason"));
         assertEquals(Arrays.asList("first", "second"), selectedKinds(result));
-        assertTrue(indexOfKind(result, "second") < indexOfType(result,
-                RuntimeBlueIds.DOCUMENT_PROCESSING_TERMINATED));
+        assertEquals(
+                -1,
+                indexOfType(
+                        result,
+                        RuntimeBlueIds.DOCUMENT_PROCESSING_TERMINATED),
+                "processor lifecycle events remain internal");
 
         assertEquals(0L, metrics.directBexChangesetHits(),
                 "the returned list is independent of BEX's accumulated changeset");

@@ -6,9 +6,13 @@ import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorStatus;
 import blue.language.snapshot.ResolvedSnapshot;
 import blue.repo.BlueRepository;
+import blue.repo.coordination.Compute;
 import blue.repo.coordination.Event;
+import blue.repo.coordination.OperationRequest;
 import blue.repo.coordination.PrincipalActor;
+import blue.repo.coordination.SequentialWorkflowOperation;
 import blue.repo.coordination.Timeline;
+import blue.repo.coordination.TimelineChannel;
 import blue.repo.coordination.TimelineEntry;
 
 import org.openjdk.jmh.annotations.Benchmark;
@@ -48,10 +52,12 @@ public class ComputeEffectPlanBenchmark {
                 .nodeProvider(repository.nodeProvider())
                 .typeClassResolver(repository.typeClassResolver());
         CoordinationProcessors.registerWith(blue, CoordinationProcessorOptions.builder().build());
+        CoordinationDeliveryPlanning.currentRootCompatibility(blue);
 
-        Node source = sourceDocument(effects).blue(repository.typeAliasBlue());
-        Node aliasesResolved = new RepositoryTypeAliasPreprocessor(repository).preprocess(source);
-        ResolvedSnapshot selected = blue.resolveToSnapshot(blue.preprocess(aliasesResolved));
+        Node source = sourceDocument(effects)
+                .blue(repository.typeAliasBlue());
+        ResolvedSnapshot selected =
+                blue.resolveToSnapshot(blue.preprocess(source));
         DocumentProcessingResult initialized = blue.initializeDocument(selected);
         requireSuccess(initialized);
         initializedSnapshot = blue.resolveToSnapshot(initialized.document());
@@ -113,7 +119,7 @@ public class ComputeEffectPlanBenchmark {
         }
         if (events) {
             statements.add(new Node().properties("$appendEvent", new Node()
-                    .type("Coordination/Event")
+                    .type(typeReference(Event.blueId()))
                     .properties("kind", new Node().value("benchmark"))));
             result.properties("events", new Node().properties("$events", new Node().value(true)));
         }
@@ -126,19 +132,20 @@ public class ComputeEffectPlanBenchmark {
         Node program = new Node().items(statements);
 
         Node channel = new Node()
-                .type("Coordination/Timeline Channel")
+                .type(typeReference(TimelineChannel.blueId()))
                 .properties("timeline", new Node()
-                        .type("Coordination/Timeline")
+                        .type(typeReference(Timeline.blueId()))
                         .properties("providerId", new Node().value("test-provider"))
                         .properties("timelineId", new Node().value("owner")))
                 .properties("actor", new Node()
-                        .type("Coordination/Principal Actor"));
+                        .type(typeReference(PrincipalActor.blueId())));
         Node operation = new Node()
-                .type("Coordination/Sequential Workflow Operation")
+                .type(typeReference(
+                        SequentialWorkflowOperation.blueId()))
                 .properties("channel", new Node().value("ownerChannel"))
                 .properties("request", new Node().type("Text"))
                 .properties("steps", new Node().items(new Node()
-                        .type("Coordination/Compute")
+                        .type(typeReference(Compute.blueId()))
                         .properties("do", program)));
         return new Node()
                 .name("Compute Effect Plan Benchmark")
@@ -162,7 +169,7 @@ public class ComputeEffectPlanBenchmark {
                 .actor(new PrincipalActor())
                 .timestamp(BigInteger.ONE);
         Node request = new Node()
-                .type("Coordination/Operation Request")
+                .type(typeReference(OperationRequest.blueId()))
                 .properties("operation", new Node().value("run"))
                 .properties("channel", new Node().value("ownerChannel"))
                 .properties("request", new Node().value("request"));
@@ -170,7 +177,11 @@ public class ComputeEffectPlanBenchmark {
                 .properties("timestamp", new Node().value(BigInteger.ONE))
                 .properties("message", request)
                 .blue(repository.typeAliasBlue());
-        return blue.preprocess(new RepositoryTypeAliasPreprocessor(repository).preprocess(source)).blue(null);
+        return blue.preprocess(source).blue(null);
+    }
+
+    private static Node typeReference(String blueId) {
+        return new Node().blueId(blueId);
     }
 
     private static void requireSuccess(DocumentProcessingResult result) {

@@ -8,7 +8,6 @@ import blue.language.processor.ProcessorStatus;
 import blue.language.snapshot.ResolvedSnapshot;
 import java.math.BigInteger;
 import java.util.List;
-import java.util.Locale;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -39,105 +38,161 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * - Restaurant and Hotel each call {@code confirm} inside their embedded order scopes.
  */
 class OfferPaynoteEmbeddedOrdersWorkflowTest {
+    private static final String LANGUAGE_PROCESS_EMBEDDED_ROUTING_DEFECT =
+            "Language Process Embedded routing defect: ";
     private static final String DOCUMENT_RESOURCE =
             "coordination/compute/offer-paynote-embedded-orders-bex.yaml";
 
     @Test
-    void packageOrderBecomesReadyToUseAfterPaynoteCapturesConfirmedRestaurantAndHotelOrders() {
-        BexProcessingMetrics metrics = new BexProcessingMetrics();
-        ComputeWorkflowTestSupport support = support(metrics);
-
+    void shouldInitializeExpectedOfferWithoutRootTemplates() {
+        // Given
+        ComputeWorkflowTestSupport support = support(null);
         Node authored = support.yamlResource(DOCUMENT_RESOURCE);
-        assertNoRootTemplates(authored);
-        ResolvedSnapshot current =
+
+        // When
+        ResolvedSnapshot initialized =
                 blue.coordination.processor.ProcessingResultTestSupport.snapshot(
                         support.blue, support.initialize(authored));
-        assertEquals("Awaiting PayNote", current.resolvedNodeAt("/order/status").getValue());
-        assertEquals("20-21 June weekend", current.resolvedNodeAt("/package/title").getValue());
-        assertEquals("Deluxe Room", current.resolvedNodeAt("/package/roomType").getValue());
-        assertEquals("Restaurant Cud Malina", current.resolvedNodeAt("/package/restaurantName").getValue());
-        assertEquals(BigInteger.valueOf(499), current.resolvedNodeAt("/package/price/amount").getValue());
-        long snapshotBuildsAfterInitialize = metrics.processingSnapshotFromDocumentBuilds();
 
-        // Travel Agency delivers the PayNote directly in the operation request. The root order embeds
-        // that request at /paynote and asks Card Processor to authorize 499 PLN.
-        DocumentProcessingResult paynoteDelivered = processMeasured(metrics, "deliverPaynote", support, current,
-                operationEvent(support, "travel-agency", 1, "deliverPaynote", packagePaynote(support)));
-        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(paynoteDelivered), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(paynoteDelivered));
-        current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
-                support.blue, paynoteDelivered);
-        Node currentDocument = paynoteDelivered.document();
-        assertEquals("Waiting for PayNote capture", currentDocument.get("/order/status"));
-        assertEquals(Boolean.TRUE, currentDocument.get("/order/paynoteDelivered"));
-        assertEquals("Package PayNote", currentDocument.get("/paynote/name"));
-        assertEquals("/paynote", currentDocument.get("/contracts/embeddedPaynotes/paths/0"));
-        assertContainsEventKind(paynoteDelivered.events(), "PayNote Authorization Requested");
+        // Then
+        assertNoRootTemplates(authored);
+        assertEquals("Awaiting PayNote", initialized.resolvedNodeAt("/order/status").getValue());
+        assertEquals("20-21 June weekend", initialized.resolvedNodeAt("/package/title").getValue());
+        assertEquals("Deluxe Room", initialized.resolvedNodeAt("/package/roomType").getValue());
+        assertEquals("Restaurant Cud Malina", initialized.resolvedNodeAt("/package/restaurantName").getValue());
+        assertEquals(BigInteger.valueOf(499), initialized.resolvedNodeAt("/package/price/amount").getValue());
+    }
 
-        // Card Processor authorizes the PayNote. Before this point, component orders are illegal.
-        DocumentProcessingResult authorized = processMeasured(metrics, "confirmAuthorization", support, current,
-                operationEvent(support, "card-processor", 2, "confirmAuthorization", new Node()));
-        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(authorized), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(authorized));
-        current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
-                support.blue, authorized);
+    @Test
+    void shouldDeliverEmbeddedPaynoteAndRequestAuthorization() {
+        // Given
+        ComputeWorkflowTestSupport support = support(null);
+        ResolvedSnapshot initialized = initializedSnapshot(support);
+
+        // When
+        DocumentProcessingResult delivered = support.blue.processDocument(
+                initialized,
+                operationEvent(support, "travel-agency", 12,
+                        "deliverPaynote", packagePaynote(support)));
+
+        // Then
+        assertSuccessful(delivered);
+        assertEquals("Waiting for PayNote capture", delivered.document().get("/order/status"));
+        assertEquals(Boolean.TRUE, delivered.document().get("/order/paynoteDelivered"));
+        assertEquals("Package PayNote", delivered.document().get("/paynote/name"));
+        assertEquals("/paynote", delivered.document().get("/contracts/embeddedPaynotes/paths/0"));
+        assertContainsEventKind(delivered.events(), "PayNote Authorization Requested");
+    }
+
+    @Test
+    void shouldAuthorizeDeliveredPackagePaynote() {
+        // Given
+        ComputeWorkflowTestSupport support = support(null);
+        ResolvedSnapshot delivered = deliveredPaynoteSnapshot(support);
+
+        // When
+        DocumentProcessingResult authorized = support.blue.processDocument(
+                delivered,
+                operationEvent(support, "card-processor", 14,
+                        "confirmAuthorization", new Node()));
+
+        // Then
+        assertSuccessful(authorized);
         assertEquals("Authorized", authorized.document().get("/paynote/status"));
+    }
 
-        // Travel Agency provides the restaurant document as a request to PayNote.
-        DocumentProcessingResult restaurantProvided = processMeasured(metrics, "provideRestaurantOrder", support, current,
-                operationEvent(support, "travel-agency", 3, "provideRestaurantOrder", restaurantOrder(support)));
-        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(restaurantProvided), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(restaurantProvided));
-        current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
-                support.blue, restaurantProvided);
-        currentDocument = restaurantProvided.document();
-        assertEquals("Restaurant Order", currentDocument.get("/paynote/restaurantOrder/name"));
-        assertEquals(Boolean.TRUE, currentDocument.get("/paynote/restaurantOrderProvided"));
-        assertEquals("/restaurantOrder", currentDocument.get("/paynote/contracts/componentOrders/paths/0"));
+    @Test
+    void shouldEmbedRestaurantAndHotelOrdersAfterAuthorization() {
+        // Given
+        ComputeWorkflowTestSupport support = support(null);
+        ResolvedSnapshot authorized = authorizedPaynoteSnapshot(support);
 
-        // Travel Agency provides the hotel document as a separate request to PayNote.
-        DocumentProcessingResult hotelProvided = processMeasured(metrics, "provideHotelOrder", support, current,
-                operationEvent(support, "travel-agency", 4, "provideHotelOrder", hotelOrder(support)));
-        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(hotelProvided), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(hotelProvided));
-        current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
-                support.blue, hotelProvided);
-        currentDocument = hotelProvided.document();
-        assertEquals("Hotel Order", currentDocument.get("/paynote/hotelOrder/name"));
-        assertEquals(Boolean.TRUE, currentDocument.get("/paynote/hotelOrderProvided"));
-        assertEquals("/hotelOrder", currentDocument.get("/paynote/contracts/componentOrders/paths/1"));
+        // When
+        DocumentProcessingResult restaurantProvided = support.blue.processDocument(
+                authorized,
+                operationEvent(support, "travel-agency", 16,
+                        "provideRestaurantOrder", restaurantOrder(support)));
+        ResolvedSnapshot withRestaurant =
+                blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                        support.blue, restaurantProvided);
+        DocumentProcessingResult hotelProvided = support.blue.processDocument(
+                withRestaurant,
+                operationEvent(support, "travel-agency", 17,
+                        "provideHotelOrder", hotelOrder(support)));
 
-        // Restaurant confirms the restaurant order. PayNote notices the embedded event, but capture
-        // is still blocked because the hotel order has not confirmed yet.
-        DocumentProcessingResult restaurantConfirmed = processMeasured(metrics, "restaurantConfirm", support, current,
-                operationEvent(support, "restaurant", 5, "confirm", new Node()));
-        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(restaurantConfirmed), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(restaurantConfirmed));
-        current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
-                support.blue, restaurantConfirmed);
-        currentDocument = restaurantConfirmed.document();
-        assertEquals("Confirmed", currentDocument.get("/paynote/restaurantOrder/status"));
-        assertEquals(Boolean.TRUE, currentDocument.get("/paynote/restaurantConfirmed"));
-        assertEquals(Boolean.FALSE, currentDocument.get("/paynote/captureRequested"));
+        // Then
+        assertSuccessful(restaurantProvided);
+        assertSuccessful(hotelProvided);
+        assertEquals("Restaurant Order", hotelProvided.document().get("/paynote/restaurantOrder/name"));
+        assertEquals(Boolean.TRUE, hotelProvided.document().get("/paynote/restaurantOrderProvided"));
+        assertEquals("/restaurantOrder", hotelProvided.document().get("/paynote/contracts/componentOrders/paths/0"));
+        assertEquals("Hotel Order", hotelProvided.document().get("/paynote/hotelOrder/name"));
+        assertEquals(Boolean.TRUE, hotelProvided.document().get("/paynote/hotelOrderProvided"));
+        assertEquals("/hotelOrder", hotelProvided.document().get("/paynote/contracts/componentOrders/paths/1"));
+    }
 
-        // Hotel confirms the hotel order. Now both embedded confirmations exist, so PayNote emits a
-        // capture request for Card Processor.
-        DocumentProcessingResult hotelConfirmed = processMeasured(metrics, "hotelConfirm", support, current,
-                operationEvent(support, "hotel", 6, "confirm", new Node()));
-        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(hotelConfirmed), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(hotelConfirmed));
-        current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
-                support.blue, hotelConfirmed);
-        currentDocument = hotelConfirmed.document();
-        assertEquals("Confirmed", currentDocument.get("/paynote/hotelOrder/status"));
-        assertEquals(Boolean.TRUE, currentDocument.get("/paynote/hotelConfirmed"));
-        assertEquals(Boolean.TRUE, currentDocument.get("/paynote/captureRequested"));
+    @Test
+    void shouldRequestCaptureOnlyAfterBothComponentOrdersConfirm() {
+        // Given
+        ComputeWorkflowTestSupport support = support(null);
+        ResolvedSnapshot ordersProvided =
+                componentOrdersProvidedSnapshot(support);
 
-        // Card Processor confirms capture. The root package order observes /paynote/captured through
-        // a Document Update Channel and switches to Ready to use.
-        DocumentProcessingResult captured = processMeasured(metrics, "confirmCapture", support, current,
-                operationEvent(support, "card-processor", 7, "confirmCapture", new Node()));
-        assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(captured), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(captured));
-        currentDocument = captured.document();
-        assertEquals("Captured", currentDocument.get("/paynote/status"));
-        assertEquals(Boolean.TRUE, currentDocument.get("/paynote/captured"));
-        assertEquals("Ready to use", currentDocument.get("/order/status"));
+        // When
+        DocumentProcessingResult restaurantConfirmed = support.blue.processDocument(
+                ordersProvided,
+                operationEvent(support, "restaurant", 18,
+                        "confirm", new Node()));
+        ResolvedSnapshot withRestaurantConfirmation =
+                blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                        support.blue, restaurantConfirmed);
+        DocumentProcessingResult hotelConfirmed = support.blue.processDocument(
+                withRestaurantConfirmation,
+                operationEvent(support, "hotel", 19,
+                        "confirm", new Node()));
+
+        // Then
+        assertSuccessful(restaurantConfirmed);
+        assertSuccessful(hotelConfirmed);
+        assertEquals("Confirmed", restaurantConfirmed.document().get("/paynote/restaurantOrder/status"));
+        assertEquals(Boolean.TRUE, restaurantConfirmed.document().get("/paynote/restaurantConfirmed"));
+        assertEquals(Boolean.FALSE, restaurantConfirmed.document().get("/paynote/captureRequested"));
+        assertEquals("Confirmed", hotelConfirmed.document().get("/paynote/hotelOrder/status"));
+        assertEquals(Boolean.TRUE, hotelConfirmed.document().get("/paynote/hotelConfirmed"));
+        assertEquals(Boolean.TRUE, hotelConfirmed.document().get("/paynote/captureRequested"));
+    }
+
+    @Test
+    void shouldMakePackageReadyAfterCapturingConfirmedComponentOrders() {
+        // Given
+        ComputeWorkflowTestSupport support = support(null);
+        ResolvedSnapshot confirmedOrders =
+                confirmedOrdersSnapshot(support);
+
+        // When
+        DocumentProcessingResult captured = support.blue.processDocument(
+                confirmedOrders,
+                operationEvent(support, "card-processor", 20,
+                        "confirmCapture", new Node()));
+
+        // Then
+        assertSuccessful(captured);
+        assertEquals("Captured", captured.document().get("/paynote/status"));
+        assertEquals(Boolean.TRUE, captured.document().get("/paynote/captured"));
+        assertEquals("Ready to use", captured.document().get("/order/status"));
         assertContainsEventKind(captured.events(), "Package Order Ready to Use");
+    }
 
+    @Test
+    void shouldPreserveSnapshotOptimizationsAcrossPackageLifecycle() {
+        // Given
+        BexProcessingMetrics metrics = new BexProcessingMetrics();
+
+        // When
+        MeasuredLifecycle lifecycle = runMeasuredLifecycle(metrics);
+
+        // Then
+        assertSuccessful(lifecycle.captured);
         assertEquals(0L, metrics.updateIndividualPatchApplications());
         assertEquals(metrics.updateBatchPatchApplications(), metrics.directBexChangesetHits());
         assertEquals(0L, metrics.bexDocumentViewMaterializedHits());
@@ -145,17 +200,21 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
         assertEquals(0L, metrics.workflowDocumentViewsFromDocument());
         assertEquals(0L, metrics.workflowDocumentViewMisses());
         assertTrue(metrics.bexDocumentViewFrozenDirectHits() > 0L);
-        assertEquals(snapshotBuildsAfterInitialize, metrics.processingSnapshotFromDocumentBuilds());
+        assertEquals(
+                lifecycle.snapshotBuildsAfterInitialize,
+                metrics.processingSnapshotFromDocumentBuilds());
     }
 
     @Test
-    void illegalPackagePaynoteAndComponentOrderOperationsFailClosed() {
+    void shouldRejectPaynoteWithWrongAmount() {
+        // Given
         ComputeWorkflowTestSupport support = support(null);
         ResolvedSnapshot current =
                 blue.coordination.processor.ProcessingResultTestSupport.snapshot(
                         support.blue,
                         support.initialize(support.yamlResource(DOCUMENT_RESOURCE)));
 
+        // When
         // Illegal: wrong PayNote amount. The package order only accepts the exact 499 PLN PayNote for
         // this Hotel Badura + Cud Malina weekend package. This is rejected by deliverPaynote.request
         // matching, so the workflow does not run and the document is unchanged.
@@ -163,52 +222,217 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
         wrongPaynote.getProperties().put("amount", new Node().value(498));
         DocumentProcessingResult wrongPaynoteResult = support.blue.processDocument(current,
                 operationEvent(support, "travel-agency", 11, "deliverPaynote", wrongPaynote));
+
+        // Then
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(wrongPaynoteResult), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(wrongPaynoteResult));
         assertFalse(wrongPaynoteResult.document().getProperties().containsKey("paynote"));
         assertEquals("Awaiting PayNote", wrongPaynoteResult.document().get("/order/status"));
+    }
 
-        current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
-                support.blue,
-                support.blue.processDocument(current,
-                        operationEvent(support, "travel-agency", 12,
-                                "deliverPaynote", packagePaynote(support))));
+    @Test
+    void shouldRejectComponentOrderBeforePaynoteAuthorization() {
+        // Given
+        ComputeWorkflowTestSupport support = support(null);
+        ResolvedSnapshot current = deliveredPaynoteSnapshot(support);
 
+        // When
         // Illegal: Travel Agency cannot provide component orders until Card Processor authorizes the
         // embedded PayNote.
         DocumentProcessingResult beforeAuthorization = support.blue.processDocument(current,
                 operationEvent(support, "travel-agency", 13, "provideHotelOrder", hotelOrder(support)));
+
+        // Then
         assertRuntimeFatal(beforeAuthorization, "after PayNote authorization");
+    }
 
-        current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
-                support.blue,
-                support.blue.processDocument(current,
-                        operationEvent(support, "card-processor", 14,
-                                "confirmAuthorization", new Node())));
+    @Test
+    void shouldRejectHotelDocumentForRestaurantOrder() {
+        // Given
+        ComputeWorkflowTestSupport support = support(null);
+        ResolvedSnapshot current = authorizedPaynoteSnapshot(support);
 
+        // When
         // Illegal: provideRestaurantOrder rejects a hotel document at operation-request matching time.
         // Restaurant and hotel fulfillment documents are intentionally specific and not interchangeable.
         DocumentProcessingResult wrongRestaurantDocument = support.blue.processDocument(current,
                 operationEvent(support, "travel-agency", 15, "provideRestaurantOrder", hotelOrder(support)));
+
+        // Then
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(wrongRestaurantDocument), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(wrongRestaurantDocument));
         assertFalse(wrongRestaurantDocument.document().getAsNode("/paynote").getProperties()
                 .containsKey("restaurantOrder"));
         assertEquals(Boolean.FALSE, wrongRestaurantDocument.document().get("/paynote/restaurantOrderProvided"));
+    }
 
-        current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
-                support.blue,
-                support.blue.processDocument(current,
-                        operationEvent(support, "travel-agency", 16,
-                                "provideRestaurantOrder", restaurantOrder(support))));
-        current = blue.coordination.processor.ProcessingResultTestSupport.snapshot(
-                support.blue,
-                support.blue.processDocument(current,
-                        operationEvent(support, "travel-agency", 17,
-                                "provideHotelOrder", hotelOrder(support))));
+    @Test
+    void shouldRejectCaptureBeforeBothComponentOrdersConfirm() {
+        // Given
+        ComputeWorkflowTestSupport support = support(null);
+        ResolvedSnapshot current = componentOrdersProvidedSnapshot(support);
 
+        // When
         // Illegal: Card Processor cannot capture before both Restaurant and Hotel have confirmed.
         DocumentProcessingResult earlyCapture = support.blue.processDocument(current,
                 operationEvent(support, "card-processor", 18, "confirmCapture", new Node()));
+
+        // Then
         assertRuntimeFatal(earlyCapture, "before both orders confirm");
+    }
+
+    private static ResolvedSnapshot initializedSnapshot(
+            ComputeWorkflowTestSupport support) {
+        return blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                support.blue,
+                support.initialize(
+                        support.yamlResource(DOCUMENT_RESOURCE)));
+    }
+
+    private static ResolvedSnapshot deliveredPaynoteSnapshot(
+            ComputeWorkflowTestSupport support) {
+        ResolvedSnapshot initialized =
+                initializedSnapshot(support);
+        return blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                support.blue,
+                support.blue.processDocument(initialized,
+                        operationEvent(support, "travel-agency", 12,
+                                "deliverPaynote", packagePaynote(support))));
+    }
+
+    private static ResolvedSnapshot authorizedPaynoteSnapshot(
+            ComputeWorkflowTestSupport support) {
+        ResolvedSnapshot delivered = deliveredPaynoteSnapshot(support);
+        return blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                support.blue,
+                support.blue.processDocument(delivered,
+                        operationEvent(support, "card-processor", 14,
+                                "confirmAuthorization", new Node())));
+    }
+
+    private static ResolvedSnapshot componentOrdersProvidedSnapshot(
+            ComputeWorkflowTestSupport support) {
+        ResolvedSnapshot authorized = authorizedPaynoteSnapshot(support);
+        ResolvedSnapshot withRestaurant =
+                blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                        support.blue,
+                        support.blue.processDocument(authorized,
+                                operationEvent(support, "travel-agency", 16,
+                                        "provideRestaurantOrder",
+                                        restaurantOrder(support))));
+        return blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                support.blue,
+                support.blue.processDocument(withRestaurant,
+                        operationEvent(support, "travel-agency", 17,
+                                        "provideHotelOrder", hotelOrder(support))));
+    }
+
+    private static ResolvedSnapshot confirmedOrdersSnapshot(
+            ComputeWorkflowTestSupport support) {
+        ResolvedSnapshot ordersProvided =
+                componentOrdersProvidedSnapshot(support);
+        ResolvedSnapshot restaurantConfirmed =
+                blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                        support.blue,
+                        support.blue.processDocument(
+                                ordersProvided,
+                                operationEvent(
+                                        support,
+                                        "restaurant",
+                                        18,
+                                        "confirm",
+                                        new Node())));
+        return blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                support.blue,
+                support.blue.processDocument(
+                        restaurantConfirmed,
+                        operationEvent(
+                                support,
+                                "hotel",
+                                19,
+                                "confirm",
+                                new Node())));
+    }
+
+    private static MeasuredLifecycle runMeasuredLifecycle(
+            BexProcessingMetrics metrics) {
+        ComputeWorkflowTestSupport support =
+                support(metrics);
+        ResolvedSnapshot current =
+                initializedSnapshot(support);
+        long snapshotBuildsAfterInitialize =
+                metrics.processingSnapshotFromDocumentBuilds();
+
+        DocumentProcessingResult delivered =
+                processMeasured(
+                        metrics, "deliverPaynote", support, current,
+                        operationEvent(
+                                support, "travel-agency", 1,
+                                "deliverPaynote",
+                                packagePaynote(support)));
+        current = snapshot(support, delivered);
+        DocumentProcessingResult authorized =
+                processMeasured(
+                        metrics, "confirmAuthorization", support, current,
+                        operationEvent(
+                                support, "card-processor", 2,
+                                "confirmAuthorization", new Node()));
+        current = snapshot(support, authorized);
+        DocumentProcessingResult restaurantProvided =
+                processMeasured(
+                        metrics, "provideRestaurantOrder", support, current,
+                        operationEvent(
+                                support, "travel-agency", 3,
+                                "provideRestaurantOrder",
+                                restaurantOrder(support)));
+        current = snapshot(support, restaurantProvided);
+        DocumentProcessingResult hotelProvided =
+                processMeasured(
+                        metrics, "provideHotelOrder", support, current,
+                        operationEvent(
+                                support, "travel-agency", 4,
+                                "provideHotelOrder",
+                                hotelOrder(support)));
+        current = snapshot(support, hotelProvided);
+        DocumentProcessingResult restaurantConfirmed =
+                processMeasured(
+                        metrics, "restaurantConfirm", support, current,
+                        operationEvent(
+                                support, "restaurant", 5,
+                                "confirm", new Node()));
+        current = snapshot(support, restaurantConfirmed);
+        DocumentProcessingResult hotelConfirmed =
+                processMeasured(
+                        metrics, "hotelConfirm", support, current,
+                        operationEvent(
+                                support, "hotel", 6,
+                                "confirm", new Node()));
+        current = snapshot(support, hotelConfirmed);
+        DocumentProcessingResult captured =
+                processMeasured(
+                        metrics, "confirmCapture", support, current,
+                        operationEvent(
+                                support, "card-processor", 7,
+                                "confirmCapture", new Node()));
+        return new MeasuredLifecycle(
+                captured,
+                snapshotBuildsAfterInitialize);
+    }
+
+    private static ResolvedSnapshot snapshot(
+            ComputeWorkflowTestSupport support,
+            DocumentProcessingResult result) {
+        return blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                support.blue, result);
+    }
+
+    private static void assertSuccessful(
+            DocumentProcessingResult result) {
+        assertEquals(
+                ProcessorStatus.SUCCESS,
+                result.status(),
+                LANGUAGE_PROCESS_EMBEDDED_ROUTING_DEFECT
+                        + blue.coordination.processor
+                                .ProcessingResultTestSupport
+                                .diagnosticMessage(result));
     }
 
     private static ComputeWorkflowTestSupport support(BexProcessingMetrics metrics) {
@@ -224,143 +448,22 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
                                                             ComputeWorkflowTestSupport support,
                                                             ResolvedSnapshot document,
                                                             Node event) {
-        BexProcessingMetrics.Snapshot before = metrics.snapshot();
-        long start = System.nanoTime();
-        DocumentProcessingResult result = support.blue.processDocument(document, event);
-        long wallNanos = System.nanoTime() - start;
-        BexProcessingMetrics.Snapshot after = metrics.snapshot();
-        printStepMetrics(label, wallNanos, result, before, after);
-        return result;
+        return support.blue.processDocument(
+                document,
+                event);
     }
 
-    private static void printStepMetrics(String label,
-                                         long wallNanos,
-                                         DocumentProcessingResult result,
-                                         BexProcessingMetrics.Snapshot before,
-                                         BexProcessingMetrics.Snapshot after) {
-        System.out.printf(Locale.ROOT,
-                "[offer-paynote metrics] %s wall=%.3fms status=%s gas=%d events=%d document=%s failure=%s%n",
-                label,
-                nanosToMs(wallNanos),
-                result.status(),
-                result.totalGas(),
-                result.events().size(),
-                result.document() != null,
-                blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
-        System.out.printf(Locale.ROOT,
-                "  processor blue=%.3fms process=%.3fms preprocess=%.3fms bundle=%.3fms actualBundle=%.3fms reuse=%.3fms cacheKey=%.3fms bundleHits=%d bundleMisses=%d built=%d reused=%d%n",
-                ms(after.blueProcessDocumentNanos, before.blueProcessDocumentNanos),
-                ms(after.processDocumentNanos, before.processDocumentNanos),
-                ms(after.eventPreprocessNanos, before.eventPreprocessNanos),
-                ms(after.bundleLoadNanos, before.bundleLoadNanos),
-                ms(after.bundleLoadActualBuildNanos, before.bundleLoadActualBuildNanos),
-                ms(after.bundleLoadReuseNanos, before.bundleLoadReuseNanos),
-                ms(after.bundleLoadCacheKeyBuildNanos, before.bundleLoadCacheKeyBuildNanos),
-                delta(after.bundleLoadCacheHits, before.bundleLoadCacheHits),
-                delta(after.bundleLoadCacheMisses, before.bundleLoadCacheMisses),
-                delta(after.bundlesBuilt, before.bundlesBuilt),
-                delta(after.bundlesReused, before.bundlesReused));
-        System.out.printf(Locale.ROOT,
-                "  snapshotCache lookup=%.3fms hits=%d misses=%d fromDocument=%.3fms builds=%d bundleScope attempts=%d execHits=%d refreshes=%d termination=%.3fms resolved=%.3fms contractLoad=%.3fms%n",
-                ms(after.processingSnapshotCacheLookupNanos, before.processingSnapshotCacheLookupNanos),
-                delta(after.processingSnapshotCacheHits, before.processingSnapshotCacheHits),
-                delta(after.processingSnapshotCacheMisses, before.processingSnapshotCacheMisses),
-                ms(after.processingSnapshotFromDocumentNanos, before.processingSnapshotFromDocumentNanos),
-                delta(after.processingSnapshotFromDocumentBuilds, before.processingSnapshotFromDocumentBuilds),
-                delta(after.bundleScopeLoadAttempts, before.bundleScopeLoadAttempts),
-                delta(after.bundleScopeExecutionCacheHits, before.bundleScopeExecutionCacheHits),
-                delta(after.bundleScopeRefreshes, before.bundleScopeRefreshes),
-                ms(after.bundleScopeTerminationCheckNanos, before.bundleScopeTerminationCheckNanos),
-                ms(after.bundleScopeResolvedLookupNanos, before.bundleScopeResolvedLookupNanos),
-                ms(after.bundleScopeContractLoadNanos, before.bundleScopeContractLoadNanos));
-        System.out.printf(Locale.ROOT,
-                "  routing channelDiscovery=%.3fms channelMatch=%.3fms channelEvals=%d handlerDiscovery=%.3fms handlerMatch=%.3fms handlerAttempts=%d handlerExecution=%.3fms handlers=%d eventRouting=%.3fms routed=%d%n",
-                ms(after.channelDiscoveryNanos, before.channelDiscoveryNanos),
-                ms(after.channelMatchNanos, before.channelMatchNanos),
-                delta(after.channelEvaluations, before.channelEvaluations),
-                ms(after.handlerDiscoveryNanos, before.handlerDiscoveryNanos),
-                ms(after.handlerMatchNanos, before.handlerMatchNanos),
-                delta(after.handlerMatchAttempts, before.handlerMatchAttempts),
-                ms(after.handlerExecutionNanos, before.handlerExecutionNanos),
-                delta(after.handlersExecuted, before.handlersExecuted),
-                ms(after.triggeredEventRoutingNanos, before.triggeredEventRoutingNanos),
-                delta(after.triggeredEventsRouted, before.triggeredEventsRouted));
-        System.out.printf(Locale.ROOT,
-                "  workflow runner=%.3fms steps=%d computeSteps=%d updateSteps=%d triggerSteps=%d compute=%.3fms update=%.3fms trigger=%.3fms checkpoint=%.3fms snapshot=%.3fms post=%.3fms%n",
-                ms(after.workflowRunnerNanos, before.workflowRunnerNanos),
-                delta(after.workflowStepsExecuted, before.workflowStepsExecuted),
-                delta(after.computeStepsExecuted, before.computeStepsExecuted),
-                delta(after.updateDocumentStepsExecuted, before.updateDocumentStepsExecuted),
-                delta(after.triggerEventStepsExecuted, before.triggerEventStepsExecuted),
-                ms(after.computeStepNanos, before.computeStepNanos),
-                ms(after.updateStepNanos, before.updateStepNanos),
-                ms(after.triggerStepNanos, before.triggerStepNanos),
-                ms(after.checkpointUpdateNanos, before.checkpointUpdateNanos),
-                ms(after.snapshotCommitNanos, before.snapshotCommitNanos),
-                ms(after.postProcessingNanos, before.postProcessingNanos));
-        System.out.printf(Locale.ROOT,
-                "  checkpoint phases ensure=%.3fms find=%.3fms currentIdentity=%.3fms isNewer=%.3fms duplicate=%.3fms persist=%.3fms identityCache hits=%d misses=%d storedHits=%d storedMisses=%d directBlueId=%.3fms contentBlueId=%.3fms fallback=%.3fms%n",
-                ms(after.checkpointEnsureNanos, before.checkpointEnsureNanos),
-                ms(after.checkpointFindNanos, before.checkpointFindNanos),
-                ms(after.checkpointCurrentIdentityNanos, before.checkpointCurrentIdentityNanos),
-                ms(after.checkpointIsNewerNanos, before.checkpointIsNewerNanos),
-                ms(after.checkpointDuplicateNanos, before.checkpointDuplicateNanos),
-                ms(after.checkpointPersistNanos, before.checkpointPersistNanos),
-                delta(after.checkpointIdentityCacheHits, before.checkpointIdentityCacheHits),
-                delta(after.checkpointIdentityCacheMisses, before.checkpointIdentityCacheMisses),
-                delta(after.checkpointStoredIdentityCacheHits, before.checkpointStoredIdentityCacheHits),
-                delta(after.checkpointStoredIdentityCacheMisses, before.checkpointStoredIdentityCacheMisses),
-                ms(after.checkpointDirectBlueIdNanos, before.checkpointDirectBlueIdNanos),
-                ms(after.checkpointContentBlueIdNanos, before.checkpointContentBlueIdNanos),
-                ms(after.checkpointFallbackNanos, before.checkpointFallbackNanos));
-        System.out.printf(Locale.ROOT,
-                "  bex compileExecute=%.3fms compile=%.3fms execute=%.3fms compiled=%d cacheHits=%d cacheMisses=%d nodeWriter=%.3fms syntheticProgramMaterializations=%d directChangesets=%d%n",
-                ms(after.computeCompileExecuteNanos, before.computeCompileExecuteNanos),
-                ms(after.bexCompileNanos, before.bexCompileNanos),
-                ms(after.bexExecuteNanos, before.bexExecuteNanos),
-                delta(after.bexCompiledExecutions, before.bexCompiledExecutions),
-                delta(after.bexCompileCacheHits, before.bexCompileCacheHits),
-                delta(after.bexCompileCacheMisses, before.bexCompileCacheMisses),
-                ms(after.bexNodeWriterNanos, before.bexNodeWriterNanos),
-                delta(after.bexSyntheticProgramMaterializations, before.bexSyntheticProgramMaterializations),
-                delta(after.directBexChangesetHits, before.directBexChangesetHits));
-        System.out.printf(Locale.ROOT,
-                "  patches applied=%d batch=%d individual=%d conversion=%.3fms apply=%.3fms batchPlan=%.3fms batchConform=%.3fms batchBuild=%.3fms batchCommit=%.3fms boundary=%.3fms gas=%.3fms updateRouting=%.3fms%n",
-                delta(after.patchesApplied, before.patchesApplied),
-                delta(after.updateBatchPatchApplications, before.updateBatchPatchApplications),
-                delta(after.updateIndividualPatchApplications, before.updateIndividualPatchApplications),
-                ms(after.updatePatchConversionNanos, before.updatePatchConversionNanos),
-                ms(after.updatePatchApplyNanos, before.updatePatchApplyNanos),
-                ms(after.batchPatchPlanningNanos, before.batchPatchPlanningNanos),
-                ms(after.batchPatchConformanceNanos, before.batchPatchConformanceNanos),
-                ms(after.batchPatchBuildUpdatesNanos, before.batchPatchBuildUpdatesNanos),
-                ms(after.batchPatchCommitNanos, before.batchPatchCommitNanos),
-                ms(after.patchBoundaryNanos, before.patchBoundaryNanos),
-                ms(after.patchGasNanos, before.patchGasNanos),
-                ms(after.documentUpdateRoutingNanos, before.documentUpdateRoutingNanos));
-        System.out.printf(Locale.ROOT,
-                "  documentView workflowFromFrozen=%d workflowFromDocument=%d workflowMisses=%d bexMaterialized=%d frozenDirect=%d frozenRootFallback=%d undefined=%d updateMaterializeBefore=%d updateMaterializeAfter=%d%n",
-                delta(after.workflowDocumentViewsFromFrozen, before.workflowDocumentViewsFromFrozen),
-                delta(after.workflowDocumentViewsFromDocument, before.workflowDocumentViewsFromDocument),
-                delta(after.workflowDocumentViewMisses, before.workflowDocumentViewMisses),
-                delta(after.bexDocumentViewMaterializedHits, before.bexDocumentViewMaterializedHits),
-                delta(after.bexDocumentViewFrozenDirectHits, before.bexDocumentViewFrozenDirectHits),
-                delta(after.bexDocumentViewFrozenRootFallbackHits, before.bexDocumentViewFrozenRootFallbackHits),
-                delta(after.bexDocumentViewUndefinedHits, before.bexDocumentViewUndefinedHits),
-                delta(after.documentUpdateBeforeMaterializations, before.documentUpdateBeforeMaterializations),
-                delta(after.documentUpdateAfterMaterializations, before.documentUpdateAfterMaterializations));
-    }
+    private static final class MeasuredLifecycle {
+        private final DocumentProcessingResult captured;
+        private final long snapshotBuildsAfterInitialize;
 
-    private static long delta(long after, long before) {
-        return after - before;
-    }
-
-    private static double ms(long afterNanos, long beforeNanos) {
-        return nanosToMs(afterNanos - beforeNanos);
-    }
-
-    private static double nanosToMs(long nanos) {
-        return nanos / 1_000_000.0d;
+        private MeasuredLifecycle(
+                DocumentProcessingResult captured,
+                long snapshotBuildsAfterInitialize) {
+            this.captured = captured;
+            this.snapshotBuildsAfterInitialize =
+                    snapshotBuildsAfterInitialize;
+        }
     }
 
     private static void assertNoRootTemplates(Node document) {
@@ -819,7 +922,13 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
     }
 
     private static void assertRuntimeFatal(DocumentProcessingResult result, String expectedMessage) {
-        assertEquals(ProcessorStatus.RUNTIME_FATAL, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
+        assertEquals(
+                ProcessorStatus.RUNTIME_FATAL,
+                result.status(),
+                LANGUAGE_PROCESS_EMBEDDED_ROUTING_DEFECT
+                        + blue.coordination.processor
+                                .ProcessingResultTestSupport
+                                .diagnosticMessage(result));
         if (blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result) != null && blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result).contains(expectedMessage)) {
             return;
         }

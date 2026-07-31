@@ -2,10 +2,11 @@ package blue.coordination.processor.compute;
 
 import blue.coordination.processor.CoordinationProcessors;
 import blue.coordination.processor.CoordinationTestResources;
-import blue.coordination.processor.RepositoryTypeAliasPreprocessor;
+import blue.coordination.processor.ProcessingResultTestSupport;
 import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
+import blue.language.processor.ProcessorStatus;
 import blue.language.processor.registry.RuntimeBlueIds;
 import blue.repo.BlueRepository;
 import org.junit.jupiter.api.Test;
@@ -36,11 +37,12 @@ class CustomerPaynoteLatestBexFixtureTest {
     private static final String EVENT_RESOURCE =
             "/processor-delay/customer-paynote-snapshot.event.yaml";
     private static final String SNAPSHOT_RESOLVED_TYPE =
-            "Sample/Document Initial Snapshot Resolved";
+            "MyOS/Document Initial Snapshot Resolved";
     private static final String PROCESSING_INITIALIZED_MARKER = "Processing Initialized Marker";
 
     @Test
-    void customerPaynoteLatestBexDocumentProcessesSnapshotEvent() {
+    void shouldProcessSnapshotEventWithLatestCustomerPaynoteBexDocument() {
+        // Given
         Fixture fixture = configuredFixture();
         Node document = loadYaml(fixture, DOCUMENT_RESOURCE);
         Node event = loadYaml(fixture, EVENT_RESOURCE);
@@ -48,32 +50,41 @@ class CustomerPaynoteLatestBexFixtureTest {
         retainAdminUpdateContracts(document);
 
         DocumentProcessingResult initialized = fixture.blue.initializeDocument(document);
-        long start = System.currentTimeMillis();
-        DocumentProcessingResult result = fixture.blue.processDocument(initialized.document(), event);
-        System.out.println("Processing time: " + (System.currentTimeMillis() - start) + "ms");
 
+        // When
+        DocumentProcessingResult result = fixture.blue.processDocument(initialized.document(), event);
+
+        // Then
         assertNotNull(result.document());
         assertEquals("Global Package Fulfillment Automation - Weekend Stay + Wine Dinner",
                 result.document().getName());
+        assertEquals(
+                ProcessorStatus.SUCCESS,
+                result.status(),
+                ProcessingResultTestSupport
+                        .diagnosticMessage(result));
         assertFalse(result.events().isEmpty(),
-                "Expected the admin update workflow to emit snapshot events; checkpoint timestamp="
-                        + result.document().get(
-                        "/contracts/checkpoint/entries/sampleAdminChannel/subject/timestamp"));
+                () -> "Expected the admin update workflow to emit snapshot events; "
+                        + "checkpoint="
+                        + result.document().getAsNode(
+                        "/contracts/checkpoint"));
         assertContainsEventType(result,
                 SNAPSHOT_RESOLVED_TYPE,
-                CoordinationTestResources.testTypeAliases(fixture.repository).get(SNAPSHOT_RESOLVED_TYPE));
+                fixture.repository.blueId(
+                        SNAPSHOT_RESOLVED_TYPE));
         assertEquals("active", result.document().get("/status"));
     }
 
     private static Node loadYaml(Fixture fixture, String resourcePath) {
         Node parsed = fixture.blue.parseSourceYaml(CoordinationTestResources.readResource(resourcePath));
-        parsed.blue(fixture.repository.typeAliasBlue());
         if (EVENT_RESOURCE.equals(resourcePath)) {
             stripNestedSnapshotDocuments(parsed);
         }
-        Node aliasesResolved = new RepositoryTypeAliasPreprocessor(
-                CoordinationTestResources.testTypeAliases(fixture.repository)).preprocess(parsed);
-        Node preprocessed = fixture.blue.preprocess(aliasesResolved);
+        Node preprocessed = CoordinationTestResources
+                .preprocessWithFixedRepository(
+                        fixture.blue,
+                        fixture.repository,
+                        parsed);
         normalizeInitializationMarkers(preprocessed);
         clearCheckpoint(preprocessed);
         if (DOCUMENT_RESOURCE.equals(resourcePath)) {

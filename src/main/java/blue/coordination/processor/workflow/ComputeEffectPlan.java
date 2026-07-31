@@ -42,10 +42,14 @@ final class ComputeEffectPlan {
         this.patches = Collections.unmodifiableList(frozenPatches);
         List<FrozenNode> frozenEvents = new ArrayList<FrozenNode>(events.size());
         for (Node event : events) {
-            // Repository-backed BEX values may already be resolved and therefore carry
-            // expanded type nodes. Preserve that valid resolved shape while taking an
-            // immutable snapshot of the event planned for later buffering.
-            frozenEvents.add(FrozenNode.fromResolvedNode(event));
+            /*
+             * ComputeResultEmitter has already rebuilt and provenance-normalized
+             * the exact event. Freeze that authored exact shape. A resolved-mode
+             * freeze reattaches the calculated root BlueId beside the event fields
+             * when converted back to Node, which the hosted semantic boundary must
+             * reject as mixed reference/content.
+             */
+            frozenEvents.add(FrozenNode.fromNode(event));
         }
         this.events = Collections.unmodifiableList(frozenEvents);
         if (terminationRequested

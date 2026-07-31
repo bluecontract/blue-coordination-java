@@ -77,6 +77,45 @@ final class SequentialWorkflowPlanCache implements AutoCloseable {
         return plan;
     }
 
+    /**
+     * Refreshes retained weight after one admitted step publishes its immutable
+     * lazy plan.
+     *
+     * <p>The plan may have been evicted or the cache may have been cleared
+     * while a concurrent execution was compiling the step. In that case the
+     * caller still owns a valid plan, but there is no retained entry to
+     * update.</p>
+     */
+    synchronized void refreshWeight(
+            SequentialWorkflowPlan plan) {
+        if (plan == null
+                || plan.contractIdentity() == null) {
+            return;
+        }
+        CacheEntry retained =
+                entries.get(plan.contractIdentity());
+        if (retained == null
+                || retained.plan != plan) {
+            return;
+        }
+        long refreshed = entryWeight(plan);
+        if (refreshed > maxWeightBytes) {
+            entries.remove(plan.contractIdentity());
+            adjustWeight(-retained.weightBytes);
+            if (metrics != null) {
+                metrics.incrementWorkflowPlanCacheEvictions();
+            }
+            return;
+        }
+        long delta = refreshed - retained.weightBytes;
+        if (delta == 0L) {
+            return;
+        }
+        retained.weightBytes = refreshed;
+        adjustWeight(delta);
+        evictToBounds();
+    }
+
     synchronized int size() {
         return entries.size();
     }
@@ -139,7 +178,7 @@ final class SequentialWorkflowPlanCache implements AutoCloseable {
 
     private static final class CacheEntry {
         private final SequentialWorkflowPlan plan;
-        private final long weightBytes;
+        private long weightBytes;
 
         private CacheEntry(SequentialWorkflowPlan plan, long weightBytes) {
             this.plan = plan;

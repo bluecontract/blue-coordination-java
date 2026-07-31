@@ -1,0 +1,24 @@
+fixtureSchema: blue.coordination/direct-portable-gas-fixture/1.0
+id: coordination-gas-trigger-event-step
+operation: direct-portable-gas
+input:
+  counter: triggerEventStep
+  quantity: 11
+  context:
+    scopePath: /
+    contractKey: gas-micro
+    logicalPath: /triggerEventStep
+    reason: direct-portable-gas:triggerEventStep
+expected:
+  totalGas: 33
+  trace:
+  - sequence: 0
+    namespace: coordination.00000000
+    counter: triggerEventStep
+    quantity: 11
+    weight: 3
+    subtotal: 33
+    scopePath: /
+    contractKey: gas-micro
+    logicalPath: /triggerEventStep
+    reason: direct-portable-gas:triggerEventStep

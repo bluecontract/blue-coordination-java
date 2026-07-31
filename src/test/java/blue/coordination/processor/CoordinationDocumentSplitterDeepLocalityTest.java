@@ -36,8 +36,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Structural evidence for deep Coordination selection surfaces.
  *
  * <p>This test models physical provider demand only. A selected target admits
- * the Root-to-target scope chain, the selected operation body at the target,
- * and the explicitly allow-listed causal body at every scope on that chain.
+ * the Root-to-target scope chain, canonical contract containers and selected
+ * headers, the selected operation body at the target, and the explicitly
+ * allow-listed causal body at every scope on that chain.
  * It does not execute Contracts and therefore makes no processing-parity
  * claim.</p>
  */
@@ -59,10 +60,13 @@ class CoordinationDocumentSplitterDeepLocalityTest {
     private static final int BODY_BYTES = 4096;
 
     @Test
-    void completeFragmentInventoryReconstructsExactDeepRoot() {
+    void shouldReconstructExactDeepRootFromCompleteFragmentInventory() {
+        // Given
         Fixture fixture = Fixture.create();
+
+        // When
         CoordinationDocumentSplitter.SplitGraph split =
-                new CoordinationDocumentSplitter()
+                CoordinationDocumentSplitterTestSupport
                         .splitDocument(fixture.root);
 
         Node reconstructed =
@@ -80,6 +84,7 @@ class CoordinationDocumentSplitterDeepLocalityTest {
                                     : node;
                         });
 
+        // Then
         assertEquals(
                 NodeToMapListOrValue.get(
                         fixture.root),
@@ -133,11 +138,18 @@ class CoordinationDocumentSplitterDeepLocalityTest {
     }
 
     @Test
-    void rootOnlySurfaceDemandsNoChildOrSiblingRoot() {
+    void shouldDemandNoChildOrSiblingRootForRootOnlySurface() {
+        // Given
+        List<String> selectedScopePaths =
+                Collections.singletonList(
+                        ROOT);
+
+        // When
         DemandProof proof =
                 demandSurface(
-                        Collections.singletonList(
-                                ROOT));
+                        selectedScopePaths);
+
+        // Then
         Set<String> childAndSiblingRoots =
                 new LinkedHashSet<>(
                         proof.fixture.scopeBlueIds
@@ -154,20 +166,27 @@ class CoordinationDocumentSplitterDeepLocalityTest {
                         proof.provider
                                 .demandedBlueIds()));
         assertEquals(
-                3,
+                6,
                 proof.provider.calls(),
-                "Root header plus selected and causal Root bodies only");
+                "Root scope, contract container, selected and causal headers, "
+                        + "and their bodies only");
     }
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("selectionSurfaces")
-    void selectedScopeUnionDemandsOnlyChainAndAllowListedBodies(
+    void shouldDemandOnlySelectedChainsAndAllowListedBodies(
             String label,
             List<String> selectedScopePaths) {
+        // Given
+        List<String> selection =
+                selectedScopePaths;
+
+        // When
         DemandProof proof =
                 demandSurface(
-                        selectedScopePaths);
+                        selection);
 
+        // Then
         assertEquals(
                 proof.expectedBlueIds,
                 proof.provider.demandedBlueIds(),
@@ -203,7 +222,7 @@ class CoordinationDocumentSplitterDeepLocalityTest {
                 "decoy operation and reactive bodies remain references");
 
         for (String selectedPath
-                : selectedScopePaths) {
+                : selection) {
             assertTrue(
                     proof.provider
                             .demandedBlueIds()
@@ -214,7 +233,7 @@ class CoordinationDocumentSplitterDeepLocalityTest {
         }
         for (String chainPath
                 : selectedChainUnion(
-                        selectedScopePaths)) {
+                        selection)) {
             assertTrue(
                     proof.provider
                             .demandedBlueIds()
@@ -257,15 +276,17 @@ class CoordinationDocumentSplitterDeepLocalityTest {
             List<String> selectedScopePaths) {
         Fixture fixture = Fixture.create();
         CoordinationDocumentSplitter.SplitGraph split =
-                new CoordinationDocumentSplitter()
+                CoordinationDocumentSplitterTestSupport
                         .splitDocument(fixture.root);
         Set<String> expectedBlueIds =
                 expectedBlueIds(
+                        split,
                         fixture,
                         selectedScopePaths);
         StrictRecordingProvider provider =
                 new StrictRecordingProvider(
-                        split.provider(),
+                        canonicalProvider(
+                                split),
                         expectedBlueIds);
         DemandSession session =
                 new DemandSession(provider);
@@ -300,10 +321,18 @@ class CoordinationDocumentSplitterDeepLocalityTest {
                             childReference.getBlueId());
                 }
 
+                Node contracts =
+                        session.demand(
+                                scope.getContracts()
+                                        .getBlueId());
+                Node causal =
+                        session.demand(
+                                contracts.getProperties()
+                                        .get("causalReaction")
+                                        .getBlueId());
                 Node causalReference =
-                        NodePathEditor.getOrNull(
-                                scope,
-                                "/contracts/causalReaction/steps");
+                        causal.getProperties()
+                                .get("steps");
                 assertNotNull(causalReference);
                 assertTrue(
                         causalReference
@@ -317,10 +346,18 @@ class CoordinationDocumentSplitterDeepLocalityTest {
                 priorPath = scopePath;
             }
 
+            Node contracts =
+                    session.demand(
+                            scope.getContracts()
+                                    .getBlueId());
+            Node selected =
+                    session.demand(
+                            contracts.getProperties()
+                                    .get("selectedOperation")
+                                    .getBlueId());
             Node selectedReference =
-                    NodePathEditor.getOrNull(
-                            scope,
-                            "/contracts/selectedOperation/steps");
+                    selected.getProperties()
+                            .get("steps");
             assertNotNull(selectedReference);
             assertTrue(
                     selectedReference
@@ -341,6 +378,7 @@ class CoordinationDocumentSplitterDeepLocalityTest {
     }
 
     private static Set<String> expectedBlueIds(
+            CoordinationDocumentSplitter.SplitGraph split,
             Fixture fixture,
             List<String> selectedScopePaths) {
         Set<String> expected =
@@ -352,15 +390,59 @@ class CoordinationDocumentSplitterDeepLocalityTest {
                 expected.add(
                         fixture.scopeBlueIds.get(
                                 chainPath));
+                Node scope =
+                        split.fragments().get(
+                                fixture.scopeBlueIds.get(
+                                        chainPath));
+                String contractsBlueId =
+                        scope.getContracts()
+                                .getBlueId();
+                expected.add(
+                        contractsBlueId);
+                Node contracts =
+                        split.fragments().get(
+                                contractsBlueId);
+                expected.add(
+                        contracts.getProperties()
+                                .get("causalReaction")
+                                .getBlueId());
                 expected.add(
                         fixture.causalBodyBlueIds.get(
                                 chainPath));
             }
+            Node selectedScope =
+                    split.fragments().get(
+                            fixture.scopeBlueIds.get(
+                                    selectedPath));
+            Node selectedContracts =
+                    split.fragments().get(
+                            selectedScope
+                                    .getContracts()
+                                    .getBlueId());
+            expected.add(
+                    selectedContracts
+                            .getProperties()
+                            .get("selectedOperation")
+                            .getBlueId());
             expected.add(
                     fixture.selectedBodyBlueIds.get(
                             selectedPath));
         }
         return expected;
+    }
+
+    private static NodeProvider canonicalProvider(
+            CoordinationDocumentSplitter.SplitGraph split) {
+        Map<String, Node> fragments =
+                split.fragments();
+        return blueId -> {
+            Node exact = fragments.get(
+                    blueId);
+            return exact != null
+                    ? Collections.singletonList(
+                            exact.clone())
+                    : null;
+        };
     }
 
     private static Set<String> selectedChainUnion(

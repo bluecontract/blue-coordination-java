@@ -16,42 +16,52 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MustUnderstandContractsTest {
     @Test
-    void unknownContractTypeStopsInitialization() {
+    void shouldStopInitializationForUnknownContractType() {
+        // Given
         Fixture fixture = configuredFixture(false);
         String unknownType = "3nxchG67TRi4XrYFM2MTjj4LmuHNQzVv9NZLjATrPN19";
         Node document = document(fixture.repository, contract("unknown", new Node()
                 .type(new Node().blueId(unknownType))));
 
+        // When
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> initialize(fixture, document));
 
+        // Then
         assertTrue(ex.getMessage().contains(unknownType), ex.getMessage());
     }
 
     @Test
-    void baseChannelContractStopsInitializationWhenUsedAsExecutableContract() {
+    void shouldStopInitializationWhenBaseChannelIsExecutableContract() {
+        // Given
         Fixture fixture = configuredFixture(false);
         Node document = document(fixture.repository, contract("owner", new Node().type("Channel")));
 
+        // When
         DocumentProcessingResult result = initialize(fixture, document);
 
+        // Then
         assertCapabilityFailure(result, "Unsupported contract type");
     }
 
     @Test
-    void timelineChannelIsSupportedWhenUsedDirectly() {
+    void shouldSupportTimelineChannelUsedDirectly() {
+        // Given
         Fixture fixture = configuredFixture(false);
         Node document = document(fixture.repository,
                 contract("owner", TestTimelineProvider.channel("owner")));
 
+        // When
         DocumentProcessingResult result = initialize(fixture, document);
 
+        // Then
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertTrue(fixture.blue.isInitialized(result.document()));
     }
 
     @Test
-    void handlerBoundToTimelineChannelInitializes() {
+    void shouldInitializeHandlerBoundToTimelineChannel() {
+        // Given
         Fixture fixture = configuredFixture(false);
         Map<String, Node> contracts = contract("owner", TestTimelineProvider.channel("owner"));
         contracts.put("handler", new Node()
@@ -60,14 +70,17 @@ class MustUnderstandContractsTest {
                 .properties("steps", new Node().items()));
         Node document = document(fixture.repository, contracts);
 
+        // When
         DocumentProcessingResult result = initialize(fixture, document);
 
+        // Then
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertTrue(fixture.blue.isInitialized(result.document()));
     }
 
     @Test
-    void handlerBoundToTypelessContractFailsClearly() {
+    void shouldFailClearlyForHandlerBoundToTypelessContract() {
+        // Given
         Fixture fixture = configuredFixture(false);
         Map<String, Node> contracts = contract("owner", new Node()
                 .properties("timelineId", new Node().value("owner")));
@@ -77,17 +90,21 @@ class MustUnderstandContractsTest {
                 .properties("steps", new Node().items()));
         Node document = document(fixture.repository, contracts);
 
+        // When
         DocumentProcessingResult result = initialize(fixture, document);
 
+        // Then
         assertCapabilityFailure(result, "must declare a type");
     }
 
     @Test
-    void simpleTimelineProviderWorksWhenRegistered() {
+    void shouldUseRegisteredSimpleTimelineProvider() {
+        // Given
         Fixture fixture = configuredFixture(true);
         Node document = document(fixture.repository, contract("owner", TestTimelineProvider.channel("owner")));
         Node initialized = initialize(fixture, document).document();
 
+        // When
         DocumentProcessingResult result = fixture.blue.processDocument(initialized,
                 TestTimelineProvider.timelineEntry(fixture.blue,
                         fixture.repository,
@@ -95,6 +112,7 @@ class MustUnderstandContractsTest {
                         1,
                         TestTimelineProvider.chatMessage("hello")));
 
+        // Then
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertNotNull(checkpointEvent(result.document(), "owner"));
     }

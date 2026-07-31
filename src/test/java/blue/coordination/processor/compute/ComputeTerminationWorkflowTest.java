@@ -19,101 +19,149 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ComputeTerminationWorkflowTest {
     @Test
-    void absentTerminationContinuesWorkflow() {
-        DocumentProcessingResult result = runCompute("approved: true", "", updateStatusStep("continued"));
+    void shouldContinueWorkflowWhenTerminationIsAbsent() {
+        // Given
+        String returnedFields = "approved: true";
 
+        // When
+        DocumentProcessingResult result = runCompute(
+                returnedFields, "", updateStatusStep("continued"));
+
+        // Then
         assertSuccess(result);
         assertEquals("continued", result.document().get("/status"));
         assertNoTerminationMarker(result);
     }
 
     @Test
-    void nullTerminationContinuesWorkflow() {
-        DocumentProcessingResult result = runCompute(String.join("\n",
+    void shouldContinueWorkflowWhenTerminationIsNull() {
+        // Given
+        String returnedFields = String.join("\n",
                 "termination:",
-                "  $null: true"), "", updateStatusStep("continued"));
+                "  $null: true");
 
+        // When
+        DocumentProcessingResult result = runCompute(
+                returnedFields, "", updateStatusStep("continued"));
+
+        // Then
         assertSuccess(result);
         assertEquals("continued", result.document().get("/status"));
         assertNoTerminationMarker(result);
     }
 
     @Test
-    void emptyTerminationWithoutCauseIsRejected() {
-        DocumentProcessingResult result = runCompute(String.join("\n",
+    void shouldRejectEmptyTerminationWithoutCause() {
+        // Given
+        String returnedFields = String.join("\n",
                 "termination:",
-                "  $emptyObject: true"), "", updateStatusStep("must-not-run"));
+                "  $emptyObject: true");
 
+        // When
+        DocumentProcessingResult result = runCompute(
+                returnedFields, "", updateStatusStep("must-not-run"));
+
+        // Then
         assertRuntimeFailure(result, "termination cause must be non-empty Text");
         assertEquals("idle", result.document().get("/status"));
         assertNoTerminationMarker(result);
     }
 
     @Test
-    void applicationCauseAndTextReasonArePassedUnchanged() {
-        DocumentProcessingResult result = runCompute(String.join("\n",
+    void shouldPassApplicationCauseAndTextReasonUnchanged() {
+        // Given
+        String returnedFields = String.join("\n",
                 "termination:",
                 "  cause: mandate-completed",
-                "  reason: Mandate terminated"), "");
+                "  reason: Mandate terminated");
 
+        // When
+        DocumentProcessingResult result = runCompute(returnedFields, "");
+
+        // Then
         assertApplicationTermination(result, "mandate-completed", "Mandate terminated");
     }
 
     @Test
-    void applicationCauseWithoutReasonUsesOptionalReasonSemantics() {
-        DocumentProcessingResult result = runCompute(String.join("\n",
+    void shouldTreatMissingApplicationReasonAsOptional() {
+        // Given
+        String returnedFields = String.join("\n",
                 "termination:",
-                "  cause: mandate-completed"), "");
+                "  cause: mandate-completed");
 
+        // When
+        DocumentProcessingResult result = runCompute(returnedFields, "");
+
+        // Then
         assertApplicationTermination(result, "mandate-completed", null);
     }
 
     @Test
-    void emptyReasonUsesCoreOmissionSemantics() {
-        DocumentProcessingResult result = runCompute(String.join("\n",
+    void shouldOmitEmptyTerminationReason() {
+        // Given
+        String returnedFields = String.join("\n",
                 "termination:",
                 "  cause: mandate-completed",
-                "  reason: ''"), "");
+                "  reason: ''");
 
+        // When
+        DocumentProcessingResult result = runCompute(returnedFields, "");
+
+        // Then
         assertApplicationTermination(result, "mandate-completed", null);
     }
 
     @Test
-    void whitespaceReasonIsPreserved() {
-        DocumentProcessingResult result = runCompute(String.join("\n",
+    void shouldPreserveWhitespaceTerminationReason() {
+        // Given
+        String returnedFields = String.join("\n",
                 "termination:",
                 "  cause: mandate-completed",
-                "  reason: '   '"), "");
+                "  reason: '   '");
 
+        // When
+        DocumentProcessingResult result = runCompute(returnedFields, "");
+
+        // Then
         assertApplicationTermination(result, "mandate-completed", "   ");
     }
 
     @Test
-    void nullReasonMeansNoReason() {
-        DocumentProcessingResult result = runCompute(String.join("\n",
+    void shouldTreatNullTerminationReasonAsAbsent() {
+        // Given
+        String returnedFields = String.join("\n",
                 "termination:",
                 "  cause: mandate-completed",
                 "  reason:",
-                "    $null: true"), "");
+                "    $null: true");
 
+        // When
+        DocumentProcessingResult result = runCompute(returnedFields, "");
+
+        // Then
         assertApplicationTermination(result, "mandate-completed", null);
     }
 
     @Test
-    void scalarAndListTerminationResultsAreRejected() {
+    void shouldRejectScalarAndListTerminationResults() {
+        // Given
         List<String> invalidResults = Arrays.asList(
                 "termination: stop",
                 "termination: []");
 
+        // When
         for (String invalidResult : invalidResults) {
             DocumentProcessingResult result = runCompute(invalidResult, "");
+
+            // Then
             assertRuntimeFailure(result, "termination must be an object", invalidResult);
             assertNoTerminationMarker(result);
         }
     }
 
     @Test
-    void missingEmptyAndNonTextCausesAreRejected() {
+    void shouldRejectMissingEmptyAndNonTextCauses() {
+        // Given
         List<String> invalidResults = Arrays.asList(
                 String.join("\n", "termination:", "  reason: reason-only"),
                 String.join("\n", "termination:", "  cause:", "    $null: true"),
@@ -123,8 +171,11 @@ class ComputeTerminationWorkflowTest {
                 String.join("\n", "termination:", "  cause: []"),
                 String.join("\n", "termination:", "  cause:", "    $emptyObject: true"));
 
+        // When
         for (String invalidResult : invalidResults) {
             DocumentProcessingResult result = runCompute(invalidResult, "");
+
+            // Then
             assertRuntimeFailure(result,
                     "termination cause must be non-empty Text",
                     invalidResult);
@@ -133,7 +184,8 @@ class ComputeTerminationWorkflowTest {
     }
 
     @Test
-    void nonTextReasonsAreRejectedWhenCauseIsValid() {
+    void shouldRejectNonTextReasonsWithValidCause() {
+        // Given
         List<String> invalidResults = Arrays.asList(
                 String.join("\n", "termination:", "  cause: completed", "  reason: 7"),
                 String.join("\n", "termination:", "  cause: completed", "  reason: true"),
@@ -144,53 +196,76 @@ class ComputeTerminationWorkflowTest {
                         "  reason:",
                         "    $emptyObject: true"));
 
+        // When
         for (String invalidResult : invalidResults) {
             DocumentProcessingResult result = runCompute(invalidResult, "");
+
+            // Then
             assertRuntimeFailure(result, "termination reason must be Text", invalidResult);
             assertNoTerminationMarker(result);
         }
     }
 
     @Test
-    void unknownModeScopeAndDelayFieldsAreRejected() {
-        for (String property : Arrays.asList("other", "mode", "scope", "document", "delay")) {
+    void shouldRejectUnknownTerminationFields() {
+        // Given
+        List<String> properties = Arrays.asList(
+                "other", "mode", "scope", "document", "delay");
+
+        // When
+        for (String property : properties) {
             DocumentProcessingResult result = runCompute(String.join("\n",
                     "termination:",
                     "  cause: completed",
                     "  " + property + ": forbidden"), "");
+
+            // Then
             assertRuntimeFailure(result, "unsupported properties");
         }
     }
 
     @Test
-    void returnResultFalseStillTerminatesAndStops() {
+    void shouldTerminateAndStopWhenReturnResultIsFalse() {
+        // Given
+        String options = "returnResult: false";
+
+        // When
         DocumentProcessingResult result = runCompute(String.join("\n",
                         "termination:",
                         "  cause: hidden-result-returned",
                         "  reason: hidden-result"),
-                "returnResult: false",
+                options,
                 updateStatusStep("must-not-run"));
 
+        // Then
         assertApplicationTermination(result, "hidden-result-returned", "hidden-result");
         assertEquals("idle", result.document().get("/status"));
     }
 
     @Test
-    void emitEventsFalseDoesNotInterpretMalformedEvents() {
+    void shouldIgnoreMalformedInactiveEventsWhenEmissionIsDisabled() {
+        // Given
+        String options = "emitEvents: false";
+
+        // When
         DocumentProcessingResult result = runCompute(String.join("\n",
                         "events: malformed-but-inactive",
                         "termination:",
                         "  cause: events-disabled-request",
                         "  reason: events-disabled"),
-                "emitEvents: false");
+                options);
 
+        // Then
         assertApplicationTermination(result, "events-disabled-request", "events-disabled");
         assertEquals(0, countKind(result, "must-not-emit"));
     }
 
     @Test
-    void invalidActiveEventsPreventComputeChangesetAndTermination() {
+    void shouldPreventEffectsWhenActiveEventsAreInvalid() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
+
+        // When
         DocumentProcessingResult result = runCompute(metrics, String.join("\n",
                 "changeset:",
                 "  - op: replace",
@@ -201,6 +276,7 @@ class ComputeTerminationWorkflowTest {
                 "  cause: must-not-buffer",
                 "  reason: must-not-buffer"), "");
 
+        // Then
         assertRuntimeFailure(result, "events must be a list");
         assertEquals("idle", result.document().get("/status"));
         assertEquals(0, countKind(result, "planned"));
@@ -209,8 +285,11 @@ class ComputeTerminationWorkflowTest {
     }
 
     @Test
-    void invalidTerminationPreventsComputeChangesetAndEvents() {
+    void shouldPreventChangesetAndEventsWhenTerminationIsInvalid() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
+
+        // When
         DocumentProcessingResult result = runCompute(metrics, String.join("\n",
                 "changeset:",
                 "  - op: replace",
@@ -223,6 +302,7 @@ class ComputeTerminationWorkflowTest {
                 "  cause: must-not-buffer",
                 "  reason: 99"), "");
 
+        // Then
         assertRuntimeFailure(result, "reason must be Text");
         assertEquals("idle", result.document().get("/status"));
         assertEquals(0, countKind(result, "planned"));
@@ -232,8 +312,11 @@ class ComputeTerminationWorkflowTest {
     }
 
     @Test
-    void invalidChangesetPreventsComputeEventsAndTermination() {
+    void shouldPreventEventsAndTerminationWhenChangesetIsInvalid() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
+
+        // When
         DocumentProcessingResult result = runCompute(metrics, String.join("\n",
                 "changeset: invalid",
                 "events:",
@@ -243,6 +326,7 @@ class ComputeTerminationWorkflowTest {
                 "  cause: must-not-buffer",
                 "  reason: must-not-buffer"), "");
 
+        // Then
         assertRuntimeFailure(result, "changeset must be a list");
         assertEquals(0, countKind(result, "planned"));
         assertEquals(0L, metrics.eventsEmitted());
@@ -251,7 +335,8 @@ class ComputeTerminationWorkflowTest {
     }
 
     @Test
-    void invalidChangesetEntryFieldsPreventEveryPlannedEffect() {
+    void shouldPreventEveryEffectForInvalidChangesetEntryFields() {
+        // Given
         List<String> invalidChangesets = Arrays.asList(
                 String.join("\n",
                         "changeset:",
@@ -272,6 +357,7 @@ class ComputeTerminationWorkflowTest {
                         "  - op: add",
                         "    path: /added"));
 
+        // When
         for (String changeset : invalidChangesets) {
             BexProcessingMetrics metrics = new BexProcessingMetrics();
             DocumentProcessingResult result = runCompute(metrics, String.join("\n",
@@ -283,6 +369,7 @@ class ComputeTerminationWorkflowTest {
                     "  cause: must-not-buffer",
                     "  reason: must-not-buffer"), "");
 
+            // Then
             assertRuntimeFailure(result, "Invalid Compute result", changeset);
             assertEquals("idle", result.document().get("/status"), changeset);
             assertEquals(0, countKind(result, "planned"), changeset);
@@ -293,8 +380,11 @@ class ComputeTerminationWorkflowTest {
     }
 
     @Test
-    void explicitNullEventEntryPreventsEveryPlannedEffect() {
+    void shouldPreventEveryEffectForExplicitNullEventEntry() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
+
+        // When
         DocumentProcessingResult result = runCompute(metrics, String.join("\n",
                 "changeset:",
                 "  - op: replace",
@@ -306,6 +396,7 @@ class ComputeTerminationWorkflowTest {
                 "  cause: must-not-buffer",
                 "  reason: must-not-buffer"), "");
 
+        // Then
         assertRuntimeFailure(result, "events cannot contain undefined/null entries");
         assertEquals("idle", result.document().get("/status"));
         assertEquals(0L, metrics.eventsEmitted());
@@ -314,8 +405,11 @@ class ComputeTerminationWorkflowTest {
     }
 
     @Test
-    void validPlanBuffersChangesetEventsAndTerminationOnceInSourceOrder() {
+    void shouldBufferValidEffectsOnceInSourceOrder() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
+
+        // When
         DocumentProcessingResult result = runCompute(metrics, String.join("\n",
                         "changeset:",
                         "  - op: add",
@@ -335,20 +429,28 @@ class ComputeTerminationWorkflowTest {
                 "",
                 updateStatusStep("must-not-run"));
 
+        // Then
         assertApplicationTermination(result, "effects-complete", "complete");
         assertEquals("changed", result.document().get("/status"));
         assertEquals("planned", result.document().get("/added"));
         assertEquals(Arrays.asList("first", "second"), kinds(result, "first", "second"));
-        assertTrue(indexOfKind(result, "second")
-                < indexOfType(result, RuntimeBlueIds.DOCUMENT_PROCESSING_TERMINATED));
+        assertEquals(
+                -1,
+                indexOfType(
+                        result,
+                        RuntimeBlueIds.DOCUMENT_PROCESSING_TERMINATED),
+                "processor lifecycle events remain internal");
         assertEquals(2L, metrics.eventsEmitted());
         assertEquals(1L, metrics.successfulComputeTerminationRequests());
         assertEquals(0L, metrics.computeResultValidationFailures());
     }
 
     @Test
-    void patchPreviewFailureBuffersNoComputeEventOrApplicationTermination() {
+    void shouldBufferNoEffectsWhenPatchPreviewFails() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
+
+        // When
         DocumentProcessingResult result = runCompute(metrics, String.join("\n",
                 "changeset:",
                 "  - op: replace",
@@ -361,6 +463,7 @@ class ComputeTerminationWorkflowTest {
                 "  cause: must-not-buffer",
                 "  reason: must-not-buffer"), "");
 
+        // Then
         assertRuntimeFailure(result, "Working document preview failed");
         assertEquals("idle", result.document().get("/status"));
         assertEquals(0, countKind(result, "planned"));
@@ -370,7 +473,8 @@ class ComputeTerminationWorkflowTest {
     }
 
     @Test
-    void accumulatedChangesetAndEventsRemainFallbackWhenTerminationIsReturned() {
+    void shouldUseAccumulatedEffectsAsFallbackWithReturnedTermination() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeWorkflowTestSupport support = support(metrics);
         Node document = support.initializedOperationWorkflow(String.join("\n",
@@ -397,8 +501,10 @@ class ComputeTerminationWorkflowTest {
                 "                cause: fallback-complete",
                 "                reason: fallback"));
 
+        // When
         DocumentProcessingResult result = support.processRun(document);
 
+        // Then
         assertApplicationTermination(result, "fallback-complete", "fallback");
         assertEquals("accumulated", result.document().get("/status"));
         assertNull(result.document().getProperties().get("temporary"));
@@ -407,7 +513,8 @@ class ComputeTerminationWorkflowTest {
     }
 
     @Test
-    void returnedChangesetAndEventsRetainPrecedenceOverAccumulators() {
+    void shouldPreferReturnedEffectsOverAccumulators() {
+        // Given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -430,8 +537,10 @@ class ComputeTerminationWorkflowTest {
                 "                - type: Coordination/Event",
                 "                  kind: returned"));
 
+        // When
         DocumentProcessingResult result = support.processRun(document);
 
+        // Then
         assertSuccess(result);
         assertEquals("returned", result.document().get("/status"));
         assertEquals(1, countKind(result, "returned"));
@@ -439,10 +548,14 @@ class ComputeTerminationWorkflowTest {
     }
 
     @Test
-    void invalidResultStillChargesBexEvaluationGas() {
+    void shouldChargeBexEvaluationGasForInvalidResult() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
+
+        // When
         DocumentProcessingResult result = runCompute(metrics, "termination: invalid", "");
 
+        // Then
         assertRuntimeFailure(result, "termination must be an object");
         assertTrue(result.totalGas() > 0L);
         assertEquals(1L, metrics.bexCompiledExecutions());
@@ -450,10 +563,14 @@ class ComputeTerminationWorkflowTest {
     }
 
     @Test
-    void ordinaryNonTerminationComputeDoesNotIncrementTerminationCounters() {
+    void shouldNotIncrementTerminationCountersForOrdinaryCompute() {
+        // Given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
+
+        // When
         DocumentProcessingResult result = runCompute(metrics, "ordinary: data", "");
 
+        // Then
         assertSuccess(result);
         assertEquals(0L, metrics.successfulComputeTerminationRequests());
         assertEquals(0L, metrics.declarativeTerminationSteps());
@@ -461,30 +578,40 @@ class ComputeTerminationWorkflowTest {
     }
 
     @Test
-    void documentProcessingTerminatedEventAloneDoesNotRequestTermination() {
+    void shouldNotRequestTerminationForLifecycleEventAlone() {
+        // Given
+        String eventType = "Document Processing Terminated";
+
+        // When
         DocumentProcessingResult result = runSteps(String.join("\n",
                 "- name: Domain-looking lifecycle event",
                 "  type: Coordination/Trigger Event",
                 "  event:",
-                "    type: Document Processing Terminated",
+                "    type: " + eventType,
                 "    cause: domain-completed",
                 updateStatusStep("continued")));
 
+        // Then
         assertSuccess(result);
         assertEquals("continued", result.document().get("/status"));
         assertNoTerminationMarker(result);
     }
 
     @Test
-    void domainTerminatedMessageAloneDoesNotRequestTermination() {
+    void shouldNotRequestTerminationForDomainMessageAlone() {
+        // Given
+        String eventType = "Mandate/Mandate Terminated";
+
+        // When
         DocumentProcessingResult result = runSteps(String.join("\n",
                 "- name: Domain termination message",
                 "  type: Coordination/Trigger Event",
                 "  event:",
-                "    type: Mandate/Mandate Terminated",
+                "    type: " + eventType,
                 "    reason: ordinary data",
                 updateStatusStep("continued")));
 
+        // Then
         assertSuccess(result);
         assertEquals("continued", result.document().get("/status"));
         assertNoTerminationMarker(result);
