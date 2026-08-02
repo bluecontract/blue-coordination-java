@@ -2,7 +2,9 @@
 
 This integrity-checked candidate binds the concrete repository catalog at
 version `1.3.0` and repository version BlueId
-`msCV6VLe4Y1hayq2RnPbuzqZbroowpfBKexXoXBirZq`. It is not a closed
+`FG4LidzBiMCyVt53aP8kJXjcZXZ97mVfnv7N92zueGzr`, loaded from the exact local
+materialization of immutable Repository commit
+`63be6b7d8d2752b5a8c90f38e672859e9b3949a1`. It is not a closed
 conformance package and is not release eligible.
 
 Coordination owns Timeline-derived channel eligibility, logical Operation
@@ -17,20 +19,19 @@ ordering remain outside this package.
 The candidate contains 55 authored behavior fixtures expanding to 65 execution
 cases. A strict generic executor dispatches their declared Blue inputs to real
 production APIs; it does not map fixture IDs to unrelated regression tests.
-The audit currently fails closed because local Repository provider bodies do
-not verify at their manifest BlueIds. Inline, reference, partial, fragmented,
-cold, warm, and bounded-batched inputs execute through the strict provider and
-splitter boundaries. Every PROCESS case supplies exact authored feeder
-revisions and source occurrences to the verified-evidence overload. Splitter
-catalog selection, Mandate target evidence, demand/identity projections,
-named gas, and workflow order all have production trace sources. The full
-129-member aggregate retains its 516 exact ordered entries. The package still
-writes no receipt because the fixed Repository boundary prevents the
-behavior/flagship executions from completing. Fourteen portable gas
+The required Repository closure must verify from exact immutable resources
+under bound source evidence before release eligibility; the complete catalog
+audit remains informative. Inline, reference, partial, fragmented, cold, warm,
+and bounded-batched inputs execute through the strict provider and splitter
+boundaries. Every PROCESS case supplies exact authored feeder revisions and
+source occurrences to the verified-evidence overload. Splitter catalog
+selection, Mandate target evidence, demand/identity projections, named gas,
+and workflow order all have production trace sources. The full 129-member
+aggregate retains its 516 exact ordered entries. Fourteen portable gas
 microfixtures execute the real processor-owned runtime session and
 Coordination child ledger. Seven host-quota fixture files execute separately
-from portable PROCESS gas, but the 86-case matrix does not yet form a fully
-passing receipt-bound suite.
+from portable PROCESS gas. The package writes a receipt only after all 86
+cases form one fully passing, receipt-bound suite.
 
 The final package requires 55 behavior fixtures, 14 portable gas fixtures,
 7 host-quota fixtures, 76 total fixture files, 86 execution cases, and 56

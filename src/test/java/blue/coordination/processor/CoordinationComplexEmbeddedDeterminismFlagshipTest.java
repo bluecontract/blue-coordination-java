@@ -11,6 +11,7 @@ import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.GasTraceEntry;
 import blue.language.processor.ProcessingConformanceTrace;
 import blue.language.processor.ProcessingDebugResult;
+import blue.language.processor.ProcessorErrorCategory;
 import blue.language.processor.ProcessingTraceConstants;
 import blue.language.processor.ProcessingTraceRecord;
 import blue.language.processor.ProcessorStatus;
@@ -619,14 +620,42 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                         .diagnosticMessage(result);
         String failureMessage =
                 context + ": " + diagnostic;
-        if (result.status()
-                == ProcessorStatus
-                .INVALID_PROCESSING_DOCUMENT) {
-            failureMessage =
-                    "Language flagship external-delivery "
-                            + "evidence drift: "
-                            + failureMessage;
-        }
+        List<String> retainedDeliveries =
+                new ArrayList<String>();
+        scenario.evidence.deliveries()
+                .forEach(delivery ->
+                        retainedDeliveries.add(
+                                delivery.scopePath()
+                                        + "|"
+                                        + delivery.channelKey()));
+        boolean exactDrift =
+                result.status()
+                        == ProcessorStatus
+                        .INVALID_PROCESSING_DOCUMENT
+                        && ProcessingResultTestSupport
+                        .diagnosticCategory(result)
+                        == ProcessorErrorCategory
+                        .InvalidExternalChannelSnapshot
+                        && diagnostic.startsWith(
+                        "External delivery changed during "
+                                + "accepted-new preflight at ")
+                        && diagnostic.endsWith(
+                        "/" + TIMELINE)
+                        && retainedDeliveries.equals(
+                        Arrays.asList(
+                                EMB3 + "|" + TIMELINE,
+                                EMB2 + "|" + TIMELINE,
+                                EMB1 + "|" + TIMELINE,
+                                ROOT + "|" + TIMELINE))
+                        && result.events().isEmpty();
+        ExternalBlockerProbeAssertions.classify(
+                "flagship-external-delivery-evidence-drift",
+                "Language flagship external-delivery evidence drift:",
+                exactDrift,
+                result.status() == ProcessorStatus.SUCCESS,
+                failureMessage
+                        + ", retainedDeliveries="
+                        + retainedDeliveries);
         assertEquals(
                 ProcessorStatus.SUCCESS,
                 result.status(),

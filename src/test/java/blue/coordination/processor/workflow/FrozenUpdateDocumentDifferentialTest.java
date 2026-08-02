@@ -4,6 +4,7 @@ import blue.bex.api.BexEngine;
 import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationProcessors;
 import blue.coordination.processor.CoordinationTestResources;
+import blue.coordination.processor.ExternalBlockerProbeAssertions;
 import blue.coordination.processor.ProcessingResultTestSupport;
 import blue.coordination.processor.TestTimelineProvider;
 import blue.coordination.processor.bex.BexProcessingMetrics;
@@ -58,6 +59,51 @@ class FrozenUpdateDocumentDifferentialTest {
         Outcome legacy = run(true, factory);
 
         // Then
+        boolean exactSelectedBodyLoss =
+                frozen.status
+                        == ProcessorStatus.RUNTIME_FATAL
+                        && frozen.errorCategory
+                        == ProcessorErrorCategory
+                        .RuntimeExecutionFailure
+                        && "Update Document patch value reference "
+                        .concat(
+                                "has no resolved selected-body value")
+                        .equals(frozen.failureReason)
+                        && "initial".equals(
+                        frozen.document.getAsText(
+                                "/status"))
+                        && frozen.triggeredEventsJson
+                        .isEmpty()
+                        && legacy.status
+                        == ProcessorStatus.SUCCESS
+                        && legacy.failureReason == null
+                        && metric(
+                        frozen.metrics,
+                        "frozenPatchesHandedToLanguage")
+                        > 0L;
+        ExternalBlockerProbeAssertions.classify(
+                "bex-admitted-exact-value-materialization",
+                "BEX admitted-exact canonical materialization defect:",
+                exactSelectedBodyLoss,
+                frozen.status == legacy.status
+                        && frozen.status
+                        == ProcessorStatus.SUCCESS,
+                "frozenStatus=" + frozen.status
+                        + ", frozenCategory="
+                        + frozen.errorCategory
+                        + ", frozenDiagnostic="
+                        + frozen.failureReason
+                        + ", frozenEvents="
+                        + frozen.triggeredEventsJson
+                        .size()
+                        + ", frozenPatchHandoffs="
+                        + metric(
+                        frozen.metrics,
+                        "frozenPatchesHandedToLanguage")
+                        + ", legacyStatus="
+                        + legacy.status
+                        + ", legacyDiagnostic="
+                        + legacy.failureReason);
         assertEquivalent(frozen, legacy);
         assertBroadPatchEffects(frozen);
         assertHandoffMetrics(frozen, legacy);

@@ -277,8 +277,13 @@ final class CoordinationBehaviorFixtureHarness {
                             fixtureCase.fixture.operation
                                     .wireValue);
             }
-            assertFixture(
-                    runtime, fixtureCase, execution);
+            try {
+                assertFixture(
+                        runtime, fixtureCase, execution);
+            } catch (FixtureExecutionException failure) {
+                throw failure.withExecution(
+                        execution);
+            }
             return execution;
         }
     }
@@ -1949,10 +1954,15 @@ final class CoordinationBehaviorFixtureHarness {
         Execution execution = new Execution(
                 fixtureCase.caseId(),
                 projections);
-        validateProcessOutputEvidence(
-                fixtureCase,
-                execution,
-                result);
+        try {
+            validateProcessOutputEvidence(
+                    fixtureCase,
+                    execution,
+                    result);
+        } catch (FixtureExecutionException failure) {
+            throw failure.withExecution(
+                    execution);
+        }
         return execution;
     }
 
@@ -4248,15 +4258,40 @@ final class CoordinationBehaviorFixtureHarness {
 
     static final class FixtureExecutionException
             extends RuntimeException {
+        private final Execution execution;
+
         private FixtureExecutionException(
                 String message) {
-            super(message);
+            this(message, null, null);
         }
 
         private FixtureExecutionException(
                 String message,
                 Throwable cause) {
+            this(message, cause, null);
+        }
+
+        private FixtureExecutionException(
+                String message,
+                Throwable cause,
+                Execution execution) {
             super(message, cause);
+            this.execution = execution;
+        }
+
+        private FixtureExecutionException withExecution(
+                Execution exactExecution) {
+            if (execution != null) {
+                return this;
+            }
+            return new FixtureExecutionException(
+                    getMessage(),
+                    this,
+                    exactExecution);
+        }
+
+        Execution execution() {
+            return execution;
         }
     }
 

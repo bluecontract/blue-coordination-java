@@ -62,16 +62,16 @@
       "pattern": "^[0-9a-f]{64}$"
     },
     "fixedRepositoryManifestSha256": {
-      "const": "d044edd678d3bf0b4a4c1e60c7176fd6449a9ebd6a4ecce4e1eaa36d4a895859"
+      "const": "07258b52518a649d5e908e216f3af271c4b0360c243b24688ae7ad148f4f76c3"
     },
     "fixturePackageIdentity": {
-      "const": "sha256:5bb35f5697deb1a43e684df03c637abe575d01aab736bcbe0be9322aab2a93ff"
+      "const": "sha256:e310e9b176620e654579612723b9e880f3bdecdd75b02e81e20d63f219962d6e"
     },
     "fixedRepositoryVersion": {
       "const": "1.3.0"
     },
     "fixedRepositoryVersionBlueId": {
-      "const": "msCV6VLe4Y1hayq2RnPbuzqZbroowpfBKexXoXBirZq"
+      "const": "FG4LidzBiMCyVt53aP8kJXjcZXZ97mVfnv7N92zueGzr"
     },
     "blueRepositoryCommit": {
       "const": "63be6b7d8d2752b5a8c90f38e672859e9b3949a1"

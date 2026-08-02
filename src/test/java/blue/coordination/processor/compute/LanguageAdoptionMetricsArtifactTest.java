@@ -3,6 +3,7 @@ package blue.coordination.processor.compute;
 import blue.bex.api.BexEngine;
 import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationTestResources;
+import blue.coordination.processor.ExternalBlockerProbeAssertions;
 import blue.coordination.processor.TestTimelineProvider;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.coordination.processor.workflow.SequentialWorkflowRunner;
@@ -165,6 +166,11 @@ class LanguageAdoptionMetricsArtifactTest {
                             fixture.support.blue, initialized),
                     event);
 
+            ExternalBlockerProbeAssertions
+                    .classifyHostedSemanticOutput(
+                            result,
+                            initialized.document(),
+                            "language-adoption PayNote fixture");
             assertSuccess(fixture.support.blue, result);
             assertEquals(Boolean.TRUE,
                     result.document().get("/orders/package-order-a/hotelOrder/resalePlaced"));

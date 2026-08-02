@@ -3,6 +3,7 @@ package blue.coordination.processor.compute;
 import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationProcessors;
 import blue.coordination.processor.CoordinationTestResources;
+import blue.coordination.processor.ExternalBlockerProbeAssertions;
 import blue.coordination.processor.TestTimelineProvider;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.Blue;
@@ -41,12 +42,23 @@ class MandateDeclaredTypeEventMatchingTest {
         DocumentProcessingResult initialized = fixture.initialize(mandateDocument(true, false));
         long handlersBeforeConfirmation = fixture.metrics.handlersExecuted();
         long stepsBeforeConfirmation = fixture.metrics.workflowStepsExecuted();
+        ResolvedSnapshot initializedSnapshot =
+                blue.coordination.processor
+                        .ProcessingResultTestSupport
+                        .snapshot(
+                                fixture.blue,
+                                initialized);
         DocumentProcessingResult activated = fixture.process(
-                blue.coordination.processor.ProcessingResultTestSupport.snapshot(
-                        fixture.blue, initialized),
+                initializedSnapshot,
                 fixture.confirmAuthorityEvent());
 
         // Then
+        ExternalBlockerProbeAssertions
+                .classifyMandateContractRefresh(
+                        activated,
+                        hasGuarantorType(
+                                initializedSnapshot),
+                        "activation after Mandate initialization");
         assertSuccess(initialized);
         assertEquals(1L, handlersBeforeConfirmation);
         assertEquals(1L, stepsBeforeConfirmation);
@@ -68,10 +80,21 @@ class MandateDeclaredTypeEventMatchingTest {
 
         // When
         DocumentProcessingResult initialized = fixture.initialize(mandateDocument(false, true));
+        ResolvedSnapshot initializedSnapshot =
+                blue.coordination.processor
+                        .ProcessingResultTestSupport
+                        .snapshot(
+                                fixture.blue,
+                                initialized);
         DocumentProcessingResult confirmed = fixture.process(
-                blue.coordination.processor.ProcessingResultTestSupport.snapshot(
-                        fixture.blue, initialized),
+                initializedSnapshot,
                 fixture.confirmAuthorityEvent());
+        ExternalBlockerProbeAssertions
+                .classifyMandateContractRefresh(
+                        confirmed,
+                        hasGuarantorType(
+                                initializedSnapshot),
+                        "deferred activation after Mandate initialization");
         long handlersBeforeFatal = fixture.metrics.handlersExecuted();
         DocumentProcessingResult fatal = fixture.process(
                 blue.coordination.processor.ProcessingResultTestSupport.snapshot(
@@ -125,6 +148,14 @@ class MandateDeclaredTypeEventMatchingTest {
 
     private static void assertSuccess(DocumentProcessingResult result) {
         assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
+    }
+
+    private static boolean hasGuarantorType(
+            ResolvedSnapshot snapshot) {
+        return snapshot != null
+                && snapshot.resolvedNodeAt(
+                "/contracts/mandateGuarantorChannel/type")
+                != null;
     }
 
     private static Fixture fixture() {

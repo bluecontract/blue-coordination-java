@@ -3,6 +3,7 @@ package blue.coordination.processor.compute;
 import blue.bex.api.BexEngine;
 import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationTestResources;
+import blue.coordination.processor.ExternalBlockerProbeAssertions;
 import blue.coordination.processor.TestTimelineProvider;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.coordination.processor.workflow.SequentialWorkflowRunner;
@@ -242,6 +243,15 @@ class RepresentativeWorkflowLifecycleSmokeTest {
                                     mandate));
             DocumentProcessingResult mandateInitialized =
                     support.blue.initializeDocument(resolvedMandate);
+            ExternalBlockerProbeAssertions
+                    .classifyMandateContractRefresh(
+                            mandateInitialized,
+                            resolvedMandate.resolvedNodeAt(
+                                    "/contracts/"
+                                            + "mandateGuarantorChannel"
+                                            + "/type")
+                                    != null,
+                            "representative lifecycle Mandate initialization");
             assertSuccess(mandateInitialized);
             assertEquals(StatusPending.blueId(),
                     mandateInitialized.document().getAsText("/status/type/blueId"));

@@ -491,15 +491,161 @@ final class CoordinationBehaviorFixtureHarnessTest {
 
         // When
         CoordinationBehaviorFixtureHarness.Execution
-                execution =
-                harness.executeAndAssertWithVariantGroup(
-                        fixtureCase);
+                execution;
+        try {
+            execution =
+                    harness.executeAndAssertWithVariantGroup(
+                            fixtureCase);
+        } catch (CoordinationBehaviorFixtureHarness
+                 .FixtureExecutionException failure) {
+            if (isMandateRefreshProbe(
+                    fixtureCase.caseId())) {
+                classifyMandateRefreshFixtureFailure(
+                        fixtureCase,
+                        failure);
+            }
+            throw failure;
+        }
 
         // Then
         assertNotNull(execution);
         assertEquals(
                 fixtureCase.caseId(),
                 execution.caseId());
+    }
+
+    private static boolean isMandateRefreshProbe(
+            String caseId) {
+        return Arrays.asList(
+                "coord-mand-02@default",
+                "coord-mand-03@default",
+                "coord-mand-04@default",
+                "coord-mand-05@default",
+                "coord-mand-06@default")
+                .contains(caseId);
+    }
+
+    private static void classifyMandateRefreshFixtureFailure(
+            CoordinationBehaviorFixtureHarness.FixtureCase
+                    fixtureCase,
+            CoordinationBehaviorFixtureHarness
+                    .FixtureExecutionException failure) {
+        CoordinationBehaviorFixtureHarness.Execution
+                execution = failure.execution();
+        String caseId = fixtureCase.caseId();
+        boolean exactDefect = false;
+        if (execution != null
+                && Arrays.asList(
+                "coord-mand-02@default",
+                "coord-mand-03@default",
+                "coord-mand-04@default",
+                "coord-mand-05@default")
+                .contains(caseId)) {
+            Map<String, String> expectedStatus =
+                    new LinkedHashMap<String, String>();
+            expectedStatus.put(
+                    "coord-mand-02@default",
+                    "Coordination/Status Failed");
+            expectedStatus.put(
+                    "coord-mand-03@default",
+                    "Mandate/Status Active");
+            expectedStatus.put(
+                    "coord-mand-04@default",
+                    "Mandate/Status Authority Confirmed");
+            expectedStatus.put(
+                    "coord-mand-05@default",
+                    "Mandate/Status Terminated");
+            exactDefect =
+                    "success".equals(
+                            execution.projection(
+                                    "result.status"))
+                            && execution.projection(
+                            "result.diagnostic.category")
+                            == null
+                            && "Coordination/Status Pending"
+                            .equals(
+                                    execution.projection(
+                                            "mandate.status"))
+                            && execution.projection(
+                            "feeder.status") == null
+                            && execution.projection(
+                            "feeder.reason") == null
+                            && failure.getMessage()
+                            .contains(
+                                    "mandate.status equals expected "
+                                            + expectedStatus
+                                            .get(caseId)
+                                            + " but was "
+                                            + "Coordination/Status Pending");
+        } else if (execution != null
+                && "coord-mand-06@default"
+                .equals(caseId)) {
+            exactDefect =
+                    "runtime-fatal".equals(
+                            execution.projection(
+                                    "result.status"))
+                            && "TypeGeneralizationFailure"
+                            .equals(
+                                    execution.projection(
+                                            "result.diagnostic.category"))
+                            && String.valueOf(
+                            execution.projection(
+                                    "result.diagnostic.message"))
+                            .contains(
+                                    "Source node value: terminated, "
+                                            + "target node value: pending")
+                            && Collections.emptyList()
+                            .equals(
+                                    execution.projection(
+                                            "feeder."
+                                                    + "eligibleSourceChannelKeys"))
+                            && failure.getMessage()
+                            .contains(
+                                    "feeder selected source keys "
+                                            + "[authorityHolderChannel, "
+                                            + "mandateTerminationChannel] "
+                                            + "but the public delivery "
+                                            + "trace reported []");
+        }
+        if (exactDefect) {
+            ExternalBlockerProbeAssertions.knownDefect(
+                    "Language mandate effective-contract refresh defect:",
+                    caseId + ": "
+                            + "status="
+                            + execution.projection(
+                            "result.status")
+                            + ", category="
+                            + execution.projection(
+                            "result.diagnostic.category")
+                            + ", diagnostic="
+                            + execution.projection(
+                            "result.diagnostic.message")
+                            + ", mandate.status="
+                            + execution.projection(
+                            "mandate.status")
+                            + ", handlerExecutions="
+                            + execution.projection(
+                            "trace.handlerExecutions")
+                            + ", sourceKeys="
+                            + execution.projection(
+                            "feeder."
+                                    + "eligibleSourceChannelKeys"));
+        }
+        ExternalBlockerProbeAssertions.invalidProbe(
+                "mandate-effective-contract-type-refresh",
+                caseId + ": " + failure.getMessage()
+                        + ", execution="
+                        + (execution != null
+                        ? "status="
+                        + execution.projection(
+                        "result.status")
+                        + ", category="
+                        + execution.projection(
+                        "result.diagnostic.category")
+                        + ", mandate.status="
+                        + execution.projection(
+                        "mandate.status")
+                        : "unavailable"));
     }
 
     @Test

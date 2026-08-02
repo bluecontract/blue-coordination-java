@@ -15,7 +15,8 @@ final class SequentialWorkflowEventMatcher {
             return true;
         }
         Node expectedType = pattern.getType();
-        FrozenNode event = context.eventFrozen();
+        FrozenNode event =
+                context.occurrenceEventFrozen();
         if (expectedType != null
                 && expectedType.getBlueId() != null
                 && event != null

@@ -1,32 +1,13 @@
 package blue.coordination.processor;
 
-import blue.language.Blue;
-import blue.language.model.Node;
 import blue.repo.BlueRepository;
-import blue.repo.coordination.AllTimelinesChannel;
-import blue.repo.coordination.CompositeTimelineChannel;
-import blue.repo.coordination.Compute;
-import blue.repo.coordination.ComputeDefinition;
-import blue.repo.coordination.OperationRequest;
-import blue.repo.coordination.SequentialWorkflow;
-import blue.repo.coordination.SequentialWorkflowOperation;
-import blue.repo.coordination.TerminateProcessing;
-import blue.repo.coordination.TimelineChannel;
-import blue.repo.coordination.TimelineEntry;
-import blue.repo.coordination.TriggerEvent;
-import blue.repo.coordination.UpdateDocument;
-import blue.repo.mandate.DocumentResponderMandate;
-import blue.repo.mandate.OperationMandate;
-import blue.repo.myos.MyOSTimelineChannel;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
@@ -41,8 +22,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * release-gating suite has completed.
  */
 class SelectiveProcessingReportArtifactTest {
-    private static final String REPOSITORY_VERSION_BLUE_ID =
-            "msCV6VLe4Y1hayq2RnPbuzqZbroowpfBKexXoXBirZq";
     private static final Path PROJECT_DIRECTORY = Paths.get(
             System.getProperty("user.dir"))
             .toAbsolutePath()
@@ -51,59 +30,55 @@ class SelectiveProcessingReportArtifactTest {
     @Test
     void shouldResolveEveryRequiredFixedRepositoryTypeByManifestBlueId()
             throws Exception {
-        // Given
+        // given
         BlueRepository repository = BlueRepository.latest();
-        Map<String, String> requiredTypes = requiredTypes();
 
-        // When
-        Blue blue = repository.configure(new Blue());
+        // when
+        List<CoordinationRequiredRepositoryClosure.Entry> requiredTypes =
+                CoordinationRequiredRepositoryClosure.entries();
 
-        // Then
-        try {
+        // then
+        assertFalse(
+                requiredTypes.isEmpty());
+        assertEquals(
+                CoordinationRequiredRepositoryClosure
+                        .REPOSITORY_VERSION,
+                repository.repositoryVersion());
+        assertEquals(
+                CoordinationRequiredRepositoryClosure
+                        .REPOSITORY_MANIFEST_BLUE_ID,
+                repository.repositoryVersionBlueId());
+        for (CoordinationRequiredRepositoryClosure.Entry required
+                : requiredTypes) {
             assertEquals(
-                    BlueRepository.V1_3_0,
-                    repository.repositoryVersion());
-            assertEquals(
-                    REPOSITORY_VERSION_BLUE_ID,
-                    repository.repositoryVersionBlueId());
-            for (Map.Entry<String, String> required
-                    : requiredTypes.entrySet()) {
-                assertEquals(
-                        required.getValue(),
-                        repository.blueId(required.getKey()),
-                        required.getKey());
-                assertNotNull(
-                        repository.nodeByBlueId(
-                                required.getValue())
-                                .orElse(null),
-                        required.getKey());
-                assertNotNull(
-                        blue.resolve(
-                                new Node().blueId(
-                                        required.getValue())),
-                        required.getKey());
-            }
-        } finally {
-            blue.close();
+                    required.blueId(),
+                    repository.blueId(
+                            required.qualifiedName()),
+                    required.qualifiedName());
+            assertNotNull(
+                    repository.nodeByBlueId(
+                            required.blueId())
+                            .orElse(null),
+                    required.qualifiedName());
         }
     }
 
     @Test
     void shouldRequireOnlyLocalBlueSiblingCompositeBuilds()
             throws Exception {
-        // Given
+        // given
         String settings = read("settings.gradle");
         String build = read("build.gradle");
 
-        // When
+        // when
         boolean languageLocal = settings.contains(
                 "includeBuild(localBlueLanguage)");
         boolean bexLocal = settings.contains(
                 "includeBuild(localBlueBex)");
         boolean repositoryLocal = settings.contains(
-                "includeBuild(localBlueRepository)");
+                "includeBuild(immutableBlueRepository)");
 
-        // Then
+        // then
         assertTrue(languageLocal);
         assertTrue(bexLocal);
         assertTrue(repositoryLocal);
@@ -113,6 +88,10 @@ class SelectiveProcessingReportArtifactTest {
                 "substitute module('blue.bex:blue-bex-java')"));
         assertTrue(settings.contains(
                 "substitute module('blue.repo:blue-repo-java')"));
+        assertTrue(settings.contains(
+                "blueRepositoryCompositePath"));
+        assertTrue(settings.contains(
+                "'--no-hardlinks'"));
         assertTrue(build.contains("excludeGroup 'blue.language'"));
         assertTrue(build.contains("excludeGroup 'blue.bex'"));
         assertTrue(build.contains("excludeGroup 'blue.repo'"));
@@ -121,7 +100,7 @@ class SelectiveProcessingReportArtifactTest {
     @Test
     void shouldContainNoUnfinishedDeliveredSourceMarkers()
             throws Exception {
-        // Given
+        // given
         List<Path> deliveredSources = Arrays.asList(
                 PROJECT_DIRECTORY.resolve(
                         "src/main/java"),
@@ -129,7 +108,7 @@ class SelectiveProcessingReportArtifactTest {
                         "src/jmh/java"));
         StringBuilder source = new StringBuilder();
 
-        // When
+        // when
         for (Path deliveredSource
                 : deliveredSources) {
             try (Stream<Path> files =
@@ -143,52 +122,10 @@ class SelectiveProcessingReportArtifactTest {
             }
         }
 
-        // Then
+        // then
         assertFalse(source.toString().contains("@Deprecated"));
         assertFalse(source.toString().contains("TODO"));
         assertFalse(source.toString().contains("FIXME"));
-    }
-
-    private static Map<String, String> requiredTypes() {
-        Map<String, String> result =
-                new LinkedHashMap<String, String>();
-        put(result, TimelineEntry.qualifiedName(),
-                TimelineEntry.blueId());
-        put(result, TimelineChannel.qualifiedName(),
-                TimelineChannel.blueId());
-        put(result, MyOSTimelineChannel.qualifiedName(),
-                MyOSTimelineChannel.blueId());
-        put(result, CompositeTimelineChannel.qualifiedName(),
-                CompositeTimelineChannel.blueId());
-        put(result, AllTimelinesChannel.qualifiedName(),
-                AllTimelinesChannel.blueId());
-        put(result, OperationRequest.qualifiedName(),
-                OperationRequest.blueId());
-        put(result, SequentialWorkflow.qualifiedName(),
-                SequentialWorkflow.blueId());
-        put(result, SequentialWorkflowOperation.qualifiedName(),
-                SequentialWorkflowOperation.blueId());
-        put(result, UpdateDocument.qualifiedName(),
-                UpdateDocument.blueId());
-        put(result, TriggerEvent.qualifiedName(),
-                TriggerEvent.blueId());
-        put(result, TerminateProcessing.qualifiedName(),
-                TerminateProcessing.blueId());
-        put(result, Compute.qualifiedName(), Compute.blueId());
-        put(result, ComputeDefinition.qualifiedName(),
-                ComputeDefinition.blueId());
-        put(result, OperationMandate.qualifiedName(),
-                OperationMandate.blueId());
-        put(result, DocumentResponderMandate.qualifiedName(),
-                DocumentResponderMandate.blueId());
-        return result;
-    }
-
-    private static void put(
-            Map<String, String> target,
-            String qualifiedName,
-            String blueId) {
-        target.put(qualifiedName, blueId);
     }
 
     private static String read(String relative)

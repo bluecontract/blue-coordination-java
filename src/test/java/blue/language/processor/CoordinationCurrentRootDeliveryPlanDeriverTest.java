@@ -22,6 +22,31 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class CoordinationCurrentRootDeliveryPlanDeriverTest {
 
     @Test
+    void shouldMarkAnEmptyActiveSubscriptionSurfaceAsComplete() {
+        try (Fixture fixture = fixture()) {
+            // Given
+            Node root = initialized(
+                    fixture,
+                    document(
+                            fixture.repository,
+                            new LinkedHashMap<>()));
+            Node event = event(
+                    fixture, "unmatched", 1);
+
+            // When
+            ExternalDeliveryPlan plan =
+                    deriver(fixture).derive(root, event);
+
+            // Then
+            assertTrue(
+                    plan.hasActiveSubscriptionIntervals());
+            assertTrue(
+                    plan.activeSubscriptionIntervals().isEmpty());
+            assertTrue(plan.deliveries().isEmpty());
+        }
+    }
+
+    @Test
     void shouldRetainCompleteSurfaceButDeliverOnlyMatchingChannel() {
         try (Fixture fixture = fixture()) {
             // Given

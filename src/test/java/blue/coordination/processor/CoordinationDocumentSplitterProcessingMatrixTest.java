@@ -36,6 +36,7 @@ import blue.language.processor.registry.BlueRuntimeTypeRegistry;
 import blue.language.processor.registry.RuntimeBlueIds;
 import blue.language.processor.registry.RuntimeTypeKey;
 import blue.language.provider.SequentialNodeProvider;
+import blue.language.snapshot.ResolvedSnapshot;
 import blue.language.utils.BlueIdCalculator;
 import org.junit.jupiter.api.Test;
 
@@ -185,9 +186,81 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
         String context = run.variant.toString();
         DocumentProcessingResult result =
                 run.debug.processResult();
-        Node exactResultDocument =
+        Node publicResultDocument =
                 result.document();
+        ResolvedSnapshot resultingSnapshot =
+                run.debug.resultingSnapshot();
+        assertNotNull(
+                resultingSnapshot,
+                context + ": snapshot-native PROCESS result");
+        Node semanticResultDocument =
+                resultingSnapshot.resolvedRoot();
+        Node canonicalResultDocument =
+                resultingSnapshot.canonicalRoot();
+        String publicResultBlueId =
+                BlueIdCalculator.calculateBlueId(
+                        publicResultDocument);
+        boolean canonicalPublicProjection =
+                resultingSnapshot.blueId().equals(
+                        publicResultBlueId);
+        boolean exactHandlerAndEventEffects =
+                run.handlerExecutions == 1
+                        && Collections.singletonList(
+                                run.scenario.emittedEventBlueId)
+                        .equals(nodeBlueIds(
+                                result.events()));
 
+        boolean pureReferenceRun =
+                run.variant.documentForm
+                        == DocumentForm.PURE_REFERENCE;
+        boolean exactCollapsedTransition =
+                pureReferenceRun
+                        && result.status()
+                        == ProcessorStatus.SUCCESS
+                        && publicResultDocument.isReferenceOnly()
+                        && run.scenario.rootBlueId.equals(
+                                publicResultDocument.getBlueId())
+                        && run.scenario.rootBlueId.equals(
+                                publicResultBlueId)
+                        && run.scenario.rootBlueId.equals(
+                                resultingSnapshot.blueId())
+                        && "pending".equals(
+                                textAt(
+                                        semanticResultDocument,
+                                        "state"))
+                        && exactHandlerAndEventEffects;
+        boolean repairedPath =
+                result.status() == ProcessorStatus.SUCCESS
+                        && "processed".equals(
+                                textAt(
+                                        semanticResultDocument,
+                                        "state"))
+                        && canonicalPublicProjection
+                        && exactHandlerAndEventEffects;
+        ExternalBlockerProbeAssertions.classify(
+                "pure-reference-root-transition",
+                "Language pure-reference Root transition defect:",
+                exactCollapsedTransition,
+                repairedPath,
+                context + ": publicResultReference="
+                        + publicResultDocument.isReferenceOnly()
+                        + ", inputRootBlueId="
+                        + run.scenario.rootBlueId
+                        + ", publicResultDeclaredBlueId="
+                        + publicResultDocument.getBlueId()
+                        + ", publicResultBlueId="
+                        + publicResultBlueId
+                        + ", resultingSnapshotBlueId="
+                        + resultingSnapshot.blueId()
+                        + ", canonicalPublicProjection="
+                        + canonicalPublicProjection
+                        + ", semanticState="
+                        + textAt(
+                                semanticResultDocument, "state")
+                        + ", handlerExecutions="
+                        + run.handlerExecutions
+                        + ", events="
+                        + nodeBlueIds(result.events()));
         assertEquals(
                 ProcessorStatus.SUCCESS,
                 result.status(),
@@ -196,12 +269,19 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                         result.diagnostic()));
         assertEquals(
                 "processed",
-                textAt(exactResultDocument, "state"),
+                textAt(semanticResultDocument, "state"),
                 "Language pure-reference Root transition defect: "
-                        + context + ": exact state="
-                        + exactResultDocument.getProperties().get("state")
+                        + context + ": resolved state="
+                        + semanticResultDocument
+                        .getProperties().get("state")
                         + ", handlerExecutions="
                         + run.handlerExecutions);
+        assertEquals(
+                resultingSnapshot.blueId(),
+                BlueIdCalculator.calculateBlueId(
+                        publicResultDocument),
+                context + ": public ProcessResult must project "
+                        + "the resulting canonical Root identity");
         assertEquals(
                 1,
                 run.handlerExecutions,
@@ -249,7 +329,7 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                         .contractKey(),
                 context + ": checkpoint source ownership");
 
-        Node checkpoint = result.document()
+        Node checkpoint = canonicalResultDocument
                 .getContracts()
                 .getProperties()
                 .get("checkpoint");
@@ -985,17 +1065,25 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                 ProcessingDebugResult debug) {
             DocumentProcessingResult result =
                     debug.processResult();
-            Node exactResultDocument =
-                    result.document();
-            Node checkpoint = result.document()
+            ResolvedSnapshot resultingSnapshot =
+                    debug.resultingSnapshot();
+            assertNotNull(
+                    resultingSnapshot,
+                    "semantic projection requires "
+                            + "the snapshot-native result");
+            Node semanticResultDocument =
+                    resultingSnapshot.resolvedRoot();
+            Node checkpoint =
+                    resultingSnapshot.canonicalRoot()
                     .getContracts()
                     .getProperties()
                     .get("checkpoint");
             return new SemanticProjection(
                     result.status(),
-                    textAt(exactResultDocument, "state"),
-                    BlueIdCalculator.calculateBlueId(
-                            result.document()),
+                    textAt(
+                            semanticResultDocument,
+                            "state"),
+                    resultingSnapshot.blueId(),
                     nodeBlueIds(result.events()),
                     diagnosticProjection(
                             result.diagnostic()),

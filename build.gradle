@@ -29,18 +29,41 @@ def requiredLocalProjectVersion = { String relativeProject ->
     }
     return value
 }
+def blueRepositorySourceRoot =
+        file('../blue-repository-java')
+                .canonicalFile
+def blueRepositoryCompositePath =
+        providers.gradleProperty(
+                'blueRepositoryCompositePath')
+                .orNull
+        ?: System.getProperty(
+                'org.gradle.project.blueRepositoryCompositePath')
+if (blueRepositoryCompositePath == null
+        || blueRepositoryCompositePath.trim().isEmpty()) {
+    throw new GradleException(
+            "settings.gradle did not export the exact immutable local "
+                    + "Repository composite path")
+}
+def blueRepositoryCompositeRoot =
+        file(
+                blueRepositoryCompositePath)
+                .canonicalFile
 def blueLanguageVersion =
         requiredLocalProjectVersion('../blue-language-java')
 def blueBexVersion =
         requiredLocalProjectVersion('../blue-bex-java')
 def blueRepositoryVersion =
-        requiredLocalProjectVersion('../blue-repository-java')
+        requiredLocalProjectVersion(
+                blueRepositoryCompositeRoot
+                        .absolutePath)
 def effectiveLocalProjectVersion = { String declaredVersion ->
     return declaredVersion
             .concat(!System.getenv('CI') ? '-SNAPSHOT' : '')
 }
 def siblingSourceLockFile =
         file('gradle/blue-sibling-lock.properties')
+def coordinationReleaseBaselineFile =
+        file('gradle/coordination-release-baseline.json')
 if (!siblingSourceLockFile.isFile()) {
     throw new GradleException(
             "Required sibling source lock is missing: "
@@ -68,6 +91,27 @@ requiredSiblingSourceLockKeys.each { key ->
                 "Sibling source lock ${key} must be an exact Git SHA")
     }
 }
+def currentLanguageSourceCommit = {
+    def command = [
+            'git',
+            '-C',
+            file('../blue-language-java').absolutePath,
+            'rev-parse',
+            'HEAD'
+    ]
+    def process = new ProcessBuilder(command)
+            .redirectErrorStream(true)
+            .start()
+    def output = process.inputStream.getText('UTF-8').trim()
+    def exitCode = process.waitFor()
+    if (exitCode != 0
+            || !(output ==~ /[0-9a-f]{40}/)) {
+        throw new GradleException(
+                "Cannot resolve the exact current Language source commit: "
+                        + output)
+    }
+    return output
+}.call()
 def binaryCompatibilityBaselineVersion = '2.0.0-rc.4'
 def binaryCompatibilityBaselineSha256 =
         'e9a7988d347856e0b0d350d456931b5ba947b3852f0117b9f97f93198398a4c4'
@@ -146,12 +190,117 @@ tasks.withType(AbstractArchiveTask).configureEach {
     reproducibleFileOrder = true
 }
 
+def requiredRepositoryClosureSourceRoot =
+        layout.buildDirectory.dir(
+                'generated/sources/'
+                        + 'coordinationRequiredRepositoryClosure/'
+                        + 'java/main')
+def requiredRepositoryClosureJava =
+        requiredRepositoryClosureSourceRoot.map {
+            it.file(
+                    'blue/coordination/processor/'
+                            + 'CoordinationRequiredRepositoryClosure.java')
+        }
+def requiredRepositoryClosureGenerationReport =
+        layout.buildDirectory.file(
+                'reports/coordination-release/'
+                        + 'required-repository-closure-generation.json')
+def verifyCoordinationRequiredRepositoryClosureGenerator =
+        tasks.register(
+                'verifyCoordinationRequiredRepositoryClosureGenerator',
+                Exec) {
+    group = 'verification'
+    description = (
+            'Exercises direct runtime roots, transitive edges, and complete '
+                    + 'cyclic-set expansion in the Repository closure '
+                    + 'generator.')
+    inputs.files(
+            'tools/generate-coordination-required-repository-closure.js',
+            'tools/test-generate-coordination-required-repository-closure.js')
+    commandLine(
+            providers.environmentVariable(
+                    'NODE_BINARY')
+                    .orElse('node')
+                    .get(),
+            file('tools/'
+                    + 'test-generate-coordination-required-repository-closure.js')
+                    .absolutePath)
+}
+def generateCoordinationRequiredRepositoryClosure =
+        tasks.register(
+                'generateCoordinationRequiredRepositoryClosure',
+                Exec) {
+    group = 'build'
+    description = (
+            'Generates the immutable transitive fixed-Repository closure '
+                    + 'from exact Coordination source and fixture usage.')
+    dependsOn(
+            verifyCoordinationRequiredRepositoryClosureGenerator)
+    inputs.file(
+            'tools/generate-coordination-required-repository-closure.js')
+    inputs.files(
+            fileTree('src/main'),
+            fileTree('src/test'),
+            fileTree('src/jmh'))
+    inputs.property(
+            'repositoryCommit',
+            siblingSourceLock.getProperty(
+                    'blueRepositoryCommit'))
+    inputs.property(
+            'languageCommit',
+            currentLanguageSourceCommit)
+    outputs.file(
+            requiredRepositoryClosureJava)
+    outputs.file(
+            requiredRepositoryClosureGenerationReport)
+    outputs.upToDateWhen { false }
+    commandLine(
+            providers.environmentVariable(
+                    'NODE_BINARY')
+                    .orElse('node')
+                    .get(),
+            file('tools/'
+                    + 'generate-coordination-required-repository-closure.js')
+                    .absolutePath,
+            '--project-root',
+            projectDir.absolutePath,
+            '--repository-root',
+            blueRepositorySourceRoot
+                    .absolutePath,
+            '--language-root',
+            file('../blue-language-java')
+                    .absolutePath,
+            '--repository-commit',
+            siblingSourceLock.getProperty(
+                    'blueRepositoryCommit'),
+            '--language-commit',
+            currentLanguageSourceCommit,
+            '--java-output',
+            requiredRepositoryClosureJava
+                    .get().asFile.absolutePath,
+            '--report-output',
+            requiredRepositoryClosureGenerationReport
+                    .get().asFile.absolutePath)
+}
+sourceSets.main.java.srcDir(
+        requiredRepositoryClosureSourceRoot)
+
 tasks.named('compileJava', JavaCompile) {
+    dependsOn(
+            generateCoordinationRequiredRepositoryClosure)
     options.compilerArgs.addAll([
             '-Xlint:deprecation',
             '-Xlint:-options',
             '-Werror'
     ])
+}
+tasks.named('sourcesJar') {
+    dependsOn(
+            generateCoordinationRequiredRepositoryClosure)
+}
+tasks.named('javadoc') {
+    dependsOn(
+            generateCoordinationRequiredRepositoryClosure)
 }
 
 configurations {
@@ -939,6 +1088,7 @@ tasks.register('localFixedRepositoryCompatibilityTest', Test) { focusedTest ->
     configureFocusedTest(focusedTest, [
             'blue.coordination.processor.LocalCompositeDependencyTest',
             'blue.coordination.processor.LocalFixedRepositoryCompatibilityTest',
+            'blue.coordination.processor.CoordinationRequiredRepositoryClosureTest',
             'blue.coordination.processor.FixedRepositoryBoundSourceProviderTest'
     ])
     dependsOn verifyNestedLocalCompositeDependencies
@@ -949,13 +1099,31 @@ tasks.register('localFixedRepositoryCompatibilityTest', Test) { focusedTest ->
                 'blue.coordination.processor.LocalFixedRepositoryCompatibilityTest'
                         + '#shouldExposeTheExactFixedRepositoryManifestIdentity()',
                 'blue.coordination.processor.LocalFixedRepositoryCompatibilityTest'
-                        + '#shouldResolveEveryRequiredGeneratedTypeAtItsManifestBlueId()',
+                        + '#shouldVerifyRequiredClosureOrExposeExactIncompatibilities()',
+                'blue.coordination.processor.CoordinationRequiredRepositoryClosureTest'
+                        + '#shouldExposeCanonicalImmutableTransitiveClosure()',
+                'blue.coordination.processor.CoordinationRequiredRepositoryClosureTest'
+                        + '#shouldRecordEveryRuntimeRegistrationAsAnExplicitRoot()',
+                'blue.coordination.processor.CoordinationRequiredRepositoryClosureTest'
+                        + '#shouldBindGeneratedReportToImmutableHeadEvidence()',
+                'blue.coordination.processor.CoordinationRequiredRepositoryClosureTest'
+                        + '#shouldIncludeMandateBaseAndSupportedSubtypeEvidence()',
                 'blue.coordination.processor.FixedRepositoryBoundSourceProviderTest'
                         + '#shouldVerifyEveryFixedRepositoryDefinitionUnderBoundSourceContent()',
                 'blue.coordination.processor.FixedRepositoryBoundSourceProviderTest'
+                        + '#shouldVerifyRequiredClosureOrEmitExactIncompatibilityProof()',
+                'blue.coordination.processor.FixedRepositoryBoundSourceProviderTest'
                         + '#shouldPreserveTypedMissesAndReturnDefensiveProviderValues()',
                 'blue.coordination.processor.FixedRepositoryBoundSourceProviderTest'
+                        + '#shouldRetainVerifiedResultsAcrossDifferentRepositoryMasters()',
+                'blue.coordination.processor.FixedRepositoryBoundSourceProviderTest'
                         + '#shouldExposeCompleteProofForEveryVerifiedCyclicMember()',
+                'blue.coordination.processor.FixedRepositoryBoundSourceProviderTest'
+                        + '#shouldKeepHistoricalRoleEvidenceOutsideTheActiveRuntime()',
+                'blue.coordination.processor.FixedRepositoryBoundSourceProviderTest'
+                        + '#shouldCloseTheOwnedVerificationRuntimeIdempotently()',
+                'blue.coordination.processor.FixedRepositoryBoundSourceProviderTest'
+                        + '#shouldLeaveActiveRuntimeUnchangedWhenRequiredClosureCannotVerify()',
                 'blue.coordination.processor.FixedRepositoryBoundSourceProviderTest'
                         + '#shouldRejectARepositoryManifestThatDiffersFromItsBinding()',
                 'blue.coordination.processor.FixedRepositoryBoundSourceProviderTest'
@@ -1824,6 +1992,17 @@ def sha256File = { File file ->
             }
         }
     }
+    digest.digest().collect {
+        String.format('%02x', it & 0xff)
+    }.join()
+}
+
+def sha256Bytes = { byte[] value ->
+    def digest =
+            java.security.MessageDigest
+                    .getInstance('SHA-256')
+    digest.update(
+            value)
     digest.digest().collect {
         String.format('%02x', it & 0xff)
     }.join()
@@ -3002,9 +3181,9 @@ def exactCoordinationConformanceReceiptIdentities = {
                         'src/main/resources/blue/coordination/processor/'
                                 + 'coordination-host-quotas-1.0.yaml')
         File fixedRepositoryManifest =
-                file(
-                        '../blue-repository-java/src/main/resources/'
-                                + 'blue/repo/manifest.json')
+                new File(
+                        blueRepositoryCompositeRoot,
+                        'src/main/resources/blue/repo/manifest.json')
         [
                 conformanceManifest,
                 portableGasManifest,
@@ -3028,7 +3207,7 @@ def exactCoordinationConformanceReceiptIdentities = {
                         'BEX')
         String repositoryCommit =
                 requiredReceiptGitCommit(
-                        file('../blue-repository-java'),
+                        blueRepositoryCompositeRoot,
                         'Repository')
         def lockedCommits = [
                 blueLanguageCommit  : languageCommit,
@@ -3071,7 +3250,7 @@ def exactCoordinationConformanceReceiptIdentities = {
                         effectiveLocalProjectVersion(
                                 blueRepositoryVersion),
                         ':blue-repository-java',
-                        file('../blue-repository-java'))
+                        blueRepositoryCompositeRoot)
         File coordinationJar =
                 tasks.named('jar')
                         .get()
@@ -5758,6 +5937,123 @@ def gitText = { File directory, String... arguments ->
     return output
 }
 
+def gitBytes = { File directory, String... arguments ->
+    def command = new ArrayList<String>()
+    command.add('git')
+    command.addAll(Arrays.asList(arguments))
+    Process process = new ProcessBuilder(command)
+            .directory(directory)
+            .start()
+    byte[] output = process.inputStream.bytes
+    String diagnostic =
+            process.errorStream.getText('UTF-8')
+    int exitCode = process.waitFor()
+    if (exitCode != 0) {
+        throw new GradleException(
+                "Git command failed in ${directory}: "
+                        + command + "\n" + diagnostic.trim())
+    }
+    return output
+}
+
+def protectedRepositoryBaselineEvidence = {
+    if (!coordinationReleaseBaselineFile.isFile()) {
+        throw new GradleException(
+                "Coordination release baseline is missing: "
+                        + coordinationReleaseBaselineFile)
+    }
+    def releaseBaseline =
+            new groovy.json.JsonSlurper()
+                    .parse(
+                            coordinationReleaseBaselineFile)
+    def expected =
+            releaseBaseline
+                    .repositories
+                    .repository
+    byte[] trackedDiff =
+            gitBytes(
+                    blueRepositorySourceRoot,
+                    'diff',
+                    '--binary',
+                    'HEAD')
+    String trackedDiffSha256 =
+            sha256Bytes(
+                    trackedDiff)
+    int trackedChangeCount =
+            new String(
+                    gitBytes(
+                            blueRepositorySourceRoot,
+                            'diff',
+                            '--name-only',
+                            '-z',
+                            'HEAD'),
+                    java.nio.charset.StandardCharsets.UTF_8)
+                    .split('\u0000', -1)
+                    .findAll { !it.isEmpty() }
+                    .size()
+    int untrackedPathCount =
+            new String(
+                    gitBytes(
+                            blueRepositorySourceRoot,
+                            'ls-files',
+                            '--others',
+                            '--exclude-standard',
+                            '-z'),
+                    java.nio.charset.StandardCharsets.UTF_8)
+                    .split('\u0000', -1)
+                    .findAll { !it.isEmpty() }
+                    .size()
+    if (expected.commit?.toString()
+            != siblingSourceLock.getProperty(
+                    'blueRepositoryCommit')
+            || trackedDiffSha256
+            != expected.trackedBinaryDiffSha256
+            ?.toString()
+            || trackedChangeCount
+            != (expected.trackedChangeCount as int)
+            || untrackedPathCount
+            != (expected.untrackedPathCount as int)) {
+        throw new GradleException(
+                "Protected Repository state changed from the saved "
+                        + "pre-implementation baseline: commit="
+                        + expected.commit
+                        + ", trackedChangeCount="
+                        + trackedChangeCount
+                        + ", untrackedPathCount="
+                        + untrackedPathCount
+                        + ", trackedBinaryDiffSha256="
+                        + trackedDiffSha256)
+    }
+    return [
+            trackedBinaryDiffSha256:
+                    trackedDiffSha256,
+            trackedChangeCount:
+                    trackedChangeCount,
+            untrackedPathCount:
+                    untrackedPathCount
+    ]
+}
+
+def verifyProtectedRepositoryUnchanged =
+        tasks.register(
+                'verifyProtectedRepositoryUnchanged') {
+    group = 'verification'
+    description = (
+            'Proves the protected user Repository checkout still exactly '
+                    + 'matches its saved dirty-source baseline.')
+    inputs.file(
+            coordinationReleaseBaselineFile)
+    outputs.upToDateWhen { false }
+    doLast {
+        protectedRepositoryBaselineEvidence()
+    }
+}
+
+tasks.named('check') {
+    dependsOn(
+            verifyProtectedRepositoryUnchanged)
+}
+
 def verifyReleaseGitDiffCheck =
         tasks.register('verifyReleaseGitDiffCheck') {
     group = 'verification'
@@ -5768,7 +6064,10 @@ def verifyReleaseGitDiffCheck =
                 Coordination: projectDir,
                 Language    : file('../blue-language-java'),
                 BEX         : file('../blue-bex-java'),
-                Repository  : file('../blue-repository-java')
+                RepositoryProtectedSource:
+                        blueRepositorySourceRoot,
+                RepositorySelectedComposite:
+                        blueRepositoryCompositeRoot
         ].each { label, directory ->
             try {
                 gitText(
@@ -5801,6 +6100,7 @@ def finalCoordinationReport = tasks.register(
             verifyJava8Bytecode,
             verifyReproducibleArchives,
             verifyReleaseGitDiffCheck,
+            generateCoordinationRequiredRepositoryClosure,
             tasks.named('jar'),
             tasks.named('sourcesJar'),
             tasks.named('javadocJar'),
@@ -5814,6 +6114,8 @@ def finalCoordinationReport = tasks.register(
     inputs.dir(coordinationConformancePackageDirectory)
     inputs.file(coordinationConformanceReceipt)
     inputs.file(siblingSourceLockFile)
+    inputs.file(coordinationReleaseBaselineFile)
+    inputs.file(requiredRepositoryClosureGenerationReport)
     inputs.file(localCompositeDependencyGraphEvidence)
     inputs.file(normalizedNestedBexDependencyEvidence)
     doFirst {
@@ -5840,8 +6142,10 @@ def finalCoordinationReport = tasks.register(
                         coordinationConformanceReceipt
                                 .get().asFile,
                         true)
-        File repositoryManifestFile = file(
-                '../blue-repository-java/src/main/resources/blue/repo/manifest.json')
+        File repositoryManifestFile =
+                new File(
+                        blueRepositoryCompositeRoot,
+                        'src/main/resources/blue/repo/manifest.json')
         if (!repositoryManifestFile.isFile()) {
             throw new GradleException(
                     "Fixed Repository manifest is missing: "
@@ -5850,12 +6154,20 @@ def finalCoordinationReport = tasks.register(
         def repositoryManifest =
                 new groovy.json.JsonSlurper()
                         .parse(repositoryManifestFile)
+        def requiredRepositoryClosureGeneration =
+                new groovy.json.JsonSlurper()
+                        .parse(
+                                requiredRepositoryClosureGenerationReport
+                                        .get().asFile)
         if (repositoryManifest.repositoryVersion
-                != '1.3.0'
+                != requiredRepositoryClosureGeneration
+                .repository.version
                 || repositoryManifest.repositoryVersionBlueId
-                != 'msCV6VLe4Y1hayq2RnPbuzqZbroowpfBKexXoXBirZq') {
+                != requiredRepositoryClosureGeneration
+                .repository.manifestBlueId) {
             throw new GradleException(
-                    "Unexpected fixed repository identity: "
+                    "Selected fixed Repository manifest differs from the "
+                            + "generated immutable HEAD closure: "
                             + repositoryManifest.repositoryVersion
                             + "/"
                             + repositoryManifest.repositoryVersionBlueId)
@@ -6098,6 +6410,11 @@ def finalCoordinationReport = tasks.register(
                                 + "the committed source lock ${locked}")
             }
         }
+        def protectedRepositoryBaseline =
+                protectedRepositoryBaselineEvidence()
+        String protectedRepositoryTrackedDiffSha256 =
+                protectedRepositoryBaseline
+                        .trackedBinaryDiffSha256
         def identities = new TreeMap<String, String>()
         identities.put(
                 'blueCoordinationVersion',
@@ -6139,14 +6456,36 @@ def finalCoordinationReport = tasks.register(
                 blueRepositoryVersion)
         identities.put(
                 'blueRepositoryDependencyMode',
-                'local-composite:../blue-repository-java')
+                'local-composite:immutable-repository-head')
         identities.put(
                 'blueRepositoryCommit',
                 actualSiblingCommits
                         .blueRepositoryCommit)
         identities.put(
                 'blueRepositorySourceState',
-                projectState(file('../blue-repository-java')))
+                projectState(blueRepositoryCompositeRoot))
+        identities.put(
+                'blueRepositoryProtectedSourceState',
+                projectState(blueRepositorySourceRoot))
+        identities.put(
+                'blueRepositoryProtectedSourceHead',
+                gitText(
+                        blueRepositorySourceRoot,
+                        'rev-parse',
+                        'HEAD'))
+        identities.put(
+                'blueRepositoryProtectedTrackedDiffSha256',
+                protectedRepositoryTrackedDiffSha256)
+        identities.put(
+                'blueRepositoryProtectedTrackedChangeCount',
+                protectedRepositoryBaseline
+                        .trackedChangeCount
+                        .toString())
+        identities.put(
+                'blueRepositoryProtectedUntrackedPathCount',
+                protectedRepositoryBaseline
+                        .untrackedPathCount
+                        .toString())
         identities.put(
                 'fixedRepositoryVersion',
                 repositoryManifest.repositoryVersion.toString())
@@ -6333,9 +6672,14 @@ def finalCoordinationReport = tasks.register(
                 ],
                 'local-fixed-repository-compatibility': [
                         dependencyMode:
-                                'mandatory local sibling composite build',
+                                'mandatory exact local immutable-HEAD composite build',
                         repositoryManifest:
-                                'repo.blue 1.3.0 / msCV6VLe4Y1hayq2RnPbuzqZbroowpfBKexXoXBirZq'
+                                'repo.blue '
+                                        + repositoryManifest
+                                        .repositoryVersion
+                                        + ' / '
+                                        + repositoryManifest
+                                        .repositoryVersionBlueId
                 ],
                 'closed-coordination-conformance': [
                         fixtureLanguage:
@@ -6803,7 +7147,7 @@ def legacyAllGreenCoordinationVerification =
                         effectiveLocalProjectVersion(
                                 blueRepositoryVersion),
                         ':blue-repository-java',
-                        file('../blue-repository-java'))
+                        blueRepositoryCompositeRoot)
         File finalBinaryCompatibilityBaseline =
                 configurations.binaryCompatibilityBaseline
                         .singleFile
@@ -7025,7 +7369,7 @@ def legacyAllGreenCoordinationVerification =
                         != blueRepositoryVersion
                 || report.identities
                         .blueRepositoryDependencyMode
-                        != 'local-composite:../blue-repository-java'
+                        != 'local-composite:immutable-repository-head'
                 || report.identities.blueRepositoryCommit
                         != siblingSourceLock.getProperty(
                                 'blueRepositoryCommit')
@@ -7049,9 +7393,13 @@ def legacyAllGreenCoordinationVerification =
                         != independentlyObservedArtifactIdentities
                                 .blueSiblingSourceLockSha256
                 || report.identities.fixedRepositoryVersion
-                        != '1.3.0'
+                        != repositoryManifest
+                        .repositoryVersion
+                        .toString()
                 || report.identities.fixedRepositoryVersionBlueId
-                        != 'msCV6VLe4Y1hayq2RnPbuzqZbroowpfBKexXoXBirZq'
+                        != repositoryManifest
+                        .repositoryVersionBlueId
+                        .toString()
                 || report.identities.blueCoordinationSourceState
                         != 'clean'
                 || report.identities.blueLanguageSourceState

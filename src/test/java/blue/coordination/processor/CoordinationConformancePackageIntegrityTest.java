@@ -15,6 +15,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -32,6 +34,7 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -55,14 +58,14 @@ final class CoordinationConformancePackageIntegrityTest {
     @Test
     void shouldBindCandidateIntegrityToTheExactFixedRepository()
             throws Exception {
-        // Given
+        // given
         String manifest = read("manifest.yaml");
 
-        // When
+        // when
         String calculated =
                 "sha256:" + packageIdentity();
 
-        // Then
+        // then
         assertTrue(manifest.contains("status: candidate"));
         assertTrue(manifest.contains("releaseEligible: false"));
         assertTrue(manifest.contains(
@@ -74,7 +77,7 @@ final class CoordinationConformancePackageIntegrityTest {
                 "fixedRepositoryVersion: 1.3.0"));
         assertTrue(manifest.contains(
                 "fixedRepositoryVersionBlueId: "
-                        + "msCV6VLe4Y1hayq2RnPbuzqZbroowpfBKexXoXBirZq"));
+                        + "FG4LidzBiMCyVt53aP8kJXjcZXZ97mVfnv7N92zueGzr"));
         assertEquals(
                 calculated,
                 manifestValue(
@@ -83,14 +86,17 @@ final class CoordinationConformancePackageIntegrityTest {
     }
 
     @Test
-    void shouldBindReceiptSchemaToCurrentLocalRepositoryManifest()
+    void shouldBindReceiptSchemaToSelectedImmutableRepositoryManifest()
             throws Exception {
-        // Given
-        Path repositoryManifest =
-                PROJECT.resolve(
-                                "../blue-repository-java/src/main/resources/"
-                                        + "blue/repo/manifest.json")
-                        .normalize();
+        // given
+        InputStream repositoryManifest =
+                BlueRepository.class
+                        .getClassLoader()
+                        .getResourceAsStream(
+                                "blue/repo/manifest.json");
+        assertNotNull(repositoryManifest);
+        byte[] repositoryManifestBytes =
+                readAllBytes(repositoryManifest);
         JsonNode receiptSchema =
                 new ObjectMapper().readTree(
                         PROJECT.resolve(
@@ -98,21 +104,28 @@ final class CoordinationConformancePackageIntegrityTest {
                                                 + "conformance-result.schema.json")
                                 .toFile());
 
-        // When
+        // when
         String expectedManifestSha256 =
                 hex(MessageDigest.getInstance("SHA-256")
-                        .digest(Files.readAllBytes(
-                                repositoryManifest)));
+                        .digest(repositoryManifestBytes));
         String schemaManifestSha256 =
                 receiptSchema.path("properties")
                         .path("fixedRepositoryManifestSha256")
                         .path("const")
                         .asText();
+        String selectedRepositoryBlueId =
+                new ObjectMapper()
+                        .readTree(repositoryManifestBytes)
+                        .path("repositoryVersionBlueId")
+                        .asText();
 
-        // Then
+        // then
         assertEquals(
                 expectedManifestSha256,
                 schemaManifestSha256);
+        assertEquals(
+                "FG4LidzBiMCyVt53aP8kJXjcZXZ97mVfnv7N92zueGzr",
+                selectedRepositoryBlueId);
     }
 
     @Test
@@ -756,6 +769,21 @@ final class CoordinationConformancePackageIntegrityTest {
             digest.update((byte) 0);
         }
         return hex(digest.digest());
+    }
+
+    private static byte[] readAllBytes(
+            InputStream inputStream)
+            throws Exception {
+        try (InputStream source = inputStream;
+             ByteArrayOutputStream target =
+                     new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = source.read(buffer)) != -1) {
+                target.write(buffer, 0, read);
+            }
+            return target.toByteArray();
+        }
     }
 
     private static String read(String relative)

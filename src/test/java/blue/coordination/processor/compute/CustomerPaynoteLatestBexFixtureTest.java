@@ -2,12 +2,15 @@ package blue.coordination.processor.compute;
 
 import blue.coordination.processor.CoordinationProcessors;
 import blue.coordination.processor.CoordinationTestResources;
+import blue.coordination.processor.ExternalBlockerProbeAssertions;
 import blue.coordination.processor.ProcessingResultTestSupport;
 import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
+import blue.language.processor.ProcessorErrorCategory;
 import blue.language.processor.ProcessorStatus;
 import blue.language.processor.registry.RuntimeBlueIds;
+import blue.language.utils.BlueIdCalculator;
 import blue.repo.BlueRepository;
 import org.junit.jupiter.api.Test;
 
@@ -55,6 +58,40 @@ class CustomerPaynoteLatestBexFixtureTest {
         DocumentProcessingResult result = fixture.blue.processDocument(initialized.document(), event);
 
         // Then
+        boolean rolledBack =
+                BlueIdCalculator.calculateBlueId(
+                        initialized.document())
+                        .equals(
+                                BlueIdCalculator.calculateBlueId(
+                                        result.document()));
+        boolean exactDictionaryDefect =
+                initialized.status()
+                        == ProcessorStatus.SUCCESS
+                        && ExternalBlockerProbeAssertions
+                        .exactDiagnostic(
+                                result,
+                                ProcessorStatus.RUNTIME_FATAL,
+                                ProcessorErrorCategory
+                                        .TypeGeneralizationFailure,
+                                "Source node with keyType or valueType "
+                                        + "must have a Dictionary type")
+                        && result.events().isEmpty()
+                        && rolledBack;
+        ExternalBlockerProbeAssertions.classify(
+                "customer-paynote-dictionary-generalization",
+                "Language customer PayNote Dictionary generalization defect:",
+                exactDictionaryDefect,
+                initialized.status() == ProcessorStatus.SUCCESS
+                        && result.status()
+                        == ProcessorStatus.SUCCESS,
+                "initialization="
+                        + ExternalBlockerProbeAssertions
+                        .resultTuple(initialized)
+                        + ", PROCESS="
+                        + ExternalBlockerProbeAssertions
+                        .resultTuple(result)
+                        + ", rolledBack="
+                        + rolledBack);
         assertNotNull(result.document());
         assertEquals("Global Package Fulfillment Automation - Weekend Stay + Wine Dinner",
                 result.document().getName());

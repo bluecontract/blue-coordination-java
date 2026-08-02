@@ -1,9 +1,11 @@
 package blue.coordination.processor.compute;
 
 import blue.coordination.processor.CoordinationProcessorOptions;
+import blue.coordination.processor.ExternalBlockerProbeAssertions;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
+import blue.language.processor.ProcessorErrorCategory;
 import blue.language.processor.ProcessorStatus;
 import blue.language.snapshot.ResolvedSnapshot;
 import java.math.BigInteger;
@@ -71,6 +73,67 @@ class DynamicEmbeddedParticipantsWorkflowTest {
             // composite-channel entry.
             DocumentProcessingResult result = support.blue.processDocument(current,
                     operationEvent(support, "alice", i, "createEmbedded"));
+            String diagnostic =
+                    blue.coordination.processor
+                            .ProcessingResultTestSupport
+                            .diagnosticMessage(result);
+            String identityPrefix =
+                    "Invalid Compute result: Compute result exact patch "
+                            + "value identity changed during semantic "
+                            + "materialization: expected ";
+            int calculatedSeparator =
+                    diagnostic.indexOf(
+                            " but calculated ");
+            String expectedIdentity =
+                    diagnostic.startsWith(identityPrefix)
+                            && calculatedSeparator
+                            > identityPrefix.length()
+                            ? diagnostic.substring(
+                            identityPrefix.length(),
+                            calculatedSeparator)
+                            : "";
+            String calculatedIdentity =
+                    calculatedSeparator >= 0
+                            ? diagnostic.substring(
+                            calculatedSeparator
+                                    + " but calculated "
+                                    .length())
+                            : "";
+            boolean exactIdentityDrift =
+                    result.status()
+                            == ProcessorStatus.RUNTIME_FATAL
+                            && blue.coordination.processor
+                            .ProcessingResultTestSupport
+                            .diagnosticCategory(result)
+                            == ProcessorErrorCategory
+                            .RuntimeExecutionFailure
+                            && expectedIdentity.length() == 44
+                            && calculatedIdentity.length() == 44
+                            && !expectedIdentity.equals(
+                            calculatedIdentity)
+                            && result.events().isEmpty()
+                            && current.blueId().equals(
+                            blue.coordination.processor
+                                    .ProcessingResultTestSupport
+                                    .blueId(result));
+            ExternalBlockerProbeAssertions.classify(
+                    "bex-admitted-exact-value-materialization",
+                    "BEX admitted-exact canonical materialization defect:",
+                    exactIdentityDrift,
+                    result.status()
+                            == ProcessorStatus.SUCCESS,
+                    "createEmbedded[" + i + "]: "
+                            + ExternalBlockerProbeAssertions
+                            .resultTuple(result)
+                            + ", expectedIdentity="
+                            + expectedIdentity
+                            + ", calculatedIdentity="
+                            + calculatedIdentity
+                            + ", rolledBack="
+                            + current.blueId().equals(
+                            blue.coordination.processor
+                                    .ProcessingResultTestSupport
+                                    .blueId(result)));
             assertEquals(ProcessorStatus.SUCCESS,
                     result.status(),
                     "BEX admitted-exact canonical materialization defect: "

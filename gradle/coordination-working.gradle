@@ -4,12 +4,52 @@ import groovy.xml.XmlSlurper
 import org.gradle.api.GradleException
 import org.gradle.api.tasks.testing.Test
 
+def workingBlueRepositoryCompositePath =
+        (providers.gradleProperty('blueRepositoryCompositePath')
+                .orNull
+                ?: System.getProperty(
+                        'org.gradle.project.blueRepositoryCompositePath'))
+                ?.trim()
+if (workingBlueRepositoryCompositePath == null
+        || workingBlueRepositoryCompositePath.isEmpty()) {
+    throw new GradleException(
+            'The exact locked local Repository composite path is missing.')
+}
+def workingBlueRepositoryComposite =
+        file(workingBlueRepositoryCompositePath).canonicalFile
+if (!workingBlueRepositoryComposite.isDirectory()) {
+    throw new GradleException(
+            'The exact locked local Repository composite is missing: '
+                    + workingBlueRepositoryComposite)
+}
+
 def workingCatalogFile =
         file('gradle/coordination-external-blockers.json')
 def workingCatalog =
         new JsonSlurper().parse(workingCatalogFile)
 def workingBlockers =
         workingCatalog.blockers as List
+if (workingCatalog.schema
+        != 'blue-coordination/external-blockers/1.1') {
+    throw new GradleException(
+            'Unsupported Coordination external-blocker catalog schema: '
+                    + workingCatalog.schema)
+}
+def workingFingerprintPrefixes =
+        workingBlockers.collect {
+            it.fingerprintPrefix
+        }
+if (workingFingerprintPrefixes.any {
+    !(it instanceof String)
+            || it.trim().isEmpty()
+            || !it.endsWith(':')
+}
+        || workingFingerprintPrefixes.toSet().size()
+        != workingFingerprintPrefixes.size()) {
+    throw new GradleException(
+            'Every external-blocker family must declare one unique, '
+                    + 'non-empty fingerprintPrefix ending in a colon.')
+}
 def workingProbes =
         workingBlockers.collectMany { blocker ->
             blocker.probes.collect { probe ->
@@ -18,11 +58,30 @@ def workingProbes =
                         owner         : blocker.owner,
                         category      : blocker.category,
                         test          : probe.test,
-                        messageContains:
-                                probe.messageContains
+                        fingerprintPrefix:
+                                blocker.fingerprintPrefix
                 ]
             }
         }
+if (workingProbes.size() != 57
+        || workingProbes.collect {
+            it.test
+        }.toSet().size() != 57
+        || workingBlockers.any { blocker ->
+            !(blocker.probes instanceof List)
+                    || blocker.probes.isEmpty()
+                    || blocker.probes.any { probe ->
+                !(probe instanceof Map)
+                        || probe.keySet()
+                        != (['test'] as Set)
+                        || !(probe.test instanceof String)
+                        || probe.test.trim().isEmpty()
+            }
+        }) {
+    throw new GradleException(
+            'The external-blocker catalog must contain exactly 57 '
+                    + 'unique, test-only probe declarations.')
+}
 def workingDynamicCaseIds =
         workingProbes.findAll {
             it.test.startsWith(
@@ -59,6 +118,7 @@ def configureWorkingTest = { Test testTask ->
         junitXml.required = true
         html.required = true
     }
+    testTask.outputs.upToDateWhen { false }
     testTask.testLogging {
         events 'PASSED', 'FAILED', 'SKIPPED'
         showStandardStreams = true
@@ -76,6 +136,18 @@ def coordinationWorkingEvidenceTest =
     workingTest.systemProperty(
             'coordination.behavior.excludeCaseIds',
             workingDynamicCaseIds.join(','))
+    workingTest.systemProperty(
+            'coordination.fixed.repository.report',
+            layout.buildDirectory.file(
+                    'reports/coordination-working/'
+                            + 'working-fixed-repository.json')
+                    .get().asFile.absolutePath)
+    workingTest.systemProperty(
+            'coordination.flagship.report',
+            layout.buildDirectory.file(
+                    'reports/coordination-working/'
+                            + 'working-flagship-trace.md')
+                    .get().asFile.absolutePath)
     workingTest.filter {
         includeTestsMatching('*')
         workingStandardProbes.each { probe ->
@@ -97,6 +169,18 @@ def coordinationExternalBlockerProbeEvidenceTest =
     probeTest.systemProperty(
             'coordination.behavior.includeCaseIds',
             workingDynamicCaseIds.join(','))
+    probeTest.systemProperty(
+            'coordination.fixed.repository.report',
+            layout.buildDirectory.file(
+                    'reports/coordination-working/'
+                            + 'probe-fixed-repository.json')
+                    .get().asFile.absolutePath)
+    probeTest.systemProperty(
+            'coordination.flagship.report',
+            layout.buildDirectory.file(
+                    'reports/coordination-working/'
+                            + 'probe-flagship-trace.md')
+                    .get().asFile.absolutePath)
     probeTest.filter {
         workingStandardProbes.each { probe ->
             includeTestsMatching(
@@ -163,6 +247,30 @@ def readWorkingJUnit = { File directory ->
                             : (testCase.skipped.size() > 0
                             ? 'skipped'
                             : 'passed')
+            String failureType =
+                    failure == null
+                            ? null
+                            : failure.@type
+                            .toString()
+            String rawMessage =
+                    failure == null
+                            ? null
+                            : failure.@message
+                            .toString()
+            String logicalMessage =
+                    rawMessage
+            if (logicalMessage != null
+                    && failureType != null
+                    && !failureType.isEmpty()) {
+                String wrapper =
+                        failureType + ': '
+                if (logicalMessage.startsWith(
+                        wrapper)) {
+                    logicalMessage =
+                            logicalMessage.substring(
+                                    wrapper.length())
+                }
+            }
             records.add([
                     id     :
                             normalizedWorkingTestId(
@@ -171,11 +279,14 @@ def readWorkingJUnit = { File directory ->
                                     testCase.@name
                                             .toString()),
                     status : status,
+                    failureType:
+                            failureType,
                     message:
-                            failure == null
-                                    ? null
-                                    : failure.@message
-                                            .toString()
+                            rawMessage,
+                    logicalMessage:
+                            logicalMessage,
+                    resultFile:
+                            resultFile.absolutePath
             ])
         }
     }
@@ -249,16 +360,16 @@ def coordinationExternalBlockerProbeTest =
                 outcome = 'resolved'
             } else if (record.status
                     == 'failed'
-                    && record.message != null
-                    && record.message.contains(
-                    probe.messageContains)) {
+                    && record.logicalMessage != null
+                    && record.logicalMessage.startsWith(
+                    probe.fingerprintPrefix)) {
                 outcome = 'exactly-blocked'
             } else {
                 outcome = 'invalid'
                 invalid.add(
                         probe.test
-                                + ': expected '
-                                + probe.messageContains
+                                + ': expected logical-message prefix '
+                                + probe.fingerprintPrefix
                                 + ' but observed '
                                 + record)
             }
@@ -268,11 +379,21 @@ def coordinationExternalBlockerProbeTest =
                     owner    : probe.owner,
                     category : probe.category,
                     test     : probe.test,
+                    fingerprintPrefix:
+                            probe.fingerprintPrefix,
                     outcome  : outcome,
+                    failureType:
+                            record == null
+                                    ? null
+                                    : record.failureType,
                     message  :
                             record == null
                                     ? null
-                                    : record.message
+                                    : record.message,
+                    logicalMessage:
+                            record == null
+                                    ? null
+                                    : record.logicalMessage
             ])
         }
         if (!byId.isEmpty()) {
@@ -439,6 +560,869 @@ def workingSourceState = { File directory ->
     ]
 }
 
+def workingEvidenceSource = { File source ->
+    if (source == null) {
+        return [
+                path  : null,
+                sha256: null,
+                files : 0L,
+                status: 'missing'
+        ]
+    }
+    if (source.isFile()) {
+        return [
+                path  : source.absolutePath,
+                sha256: workingSha256(source),
+                files : 1L,
+                status: 'present'
+        ]
+    }
+    if (!source.isDirectory()) {
+        return [
+                path  : source.absolutePath,
+                sha256: null,
+                files : 0L,
+                status: 'missing'
+        ]
+    }
+    def entries =
+            fileTree(source) {
+                include 'TEST-*.xml'
+            }.files.collect { evidenceFile ->
+                [
+                        source  : evidenceFile,
+                        relative:
+                                source.toPath()
+                                        .relativize(
+                                                evidenceFile.toPath())
+                                        .toString()
+                                        .replace(
+                                                File.separatorChar,
+                                                '/' as char)
+                ]
+            }.sort { left, right ->
+                left.relative <=> right.relative
+            }
+    if (entries.isEmpty()) {
+        return [
+                path  : source.absolutePath,
+                sha256: null,
+                files : 0L,
+                status: 'missing'
+        ]
+    }
+    def digest =
+            java.security.MessageDigest
+                    .getInstance('SHA-256')
+    entries.each { entry ->
+        digest.update(
+                entry.relative.getBytes(
+                        'UTF-8'))
+        digest.update(0 as byte)
+        entry.source.withInputStream { input ->
+            byte[] buffer = new byte[8192]
+            int read
+            while ((read = input.read(buffer)) >= 0) {
+                if (read > 0) {
+                    digest.update(
+                            buffer, 0, read)
+                }
+            }
+        }
+        digest.update(0 as byte)
+    }
+    [
+            path  : source.absolutePath,
+            sha256:
+                    digest.digest().collect {
+                        String.format(
+                                java.util.Locale.ROOT,
+                                '%02x',
+                                it & 0xff)
+                    }.join(),
+            files : (long) entries.size(),
+            status: 'present'
+    ]
+}
+
+def workingInventory = {
+    List<Map<String, Object>> records ->
+        def inventory =
+                new TreeMap<String, Long>()
+        records.each { record ->
+            String id =
+                    record.id.toString()
+            inventory.put(
+                    id,
+                    (inventory.get(id)
+                            ?: 0L) + 1L)
+        }
+        inventory
+}
+
+def workingInventoryDifference = {
+    Map<String, Long> left,
+    Map<String, Long> right ->
+        def difference =
+                new TreeMap<String, Long>()
+        left.each { id, count ->
+            long remaining =
+                    count - (right.get(id)
+                            ?: 0L)
+            if (remaining > 0L) {
+                difference.put(
+                        id, remaining)
+            }
+        }
+        difference
+}
+
+def workingInventorySum = {
+    Map<String, Long> left,
+    Map<String, Long> right ->
+        def sum =
+                new TreeMap<String, Long>()
+        [left, right].each { inventory ->
+            inventory.each { id, count ->
+                sum.put(
+                        id,
+                        (sum.get(id)
+                                ?: 0L) + count)
+            }
+        }
+        sum
+}
+
+def workingPartitionReport =
+        layout.buildDirectory.file(
+                'reports/coordination-working/'
+                        + 'test-partition.json')
+def workingFullResults =
+        layout.buildDirectory.dir(
+                'test-results/'
+                        + 'coordinationReleaseEvidenceTest')
+def workingSurfaceResults =
+        layout.buildDirectory.dir(
+                'test-results/'
+                        + 'coordinationWorkingEvidenceTest')
+def workingProbeResults =
+        layout.buildDirectory.dir(
+                'test-results/'
+                        + 'coordinationExternal'
+                        + 'BlockerProbeEvidenceTest')
+
+def coordinationFullSuitePartitionVerification =
+        tasks.register(
+                'coordinationFullSuitePartitionVerification') {
+    group = 'verification'
+    description =
+            'Proves that the exact 899-case ordinary suite is the disjoint multiset union of 842 working cases and 57 catalogued probes.'
+    dependsOn(
+            tasks.named(
+                    'coordinationReleaseEvidenceTest'),
+            coordinationWorkingEvidenceTest,
+            coordinationExternalBlockerProbeEvidenceTest)
+    inputs.file(workingCatalogFile)
+    outputs.file(workingPartitionReport)
+    outputs.upToDateWhen { false }
+    doLast {
+        File fullDirectory =
+                workingFullResults.get()
+                        .asFile
+        File surfaceDirectory =
+                workingSurfaceResults.get()
+                        .asFile
+        File probeDirectory =
+                workingProbeResults.get()
+                        .asFile
+        def full =
+                readWorkingJUnit(
+                        fullDirectory)
+        def surface =
+                readWorkingJUnit(
+                        surfaceDirectory)
+        def probes =
+                readWorkingJUnit(
+                        probeDirectory)
+        def fullInventory =
+                workingInventory(
+                        full.records)
+        def surfaceInventory =
+                workingInventory(
+                        surface.records)
+        def probeInventory =
+                workingInventory(
+                        probes.records)
+        def combinedInventory =
+                workingInventorySum(
+                        surfaceInventory,
+                        probeInventory)
+        def overlap =
+                new TreeMap<String, Long>()
+        surfaceInventory.each { id, count ->
+            long shared =
+                    Math.min(
+                            count,
+                            probeInventory.get(id)
+                                    ?: 0L)
+            if (shared > 0L) {
+                overlap.put(
+                        id, shared)
+            }
+        }
+        def missing =
+                workingInventoryDifference(
+                        fullInventory,
+                        combinedInventory)
+        def extra =
+                workingInventoryDifference(
+                        combinedInventory,
+                        fullInventory)
+        def catalogInventory =
+                new TreeMap<String, Long>()
+        workingProbes.each { probe ->
+            catalogInventory.put(
+                    probe.test,
+                    (catalogInventory.get(
+                            probe.test)
+                            ?: 0L) + 1L)
+        }
+        def catalogMissing =
+                workingInventoryDifference(
+                        catalogInventory,
+                        probeInventory)
+        def catalogExtra =
+                workingInventoryDifference(
+                        probeInventory,
+                        catalogInventory)
+        String dynamicPrefix =
+                'blue.coordination.processor.'
+                        + 'CoordinationBehaviorFixtureHarnessTest#'
+        def observedDynamicCaseIds =
+                new TreeSet<String>(
+                        probeInventory.keySet()
+                                .findAll {
+                                    it.startsWith(
+                                            dynamicPrefix)
+                                }
+                                .collect {
+                                    it.substring(
+                                            dynamicPrefix.length())
+                                })
+        def expectedDynamicCaseIds =
+                new TreeSet<String>(
+                        workingDynamicCaseIds)
+        boolean exactCounts =
+                full.total == 899L
+                        && surface.total == 842L
+                        && probes.total == 57L
+                        && fullInventory.size() == 899
+                        && surfaceInventory.size() == 842
+                        && probeInventory.size() == 57
+        boolean passed =
+                exactCounts
+                        && overlap.isEmpty()
+                        && missing.isEmpty()
+                        && extra.isEmpty()
+                        && catalogMissing.isEmpty()
+                        && catalogExtra.isEmpty()
+                        && observedDynamicCaseIds
+                        == expectedDynamicCaseIds
+                        && fullInventory
+                        == combinedInventory
+        def report = [
+                schema:
+                        'blue-coordination/'
+                                + 'test-partition/1.0',
+                status:
+                        passed
+                                ? 'verified'
+                                : 'invalid',
+                expected:
+                        [
+                                full    : 899L,
+                                working : 842L,
+                                probes  : 57L
+                        ],
+                observed:
+                        [
+                                full:
+                                        [
+                                                total :
+                                                        full.total,
+                                                unique:
+                                                        (long) fullInventory
+                                                                .size()
+                                        ],
+                                working:
+                                        [
+                                                total :
+                                                        surface.total,
+                                                unique:
+                                                        (long) surfaceInventory
+                                                                .size()
+                                        ],
+                                probes:
+                                        [
+                                                total :
+                                                        probes.total,
+                                                unique:
+                                                        (long) probeInventory
+                                                                .size()
+                                        ]
+                        ],
+                multisetUnionMatches:
+                        fullInventory
+                        == combinedInventory,
+                overlap:
+                        overlap,
+                missing:
+                        missing,
+                extra:
+                        extra,
+                catalogMissing:
+                        catalogMissing,
+                catalogExtra:
+                        catalogExtra,
+                expectedDynamicCaseIds:
+                        new ArrayList<String>(
+                                expectedDynamicCaseIds),
+                observedDynamicCaseIds:
+                        new ArrayList<String>(
+                                observedDynamicCaseIds),
+                evidenceSources:
+                        [
+                                catalog:
+                                        workingEvidenceSource(
+                                                workingCatalogFile),
+                                full:
+                                        workingEvidenceSource(
+                                                fullDirectory),
+                                working:
+                                        workingEvidenceSource(
+                                                surfaceDirectory),
+                                probes:
+                                        workingEvidenceSource(
+                                                probeDirectory)
+                        ]
+        ]
+        File target =
+                workingPartitionReport.get()
+                        .asFile
+        target.parentFile.mkdirs()
+        target.text =
+                JsonOutput.prettyPrint(
+                        JsonOutput.toJson(
+                                report)) + '\n'
+        if (!passed) {
+            throw new GradleException(
+                    'Coordination test partition is invalid; see '
+                            + target)
+        }
+    }
+}
+
+def workingYamlScalar = {
+    File source,
+    String key ->
+        if (source == null
+                || !source.isFile()) {
+            return null
+        }
+        String prefix =
+                key + ':'
+        String line =
+                source.readLines(
+                        'UTF-8')
+                        .find {
+                            it.startsWith(
+                                    prefix)
+                        }
+        line == null
+                ? null
+                : line.substring(
+                        prefix.length())
+                        .trim()
+}
+
+def workingConformanceResult = {
+    Map<String, Object> evidence,
+    String exactIdPattern,
+    long required ->
+        def pattern =
+                java.util.regex.Pattern
+                        .compile(
+                                exactIdPattern)
+        def records =
+                evidence.records.findAll {
+                    pattern.matcher(
+                            it.id.toString())
+                            .matches()
+                }
+        long failed =
+                records.count {
+                    it.status == 'failed'
+                }
+        long skipped =
+                records.count {
+                    it.status == 'skipped'
+                }
+        [
+                required   : required,
+                executed   :
+                        (long) records.size(),
+                passed     :
+                        (long) records.size()
+                                - failed
+                                - skipped,
+                failed     : failed,
+                skipped    : skipped,
+                notExecuted:
+                        Math.max(
+                                0L,
+                                required
+                                        - (long) records.size())
+        ]
+}
+
+def workingSystemOutMetric = {
+    File resultsDirectory,
+    String suiteName,
+    String metricPrefix ->
+        def values =
+                new ArrayList<String>()
+        fileTree(resultsDirectory) {
+            include 'TEST-*.xml'
+        }.files.sort { left, right ->
+            left.name <=> right.name
+        }.each { resultFile ->
+            def suite =
+                    new XmlSlurper(
+                            false, false)
+                            .parse(resultFile)
+            if (suite.@name.toString()
+                    == suiteName) {
+                suite.'system-out'.text()
+                        .readLines()
+                        .findAll {
+                            it.startsWith(
+                                    metricPrefix)
+                        }.each { line ->
+                            values.add(
+                                    line.substring(
+                                            metricPrefix.length()))
+                        }
+            }
+        }
+        if (values.size() != 1
+                || !(values[0] ==~ /[0-9]+/)) {
+            return null
+        }
+        Long.valueOf(
+                values[0])
+}
+
+def workingSameRunEvidenceReport =
+        layout.buildDirectory.file(
+                'reports/coordination-working/'
+                        + 'same-run-evidence.json')
+def workingFixedRepositoryEvidence =
+        layout.buildDirectory.file(
+                'reports/coordination-release/'
+                        + 'fixed-repository.json')
+def workingFlagshipEvidence =
+        layout.buildDirectory.file(
+                'reports/coordination-flagship/'
+                        + 'trace.md')
+def workingFinalReportSchema =
+        file('src/test/resources/coordination/'
+                + 'selective-processing-report.schema.json')
+def workingGasFixtureEvidence =
+        file('src/test/resources/coordination/'
+                + 'conformance/gas-fixtures.yaml')
+def workingConformanceManifest =
+        file('src/test/resources/coordination/'
+                + 'conformance/manifest.yaml')
+
+def generateCoordinationSameRunEvidenceReport =
+        tasks.register(
+                'generateCoordinationSameRunEvidenceReport') {
+    group = 'verification'
+    description =
+            'Derives all working-report counts from the same-run full JUnit, fixed-Repository, flagship, schema, and gas evidence.'
+    dependsOn(
+            coordinationFullSuitePartitionVerification)
+    inputs.files(
+            workingFinalReportSchema,
+            workingGasFixtureEvidence,
+            workingConformanceManifest)
+    outputs.file(
+            workingSameRunEvidenceReport)
+    outputs.upToDateWhen { false }
+    doLast {
+        File fullDirectory =
+                workingFullResults.get()
+                        .asFile
+        def full =
+                readWorkingJUnit(
+                        fullDirectory)
+        def reportSchema =
+                new JsonSlurper()
+                        .parse(
+                                workingFinalReportSchema)
+        def closedProperties =
+                reportSchema.allOf[0]
+                        .get('then')
+                        .properties
+        long requiredBehavior =
+                closedProperties
+                        .behaviorConformance
+                        .properties.required.const
+                        .longValue()
+        long requiredPortableGas =
+                closedProperties
+                        .portableGasConformance
+                        .properties.required.const
+                        .longValue()
+        long requiredHostQuota =
+                closedProperties
+                        .hostQuotaConformance
+                        .properties.required.const
+                        .longValue()
+        long requiredTotal =
+                closedProperties
+                        .totalConformance
+                        .properties.required.const
+                        .longValue()
+        long requiredFlagship =
+                closedProperties
+                        .flagshipRuns
+                        .properties.required.const
+                        .longValue()
+        def behavior =
+                workingConformanceResult(
+                        full,
+                        '^blue\\.coordination\\.processor\\.'
+                                + 'CoordinationBehaviorFixtureHarnessTest#'
+                                + 'coord-(?:chan|e2e|fail|mand|route|'
+                                + 'split|time|wf)-[0-9]+@[a-z0-9-]+$',
+                        requiredBehavior)
+        def portableGas =
+                workingConformanceResult(
+                        full,
+                        '^blue\\.language\\.processor\\.'
+                                + 'CoordinationDirectPortableGas'
+                                + 'MicrofixtureTest#'
+                                + 'shouldExecuteDirectPortableGas'
+                                + 'Microfixture\\[[0-9]+\\] '
+                                + 'coordination/conformance/fixtures/'
+                                + 'gas-micro/[A-Za-z0-9]+\\.yaml$',
+                        requiredPortableGas)
+        def hostQuota =
+                workingConformanceResult(
+                        full,
+                        '^blue\\.coordination\\.processor\\.'
+                                + 'CoordinationHostQuotaFixtureTest#'
+                                + 'coordination-host-[a-z0-9-]+ '
+                                + '\\[[a-z0-9-]+\\.yaml\\]$',
+                        requiredHostQuota)
+        def totalConformance = [
+                required   :
+                        requiredTotal,
+                executed   :
+                        behavior.executed
+                                + portableGas.executed
+                                + hostQuota.executed,
+                passed     :
+                        behavior.passed
+                                + portableGas.passed
+                                + hostQuota.passed,
+                failed     :
+                        behavior.failed
+                                + portableGas.failed
+                                + hostQuota.failed,
+                skipped    :
+                        behavior.skipped
+                                + portableGas.skipped
+                                + hostQuota.skipped,
+                notExecuted:
+                        behavior.notExecuted
+                                + portableGas.notExecuted
+                                + hostQuota.notExecuted
+        ]
+        File fixedFile =
+                workingFixedRepositoryEvidence
+                        .get().asFile
+        def fixedRepository =
+                fixedFile.isFile()
+                        ? new JsonSlurper()
+                        .parse(
+                                fixedFile)
+                        : [
+                        status  : 'missing',
+                        total   : null,
+                        verified: null,
+                        failed  : null
+                ]
+        def fixedRequiredClosure =
+                fixedRepository.requiredClosure
+                instanceof Map
+                        ? fixedRepository.requiredClosure
+                        : [
+                        eligible       : null,
+                        total          : null,
+                        audited        : null,
+                        verified       : null,
+                        missing        : null,
+                        invalidEvidence: null,
+                        unavailable    : null,
+                        incompleteCyclicProof:
+                                null
+                ]
+        File flagshipFile =
+                workingFlagshipEvidence
+                        .get().asFile
+        def flagshipLocality =
+                project.ext
+                        .coordinationReleaseReadFlagshipLocality
+                        .call(
+                                flagshipFile)
+        String flagshipClass =
+                'blue.coordination.processor.'
+                        + 'CoordinationComplexEmbedded'
+                        + 'DeterminismFlagshipTest#'
+        def flagshipTests =
+                full.records.findAll {
+                    it.id.toString()
+                            .startsWith(
+                                    flagshipClass)
+                }
+        boolean flagshipTestsGreen =
+                !flagshipTests.isEmpty()
+                        && flagshipTests.every {
+                    it.status == 'passed'
+                }
+        long flagshipPassed =
+                flagshipTestsGreen
+                        && flagshipLocality.status
+                        == 'verified'
+                        ? flagshipLocality.matrixRows
+                        : 0L
+        String requiredTraceText =
+                workingYamlScalar(
+                        workingGasFixtureEvidence,
+                        'compositeProofRequiredTraceEntries')
+        Long requiredTraceEntries =
+                requiredTraceText != null
+                        && requiredTraceText ==~ /[0-9]+/
+                        ? Long.valueOf(
+                        requiredTraceText)
+                        : null
+        Long observedTraceEntries =
+                workingSystemOutMetric(
+                        fullDirectory,
+                        'blue.coordination.processor.'
+                                + 'CoordinationRuntimeGasScalingTest',
+                        'coordination.'
+                                + 'maximumRuntimeTraceEntriesObserved=')
+        def evidenceSources = [
+                fullSuite:
+                        workingEvidenceSource(
+                                fullDirectory),
+                partition:
+                        workingEvidenceSource(
+                                workingPartitionReport
+                                        .get().asFile),
+                fixedRepository:
+                        workingEvidenceSource(
+                                fixedFile),
+                flagship:
+                        workingEvidenceSource(
+                                flagshipFile),
+                releaseSchema:
+                        workingEvidenceSource(
+                                workingFinalReportSchema),
+                gasFixtures:
+                        workingEvidenceSource(
+                                workingGasFixtureEvidence),
+                conformanceManifest:
+                        workingEvidenceSource(
+                                workingConformanceManifest)
+        ]
+        boolean evidenceComplete =
+                evidenceSources.fullSuite.status
+                        == 'present'
+                        && evidenceSources.partition.status
+                        == 'present'
+                        && evidenceSources.fixedRepository.status
+                        == 'present'
+                        && evidenceSources.flagship.status
+                        == 'present'
+                        && evidenceSources.releaseSchema.status
+                        == 'present'
+                        && evidenceSources.gasFixtures.status
+                        == 'present'
+                        && evidenceSources
+                        .conformanceManifest.status
+                        == 'present'
+                        && full.total == 899L
+                        && requiredTraceEntries != null
+                        && observedTraceEntries != null
+                        && flagshipLocality
+                        .forbiddenProviderDemandCount
+                        != null
+                        && flagshipLocality
+                        .forbiddenBackendLoadCount
+                        != null
+                        && fixedRequiredClosure.total
+                        instanceof Number
+                        && fixedRequiredClosure.verified
+                        instanceof Number
+                        && fixedRequiredClosure.missing
+                        instanceof Number
+                        && fixedRequiredClosure.invalidEvidence
+                        instanceof Number
+                        && fixedRequiredClosure.unavailable
+                        instanceof Number
+                        && fixedRepository.repositoryVersion
+                        instanceof String
+        def report = [
+                schema:
+                        'blue-coordination/'
+                                + 'same-run-evidence/1.0',
+                status:
+                        evidenceComplete
+                                ? 'complete'
+                                : 'incomplete',
+                fixedRepository:
+                        [
+                                version :
+                                        fixedRepository
+                                                .repositoryVersion,
+                                total   :
+                                        fixedRequiredClosure.total,
+                                audited :
+                                        fixedRequiredClosure.audited,
+                                verified:
+                                        fixedRequiredClosure.verified,
+                                missing :
+                                        fixedRequiredClosure.missing,
+                                invalidEvidence:
+                                        fixedRequiredClosure
+                                                .invalidEvidence,
+                                unavailable:
+                                        fixedRequiredClosure.unavailable,
+                                incompleteCyclicProof:
+                                        fixedRequiredClosure
+                                                .incompleteCyclicProof,
+                                eligible:
+                                        fixedRequiredClosure.eligible,
+                                fullCatalog:
+                                        [
+                                                total   :
+                                                        fixedRepository
+                                                                .total,
+                                                verified:
+                                                        fixedRepository
+                                                                .verified,
+                                                failed  :
+                                                        fixedRepository
+                                                                .failed,
+                                                status  :
+                                                        fixedRepository
+                                                                .status
+                                        ],
+                                derivedFrom:
+                                        [
+                                                'fixedRepository'
+                                        ]
+                        ],
+                conformance:
+                        [
+                                behavior:
+                                        behavior,
+                                portableGas:
+                                        portableGas,
+                                hostQuota:
+                                        hostQuota,
+                                total:
+                                        totalConformance,
+                                packageIdentity:
+                                        workingYamlScalar(
+                                                workingConformanceManifest,
+                                                'packageIdentity'),
+                                derivedFrom:
+                                        [
+                                                'fullSuite',
+                                                'releaseSchema',
+                                                'conformanceManifest'
+                                        ]
+                        ],
+                flagship:
+                        [
+                                requiredVariants:
+                                        requiredFlagship,
+                                executedVariants:
+                                        flagshipLocality.matrixRows,
+                                passedVariants:
+                                        flagshipPassed,
+                                status:
+                                        flagshipLocality.status,
+                                derivedFrom:
+                                        [
+                                                'fullSuite',
+                                                'flagship',
+                                                'releaseSchema'
+                                        ]
+                        ],
+                providerLocality:
+                        [
+                                forbiddenProviderDemandCount:
+                                        flagshipLocality
+                                                .forbiddenProviderDemandCount,
+                                forbiddenBackendLoadCount:
+                                        flagshipLocality
+                                                .forbiddenBackendLoadCount,
+                                derivedFrom:
+                                        [
+                                                'flagship'
+                                        ]
+                        ],
+                runtimeTrace:
+                        [
+                                requiredEntries:
+                                        requiredTraceEntries,
+                                observedEntries:
+                                        observedTraceEntries,
+                                passed:
+                                        requiredTraceEntries != null
+                                                && requiredTraceEntries
+                                                == observedTraceEntries,
+                                derivedFrom:
+                                        [
+                                                'fullSuite',
+                                                'gasFixtures'
+                                        ]
+                        ],
+                evidenceSources:
+                        evidenceSources
+        ]
+        File target =
+                workingSameRunEvidenceReport
+                        .get().asFile
+        target.parentFile.mkdirs()
+        target.text =
+                JsonOutput.prettyPrint(
+                        JsonOutput.toJson(
+                                report)) + '\n'
+        if (!evidenceComplete) {
+            throw new GradleException(
+                    'Same-run Coordination evidence is incomplete; see '
+                            + target)
+        }
+    }
+}
+
 def workingFinalJson =
         layout.buildDirectory.file(
                 'reports/coordination-working/final.json')
@@ -459,6 +1443,7 @@ def generateCoordinationWorkingReport =
     dependsOn(
             coordinationWorkingTest,
             coordinationExternalBlockerProbeTest,
+            generateCoordinationSameRunEvidenceReport,
             tasks.named('compileJava'),
             tasks.named('compileTestJava'),
             tasks.named('compileJmhJava'),
@@ -489,6 +1474,16 @@ def generateCoordinationWorkingReport =
                                 externalProbeReport
                                         .get()
                                         .asFile)
+        def sameRun =
+                new JsonSlurper()
+                        .parse(
+                                workingSameRunEvidenceReport
+                                        .get().asFile)
+        def partition =
+                new JsonSlurper()
+                        .parse(
+                                workingPartitionReport
+                                        .get().asFile)
         File coordinationJar =
                 tasks.named('jar')
                         .get()
@@ -532,8 +1527,8 @@ def generateCoordinationWorkingReport =
                 ],
                 [
                         name   : 'blue-repository-java',
-                        path   : file(
-                                '../blue-repository-java'),
+                        path   :
+                                workingBlueRepositoryComposite,
                         version:
                                 '3.0.0-rc.17-SNAPSHOT'
                 ]
@@ -569,6 +1564,8 @@ def generateCoordinationWorkingReport =
                         && workingTests.skipped == 0L
                         && external.invalidProbes
                         .isEmpty()
+                        && sameRun.status == 'complete'
+                        && partition.status == 'verified'
                         && coordinationJar.isFile()
                         && sourcesJar.isFile()
                         && sourceArchive.isFile()
@@ -624,11 +1621,21 @@ def generateCoordinationWorkingReport =
                         dependencyCoordinates,
                 fixedRepository: [
                         version :
-                                '1.3.0',
+                                sameRun
+                                        .fixedRepository
+                                        .version,
                         verified:
-                                233,
+                                sameRun
+                                        .fixedRepository
+                                        .verified,
                         total   :
-                                1107
+                                sameRun
+                                        .fixedRepository
+                                        .total,
+                        failed  :
+                                sameRun
+                                        .fixedRepository
+                                        .failed
                 ],
                 workingTests: [
                         total  :
@@ -676,60 +1683,93 @@ def generateCoordinationWorkingReport =
                         },
                 unclassifiedFailures:
                         [],
-                conformance: [
-                        executable:
-                                81,
-                        required  :
-                                86,
-                        behavior  :
-                                [
-                                        executable:
-                                                60,
-                                        required  :
-                                                65
-                                ],
-                        portableGas:
-                                [
-                                        executable:
-                                                14,
-                                        required  :
-                                                14
-                                ],
-                        hostQuota :
-                                [
-                                        executable:
-                                                7,
-                                        required  :
-                                                7
-                                ],
-                        packageIdentity:
-                                new File(
-                                        projectDir,
-                                        'src/test/resources/'
-                                                + 'coordination/'
-                                                + 'conformance/'
-                                                + 'manifest.yaml')
-                                        .readLines(
-                                                'UTF-8')
-                                        .find {
-                                            it.startsWith(
-                                                    'packageIdentity:')
-                                        }
-                                        .substring(
-                                                'packageIdentity:'
-                                                        .length())
-                                        .trim()
-                ],
+                conformance:
+                        [
+                                executable:
+                                        sameRun.conformance
+                                                .total.passed,
+                                required:
+                                        sameRun.conformance
+                                                .total.required,
+                                behavior:
+                                        [
+                                                executable:
+                                                        sameRun.conformance
+                                                                .behavior
+                                                                .passed,
+                                                required:
+                                                        sameRun.conformance
+                                                                .behavior
+                                                                .required
+                                        ],
+                                portableGas:
+                                        [
+                                                executable:
+                                                        sameRun.conformance
+                                                                .portableGas
+                                                                .passed,
+                                                required:
+                                                        sameRun.conformance
+                                                                .portableGas
+                                                                .required
+                                        ],
+                                hostQuota:
+                                        [
+                                                executable:
+                                                        sameRun.conformance
+                                                                .hostQuota
+                                                                .passed,
+                                                required:
+                                                        sameRun.conformance
+                                                                .hostQuota
+                                                                .required
+                                        ],
+                                packageIdentity:
+                                        sameRun.conformance
+                                                .packageIdentity,
+                                sameRunResult:
+                                        sameRun.conformance
+                        ],
                 flagship: [
                         executableVariants:
-                                0,
+                                sameRun
+                                        .flagship
+                                        .passedVariants,
                         requiredVariants  :
-                                32
+                                sameRun
+                                        .flagship
+                                        .requiredVariants
                 ],
                 forbiddenProviderDemandCount:
-                        0,
+                        sameRun.providerLocality
+                                .forbiddenProviderDemandCount,
                 runtimeTraceMaximum:
-                        516,
+                        sameRun.runtimeTrace
+                                .observedEntries,
+                testPartition:
+                        partition,
+                evidenceSources:
+                        [
+                                workingTests:
+                                        workingEvidenceSource(
+                                                workingSurfaceResults
+                                                        .get().asFile),
+                                externalProbes:
+                                        workingEvidenceSource(
+                                                externalProbeReport
+                                                        .get().asFile),
+                                sameRunEvidence:
+                                        workingEvidenceSource(
+                                                workingSameRunEvidenceReport
+                                                        .get().asFile),
+                                partition:
+                                        workingEvidenceSource(
+                                                workingPartitionReport
+                                                        .get().asFile),
+                                derived:
+                                        sameRun
+                                                .evidenceSources
+                        ],
                 artifacts: [
                         jar: [
                                 path  :
@@ -776,7 +1816,7 @@ def generateCoordinationWorkingReport =
                         './gradlew coordinationWorkingVerification '
                                 + '--offline --no-daemon '
                                 + '-PtestJfr=false',
-                        './gradlew test --continue --rerun-tasks '
+                        './gradlew coordinationReleaseEvidenceTest '
                                 + '--offline --no-daemon '
                                 + '-PtestJfr=false'
                 ]
@@ -802,11 +1842,12 @@ def generateCoordinationWorkingReport =
 - Coordination-owned failures: `0`
 - Fixture failures: `0`
 - Unclassified failures: `0`
-- Executable conformance: `81/86` (`60/65` behavior, `14/14` portable gas, `7/7` host quota)
-- Executable flagship variants: `0/32`
-- Fixed Repository audit: `233/1107`
-- Forbidden provider demands: `0`
-- Maximum runtime trace entries: `516`
+- Executable conformance: `${sameRun.conformance.total.passed}/${sameRun.conformance.total.required}` (`${sameRun.conformance.behavior.passed}/${sameRun.conformance.behavior.required}` behavior, `${sameRun.conformance.portableGas.passed}/${sameRun.conformance.portableGas.required}` portable gas, `${sameRun.conformance.hostQuota.passed}/${sameRun.conformance.hostQuota.required}` host quota)
+- Executable flagship variants: `${sameRun.flagship.passedVariants}/${sameRun.flagship.requiredVariants}`
+- Fixed Repository audit: `${sameRun.fixedRepository.verified}/${sameRun.fixedRepository.total}`
+- Forbidden provider demands: `${sameRun.providerLocality.forbiddenProviderDemandCount}`
+- Maximum runtime trace entries: `${sameRun.runtimeTrace.observedEntries}`
+- Test partition: `${partition.observed.full.total} = ${partition.observed.working.total} + ${partition.observed.probes.total}` (`${partition.status}`)
 
 Public release eligibility remains false while exact catalogued dependency blockers are open.
 """
@@ -840,7 +1881,19 @@ def coordinationWorkingVerification =
                 .isEmpty()
                 || report.workingTests.failed != 0
                 || report.workingTests.skipped != 0
-                || report.externalProbes.invalid != 0) {
+                || report.externalProbes.invalid != 0
+                || report.testPartition?.status
+                != 'verified'
+                || report.testPartition
+                ?.observed?.full?.total != 899
+                || report.testPartition
+                ?.observed?.working?.total != 842
+                || report.testPartition
+                ?.observed?.probes?.total != 57
+                || report.evidenceSources
+                ?.sameRunEvidence?.status != 'present'
+                || report.evidenceSources
+                ?.partition?.status != 'present') {
             throw new GradleException(
                     'Coordination working verification failed; see '
                             + workingFinalJson.get()
@@ -851,3 +1904,15 @@ def coordinationWorkingVerification =
 
 ext.coordinationWorkingVerificationTask =
         coordinationWorkingVerification
+
+if (project.ext.has(
+        'coordinationReleaseRegisterRequiredEvidenceGate')) {
+    project.ext
+            .coordinationReleaseRegisterRequiredEvidenceGate
+            .call(
+                    'coordinationFullSuitePartitionVerification')
+    project.ext
+            .coordinationReleaseRegisterRequiredEvidenceGate
+            .call(
+                    'generateCoordinationSameRunEvidenceReport')
+}

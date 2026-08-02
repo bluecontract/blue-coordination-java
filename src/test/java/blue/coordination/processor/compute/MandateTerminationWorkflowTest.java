@@ -3,6 +3,7 @@ package blue.coordination.processor.compute;
 import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationProcessors;
 import blue.coordination.processor.CoordinationTestResources;
+import blue.coordination.processor.ExternalBlockerProbeAssertions;
 import blue.coordination.processor.TestTimelineProvider;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.Blue;
@@ -110,10 +111,10 @@ class MandateTerminationWorkflowTest {
 
         // Then
         assertEquals(StatusFailed.blueId(), initialized.document().getAsText("/status/type/blueId"));
-        assertNull(initialized.document().getAsNode("/terminatedAt").getValue());
+        assertNull(optionalValue(initialized.document(), "/terminatedAt"));
         assertSuccess(result);
         assertEquals(StatusFailed.blueId(), result.document().getAsText("/status/type/blueId"));
-        assertNull(result.document().getAsNode("/terminatedAt").getValue());
+        assertNull(optionalValue(result.document(), "/terminatedAt"));
         assertEquals("mandate-terminated",
                 result.document().get("/contracts/terminated/cause"));
         assertEquals("requested by guarantor", result.document().get("/contracts/terminated/reason"));
@@ -162,8 +163,26 @@ class MandateTerminationWorkflowTest {
         return -1;
     }
 
+    private static Object optionalValue(
+            Node document,
+            String path) {
+        try {
+            Node node = document.getAsNode(path);
+            return node != null
+                    ? node.getValue()
+                    : null;
+        } catch (IllegalArgumentException absent) {
+            return null;
+        }
+    }
+
     private static void assertSuccess(DocumentProcessingResult result) {
-        assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
+        assertEquals(
+                ProcessorStatus.SUCCESS,
+                result.status(),
+                blue.coordination.processor
+                        .ProcessingResultTestSupport
+                        .diagnosticMessage(result));
     }
 
     private static Fixture fixture() {
@@ -196,6 +215,15 @@ class MandateTerminationWorkflowTest {
                                     repository,
                                     document));
             DocumentProcessingResult result = blue.initializeDocument(snapshot);
+            ExternalBlockerProbeAssertions
+                    .classifyMandateContractRefresh(
+                            result,
+                            snapshot.resolvedNodeAt(
+                                    "/contracts/"
+                                            + "mandateGuarantorChannel"
+                                            + "/type")
+                                    != null,
+                            "Mandate termination initialization");
             assertSuccess(result);
             return result;
         }

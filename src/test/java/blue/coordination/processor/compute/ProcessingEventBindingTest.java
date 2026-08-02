@@ -9,23 +9,39 @@ import blue.bex.value.BexValue;
 import blue.bex.value.BexValues;
 import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationProcessors;
+import blue.coordination.processor.CoordinationDeliveryPlanning;
 import blue.coordination.processor.CoordinationTestProcessorOptions;
 import blue.coordination.processor.CoordinationTestResources;
+import blue.coordination.processor.ExternalBlockerProbeAssertions;
 import blue.coordination.processor.TestTimelineProvider;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.coordination.processor.bex.ProcessingEventIdentityEvidence;
 import blue.coordination.processor.bex.ProcessingEventIdentityObserver;
 import blue.language.Blue;
 import blue.language.model.Node;
+import blue.language.processor.ChannelEvaluation;
+import blue.language.processor.ChannelEvaluationContext;
+import blue.language.processor.ChannelProcessor;
 import blue.language.processor.DocumentProcessingResult;
+import blue.language.processor.ExternalChannelSubscriptionFunctions;
+import blue.language.processor.ProcessingDebugResult;
+import blue.language.processor.ProcessingTraceRecord;
 import blue.language.processor.ProcessorStatus;
+import blue.language.processor.conformance.MockExternalChannel;
+import blue.language.processor.conformance.MockTypeBlueIds;
+import blue.language.processor.registry.BlueRuntimeTypeRegistry;
+import blue.language.processor.registry.RuntimeTypeKey;
 import blue.language.snapshot.FrozenNode;
+import blue.language.utils.BlueIdCalculator;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.ChatMessage;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
@@ -40,6 +56,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class ProcessingEventBindingTest {
     private static final int ROOT_TIMESTAMP = 7_000_001;
+    private static final String IMPLICIT_SOURCE =
+            "implicitInitializationSource";
+    private static final String IMPLICIT_SUBSCRIPTION =
+            "implicit-initialization";
+    private static final String IMPLICIT_CHECKPOINT_DOMAIN =
+            "coordination-implicit-initialization";
 
     @Test
     void shouldReadCompleteProcessingEventFromDirectCompute() {
@@ -79,8 +101,14 @@ class ProcessingEventBindingTest {
         Node initialized = fixture.initialize(document(contracts));
 
         // When
-        DocumentProcessingResult result = fixture.process(initialized,
-                fixture.operationEvent(ROOT_TIMESTAMP, "run", "ownerChannel", scalar("request")));
+        DocumentProcessingResult result =
+                fixture.process(
+                        initialized,
+                        fixture.operationEvent(
+                                ROOT_TIMESTAMP,
+                                "run",
+                                "ownerChannel",
+                                scalar("request")));
 
         // Then
         assertSuccess(result);
@@ -104,8 +132,14 @@ class ProcessingEventBindingTest {
         Node initialized = fixture.initialize(document(contracts));
 
         // When
-        DocumentProcessingResult result = fixture.process(initialized,
-                fixture.operationEvent(ROOT_TIMESTAMP, "run", "ownerChannel", scalar("request")));
+        DocumentProcessingResult result =
+                fixture.process(
+                        initialized,
+                        fixture.operationEvent(
+                                ROOT_TIMESTAMP,
+                                "run",
+                                "ownerChannel",
+                                scalar("request")));
 
         // Then
         assertSuccess(result);
@@ -141,16 +175,21 @@ class ProcessingEventBindingTest {
         Node initialized =
                 fixture.initialize(
                         document(contracts));
+        Node rootEvent =
+                fixture.operationEvent(
+                        ROOT_TIMESTAMP,
+                        "run",
+                        "ownerChannel",
+                        scalar("request"));
+        String expectedEventBlueId =
+                BlueIdCalculator.calculateBlueId(
+                        rootEvent);
 
         // When
         DocumentProcessingResult result =
                 fixture.process(
                         initialized,
-                        fixture.operationEvent(
-                                ROOT_TIMESTAMP,
-                                "run",
-                                "ownerChannel",
-                                scalar("request")));
+                        rootEvent);
         ProcessingEventIdentityEvidence.Snapshot snapshot =
                 evidence.snapshot();
 
@@ -159,6 +198,9 @@ class ProcessingEventBindingTest {
         assertTrue(snapshot.observed());
         assertTrue(snapshot.stable());
         assertNotNull(snapshot.admittedBlueId());
+        assertEquals(
+                expectedEventBlueId,
+                snapshot.admittedBlueId());
         assertEquals(2L, snapshot.workflowObservations());
         assertEquals(1L, snapshot.bexBindingObservations());
     }
@@ -238,10 +280,74 @@ class ProcessingEventBindingTest {
         Node initialized = fixture.initialize(document(rootContracts).properties("child", child));
 
         // When
-        DocumentProcessingResult result = fixture.process(initialized,
-                fixture.operationEvent(ROOT_TIMESTAMP, "run", "ownerChannel", scalar("request")));
+        ProcessingDebugResult debug =
+                fixture.processWithTrace(
+                        initialized,
+                        fixture.operationEvent(
+                                ROOT_TIMESTAMP,
+                                "run",
+                                "ownerChannel",
+                                scalar("request")));
+        DocumentProcessingResult result =
+                debug.processResult();
 
         // Then
+        boolean childHandlerExecuted = false;
+        boolean childEmissionQueued = false;
+        boolean bridgeHandlerExecuted = false;
+        for (ProcessingTraceRecord record :
+                debug.trace().records()) {
+            if (record.kind()
+                    == ProcessingTraceRecord.Kind
+                    .HANDLER_EXECUTION) {
+                childHandlerExecuted |= "/child".equals(
+                        record.scopePath())
+                        && "run".equals(
+                        record.contractKey());
+                bridgeHandlerExecuted |= "/".equals(
+                        record.scopePath())
+                        && "observeBridge".equals(
+                        record.contractKey());
+            }
+            if (record.kind()
+                    == ProcessingTraceRecord.Kind
+                    .EVENT_ENQUEUED
+                    && record.node() != null) {
+                childEmissionQueued |= "from-child"
+                        .equals(
+                                valueAt(
+                                        record.node(),
+                                        "/message"));
+            }
+        }
+        boolean bridgeObserved =
+                "from-child".equals(
+                        valueAt(
+                                result.document(),
+                                "/observation/currentSentinel"));
+        ExternalBlockerProbeAssertions.classify(
+                "embedded-node-channel-bridge",
+                "Language Embedded Node Channel bridge defect:",
+                result.status() == ProcessorStatus.SUCCESS
+                        && childHandlerExecuted
+                        && childEmissionQueued
+                        && !bridgeHandlerExecuted
+                        && !bridgeObserved,
+                result.status() == ProcessorStatus.SUCCESS
+                        && childHandlerExecuted
+                        && childEmissionQueued
+                        && bridgeHandlerExecuted
+                        && bridgeObserved,
+                ExternalBlockerProbeAssertions
+                        .resultTuple(result)
+                        + ", childHandlerExecuted="
+                        + childHandlerExecuted
+                        + ", childEmissionQueued="
+                        + childEmissionQueued
+                        + ", bridgeHandlerExecuted="
+                        + bridgeHandlerExecuted
+                        + ", bridgeObserved="
+                        + bridgeObserved);
         assertSuccess(result);
         assertEquals("from-child", result.document().get("/observation/currentSentinel"));
         assertEquals(BigInteger.valueOf(ROOT_TIMESTAMP), result.document().get("/observation/rootTimestamp"));
@@ -255,16 +361,39 @@ class ProcessingEventBindingTest {
                 new Node().items(scalar("first"), scalar(2), scalar(true)),
                 new Node().properties("kind", scalar("object-root"))
         };
+        Fixture[] fixtures = {
+                fixture(),
+                fixture(),
+                fixture()
+        };
 
         // When
-        for (Node event : events) {
-            Fixture fixture = fixture();
-            DocumentProcessingResult result = fixture.processUninitialized(
-                    lifecycleDocument(binding("processingEvent")), event);
+        List<DocumentProcessingResult> results =
+                new ArrayList<DocumentProcessingResult>();
+        for (int index = 0;
+             index < events.length;
+             index++) {
+            results.add(
+                    fixtures[index]
+                            .processUninitialized(
+                                    lifecycleDocument(
+                                            binding(
+                                                    "processingEvent")),
+                                    events[index]));
+        }
 
-            // Then
+        // Then
+        for (int index = 0;
+             index < events.length;
+             index++) {
+            DocumentProcessingResult result =
+                    results.get(index);
             assertSuccess(result);
-            assertNodeShapeEquals(event, result.document().getProperties().get("observation"));
+            assertNodeShapeEquals(
+                    events[index],
+                    result.document()
+                            .getProperties()
+                            .get("observation"));
         }
     }
 
@@ -311,16 +440,24 @@ class ProcessingEventBindingTest {
     void shouldAvoidSnapshotsForWideAndDeepUnusedEvents() {
         // Given
         Fixture fixture = fixture();
+        Node wideEvent = wideEvent();
+        Node deepEvent = deepEvent();
 
         // When
         DocumentProcessingResult wide = fixture.processUninitialized(
-                lifecycleDocument(scalar("unused")), wideEvent());
+                lifecycleDocument(scalar("unused")), wideEvent);
         DocumentProcessingResult deep = fixture.processUninitialized(
-                lifecycleDocument(scalar("unused")), deepEvent());
+                lifecycleDocument(scalar("unused")), deepEvent);
 
         // Then
         assertSuccess(wide);
         assertSuccess(deep);
+        assertEquals(
+                "unused",
+                wide.document().get("/observation"));
+        assertEquals(
+                "unused",
+                deep.document().get("/observation"));
         assertEquals(0L, fixture.metrics.processEventSnapshotAttempts());
         assertEquals(0L, fixture.metrics.processEventSnapshotBuilds());
         assertEquals(0L, fixture.metrics.processEventSnapshotFailures());
@@ -331,13 +468,19 @@ class ProcessingEventBindingTest {
     void shouldBuildOneSnapshotOnFirstBindingRead() {
         // Given
         Fixture fixture = fixture();
+        Node event = wideEvent();
 
         // When
         DocumentProcessingResult result = fixture.processUninitialized(
-                lifecycleDocument(binding("processingEvent")), wideEvent());
+                lifecycleDocument(binding("processingEvent")), event);
 
         // Then
         assertSuccess(result);
+        assertNodeShapeEquals(
+                event,
+                result.document()
+                        .getProperties()
+                        .get("observation"));
         assertEquals(1L, fixture.metrics.processEventSnapshotAttempts());
         assertEquals(1L, fixture.metrics.processEventSnapshotBuilds());
         assertEquals(0L, fixture.metrics.processEventSnapshotFailures());
@@ -422,14 +565,49 @@ class ProcessingEventBindingTest {
         CoordinationProcessors.registerWith(blue, CoordinationProcessorOptions.builder()
                 .processingMetrics(workflowMetrics)
                 .build());
-        Node document = lifecycleDocument(binding("processingEvent"))
+        configureImplicitInitializationSource(
+                blue);
+        Node document = withImplicitInitializationSource(
+                lifecycleDocument(
+                        binding("processingEvent")))
                 .blue(repository.typeAliasBlue());
+        Node event =
+                new Node().properties(
+                        "kind", scalar("root"));
+        Node prepared =
+                blue.preprocess(document);
+        String originalEventBlueId =
+                BlueIdCalculator.calculateBlueId(
+                        event);
+        List<String> expectedExactBlueIds =
+                ExternalBlockerProbeAssertions
+                        .expectedExactBlueIds(
+                                prepared, event);
 
         // When
-        DocumentProcessingResult result = blue.processDocument(
-                blue.preprocess(document), new Node().properties("kind", scalar("root")));
+        ProcessingDebugResult debug;
+        try {
+            debug = blue.getDocumentProcessor()
+                    .processDocumentWithTrace(
+                            prepared, event);
+        } catch (RuntimeException failure) {
+            ExternalBlockerProbeAssertions
+                    .classifyImplicitInitializationFailure(
+                            failure,
+                            expectedExactBlueIds,
+                            "independent metrics sinks");
+            throw failure;
+        }
+        DocumentProcessingResult result =
+                debug.processResult();
 
         // Then
+        ExternalBlockerProbeAssertions
+                .requireImplicitInitializationSuccess(
+                        debug,
+                        IMPLICIT_SOURCE,
+                        originalEventBlueId,
+                        "independent metrics sinks");
         assertSuccess(result);
         assertEquals(1L, processorMetrics.processEventSnapshotAttempts());
         assertEquals(1L, workflowMetrics.processEventSnapshotAttempts());
@@ -565,6 +743,55 @@ class ProcessingEventBindingTest {
         return new Node().value(value);
     }
 
+    private static Node withImplicitInitializationSource(
+            Node document) {
+        Node prepared = document.clone();
+        Node contracts = prepared.getContracts();
+        if (contracts == null) {
+            contracts = new Node();
+            prepared.properties("contracts", contracts);
+        }
+        contracts.properties(
+                IMPLICIT_SOURCE,
+                new Node()
+                        .type(new Node().blueId(
+                                MockTypeBlueIds
+                                        .MOCK_EXTERNAL_CHANNEL))
+                        .properties(
+                                "subscriptionKey",
+                                scalar(
+                                        IMPLICIT_SUBSCRIPTION))
+                        .properties(
+                                "checkpointDomain",
+                                scalar(
+                                        IMPLICIT_CHECKPOINT_DOMAIN)));
+        return prepared;
+    }
+
+    private static void configureImplicitInitializationSource(
+            Blue blue) {
+        blue.registerExternalContractType(
+                MockTypeBlueIds.MOCK_EXTERNAL_CHANNEL,
+                BlueRuntimeTypeRegistry.getDefault()
+                        .node(RuntimeTypeKey
+                                .SCRIPTED_EXTERNAL_CHANNEL),
+                new ImplicitInitializationChannelProcessor());
+        CoordinationDeliveryPlanning
+                .currentRootCompatibility(blue);
+    }
+
+    private static Object valueAt(
+            Node node,
+            String path) {
+        try {
+            return node != null
+                    ? node.get(path)
+                    : null;
+        } catch (IllegalArgumentException absent) {
+            return null;
+        }
+    }
+
     private static Node wideEvent() {
         Node event = new Node().properties("kind", scalar("wide"));
         for (int index = 0; index < 256; index++) {
@@ -617,7 +844,12 @@ class ProcessingEventBindingTest {
     }
 
     private static void assertSuccess(DocumentProcessingResult result) {
-        assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
+        assertEquals(
+                ProcessorStatus.SUCCESS,
+                result.status(),
+                blue.coordination.processor
+                        .ProcessingResultTestSupport
+                        .diagnosticMessage(result));
     }
 
     private static Fixture fixture() {
@@ -637,7 +869,59 @@ class ProcessingEventBindingTest {
                                 metrics,
                                 processingEventIdentityObserver));
         blue.getDocumentProcessor().processingMetricsSink(metrics);
+        configureImplicitInitializationSource(
+                blue);
         return new Fixture(repository, blue, metrics);
+    }
+
+    private static final class
+            ImplicitInitializationChannelProcessor
+            implements ChannelProcessor<MockExternalChannel> {
+        private final ExternalChannelSubscriptionFunctions<
+                MockExternalChannel> subscriptions =
+                new ExternalChannelSubscriptionFunctions<
+                        MockExternalChannel>() {
+                    @Override
+                    public List<String> channelKeys(
+                            MockExternalChannel contract) {
+                        return Collections.singletonList(
+                                contract.getSubscriptionKey());
+                    }
+
+                    @Override
+                    public List<String> eventKeys(
+                            Node event) {
+                        return Collections.singletonList(
+                                IMPLICIT_SUBSCRIPTION);
+                    }
+
+                    @Override
+                    public String checkpointDomainDiscriminator(
+                            MockExternalChannel contract) {
+                        return contract
+                                .getCheckpointDomain();
+                    }
+                };
+
+        @Override
+        public Class<MockExternalChannel> contractType() {
+            return MockExternalChannel.class;
+        }
+
+        @Override
+        public ExternalChannelSubscriptionFunctions<
+                MockExternalChannel> externalSubscriptionFunctions() {
+            return subscriptions;
+        }
+
+        @Override
+        public ChannelEvaluation evaluate(
+                MockExternalChannel contract,
+                ChannelEvaluationContext context) {
+            return ChannelEvaluation.match(
+                    context.event(),
+                    null);
+        }
     }
 
     private static final class Fixture {
@@ -664,9 +948,51 @@ class ProcessingEventBindingTest {
             return blue.processDocument(document, event);
         }
 
+        ProcessingDebugResult processWithTrace(
+                Node document,
+                Node event) {
+            return blue.getDocumentProcessor()
+                    .processDocumentWithTrace(
+                            document, event);
+        }
+
         DocumentProcessingResult processUninitialized(Node document, Node event) {
-            document.blue(repository.typeAliasBlue());
-            return blue.processDocument(blue.preprocess(document), event);
+            Node prepared =
+                    withImplicitInitializationSource(
+                            document);
+            prepared.blue(
+                    repository.typeAliasBlue());
+            Node preprocessed =
+                    blue.preprocess(prepared);
+            String originalEventBlueId =
+                    BlueIdCalculator.calculateBlueId(
+                            event);
+            List<String> expectedExactBlueIds =
+                    ExternalBlockerProbeAssertions
+                            .expectedExactBlueIds(
+                                    preprocessed,
+                                    event);
+            ProcessingDebugResult debug;
+            try {
+                debug = blue.getDocumentProcessor()
+                        .processDocumentWithTrace(
+                                preprocessed,
+                                event);
+            } catch (RuntimeException failure) {
+                ExternalBlockerProbeAssertions
+                        .classifyImplicitInitializationFailure(
+                                failure,
+                                expectedExactBlueIds,
+                                "processing-event binding");
+                throw failure;
+            }
+            ExternalBlockerProbeAssertions
+                    .requireImplicitInitializationSuccess(
+                            debug,
+                            IMPLICIT_SOURCE,
+                            originalEventBlueId,
+                            "processing-event binding");
+            return debug.processResult();
         }
 
         Node operationEvent(int timestamp,

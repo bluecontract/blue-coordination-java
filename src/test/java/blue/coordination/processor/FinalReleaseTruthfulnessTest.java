@@ -8,6 +8,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.HashSet;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -189,21 +191,29 @@ class FinalReleaseTruthfulnessTest {
                 read(
                         "gradle/"
                                 + "coordination-release.gradle");
+        String working =
+                read(
+                        "gradle/"
+                                + "coordination-working.gradle");
 
         // When
-        boolean requiresConformance =
+        boolean derivesRequiredConformance =
                 release.contains(
-                        "'CoordinationBehaviorFixtureHarnessTest',\n"
-                                + "                65L,")
+                        "sameRun.conformance\n"
+                                + "                        "
+                                + "?.behavior?.required")
                         && release.contains(
-                        "'CoordinationDirectPortableGas"
-                                + "MicrofixtureTest',\n"
-                                + "                14L,")
+                        "sameRun.conformance\n"
+                                + "                        "
+                                + "?.portableGas?.required")
                         && release.contains(
-                        "'CoordinationHostQuotaFixtureTest',\n"
-                                + "                7L,")
+                        "sameRun.conformance\n"
+                                + "                        "
+                                + "?.hostQuota?.required")
                         && release.contains(
-                        "required   : 86L");
+                        "sameRun.conformance\n"
+                                + "                        "
+                                + "?.total?.required");
         boolean excludesSupportTests =
                 release.contains(
                         "String exactNamePattern ->")
@@ -220,26 +230,67 @@ class FinalReleaseTruthfulnessTest {
                         "'^coordination-host-[a-z0-9-]+ '");
         boolean requiresExactExecutionCounts =
                 release.contains(
-                        "if (behavior.executed != 65L")
+                        "behavior.executed\n"
+                                + "                "
+                                + "!= requiredBehavior")
                         && release.contains(
-                        "|| portableGas.executed != 14L")
+                        "portableGas.executed\n"
+                                + "                "
+                                + "!= requiredPortableGas")
                         && release.contains(
-                        "|| hostQuota.executed != 7L")
+                        "hostQuota.executed\n"
+                                + "                "
+                                + "!= requiredHostQuota")
                         && release.contains(
-                        "|| totalConformance.executed != 86L");
-        boolean requiresFlagship =
+                        "totalConformance.executed\n"
+                                + "                "
+                                + "!= requiredTotal");
+        boolean derivesFlagshipAndTraceRequirements =
                 release.contains(
                         "'CoordinationComplexEmbedded"
                                 + "DeterminismFlagshipTest'")
                         && release.contains(
-                        "flagshipRuns != 32L");
-        boolean requiresRepeatedCounterTrace =
-                release.contains(
                         "'CoordinationRuntimeGasScalingTest'")
                         && release.contains(
-                        "traceEntries.longValue()\n"
+                        "sameRun.flagship\n"
                                 + "                        "
-                                + "== 516L");
+                                + "?.requiredVariants")
+                        && release.contains(
+                        "sameRun.runtimeTrace\n"
+                                + "                        "
+                                + "?.requiredEntries");
+        boolean provesExactPartition =
+                working.contains(
+                        "'coordinationFullSuitePartitionVerification'")
+                        && working.contains(
+                        "full.total == 899L")
+                        && working.contains(
+                        "surface.total == 842L")
+                        && working.contains(
+                        "probes.total == 57L")
+                        && working.contains(
+                        "fullInventory\n"
+                                + "                        "
+                                + "== combinedInventory")
+                        && working.contains(
+                        "'generateCoordinationSameRunEvidenceReport'")
+                        && release.contains(
+                        "'reports/coordination-working/"
+                                + "test-partition.json'")
+                        && release.contains(
+                        "'reports/coordination-working/"
+                                + "same-run-evidence.json'");
+        boolean bindsReportsToPathsAndDigests =
+                working.contains(
+                        "def workingEvidenceSource")
+                        && release.contains(
+                        "def releaseEvidenceSource")
+                        && working.contains(
+                        "evidenceSources:")
+                        && release.contains(
+                        "evidenceSources:")
+                        && release.contains(
+                        "sameRunMetricsMatch");
         boolean requiresProjectionRuntimeIdentities =
                 release.contains(
                         "coordination."
@@ -253,12 +304,22 @@ class FinalReleaseTruthfulnessTest {
                                 + "== null");
 
         // Then
-        assertTrue(requiresConformance);
+        assertTrue(derivesRequiredConformance);
         assertTrue(excludesSupportTests);
         assertTrue(requiresExactExecutionCounts);
-        assertTrue(requiresFlagship);
-        assertTrue(requiresRepeatedCounterTrace);
+        assertTrue(derivesFlagshipAndTraceRequirements);
+        assertTrue(provesExactPartition);
+        assertTrue(bindsReportsToPathsAndDigests);
         assertTrue(requiresProjectionRuntimeIdentities);
+        assertFalse(
+                release.contains(
+                        "required   : 86L"));
+        assertFalse(
+                release.contains(
+                        "flagshipRuns != 32L"));
+        assertFalse(
+                release.contains(
+                        "== 516L"));
     }
 
     @Test
@@ -306,80 +367,119 @@ class FinalReleaseTruthfulnessTest {
                 read(
                         "gradle/"
                                 + "coordination-release.gradle");
+        String working =
+                read(
+                        "gradle/"
+                                + "coordination-working.gradle");
+        JsonNode catalog =
+                json(
+                        "gradle/"
+                                + "coordination-external-blockers.json");
 
         // When
         boolean classifierUsesTestIdentity =
                 release.contains(
                         "String className,\n"
                                 + "    String testName,\n"
+                                + "    String failureType,\n"
                                 + "    String message ->")
                         && release.contains(
                         "testCase.@classname")
                         && release.contains(
-                        "testCase.@name");
-        boolean hasExplicitAttribution =
+                        "testCase.@name")
+                        && release.contains(
+                        "String testId =");
+        boolean stripsOnlyTheJUnitTypeWrapper =
                 release.contains(
-                        "fixedRepositoryAudit")
+                        "String wrapper =\n"
+                                + "                "
+                                + "failureType + ': '")
                         && release.contains(
-                        "fixedMandateEvidence")
-                        && release.contains(
-                        "explicitlyAttributedLanguageFailure")
-                        && release.contains(
-                        "Language invalid-execution-evidence ")
-                        && release.contains(
-                        "Language Process Embedded routing defect:")
-                        && release.contains(
-                        "Language handler-match reference "
-                                + "materialization ")
-                        && release.contains(
-                        "Language flagship external-delivery "
-                                + "evidence drift:")
-                        && release.contains(
-                        "Language hosted BEX semantic-output "
-                                + "provenance defect:")
-                        && release.contains(
-                        "Language Embedded Node Channel bridge defect:")
-                        && release.contains(
-                        "BEX admitted-exact canonical "
-                                + "materialization defect:")
-                        && release.contains(
-                        "Language pure-reference Root transition defect:")
-                        && release.contains(
-                        "fixedBexConformanceFailure");
-        boolean usesExactTestAllowLists =
+                        "logicalMessage.substring(\n"
+                                + "                            "
+                                + "wrapper.length())");
+        boolean usesExactCatalogPrefixes =
                 release.contains(
-                        "String testId =")
+                        "logicalMessage.startsWith(\n"
+                                + "                        "
+                                + "it.fingerprintPrefix)")
                         && release.contains(
+                        "releaseExternalProbes.find")
+                        && release.contains(
+                        "'dependency-evidence-before-coordination'")
+                        && working.contains(
+                        "record.logicalMessage.startsWith(\n"
+                                + "                    "
+                                + "probe.fingerprintPrefix)")
+                        && release.contains(
+                        "'coordination-behavior-or-evidence'");
+        Set<String> prefixes =
+                new HashSet<String>();
+        Set<String> tests =
+                new HashSet<String>();
+        int probeCount = 0;
+        boolean catalogHasOnlyTestProbes = true;
+        for (JsonNode blocker :
+                catalog.path("blockers")) {
+            String prefix =
+                    blocker.path(
+                                    "fingerprintPrefix")
+                            .asText();
+            prefixes.add(prefix);
+            for (JsonNode probe :
+                    blocker.path("probes")) {
+                probeCount++;
+                catalogHasOnlyTestProbes &=
+                        probe.size() == 1
+                                && probe.has("test")
+                                && tests.add(
+                                probe.path("test")
+                                        .asText());
+            }
+        }
+        boolean removedStaleClassifiers =
+                !release.contains(
                         "fixedRepositoryAuditTestIds")
-                        && release.contains(
+                        && !release.contains(
+                        "fixedMandateEvidence")
+                        && !release.contains(
                         "checkpointCoalescingTestIds")
-                        && release.contains(
-                        "invalidExecutionEvidenceTestIds")
-                        && release.contains(
-                        "processEmbeddedRoutingTestIds")
-                        && release.contains(
-                        "handlerMaterializationTestIds")
-                        && release.contains(
-                        "flagshipDeliveryEvidenceTestIds")
-                        && release.contains(
-                        "hostedBexOutputTestIds")
-                        && release.contains(
-                        "embeddedBridgeTestIds")
-                        && release.contains(
-                        "admittedExactBexTestIds")
-                        && release.contains(
-                        "pureReferenceRootTransitionTestIds")
-                        && release.contains(
-                        "fixedRepositoryAuditTestIds.contains")
-                        && release.contains(
-                        "checkpointCoalescingTestIds.contains")
-                        && release.contains(
-                        "processEmbeddedRoutingTestIds.contains");
+                        && !release.contains(
+                        "explicitlyAttributedLanguageFailure")
+                        && !release.contains(
+                        "fixedBexConformanceFailure")
+                        && !release.contains(
+                        "messageContains")
+                        && !working.contains(
+                        "messageContains");
 
         // Then
         assertTrue(classifierUsesTestIdentity);
-        assertTrue(hasExplicitAttribution);
-        assertTrue(usesExactTestAllowLists);
+        assertTrue(stripsOnlyTheJUnitTypeWrapper);
+        assertTrue(usesExactCatalogPrefixes);
+        assertEquals(
+                "blue-coordination/external-blockers/1.1",
+                catalog.path("schema")
+                        .asText());
+        assertEquals(
+                15,
+                catalog.path("blockers")
+                        .size());
+        assertEquals(15, prefixes.size());
+        assertEquals(57, probeCount);
+        assertEquals(57, tests.size());
+        assertTrue(
+                catalogHasOnlyTestProbes);
+        assertTrue(removedStaleClassifiers);
+        assertTrue(
+                prefixes.stream()
+                        .allMatch(
+                                prefix ->
+                                        !prefix.isEmpty()
+                                                && prefix.endsWith(":")));
+        assertFalse(
+                release.contains(
+                        "value.contains("));
         assertFalse(
                 release.contains(
                         "def dependencyMarkers"));
@@ -496,21 +596,33 @@ class FinalReleaseTruthfulnessTest {
                                 + "coordination-release.gradle");
 
         // When
-        boolean requiresCompleteCatalogAudit =
+        boolean requiresExactRequiredClosure =
                 release.contains(
-                        "fixedCatalog.total == 1107L")
-                        && release.contains(
-                        "fixedCatalog.verified\n"
+                        "sameRun.fixedRepository\n"
                                 + "                        "
-                                + "== fixedCatalog.total")
+                                + "?.total")
                         && release.contains(
-                        "fixedCatalog.failed == 0L")
+                        "fixedRequiredClosure.total\n"
+                                + "                        "
+                                + "== requiredFixedTotal")
                         && release.contains(
-                        "fixedCatalog.cyclicSetCount == 10L")
+                        "fixedRequiredClosure.verified\n"
+                                + "                        "
+                                + "== fixedRequiredClosure.total")
                         && release.contains(
-                        "fixedCatalog.cyclicMemberCount == 27L")
+                        "fixedRequiredClosure.missing == 0L")
                         && release.contains(
-                        "BOUND_SOURCE_CONTENT audit is not green");
+                        "fixedRequiredClosure.invalidEvidence == 0L")
+                        && release.contains(
+                        "fixedRequiredClosure.unavailable == 0L")
+                        && release.contains(
+                        "fixedRequiredClosure.eligible == true")
+                        && release.contains(
+                        "fixedCatalog.status == 'informative'")
+                        && release.contains(
+                        "fixedCatalogDiagnosticComplete")
+                        && release.contains(
+                        "required fixed Repository closure");
         int fixedRepository =
                 release.indexOf("fixedRepository:");
         int expectedManifest =
@@ -525,23 +637,31 @@ class FinalReleaseTruthfulnessTest {
                 release.indexOf(
                         "manifestCompatible:",
                         observedManifest);
+        int requiredClosure =
+                release.indexOf(
+                        "requiredClosure:",
+                        manifestCompatible);
         int catalogAudit =
                 release.indexOf(
                         "catalogAudit:",
-                        manifestCompatible);
+                        requiredClosure);
 
         // Then
-        assertTrue(requiresCompleteCatalogAudit);
+        assertTrue(requiresExactRequiredClosure);
         assertTrue(fixedRepository >= 0);
         assertTrue(expectedManifest > fixedRepository);
         assertTrue(observedManifest > expectedManifest);
         assertTrue(manifestCompatible > observedManifest);
-        assertTrue(catalogAudit > manifestCompatible);
+        assertTrue(requiredClosure > manifestCompatible);
+        assertTrue(catalogAudit > requiredClosure);
         assertTrue(
                 release.contains(
                         "releaseFixedRepositoryEvidence\n"
                                 + "                        "
                                 + ".get().asFile"));
+        assertFalse(
+                release.contains(
+                        "fixedCatalog.total == 1107L"));
     }
 
     @Test
@@ -562,7 +682,13 @@ class FinalReleaseTruthfulnessTest {
                 release.contains(
                         "fixedCatalog.schema")
                         && release.contains(
-                        "fixedCatalog.status == 'verified'")
+                        "fixedCatalog.status == 'informative'")
+                        && release.contains(
+                        "fixedCatalog.releaseEligibilityBasis")
+                        && release.contains(
+                        "fixedCatalog.releaseEligible\n"
+                                + "                        "
+                                + "== fixedRequiredClosure.eligible")
                         && release.contains(
                         "fixedCatalog.providerMode\n"
                                 + "                        "
@@ -580,26 +706,37 @@ class FinalReleaseTruthfulnessTest {
                         && release.contains(
                         "fixedCatalog.repositoryManifestBlueId")
                         && release.contains(
-                        "fixedCatalog.repositoryManifestSha256\n"
+                        "fixedCatalog\n"
                                 + "                        "
-                                + "== artifacts."
-                                + "fixedRepositoryManifestSha256")
+                                + ".observedLoadedManifestSha256")
                         && release.contains(
-                        "fixedCatalog.repositoryCommit\n"
-                                + "                        "
-                                + "== coordinates.repository.commit")
+                        ".immutableHeadExpectedManifestSha256")
                         && release.contains(
-                        "fixedCatalog.repositoryArtifactSha256\n"
+                        "fixedCatalog.immutableHeadCommit")
+                        && release.contains(
+                        ".selectedRepositoryArtifactSha256")
+                        && release.contains(
+                        "fixedRequiredClosure\n"
                                 + "                        "
-                                + "== artifacts.repositoryJarSha256");
+                                + ".repositoryManifestSha256")
+                        && release.contains(
+                        "fixedRequiredClosure.repositoryHeadCommit");
         boolean writerEmitsRequiredFields =
                 writer.contains(
                         "\"status\",\n"
-                                + "                audit.failed() == 0")
+                                + "                \"informative\"")
                         && writer.contains(
-                        "\"repositoryManifestSha256\",\n"
+                        "\"releaseEligibilityBasis\",\n"
                                 + "                "
-                                + "repositoryManifestSha256()")
+                                + "\"requiredClosure\"")
+                        && writer.contains(
+                        "\"observedLoadedManifestSha256\",\n"
+                                + "                "
+                                + "loadedRepositoryManifestSha256()")
+                        && writer.contains(
+                        "\"immutableHeadCommit\"")
+                        && writer.contains(
+                        "\"selectedRepositoryArtifactSha256\"")
                         && writer.contains(
                         "\"providerMode\",\n"
                                 + "                "

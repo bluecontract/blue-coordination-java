@@ -1,10 +1,13 @@
 package blue.coordination.processor.compute;
 
 import blue.coordination.processor.CoordinationProcessorOptions;
+import blue.coordination.processor.ExternalBlockerProbeAssertions;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
+import blue.language.processor.ProcessorErrorCategory;
 import blue.language.processor.ProcessorStatus;
+import blue.language.processor.registry.RuntimeBlueIds;
 import blue.language.snapshot.ResolvedSnapshot;
 import java.math.BigInteger;
 import java.util.List;
@@ -88,13 +91,18 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
     void shouldAuthorizeDeliveredPackagePaynote() {
         // Given
         ComputeWorkflowTestSupport support = support(null);
-        ResolvedSnapshot delivered = deliveredPaynoteSnapshot(support);
+        ResolvedSnapshot delivered =
+                deliveredPaynoteSnapshot(
+                        support, true);
 
         // When
-        DocumentProcessingResult authorized = support.blue.processDocument(
+        DocumentProcessingResult authorized = processForProbe(
+                support,
                 delivered,
                 operationEvent(support, "card-processor", 14,
-                        "confirmAuthorization", new Node()));
+                        "confirmAuthorization", new Node()),
+                ProcessorStatus.SUCCESS,
+                "confirmAuthorization");
 
         // Then
         assertSuccessful(authorized);
@@ -105,20 +113,28 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
     void shouldEmbedRestaurantAndHotelOrdersAfterAuthorization() {
         // Given
         ComputeWorkflowTestSupport support = support(null);
-        ResolvedSnapshot authorized = authorizedPaynoteSnapshot(support);
+        ResolvedSnapshot authorized =
+                authorizedPaynoteSnapshot(
+                        support, true);
 
         // When
-        DocumentProcessingResult restaurantProvided = support.blue.processDocument(
+        DocumentProcessingResult restaurantProvided = processForProbe(
+                support,
                 authorized,
                 operationEvent(support, "travel-agency", 16,
-                        "provideRestaurantOrder", restaurantOrder(support)));
+                        "provideRestaurantOrder", restaurantOrder(support)),
+                ProcessorStatus.SUCCESS,
+                "provideRestaurantOrder");
         ResolvedSnapshot withRestaurant =
                 blue.coordination.processor.ProcessingResultTestSupport.snapshot(
                         support.blue, restaurantProvided);
-        DocumentProcessingResult hotelProvided = support.blue.processDocument(
+        DocumentProcessingResult hotelProvided = processForProbe(
+                support,
                 withRestaurant,
                 operationEvent(support, "travel-agency", 17,
-                        "provideHotelOrder", hotelOrder(support)));
+                        "provideHotelOrder", hotelOrder(support)),
+                ProcessorStatus.SUCCESS,
+                "provideHotelOrder");
 
         // Then
         assertSuccessful(restaurantProvided);
@@ -136,20 +152,27 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
         // Given
         ComputeWorkflowTestSupport support = support(null);
         ResolvedSnapshot ordersProvided =
-                componentOrdersProvidedSnapshot(support);
+                componentOrdersProvidedSnapshot(
+                        support, true);
 
         // When
-        DocumentProcessingResult restaurantConfirmed = support.blue.processDocument(
+        DocumentProcessingResult restaurantConfirmed = processForProbe(
+                support,
                 ordersProvided,
                 operationEvent(support, "restaurant", 18,
-                        "confirm", new Node()));
+                        "confirm", new Node()),
+                ProcessorStatus.SUCCESS,
+                "restaurant confirm");
         ResolvedSnapshot withRestaurantConfirmation =
                 blue.coordination.processor.ProcessingResultTestSupport.snapshot(
                         support.blue, restaurantConfirmed);
-        DocumentProcessingResult hotelConfirmed = support.blue.processDocument(
+        DocumentProcessingResult hotelConfirmed = processForProbe(
+                support,
                 withRestaurantConfirmation,
                 operationEvent(support, "hotel", 19,
-                        "confirm", new Node()));
+                        "confirm", new Node()),
+                ProcessorStatus.SUCCESS,
+                "hotel confirm");
 
         // Then
         assertSuccessful(restaurantConfirmed);
@@ -167,13 +190,17 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
         // Given
         ComputeWorkflowTestSupport support = support(null);
         ResolvedSnapshot confirmedOrders =
-                confirmedOrdersSnapshot(support);
+                confirmedOrdersSnapshot(
+                        support, true);
 
         // When
-        DocumentProcessingResult captured = support.blue.processDocument(
+        DocumentProcessingResult captured = processForProbe(
+                support,
                 confirmedOrders,
                 operationEvent(support, "card-processor", 20,
-                        "confirmCapture", new Node()));
+                        "confirmCapture", new Node()),
+                ProcessorStatus.SUCCESS,
+                "confirmCapture");
 
         // Then
         assertSuccessful(captured);
@@ -233,13 +260,20 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
     void shouldRejectComponentOrderBeforePaynoteAuthorization() {
         // Given
         ComputeWorkflowTestSupport support = support(null);
-        ResolvedSnapshot current = deliveredPaynoteSnapshot(support);
+        ResolvedSnapshot current =
+                deliveredPaynoteSnapshot(
+                        support, true);
 
         // When
         // Illegal: Travel Agency cannot provide component orders until Card Processor authorizes the
         // embedded PayNote.
-        DocumentProcessingResult beforeAuthorization = support.blue.processDocument(current,
-                operationEvent(support, "travel-agency", 13, "provideHotelOrder", hotelOrder(support)));
+        DocumentProcessingResult beforeAuthorization = processForProbe(
+                support,
+                current,
+                operationEvent(support, "travel-agency", 13,
+                        "provideHotelOrder", hotelOrder(support)),
+                ProcessorStatus.RUNTIME_FATAL,
+                "provideHotelOrder before authorization");
 
         // Then
         assertRuntimeFatal(beforeAuthorization, "after PayNote authorization");
@@ -268,12 +302,19 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
     void shouldRejectCaptureBeforeBothComponentOrdersConfirm() {
         // Given
         ComputeWorkflowTestSupport support = support(null);
-        ResolvedSnapshot current = componentOrdersProvidedSnapshot(support);
+        ResolvedSnapshot current =
+                componentOrdersProvidedSnapshot(
+                        support, true);
 
         // When
         // Illegal: Card Processor cannot capture before both Restaurant and Hotel have confirmed.
-        DocumentProcessingResult earlyCapture = support.blue.processDocument(current,
-                operationEvent(support, "card-processor", 18, "confirmCapture", new Node()));
+        DocumentProcessingResult earlyCapture = processForProbe(
+                support,
+                current,
+                operationEvent(support, "card-processor", 18,
+                        "confirmCapture", new Node()),
+                ProcessorStatus.RUNTIME_FATAL,
+                "confirmCapture before confirmations");
 
         // Then
         assertRuntimeFatal(earlyCapture, "before both orders confirm");
@@ -289,67 +330,203 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
 
     private static ResolvedSnapshot deliveredPaynoteSnapshot(
             ComputeWorkflowTestSupport support) {
+        return deliveredPaynoteSnapshot(
+                support, false);
+    }
+
+    private static ResolvedSnapshot deliveredPaynoteSnapshot(
+            ComputeWorkflowTestSupport support,
+            boolean blockerProbe) {
         ResolvedSnapshot initialized =
                 initializedSnapshot(support);
+        DocumentProcessingResult delivered =
+                blockerProbe
+                        ? processForProbe(
+                        support,
+                        initialized,
+                        operationEvent(
+                                support,
+                                "travel-agency",
+                                12,
+                                "deliverPaynote",
+                                packagePaynote(support)),
+                        ProcessorStatus.SUCCESS,
+                        "deliverPaynote setup")
+                        : support.blue.processDocument(
+                        initialized,
+                        operationEvent(
+                                support,
+                                "travel-agency",
+                                12,
+                                "deliverPaynote",
+                                packagePaynote(support)));
         return blue.coordination.processor.ProcessingResultTestSupport.snapshot(
                 support.blue,
-                support.blue.processDocument(initialized,
-                        operationEvent(support, "travel-agency", 12,
-                                "deliverPaynote", packagePaynote(support))));
+                delivered);
     }
 
     private static ResolvedSnapshot authorizedPaynoteSnapshot(
             ComputeWorkflowTestSupport support) {
-        ResolvedSnapshot delivered = deliveredPaynoteSnapshot(support);
+        return authorizedPaynoteSnapshot(
+                support, false);
+    }
+
+    private static ResolvedSnapshot authorizedPaynoteSnapshot(
+            ComputeWorkflowTestSupport support,
+            boolean blockerProbe) {
+        ResolvedSnapshot delivered =
+                deliveredPaynoteSnapshot(
+                        support, blockerProbe);
+        DocumentProcessingResult authorized =
+                blockerProbe
+                        ? processForProbe(
+                        support,
+                        delivered,
+                        operationEvent(
+                                support,
+                                "card-processor",
+                                14,
+                                "confirmAuthorization",
+                                new Node()),
+                        ProcessorStatus.SUCCESS,
+                        "confirmAuthorization setup")
+                        : support.blue.processDocument(
+                        delivered,
+                        operationEvent(
+                                support,
+                                "card-processor",
+                                14,
+                                "confirmAuthorization",
+                                new Node()));
         return blue.coordination.processor.ProcessingResultTestSupport.snapshot(
                 support.blue,
-                support.blue.processDocument(delivered,
-                        operationEvent(support, "card-processor", 14,
-                                "confirmAuthorization", new Node())));
+                authorized);
     }
 
     private static ResolvedSnapshot componentOrdersProvidedSnapshot(
             ComputeWorkflowTestSupport support) {
-        ResolvedSnapshot authorized = authorizedPaynoteSnapshot(support);
+        return componentOrdersProvidedSnapshot(
+                support, false);
+    }
+
+    private static ResolvedSnapshot componentOrdersProvidedSnapshot(
+            ComputeWorkflowTestSupport support,
+            boolean blockerProbe) {
+        ResolvedSnapshot authorized =
+                authorizedPaynoteSnapshot(
+                        support, blockerProbe);
+        DocumentProcessingResult restaurant =
+                blockerProbe
+                        ? processForProbe(
+                        support,
+                        authorized,
+                        operationEvent(
+                                support,
+                                "travel-agency",
+                                16,
+                                "provideRestaurantOrder",
+                                restaurantOrder(support)),
+                        ProcessorStatus.SUCCESS,
+                        "provideRestaurantOrder setup")
+                        : support.blue.processDocument(
+                        authorized,
+                        operationEvent(
+                                support,
+                                "travel-agency",
+                                16,
+                                "provideRestaurantOrder",
+                                restaurantOrder(support)));
         ResolvedSnapshot withRestaurant =
                 blue.coordination.processor.ProcessingResultTestSupport.snapshot(
                         support.blue,
-                        support.blue.processDocument(authorized,
-                                operationEvent(support, "travel-agency", 16,
-                                        "provideRestaurantOrder",
-                                        restaurantOrder(support))));
+                        restaurant);
+        DocumentProcessingResult hotel =
+                blockerProbe
+                        ? processForProbe(
+                        support,
+                        withRestaurant,
+                        operationEvent(
+                                support,
+                                "travel-agency",
+                                17,
+                                "provideHotelOrder",
+                                hotelOrder(support)),
+                        ProcessorStatus.SUCCESS,
+                        "provideHotelOrder setup")
+                        : support.blue.processDocument(
+                        withRestaurant,
+                        operationEvent(
+                                support,
+                                "travel-agency",
+                                17,
+                                "provideHotelOrder",
+                                hotelOrder(support)));
         return blue.coordination.processor.ProcessingResultTestSupport.snapshot(
                 support.blue,
-                support.blue.processDocument(withRestaurant,
-                        operationEvent(support, "travel-agency", 17,
-                                        "provideHotelOrder", hotelOrder(support))));
+                hotel);
     }
 
     private static ResolvedSnapshot confirmedOrdersSnapshot(
             ComputeWorkflowTestSupport support) {
+        return confirmedOrdersSnapshot(
+                support, false);
+    }
+
+    private static ResolvedSnapshot confirmedOrdersSnapshot(
+            ComputeWorkflowTestSupport support,
+            boolean blockerProbe) {
         ResolvedSnapshot ordersProvided =
-                componentOrdersProvidedSnapshot(support);
+                componentOrdersProvidedSnapshot(
+                        support, blockerProbe);
+        DocumentProcessingResult restaurant =
+                blockerProbe
+                        ? processForProbe(
+                        support,
+                        ordersProvided,
+                        operationEvent(
+                                support,
+                                "restaurant",
+                                18,
+                                "confirm",
+                                new Node()),
+                        ProcessorStatus.SUCCESS,
+                        "restaurant confirm setup")
+                        : support.blue.processDocument(
+                        ordersProvided,
+                        operationEvent(
+                                support,
+                                "restaurant",
+                                18,
+                                "confirm",
+                                new Node()));
         ResolvedSnapshot restaurantConfirmed =
                 blue.coordination.processor.ProcessingResultTestSupport.snapshot(
                         support.blue,
-                        support.blue.processDocument(
-                                ordersProvided,
-                                operationEvent(
-                                        support,
-                                        "restaurant",
-                                        18,
-                                        "confirm",
-                                        new Node())));
-        return blue.coordination.processor.ProcessingResultTestSupport.snapshot(
-                support.blue,
-                support.blue.processDocument(
+                        restaurant);
+        DocumentProcessingResult hotel =
+                blockerProbe
+                        ? processForProbe(
+                        support,
                         restaurantConfirmed,
                         operationEvent(
                                 support,
                                 "hotel",
                                 19,
                                 "confirm",
-                                new Node())));
+                                new Node()),
+                        ProcessorStatus.SUCCESS,
+                        "hotel confirm setup")
+                        : support.blue.processDocument(
+                        restaurantConfirmed,
+                        operationEvent(
+                                support,
+                                "hotel",
+                                19,
+                                "confirm",
+                                new Node()));
+        return blue.coordination.processor.ProcessingResultTestSupport.snapshot(
+                support.blue,
+                hotel);
     }
 
     private static MeasuredLifecycle runMeasuredLifecycle(
@@ -448,9 +625,115 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
                                                             ComputeWorkflowTestSupport support,
                                                             ResolvedSnapshot document,
                                                             Node event) {
-        return support.blue.processDocument(
+        return processForProbe(
+                support,
                 document,
-                event);
+                event,
+                ProcessorStatus.SUCCESS,
+                "measured " + label);
+    }
+
+    private static DocumentProcessingResult processForProbe(
+            ComputeWorkflowTestSupport support,
+            ResolvedSnapshot input,
+            Node event,
+            ProcessorStatus repairedStatus,
+            String context) {
+        DocumentProcessingResult result =
+                support.blue.processDocument(
+                        input, event);
+        String diagnostic =
+                blue.coordination.processor
+                        .ProcessingResultTestSupport
+                        .diagnosticMessage(result);
+        boolean routePresent =
+                hasProcessEmbeddedRoute(
+                        input.resolvedRoot(),
+                        "/paynote");
+        boolean rolledBack =
+                input.blueId().equals(
+                        blue.coordination.processor
+                                .ProcessingResultTestSupport
+                                .blueId(result));
+        boolean exactRouteLoss =
+                routePresent
+                        && result.status()
+                        == ProcessorStatus
+                        .INVALID_PROCESSING_DOCUMENT
+                        && blue.coordination.processor
+                        .ProcessingResultTestSupport
+                        .diagnosticCategory(result)
+                        == ProcessorErrorCategory
+                        .InvalidExternalChannelSnapshot
+                        && "No Process Embedded route to /paynote"
+                        .equals(diagnostic)
+                        && result.events().isEmpty()
+                        && rolledBack;
+        ExternalBlockerProbeAssertions.classify(
+                "process-embedded-routing",
+                "Language Process Embedded routing defect:",
+                exactRouteLoss,
+                result.status() == repairedStatus,
+                context + ": "
+                        + ExternalBlockerProbeAssertions
+                        .resultTuple(result)
+                        + ", routePresent="
+                        + routePresent
+                        + ", rolledBack="
+                        + rolledBack
+                        + ", expectedRepairedStatus="
+                        + repairedStatus);
+        return result;
+    }
+
+    private static boolean hasProcessEmbeddedRoute(
+            Node root,
+            String path) {
+        Node contracts =
+                root != null
+                        ? root.getContracts()
+                        : null;
+        if (contracts == null
+                || contracts.getProperties() == null) {
+            return false;
+        }
+        for (Node contract :
+                contracts.getProperties().values()) {
+            Node type =
+                    contract != null
+                            ? contract.getType()
+                            : null;
+            boolean processEmbedded =
+                    type != null
+                            && (RuntimeBlueIds
+                            .PROCESS_EMBEDDED
+                            .equals(type.getBlueId())
+                            || "Process Embedded"
+                            .equals(type.getValue())
+                            || "Process Embedded"
+                            .equals(type.getName()));
+            Node paths =
+                    contract != null
+                            && contract.getProperties()
+                            != null
+                            ? contract.getProperties()
+                            .get("paths")
+                            : null;
+            if (!processEmbedded
+                    || paths == null
+                    || paths.getItems() == null) {
+                continue;
+            }
+            for (Node candidate :
+                    paths.getItems()) {
+                if (candidate != null
+                        && path.equals(
+                        candidate.getValue())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static final class MeasuredLifecycle {

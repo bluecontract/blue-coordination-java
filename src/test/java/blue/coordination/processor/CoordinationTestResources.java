@@ -93,24 +93,6 @@ public final class CoordinationTestResources {
         return blue;
     }
 
-    /**
-     * Configures the exact local fixed Repository through the released
-     * bound-source-content verification boundary.
-     *
-     * <p>This method deliberately does not choose a delivery-planning mode.
-     * Tests that exercise registration without a host plan use this method;
-     * compatibility-mode tests use {@link #configuredBlue(BlueRepository)}.</p>
-     */
-    public static Blue fixedRepositoryBlue(
-            BlueRepository repository) {
-        Blue blue = new Blue();
-        FixedRepositoryBoundSourceProvider
-                .configureReleaseRuntime(
-                        repository,
-                        blue);
-        return blue;
-    }
-
     public static String simpleTimelineChannelYaml(String key, String timelineId, int indent) {
         String base = spaces(indent);
         String child = spaces(indent + 2);

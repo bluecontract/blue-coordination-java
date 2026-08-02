@@ -44,7 +44,7 @@ final class OperationRequestMatcher {
         Node requestPattern = contract.getRequest();
         boolean requestMatches =
                 CoordinationEventNodes.matchesOperationRequest(
-                context.event(),
+                context.occurrenceEvent(),
                 operationKey,
                 channelKey,
                 requestPattern == null

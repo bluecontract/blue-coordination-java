@@ -3,6 +3,8 @@ package blue.coordination.processor;
 import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
+import blue.language.processor.ProcessingDebugResult;
+import blue.language.processor.ProcessingTraceRecord;
 import blue.language.processor.ProcessorStatus;
 import blue.language.processor.registry.RuntimeBlueIds;
 import blue.repo.BlueRepository;
@@ -37,6 +39,11 @@ class RuntimeChannelsTest {
         DocumentProcessingResult result = processChat(fixture, document, 1);
 
         // Then
+        ExternalBlockerProbeAssertions
+                .classifyHostedSemanticOutput(
+                        result,
+                        document,
+                        "runtime Document Update observer");
         assertEquals(ProcessorStatus.SUCCESS,
                 result.status(),
                 "Language hosted BEX semantic-output provenance defect: "
@@ -90,6 +97,11 @@ class RuntimeChannelsTest {
         DocumentProcessingResult result = processChat(fixture, initialized, 1);
 
         // Then
+        ExternalBlockerProbeAssertions
+                .classifyHostedSemanticOutput(
+                        result,
+                        initialized,
+                        "nested Document Update observer");
         assertEquals(ProcessorStatus.SUCCESS,
                 result.status(),
                 "Language hosted BEX semantic-output provenance defect: "
@@ -209,9 +221,65 @@ class RuntimeChannelsTest {
         Node document = initializedDocument(fixture, embeddedBridgeDocument(fixture.repository, "/child"));
 
         // When
-        DocumentProcessingResult result = processChat(fixture, document, 1);
+        ProcessingDebugResult debug =
+                processChatWithTrace(
+                        fixture, document, 1);
+        DocumentProcessingResult result =
+                debug.processResult();
 
         // Then
+        boolean childHandlerExecuted = false;
+        boolean childEventEnqueued = false;
+        boolean rootObserverExecuted = false;
+        for (ProcessingTraceRecord record :
+                debug.trace().records()) {
+            if (record.kind()
+                    == ProcessingTraceRecord.Kind
+                    .HANDLER_EXECUTION) {
+                childHandlerExecuted |= "/child".equals(
+                        record.scopePath())
+                        && "emit".equals(
+                        record.contractKey());
+                rootObserverExecuted |= "/".equals(
+                        record.scopePath())
+                        && "childObserver".equals(
+                        record.contractKey());
+            }
+            if (record.kind()
+                    == ProcessingTraceRecord.Kind
+                    .EVENT_ENQUEUED
+                    && record.node() != null) {
+                childEventEnqueued |= "child emitted"
+                        .equals(
+                                nodeValueAt(
+                                        record.node(),
+                                        "/message"));
+            }
+        }
+        boolean parentObserved =
+                containsChatMessage(
+                        result.events(),
+                        "parent saw child emitted");
+        ExternalBlockerProbeAssertions.classify(
+                "embedded-node-channel-bridge",
+                "Language Embedded Node Channel bridge defect:",
+                result.status() == ProcessorStatus.SUCCESS
+                        && childHandlerExecuted
+                        && childEventEnqueued
+                        && !rootObserverExecuted
+                        && !parentObserved,
+                result.status() == ProcessorStatus.SUCCESS
+                        && parentObserved,
+                ExternalBlockerProbeAssertions
+                        .resultTuple(result)
+                        + ", childHandlerExecuted="
+                        + childHandlerExecuted
+                        + ", childEventEnqueued="
+                        + childEventEnqueued
+                        + ", rootObserverExecuted="
+                        + rootObserverExecuted
+                        + ", parentObserved="
+                        + parentObserved);
         assertEquals(ProcessorStatus.SUCCESS,
                 result.status(),
                 ProcessingResultTestSupport.diagnosticMessage(result));
@@ -501,6 +569,17 @@ class RuntimeChannelsTest {
         return fixture.blue.processDocument(document, chatTimelineEntry(fixture, timestamp));
     }
 
+    private static ProcessingDebugResult processChatWithTrace(
+            Fixture fixture,
+            Node document,
+            int timestamp) {
+        return fixture.blue.getDocumentProcessor()
+                .processDocumentWithTrace(
+                        document,
+                        chatTimelineEntry(
+                                fixture, timestamp));
+    }
+
     private static Node chatTimelineEntry(Fixture fixture, int timestamp) {
         return TestTimelineProvider.timelineEntry(
                 fixture.blue, fixture.repository, "owner", timestamp, chatMessageEvent("run"));
@@ -524,6 +603,18 @@ class RuntimeChannelsTest {
             Object value = node.get(pointer);
             return value instanceof Node ? (Node) value : null;
         } catch (IllegalArgumentException ex) {
+            return null;
+        }
+    }
+
+    private static Object nodeValueAt(
+            Node node,
+            String pointer) {
+        try {
+            return node != null
+                    ? node.get(pointer)
+                    : null;
+        } catch (IllegalArgumentException absent) {
             return null;
         }
     }

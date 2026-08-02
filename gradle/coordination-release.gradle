@@ -4,6 +4,25 @@ import groovy.xml.XmlSlurper
 import org.gradle.api.GradleException
 import org.gradle.api.tasks.testing.Test
 
+def releaseBlueRepositoryCompositePath =
+        (providers.gradleProperty('blueRepositoryCompositePath')
+                .orNull
+                ?: System.getProperty(
+                        'org.gradle.project.blueRepositoryCompositePath'))
+                ?.trim()
+if (releaseBlueRepositoryCompositePath == null
+        || releaseBlueRepositoryCompositePath.isEmpty()) {
+    throw new GradleException(
+            'The exact locked local Repository composite path is missing.')
+}
+def releaseBlueRepositoryComposite =
+        file(releaseBlueRepositoryCompositePath).canonicalFile
+if (!releaseBlueRepositoryComposite.isDirectory()) {
+    throw new GradleException(
+            'The exact locked local Repository composite is missing: '
+                    + releaseBlueRepositoryComposite)
+}
+
 /*
  * Always-truthful release evidence.
  *
@@ -43,11 +62,42 @@ def releaseLoopEvidence =
 def releaseFixedRepositoryEvidence =
         layout.buildDirectory.file(
                 'reports/coordination-release/fixed-repository.json')
+def releasePartitionEvidence =
+        layout.buildDirectory.file(
+                'reports/coordination-working/test-partition.json')
+def releaseSameRunEvidence =
+        layout.buildDirectory.file(
+                'reports/coordination-working/same-run-evidence.json')
+def releaseExternalBlockerCatalogFile =
+        file('gradle/coordination-external-blockers.json')
 def releaseExternalBlockerCatalog =
         new JsonSlurper().parse(
-                file('gradle/coordination-external-blockers.json'))
+                releaseExternalBlockerCatalogFile)
+def releaseExternalBlockers =
+        releaseExternalBlockerCatalog.blockers as List
+if (releaseExternalBlockerCatalog.schema
+        != 'blue-coordination/external-blockers/1.1') {
+    throw new GradleException(
+            'Unsupported Coordination external-blocker catalog schema: '
+                    + releaseExternalBlockerCatalog.schema)
+}
+def releaseFingerprintPrefixes =
+        releaseExternalBlockers.collect {
+            it.fingerprintPrefix
+        }
+if (releaseFingerprintPrefixes.any {
+    !(it instanceof String)
+            || it.trim().isEmpty()
+            || !it.endsWith(':')
+}
+        || releaseFingerprintPrefixes.toSet().size()
+        != releaseFingerprintPrefixes.size()) {
+    throw new GradleException(
+            'Every external-blocker family must declare one unique, '
+                    + 'non-empty fingerprintPrefix ending in a colon.')
+}
 def releaseExternalProbes =
-        releaseExternalBlockerCatalog.blockers.collectMany {
+        releaseExternalBlockers.collectMany {
             blocker ->
                 blocker.probes.collect {
                     probe ->
@@ -58,11 +108,30 @@ def releaseExternalProbes =
                                         blocker.owner,
                                 test     :
                                         probe.test,
-                                messageContains:
-                                        probe.messageContains
+                                fingerprintPrefix:
+                                        blocker.fingerprintPrefix
                         ]
                 }
         }
+if (releaseExternalProbes.size() != 57
+        || releaseExternalProbes.collect {
+            it.test
+        }.toSet().size() != 57
+        || releaseExternalBlockers.any { blocker ->
+            !(blocker.probes instanceof List)
+                    || blocker.probes.isEmpty()
+                    || blocker.probes.any { probe ->
+                !(probe instanceof Map)
+                        || probe.keySet()
+                        != (['test'] as Set)
+                        || !(probe.test instanceof String)
+                        || probe.test.trim().isEmpty()
+            }
+        }) {
+    throw new GradleException(
+            'The external-blocker catalog must contain exactly 57 '
+                    + 'unique, test-only probe declarations.')
+}
 def releasePublishedAlignmentEvidence =
         layout.buildDirectory.file(
                 'reports/local-composite/'
@@ -137,6 +206,93 @@ def sha256FileRelease = { File source ->
                 '%02x',
                 it & 0xff)
     }.join()
+}
+
+def releaseEvidenceSource = { File source ->
+    if (source == null) {
+        return [
+                path  : null,
+                sha256: null,
+                files : 0L,
+                status: 'missing'
+        ]
+    }
+    if (source.isFile()) {
+        return [
+                path  : source.absolutePath,
+                sha256:
+                        sha256FileRelease(
+                                source),
+                files : 1L,
+                status: 'present'
+        ]
+    }
+    if (!source.isDirectory()) {
+        return [
+                path  : source.absolutePath,
+                sha256: null,
+                files : 0L,
+                status: 'missing'
+        ]
+    }
+    def entries =
+            fileTree(source) {
+                include 'TEST-*.xml'
+            }.files.collect { evidenceFile ->
+                [
+                        source  : evidenceFile,
+                        relative:
+                                source.toPath()
+                                        .relativize(
+                                                evidenceFile.toPath())
+                                        .toString()
+                                        .replace(
+                                                File.separatorChar,
+                                                '/' as char)
+                ]
+            }.sort { left, right ->
+                left.relative <=> right.relative
+            }
+    if (entries.isEmpty()) {
+        return [
+                path  : source.absolutePath,
+                sha256: null,
+                files : 0L,
+                status: 'missing'
+        ]
+    }
+    def digest =
+            java.security.MessageDigest
+                    .getInstance('SHA-256')
+    entries.each { entry ->
+        digest.update(
+                entry.relative.getBytes(
+                        'UTF-8'))
+        digest.update(0 as byte)
+        entry.source.withInputStream { input ->
+            byte[] buffer = new byte[8192]
+            int read
+            while ((read = input.read(buffer)) >= 0) {
+                if (read > 0) {
+                    digest.update(
+                            buffer, 0, read)
+                }
+            }
+        }
+        digest.update(0 as byte)
+    }
+    [
+            path  : source.absolutePath,
+            sha256:
+                    digest.digest().collect {
+                        String.format(
+                                java.util.Locale.ROOT,
+                                '%02x',
+                                it & 0xff)
+                    }.join(),
+            files : (long) entries.size(),
+            status: 'present'
+    ]
 }
 
 def readReleaseProperties = { File source ->
@@ -380,8 +536,23 @@ def yamlProjectionVersionRelease = {
 def classifyReleaseFailure = {
     String className,
     String testName,
+    String failureType,
     String message ->
-    String value = message == null ? '' : message
+    String logicalMessage =
+            message == null
+                    ? ''
+                    : message
+    if (failureType != null
+            && !failureType.isEmpty()) {
+        String wrapper =
+                failureType + ': '
+        if (logicalMessage.startsWith(
+                wrapper)) {
+            logicalMessage =
+                    logicalMessage.substring(
+                            wrapper.length())
+        }
+    }
     String normalizedTestName =
             testName != null
                     && testName.endsWith('()')
@@ -405,201 +576,13 @@ def classifyReleaseFailure = {
     def exactExternalProbe =
             releaseExternalProbes.find {
                 it.test == testId
-                        && value.contains(
-                        it.messageContains)
+                        && logicalMessage.startsWith(
+                        it.fingerprintPrefix)
             }
     if (exactExternalProbe != null) {
         return 'dependency-evidence-before-coordination'
     }
-    def fixedRepositoryAuditTestIds = [
-            'blue.coordination.processor.'
-                    + 'FixedRepositoryBoundSourceProviderTest'
-                    + '#shouldVerifyEveryFixedRepositoryDefinition'
-                    + 'UnderBoundSourceContent()',
-            'blue.coordination.processor.'
-                    + 'LocalFixedRepositoryCompatibilityTest'
-                    + '#shouldResolveEveryRequiredGeneratedType'
-                    + 'AtItsManifestBlueId()'
-    ] as Set
-    boolean fixedRepositoryAudit =
-            fixedRepositoryAuditTestIds.contains(
-                    testId)
-    def fixedMandateTestIds = [
-            'blue.coordination.processor.mandate.'
-                    + 'DocumentResponderMandateEligibilityTest'
-                    + '#shouldAuthorizeVerifiedDocumentResponder'
-                    + 'MandateSubtype()',
-            'blue.coordination.processor.mandate.'
-                    + 'OperationMandateEligibilityTest'
-                    + '#shouldAuthorizeVerifiedOperationMandateSubtype()',
-            'blue.coordination.processor.mandate.'
-                    + 'OperationMandateEligibilityTest'
-                    + '#shouldRejectDifferentFixedMandateType()'
-    ] as Set
-    boolean fixedMandateEvidence =
-            value.contains(
-                    'invalid-exact-mandate-evidence')
-                    && (fixedMandateTestIds.contains(
-                    testId)
-                    || (className
-                    == 'blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest'
-                    && testName
-                    ==~ /^[0-9]+: coord-mand-[0-9]+@[a-z0-9-]+$/))
-    def checkpointCoalescingTestIds = [
-            'blue.coordination.processor.'
-                    + 'AllTimelinesChannelProcessorTest'
-                    + '#shouldEnsureThatAllTimelinesWithSeveral'
-                    + 'MatchingChildrenDeliversOnce()',
-            'blue.coordination.processor.'
-                    + 'AllTimelinesChannelProcessorTest'
-                    + '#shouldSelectTheFirstMatchingAllTimelines'
-                    + 'ChildKeyWhenOrdersTie()',
-            'blue.coordination.processor.'
-                    + 'AllTimelinesChannelProcessorTest'
-                    + '#shouldConsumePlatformDeliveryOrderAcrossTimelines()',
-            'blue.coordination.processor.'
-                    + 'CompositeTimelineChannelProcessorTest'
-                    + '#shouldEnsureThatDirectChildAndUnionHandlersMayBothRun()',
-            'blue.coordination.processor.'
-                    + 'TimelineSubtypeAggregateTest'
-                    + '#shouldIncludeGeneratedMyosMembersInComposite'
-                    + 'AndCoalesceTheirDelivery()',
-            'blue.coordination.processor.'
-                    + 'TimelineSubtypeAggregateTest'
-                    + '#shouldIncludeGeneratedMyosMembersInAllTimelines'
-                    + 'AndExcludeUnrelatedChannels()'
-    ] as Set
-    def invalidExecutionEvidenceTestIds = [
-            'blue.coordination.processor.compute.'
-                    + 'ComputeProgramPlanIntegrationTest'
-                    + '#shouldKeepInvalidDefinitionProviderEvidence'
-                    + 'OutOfRuntimeFatal()'
-    ] as Set
-    def processEmbeddedRoutingTestIds = [
-            'blue.coordination.processor.compute.'
-                    + 'OfferPaynoteEmbeddedOrdersWorkflowTest'
-                    + '#shouldEmbedRestaurantAndHotelOrders'
-                    + 'AfterAuthorization()',
-            'blue.coordination.processor.compute.'
-                    + 'OfferPaynoteEmbeddedOrdersWorkflowTest'
-                    + '#shouldMakePackageReadyAfterCapturing'
-                    + 'ConfirmedComponentOrders()',
-            'blue.coordination.processor.compute.'
-                    + 'OfferPaynoteEmbeddedOrdersWorkflowTest'
-                    + '#shouldRequestCaptureOnlyAfterBoth'
-                    + 'ComponentOrdersConfirm()',
-            'blue.coordination.processor.compute.'
-                    + 'OfferPaynoteEmbeddedOrdersWorkflowTest'
-                    + '#shouldRejectCaptureBeforeBoth'
-                    + 'ComponentOrdersConfirm()',
-            'blue.coordination.processor.compute.'
-                    + 'OfferPaynoteEmbeddedOrdersWorkflowTest'
-                    + '#shouldRejectComponentOrderBefore'
-                    + 'PaynoteAuthorization()',
-            'blue.coordination.processor.compute.'
-                    + 'OfferPaynoteEmbeddedOrdersWorkflowTest'
-                    + '#shouldAuthorizeDeliveredPackagePaynote()',
-            'blue.coordination.processor.compute.'
-                    + 'OfferPaynoteEmbeddedOrdersWorkflowTest'
-                    + '#shouldPreserveSnapshotOptimizations'
-                    + 'AcrossPackageLifecycle()'
-    ] as Set
-    def handlerMaterializationTestIds = [
-            'blue.coordination.processor.'
-                    + 'OperationRequestLogicalRoutingTest'
-                    + '#shouldEnsureThatFragmentedWhitespaceOperation'
-                    + 'KeepsOrdinarySourceDelivery()'
-    ] as Set
-    def flagshipDeliveryEvidenceTestIds = [
-            'blue.coordination.processor.'
-                    + 'CoordinationComplexEmbeddedDeterminismFlagshipTest'
-                    + '#shouldExposeOnlyOrderedRootEventsAcrossEvery'
-                    + 'RepresentationProviderVariant()',
-            'blue.coordination.processor.'
-                    + 'CoordinationComplexEmbeddedDeterminismFlagshipTest'
-                    + '#shouldKeepDescendantEventsInternalAcrossEvery'
-                    + 'RepresentationProviderVariant()'
-    ] as Set
-    def hostedBexOutputTestIds = [
-            'blue.coordination.processor.RuntimeChannelsTest'
-                    + '#shouldEnsureThatRuntimeDocumentUpdateChannel'
-                    + 'ReceivesUpdateEvents()',
-            'blue.coordination.processor.RuntimeChannelsTest'
-                    + '#shouldEnsureThatNestedUpdatesPropagateTo'
-                    + 'ParentWatchers()',
-            'blue.coordination.processor.SequentialWorkflowExecutionTest'
-                    + '#shouldExposeUpdatedDocumentToComputeEventStep()',
-            'blue.coordination.processor.SequentialWorkflowExecutionTest'
-                    + '#shouldEmitChatMessageFromFullCounterWorkflow()'
-    ] as Set
-    def embeddedBridgeTestIds = [
-            'blue.coordination.processor.RuntimeChannelsTest'
-                    + '#shouldEnsureThatEmbeddedNodeChannelBridges'
-                    + 'ConfiguredChildEmissions()'
-    ] as Set
-    def admittedExactBexTestIds = [
-            'blue.coordination.processor.compute.'
-                    + 'DynamicEmbeddedParticipantsWorkflowTest'
-                    + '#shouldCountChatsAfterAliceAddsEmbeddedParticipants()'
-    ] as Set
-    def pureReferenceRootTransitionTestIds = [
-            'blue.coordination.processor.'
-                    + 'CoordinationDocumentSplitterProcessingMatrixTest'
-                    + '#shouldPreserveProcessSemanticsAcross'
-                    + 'SplitRepresentations()'
-    ] as Set
-    boolean explicitlyAttributedLanguageFailure =
-            (checkpointCoalescingTestIds.contains(
-                    testId)
-                    && value.contains(
-                    'Language checkpoint coalescing defect'))
-                    || (invalidExecutionEvidenceTestIds.contains(
-                    testId)
-                    && value.contains(
-                    'Language invalid-execution-evidence '
-                            + 'classification defect:'))
-                    || (processEmbeddedRoutingTestIds.contains(
-                    testId)
-                    && value.contains(
-                    'Language Process Embedded routing defect:'))
-                    || (handlerMaterializationTestIds.contains(
-                    testId)
-                    && value.contains(
-                    'Language handler-match reference materialization '
-                            + 'defect:'))
-                    || (flagshipDeliveryEvidenceTestIds.contains(
-                    testId)
-                    && value.contains(
-                    'Language flagship external-delivery evidence drift:'))
-                    || (hostedBexOutputTestIds.contains(
-                    testId)
-                    && value.contains(
-                    'Language hosted BEX semantic-output provenance defect:'))
-                    || (embeddedBridgeTestIds.contains(
-                    testId)
-                    && value.contains(
-                    'Language Embedded Node Channel bridge defect:'))
-                    || (admittedExactBexTestIds.contains(
-                    testId)
-                    && value.contains(
-                    'BEX admitted-exact canonical materialization defect:'))
-                    || (pureReferenceRootTransitionTestIds.contains(
-                    testId)
-                    && value.contains(
-                    'Language pure-reference Root transition defect:'))
-    boolean fixedBexConformanceFailure =
-            className
-            == 'blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest'
-                    && testName
-                    ==~ /^[0-9]+: coord-wf-08@[a-z0-9-]+$/
-                    && value.contains(
-                    'Unsupported BEX output value kind')
-    fixedRepositoryAudit
-            || fixedMandateEvidence
-            || explicitlyAttributedLanguageFailure
-            || fixedBexConformanceFailure
-            ? 'dependency-evidence-before-coordination'
-            : 'coordination-behavior-or-evidence'
+    'coordination-behavior-or-evidence'
 }
 
 def readReleaseJUnit = { File directory ->
@@ -645,6 +628,24 @@ def readReleaseJUnit = { File directory ->
                     failure == null
                             ? null
                             : failure.@message.toString()
+            String failureType =
+                    failure == null
+                            ? null
+                            : failure.@type.toString()
+            String logicalMessage =
+                    message
+            if (logicalMessage != null
+                    && failureType != null
+                    && !failureType.isEmpty()) {
+                String wrapper =
+                        failureType + ': '
+                if (logicalMessage.startsWith(
+                        wrapper)) {
+                    logicalMessage =
+                            logicalMessage.substring(
+                                    wrapper.length())
+                }
+            }
             records.add([
                     id       :
                             testCase.@classname.toString()
@@ -662,9 +663,14 @@ def readReleaseJUnit = { File directory ->
                                             .toString(),
                                     testCase.@name
                                             .toString(),
+                                    failureType,
                                     message)
                                     : status,
-                    message  : message
+                    failureType:
+                            failureType,
+                    message  : message,
+                    logicalMessage:
+                            logicalMessage
             ])
         }
     }
@@ -972,6 +978,9 @@ def readReleaseFlagshipLocality = { File source ->
     }
 }
 
+ext.coordinationReleaseReadFlagshipLocality =
+        readReleaseFlagshipLocality
+
 def releaseEvidenceTest =
         tasks.register(
                 'coordinationReleaseEvidenceTest',
@@ -1172,6 +1181,125 @@ def generateCoordinationReleaseFinalReport =
         try {
         def blockers =
                 new ArrayList<String>()
+        File partitionFile =
+                releasePartitionEvidence
+                        .get().asFile
+        File sameRunFile =
+                releaseSameRunEvidence
+                        .get().asFile
+        def partition = [
+                status  : 'missing',
+                observed: [:]
+        ]
+        String partitionParseError = null
+        if (partitionFile.isFile()) {
+            try {
+                partition =
+                        new JsonSlurper()
+                                .parse(
+                                        partitionFile)
+            } catch (Exception invalidPartition) {
+                partitionParseError =
+                        invalidPartition.message
+                                ?: invalidPartition
+                                .class.name
+            }
+        }
+        boolean partitionVerified =
+                partitionParseError == null
+                        && partition.status
+                        == 'verified'
+                        && partition
+                        .multisetUnionMatches == true
+                        && partition
+                        .observed?.full?.total == 899
+                        && partition
+                        .observed?.full?.unique == 899
+                        && partition
+                        .observed?.working?.total == 842
+                        && partition
+                        .observed?.working?.unique == 842
+                        && partition
+                        .observed?.probes?.total == 57
+                        && partition
+                        .observed?.probes?.unique == 57
+                        && partition.overlap
+                        instanceof Map
+                        && partition.overlap.isEmpty()
+                        && partition.missing
+                        instanceof Map
+                        && partition.missing.isEmpty()
+                        && partition.extra
+                        instanceof Map
+                        && partition.extra.isEmpty()
+                        && partition.catalogMissing
+                        instanceof Map
+                        && partition.catalogMissing
+                        .isEmpty()
+                        && partition.catalogExtra
+                        instanceof Map
+                        && partition.catalogExtra
+                        .isEmpty()
+        if (!partitionVerified) {
+            blockers.add(
+                    'The same-run full-suite partition is not the exact '
+                            + '899 = 842 + 57 disjoint multiset union'
+                            + (partitionParseError == null
+                            ? '.'
+                            : ': ' + partitionParseError + '.'))
+        }
+        def sameRun = [
+                status       : 'missing',
+                conformance  : [:],
+                flagship     : [:],
+                runtimeTrace : [:],
+                fixedRepository:
+                        [:],
+                providerLocality:
+                        [:],
+                evidenceSources:
+                        [:]
+        ]
+        String sameRunParseError = null
+        if (sameRunFile.isFile()) {
+            try {
+                sameRun =
+                        new JsonSlurper()
+                                .parse(
+                                        sameRunFile)
+            } catch (Exception invalidSameRun) {
+                sameRunParseError =
+                        invalidSameRun.message
+                                ?: invalidSameRun
+                                .class.name
+            }
+        }
+        boolean sameRunEvidenceComplete =
+                sameRunParseError == null
+                        && sameRun.status
+                        == 'complete'
+                        && sameRun.evidenceSources
+                        instanceof Map
+                        && !sameRun.evidenceSources
+                        .isEmpty()
+                        && sameRun.evidenceSources
+                        .values().every {
+                    it.status == 'present'
+                            && it.path
+                            instanceof String
+                            && it.sha256
+                            instanceof String
+                            && it.sha256
+                            ==~ /[0-9a-f]{64}/
+                }
+        if (!sameRunEvidenceComplete) {
+            blockers.add(
+                    'The same-run machine-readable evidence bundle is '
+                            + 'missing, invalid, or incomplete'
+                            + (sameRunParseError == null
+                            ? '.'
+                            : ': ' + sameRunParseError + '.'))
+        }
         def releaseGates =
                 new LinkedHashMap<String, Object>()
         releaseRequiredGateTaskNames.each { taskName ->
@@ -1278,17 +1406,65 @@ def generateCoordinationReleaseFinalReport =
                             + 'inventories do not match exactly.')
         }
 
+        Long requiredBehaviorEvidence =
+                sameRun.conformance
+                        ?.behavior?.required
+                instanceof Number
+                        ? sameRun.conformance
+                        .behavior.required
+                        .longValue()
+                        : null
+        Long requiredPortableGasEvidence =
+                sameRun.conformance
+                        ?.portableGas?.required
+                instanceof Number
+                        ? sameRun.conformance
+                        .portableGas.required
+                        .longValue()
+                        : null
+        Long requiredHostQuotaEvidence =
+                sameRun.conformance
+                        ?.hostQuota?.required
+                instanceof Number
+                        ? sameRun.conformance
+                        .hostQuota.required
+                        .longValue()
+                        : null
+        Long requiredTotalEvidence =
+                sameRun.conformance
+                        ?.total?.required
+                instanceof Number
+                        ? sameRun.conformance
+                        .total.required
+                        .longValue()
+                        : null
+        long requiredBehavior =
+                requiredBehaviorEvidence == null
+                        ? -1L
+                        : requiredBehaviorEvidence
+        long requiredPortableGas =
+                requiredPortableGasEvidence == null
+                        ? -1L
+                        : requiredPortableGasEvidence
+        long requiredHostQuota =
+                requiredHostQuotaEvidence == null
+                        ? -1L
+                        : requiredHostQuotaEvidence
+        long requiredTotal =
+                requiredTotalEvidence == null
+                        ? -1L
+                        : requiredTotalEvidence
         def behavior = classConformanceResult(
                 tests,
                 'blue.coordination.processor.'
                         + 'CoordinationBehaviorFixtureHarnessTest',
-                65L,
+                requiredBehavior,
                 '^[0-9]+: coord-(?:chan|e2e|fail|mand|route|split|time|wf)-[0-9]+@[a-z0-9-]+$')
         def portableGas = classConformanceResult(
                 tests,
                 'blue.language.processor.'
                         + 'CoordinationDirectPortableGasMicrofixtureTest',
-                14L,
+                requiredPortableGas,
                 '^shouldExecuteDirectPortableGasMicrofixture'
                         + '\\[[0-9]+\\] coordination/conformance/fixtures/'
                         + 'gas-micro/[A-Za-z0-9]+\\.yaml$')
@@ -1296,11 +1472,11 @@ def generateCoordinationReleaseFinalReport =
                 tests,
                 'blue.coordination.processor.'
                         + 'CoordinationHostQuotaFixtureTest',
-                7L,
+                requiredHostQuota,
                 '^coordination-host-[a-z0-9-]+ '
                         + '\\[[a-z0-9-]+\\.yaml\\]$')
         def totalConformance = [
-                required   : 86L,
+                required   : requiredTotal,
                 executed   :
                         behavior.executed
                                 + portableGas.executed
@@ -1322,20 +1498,41 @@ def generateCoordinationReleaseFinalReport =
                                 + portableGas.notExecuted
                                 + hostQuota.notExecuted
         ]
-        if (behavior.executed != 65L
-                || behavior.passed != 65L
-                || portableGas.executed != 14L
-                || portableGas.passed != 14L
-                || hostQuota.executed != 7L
-                || hostQuota.passed != 7L
-                || totalConformance.executed != 86L
-                || totalConformance.passed != 86L
+        if (requiredBehavior < 0L
+                || requiredPortableGas < 0L
+                || requiredHostQuota < 0L
+                || requiredTotal < 0L
+                || requiredBehavior
+                + requiredPortableGas
+                + requiredHostQuota
+                != requiredTotal
+                || behavior.executed
+                != requiredBehavior
+                || behavior.passed
+                != requiredBehavior
+                || portableGas.executed
+                != requiredPortableGas
+                || portableGas.passed
+                != requiredPortableGas
+                || hostQuota.executed
+                != requiredHostQuota
+                || hostQuota.passed
+                != requiredHostQuota
+                || totalConformance.executed
+                != requiredTotal
+                || totalConformance.passed
+                != requiredTotal
                 || totalConformance.failed != 0L
                 || totalConformance.skipped != 0L) {
             blockers.add(
                     'Closed executable conformance is not '
-                            + '65/65 behavior, 14/14 portable gas, '
-                            + '7/7 host quota, and 86/86 total.')
+                            + "${requiredBehavior}/${requiredBehavior} "
+                            + 'behavior, '
+                            + "${requiredPortableGas}/"
+                            + "${requiredPortableGas} portable gas, "
+                            + "${requiredHostQuota}/"
+                            + "${requiredHostQuota} host quota, and "
+                            + "${requiredTotal}/${requiredTotal} total.")
         }
 
         def flagshipRecords =
@@ -1349,6 +1546,18 @@ def generateCoordinationReleaseFinalReport =
                         && flagshipRecords.every {
                     it.status == 'passed'
                 }
+        Long requiredFlagshipEvidence =
+                sameRun.flagship
+                        ?.requiredVariants
+                instanceof Number
+                        ? sameRun.flagship
+                        .requiredVariants
+                        .longValue()
+                        : null
+        long requiredFlagshipRuns =
+                requiredFlagshipEvidence == null
+                        ? -1L
+                        : requiredFlagshipEvidence
         long flagshipRuns = 0L
         File flagshipFile =
                 releaseFlagshipEvidence
@@ -1360,13 +1569,17 @@ def generateCoordinationReleaseFinalReport =
                 && flagshipLocality.status
                 == 'verified'
                 && flagshipLocality.matrixRows
-                == 32L) {
-            flagshipRuns = 32L
+                == requiredFlagshipRuns) {
+            flagshipRuns =
+                    flagshipLocality.matrixRows
         }
-        if (flagshipRuns != 32L) {
+        if (requiredFlagshipRuns < 0L
+                || flagshipRuns
+                != requiredFlagshipRuns) {
             blockers.add(
                     'The exact flagship representation/provider '
-                            + "matrix is ${flagshipRuns}/32.")
+                            + "matrix is ${flagshipRuns}/"
+                            + "${requiredFlagshipRuns}.")
         }
         if (flagshipLocality
                 .forbiddenProviderDemandCount != 0L
@@ -1410,14 +1623,29 @@ def generateCoordinationReleaseFinalReport =
                         }
             }
         }
+        Long requiredTraceEvidence =
+                sameRun.runtimeTrace
+                        ?.requiredEntries
+                instanceof Number
+                        ? sameRun.runtimeTrace
+                        .requiredEntries
+                        .longValue()
+                        : null
+        long requiredTraceEntries =
+                requiredTraceEvidence == null
+                        ? -1L
+                        : requiredTraceEvidence
         boolean traceGreen =
                 traceEntries != null
+                        && requiredTraceEntries >= 0L
                         && traceEntries.longValue()
-                        == 516L
+                        == requiredTraceEntries
         if (!traceGreen) {
             blockers.add(
                     'The same-run repeated-counter trace did not '
-                            + 'prove exactly 516 retained entries.')
+                            + 'prove exactly '
+                            + requiredTraceEntries
+                            + ' retained entries.')
         }
 
         def projectionAlgorithmIdentities =
@@ -1466,8 +1694,9 @@ def generateCoordinationReleaseFinalReport =
         }
 
         File repositoryManifest =
-                file('../blue-repository-java/'
-                        + 'src/main/resources/blue/repo/manifest.json')
+                new File(
+                        releaseBlueRepositoryComposite,
+                        'src/main/resources/blue/repo/manifest.json')
         File conformanceManifestForRepository =
                 file('src/test/resources/coordination/conformance/'
                         + 'manifest.yaml')
@@ -1522,7 +1751,7 @@ def generateCoordinationReleaseFinalReport =
                 bex         :
                         file('../blue-bex-java'),
                 repository  :
-                        file('../blue-repository-java')
+                        releaseBlueRepositoryComposite
         ]
         def sourceStates =
                 new LinkedHashMap<String, Object>()
@@ -1842,8 +2071,9 @@ def generateCoordinationReleaseFinalReport =
                 file('src/main/java/blue/coordination/processor/'
                         + 'CoordinationDocumentSplitter.java')
         File fixedRepositoryBlueSource =
-                file('../blue-repository-java/'
-                        + 'src/main/resources/blue/repo/'
+                new File(
+                        releaseBlueRepositoryComposite,
+                        'src/main/resources/blue/repo/'
                         + 'BlueRepository.blue')
         File currentJar =
                 tasks.named('jar').get()
@@ -2275,7 +2505,9 @@ def generateCoordinationReleaseFinalReport =
                                         + '.jar')),
                 repositoryJarSha256:
                         sha256FileRelease(
-                                file('../blue-repository-java/build/libs/'
+                                new File(
+                                        releaseBlueRepositoryComposite,
+                                        'build/libs/'
                                         + 'blue-repo-java-'
                                         + coordinates.repository.version
                                         + (System.getenv('CI')
@@ -2398,19 +2630,70 @@ def generateCoordinationReleaseFinalReport =
                             + 'same-run source and artifact identities.')
         }
 
-        boolean fixedCatalogCountsMatch =
-                fixedCatalog.total == 1107L
-                        && fixedCatalog.verified
-                        == fixedCatalog.total
-                        && fixedCatalog.failed == 0L
+        def fixedRequiredClosure =
+                fixedCatalog.requiredClosure
+                instanceof Map
+                        ? fixedCatalog.requiredClosure
+                        : [:]
+        Long requiredFixedTotal =
+                sameRun.fixedRepository
+                        ?.total
+                instanceof Number
+                        ? sameRun.fixedRepository
+                        .total.longValue()
+                        : null
+        Long requiredFixedVerified =
+                sameRun.fixedRepository
+                        ?.verified
+                instanceof Number
+                        ? sameRun.fixedRepository
+                        .verified.longValue()
+                        : null
+        boolean fixedRequiredClosureCountsMatch =
+                requiredFixedTotal != null
+                        && requiredFixedVerified != null
+                        && fixedRequiredClosure.total
+                        == requiredFixedTotal
+                        && fixedRequiredClosure.audited
+                        == sameRun.fixedRepository.audited
+                        && fixedRequiredClosure.verified
+                        == requiredFixedVerified
+                        && fixedRequiredClosure.missing
+                        == sameRun.fixedRepository.missing
+                        && fixedRequiredClosure.invalidEvidence
+                        == sameRun.fixedRepository.invalidEvidence
+                        && fixedRequiredClosure.unavailable
+                        == sameRun.fixedRepository.unavailable
+                        && fixedRequiredClosure.incompleteCyclicProof
+                        == sameRun.fixedRepository
+                        .incompleteCyclicProof
+                        && fixedRequiredClosure.eligible == true
+                        && sameRun.fixedRepository.eligible == true
+                        && fixedRequiredClosure.audited
+                        == fixedRequiredClosure.total
+                        && fixedRequiredClosure.verified
+                        == fixedRequiredClosure.total
+                        && fixedRequiredClosure.missing == 0L
+                        && fixedRequiredClosure.invalidEvidence == 0L
+                        && fixedRequiredClosure.unavailable == 0L
+                        && fixedRequiredClosure
+                        .incompleteCyclicProof == 0L
+                        && fixedRequiredClosure
+                        .incompatibilityProofs instanceof List
+                        && fixedRequiredClosure
+                        .incompatibilityProofs.isEmpty()
+        boolean fixedCatalogDiagnosticComplete =
+                fixedCatalog.total instanceof Number
+                        && fixedCatalog.verified instanceof Number
+                        && fixedCatalog.failed instanceof Number
+                        && fixedCatalog.total
+                        == fixedCatalog.verified
+                        + fixedCatalog.failed
                         && fixedCatalog.cyclicSetCount == 10L
                         && fixedCatalog.cyclicMemberCount == 27L
                         && fixedCatalog.entries instanceof List
                         && fixedCatalog.entries.size()
                         == fixedCatalog.total
-                        && fixedCatalog.entries.every {
-                    it.outcome == 'FOUND'
-                }
                         && fixedCatalog.entries.count {
                     it.cyclicMember == true
                 } == fixedCatalog.cyclicMemberCount
@@ -2418,35 +2701,160 @@ def generateCoordinationReleaseFinalReport =
                 fixedCatalog.schema
                         == ('blue.coordination/'
                         + 'fixed-repository-catalog-audit/1.0')
-                        && fixedCatalog.status == 'verified'
+                        && fixedCatalog.status == 'informative'
+                        && fixedCatalog.releaseEligibilityBasis
+                        == 'requiredClosure'
+                        && fixedCatalog.releaseEligible
+                        == fixedRequiredClosure.eligible
                         && fixedCatalog.providerMode
                         == 'BOUND_SOURCE_CONTENT'
                         && fixedCatalog.repositoryCoordinate
                         == coordinates.repository.coordinate
                         && fixedCatalog.repositoryVersion
                         == repositoryManifestValue.repositoryVersion
+                        && fixedCatalog.repositoryVersion
+                        == sameRun.fixedRepository.version
                         && fixedCatalog.repositoryManifestBlueId
                         == repositoryManifestValue
                         .repositoryVersionBlueId
-                        && fixedCatalog.repositoryManifestSha256
+                        && fixedCatalog
+                        .observedLoadedManifestSha256
                         == artifacts.fixedRepositoryManifestSha256
-                        && fixedCatalog.repositoryCommit
+                        && fixedCatalog
+                        .immutableHeadExpectedManifestSha256
+                        == artifacts.fixedRepositoryManifestSha256
+                        && fixedCatalog.loadedManifestMatchesImmutableHead
+                        == true
+                        && fixedCatalog.immutableHeadCommit
                         == coordinates.repository.commit
-                        && fixedCatalog.repositoryArtifactSha256
+                        && fixedCatalog
+                        .selectedRepositoryArtifactSha256
                         == artifacts.repositoryJarSha256
-                        && (fixedCatalog.repositoryArtifactSha256
+                        && (fixedCatalog
+                        .selectedRepositoryArtifactSha256
                         instanceof String)
-                        && (fixedCatalog.repositoryArtifactSha256
+                        && (fixedCatalog
+                        .selectedRepositoryArtifactSha256
                         ==~ /[0-9a-f]{64}/)
-        if (!fixedCatalogCountsMatch
+                        && fixedRequiredClosure.repositoryVersion
+                        == repositoryManifestValue.repositoryVersion
+                        && fixedRequiredClosure
+                        .repositoryManifestBlueId
+                        == repositoryManifestValue
+                        .repositoryVersionBlueId
+                        && fixedRequiredClosure
+                        .repositoryManifestSha256
+                        == artifacts.fixedRepositoryManifestSha256
+                        && fixedRequiredClosure.repositoryHeadCommit
+                        == coordinates.repository.commit
+        if (!fixedRequiredClosureCountsMatch
+                || !fixedCatalogDiagnosticComplete
                 || !fixedCatalogIdentityMatches) {
             blockers.add(
-                    'The complete 1,107-definition fixed Repository '
-                            + 'BOUND_SOURCE_CONTENT audit is not green or '
-                            + 'does not match the same-run Repository '
-                            + 'source, manifest, artifact, and cyclic-set '
-                            + 'identities.')
+                    'The exact '
+                            + requiredFixedTotal
+                            + '-definition required fixed Repository closure '
+                            + 'is not fully verified under '
+                            + 'BOUND_SOURCE_CONTENT, or its informative '
+                            + 'full-catalog audit does not match the '
+                            + 'same-run Repository identities.')
         }
+
+        boolean sameRunMetricsMatch =
+                sameRun.conformance
+                        ?.behavior?.required
+                        == behavior.required
+                        && sameRun.conformance
+                        ?.behavior?.executed
+                        == behavior.executed
+                        && sameRun.conformance
+                        ?.behavior?.passed
+                        == behavior.passed
+                        && sameRun.conformance
+                        ?.portableGas?.required
+                        == portableGas.required
+                        && sameRun.conformance
+                        ?.portableGas?.executed
+                        == portableGas.executed
+                        && sameRun.conformance
+                        ?.portableGas?.passed
+                        == portableGas.passed
+                        && sameRun.conformance
+                        ?.hostQuota?.required
+                        == hostQuota.required
+                        && sameRun.conformance
+                        ?.hostQuota?.executed
+                        == hostQuota.executed
+                        && sameRun.conformance
+                        ?.hostQuota?.passed
+                        == hostQuota.passed
+                        && sameRun.conformance
+                        ?.total?.required
+                        == totalConformance.required
+                        && sameRun.conformance
+                        ?.total?.executed
+                        == totalConformance.executed
+                        && sameRun.conformance
+                        ?.total?.passed
+                        == totalConformance.passed
+                        && sameRun.flagship
+                        ?.requiredVariants
+                        == requiredFlagshipRuns
+                        && sameRun.flagship
+                        ?.passedVariants
+                        == flagshipRuns
+                        && sameRun.runtimeTrace
+                        ?.requiredEntries
+                        == requiredTraceEntries
+                        && sameRun.runtimeTrace
+                        ?.observedEntries
+                        == traceEntries
+                        && sameRun.fixedRepository
+                        ?.total
+                        == fixedCatalog.total
+                        && sameRun.fixedRepository
+                        ?.verified
+                        == fixedCatalog.verified
+                        && sameRun.fixedRepository
+                        ?.failed
+                        == fixedCatalog.failed
+                        && sameRun.providerLocality
+                        ?.forbiddenProviderDemandCount
+                        == flagshipLocality
+                        .forbiddenProviderDemandCount
+                        && sameRun.providerLocality
+                        ?.forbiddenBackendLoadCount
+                        == flagshipLocality
+                        .forbiddenBackendLoadCount
+        if (!sameRunMetricsMatch) {
+            blockers.add(
+                    'The strict release metrics do not exactly match the '
+                            + 'same-run machine-readable evidence bundle.')
+        }
+
+        def evidenceSources = [
+                fullSuite:
+                        releaseEvidenceSource(
+                                releaseTestResults
+                                        .get().asFile),
+                partition:
+                        releaseEvidenceSource(
+                                partitionFile),
+                sameRun:
+                        releaseEvidenceSource(
+                                sameRunFile),
+                blockerCatalog:
+                        releaseEvidenceSource(
+                                releaseExternalBlockerCatalogFile),
+                fixedRepository:
+                        releaseEvidenceSource(
+                                fixedCatalogReport),
+                flagship:
+                        releaseEvidenceSource(
+                                flagshipFile),
+                derived:
+                        sameRun.evidenceSources
+        ]
 
         def failureCases =
                 tests.records.findAll {
@@ -2495,6 +2903,28 @@ def generateCoordinationReleaseFinalReport =
                         ],
                 requiredReleaseGates:
                         releaseGates,
+                testPartition:
+                        [
+                                verified:
+                                        partitionVerified,
+                                parseError:
+                                        partitionParseError,
+                                receipt:
+                                        partition
+                        ],
+                sameRunEvidence:
+                        [
+                                complete:
+                                        sameRunEvidenceComplete,
+                                metricsMatch:
+                                        sameRunMetricsMatch,
+                                parseError:
+                                        sameRunParseError,
+                                receipt:
+                                        sameRun
+                        ],
+                evidenceSources:
+                        evidenceSources,
                 focusedSuites:
                         focusedSuites,
                 siblingSourceLocks:
@@ -2624,12 +3054,14 @@ def generateCoordinationReleaseFinalReport =
                         ],
                 flagship:
                         [
-                                required: 32L,
+                                required:
+                                        requiredFlagshipRuns,
                                 passed  : flagshipRuns
                         ],
                 repeatedCounterTrace:
                         [
-                                requiredEntries: 516L,
+                                requiredEntries:
+                                        requiredTraceEntries,
                                 observedEntries:
                                         traceEntries,
                                 passed         :
@@ -2644,10 +3076,14 @@ def generateCoordinationReleaseFinalReport =
                                                 .repositoryVersionBlueId,
                                 manifestCompatible:
                                         repositoryManifestCompatible,
-                                catalogCountsMatch:
-                                        fixedCatalogCountsMatch,
+                                requiredClosureCountsMatch:
+                                        fixedRequiredClosureCountsMatch,
+                                fullCatalogDiagnosticComplete:
+                                        fixedCatalogDiagnosticComplete,
                                 sameRunIdentityMatch:
                                         fixedCatalogIdentityMatches,
+                                requiredClosure:
+                                        fixedRequiredClosure,
                                 catalogAudit:
                                         fixedCatalog
                         ],
@@ -2730,16 +3166,25 @@ def generateCoordinationReleaseFinalReport =
                             + "`${tests.skipped}` skipped; "
                             + "`${tests.notExecuted}` not executed")
             writer.writeLine(
-                    "- Conformance: `${totalConformance.passed}/86`")
+                    "- Conformance: `${totalConformance.passed}/"
+                            + "${totalConformance.required}`")
             writer.writeLine(
-                    "- Flagship: `${flagshipRuns}/32`")
+                    "- Flagship: `${flagshipRuns}/"
+                            + "${requiredFlagshipRuns}`")
             writer.writeLine(
                     "- Repeated-counter trace: "
-                            + "`${traceEntries ?: 'not-executed'}/516`")
+                            + "`${traceEntries ?: 'not-executed'}/"
+                            + "${requiredTraceEntries}`")
             writer.writeLine(
                     "- Fixed Repository: "
-                            + "`${fixedCatalog.verified ?: 0}/"
-                            + "${fixedCatalog.total ?: 1107}`")
+                            + "`${fixedCatalog.verified}/"
+                            + "${fixedCatalog.total}`")
+            writer.writeLine(
+                    '- Test partition: `'
+                            + "${partition.observed?.full?.total} = "
+                            + "${partition.observed?.working?.total} + "
+                            + "${partition.observed?.probes?.total}` "
+                            + "(`${partition.status}`)")
             writer.writeLine(
                     "- Public API: `${api.publicApiDigest ?: 'missing'}`")
             writer.writeLine(
@@ -2842,6 +3287,16 @@ generateCoordinationReleaseFinalReport.configure {
                 ?.receiptComplete != true
                 || report.conformanceClosure
                 ?.receiptIdentityMatches != true
+                || report.testPartition
+                ?.verified != true
+                || report.sameRunEvidence
+                ?.complete != true
+                || report.sameRunEvidence
+                ?.metricsMatch != true
+                || !(report.evidenceSources
+                instanceof Map)
+                || report.evidenceSources
+                .isEmpty()
                 || report.forbiddenProviderDemandCount
                 != 0) {
             throw new GradleException(
@@ -2902,6 +3357,30 @@ tasks.configureEach { candidate ->
         candidate.mustRunAfter(
                 coordinationReleaseClean)
     }
+}
+
+ext.coordinationReleaseRegisterRequiredEvidenceGate = {
+    String taskName ->
+        if (releaseRequiredGateTaskNames
+                .contains(
+                        taskName)) {
+            return
+        }
+        def gate =
+                tasks.named(
+                        taskName)
+        releaseRequiredGateTaskNames.add(
+                taskName)
+        finalCoordinationVerification.configure {
+            dependsOn gate
+        }
+        generateCoordinationReleaseFinalReport.configure {
+            shouldRunAfter gate
+        }
+        gate.configure {
+            finalizedBy(
+                    generateCoordinationReleaseFinalReport)
+        }
 }
 
 ext.finalCoordinationVerificationTask =

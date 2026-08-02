@@ -339,7 +339,9 @@ class SelectiveProcessingReportWriterTest {
         if (reverseInputOrder) {
             identities.put(
                     "repositoryLocalProject",
-                    "../blue-repository-java@local-composite");
+                    ".gradle/immutable-local-repository/"
+                            + "63be6b7d8d2752b5a8c90f38e672859e9b3949a1"
+                            + "@exact-local-composite");
             identities.put(
                     "languageGitCommit",
                     "0000000000000000000000000000000000000001");
@@ -349,7 +351,9 @@ class SelectiveProcessingReportWriterTest {
                     "0000000000000000000000000000000000000001");
             identities.put(
                     "repositoryLocalProject",
-                    "../blue-repository-java@local-composite");
+                    ".gradle/immutable-local-repository/"
+                            + "63be6b7d8d2752b5a8c90f38e672859e9b3949a1"
+                            + "@exact-local-composite");
         }
 
         SelectiveProcessingReportWriter.Section routing =

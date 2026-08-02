@@ -16,8 +16,11 @@ The closed top-level fields are `schema`, `id`, `vectors`, `category`,
 - `split`
 - `timeline-order`
 
-The executor configures `BlueRepository.latest()` from the local
-`../blue-repository-java` composite build, registers the real Coordination
+The executor configures `BlueRepository.latest()` from the exact local
+composite materialized at the locked Repository commit
+`63be6b7d8d2752b5a8c90f38e672859e9b3949a1`. The materialization reads the
+local `../blue-repository-java` Git object database but never consumes or
+changes that checkout's working files. It registers the real Coordination
 processors, consumes the fixed Repository's exact manifest BlueIds directly
 from every repository-backed fixture `type`, preprocesses those canonical
 nodes for ordinary Blue value typing, and dispatches the corresponding
@@ -53,14 +56,16 @@ in a prefetch window. This does not invent a batch method or portable work.
 Mandate document inline/reference coverage is exercised through the production
 Mandate path.
 
-This package remains a candidate. The current local fixed Repository contains
-provider bodies that do not calculate to the BlueIds declared by its manifest,
-so strict Language verification fails closed. The harness validates exact
-feeder revision pairs, source keys, Mandate target evidence, and splitter
-catalog selections, then invokes the verified-evidence PROCESS overload. Every
-authored PROCESS fixture supplies the exact managed/indexed revision pair and
-eligible source occurrence sequence; empty or partial feeder evidence fails
-closed.
+This package remains a candidate until the same-run required-closure audit and
+all executable cases pass. The required audit verifies exact immutable
+Repository resources against their published identities under the bound source
+environment. The complete catalog remains informative compatibility evidence;
+unrelated domains do not determine Coordination eligibility. The harness
+validates exact feeder revision pairs, source keys, Mandate target evidence,
+and splitter catalog selections, then invokes the verified-evidence PROCESS
+overload. Every authored PROCESS fixture supplies the exact managed/indexed
+revision pair and eligible source occurrence sequence; empty or partial feeder
+evidence fails closed.
 
 `trace.forbiddenDemands` filters the observed semantic-demand order against
 forbidden executable-body BlueIds independently derived from splitter metadata.

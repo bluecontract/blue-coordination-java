@@ -482,6 +482,11 @@ class SequentialWorkflowExecutionTest {
         DocumentProcessingResult result = processChat(fixture, document, "owner", 1, "run");
 
         // Then
+        ExternalBlockerProbeAssertions
+                .classifyHostedSemanticOutput(
+                        result,
+                        document,
+                        "Compute event after Update Document");
         assertEquals(
                 ProcessorStatus.SUCCESS,
                 result.status(),
@@ -530,6 +535,11 @@ class SequentialWorkflowExecutionTest {
                 new Node().value(7));
 
         // Then
+        ExternalBlockerProbeAssertions
+                .classifyHostedSemanticOutput(
+                        result,
+                        document,
+                        "full counter workflow event");
         assertEquals(
                 ProcessorStatus.SUCCESS,
                 result.status(),

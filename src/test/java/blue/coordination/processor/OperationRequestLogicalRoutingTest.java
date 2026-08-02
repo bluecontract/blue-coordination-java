@@ -167,6 +167,62 @@ final class OperationRequestLogicalRoutingTest {
                         fragments.event);
 
         // Then
+        List<Node> exactOperationCandidates =
+                fragments.provider.fetchByBlueId(
+                        fragments.operationBlueId);
+        boolean exactProviderEvidence =
+                exactOperationCandidates != null
+                        && exactOperationCandidates.size() == 1
+                        && "increment".equals(
+                        exactOperationCandidates.get(0)
+                                .getValue())
+                        && fragments.operationBlueId
+                        .equals(
+                                BlueIdCalculator
+                                        .calculateBlueId(
+                                                exactOperationCandidates
+                                                        .get(0)));
+        boolean exactMatcherDefect =
+                exactProviderEvidence
+                        && result.status()
+                        == ProcessorStatus.SUCCESS
+                        && fixture.operations.executions == 0
+                        && fixture.metrics.handlersExecuted == 2
+                        && hasCheckpoint(
+                        result.document(), "source-a")
+                        && hasCheckpoint(
+                        result.document(), "source-b")
+                        && !hasCheckpoint(
+                        result.document(), "target");
+        ExternalBlockerProbeAssertions.classify(
+                "handler-match-reference-materialization",
+                "Language handler-match reference materialization defect:",
+                exactMatcherDefect,
+                result.status()
+                        == ProcessorStatus.SUCCESS
+                        && fixture.operations.executions == 1
+                        && fixture.metrics.handlersExecuted == 1,
+                "status=" + result.status()
+                        + ", diagnostic="
+                        + ProcessingResultTestSupport
+                        .diagnosticMessage(result)
+                        + ", operationBlueId="
+                        + fragments.operationBlueId
+                        + ", exactProviderEvidence="
+                        + exactProviderEvidence
+                        + ", operationExecutions="
+                        + fixture.operations.executions
+                        + ", handlerExecutions="
+                        + fixture.metrics.handlersExecuted
+                        + ", checkpoints="
+                        + hasCheckpoint(
+                        result.document(), "source-a")
+                        + "/"
+                        + hasCheckpoint(
+                        result.document(), "source-b")
+                        + "/"
+                        + hasCheckpoint(
+                        result.document(), "target"));
         assertSuccess(result);
         assertEquals(1, fixture.operations.executions);
         assertEquals(1, fixture.metrics.handlersExecuted);
@@ -570,7 +626,9 @@ final class OperationRequestLogicalRoutingTest {
                     : null;
         };
         return new FragmentedEvent(
-                event, provider);
+                event,
+                provider,
+                operationValue);
     }
 
     private static String addFragment(
@@ -649,12 +707,16 @@ final class OperationRequestLogicalRoutingTest {
     private static final class FragmentedEvent {
         private final Node event;
         private final NodeProvider provider;
+        private final String operationBlueId;
 
         private FragmentedEvent(
                 Node event,
-                NodeProvider provider) {
+                NodeProvider provider,
+                String operationBlueId) {
             this.event = event;
             this.provider = provider;
+            this.operationBlueId =
+                    operationBlueId;
         }
     }
 

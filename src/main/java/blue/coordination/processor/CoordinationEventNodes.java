@@ -428,6 +428,15 @@ final class CoordinationEventNodes {
             return channel.equals(
                     direct.channel());
         }
+        OperationRequestView exactReferenced =
+                handlerOperationRequest(
+                        event,
+                        context);
+        if (exactReferenced != null) {
+            return exactReferenced.routable()
+                    && channel.equals(
+                            exactReferenced.channel());
+        }
         if (direct != null
                 && !hasReferencedRoutingFields(event)) {
             return false;
@@ -446,6 +455,61 @@ final class CoordinationEventNodes {
                         new Node().value(channel));
         return matchesDirectOrTimelineOperationRequest(
                 requestPattern, context);
+    }
+
+    private static OperationRequestView handlerOperationRequest(
+            Node event,
+            HandlerMatchContext context) {
+        Node projectedEvent =
+                materializeIfReference(
+                        event,
+                        context);
+        if (projectedEvent == null) {
+            return null;
+        }
+        Node request = projectedEvent;
+        if (declaresExactType(
+                projectedEvent,
+                TimelineEntry.blueId())) {
+            request = materializeIfReference(
+                    property(
+                            projectedEvent,
+                            MESSAGE_FIELD),
+                    context);
+        }
+        if (!declaresExactType(
+                request,
+                OperationRequest.blueId())) {
+            return null;
+        }
+        Node projectedRequest =
+                request.clone();
+        if (projectedRequest.getProperties()
+                != null) {
+            String[] routingFields =
+                    new String[] {
+                            OPERATION_FIELD,
+                            CHANNEL_FIELD
+                    };
+            for (String field : routingFields) {
+                Node supplied =
+                        property(
+                                request,
+                                field);
+                if (supplied != null
+                        && supplied.isReferenceOnly()) {
+                    projectedRequest
+                            .getProperties()
+                            .put(
+                                    field,
+                                    context
+                                            .materializeExactReference(
+                                                    supplied));
+                }
+            }
+        }
+        return OperationRequestView.from(
+                projectedRequest);
     }
 
     private static boolean hasReferencedRoutingFields(
@@ -547,6 +611,14 @@ final class CoordinationEventNodes {
     private static Node materializeIfReference(
             Node node,
             ExternalChannelFunctionContext context) {
+        return node != null && node.isReferenceOnly()
+                ? context.materializeExactReference(node)
+                : node;
+    }
+
+    private static Node materializeIfReference(
+            Node node,
+            HandlerMatchContext context) {
         return node != null && node.isReferenceOnly()
                 ? context.materializeExactReference(node)
                 : node;

@@ -20,17 +20,17 @@ class LocalCompositeDependencyTest {
     @Test
     void shouldLoadEveryBlueDependencyFromItsSiblingCompositeBuild()
             throws IOException, URISyntaxException {
-        // Given
+        // given
         Class<?> languageType = Blue.class;
         Class<?> bexType = BexEngine.class;
         Class<?> repositoryType = BlueRepository.class;
 
-        // When
+        // when
         Path languageLocation = codeSourceLocation(languageType);
         Path bexLocation = codeSourceLocation(bexType);
         Path repositoryLocation = codeSourceLocation(repositoryType);
 
-        // Then
+        // then
         assertLocalBuild(
                 languageType,
                 languageLocation,
@@ -39,10 +39,23 @@ class LocalCompositeDependencyTest {
                 bexType,
                 bexLocation,
                 "blue-bex-java");
-        assertLocalBuild(
+        Path immutableLocalRepository =
+                Paths.get(
+                                System.getProperty(
+                                        "user.dir"))
+                        .toAbsolutePath()
+                        .normalize()
+                        .resolve(
+                                ".gradle/immutable-local-repository/"
+                                        + CoordinationRequiredRepositoryClosure
+                                        .REPOSITORY_HEAD_COMMIT)
+                        .normalize()
+                        .toRealPath();
+        assertLocalBuildRoot(
                 repositoryType,
                 repositoryLocation,
-                "blue-repository-java");
+                immutableLocalRepository,
+                "the exact immutable local blue-repository-java HEAD");
     }
 
     private static Path codeSourceLocation(
@@ -76,9 +89,23 @@ class LocalCompositeDependencyTest {
                 .resolve("../" + siblingName)
                 .normalize()
                 .toRealPath();
+        assertLocalBuildRoot(
+                type,
+                actual,
+                expectedSibling,
+                "../" + siblingName);
+    }
+
+    private static void assertLocalBuildRoot(
+            Class<?> type,
+            Path actual,
+            Path expectedRoot,
+            String sourceDescription) {
         assertTrue(
-                actual.startsWith(expectedSibling),
-                type.getName() + " did not load from ../" + siblingName
+                actual.startsWith(
+                        expectedRoot),
+                type.getName() + " did not load from "
+                        + sourceDescription
                         + ": " + actual);
     }
 }

@@ -4,8 +4,11 @@ import blue.coordination.processor.CoordinationHostQuotaSchedule;
 import blue.coordination.processor.CoordinationHostQuotaSession;
 import blue.coordination.processor.CoordinationHostQuotaTraceEntry;
 import blue.coordination.processor.CoordinationHostQuotas;
+import blue.coordination.processor.ExternalBlockerProbeAssertions;
+import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.utils.BlueIdCalculator;
+import blue.repo.BlueRepository;
 import blue.repo.coordination.Request;
 import blue.repo.mandate.DocumentResponderMandate;
 import blue.repo.mandate.OperationMandate;
@@ -273,8 +276,34 @@ class DocumentResponderMandateEligibilityTest {
         // When
         MandateEligibilityDecision decision =
                 evaluateSingleCandidate(fixture, subtype);
+        String providerDiagnostic =
+                fixedTypeProviderDiagnostic(
+                        MyOSDocumentBootstrapMandate
+                                .blueId());
 
         // Then
+        ExternalBlockerProbeAssertions.classify(
+                "fixed-repository-mandate-subtype-evidence",
+                "Fixed Repository Mandate subtype evidence defect:",
+                decision.isIneligible()
+                        && "invalid-exact-responder-mandate-evidence"
+                        .equals(decision.reason())
+                        && "Schema validation failed at path "
+                        .concat(
+                                "/timelineId: Required node has no "
+                                        + "value, items, or object fields.")
+                        .equals(providerDiagnostic),
+                decision.isEligible()
+                        && providerDiagnostic == null,
+                "type="
+                        + MyOSDocumentBootstrapMandate
+                        .blueId()
+                        + ", decision="
+                        + decision.outcome()
+                        + "/"
+                        + decision.reason()
+                        + ", providerDiagnostic="
+                        + providerDiagnostic);
         assertTrue(decision.isEligible());
     }
 
@@ -420,5 +449,20 @@ class DocumentResponderMandateEligibilityTest {
     private static Node reference(Node exactNode) {
         return new Node().blueId(
                 BlueIdCalculator.calculateBlueId(exactNode));
+    }
+
+    private static String fixedTypeProviderDiagnostic(
+            String blueId) {
+        Blue blue =
+                BlueRepository.latest()
+                        .configure(new Blue());
+        try {
+            blue.loadSnapshot(blueId);
+            return null;
+        } catch (RuntimeException failure) {
+            return failure.getMessage();
+        } finally {
+            blue.close();
+        }
     }
 }

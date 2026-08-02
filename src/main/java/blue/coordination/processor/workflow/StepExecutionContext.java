@@ -229,7 +229,8 @@ public final class StepExecutionContext {
                 ? workflowStateView
                 : new WorkflowExecutionState().snapshotView();
         this.staticUpdatePlan = staticUpdatePlan;
-        this.eventRef = processorContext.event();
+        this.eventRef =
+                processorContext.occurrenceEvent();
         this.workflowBexGasLedgerHost = workflowBexGasLedgerHost;
         this.workingDocument = workingDocument;
     }

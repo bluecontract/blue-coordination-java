@@ -207,16 +207,19 @@ public final class CoordinationCurrentRootDeliveryPlanDeriver
         }
 
         Collections.sort(candidates, Candidate.CANONICAL_ORDER);
+        List<SubscriptionDelta.Entry> retainedActiveSurface =
+                new ArrayList<>();
+        for (SubscriptionDelta.Entry entry : activeSurface) {
+            retainedActiveSurface.add(activeInterval(entry));
+        }
         ExternalDeliveryPlan.Builder plan =
                 ExternalDeliveryPlan.builder()
                         .revisions(0L, 0L)
                         .eventOrderKey(
                                 eventOrder(exactEvent))
+                        .activeSubscriptionIntervals(
+                                retainedActiveSurface)
                         .exactRuntimeState();
-        for (SubscriptionDelta.Entry entry : activeSurface) {
-            plan.activeSubscriptionInterval(
-                    activeInterval(entry));
-        }
         for (Candidate candidate : candidates) {
             if (candidate.evaluation.preselects()) {
                 if (candidate.evaluation.accepts()) {

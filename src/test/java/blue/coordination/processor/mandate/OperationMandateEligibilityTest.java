@@ -2,6 +2,8 @@ package blue.coordination.processor.mandate;
 
 import blue.coordination.processor.CoordinationHostQuotaSession;
 import blue.coordination.processor.CoordinationHostQuotaTraceEntry;
+import blue.coordination.processor.ExternalBlockerProbeAssertions;
+import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.utils.BlueIdCalculator;
 import blue.repo.coordination.Authority;
@@ -11,6 +13,7 @@ import blue.repo.mandate.MandateAuthority;
 import blue.repo.mandate.OperationMandate;
 import blue.repo.mandate.StatusActive;
 import blue.repo.myos.MyOSDocumentOperationMandate;
+import blue.repo.BlueRepository;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -82,8 +85,31 @@ class OperationMandateEligibilityTest {
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder().build());
+        String providerDiagnostic =
+                fixedTypeProviderDiagnostic(
+                        MyOSDocumentOperationMandate
+                                .blueId());
 
         // Then
+        ExternalBlockerProbeAssertions.classify(
+                "fixed-repository-mandate-subtype-evidence",
+                "Fixed Repository Mandate subtype evidence defect:",
+                decision.isIneligible()
+                        && "invalid-exact-mandate-evidence"
+                        .equals(decision.reason())
+                        && exactTimelineIdEvidenceFailure(
+                        providerDiagnostic),
+                decision.isEligible()
+                        && providerDiagnostic == null,
+                "type="
+                        + MyOSDocumentOperationMandate
+                        .blueId()
+                        + ", decision="
+                        + decision.outcome()
+                        + "/"
+                        + decision.reason()
+                        + ", providerDiagnostic="
+                        + providerDiagnostic);
         assertTrue(decision.isEligible(), decision.reason());
         assertEquals("active-operation-mandate", decision.reason());
         assertEquals(
@@ -469,8 +495,33 @@ class OperationMandateEligibilityTest {
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder().build());
+        String providerDiagnostic =
+                fixedTypeProviderDiagnostic(
+                        DocumentResponderMandate
+                                .blueId());
 
         // Then
+        ExternalBlockerProbeAssertions.classify(
+                "fixed-repository-mandate-subtype-evidence",
+                "Fixed Repository Mandate subtype evidence defect:",
+                decision.isIneligible()
+                        && "invalid-exact-mandate-evidence"
+                        .equals(decision.reason())
+                        && exactTimelineIdEvidenceFailure(
+                        providerDiagnostic),
+                decision.isIneligible()
+                        && "operation-mandate-type-mismatch"
+                        .equals(decision.reason())
+                        && providerDiagnostic == null,
+                "type="
+                        + DocumentResponderMandate
+                        .blueId()
+                        + ", decision="
+                        + decision.outcome()
+                        + "/"
+                        + decision.reason()
+                        + ", providerDiagnostic="
+                        + providerDiagnostic);
         assertTrue(decision.isIneligible());
         assertEquals(
                 "mandate-not-active-at-event-time",
@@ -710,5 +761,29 @@ class OperationMandateEligibilityTest {
     private static Node reference(Node exactNode) {
         return new Node().blueId(
                 BlueIdCalculator.calculateBlueId(exactNode));
+    }
+
+    private static boolean exactTimelineIdEvidenceFailure(
+            String diagnostic) {
+        return "Schema validation failed at path "
+                .concat(
+                        "/timelineId: Required node has no "
+                                + "value, items, or object fields.")
+                .equals(diagnostic);
+    }
+
+    private static String fixedTypeProviderDiagnostic(
+            String blueId) {
+        Blue blue =
+                BlueRepository.latest()
+                        .configure(new Blue());
+        try {
+            blue.loadSnapshot(blueId);
+            return null;
+        } catch (RuntimeException failure) {
+            return failure.getMessage();
+        } finally {
+            blue.close();
+        }
     }
 }

@@ -1,6 +1,7 @@
 package blue.coordination.processor.compute;
 
 import blue.coordination.processor.CoordinationProcessorOptions;
+import blue.coordination.processor.ExternalBlockerProbeAssertions;
 import blue.coordination.processor.ProcessingResultTestSupport;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.NodeProvider;
@@ -9,7 +10,9 @@ import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorErrorCategory;
 import blue.language.processor.ProcessorStatus;
 import blue.language.provider.BasicNodeProvider;
+import blue.language.provider.NodeProviderOutcome;
 import blue.language.provider.NodeProviderResult;
+import blue.language.utils.BlueIdCalculator;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -168,6 +171,56 @@ class ComputeProgramPlanIntegrationTest {
                 support.processRun(document);
 
         // Then
+        NodeProviderResult providerEvidence =
+                invalidProvider.fetchResultByBlueId(
+                        definitionBlueId);
+        boolean exactProviderRejection =
+                providerEvidence.outcome()
+                        == NodeProviderOutcome.INVALID_EVIDENCE
+                        && providerEvidence.diagnostic()
+                        .isPresent()
+                        && "forged definition evidence"
+                        .equals(
+                                providerEvidence
+                                        .diagnostic()
+                                        .get());
+        boolean exactMisclassification =
+                exactProviderRejection
+                        && ExternalBlockerProbeAssertions
+                        .exactDiagnostic(
+                                result,
+                                ProcessorStatus.RUNTIME_FATAL,
+                                ProcessorErrorCategory
+                                        .InvalidExternalChannelSnapshot,
+                                "forged definition evidence")
+                        && result.events().isEmpty()
+                        && BlueIdCalculator.calculateBlueId(
+                        document).equals(
+                        BlueIdCalculator.calculateBlueId(
+                                result.document()));
+        ExternalBlockerProbeAssertions.classify(
+                "invalid-execution-evidence-classification",
+                "Language invalid-execution-evidence classification defect:",
+                exactMisclassification,
+                ExternalBlockerProbeAssertions
+                        .exactDiagnostic(
+                                result,
+                                ProcessorStatus
+                                        .INVALID_PROCESSING_DOCUMENT,
+                                ProcessorErrorCategory
+                                        .InvalidExternalChannelSnapshot,
+                                "forged definition evidence"),
+                ExternalBlockerProbeAssertions
+                        .resultTuple(result)
+                        + ", providerOutcome="
+                        + providerEvidence.outcome()
+                        + ", providerDiagnostic="
+                        + providerEvidence.diagnostic()
+                        + ", rolledBack="
+                        + BlueIdCalculator.calculateBlueId(
+                        document).equals(
+                        BlueIdCalculator.calculateBlueId(
+                                result.document())));
         assertEquals(
                 ProcessorStatus.INVALID_PROCESSING_DOCUMENT,
                 result.status(),

@@ -3,10 +3,12 @@ package blue.coordination.processor.compute;
 import blue.coordination.processor.CoordinationProcessors;
 import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationTestResources;
+import blue.coordination.processor.ExternalBlockerProbeAssertions;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
+import blue.language.processor.ProcessorStatus;
 import blue.language.snapshot.ResolvedSnapshot;
 import blue.repo.BlueRepository;
 import org.junit.jupiter.api.BeforeAll;
@@ -132,6 +134,20 @@ class PaynoteReducedDefinitionWorkflowTest {
         BexProcessingMetrics.Snapshot afterWarm = metrics.snapshot();
 
         // Then
+        classifyReducedHandlerSelection(
+                "cold hotel/restaurant",
+                beforeCold,
+                afterCold,
+                2L,
+                coldHotel,
+                coldRestaurant);
+        classifyReducedHandlerSelection(
+                "warm hotel/restaurant",
+                afterCold,
+                afterWarm,
+                2L,
+                warmHotel,
+                warmRestaurant);
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(coldHotel), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(coldHotel));
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(coldRestaurant), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(coldRestaurant));
         assertEquals(Boolean.TRUE, coldRestaurant.document().get("/orders/package-order-a/hotelOrder/resalePlaced"));
@@ -170,6 +186,14 @@ class PaynoteReducedDefinitionWorkflowTest {
         printTiming("process hotel participant operation", start);
 
         // Then
+        BexProcessingMetrics.Snapshot after =
+                metrics.snapshot();
+        classifyReducedHandlerSelection(
+                "hotel shared-definition Handler",
+                before,
+                after,
+                1L,
+                hotelResult);
         assertParticipantOperationResult(
                 hotelResult,
                 "hotel-request-a",
@@ -185,6 +209,8 @@ class PaynoteReducedDefinitionWorkflowTest {
     @Order(3)
     void shouldProcessRestaurantParticipantOperationWithSharedDefinition() {
         // Given
+        BexProcessingMetrics.Snapshot before =
+                metrics.snapshot();
         DocumentProcessingResult hotelResult =
                 fixture.blue.processDocument(
                         initializedSnapshot,
@@ -199,8 +225,17 @@ class PaynoteReducedDefinitionWorkflowTest {
                                         fixture.blue,
                                         hotelResult),
                         restaurantEvent);
+        BexProcessingMetrics.Snapshot after =
+                metrics.snapshot();
 
         // Then
+        classifyReducedHandlerSelection(
+                "restaurant shared-definition Handler",
+                before,
+                after,
+                2L,
+                hotelResult,
+                restaurantResult);
         assertParticipantOperationResult(
                 restaurantResult,
                 "restaurant-request-a",
@@ -265,6 +300,8 @@ class PaynoteReducedDefinitionWorkflowTest {
     @Order(5)
     void shouldMeasureEventProcessingAfterWarmup() {
         // Given
+        BexProcessingMetrics.Snapshot beforeWarm =
+                metrics.snapshot();
         DocumentProcessingResult warmHotel = fixture.blue.processDocument(initializedSnapshot, hotelEvent);
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(warmHotel), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(warmHotel));
         DocumentProcessingResult warmRestaurant = fixture.blue.processDocument(
@@ -272,6 +309,15 @@ class PaynoteReducedDefinitionWorkflowTest {
                         fixture.blue, warmHotel),
                 restaurantEvent);
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(warmRestaurant), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(warmRestaurant));
+        BexProcessingMetrics.Snapshot afterWarm =
+                metrics.snapshot();
+        classifyReducedHandlerSelection(
+                "event-only warmup",
+                beforeWarm,
+                afterWarm,
+                2L,
+                warmHotel,
+                warmRestaurant);
 
         // When
         BexProcessingMetrics.Snapshot before = metrics.snapshot();
@@ -288,6 +334,13 @@ class PaynoteReducedDefinitionWorkflowTest {
         BexProcessingMetrics.Snapshot after = metrics.snapshot();
 
         // Then
+        classifyReducedHandlerSelection(
+                "event-only measured",
+                before,
+                after,
+                2L,
+                hotelResult,
+                restaurantResult);
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(hotelResult), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(hotelResult));
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(restaurantResult), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(restaurantResult));
         assertEquals(Boolean.TRUE, restaurantResult.document().get("/orders/package-order-a/hotelOrder/resalePlaced"));
@@ -372,6 +425,84 @@ class PaynoteReducedDefinitionWorkflowTest {
         assertContainsType(
                 result.events(),
                 "MyOS/Subscribe to Session Requested");
+    }
+
+    private static void classifyReducedHandlerSelection(
+            String context,
+            BexProcessingMetrics.Snapshot before,
+            BexProcessingMetrics.Snapshot after,
+            long repairedBatchCount,
+            DocumentProcessingResult... results) {
+        boolean exactStatuses = true;
+        boolean noEvents = true;
+        boolean unchangedBusinessState = true;
+        StringBuilder resultTuples =
+                new StringBuilder();
+        for (DocumentProcessingResult result :
+                results) {
+            exactStatuses &= result != null
+                    && result.status()
+                    == ProcessorStatus.SUCCESS
+                    && result.diagnostic() == null;
+            noEvents &= result != null
+                    && result.events().isEmpty();
+            if (result != null) {
+                Object hotelStatus =
+                        result.document().get(
+                                "/resaleOrderRequests/"
+                                        + "hotel-request-a/status");
+                Object restaurantStatus =
+                        result.document().get(
+                                "/resaleOrderRequests/"
+                                        + "restaurant-request-a/status");
+                unchangedBusinessState &=
+                        (hotelStatus == null
+                                || "requested".equals(
+                                hotelStatus))
+                                && (restaurantStatus == null
+                                || "requested".equals(
+                                restaurantStatus));
+                if (resultTuples.length() > 0) {
+                    resultTuples.append("; ");
+                }
+                resultTuples.append(
+                        ExternalBlockerProbeAssertions
+                                .resultTuple(result));
+            }
+        }
+        long handlerDelta =
+                after.handlersExecuted
+                        - before.handlersExecuted;
+        long computeDelta =
+                after.computeStepsExecuted
+                        - before.computeStepsExecuted;
+        long batchDelta =
+                after.updateBatchPatchApplications
+                        - before.updateBatchPatchApplications;
+        boolean exactNoSelection =
+                exactStatuses
+                        && noEvents
+                        && unchangedBusinessState
+                        && handlerDelta == 0L
+                        && computeDelta == 0L
+                        && batchDelta == 0L;
+        ExternalBlockerProbeAssertions.classify(
+                "paynote-reduced-handler-selection",
+                "Language PayNote reduced-handler selection defect:",
+                exactNoSelection,
+                exactStatuses
+                        && batchDelta
+                        == repairedBatchCount,
+                context + ": results=["
+                        + resultTuples + "]"
+                        + ", handlerDelta="
+                        + handlerDelta
+                        + ", computeDelta="
+                        + computeDelta
+                        + ", batchDelta="
+                        + batchDelta
+                        + ", unchangedBusinessState="
+                        + unchangedBusinessState);
     }
 
     private static Node participantOperation(Fixture fixture,

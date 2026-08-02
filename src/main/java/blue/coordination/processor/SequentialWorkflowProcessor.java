@@ -50,7 +50,7 @@ public final class SequentialWorkflowProcessor implements HandlerProcessor<Seque
     public boolean matches(SequentialWorkflow contract, HandlerMatchContext context) {
         return !CoordinationEventNodes
                 .isRoutableOperationRequestForChannel(
-                        context.event(),
+                        context.occurrenceEvent(),
                         context.channelKey(),
                         context)
                 && SequentialWorkflowEventMatcher.matches(
