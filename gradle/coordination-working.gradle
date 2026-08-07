@@ -25,30 +25,71 @@ if (!workingBlueRepositoryComposite.isDirectory()) {
 
 def workingCatalogFile =
         file('gradle/coordination-external-blockers.json')
+def workingSiblingInputsEvidence =
+        layout.buildDirectory.file(
+                'reports/latest-language-embedded-collections/'
+                        + 'sibling-inputs.json')
+def workingResolvedDependencyLockEvidence =
+        layout.buildDirectory.file(
+                'reports/latest-language-embedded-collections/'
+                        + 'resolved-dependency-lock.json')
+def workingSiblingLockFile =
+        file('gradle/blue-sibling-lock.properties')
+def workingSiblingLock = new Properties()
+workingSiblingLockFile.withInputStream {
+    workingSiblingLock.load(it)
+}
 def workingCatalog =
         new JsonSlurper().parse(workingCatalogFile)
 def workingBlockers =
         workingCatalog.blockers as List
 if (workingCatalog.schema
-        != 'blue-coordination/external-blockers/1.1') {
+        != 'blue-coordination/external-blockers/1.2') {
     throw new GradleException(
             'Unsupported Coordination external-blocker catalog schema: '
                     + workingCatalog.schema)
 }
-def workingFingerprintPrefixes =
-        workingBlockers.collect {
-            it.fingerprintPrefix
-        }
-if (workingFingerprintPrefixes.any {
-    !(it instanceof String)
-            || it.trim().isEmpty()
-            || !it.endsWith(':')
+def workingExpectedSuite =
+        workingCatalog.expectedSuite
+def workingExpectedFull =
+        workingExpectedSuite?.full
+def workingExpectedWorking =
+        workingExpectedSuite?.working
+def workingExpectedProbes =
+        workingExpectedSuite?.probes
+if (!(workingExpectedFull instanceof Number)
+        || !(workingExpectedWorking instanceof Number)
+        || !(workingExpectedProbes instanceof Number)
+        || workingExpectedFull.longValue() <= 0L
+        || workingExpectedWorking.longValue() < 0L
+        || workingExpectedProbes.longValue() < 0L
+        || workingExpectedFull.longValue()
+        != workingExpectedWorking.longValue()
+        + workingExpectedProbes.longValue()) {
+    throw new GradleException(
+            'The external-blocker catalog must declare one exact '
+                    + 'full = working + probes suite partition.')
 }
-        || workingFingerprintPrefixes.toSet().size()
-        != workingFingerprintPrefixes.size()) {
+def workingFingerprints =
+        workingBlockers.collect {
+            [
+                    failureType:
+                            it.failureType,
+                    logicalMessagePrefix:
+                            it.logicalMessagePrefix
+            ]
+        }
+if (workingFingerprints.any {
+    !(it.failureType instanceof String)
+            || it.failureType.trim().isEmpty()
+            || !(it.logicalMessagePrefix instanceof String)
+            || it.logicalMessagePrefix.trim().isEmpty()
+}
+        || workingFingerprints.toSet().size()
+        != workingFingerprints.size()) {
     throw new GradleException(
             'Every external-blocker family must declare one unique, '
-                    + 'non-empty fingerprintPrefix ending in a colon.')
+                    + 'non-empty failureType/logicalMessagePrefix pair.')
 }
 def workingProbes =
         workingBlockers.collectMany { blocker ->
@@ -58,15 +99,19 @@ def workingProbes =
                         owner         : blocker.owner,
                         category      : blocker.category,
                         test          : probe.test,
-                        fingerprintPrefix:
-                                blocker.fingerprintPrefix
+                        failureType:
+                                blocker.failureType,
+                        logicalMessagePrefix:
+                                blocker.logicalMessagePrefix
                 ]
             }
         }
-if (workingProbes.size() != 57
+if (workingProbes.size()
+        != workingExpectedProbes.longValue()
         || workingProbes.collect {
             it.test
-        }.toSet().size() != 57
+        }.toSet().size()
+        != workingExpectedProbes.longValue()
         || workingBlockers.any { blocker ->
             !(blocker.probes instanceof List)
                     || blocker.probes.isEmpty()
@@ -79,24 +124,125 @@ if (workingProbes.size() != 57
             }
         }) {
     throw new GradleException(
-            'The external-blocker catalog must contain exactly 57 '
+            'The external-blocker catalog must contain exactly '
+                    + workingExpectedProbes + ' '
                     + 'unique, test-only probe declarations.')
 }
+if (workingBlockers.any { blocker ->
+    !(blocker.id instanceof String)
+            || blocker.id.trim().isEmpty()
+            || blocker.owner != 'blue-repository-java'
+            || blocker.status != 'open'
+            || !(blocker.category instanceof String)
+            || blocker.category.trim().isEmpty()
+            || !(blocker.reproductionCommand instanceof String)
+            || blocker.reproductionCommand.trim().isEmpty()
+            || !(blocker.notes instanceof String)
+            || blocker.notes.trim().isEmpty()
+            || !(blocker.firstObservedAgainst instanceof Map)
+            || blocker.firstObservedAgainst.commit
+            != workingSiblingLock.getProperty('blueRepositoryCommit')
+            || blocker.firstObservedAgainst.version
+            != workingSiblingLock.getProperty('blueRepositoryLocalVersion')
+}) {
+    throw new GradleException(
+            'Every open external blocker must be bound to the exact locked '
+                    + 'Repository commit and local version.')
+}
+def workingBehaviorFixtureClass =
+        'blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest'
+def workingBehaviorFixtureMethod =
+        'blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest.' +
+                'shouldExecuteOneAuthoredBehaviorCaseAgainstProductionApis'
+def workingDeepLocalityClass =
+        'blue.coordination.processor.CoordinationDocumentSplitterDeepLocalityTest'
+def workingDeepLocalityMethod =
+        'blue.coordination.processor.CoordinationDocumentSplitterDeepLocalityTest.' +
+                'shouldDemandOnlySelectedChainsAndAllowListedBodies'
+def workingProbeClass = { probe ->
+    probe.test.substring(
+            0, probe.test.indexOf('#'))
+}
+def workingProbeName = { probe ->
+    probe.test.substring(
+            probe.test.indexOf('#') + 1)
+}
+def workingDynamicProbes =
+        workingProbes.findAll { probe ->
+            workingProbeClass(probe)
+                    == workingBehaviorFixtureClass
+                    && workingProbeName(probe)
+                    .startsWith('coord-')
+                    && workingProbeName(probe)
+                    .contains('@')
+        }
 def workingDynamicCaseIds =
-        workingProbes.findAll {
-            it.test.startsWith(
-                    'blue.coordination.processor.'
-                            + 'CoordinationBehaviorFixtureHarnessTest#')
-        }.collect {
-            it.test.substring(
-                    it.test.indexOf('#') + 1)
+        workingDynamicProbes.collect {
+            workingProbeName(it)
         }
+def workingDeepLocalityParameterizedProbes =
+        workingProbes.findAll { probe ->
+            workingProbeClass(probe)
+                    == workingDeepLocalityClass
+                    && !workingProbeName(probe)
+                    .startsWith('should')
+        }
+def workingInitializationErrorProbes =
+        workingProbes.findAll { probe ->
+            workingProbeName(probe)
+                    == 'initializationError'
+        }
+def workingSpecialProbes =
+        (workingDynamicProbes
+                + workingDeepLocalityParameterizedProbes
+                + workingInitializationErrorProbes)
+                .toSet()
 def workingStandardProbes =
-        workingProbes.findAll {
-            !it.test.startsWith(
-                    'blue.coordination.processor.'
-                            + 'CoordinationBehaviorFixtureHarnessTest#')
+        workingProbes.findAll { probe ->
+            !workingSpecialProbes.contains(probe)
         }
+def workingStandardSelectors =
+        workingStandardProbes.collect { probe ->
+            probe.test.replace('#', '.')
+        }.toSet()
+def workingParameterizedSelectors =
+        new LinkedHashSet<String>()
+if (!workingDynamicProbes.isEmpty()) {
+    workingParameterizedSelectors.add(
+            workingBehaviorFixtureMethod)
+}
+if (!workingDeepLocalityParameterizedProbes.isEmpty()) {
+    workingParameterizedSelectors.add(
+            workingDeepLocalityMethod)
+}
+def workingInitializationErrorClassSelectors =
+        workingInitializationErrorProbes.collect { probe ->
+            workingProbeClass(probe)
+        }.toSet()
+def workingProbeSelectors =
+        new LinkedHashSet<String>()
+workingProbeSelectors.addAll(
+        workingStandardSelectors)
+workingProbeSelectors.addAll(
+        workingParameterizedSelectors)
+workingProbeSelectors.addAll(
+        workingInitializationErrorClassSelectors)
+
+def workingFixtureProbes =
+        workingProbes.findAll { probe ->
+            workingProbeClass(probe)
+                    == workingBehaviorFixtureClass
+        }
+if (workingFixtureProbes.size()
+        != workingDynamicProbes.size()
+        + workingFixtureProbes.count { probe ->
+            workingProbeName(probe)
+                    .startsWith('should')
+        }) {
+    throw new GradleException(
+            'Every authored behavior probe must be either one exact '
+                    + 'coord-...@... case ID or one exact should... method.')
+}
 
 def configureWorkingTest = { Test testTask ->
     testTask.group = 'verification'
@@ -150,10 +296,9 @@ def coordinationWorkingEvidenceTest =
                     .get().asFile.absolutePath)
     workingTest.filter {
         includeTestsMatching('*')
-        workingStandardProbes.each { probe ->
+        workingProbeSelectors.each { selector ->
             excludeTestsMatching(
-                    probe.test.replace(
-                            '#', '.'))
+                    selector)
         }
     }
 }
@@ -182,17 +327,15 @@ def coordinationExternalBlockerProbeEvidenceTest =
                             + 'probe-flagship-trace.md')
                     .get().asFile.absolutePath)
     probeTest.filter {
-        workingStandardProbes.each { probe ->
+        if (workingProbes.isEmpty()) {
             includeTestsMatching(
-                    probe.test.replace(
-                            '#', '.'))
-        }
-        if (!workingDynamicCaseIds.isEmpty()) {
-            includeTestsMatching(
-                    'blue.coordination.processor.'
-                            + 'CoordinationBehaviorFixtureHarnessTest.'
-                            + 'shouldExecuteOneAuthoredBehaviorCase'
-                            + 'AgainstProductionApis')
+                    '__coordination_no_external_blockers__')
+            setFailOnNoMatchingTests(false)
+        } else {
+            workingProbeSelectors.each { selector ->
+                includeTestsMatching(
+                        selector)
+            }
         }
     }
 }
@@ -360,16 +503,20 @@ def coordinationExternalBlockerProbeTest =
                 outcome = 'resolved'
             } else if (record.status
                     == 'failed'
+                    && record.failureType
+                    == probe.failureType
                     && record.logicalMessage != null
                     && record.logicalMessage.startsWith(
-                    probe.fingerprintPrefix)) {
+                    probe.logicalMessagePrefix)) {
                 outcome = 'exactly-blocked'
             } else {
                 outcome = 'invalid'
                 invalid.add(
                         probe.test
-                                + ': expected logical-message prefix '
-                                + probe.fingerprintPrefix
+                                + ': expected failure type '
+                                + probe.failureType
+                                + ' and logical-message prefix '
+                                + probe.logicalMessagePrefix
                                 + ' but observed '
                                 + record)
             }
@@ -379,8 +526,10 @@ def coordinationExternalBlockerProbeTest =
                     owner    : probe.owner,
                     category : probe.category,
                     test     : probe.test,
-                    fingerprintPrefix:
-                            probe.fingerprintPrefix,
+                    expectedFailureType:
+                            probe.failureType,
+                    expectedLogicalMessagePrefix:
+                            probe.logicalMessagePrefix,
                     outcome  : outcome,
                     failureType:
                             record == null
@@ -716,7 +865,7 @@ def coordinationFullSuitePartitionVerification =
                 'coordinationFullSuitePartitionVerification') {
     group = 'verification'
     description =
-            'Proves that the exact 899-case ordinary suite is the disjoint multiset union of 842 working cases and 57 catalogued probes.'
+            'Proves that the exact catalogued ordinary suite is the disjoint multiset union of its working cases and external probes.'
     dependsOn(
             tasks.named(
                     'coordinationReleaseEvidenceTest'),
@@ -796,8 +945,7 @@ def coordinationFullSuitePartitionVerification =
                         probeInventory,
                         catalogInventory)
         String dynamicPrefix =
-                'blue.coordination.processor.'
-                        + 'CoordinationBehaviorFixtureHarnessTest#'
+                'blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#'
         def observedDynamicCaseIds =
                 new TreeSet<String>(
                         probeInventory.keySet()
@@ -808,17 +956,27 @@ def coordinationFullSuitePartitionVerification =
                                 .collect {
                                     it.substring(
                                             dynamicPrefix.length())
+                                }
+                                .findAll {
+                                    it.startsWith('coord-')
+                                            && it.contains('@')
                                 })
         def expectedDynamicCaseIds =
                 new TreeSet<String>(
                         workingDynamicCaseIds)
         boolean exactCounts =
-                full.total == 899L
-                        && surface.total == 842L
-                        && probes.total == 57L
-                        && fullInventory.size() == 899
-                        && surfaceInventory.size() == 842
-                        && probeInventory.size() == 57
+                full.total
+                        == workingExpectedFull.longValue()
+                        && surface.total
+                        == workingExpectedWorking.longValue()
+                        && probes.total
+                        == workingExpectedProbes.longValue()
+                        && fullInventory.size()
+                        == workingExpectedFull.longValue()
+                        && surfaceInventory.size()
+                        == workingExpectedWorking.longValue()
+                        && probeInventory.size()
+                        == workingExpectedProbes.longValue()
         boolean passed =
                 exactCounts
                         && overlap.isEmpty()
@@ -840,9 +998,9 @@ def coordinationFullSuitePartitionVerification =
                                 : 'invalid',
                 expected:
                         [
-                                full    : 899L,
-                                working : 842L,
-                                probes  : 57L
+                                full    : workingExpectedFull.longValue(),
+                                working : workingExpectedWorking.longValue(),
+                                probes  : workingExpectedProbes.longValue()
                         ],
                 observed:
                         [
@@ -1051,7 +1209,8 @@ def generateCoordinationSameRunEvidenceReport =
     description =
             'Derives all working-report counts from the same-run full JUnit, fixed-Repository, flagship, schema, and gas evidence.'
     dependsOn(
-            coordinationFullSuitePartitionVerification)
+            coordinationFullSuitePartitionVerification,
+            coordinationExternalBlockerProbeTest)
     inputs.files(
             workingFinalReportSchema,
             workingGasFixtureEvidence,
@@ -1066,6 +1225,16 @@ def generateCoordinationSameRunEvidenceReport =
         def full =
                 readWorkingJUnit(
                         fullDirectory)
+        def partition =
+                new JsonSlurper()
+                        .parse(
+                                workingPartitionReport
+                                        .get().asFile)
+        def external =
+                new JsonSlurper()
+                        .parse(
+                                externalProbeReport
+                                        .get().asFile)
         def reportSchema =
                 new JsonSlurper()
                         .parse(
@@ -1187,27 +1356,148 @@ def generateCoordinationSameRunEvidenceReport =
                         .coordinationReleaseReadFlagshipLocality
                         .call(
                                 flagshipFile)
-        String flagshipClass =
-                'blue.coordination.processor.'
-                        + 'CoordinationComplexEmbedded'
-                        + 'DeterminismFlagshipTest#'
+        String flagshipClass = [
+                'blue.coordination.processor.',
+                'CoordinationComplexEmbedded',
+                'DeterminismFlagshipTest#'
+        ].join()
         def flagshipTests =
                 full.records.findAll {
                     it.id.toString()
                             .startsWith(
                                     flagshipClass)
                 }
+        def flagshipFailures =
+                flagshipTests.findAll {
+                    it.status == 'failed'
+                }
+        def flagshipSkipped =
+                flagshipTests.findAll {
+                    it.status == 'skipped'
+                }
+        String repositoryRuntimeProbeClass = [
+                'blue.coordination.processor.',
+                'CoordinationRepositoryRuntimeCompatibilityProbeTest#'
+        ].join()
+        def repositoryRuntimeProbeFailures =
+                full.records.findAll {
+                    it.id.toString().startsWith(
+                            repositoryRuntimeProbeClass)
+                            && it.status == 'failed'
+                }
+        def workingProbeByTest =
+                workingProbes.collectEntries { probe ->
+                    [(probe.test): probe]
+                }
+        def externalOutcomeByTest =
+                external.outcomes.collectEntries { outcome ->
+                    [(outcome.test): outcome]
+                }
+        def externalVerifierChecks = [
+                noInvalidProbes:
+                        external.invalidProbes == [],
+                declaredCountExact:
+                        external.declaredProbes.longValue()
+                        == workingExpectedProbes.longValue(),
+                executedCountExact:
+                        external.executedProbes.longValue()
+                        == workingExpectedProbes.longValue(),
+                outcomesAccountedFor:
+                        external.resolvedProbes.longValue()
+                        + external.exactlyBlockedProbes.longValue()
+                        == workingExpectedProbes.longValue()
+        ]
+        boolean externalVerifierGreen =
+                externalVerifierChecks.values().every {
+                    it == true
+                }
+        boolean partitionGreen =
+                partition.status == 'verified'
+                        && partition.observed?.full?.total
+                        == workingExpectedFull.longValue()
+                        && partition.observed?.working?.total
+                        == workingExpectedWorking.longValue()
+                        && partition.observed?.probes?.total
+                        == workingExpectedProbes.longValue()
+        def failuresAreExactDeclaredProbes = { failures ->
+            failures.every { failure ->
+                    def probe =
+                            workingProbeByTest.get(
+                                    failure.id)
+                    def outcome =
+                            externalOutcomeByTest.get(
+                                    failure.id)
+                    probe != null
+                            && failure.failureType
+                            == probe.failureType
+                            && failure.logicalMessage != null
+                            && failure.logicalMessage.startsWith(
+                            probe.logicalMessagePrefix)
+                            && outcome?.outcome
+                            == 'exactly-blocked'
+                }
+        }
+        boolean flagshipFailuresAreExactDeclaredProbes =
+                failuresAreExactDeclaredProbes(
+                        flagshipFailures)
+        boolean repositoryRuntimeFailuresAreExactDeclaredProbes =
+                repositoryRuntimeProbeFailures.size() == 3
+                        && failuresAreExactDeclaredProbes(
+                        repositoryRuntimeProbeFailures)
         boolean flagshipTestsGreen =
                 !flagshipTests.isEmpty()
                         && flagshipTests.every {
                     it.status == 'passed'
                 }
-        long flagshipPassed =
+        boolean flagshipEvidenceVerified =
                 flagshipTestsGreen
                         && flagshipLocality.status
                         == 'verified'
+        boolean flagshipExternallyBlocked =
+                !flagshipFailures.isEmpty()
+                        && flagshipSkipped.isEmpty()
+                        && flagshipFailures.size()
+                        + flagshipTests.count {
+                            it.status == 'passed'
+                        }
+                        == flagshipTests.size()
+                        && flagshipFailuresAreExactDeclaredProbes
+                        && flagshipLocality.status == 'missing'
+                        && partitionGreen
+                        && externalVerifierGreen
+        boolean flagshipMigratedToEngineGate =
+                flagshipTests.isEmpty()
+                        && repositoryRuntimeFailuresAreExactDeclaredProbes
+                        && flagshipLocality.status == 'missing'
+                        && partitionGreen
+                        && externalVerifierGreen
+        flagshipExternallyBlocked =
+                flagshipExternallyBlocked
+                        || flagshipMigratedToEngineGate
+        long flagshipExecuted =
+                flagshipEvidenceVerified
                         ? flagshipLocality.matrixRows
                         : 0L
+        long flagshipPassed =
+                flagshipEvidenceVerified
+                        ? flagshipLocality.matrixRows
+                        : 0L
+        String flagshipStatus =
+                flagshipEvidenceVerified
+                        ? 'verified'
+                        : (flagshipExternallyBlocked
+                        ? 'externally-blocked'
+                        : flagshipLocality.status)
+        Long forbiddenProviderDemandCount =
+                flagshipEvidenceVerified
+                        ? flagshipLocality
+                        .forbiddenProviderDemandCount
+                        : null
+        Long forbiddenBackendLoadCount =
+                flagshipEvidenceVerified
+                        ? flagshipLocality
+                        .forbiddenBackendLoadCount
+                        : null
         String requiredTraceText =
                 workingYamlScalar(
                         workingGasFixtureEvidence,
@@ -1233,6 +1523,10 @@ def generateCoordinationSameRunEvidenceReport =
                         workingEvidenceSource(
                                 workingPartitionReport
                                         .get().asFile),
+                externalBlockers:
+                        workingEvidenceSource(
+                                externalProbeReport
+                                        .get().asFile),
                 fixedRepository:
                         workingEvidenceSource(
                                 fixedFile),
@@ -1249,43 +1543,78 @@ def generateCoordinationSameRunEvidenceReport =
                         workingEvidenceSource(
                                 workingConformanceManifest)
         ]
-        boolean evidenceComplete =
-                evidenceSources.fullSuite.status
-                        == 'present'
-                        && evidenceSources.partition.status
-                        == 'present'
-                        && evidenceSources.fixedRepository.status
-                        == 'present'
-                        && evidenceSources.flagship.status
-                        == 'present'
-                        && evidenceSources.releaseSchema.status
-                        == 'present'
-                        && evidenceSources.gasFixtures.status
-                        == 'present'
-                        && evidenceSources
-                        .conformanceManifest.status
-                        == 'present'
-                        && full.total == 899L
-                        && requiredTraceEntries != null
-                        && observedTraceEntries != null
-                        && flagshipLocality
-                        .forbiddenProviderDemandCount
-                        != null
-                        && flagshipLocality
-                        .forbiddenBackendLoadCount
-                        != null
-                        && fixedRequiredClosure.total
+        def completenessChecks = [
+                fullSuitePresent:
+                        evidenceSources.fullSuite.status
+                        == 'present',
+                partitionPresent:
+                        evidenceSources.partition.status
+                        == 'present',
+                externalBlockersPresent:
+                        evidenceSources.externalBlockers.status
+                        == 'present',
+                fixedRepositoryPresent:
+                        evidenceSources.fixedRepository.status
+                        == 'present',
+                flagshipEvidenceAccountedFor:
+                        flagshipEvidenceVerified
+                                ? evidenceSources.flagship.status
+                                == 'present'
+                                : flagshipExternallyBlocked
+                                && evidenceSources.flagship.status
+                                == 'missing',
+                releaseSchemaPresent:
+                        evidenceSources.releaseSchema.status
+                        == 'present',
+                gasFixturesPresent:
+                        evidenceSources.gasFixtures.status
+                        == 'present',
+                conformanceManifestPresent:
+                        evidenceSources.conformanceManifest.status
+                        == 'present',
+                fullSuiteCountExact:
+                        full.total
+                        == workingExpectedFull.longValue(),
+                partitionVerified:
+                        partitionGreen,
+                externalVerifierGreen:
+                        externalVerifierGreen,
+                flagshipFailuresDeclared:
+                        flagshipMigratedToEngineGate
+                                ? repositoryRuntimeFailuresAreExactDeclaredProbes
+                                : flagshipFailures.isEmpty()
+                                || flagshipFailuresAreExactDeclaredProbes,
+                runtimeTraceMeasured:
+                        requiredTraceEntries != null
+                        && observedTraceEntries != null,
+                flagshipLocalityAccountedFor:
+                        flagshipEvidenceVerified
+                                ? flagshipLocality
+                                .forbiddenProviderDemandCount
+                                != null
+                                && flagshipLocality
+                                .forbiddenBackendLoadCount
+                                != null
+                                : flagshipExternallyBlocked,
+                fixedRepositoryClosureMeasured:
+                        fixedRequiredClosure.total
                         instanceof Number
-                        && fixedRequiredClosure.verified
-                        instanceof Number
-                        && fixedRequiredClosure.missing
-                        instanceof Number
-                        && fixedRequiredClosure.invalidEvidence
-                        instanceof Number
-                        && fixedRequiredClosure.unavailable
-                        instanceof Number
-                        && fixedRepository.repositoryVersion
+                                && fixedRequiredClosure.verified
+                                instanceof Number
+                                && fixedRequiredClosure.missing
+                                instanceof Number
+                                && fixedRequiredClosure.invalidEvidence
+                                instanceof Number
+                                && fixedRequiredClosure.unavailable
+                                instanceof Number,
+                fixedRepositoryVersionPresent:
+                        fixedRepository.repositoryVersion
                         instanceof String
+        ]
+        boolean evidenceComplete =
+                completenessChecks.values().every {
+                    it == true
+                }
         def report = [
                 schema:
                         'blue-coordination/'
@@ -1310,6 +1639,17 @@ def generateCoordinationSameRunEvidenceReport =
                                 invalidEvidence:
                                         fixedRequiredClosure
                                                 .invalidEvidence,
+                                failed  :
+                                        fixedRequiredClosure.total
+                                        instanceof Number
+                                                && fixedRequiredClosure
+                                                .verified
+                                                instanceof Number
+                                                ? fixedRequiredClosure
+                                                .total.longValue()
+                                                - fixedRequiredClosure
+                                                .verified.longValue()
+                                                : null,
                                 unavailable:
                                         fixedRequiredClosure.unavailable,
                                 incompleteCyclicProof:
@@ -1363,11 +1703,19 @@ def generateCoordinationSameRunEvidenceReport =
                                 requiredVariants:
                                         requiredFlagship,
                                 executedVariants:
-                                        flagshipLocality.matrixRows,
+                                        flagshipExecuted,
                                 passedVariants:
                                         flagshipPassed,
                                 status:
-                                        flagshipLocality.status,
+                                        flagshipStatus,
+                                exactDeclaredProbeFailures:
+                                        flagshipMigratedToEngineGate
+                                                ? (long) repositoryRuntimeProbeFailures
+                                                .size()
+                                                : (long) flagshipFailures
+                                                .size(),
+                                migratedToEngineGate:
+                                        flagshipMigratedToEngineGate,
                                 derivedFrom:
                                         [
                                                 'fullSuite',
@@ -1378,11 +1726,9 @@ def generateCoordinationSameRunEvidenceReport =
                 providerLocality:
                         [
                                 forbiddenProviderDemandCount:
-                                        flagshipLocality
-                                                .forbiddenProviderDemandCount,
+                                        forbiddenProviderDemandCount,
                                 forbiddenBackendLoadCount:
-                                        flagshipLocality
-                                                .forbiddenBackendLoadCount,
+                                        forbiddenBackendLoadCount,
                                 derivedFrom:
                                         [
                                                 'flagship'
@@ -1405,7 +1751,11 @@ def generateCoordinationSameRunEvidenceReport =
                                         ]
                         ],
                 evidenceSources:
-                        evidenceSources
+                        evidenceSources,
+                completenessChecks:
+                        completenessChecks,
+                externalVerifierChecks:
+                        externalVerifierChecks
         ]
         File target =
                 workingSameRunEvidenceReport
@@ -1449,6 +1799,7 @@ def generateCoordinationWorkingReport =
             tasks.named('compileJmhJava'),
             tasks.named(
                     'verifyCoordinationConformanceReceiptIdentities'),
+            tasks.named('writeLatestBlueDependencyLock'),
             tasks.named('verifyJava8Bytecode'),
             tasks.named('binaryCompatibilityCheck'),
             tasks.named('verifyReproducibleArchives'),
@@ -1508,50 +1859,120 @@ def generateCoordinationWorkingReport =
                         .archiveFile
                         .get()
                         .asFile
+        File resolvedDependencyLockFile =
+                workingResolvedDependencyLockEvidence.get().asFile
+        File siblingInputsFile =
+                workingSiblingInputsEvidence.get().asFile
+        def resolvedDependencyLock =
+                new JsonSlurper().parse(resolvedDependencyLockFile)
+        def siblingInputs =
+                new JsonSlurper().parse(siblingInputsFile)
+        def expectedDependencyCoordinates = [
+                'blue.language:blue-language-model',
+                'blue.language:blue-language-core',
+                'blue.language:blue-language-mapping',
+                'blue.language:blue-contracts-core',
+                'blue.bex:blue-bex-core',
+                'blue.bex:blue-bex-contracts',
+                'blue.repo:blue-repo-java'
+        ] as Set
+        def expectedDependencyHashes = [
+                'blue.language:blue-language-model':
+                        workingSiblingLock.getProperty(
+                                'blueLanguageModelJarSha256'),
+                'blue.language:blue-language-core':
+                        workingSiblingLock.getProperty(
+                                'blueLanguageCoreJarSha256'),
+                'blue.language:blue-language-mapping':
+                        workingSiblingLock.getProperty(
+                                'blueLanguageMappingJarSha256'),
+                'blue.language:blue-contracts-core':
+                        workingSiblingLock.getProperty(
+                                'blueContractsCoreJarSha256'),
+                'blue.bex:blue-bex-core':
+                        workingSiblingLock.getProperty(
+                                'blueBexCoreJarSha256'),
+                'blue.bex:blue-bex-contracts':
+                        workingSiblingLock.getProperty(
+                                'blueBexContractsJarSha256'),
+                'blue.repo:blue-repo-java':
+                        workingSiblingLock.getProperty(
+                                'blueRepositoryJarSha256')
+        ]
+        def expectedProjectComponents = [
+                'blue.language:blue-language-model':
+                        [build: ':blue-language-java', project: ':blue-language-model'],
+                'blue.language:blue-language-core':
+                        [build: ':blue-language-java', project: ':blue-language-core'],
+                'blue.language:blue-language-mapping':
+                        [build: ':blue-language-java', project: ':blue-language-mapping'],
+                'blue.language:blue-contracts-core':
+                        [build: ':blue-language-java', project: ':blue-contracts-core'],
+                'blue.bex:blue-bex-core':
+                        [build: ':blue-bex-java', project: ':blue-bex-core'],
+                'blue.bex:blue-bex-contracts':
+                        [build: ':blue-bex-java', project: ':blue-bex-contracts']
+        ]
+        boolean dependencyTopologyVerified =
+                resolvedDependencyLock?.schema
+                == 'blue-coordination/latest-blue-dependency-lock/1.0'
+                        && resolvedDependencyLock?.status == 'verified'
+                        && resolvedDependencyLock?.mode == 'local-composite'
+                        && resolvedDependencyLock?.aggregateRetention
+                        == [language: 'not-selected', bex: 'not-selected']
+                        && (resolvedDependencyLock?.resolvedComponents
+                        ?.keySet() as Set) == expectedDependencyCoordinates
+                        && (resolvedDependencyLock?.artifacts
+                        ?.keySet() as Set) == expectedDependencyCoordinates
+                        && siblingInputs?.schema
+                        == 'blue-coordination/latest-blue-sibling-inputs/1.0'
+                        && siblingInputs?.status == 'verified'
+                        && siblingInputs?.packageIdentities?.languageRegistry
+                        == workingSiblingLock.getProperty(
+                        'blueLanguageRegistrySha256')
+                        && siblingInputs?.packageIdentities?.contractsRegistry
+                        == workingSiblingLock.getProperty(
+                        'blueContractsRegistrySha256')
+                        && siblingInputs?.failures == []
+                        && resolvedDependencyLock?.siblingInputReceipt?.sha256
+                        == workingSha256(siblingInputsFile)
         def dependencyCoordinates =
-                new LinkedHashMap<String, Object>()
-        [
-                [
-                        name   : 'blue-language-java',
-                        path   : file(
-                                '../blue-language-java'),
-                        version:
-                                '3.1.0-rc.18-SNAPSHOT'
-                ],
-                [
-                        name   : 'blue-bex-java',
-                        path   : file(
-                                '../blue-bex-java'),
-                        version:
-                                '1.1.0-rc.2-SNAPSHOT'
-                ],
-                [
-                        name   : 'blue-repository-java',
-                        path   :
-                                workingBlueRepositoryComposite,
-                        version:
-                                '3.0.0-rc.17-SNAPSHOT'
-                ]
-        ].each { dependency ->
-            File jar =
-                    workingPlainJar(
-                            dependency.path)
+                new TreeMap<String, Object>()
+        expectedDependencyCoordinates.sort().each { coordinate ->
+            def component = resolvedDependencyLock.resolvedComponents
+                    .get(coordinate)
+            def artifact = resolvedDependencyLock.artifacts
+                    .get(coordinate)
+            File artifactFile = file(artifact.file.toString())
+            boolean artifactVerified = artifactFile.isFile()
+                    && artifact.sha256
+                    == expectedDependencyHashes.get(coordinate)
+                    && workingSha256(artifactFile) == artifact.sha256
+            def expectedProject = expectedProjectComponents.get(coordinate)
+            boolean componentVerified = expectedProject == null
+                    ? component.componentType.toString()
+                    .endsWith('ModuleComponentIdentifier')
+                    && component.selectedVersion
+                    == workingSiblingLock.getProperty(
+                    'blueRepositoryLocalVersion')
+                    : component.componentType.toString()
+                    .endsWith('ProjectComponentIdentifier')
+                    && component.buildPath == expectedProject.build
+                    && component.projectPath == expectedProject.project
+            dependencyTopologyVerified = dependencyTopologyVerified
+                    && artifactVerified
+                    && componentVerified
             dependencyCoordinates.put(
-                    dependency.name,
+                    coordinate,
                     [
-                            commit :
-                                    workingGit(
-                                            dependency.path,
-                                            'rev-parse',
-                                            'HEAD'),
-                            version:
-                                    dependency.version,
-                            jar    :
-                                    jar == null
-                                            ? null
-                                            : jar.absolutePath,
-                            jarSha256:
-                                    workingSha256(jar)
+                            selectedVersion: component.selectedVersion,
+                            componentType : component.componentType,
+                            buildPath     : component.buildPath,
+                            projectPath   : component.projectPath,
+                            artifact      : artifactFile.absolutePath,
+                            artifactSha256: artifact.sha256,
+                            verified      : artifactVerified
+                                    && componentVerified
                     ])
         }
         def blockedOutcomes =
@@ -1566,8 +1987,10 @@ def generateCoordinationWorkingReport =
                         .isEmpty()
                         && sameRun.status == 'complete'
                         && partition.status == 'verified'
+                        && dependencyTopologyVerified
                         && coordinationJar.isFile()
                         && sourcesJar.isFile()
+                        && javadocJar.isFile()
                         && sourceArchive.isFile()
         def coordinationCoordinate = [
                 commit     :
@@ -1591,12 +2014,23 @@ def generateCoordinationWorkingReport =
         def dependencyLock = [
                 schema      :
                         'blue-coordination/'
-                                + 'local-dependency-lock/1.0',
-                version     : 1,
+                                + 'local-dependency-lock/2.0',
+                version     : 2,
                 coordination:
                         coordinationCoordinate,
                 dependencies:
-                        dependencyCoordinates
+                        dependencyCoordinates,
+                sourceReceipts:
+                        [
+                                resolvedDependencyLock: [
+                                        path  : resolvedDependencyLockFile.absolutePath,
+                                        sha256: workingSha256(resolvedDependencyLockFile)
+                                ],
+                                siblingInputs: [
+                                        path  : siblingInputsFile.absolutePath,
+                                        sha256: workingSha256(siblingInputsFile)
+                                ]
+                        ]
         ]
         File dependencyLockTarget =
                 workingDependencyLock.get()
@@ -1619,6 +2053,18 @@ def generateCoordinationWorkingReport =
                         coordinationCoordinate,
                 dependencies:
                         dependencyCoordinates,
+                dependencyTopology:
+                        [
+                                status: dependencyTopologyVerified
+                                        ? 'verified'
+                                        : 'invalid',
+                                aggregateRetention:
+                                        resolvedDependencyLock.aggregateRetention,
+                                resolvedDependencyLockSha256:
+                                        workingSha256(resolvedDependencyLockFile),
+                                siblingInputsSha256:
+                                        workingSha256(siblingInputsFile)
+                        ],
                 fixedRepository: [
                         version :
                                 sameRun
@@ -1766,6 +2212,12 @@ def generateCoordinationWorkingReport =
                                         workingEvidenceSource(
                                                 workingPartitionReport
                                                         .get().asFile),
+                                siblingInputs:
+                                        workingEvidenceSource(
+                                                siblingInputsFile),
+                                resolvedDependencyLock:
+                                        workingEvidenceSource(
+                                                resolvedDependencyLockFile),
                                 derived:
                                         sameRun
                                                 .evidenceSources
@@ -1849,7 +2301,7 @@ def generateCoordinationWorkingReport =
 - Maximum runtime trace entries: `${sameRun.runtimeTrace.observedEntries}`
 - Test partition: `${partition.observed.full.total} = ${partition.observed.working.total} + ${partition.observed.probes.total}` (`${partition.status}`)
 
-Public release eligibility remains false while exact catalogued dependency blockers are open.
+Public release eligibility is determined only by the strict release gate; this working report does not claim it.
 """
         if (!workingEligible) {
             throw new GradleException(
@@ -1882,18 +2334,26 @@ def coordinationWorkingVerification =
                 || report.workingTests.failed != 0
                 || report.workingTests.skipped != 0
                 || report.externalProbes.invalid != 0
+                || report.dependencyTopology?.status != 'verified'
                 || report.testPartition?.status
                 != 'verified'
                 || report.testPartition
-                ?.observed?.full?.total != 899
+                ?.observed?.full?.total
+                != workingExpectedFull.longValue()
                 || report.testPartition
-                ?.observed?.working?.total != 842
+                ?.observed?.working?.total
+                != workingExpectedWorking.longValue()
                 || report.testPartition
-                ?.observed?.probes?.total != 57
+                ?.observed?.probes?.total
+                != workingExpectedProbes.longValue()
                 || report.evidenceSources
                 ?.sameRunEvidence?.status != 'present'
                 || report.evidenceSources
-                ?.partition?.status != 'present') {
+                ?.partition?.status != 'present'
+                || report.evidenceSources
+                ?.siblingInputs?.status != 'present'
+                || report.evidenceSources
+                ?.resolvedDependencyLock?.status != 'present') {
             throw new GradleException(
                     'Coordination working verification failed; see '
                             + workingFinalJson.get()

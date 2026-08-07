@@ -1,6 +1,5 @@
 package blue.coordination.processor;
 
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorStatus;
@@ -21,14 +20,14 @@ class AllTimelinesChannelProcessorTest {
 
     @Test
     void shouldEnsureThatAllTimelinesWithSeveralMatchingChildrenDeliversOnce() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = matchingChildren();
         contracts.put("all", allTimelines());
         contracts.put("handler", fixedHandler("union"));
         Node initialized = initializedDocument(fixture, contracts);
 
-        // When
+        // when
         DocumentProcessingResult result = process(fixture,
                 initialized,
                 TIMELINE,
@@ -36,7 +35,7 @@ class AllTimelinesChannelProcessorTest {
                 10,
                 "hello");
 
-        // Then
+        // then
         assertChatCount(result.events(), "union", 1);
         assertAllCheckpointSubject(
                 checkpoint(result.document(), "all"),
@@ -48,14 +47,14 @@ class AllTimelinesChannelProcessorTest {
 
     @Test
     void shouldSelectTheLowestOrderMatchingAllTimelinesChild() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Map<String, Node> ordered = matchingChildren();
         ordered.get("childB").properties("order", new Node().value(-1));
         ordered.put("all", allTimelines());
         ordered.put("handler", fixedHandler("union"));
 
-        // When
+        // when
         DocumentProcessingResult orderWinner = process(fixture,
                 initializedDocument(fixture, ordered),
                 TIMELINE,
@@ -63,7 +62,7 @@ class AllTimelinesChannelProcessorTest {
                 1,
                 "order");
 
-        // Then
+        // then
         assertChatCount(orderWinner.events(), "union", 1);
         assertAllCheckpointSubject(
                 checkpoint(orderWinner.document(), "all"),
@@ -73,7 +72,7 @@ class AllTimelinesChannelProcessorTest {
 
     @Test
     void shouldSelectTheFirstMatchingAllTimelinesChildKeyWhenOrdersTie() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Map<String, Node> tied = new LinkedHashMap<String, Node>();
         tied.put("childB", TestTimelineProvider.channel(TIMELINE, ACTOR));
@@ -81,7 +80,7 @@ class AllTimelinesChannelProcessorTest {
         tied.put("all", allTimelines());
         tied.put("handler", fixedHandler("union"));
 
-        // When
+        // when
         DocumentProcessingResult keyWinner = process(fixture,
                 initializedDocument(fixture, tied),
                 TIMELINE,
@@ -89,7 +88,7 @@ class AllTimelinesChannelProcessorTest {
                 1,
                 "key");
 
-        // Then
+        // then
         assertChatCount(keyWinner.events(), "union", 1);
         assertAllCheckpointSubject(
                 checkpoint(keyWinner.document(), "all"),
@@ -99,7 +98,7 @@ class AllTimelinesChannelProcessorTest {
 
     @Test
     void shouldConsumePlatformDeliveryOrderAcrossTimelines() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = new LinkedHashMap<String, Node>();
         contracts.put("alice", TestTimelineProvider.channel("alice-timeline", "alice-actor"));
@@ -142,12 +141,12 @@ class AllTimelinesChannelProcessorTest {
                 fixture.blue.processDocument(
                         initialized, platformFirst);
 
-        // When
+        // when
         DocumentProcessingResult second =
                 fixture.blue.processDocument(
                         first.document(), platformSecond);
 
-        // Then
+        // then
         assertAllCheckpointSubject(
                 checkpoint(second.document(), "all"),
                 BigInteger.valueOf(100),
@@ -162,14 +161,14 @@ class AllTimelinesChannelProcessorTest {
 
     @Test
     void shouldEnsureThatAllTimelinesRejectsEntryThatMatchesNoDeclaredTimelineChannel() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = new LinkedHashMap<String, Node>();
         contracts.put("child", TestTimelineProvider.channel(TIMELINE, ACTOR));
         contracts.put("all", allTimelines());
         contracts.put("triggered", new Node().type("Triggered Event Channel"));
 
-        // When
+        // when
         DocumentProcessingResult result = process(fixture,
                 initializedDocument(fixture, contracts),
                 "unknown-timeline",
@@ -177,19 +176,19 @@ class AllTimelinesChannelProcessorTest {
                 1,
                 "unknown");
 
-        // Then
+        // then
         assertNull(checkpoint(result.document(), "all"));
     }
 
     @Test
     void shouldEnsureThatAllTimelinesWithNoTimelineMembersAcceptsNothing() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = new LinkedHashMap<String, Node>();
         contracts.put("all", allTimelines());
         Node initialized = initializedDocument(fixture, contracts);
 
-        // When
+        // when
         DocumentProcessingResult result = process(
                 fixture,
                 initialized,
@@ -198,7 +197,7 @@ class AllTimelinesChannelProcessorTest {
                 1,
                 "unmatched");
 
-        // Then
+        // then
         assertEquals(
                 ProcessorStatus.NO_MATCH,
                 result.status(),
@@ -232,7 +231,7 @@ class AllTimelinesChannelProcessorTest {
 
     private static Node initializedDocument(Fixture fixture, Map<String, Node> contracts) {
         Node document = new Node()
-                .blue(fixture.repository.typeAliasBlue())
+                .blue(fixture.repository.importsDirective())
                 .name("All Timelines V2 Test")
                 .properties("contracts", new Node().properties(contracts));
         DocumentProcessingResult initialized = fixture.blue.initializeDocument(fixture.blue.preprocess(document));
@@ -329,17 +328,19 @@ class AllTimelinesChannelProcessorTest {
     }
 
     private static Fixture configuredFixture() {
-        BlueRepository repository = BlueRepository.latest();
-        Blue blue = CoordinationTestResources.configuredBlue(repository);
-        CoordinationProcessors.registerWith(blue);
+        BlueRepository repository = BlueRepository.current();
+        CoordinationTestRuntime blue =
+                CoordinationTestResources.configuredBlue(repository);
         return new Fixture(repository, blue);
     }
 
     private static final class Fixture {
         private final BlueRepository repository;
-        private final Blue blue;
+        private final CoordinationTestRuntime blue;
 
-        private Fixture(BlueRepository repository, Blue blue) {
+        private Fixture(
+                BlueRepository repository,
+                CoordinationTestRuntime blue) {
             this.repository = repository;
             this.blue = blue;
         }

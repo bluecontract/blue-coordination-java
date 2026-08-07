@@ -4,7 +4,7 @@ import blue.language.model.Node;
 import blue.language.processor.ContractProcessor;
 import blue.language.processor.DocumentProcessor;
 import blue.language.processor.model.Contract;
-import blue.language.utils.BlueIdCalculator;
+import blue.language.identity.DirectBlueIdCalculator;
 import blue.repo.coordination.TimelineChannel;
 
 import java.util.ArrayList;
@@ -38,7 +38,8 @@ final class CoordinationRuntimeRegistrations {
                 String,
                 ContractProcessor<? extends Contract>>
                 registration
-                : processor.getContractRegistry()
+                : processor.administration()
+                        .contractRegistry()
                         .processors().entrySet()) {
             ContractProcessor<? extends Contract>
                     registeredProcessor =
@@ -72,7 +73,8 @@ final class CoordinationRuntimeRegistrations {
                 String,
                 ContractProcessor<? extends Contract>>
                 registration
-                : processor.getContractRegistry()
+                : processor.administration()
+                        .contractRegistry()
                         .processors().entrySet()) {
             ContractProcessor<? extends Contract>
                     registeredProcessor =
@@ -92,6 +94,15 @@ final class CoordinationRuntimeRegistrations {
                             + (contractType == null
                             ? ""
                             : contractType.getName()));
+            if (registeredProcessor
+                    instanceof TimelineChannelProcessor) {
+                types.add(
+                        "semantic-profile\u0000"
+                                + ((TimelineChannelProcessor)
+                                registeredProcessor)
+                                .semanticTypeIdentities()
+                                .profileIdentity());
+            }
         }
         Collections.sort(types);
         types.add(
@@ -117,7 +128,9 @@ final class CoordinationRuntimeRegistrations {
                 || processor
                 instanceof SequentialWorkflowProcessor
                 || processor
-                instanceof SequentialWorkflowOperationProcessor;
+                instanceof SequentialWorkflowOperationProcessor
+                || processor
+                instanceof CurrentRepositoryMarkerProcessor;
     }
 
     private static String identity(
@@ -129,7 +142,7 @@ final class CoordinationRuntimeRegistrations {
             items.add(
                     new Node().value(value));
         }
-        return BlueIdCalculator.calculateBlueId(
+        return DirectBlueIdCalculator.calculateBlueId(
                 new Node()
                         .properties(
                                 "kind",

@@ -1,6 +1,6 @@
 package blue.language.processor;
 
-import blue.language.Blue;
+import blue.coordination.processor.CoordinationTestRuntime;
 import blue.language.model.Node;
 import blue.language.processor.model.MarkerContract;
 import java.util.Collections;
@@ -10,7 +10,7 @@ public final class HandlerMatchContextFactory {
     private HandlerMatchContextFactory() {
     }
 
-    public static HandlerMatchContext create(Blue blue,
+    public static HandlerMatchContext create(CoordinationTestRuntime runtime,
                                              String handlerKey,
                                              String channelKey,
                                              Node event) {
@@ -20,7 +20,10 @@ public final class HandlerMatchContextFactory {
                 channelKey,
                 event,
                 markers,
-                new ContractMatchingService(blue),
+                new ContractMatchingService(
+                        runtime.language()
+                                .processing()
+                                .runtimeAccess()),
                 new RuntimeWorkSession(
                         new GasMeter(),
                         RuntimeWorkSession.Mode.PROCESSING));

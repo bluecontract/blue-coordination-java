@@ -1,11 +1,14 @@
 package blue.coordination.processor;
 
+import blue.coordination.processor.delivery.CoordinationIndexedDeliveryEngine;
+import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.model.Node;
 import blue.language.processor.ExternalOrderKey;
+import blue.language.processor.InvalidExecutionEvidenceException;
 import blue.language.processor.util.PointerUtils;
-import blue.language.utils.BlueIdCalculator;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -13,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Immutable, identity-bearing Coordination external-subscription projection.
@@ -25,13 +29,13 @@ import java.util.Set;
 public final class CoordinationSubscriptionSnapshot {
     /** Stable public schema/projection version. */
     public static final String VERSION =
-            "blue.coordination/subscription-snapshot/1.0";
+            "blue.coordination/subscription-snapshot/2.0";
 
     /** Identity of the exact deterministic projection algorithm. */
     public static final String ALGORITHM_IDENTITY =
             identity(
                     "blue.coordination/"
-                            + "subscription-projection-algorithm/1.0",
+                            + "subscription-projection-algorithm/2.0",
                     Collections.singletonList(
                             TimelineSubscriptionProjection.VERSION));
 
@@ -46,10 +50,20 @@ public final class CoordinationSubscriptionSnapshot {
             occurrences;
     private final Map<String, CoordinationSubscriptionOccurrence>
             occurrencesByKey;
+    private final Map<String, CoordinationSubscriptionOccurrence>
+            occurrencesByLanguageKey;
+    private final CoordinationIndexedDeliveryEngine.IndexedActiveSurface
+            indexedActiveSurface;
     private final Map<String, List<String>>
             processEmbeddedRoutes;
     private final Set<String> prunedScopePaths;
     private final String digest;
+    private final PlanningVerification planningVerification;
+    private final long constructionOccurrenceValidationCount;
+    private final AtomicLong trustedPlanningVerificationCount =
+            new AtomicLong();
+    private final AtomicLong exactOccurrenceLookupCount =
+            new AtomicLong();
 
     CoordinationSubscriptionSnapshot(
             String languageRuntimeRegistryIdentity,
@@ -129,8 +143,15 @@ public final class CoordinationSubscriptionSnapshot {
                 new LinkedHashMap<
                         String,
                         CoordinationSubscriptionOccurrence>();
+        Map<String, CoordinationSubscriptionOccurrence>
+                indexedByLanguageKey =
+                new LinkedHashMap<
+                        String,
+                        CoordinationSubscriptionOccurrence>();
+        long validatedOccurrences = 0L;
         for (CoordinationSubscriptionOccurrence occurrence
                 : ordered) {
+            validatedOccurrences++;
             CoordinationSubscriptionOccurrence exact =
                     Objects.requireNonNull(
                             occurrence,
@@ -140,6 +161,16 @@ public final class CoordinationSubscriptionSnapshot {
                         "Snapshot contains a retired occurrence: "
                                 + exact.occurrenceKey());
             }
+            if (exact.activationRootRevision() == null
+                    || exact.activationRootRevision().longValue()
+                    > rootRevision
+                    || exact.activationFrontier() == null
+                    || exact.activationFrontier().compareTo(
+                    this.activationFrontier) > 0) {
+                throw new IllegalArgumentException(
+                        "Snapshot contains an inactive or stale occurrence: "
+                                + exact.occurrenceKey());
+            }
             if (indexed.put(
                     exact.occurrenceKey(),
                     exact) != null) {
@@ -147,11 +178,29 @@ public final class CoordinationSubscriptionSnapshot {
                         "Duplicate subscription occurrence: "
                                 + exact.occurrenceKey());
             }
+            String languageKey =
+                    CoordinationIndexedDeliveryEngine
+                            .languageOccurrenceKey(
+                                    exact.scopePath(),
+                                    exact.channelKey());
+            if (indexedByLanguageKey.put(
+                    languageKey, exact) != null) {
+                throw new IllegalArgumentException(
+                        "Snapshot maps two active occurrences to one "
+                                + "Language occurrence: " + languageKey);
+            }
         }
         this.occurrences =
                 Collections.unmodifiableList(ordered);
         this.occurrencesByKey =
                 Collections.unmodifiableMap(indexed);
+        this.occurrencesByLanguageKey =
+                Collections.unmodifiableMap(indexedByLanguageKey);
+        this.indexedActiveSurface =
+                CoordinationIndexedDeliveryEngine.IndexedActiveSurface
+                        .from(this.occurrences);
+        this.constructionOccurrenceValidationCount =
+                validatedOccurrences;
         this.processEmbeddedRoutes =
                 immutableRoutes(processEmbeddedRoutes);
         this.prunedScopePaths =
@@ -166,6 +215,19 @@ public final class CoordinationSubscriptionSnapshot {
                     "Persisted subscription snapshot digest "
                             + "does not match its content");
         }
+        this.planningVerification = new PlanningVerification(
+                this,
+                identity(
+                        "blue.coordination/"
+                                + "trusted-subscription-planning/1.0",
+                        Arrays.asList(
+                                this.projectionVersion,
+                                this.algorithmIdentity,
+                                this.languageRuntimeRegistryIdentity,
+                                this.coordinationRuntimeRegistryIdentity,
+                                this.rootBlueId,
+                                Long.toString(this.rootRevision),
+                                this.digest)));
     }
 
     /** @return stable public projection schema version */
@@ -240,6 +302,67 @@ public final class CoordinationSubscriptionSnapshot {
     }
 
     /**
+     * Verifies and returns the immutable planning proof bound to the expected
+     * runtime and exact Root generation.
+     *
+     * <p>Instances can only be created by the package projection constructor,
+     * which calculates the canonical digest, or by {@link #rehydrate(Map)},
+     * which additionally checks the persisted digest. All retained
+     * collections are immutable and this class is final, so active occurrence
+     * and revision invariants are checked once during construction. This
+     * method performs only constant-time binding checks and returns a proof
+     * that owns the prevalidated exact occurrence indexes.</p>
+     */
+    PlanningVerification verifiedForInProcessPlanning(
+            String expectedLanguageRuntimeIdentity,
+            String expectedCoordinationRuntimeIdentity,
+            String expectedRootBlueId,
+            long expectedRootRevision) {
+        if (!VERSION.equals(projectionVersion)
+                || !ALGORITHM_IDENTITY.equals(algorithmIdentity)
+                || !coordinationRuntimeRegistryIdentity.equals(
+                expectedCoordinationRuntimeIdentity)) {
+            throw new InvalidExecutionEvidenceException(
+                    "Subscription snapshot runtime or projection "
+                            + "identity mismatch");
+        }
+        if (!languageRuntimeRegistryIdentity.equals(
+                expectedLanguageRuntimeIdentity)) {
+            throw new InvalidExecutionEvidenceException(
+                    "Subscription snapshot Language runtime registry "
+                            + "identity mismatch");
+        }
+        if (!rootBlueId.equals(expectedRootBlueId)) {
+            throw new InvalidExecutionEvidenceException(
+                    "Subscription snapshot Root identity mismatch");
+        }
+        if (rootRevision != expectedRootRevision) {
+            throw new InvalidExecutionEvidenceException(
+                    "Subscription snapshot Root revision mismatch");
+        }
+        trustedPlanningVerificationCount.incrementAndGet();
+        return planningVerification;
+    }
+
+    /** Returns live work evidence for trusted verification and exact lookups. */
+    public PlanningMetrics planningMetrics() {
+        return new PlanningMetrics(
+                constructionOccurrenceValidationCount,
+                trustedPlanningVerificationCount.get(),
+                exactOccurrenceLookupCount.get());
+    }
+
+    /**
+     * Returns the process-independent proof identity binding this immutable
+     * snapshot to its projection, runtimes, and exact Root generation.
+     *
+     * @return stable direct Blue identity of the trusted planning binding
+     */
+    public String planningBindingIdentity() {
+        return planningVerification.bindingIdentity();
+    }
+
+    /**
      * Serializes the snapshot to application-independent scalar/list/map
      * values.
      *
@@ -279,6 +402,28 @@ public final class CoordinationSubscriptionSnapshot {
                         "prunedScopePaths",
                         "digest"
                 });
+        String projectionVersion =
+                CoordinationSubscriptionSerialization
+                        .text(
+                                persisted,
+                                "projectionVersion");
+        if (!VERSION.equals(projectionVersion)) {
+            throw new IllegalArgumentException(
+                    "Unsupported Coordination projection version: "
+                            + projectionVersion);
+        }
+        String algorithmIdentity =
+                CoordinationSubscriptionSerialization
+                        .text(
+                                persisted,
+                                "algorithmIdentity");
+        if (!ALGORITHM_IDENTITY.equals(
+                algorithmIdentity)) {
+            throw new IllegalArgumentException(
+                    "Coordination subscription projection "
+                            + "algorithm identity does not match "
+                            + "this library");
+        }
         List<CoordinationSubscriptionOccurrence> occurrences =
                 new ArrayList<
                         CoordinationSubscriptionOccurrence>();
@@ -312,10 +457,7 @@ public final class CoordinationSubscriptionSnapshot {
                                 "prunedScopePaths");
         CoordinationSubscriptionSnapshot snapshot =
                 new CoordinationSubscriptionSnapshot(
-                        CoordinationSubscriptionSerialization
-                                .text(
-                                        persisted,
-                                        "projectionVersion"),
+                        projectionVersion,
                         CoordinationSubscriptionSerialization
                                 .text(
                                         persisted,
@@ -324,10 +466,7 @@ public final class CoordinationSubscriptionSnapshot {
                                 .text(
                                         persisted,
                                         "coordinationRuntimeRegistryIdentity"),
-                        CoordinationSubscriptionSerialization
-                                .text(
-                                        persisted,
-                                        "algorithmIdentity"),
+                        algorithmIdentity,
                         CoordinationSubscriptionSerialization
                                 .text(
                                         persisted,
@@ -421,6 +560,74 @@ public final class CoordinationSubscriptionSnapshot {
                     "Coordination subscription projection "
                             + "algorithm identity does not match "
                             + "this library");
+        }
+    }
+
+    /** Immutable live-work snapshot for trusted indexed planning. */
+    public static final class PlanningMetrics {
+        private final long constructionOccurrenceValidationCount;
+        private final long trustedPlanningVerificationCount;
+        private final long exactOccurrenceLookupCount;
+
+        private PlanningMetrics(
+                long constructionOccurrenceValidationCount,
+                long trustedPlanningVerificationCount,
+                long exactOccurrenceLookupCount) {
+            this.constructionOccurrenceValidationCount =
+                    constructionOccurrenceValidationCount;
+            this.trustedPlanningVerificationCount =
+                    trustedPlanningVerificationCount;
+            this.exactOccurrenceLookupCount = exactOccurrenceLookupCount;
+        }
+
+        public long constructionOccurrenceValidationCount() {
+            return constructionOccurrenceValidationCount;
+        }
+
+        public long trustedPlanningVerificationCount() {
+            return trustedPlanningVerificationCount;
+        }
+
+        public long exactOccurrenceLookupCount() {
+            return exactOccurrenceLookupCount;
+        }
+    }
+
+    /** Package proof that grants access to prevalidated exact indexes. */
+    static final class PlanningVerification {
+        private final CoordinationSubscriptionSnapshot snapshot;
+        private final String bindingIdentity;
+
+        private PlanningVerification(
+                CoordinationSubscriptionSnapshot snapshot,
+                String bindingIdentity) {
+            this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
+            this.bindingIdentity = requireText(
+                    bindingIdentity, "bindingIdentity");
+        }
+
+        CoordinationSubscriptionSnapshot snapshot() {
+            return snapshot;
+        }
+
+        CoordinationIndexedDeliveryEngine.IndexedActiveSurface
+        indexedActiveSurface() {
+            return snapshot.indexedActiveSurface;
+        }
+
+        CoordinationSubscriptionOccurrence occurrence(String key) {
+            snapshot.exactOccurrenceLookupCount.incrementAndGet();
+            return snapshot.occurrencesByKey.get(key);
+        }
+
+        CoordinationSubscriptionOccurrence occurrenceByLanguageKey(
+                String key) {
+            snapshot.exactOccurrenceLookupCount.incrementAndGet();
+            return snapshot.occurrencesByLanguageKey.get(key);
+        }
+
+        String bindingIdentity() {
+            return bindingIdentity;
         }
     }
 
@@ -529,7 +736,7 @@ public final class CoordinationSubscriptionSnapshot {
             items.add(
                     new Node().value(value));
         }
-        return BlueIdCalculator.calculateBlueId(
+        return DirectBlueIdCalculator.calculateBlueId(
                 new Node()
                         .properties(
                                 "kind",

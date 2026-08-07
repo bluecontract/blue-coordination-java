@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -23,15 +24,15 @@ final class CoordinationSubscriptionPersistenceTest {
 
     @Test
     void shouldExposeOnlyDeeplyImmutableSnapshotPersistenceValues() {
-        // Given
+        // given
         CoordinationSubscriptionSnapshot snapshot =
                 snapshot(false);
 
-        // When
+        // when
         Map<String, Object> persisted =
                 snapshot.toMap();
 
-        // Then
+        // then
         assertDeeplyUnmodifiable(persisted);
         assertEquals(
                 persisted,
@@ -40,7 +41,7 @@ final class CoordinationSubscriptionPersistenceTest {
 
     @Test
     void shouldKeepUpdateViewsDetachedFromMutableInputLists() {
-        // Given
+        // given
         CoordinationSubscriptionSnapshot snapshot =
                 snapshot(false);
         CoordinationSubscriptionOccurrence occurrence =
@@ -63,15 +64,16 @@ final class CoordinationSubscriptionPersistenceTest {
                         unchanged,
                         order(4));
 
-        // When
+        // when
         added.clear();
         retired.add(occurrence);
         unchanged.add(occurrence);
 
-        // Then
+        // then
         assertEquals(1, update.added().size());
         assertTrue(update.retired().isEmpty());
         assertTrue(update.unchanged().isEmpty());
+        assertFalse(update.fragmentationCatalog().isPresent());
         assertThrows(
                 UnsupportedOperationException.class,
                 () -> update.added().clear());
@@ -79,63 +81,63 @@ final class CoordinationSubscriptionPersistenceTest {
 
     @Test
     void shouldRejectUnknownPersistedSnapshotFields() {
-        // Given
+        // given
         Map<String, Object> persisted =
                 mutableSnapshot(false);
         persisted.put("unexpected", "value");
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
                         () -> CoordinationSubscriptionSnapshot
                                 .rehydrate(persisted));
 
-        // Then
+        // then
         assertUnknownField(failure);
     }
 
     @Test
     void shouldRejectUnknownPersistedOccurrenceFields() {
-        // Given
+        // given
         Map<String, Object> persisted =
                 mutableSnapshot(false);
         firstOccurrence(persisted)
                 .put("unexpected", "value");
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
                         () -> CoordinationSubscriptionSnapshot
                                 .rehydrate(persisted));
 
-        // Then
+        // then
         assertUnknownField(failure);
     }
 
     @Test
     void shouldRejectUnknownPersistedDependencyFields() {
-        // Given
+        // given
         Map<String, Object> persisted =
                 mutableSnapshot(false);
         dependencies(persisted)
                 .put("unexpected", "value");
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
                         () -> CoordinationSubscriptionSnapshot
                                 .rehydrate(persisted));
 
-        // Then
+        // then
         assertUnknownField(failure);
     }
 
     @Test
     void shouldRejectUnknownPersistedDependencyEntryFields() {
-        // Given
+        // given
         Map<String, Object> persisted =
                 mutableSnapshot(false);
         firstObject(
@@ -144,20 +146,20 @@ final class CoordinationSubscriptionPersistenceTest {
                         "unexpected",
                         "value");
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
                         () -> CoordinationSubscriptionSnapshot
                                 .rehydrate(persisted));
 
-        // Then
+        // then
         assertUnknownField(failure);
     }
 
     @Test
     void shouldRejectUnknownPersistedTypeFamilyFields() {
-        // Given
+        // given
         Map<String, Object> persisted =
                 mutableSnapshot(false);
         firstObject(
@@ -166,20 +168,20 @@ final class CoordinationSubscriptionPersistenceTest {
                         "unexpected",
                         "value");
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
                         () -> CoordinationSubscriptionSnapshot
                                 .rehydrate(persisted));
 
-        // Then
+        // then
         assertUnknownField(failure);
     }
 
     @Test
     void shouldRejectUnknownPersistedTypeFamilyMemberFields() {
-        // Given
+        // given
         Map<String, Object> persisted =
                 mutableSnapshot(false);
         Map<String, Object> family =
@@ -189,20 +191,20 @@ final class CoordinationSubscriptionPersistenceTest {
         firstObject(family, "members")
                 .put("unexpected", "value");
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
                         () -> CoordinationSubscriptionSnapshot
                                 .rehydrate(persisted));
 
-        // Then
+        // then
         assertUnknownField(failure);
     }
 
     @Test
     void shouldRejectUnknownPersistedChannelEntryFields() {
-        // Given
+        // given
         Map<String, Object> persisted =
                 mutableSnapshot(false);
         firstObject(
@@ -211,33 +213,33 @@ final class CoordinationSubscriptionPersistenceTest {
                         "unexpected",
                         "value");
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
                         () -> CoordinationSubscriptionSnapshot
                                 .rehydrate(persisted));
 
-        // Then
+        // then
         assertUnknownField(failure);
     }
 
     @Test
     void shouldRejectExplicitNullForOptionalOccurrenceFields() {
-        // Given
+        // given
         Map<String, Object> persisted =
                 mutableSnapshot(false);
         firstOccurrence(persisted)
                 .put("endAtRootRevision", null);
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
                         () -> CoordinationSubscriptionSnapshot
                                 .rehydrate(persisted));
 
-        // Then
+        // then
         assertTrue(
                 failure.getMessage().contains(
                         "must be omitted rather than null"),
@@ -246,7 +248,7 @@ final class CoordinationSubscriptionPersistenceTest {
 
     @Test
     void shouldRejectNonCanonicalPersistedOccurrenceOrder() {
-        // Given
+        // given
         Map<String, Object> persisted =
                 mutableSnapshot(true);
         @SuppressWarnings("unchecked")
@@ -255,14 +257,14 @@ final class CoordinationSubscriptionPersistenceTest {
                         persisted.get("occurrences");
         Collections.reverse(occurrences);
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
                         () -> CoordinationSubscriptionSnapshot
                                 .rehydrate(persisted));
 
-        // Then
+        // then
         assertTrue(
                 failure.getMessage().contains(
                         "not canonically ordered"),
@@ -271,7 +273,7 @@ final class CoordinationSubscriptionPersistenceTest {
 
     @Test
     void shouldRejectNonCanonicalPersistedScopePaths() {
-        // Given
+        // given
         Map<String, Object> persisted =
                 mutableSnapshot(true);
         @SuppressWarnings("unchecked")
@@ -282,14 +284,14 @@ final class CoordinationSubscriptionPersistenceTest {
                 "scopePath",
                 "child");
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
                         () -> CoordinationSubscriptionSnapshot
                                 .rehydrate(persisted));
 
-        // Then
+        // then
         assertTrue(
                 failure.getMessage().contains(
                         "scopePath must be canonical"),
@@ -352,6 +354,17 @@ final class CoordinationSubscriptionPersistenceTest {
         return new CoordinationSubscriptionOccurrence(
                 scopePath,
                 scopeBlueId,
+                "/",
+                "/".equals(scopePath)
+                        ? CoordinationSubscriptionOccurrence
+                                .Origin.ROOT
+                        : CoordinationSubscriptionOccurrence
+                                .Origin.EXPLICIT,
+                "/".equals(scopePath)
+                        ? null
+                        : scopePath,
+                null,
+                null,
                 channelKey,
                 Collections.singletonList(
                         channelKey + "-contribution"),

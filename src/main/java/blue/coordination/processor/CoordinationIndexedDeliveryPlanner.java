@@ -1,18 +1,25 @@
 package blue.coordination.processor;
 
-import blue.language.NodeProvider;
+import blue.coordination.fastpath.AdmittedOccurrence;
+import blue.coordination.fastpath.AdmittedProjection;
+import blue.coordination.engine.CoordinationProcessingEngine
+        .AdmittedPlanningAuthority;
+import blue.coordination.processor.delivery.CoordinationDeliveryDiagnosticView;
+import blue.coordination.processor.delivery.CoordinationIndexedDeliveryEngine;
+import blue.coordination.processor.subscription.CoordinationSubscriptionProjectionBridge;
+import blue.language.api.NodeProviderOutcome;
+import blue.language.identity.DirectBlueIdCalculator;
+import blue.language.provider.NodeProvider;
 import blue.language.model.Node;
-import blue.language.processor.CoordinationIndexedDeliveryEngine;
-import blue.language.processor.CoordinationSubscriptionProjectionBridge;
 import blue.language.processor.ExecutionEvidenceUnavailableException;
+import blue.language.processor.BlueContracts;
 import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.InvalidExecutionEvidenceException;
+import blue.language.processor.PlatformProcessingResult;
 import blue.language.processor.SubscriptionDelta;
-import blue.language.provider.NodeProviderOutcome;
 import blue.language.provider.NodeProviderResult;
-import blue.language.utils.BlueIdCalculator;
-import blue.language.utils.JsonPointer;
-import blue.language.utils.NodePathAccessor;
+import blue.language.model.NodePath;
+import blue.language.model.wire.JsonPointer;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -43,22 +50,37 @@ public final class CoordinationIndexedDeliveryPlanner {
     private final CoordinationIndexedDeliveryEngine engine;
     private final CoordinationSubscriptionProjectionBridge
             subscriptionProjectionBridge;
+    private final AdmittedPlanningAuthority admittedPlanningAuthority;
 
     /**
-     * Creates a planner bound to a configured Coordination processor.
-     *
-     * @param processor configured Language/Contracts processor
+     * Creates a planner that delegates authoritative semantic evaluation to
+     * the public Contracts service.
      */
     CoordinationIndexedDeliveryPlanner(
-            blue.language.processor.DocumentProcessor processor) {
-        this.processor =
-                Objects.requireNonNull(
-                        processor, "processor");
-        this.engine = new CoordinationIndexedDeliveryEngine(
-                this.processor);
+            blue.language.processor.DocumentProcessor processor,
+            BlueContracts contracts) {
+        this(processor, contracts, null);
+    }
+
+    CoordinationIndexedDeliveryPlanner(
+            blue.language.processor.DocumentProcessor processor,
+            BlueContracts contracts,
+            AdmittedPlanningAuthority admittedPlanningAuthority) {
+        this.processor = Objects.requireNonNull(processor, "processor");
+        BlueContracts exactContracts = Objects.requireNonNull(
+                contracts, "contracts");
+        if (admittedPlanningAuthority != null) {
+            admittedPlanningAuthority.requireDomain(
+                    this.processor, exactContracts);
+        }
+        this.engine = admittedPlanningAuthority == null
+                ? new CoordinationIndexedDeliveryEngine(exactContracts)
+                : CoordinationIndexedDeliveryEngine.forAdmittedPlanning(
+                        exactContracts, admittedPlanningAuthority);
         this.subscriptionProjectionBridge =
                 new CoordinationSubscriptionProjectionBridge(
-                        this.processor);
+                        exactContracts);
+        this.admittedPlanningAuthority = admittedPlanningAuthority;
     }
 
     /**
@@ -97,6 +119,20 @@ public final class CoordinationIndexedDeliveryPlanner {
     }
 
     /**
+     * Processes an exact prepared Root/event pair for one atomic host commit
+     * through the same Contracts generation that verified indexed delivery.
+     */
+    public PlatformProcessingResult processForPlatformCommit(
+            Node root,
+            Node event,
+            CoordinationPreparedDelivery prepared) {
+        return engine.processForPlatformCommit(
+                Objects.requireNonNull(root, "root"),
+                Objects.requireNonNull(event, "event"),
+                Objects.requireNonNull(prepared, "prepared").evidence());
+    }
+
+    /**
      * Prepares one exact event while enforcing explicit nonportable host-work
      * quotas for candidate validation and prefetch construction.
      *
@@ -126,7 +162,7 @@ public final class CoordinationIndexedDeliveryPlanner {
                 rootBlueId, "rootBlueId");
         String exactEventBlueId = requireText(
                 eventBlueId, "eventBlueId");
-        CoordinationSubscriptionSnapshot snapshot =
+        CoordinationSubscriptionSnapshot.PlanningVerification verified =
                 requireSnapshot(
                         activeSnapshot,
                         exactRootBlueId,
@@ -138,45 +174,196 @@ public final class CoordinationIndexedDeliveryPlanner {
         Node root = lookup.require(exactRootBlueId);
         Node event = lookup.require(exactEventBlueId);
 
+        return prepareVerified(
+                exactRootBlueId,
+                exactEventBlueId,
+                verified,
+                indexedCandidateOccurrenceKeys,
+                exactProvider,
+                rootRevision,
+                eventOrderKey,
+                quotas,
+                lookup,
+                root,
+                event,
+                false,
+                null);
+    }
+
+    /**
+     * Engine-only fast path for exact Root/event values already verified by
+     * canonical inventory admission. The opaque authority is compared by
+     * reference, so an external caller cannot turn an untrusted Node into an
+     * admitted value. Contracts still performs its own public-boundary
+     * defensive copies and remains the semantic evaluator.
+     */
+    public CoordinationPreparedDelivery prepareAdmitted(
+            AdmittedPlanningAuthority admittedAuthority,
+            String rootBlueId,
+            Node exactRoot,
+            String eventBlueId,
+            Node exactEvent,
+            CoordinationSubscriptionSnapshot activeSnapshot,
+            Collection<String> indexedCandidateOccurrenceKeys,
+            NodeProvider exactProvider,
+            long rootRevision,
+            ExternalOrderKey eventOrderKey) {
+        if (admittedPlanningAuthority == null
+                || admittedPlanningAuthority != Objects.requireNonNull(
+                        admittedAuthority, "admittedAuthority")) {
+            throw invalid("Admitted planning capability is invalid");
+        }
+        String exactRootBlueId = requireText(rootBlueId, "rootBlueId");
+        String exactEventBlueId = requireText(eventBlueId, "eventBlueId");
+        Node root = requireAdmittedNode(
+                exactRoot, exactRootBlueId, "exactRoot");
+        Node event = requireAdmittedNode(
+                exactEvent, exactEventBlueId, "exactEvent");
+        CoordinationSubscriptionSnapshot.PlanningVerification verified =
+                requireSnapshot(
+                        activeSnapshot,
+                        exactRootBlueId,
+                        rootRevision,
+                        eventOrderKey);
+        NodeProvider provider = Objects.requireNonNull(
+                exactProvider, "exactProvider");
+        ExactLookup lookup = ExactLookup.admitted(
+                provider,
+                exactRootBlueId,
+                root,
+                exactEventBlueId,
+                event);
+        return prepareVerified(
+                exactRootBlueId,
+                exactEventBlueId,
+                verified,
+                indexedCandidateOccurrenceKeys,
+                provider,
+                rootRevision,
+                eventOrderKey,
+                CoordinationHostQuotaSession.disabled(),
+                lookup,
+                root,
+                event,
+                true,
+                null);
+    }
+
+    /**
+     * Engine-owned admitted path using a generation-bound static projection.
+     * The frozen semantic evaluator still runs on a cache miss; only
+     * Coordination's repeated candidate and scope-chain discovery is reused.
+     */
+    CoordinationPreparedDelivery prepareProjectedAdmitted(
+            AdmittedPlanningAuthority admittedAuthority,
+            String rootBlueId,
+            Node exactRoot,
+            String eventBlueId,
+            Node exactEvent,
+            CoordinationSubscriptionSnapshot activeSnapshot,
+            Collection<String> indexedCandidateOccurrenceKeys,
+            NodeProvider exactProvider,
+            long rootRevision,
+            ExternalOrderKey eventOrderKey,
+            AdmittedProjection.SelectedSurface selectedSurface) {
+        if (admittedPlanningAuthority == null
+                || admittedPlanningAuthority != Objects.requireNonNull(
+                        admittedAuthority, "admittedAuthority")) {
+            throw invalid("Admitted planning capability is invalid");
+        }
+        String exactRootBlueId = requireText(rootBlueId, "rootBlueId");
+        String exactEventBlueId = requireText(eventBlueId, "eventBlueId");
+        Node root = requireAdmittedNode(
+                exactRoot, exactRootBlueId, "exactRoot");
+        Node event = requireAdmittedNode(
+                exactEvent, exactEventBlueId, "exactEvent");
+        CoordinationSubscriptionSnapshot.PlanningVerification verified =
+                requireSnapshot(
+                        activeSnapshot,
+                        exactRootBlueId,
+                        rootRevision,
+                        eventOrderKey);
+        AdmittedProjection.SelectedSurface projected =
+                Objects.requireNonNull(
+                        selectedSurface, "selectedSurface");
+        requireProjectedGeneration(
+                projected,
+                exactRootBlueId,
+                rootRevision,
+                verified.snapshot().digest());
+        NodeProvider provider = Objects.requireNonNull(
+                exactProvider, "exactProvider");
+        ExactLookup lookup = ExactLookup.admitted(
+                provider,
+                exactRootBlueId,
+                root,
+                exactEventBlueId,
+                event);
+        return prepareVerified(
+                exactRootBlueId,
+                exactEventBlueId,
+                verified,
+                indexedCandidateOccurrenceKeys,
+                provider,
+                rootRevision,
+                eventOrderKey,
+                CoordinationHostQuotaSession.disabled(),
+                lookup,
+                root,
+                event,
+                true,
+                projected);
+    }
+
+    private CoordinationPreparedDelivery prepareVerified(
+            String exactRootBlueId,
+            String exactEventBlueId,
+            CoordinationSubscriptionSnapshot.PlanningVerification verified,
+            Collection<String> indexedCandidateOccurrenceKeys,
+            NodeProvider exactProvider,
+            long rootRevision,
+            ExternalOrderKey eventOrderKey,
+            CoordinationHostQuotaSession quotas,
+            ExactLookup lookup,
+            Node root,
+            Node event,
+            boolean admitted,
+            AdmittedProjection.SelectedSurface projectedSurface) {
+        CoordinationSubscriptionSnapshot snapshot = verified.snapshot();
+
         CandidateMapping candidates =
                 candidates(
-                        snapshot,
+                        verified,
                         indexedCandidateOccurrenceKeys,
                         quotas);
-        List<SubscriptionDelta.Entry> activeIntervals =
-                new ArrayList<>(
-                        snapshot.occurrences().size());
-        Map<String, CoordinationSubscriptionOccurrence>
-                occurrenceByLanguageKey =
-                new LinkedHashMap<>();
-        for (CoordinationSubscriptionOccurrence occurrence
-                : snapshot.occurrences()) {
-            SubscriptionDelta.Entry interval =
-                    occurrence
-                            .toSubscriptionDeltaEntry();
-            activeIntervals.add(interval);
-            String languageKey =
-                    CoordinationIndexedDeliveryEngine
-                            .languageOccurrenceKey(
-                                    occurrence.scopePath(),
-                                    occurrence.channelKey());
-            if (occurrenceByLanguageKey.put(
-                    languageKey, occurrence) != null) {
-                throw invalid(
-                        "Subscription snapshot maps two public occurrences "
-                                + "to one Language occurrence");
-            }
+        if (projectedSurface != null
+                && !projectedSurface.publicKeys().equals(
+                        candidates.publicKeys)) {
+            throw invalid(
+                    "Admitted projection changed indexed candidate order");
         }
 
         CoordinationIndexedDeliveryEngine.Prepared prepared =
-                engine.prepare(
+                admitted
+                        ? engine.prepareAdmitted(
+                        admittedPlanningAuthority,
+                        exactRootBlueId,
+                        root,
+                        exactEventBlueId,
+                        event,
+                        exactProvider,
+                        rootRevision,
+                        eventOrderKey,
+                        verified.indexedActiveSurface(),
+                        candidates.publicKeys)
+                        : engine.prepare(
                         root,
                         event,
                         exactProvider,
                         rootRevision,
                         eventOrderKey,
-                        activeIntervals,
-                        candidates.languageKeys);
+                        verified.indexedActiveSurface(),
+                        candidates.publicKeys);
         List<String> publicOrder = new ArrayList<>();
         Map<String, CoordinationSubscriptionOccurrence>
                 selectedOccurrences =
@@ -184,7 +371,7 @@ public final class CoordinationIndexedDeliveryPlanner {
         for (String languageKey
                 : prepared.occurrenceOrder()) {
             CoordinationSubscriptionOccurrence occurrence =
-                    occurrenceByLanguageKey.get(languageKey);
+                    verified.occurrenceByLanguageKey(languageKey);
             if (occurrence == null) {
                 throw invalid(
                         "Language selected an occurrence outside the "
@@ -208,11 +395,17 @@ public final class CoordinationIndexedDeliveryPlanner {
                 publicDiagnostics(
                         prepared.diagnostics(),
                         publicOrder);
-        Map<String, List<String>> scopeChains =
-                selectedScopeChains(
+        Map<String, List<String>> scopeChains = projectedSurface == null
+                ? selectedScopeChains(
+                        exactRootBlueId,
                         root,
                         selectedOccurrences.values(),
-                        lookup);
+                        lookup)
+                : projectedScopeChains(
+                        exactRootBlueId,
+                        projectedSurface,
+                        selectedOccurrences,
+                        publicOrder);
         ResourceClosure resources =
                 resourceClosure(
                         exactRootBlueId,
@@ -246,24 +439,127 @@ public final class CoordinationIndexedDeliveryPlanner {
                 demandBoundary);
     }
 
+    private static void requireProjectedGeneration(
+            AdmittedProjection.SelectedSurface selected,
+            String rootBlueId,
+            long rootRevision,
+            String subscriptionDigest) {
+        if (!selected.generation().rootBlueId().equals(rootBlueId)
+                || selected.generation().rootRevision() != rootRevision
+                || !selected.generation().subscriptionDigest().equals(
+                        subscriptionDigest)) {
+            throw invalid(
+                    "Admitted projection belongs to another Root generation");
+        }
+    }
+
+    private static Map<String, List<String>> projectedScopeChains(
+            String rootBlueId,
+            AdmittedProjection.SelectedSurface selected,
+            Map<String, CoordinationSubscriptionOccurrence> occurrences,
+            List<String> publicOrder) {
+        if (!selected.publicKeys().equals(publicOrder)
+                || selected.occurrences().size() != publicOrder.size()) {
+            throw invalid(
+                    "Admitted projection selection differs from Language");
+        }
+        Set<String> expectedScopePaths = new LinkedHashSet<String>();
+        for (int index = 0; index < publicOrder.size(); index++) {
+            CoordinationSubscriptionOccurrence occurrence =
+                    occurrences.get(publicOrder.get(index));
+            AdmittedOccurrence projected =
+                    selected.occurrences().get(index);
+            if (occurrence == null
+                    || !projected.publicKey().equals(
+                            occurrence.occurrenceKey())
+                    || !projected.scopePath().equals(
+                            occurrence.scopePath())
+                    || !projected.scopeBlueId().equals(
+                            occurrence.scopeBlueId())
+                    || !projected.channelKey().equals(
+                            occurrence.channelKey())
+                    || !projected.effectiveTypeBlueId().equals(
+                            occurrence.effectiveTypeBlueId())
+                    || projected.order() != occurrence.order()
+                    || !projected.headerIdentityBlueId().equals(
+                            occurrence.headerIdentityBlueId())
+                    || !projected.checkpointDomainBlueId().equals(
+                            occurrence.checkpointDomainBlueId())
+                    || !projected.sourceContributionBlueIds().equals(
+                            occurrence.sourceContributionNodeBlueIds())
+                    || !projected.dependencyBlueIds().equals(
+                            occurrence.dependencyNodeBlueIds())
+                    || !projected.subscriptionKeys().equals(
+                            occurrence.subscriptionKeys())) {
+                throw invalid(
+                        "Admitted projection occurrence is stale at "
+                                + publicOrder.get(index));
+            }
+            expectedScopePaths.add(occurrence.scopePath());
+        }
+        if (!selected.scopeChains().keySet().equals(expectedScopePaths)) {
+            throw invalid(
+                    "Admitted projection scope-chain set is incomplete");
+        }
+        for (Map.Entry<String, List<String>> entry
+                : selected.scopeChains().entrySet()) {
+            List<String> chain = entry.getValue();
+            if (chain.isEmpty() || !rootBlueId.equals(chain.get(0))) {
+                throw invalid(
+                        "Admitted projection scope chain has another Root");
+            }
+        }
+        return selected.scopeChains();
+    }
+
+    private static Node requireAdmittedNode(
+            Node supplied,
+            String expectedBlueId,
+            String label) {
+        Node value = Objects.requireNonNull(supplied, label);
+        if (value.isReferenceOnly()) {
+            throw invalid(label + " must be expanded exact content");
+        }
+        String declared = value.getBlueId();
+        if (declared != null && !expectedBlueId.equals(declared)) {
+            throw invalid(label + " carries another declared BlueId");
+        }
+        return value;
+    }
+
     private static List<CoordinationDeliveryDiagnostic>
     publicDiagnostics(
-            List<CoordinationDeliveryDiagnostic> diagnostics,
+            List<CoordinationDeliveryDiagnosticView> diagnostics,
             List<String> publicOrder) {
         List<CoordinationDeliveryDiagnostic> result =
                 new ArrayList<>(diagnostics.size());
         for (int index = 0;
                 index < diagnostics.size();
                 index++) {
-            result.add(
-                    diagnostics.get(index)
-                            .withOccurrenceKey(
-                                    publicOrder.get(index)));
+            CoordinationDeliveryDiagnosticView diagnostic =
+                    diagnostics.get(index);
+            result.add(new CoordinationDeliveryDiagnostic(
+                    publicOrder.get(index),
+                    diagnostic.scopePath(),
+                    diagnostic.sourceChannelKey(),
+                    diagnostic.sourceEffectiveTypeBlueId(),
+                    diagnostic.sourceHeaderBlueId(),
+                    diagnostic.sourceContributionBlueIds(),
+                    diagnostic.checkpointDomainBlueId(),
+                    diagnostic.checkpointSubjectBlueId(),
+                    diagnostic.payloadBlueId(),
+                    diagnostic.targetChannelKey(),
+                    diagnostic.targetEffectiveTypeBlueId(),
+                    diagnostic.targetHeaderBlueId(),
+                    diagnostic.targetContributionBlueIds(),
+                    diagnostic.logicalDeliveryKey(),
+                    diagnostic.dependencyBlueIds()));
         }
         return Collections.unmodifiableList(result);
     }
 
-    private CoordinationSubscriptionSnapshot requireSnapshot(
+    private CoordinationSubscriptionSnapshot.PlanningVerification
+    requireSnapshot(
             CoordinationSubscriptionSnapshot supplied,
             String rootBlueId,
             long rootRevision,
@@ -277,80 +573,34 @@ public final class CoordinationIndexedDeliveryPlanner {
         }
         ExternalOrderKey order = Objects.requireNonNull(
                 eventOrderKey, "eventOrderKey");
-        /*
-         * Round-tripping re-runs the canonical digest and exact dependency
-         * codec. A caller cannot hand us a subclass or a mutable map view.
-         */
-        CoordinationSubscriptionSnapshot verified;
-        try {
-            verified =
-                    CoordinationSubscriptionSnapshot
-                            .rehydrate(snapshot.toMap());
-        } catch (RuntimeException invalidSnapshot) {
-            throw invalid(
-                    "Subscription snapshot identity is invalid: "
-                            + deterministicMessage(
-                            invalidSnapshot));
-        }
-        if (!CoordinationSubscriptionSnapshot.VERSION.equals(
-                verified.projectionVersion())
-                || !CoordinationSubscriptionSnapshot
-                .ALGORITHM_IDENTITY.equals(
-                        verified.algorithmIdentity())
-                || !CoordinationRuntimeRegistrations
-                .identity(processor).equals(
-                        verified
-                                .coordinationRuntimeRegistryIdentity())) {
-            throw invalid(
-                    "Subscription snapshot runtime or projection "
-                            + "identity mismatch");
-        }
-        if (!subscriptionProjectionBridge
-                .languageRuntimeRegistryIdentity()
-                .equals(
-                verified.languageRuntimeRegistryIdentity())) {
-            throw invalid(
-                    "Subscription snapshot Language runtime registry "
-                            + "identity mismatch");
-        }
-        if (!rootBlueId.equals(verified.rootBlueId())) {
-            throw invalid(
-                    "Subscription snapshot Root identity mismatch");
-        }
-        if (rootRevision != verified.rootRevision()) {
-            throw invalid(
-                    "Subscription snapshot Root revision mismatch");
-        }
+        /* Construction/rehydration validates every active occurrence once.
+         * The proof below binds the immutable exact indexes to this runtime
+         * and Root generation in constant time. */
+        CoordinationSubscriptionSnapshot.PlanningVerification verified =
+                snapshot.verifiedForInProcessPlanning(
+                        subscriptionProjectionBridge
+                                .languageRuntimeRegistryIdentity(),
+                        CoordinationRuntimeRegistrations
+                                .identity(processor),
+                        rootBlueId,
+                        rootRevision);
         if (order.compareTo(
-                verified.activationFrontier()) <= 0) {
+                verified.snapshot().activationFrontier()) <= 0) {
             throw invalid(
                     "Event order is not after the active subscription "
                             + "snapshot frontier");
-        }
-        for (CoordinationSubscriptionOccurrence occurrence
-                : verified.occurrences()) {
-            if (occurrence.activationRootRevision() == null
-                    || occurrence.activationRootRevision()
-                    > rootRevision
-                    || occurrence.endAtRootRevision() != null) {
-                throw invalid(
-                        "Subscription snapshot contains a stale occurrence: "
-                                + occurrence.occurrenceKey());
-            }
         }
         return verified;
     }
 
     private static CandidateMapping candidates(
-            CoordinationSubscriptionSnapshot snapshot,
+            CoordinationSubscriptionSnapshot.PlanningVerification verified,
             Collection<String> supplied,
             CoordinationHostQuotaSession hostQuotas) {
         Objects.requireNonNull(
                 supplied,
                 "indexedCandidateOccurrenceKeys");
         List<String> publicKeys = new ArrayList<>(
-                supplied.size());
-        List<String> languageKeys = new ArrayList<>(
                 supplied.size());
         Set<String> unique = new LinkedHashSet<>();
         int candidateIndex = 0;
@@ -365,25 +615,19 @@ public final class CoordinationIndexedDeliveryPlanner {
                                 + exact);
             }
             CoordinationSubscriptionOccurrence occurrence =
-                    snapshot.occurrence(exact);
+                    verified.occurrence(exact);
             if (occurrence == null) {
                 throw invalid(
                         "Indexed candidate is absent or stale in the active "
                                 + "snapshot: " + exact);
             }
             publicKeys.add(exact);
-            languageKeys.add(
-                    CoordinationIndexedDeliveryEngine
-                            .languageOccurrenceKey(
-                                    occurrence.scopePath(),
-                                    occurrence.channelKey()));
         }
-        return new CandidateMapping(
-                publicKeys, languageKeys);
+        return new CandidateMapping(publicKeys);
     }
 
     private static void verifyDiagnostics(
-            List<CoordinationDeliveryDiagnostic> diagnostics,
+            List<CoordinationDeliveryDiagnosticView> diagnostics,
             Map<String, CoordinationSubscriptionOccurrence>
                     selectedOccurrences) {
         if (diagnostics.size()
@@ -395,7 +639,7 @@ public final class CoordinationIndexedDeliveryPlanner {
         int index = 0;
         for (CoordinationSubscriptionOccurrence occurrence
                 : selectedOccurrences.values()) {
-            CoordinationDeliveryDiagnostic diagnostic =
+            CoordinationDeliveryDiagnosticView diagnostic =
                     diagnostics.get(index++);
             if (!occurrence.scopePath().equals(
                     diagnostic.scopePath())
@@ -427,12 +671,18 @@ public final class CoordinationIndexedDeliveryPlanner {
 
     private static Map<String, List<String>>
     selectedScopeChains(
+            String rootBlueId,
             Node root,
             Collection<CoordinationSubscriptionOccurrence>
                     selected,
             ExactLookup lookup) {
         Map<String, List<String>> result =
                 new LinkedHashMap<>();
+        Map<String, String> identitiesByPointer =
+                new LinkedHashMap<>();
+        CoordinationExactNodeIndex exactNodeIndex =
+                new CoordinationExactNodeIndex();
+        identitiesByPointer.put(JsonPointer.ROOT, rootBlueId);
         for (CoordinationSubscriptionOccurrence occurrence
                 : selected) {
             String scopePath = occurrence.scopePath();
@@ -440,8 +690,7 @@ public final class CoordinationIndexedDeliveryPlanner {
                 continue;
             }
             List<String> identities = new ArrayList<>();
-            identities.add(
-                    BlueIdCalculator.calculateBlueId(root));
+            identities.add(rootBlueId);
             List<String> segments =
                     JsonPointer.split(scopePath);
             List<String> prefix = new ArrayList<>();
@@ -449,50 +698,25 @@ public final class CoordinationIndexedDeliveryPlanner {
                 prefix.add(segment);
                 String pointer =
                         JsonPointer.toPointer(prefix);
-                Object selectedNode;
-                try {
-                    selectedNode =
-                            NodePathAccessor.get(
-                                    root,
-                                    pointer,
-                                    new Function<Node, Node>() {
-                                        @Override
-                                        public Node apply(Node reference) {
-                                            return reference != null
-                                                    && reference
-                                                    .isReferenceOnly()
-                                                    ? lookup.require(
-                                                    reference
-                                                            .getBlueId())
-                                                    : reference;
-                                        }
-                                    });
-                } catch (RuntimeException unavailable) {
-                    if (unavailable
-                            instanceof
-                            ExecutionEvidenceUnavailableException) {
-                        throw unavailable;
-                    }
-                    throw invalid(
-                            "Unable to resolve selected scope chain "
-                                    + pointer + ": "
-                                    + deterministicMessage(
-                                    unavailable));
+                String identity = identitiesByPointer.get(pointer);
+                if (identity == null) {
+                    Node selectedNode = resolveScopeNode(
+                            root, pointer, lookup);
+                    identity = exactIdentity(
+                            selectedNode, exactNodeIndex);
+                    identitiesByPointer.put(pointer, identity);
                 }
-                if (!(selectedNode instanceof Node)) {
-                    throw invalid(
-                            "Selected scope chain is not structural at "
-                                    + pointer);
-                }
-                identities.add(exactIdentity(
-                        (Node) selectedNode));
+                identities.add(identity);
             }
             if (!identities.get(
                     identities.size() - 1)
                     .equals(occurrence.scopeBlueId())) {
                 throw invalid(
                         "Subscription occurrence scope identity is stale at "
-                                + scopePath);
+                                + scopePath + ": current="
+                                + identities.get(identities.size() - 1)
+                                + ", projected="
+                                + occurrence.scopeBlueId());
             }
             result.put(
                     scopePath,
@@ -500,6 +724,43 @@ public final class CoordinationIndexedDeliveryPlanner {
                             identities));
         }
         return Collections.unmodifiableMap(result);
+    }
+
+    private static Node resolveScopeNode(
+            Node root,
+            String pointer,
+            ExactLookup lookup) {
+        final Object selectedNode;
+        try {
+            selectedNode = NodePath.get(
+                    root,
+                    pointer,
+                    new Function<Node, Node>() {
+                        @Override
+                        public Node apply(Node reference) {
+                            return reference != null
+                                    && reference.isReferenceOnly()
+                                    ? lookup.require(
+                                    reference.getBlueId())
+                                    : reference;
+                        }
+                    });
+        } catch (RuntimeException unavailable) {
+            if (unavailable
+                    instanceof ExecutionEvidenceUnavailableException) {
+                throw unavailable;
+            }
+            throw invalid(
+                    "Unable to resolve selected scope chain "
+                            + pointer + ": "
+                            + deterministicMessage(unavailable));
+        }
+        if (!(selectedNode instanceof Node)) {
+            throw invalid(
+                    "Selected scope chain is not structural at "
+                            + pointer);
+        }
+        return (Node) selectedNode;
     }
 
     private static ResourceClosure resourceClosure(
@@ -590,19 +851,20 @@ public final class CoordinationIndexedDeliveryPlanner {
         }
     }
 
-    private static String exactIdentity(Node supplied) {
+    private static String exactIdentity(
+            Node supplied,
+            CoordinationExactNodeIndex exactNodeIndex) {
         if (supplied.isReferenceOnly()) {
             return supplied.getBlueId();
         }
-        Node canonical = supplied.clone();
-        String declared = canonical.getBlueId();
-        if (declared != null) {
-            canonical.blueId(null);
+        String declared = supplied.getBlueId();
+        if (declared == null) {
+            return exactNodeIndex.blueId(supplied);
         }
+        Node canonical = supplied.clone().blueId(null);
         String calculated =
-                BlueIdCalculator.calculateBlueId(canonical);
-        if (declared != null
-                && !declared.equals(calculated)) {
+                DirectBlueIdCalculator.calculateBlueId(canonical);
+        if (!declared.equals(calculated)) {
             throw invalid(
                     "Exact content carries mismatched root BlueId "
                             + declared);
@@ -642,10 +904,25 @@ public final class CoordinationIndexedDeliveryPlanner {
             this.provider = provider;
         }
 
+        private static ExactLookup admitted(
+                NodeProvider provider,
+                String rootBlueId,
+                Node root,
+                String eventBlueId,
+                Node event) {
+            ExactLookup result = new ExactLookup(provider);
+            result.cache.put(rootBlueId, root);
+            result.cache.put(eventBlueId, event);
+            return result;
+        }
+
         private synchronized Node require(String blueId) {
             Node cached = cache.get(blueId);
             if (cached != null) {
-                return cached.clone();
+                /* ExactLookup is invocation-local. All consumers traverse
+                 * retained nodes read-only, while the Contracts boundary
+                 * takes its own defensive semantic-input snapshots. */
+                return cached;
             }
             NodeProviderResult result =
                     Objects.requireNonNull(
@@ -695,7 +972,7 @@ public final class CoordinationIndexedDeliveryPlanner {
             final String calculated;
             try {
                 calculated =
-                        BlueIdCalculator.calculateBlueId(
+                        DirectBlueIdCalculator.calculateBlueId(
                                 canonical);
             } catch (RuntimeException invalidContent) {
                 throw invalid(
@@ -710,7 +987,7 @@ public final class CoordinationIndexedDeliveryPlanner {
                                 + calculated
                                 + " for requested " + blueId);
             }
-            cache.put(blueId, canonical.clone());
+            cache.put(blueId, canonical);
             return canonical;
         }
 
@@ -724,17 +1001,11 @@ public final class CoordinationIndexedDeliveryPlanner {
 
     private static final class CandidateMapping {
         private final List<String> publicKeys;
-        private final List<String> languageKeys;
 
-        private CandidateMapping(
-                List<String> publicKeys,
-                List<String> languageKeys) {
+        private CandidateMapping(List<String> publicKeys) {
             this.publicKeys =
                     Collections.unmodifiableList(
                             new ArrayList<>(publicKeys));
-            this.languageKeys =
-                    Collections.unmodifiableList(
-                            new ArrayList<>(languageKeys));
         }
     }
 

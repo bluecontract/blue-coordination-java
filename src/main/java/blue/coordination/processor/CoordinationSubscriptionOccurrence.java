@@ -1,11 +1,14 @@
 package blue.coordination.processor;
 
+import blue.coordination.processor.delivery.CoordinationSubscriptionOccurrenceView;
+
 import blue.language.model.Node;
 import blue.language.processor.ExternalChannelDependencySnapshot;
 import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.SubscriptionDelta;
 import blue.language.processor.util.PointerUtils;
-import blue.language.utils.BlueIdCalculator;
+import blue.language.identity.DirectBlueIdCalculator;
+import blue.language.model.wire.JsonPointer;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -24,7 +27,18 @@ import java.util.Objects;
  * revalidation dependencies. Executable bodies and provider transport state
  * are deliberately absent.</p>
  */
-public final class CoordinationSubscriptionOccurrence {
+public final class CoordinationSubscriptionOccurrence
+        implements CoordinationSubscriptionOccurrenceView {
+    /** Declares how the selected scope entered the effective scope catalog. */
+    public enum Origin {
+        /** The selected scope is the admitted Processing Root. */
+        ROOT,
+        /** The scope was named by {@code Process Embedded.paths}. */
+        EXPLICIT,
+        /** The scope is one stable-key {@code collectionPaths} member. */
+        COLLECTION_MEMBER
+    }
+
     /** Stable policy name for Language's lower-exclusive activation bound. */
     public static final String SUBSCRIPTION_START_POLICY =
             "blue.coordination/subscription-start/"
@@ -66,6 +80,11 @@ public final class CoordinationSubscriptionOccurrence {
     private final String occurrenceKey;
     private final String scopePath;
     private final String scopeBlueId;
+    private final String declaringScopePath;
+    private final Origin origin;
+    private final String explicitDeclarationPath;
+    private final String collectionDeclarationPath;
+    private final String collectionMemberKey;
     private final String channelKey;
     private final List<String> sourceContributionNodeBlueIds;
     private final String effectiveTypeBlueId;
@@ -83,6 +102,11 @@ public final class CoordinationSubscriptionOccurrence {
     CoordinationSubscriptionOccurrence(
             String scopePath,
             String scopeBlueId,
+            String declaringScopePath,
+            Origin origin,
+            String explicitDeclarationPath,
+            String collectionDeclarationPath,
+            String collectionMemberKey,
             String channelKey,
             List<String> sourceContributionNodeBlueIds,
             String effectiveTypeBlueId,
@@ -108,6 +132,25 @@ public final class CoordinationSubscriptionOccurrence {
         this.scopePath = exactScopePath;
         this.scopeBlueId =
                 requireText(scopeBlueId, "scopeBlueId");
+        String suppliedDeclaringScopePath =
+                requireText(
+                        declaringScopePath,
+                        "declaringScopePath");
+        String exactDeclaringScopePath =
+                PointerUtils.normalizeScope(
+                        suppliedDeclaringScopePath);
+        if (!exactDeclaringScopePath.equals(
+                suppliedDeclaringScopePath)) {
+            throw new IllegalArgumentException(
+                    "declaringScopePath must be canonical: "
+                            + suppliedDeclaringScopePath);
+        }
+        this.declaringScopePath = exactDeclaringScopePath;
+        this.origin = Objects.requireNonNull(origin, "origin");
+        this.explicitDeclarationPath = explicitDeclarationPath;
+        this.collectionDeclarationPath = collectionDeclarationPath;
+        this.collectionMemberKey = collectionMemberKey;
+        validateProvenance();
         this.channelKey =
                 requireText(channelKey, "channelKey");
         this.sourceContributionNodeBlueIds =
@@ -191,7 +234,7 @@ public final class CoordinationSubscriptionOccurrence {
                                 requireText(
                                         channelKey,
                                         "channelKey")));
-        return BlueIdCalculator.calculateBlueId(descriptor);
+        return DirectBlueIdCalculator.calculateBlueId(descriptor);
     }
 
     /** @return stable public occurrence key */
@@ -207,6 +250,31 @@ public final class CoordinationSubscriptionOccurrence {
     /** @return exact selected scope BlueId */
     public String scopeBlueId() {
         return scopeBlueId;
+    }
+
+    /** @return absolute scope that declared this selected scope */
+    public String declaringScopePath() {
+        return declaringScopePath;
+    }
+
+    /** @return exact structured-catalog origin of this selected scope */
+    public Origin origin() {
+        return origin;
+    }
+
+    /** @return explicit declaration pointer, or {@code null} */
+    public String explicitDeclarationPath() {
+        return explicitDeclarationPath;
+    }
+
+    /** @return collection declaration pointer, or {@code null} */
+    public String collectionDeclarationPath() {
+        return collectionDeclarationPath;
+    }
+
+    /** @return exact unescaped collection member key, or {@code null} */
+    public String collectionMemberKey() {
+        return collectionMemberKey;
     }
 
     /** @return raw same-scope Channel key */
@@ -329,6 +397,11 @@ public final class CoordinationSubscriptionOccurrence {
         return new CoordinationSubscriptionOccurrence(
                 entry.scopePath(),
                 nextScopeBlueId,
+                declaringScopePath,
+                origin,
+                explicitDeclarationPath,
+                collectionDeclarationPath,
+                collectionMemberKey,
                 entry.channelKey(),
                 entry.sourceContributionNodeBlueIds(),
                 entry.effectiveTypeBlueId(),
@@ -343,12 +416,61 @@ public final class CoordinationSubscriptionOccurrence {
                 entry.dependencies());
     }
 
+    /**
+     * Rebinds only the selected scope identity after a proof that contracts,
+     * subscription dependencies, membership and embedded topology are
+     * unchanged.  This is deliberately package-private: callers cannot use a
+     * new Root BlueId as a substitute for semantic projection evidence.
+     */
+    CoordinationSubscriptionOccurrence withScopeBlueId(
+            String nextScopeBlueId) {
+        return new CoordinationSubscriptionOccurrence(
+                scopePath,
+                nextScopeBlueId,
+                declaringScopePath,
+                origin,
+                explicitDeclarationPath,
+                collectionDeclarationPath,
+                collectionMemberKey,
+                channelKey,
+                sourceContributionNodeBlueIds,
+                effectiveTypeBlueId,
+                order,
+                checkpointDomainBlueId,
+                headerIdentityBlueId,
+                headerFieldBlueIds,
+                subscriptionKeys,
+                activationRootRevision,
+                activationFrontier,
+                endAtRootRevision,
+                dependencies);
+    }
+
     Map<String, Object> toCanonicalMap() {
         Map<String, Object> result =
                 new LinkedHashMap<String, Object>();
         result.put("occurrenceKey", occurrenceKey);
         result.put("scopePath", scopePath);
         result.put("scopeBlueId", scopeBlueId);
+        result.put(
+                "declaringScopePath",
+                declaringScopePath);
+        result.put("origin", origin.name());
+        if (explicitDeclarationPath != null) {
+            result.put(
+                    "explicitDeclarationPath",
+                    explicitDeclarationPath);
+        }
+        if (collectionDeclarationPath != null) {
+            result.put(
+                    "collectionDeclarationPath",
+                    collectionDeclarationPath);
+        }
+        if (collectionMemberKey != null) {
+            result.put(
+                    "collectionMemberKey",
+                    collectionMemberKey);
+        }
         result.put("channelKey", channelKey);
         result.put(
                 "sourceContributionNodeBlueIds",
@@ -404,6 +526,8 @@ public final class CoordinationSubscriptionOccurrence {
                         "occurrenceKey",
                         "scopePath",
                         "scopeBlueId",
+                        "declaringScopePath",
+                        "origin",
                         "channelKey",
                         "sourceContributionNodeBlueIds",
                         "effectiveTypeBlueId",
@@ -415,6 +539,9 @@ public final class CoordinationSubscriptionOccurrence {
                         "subscriptionStartPolicy",
                         "dependencies"
                 },
+                "explicitDeclarationPath",
+                "collectionDeclarationPath",
+                "collectionMemberKey",
                 "activationRootRevision",
                 "activationFrontier",
                 "endAtRootRevision");
@@ -424,6 +551,20 @@ public final class CoordinationSubscriptionOccurrence {
                                 .text(map, "scopePath"),
                         CoordinationSubscriptionSerialization
                                 .text(map, "scopeBlueId"),
+                        CoordinationSubscriptionSerialization
+                                .text(
+                                        map,
+                                        "declaringScopePath"),
+                        parseOrigin(
+                                CoordinationSubscriptionSerialization
+                                        .text(map, "origin")),
+                        optionalText(
+                                map,
+                                "explicitDeclarationPath"),
+                        optionalText(
+                                map,
+                                "collectionDeclarationPath"),
+                        optionalMemberKey(map),
                         CoordinationSubscriptionSerialization
                                 .text(map, "channelKey"),
                         CoordinationSubscriptionSerialization
@@ -515,6 +656,100 @@ public final class CoordinationSubscriptionOccurrence {
                     label + " must be non-empty");
         }
         return value;
+    }
+
+    private void validateProvenance() {
+        if (origin == Origin.ROOT) {
+            if (!"/".equals(scopePath)
+                    || !"/".equals(declaringScopePath)
+                    || explicitDeclarationPath != null
+                    || collectionDeclarationPath != null
+                    || collectionMemberKey != null) {
+                throw new IllegalArgumentException(
+                        "ROOT occurrence has inconsistent declaration "
+                                + "provenance");
+            }
+            return;
+        }
+        if (origin == Origin.EXPLICIT) {
+            String declaration = canonicalDeclaration(
+                    explicitDeclarationPath,
+                    "explicitDeclarationPath");
+            if (collectionDeclarationPath != null
+                    || collectionMemberKey != null
+                    || !scopePath.equals(
+                            PointerUtils.resolvePointer(
+                                    declaringScopePath,
+                                    declaration))) {
+                throw new IllegalArgumentException(
+                        "EXPLICIT occurrence has inconsistent declaration "
+                                + "provenance");
+            }
+            return;
+        }
+        String declaration = canonicalDeclaration(
+                collectionDeclarationPath,
+                "collectionDeclarationPath");
+        if (explicitDeclarationPath != null
+                || collectionMemberKey == null
+                || !scopePath.equals(
+                        JsonPointer.append(
+                                PointerUtils.resolvePointer(
+                                        declaringScopePath,
+                                        declaration),
+                                collectionMemberKey))) {
+            throw new IllegalArgumentException(
+                    "COLLECTION_MEMBER occurrence has inconsistent "
+                            + "declaration provenance");
+        }
+    }
+
+    private static String canonicalDeclaration(
+            String supplied,
+            String label) {
+        String declaration = requireText(supplied, label);
+        String canonical =
+                PointerUtils.assertValidRuntimePointer(
+                        declaration);
+        if (!canonical.equals(declaration)
+                || "/".equals(canonical)) {
+            throw new IllegalArgumentException(
+                    label + " must be a canonical non-root Runtime "
+                            + "Pointer: " + declaration);
+        }
+        return canonical;
+    }
+
+    private static Origin parseOrigin(String encoded) {
+        try {
+            return Origin.valueOf(encoded);
+        } catch (IllegalArgumentException unknown) {
+            throw new IllegalArgumentException(
+                    "Unsupported subscription occurrence origin: "
+                            + encoded,
+                    unknown);
+        }
+    }
+
+    private static String optionalText(
+            Map<String, ?> map,
+            String key) {
+        return map.containsKey(key)
+                ? CoordinationSubscriptionSerialization.text(map, key)
+                : null;
+    }
+
+    private static String optionalMemberKey(
+            Map<String, ?> map) {
+        if (!map.containsKey("collectionMemberKey")) {
+            return null;
+        }
+        Object value = map.get("collectionMemberKey");
+        if (!(value instanceof String)) {
+            throw new IllegalArgumentException(
+                    "collectionMemberKey must be Text");
+        }
+        return (String) value;
     }
 
     private static List<String> immutableText(

@@ -2,9 +2,9 @@ package blue.coordination.processor.workflow;
 
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.model.Node;
-import blue.language.processor.CoordinationProcessHeaderBridge;
+import blue.coordination.processor.support.CoordinationProcessHeaderSupport;
 import blue.language.processor.WorkingDocument;
-import blue.language.processor.model.FrozenJsonPatch;
+import blue.language.processor.FrozenJsonPatch;
 import blue.language.snapshot.FrozenNode;
 import blue.repo.coordination.SequentialWorkflowStep;
 import blue.repo.coordination.UpdateDocument;
@@ -316,7 +316,7 @@ public final class UpdateDocumentStepExecutor implements WorkflowStepExecutor<Up
             return null;
         }
         return FrozenNode.fromNode(
-                CoordinationProcessHeaderBridge
+                CoordinationProcessHeaderSupport
                         .canonicalExactCopy(
                                 resolvedValue));
     }

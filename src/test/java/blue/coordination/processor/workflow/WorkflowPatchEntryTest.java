@@ -12,56 +12,56 @@ class WorkflowPatchEntryTest {
 
     @Test
     void shouldDefensivelyFreezeLegacyMutableValueAtTheBoundary() {
-        // Given
+        // given
         Node callerOwned = new Node().properties("status", new Node().value("before"));
 
-        // When
+        // when
         WorkflowPatchEntry entry = new WorkflowPatchEntry("add", "/payload", callerOwned);
         callerOwned.getProperties().get("status").value("after");
 
-        // Then
+        // then
         assertTrue(entry.val().isStrictCanonical());
         assertEquals("before", entry.val().getProperties().get("status").getValue());
     }
 
     @Test
     void shouldRetainStrictFrozenValueWithoutMaterialization() {
-        // Given
+        // given
         FrozenNode authored = FrozenNode.fromNode(new Node().value("authored"));
 
-        // When
+        // when
         WorkflowPatchEntry entry = new WorkflowPatchEntry("replace", "/payload", authored);
 
-        // Then
+        // then
         assertSame(authored, entry.val());
     }
 
     @Test
     void shouldCanonicalizeResolvedFrozenCompatibilityValueAtConstruction() {
-        // Given
+        // given
         FrozenNode resolved = FrozenNode.fromResolvedNode(new Node()
                 .properties("status", new Node().value("resolved-shape")));
 
-        // When
+        // when
         WorkflowPatchEntry entry = new WorkflowPatchEntry("add", "/payload", resolved);
 
-        // Then
+        // then
         assertTrue(entry.val().isStrictCanonical());
         assertEquals("resolved-shape", entry.val().getProperties().get("status").getValue());
     }
 
     @Test
     void shouldPreserveRemoveValueForExactShapeValidation() {
-        // Given
+        // given
         Node forbiddenValue = new Node()
                 .properties("expanded", new Node().value("forbidden"));
 
-        // When
+        // when
         WorkflowPatchEntry entry = new WorkflowPatchEntry(
                 "remove", "/payload", forbiddenValue);
         forbiddenValue.getProperties().get("expanded").value("mutated");
 
-        // Then
+        // then
         assertEquals("remove", entry.op());
         assertTrue(entry.val().isStrictCanonical());
         assertEquals("forbidden",

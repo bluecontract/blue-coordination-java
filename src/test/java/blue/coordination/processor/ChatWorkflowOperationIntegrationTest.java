@@ -1,6 +1,5 @@
 package blue.coordination.processor;
 
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorStatus;
@@ -25,140 +24,142 @@ final class ChatWorkflowOperationIntegrationTest {
 
     @Test
     void shouldEmitSeededChatMessageBeforeAppendedWorkflowEvent() {
-        // Given
-        Fixture fixture = configuredFixture();
-        Node document = initializedDocument(
-                fixture,
-                chatDocument(
-                        fixture.repository,
-                        "hello",
-                        appendedChatMessage("moderation-complete")));
-        Node request = TestTimelineProvider.chatMessage("hello");
-        Node event = CoordinationTestResources.operationRequestEvent(
-                fixture.blue,
-                fixture.repository,
-                "alice",
-                100,
-                "chat",
-                "alice",
-                request);
+        try (Fixture fixture = configuredFixture()) {
+            // given
+            Node document = initializedDocument(
+                    fixture,
+                    chatDocument(
+                            fixture.repository,
+                            "hello",
+                            appendedChatMessage("moderation-complete")));
+            Node request = TestTimelineProvider.chatMessage("hello");
+            Node event = CoordinationTestResources.operationRequestEvent(
+                    fixture.runtime,
+                    fixture.repository,
+                    "alice",
+                    100,
+                    "chat",
+                    "alice",
+                    request);
 
-        // When
-        DocumentProcessingResult result =
-                fixture.blue.processDocument(document, event);
+            // when
+            DocumentProcessingResult result =
+                    fixture.runtime.processDocument(document, event);
 
-        // Then
-        assertEquals(
-                ProcessorStatus.SUCCESS,
-                result.status(),
-                ProcessingResultTestSupport.diagnosticMessage(result));
-        assertChatMessages(
-                result.events(),
-                "hello",
-                "moderation-complete");
+            // then
+            assertEquals(
+                    ProcessorStatus.SUCCESS,
+                    result.status(),
+                    ProcessingResultTestSupport.diagnosticMessage(result));
+            assertChatMessages(
+                    result.events(),
+                    "hello",
+                    "moderation-complete");
+        }
     }
 
     @Test
     void shouldAdvanceSourceCheckpointOnceForRoutedChatRequest() {
-        // Given
-        Fixture fixture = configuredFixture();
-        Node document = initializedDocument(
-                fixture,
-                chatDocument(fixture.repository, "hello"));
-        Node event = CoordinationTestResources.operationRequestEvent(
-                fixture.blue,
-                fixture.repository,
-                "alice",
-                100,
-                "chat",
-                "alice",
-                TestTimelineProvider.chatMessage("hello"));
+        try (Fixture fixture = configuredFixture()) {
+            // given
+            Node document = initializedDocument(
+                    fixture,
+                    chatDocument(fixture.repository, "hello"));
+            Node event = CoordinationTestResources.operationRequestEvent(
+                    fixture.runtime,
+                    fixture.repository,
+                    "alice",
+                    100,
+                    "chat",
+                    "alice",
+                    TestTimelineProvider.chatMessage("hello"));
 
-        // When
-        DocumentProcessingResult first =
-                fixture.blue.processDocument(document, event);
-        DocumentProcessingResult replay =
-                fixture.blue.processDocument(
-                        first.document(), event);
+            // when
+            DocumentProcessingResult first =
+                    fixture.runtime.processDocument(document, event);
+            DocumentProcessingResult replay =
+                    fixture.runtime.processDocument(
+                            first.document(), event);
 
-        // Then
-        assertEquals(
-                ProcessorStatus.SUCCESS,
-                first.status(),
-                ProcessingResultTestSupport.diagnosticMessage(first));
-        assertEquals(
-                BigInteger.valueOf(100),
-                first.document().get(
-                        "/contracts/checkpoint/entries/alice/subject/timestamp"));
-        assertEquals(1, first.events().size());
-        assertEquals(
-                ProcessorStatus.STALE,
-                replay.status(),
-                ProcessingResultTestSupport.diagnosticMessage(replay));
-        assertEquals(0, replay.events().size());
-        assertEquals(
-                BigInteger.valueOf(100),
-                replay.document().get(
-                        "/contracts/checkpoint/entries/alice/subject/timestamp"));
+            // then
+            assertEquals(
+                    ProcessorStatus.SUCCESS,
+                    first.status(),
+                    ProcessingResultTestSupport.diagnosticMessage(first));
+            assertEquals(
+                    BigInteger.valueOf(100),
+                    first.document().get(
+                            "/contracts/checkpoint/entries/alice/subject/timestamp"));
+            assertEquals(1, first.events().size());
+            assertEquals(
+                    ProcessorStatus.STALE,
+                    replay.status(),
+                    ProcessingResultTestSupport.diagnosticMessage(replay));
+            assertEquals(0, replay.events().size());
+            assertEquals(
+                    BigInteger.valueOf(100),
+                    replay.document().get(
+                            "/contracts/checkpoint/entries/alice/subject/timestamp"));
+        }
     }
 
     @Test
     void shouldTerminateAfterInheritedChatWorkflowPrefix() {
-        // Given
-        Fixture fixture = configuredFixture();
-        Node document = initializedDocument(
-                fixture,
-                chatDocument(
-                        fixture.repository,
-                        "hello",
-                        terminateProcessing("inherited-prefix-complete")));
-        Node event = CoordinationTestResources.operationRequestEvent(
-                fixture.blue,
-                fixture.repository,
-                "alice",
-                100,
-                "chat",
-                "alice",
-                TestTimelineProvider.chatMessage("hello"));
+        try (Fixture fixture = configuredFixture()) {
+            // given
+            Node document = initializedDocument(
+                    fixture,
+                    chatDocument(
+                            fixture.repository,
+                            "hello",
+                            terminateProcessing("inherited-prefix-complete")));
+            Node event = CoordinationTestResources.operationRequestEvent(
+                    fixture.runtime,
+                    fixture.repository,
+                    "alice",
+                    100,
+                    "chat",
+                    "alice",
+                    TestTimelineProvider.chatMessage("hello"));
 
-        // When
-        DocumentProcessingResult result =
-                fixture.blue.processDocument(document, event);
+            // when
+            DocumentProcessingResult result =
+                    fixture.runtime.processDocument(document, event);
 
-        // Then
-        assertEquals(
-                ProcessorStatus.SUCCESS,
-                result.status(),
-                ProcessingResultTestSupport.diagnosticMessage(result));
-        assertEquals(1, result.events().size());
-        assertEquals(
-                ChatMessage.blueId(),
-                result.events().get(0).getType().getBlueId());
-        assertEquals("hello", result.events().get(0).get("/message"));
-        assertEquals(
-                TerminateProcessing.blueId(),
-                result.document().get("/contracts/terminated/cause"));
-        assertEquals(
-                "inherited-prefix-complete",
-                result.document().get("/contracts/terminated/reason"));
+            // then
+            assertEquals(
+                    ProcessorStatus.SUCCESS,
+                    result.status(),
+                    ProcessingResultTestSupport.diagnosticMessage(result));
+            assertEquals(1, result.events().size());
+            assertEquals(
+                    ChatMessage.blueId(),
+                    result.events().get(0).getType().getBlueId());
+            assertEquals("hello", result.events().get(0).get("/message"));
+            assertEquals(
+                    TerminateProcessing.blueId(),
+                    result.document().get("/contracts/terminated/cause"));
+            assertEquals(
+                    "inherited-prefix-complete",
+                    result.document().get("/contracts/terminated/reason"));
+        }
     }
 
     private static Fixture configuredFixture() {
         BlueRepository repository =
-                BlueRepository.latest();
-        Blue blue =
+                BlueRepository.current();
+        CoordinationTestRuntime runtime =
                 CoordinationTestResources.configuredBlue(
                         repository);
-        CoordinationProcessors.registerWith(blue);
-        return new Fixture(repository, blue);
+        return new Fixture(repository, runtime);
     }
 
     private static Node initializedDocument(
             Fixture fixture,
             Node authored) {
         DocumentProcessingResult result =
-                fixture.blue.initializeDocument(
-                        fixture.blue.preprocess(authored));
+                fixture.runtime.initializeDocument(
+                        fixture.runtime.preprocess(authored));
         assertEquals(
                 ProcessorStatus.SUCCESS,
                 result.status(),
@@ -193,7 +194,7 @@ final class ChatWorkflowOperationIntegrationTest {
                 "chat",
                 workflow);
         return new Node()
-                .blue(repository.typeAliasBlue())
+                .blue(repository.importsDirective())
                 .name("Chat document")
                 .properties(
                         "contracts",
@@ -210,7 +211,7 @@ final class ChatWorkflowOperationIntegrationTest {
         return new Node()
                 .type(
                         new Node().blueId(
-                                blue.language.utils.Properties
+                                blue.language.model.wire.BlueLanguageConstants
                                         .LIST_TYPE_BLUE_ID))
                 .mergePolicy("append-only")
                 .items(steps);
@@ -221,7 +222,7 @@ final class ChatWorkflowOperationIntegrationTest {
                 new Node()
                         .type(
                                 new Node().blueId(
-                                        blue.language.utils.Properties
+                                        blue.language.model.wire.BlueLanguageConstants
                                                 .TEXT_TYPE_BLUE_ID))
                         .value("/message/request");
         return new Node()
@@ -282,15 +283,20 @@ final class ChatWorkflowOperationIntegrationTest {
         }
     }
 
-    private static final class Fixture {
+    private static final class Fixture implements AutoCloseable {
         private final BlueRepository repository;
-        private final Blue blue;
+        private final CoordinationTestRuntime runtime;
 
         private Fixture(
                 BlueRepository repository,
-                Blue blue) {
+                CoordinationTestRuntime runtime) {
             this.repository = repository;
-            this.blue = blue;
+            this.runtime = runtime;
+        }
+
+        @Override
+        public void close() {
+            runtime.close();
         }
     }
 }

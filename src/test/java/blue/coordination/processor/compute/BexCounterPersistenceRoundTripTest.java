@@ -1,11 +1,11 @@
 package blue.coordination.processor.compute;
 
 import blue.coordination.processor.CoordinationProcessorOptions;
+import blue.coordination.processor.CoordinationTestRuntime;
 import blue.coordination.processor.bex.BexProcessingMetrics;
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
-import blue.language.snapshot.ResolvedSnapshot;
+import blue.language.merge.ResolvedSnapshot;
 import blue.repo.BlueRepository;
 import java.math.BigInteger;
 import org.junit.jupiter.api.Test;
@@ -35,7 +35,7 @@ class BexCounterPersistenceRoundTripTest {
 
     @Test
     void shouldReloadCanonicalDocumentAcrossOneHundredBexIncrements() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         CoordinationProcessorOptions options = CoordinationProcessorOptions.builder()
                 .processingMetrics(metrics)
@@ -44,7 +44,7 @@ class BexCounterPersistenceRoundTripTest {
 
         long start = System.nanoTime();
 
-        // When
+        // when
         long initializeStart = System.nanoTime();
         DocumentProcessingResult initialized = support.initialize(support.yamlResource(COUNTER_RESOURCE));
         long initializeNanos = System.nanoTime() - initializeStart;
@@ -106,7 +106,7 @@ class BexCounterPersistenceRoundTripTest {
         ResolvedSnapshot finalSnapshot = deserializeCanonicalAndLoadSnapshot(
                 ComputeWorkflowTestSupport.create(options), storedCanonicalJson);
 
-        // Then
+        // then
         assertEquals(BigInteger.valueOf(ITERATIONS), finalSnapshot.resolvedNodeAt("/counter").getValue());
         assertEquals(ITERATIONS, metrics.updateBatchPatchApplications());
         assertEquals(ITERATIONS, metrics.directBexChangesetHits());
@@ -142,7 +142,7 @@ class BexCounterPersistenceRoundTripTest {
         return support.blue.loadSnapshot(storedCanonical);
     }
 
-    private static Node operationRequest(Blue blue,
+    private static Node operationRequest(CoordinationTestRuntime blue,
                                          BlueRepository repository,
                                          int timestamp) {
         Node message = new Node()
@@ -156,7 +156,7 @@ class BexCounterPersistenceRoundTripTest {
                 .properties("actor", principalActor())
                 .properties("timestamp", new Node().value(BigInteger.valueOf(timestamp)))
                 .properties("message", message)
-                .blue(repository.typeAliasBlue());
+                .blue(repository.importsDirective());
         return blue.preprocess(event).blue(null);
     }
 

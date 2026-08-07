@@ -1,0 +1,106 @@
+{
+  "schema": "blue-coordination/nested-agreement-flagship-trace/1.0",
+  "status": "failed",
+  "run": {
+    "id": "coordination-release-evidence-2026-08-03",
+    "finishedAt": "2026-08-03T13:20:33.024Z",
+    "sourceTests": [
+      "blue.coordination.processor.CoordinationNestedEmbeddedCollectionFlagshipStructuralTest",
+      "blue.coordination.processor.CoordinationComplexEmbeddedDeterminismFlagshipTest"
+    ]
+  },
+  "structuralEvidence": {
+    "status": "passed",
+    "sourceTests": [
+      "blue.coordination.processor.CoordinationNestedEmbeddedCollectionFlagshipStructuralTest"
+    ],
+    "scopePlan": {
+      "collectionPaths": [
+        "/agreements",
+        "/lessons",
+        "/paymentProcesses",
+        "/cancellations"
+      ],
+      "concreteEmbeddedOccurrences": 10,
+      "stableObjectKeys": true,
+      "nestedScopes": true,
+      "rfc6901EscapedMemberKeys": true
+    },
+    "fragmentInventory": {
+      "canonicalExactFragments": true,
+      "collectionDeclarationProvenance": true,
+      "sharedBlueIdIndependentOccurrences": true,
+      "onePhysicalFragmentPerBlueId": true
+    },
+    "reconstruction": {
+      "exactNodeWireForm": true,
+      "exactRootBlueId": true
+    }
+  },
+  "runtimeLanes": [
+    {
+      "id": "A-root-only",
+      "status": "notExecuted",
+      "declaredScenarios": 1,
+      "attemptedScenarios": 0,
+      "completedScenarios": 0
+    },
+    {
+      "id": "B-one-lesson",
+      "status": "notExecuted",
+      "declaredScenarios": 1,
+      "attemptedScenarios": 0,
+      "completedScenarios": 0
+    },
+    {
+      "id": "C-deep-cancellation",
+      "status": "failed",
+      "declaredScenarios": 2,
+      "attemptedScenarios": 2,
+      "completedScenarios": 0,
+      "diagnostic": "Immutable Repository bytecode failed before PROCESS with java.lang.NoClassDefFoundError: blue/language/NodeProvider."
+    },
+    {
+      "id": "D-sibling-agreement",
+      "status": "notExecuted",
+      "declaredScenarios": 1,
+      "attemptedScenarios": 0,
+      "completedScenarios": 0
+    },
+    {
+      "id": "E-add-member",
+      "status": "notExecuted",
+      "declaredScenarios": 2,
+      "attemptedScenarios": 0,
+      "completedScenarios": 0
+    },
+    {
+      "id": "F-remove-readd",
+      "status": "notExecuted",
+      "declaredScenarios": 1,
+      "attemptedScenarios": 0,
+      "completedScenarios": 0
+    },
+    {
+      "id": "G-shared-initial-child",
+      "status": "notExecuted",
+      "declaredScenarios": 1,
+      "attemptedScenarios": 0,
+      "completedScenarios": 0
+    },
+    {
+      "id": "H-frozen-membership",
+      "status": "notExecuted",
+      "declaredScenarios": 1,
+      "attemptedScenarios": 0,
+      "completedScenarios": 0
+    },
+    {
+      "id": "I-invalid-surfaces",
+      "status": "notExecuted",
+      "declaredScenarios": 11,
+      "attemptedScenarios": 0,
+      "completedScenarios": 0
+    }
+  ]
+}

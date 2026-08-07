@@ -59,8 +59,8 @@ Root-public events, and source checkpoints as one result.
 
 ## Registration is architecture-neutral
 
-`CoordinationProcessors.configure(...)` and
-`CoordinationProcessors.registerWith(...)` install only runtime semantics.
+`CoordinationProcessors.contracts(...)` and
+`CoordinationProcessors.configure(...)` install only runtime semantics.
 They do not install a delivery-plan deriver and therefore do not silently
 select a whole-Root persistence strategy.
 
@@ -69,19 +69,20 @@ The host chooses one of two explicit modes.
 ### Compatibility mode
 
 ```text
-CoordinationDeliveryPlanning.currentRootCompatibility(processor or blue)
+CoordinationDeliveryPlanning.currentRootCompatibilityDeriver(
+    contracts, rootRevision, eventOrderKey, completeActiveIntervals)
 ```
 
-This installs the deterministic current-Root deriver. It is useful when a host
-can afford to derive the complete effective external Channel surface for each
-event. It is a compatibility architecture, not historical activation-state
-reconstruction.
+This creates the deterministic current-Root deriver through the public
+`BlueContracts` service. It is useful when a host can afford to derive the
+complete effective external Channel surface for each event. It is a
+compatibility architecture, not historical activation-state reconstruction.
 
 ### Indexed mode
 
 ```text
-CoordinationDeliveryPlanning.subscriptionProjector(processor)
-CoordinationDeliveryPlanning.indexed(processor)
+CoordinationDeliveryPlanning.subscriptionProjector(processor, contracts)
+CoordinationDeliveryPlanning.indexed(processor, contracts)
 ```
 
 Indexed mode separates Root-transition projection from event-time planning:

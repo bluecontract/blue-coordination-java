@@ -28,13 +28,25 @@ public final class TimelineProviderSupport {
     }
 
     public static ChannelEvaluation evaluateTimelineEntry(TimelineChannel contract, ChannelEvaluationContext context) {
+        return evaluateTimelineEntry(
+                contract,
+                context,
+                CoordinationSemanticTypeIdentities.publishedDefaults());
+    }
+
+    static ChannelEvaluation evaluateTimelineEntry(
+            TimelineChannel contract,
+            ChannelEvaluationContext context,
+            CoordinationSemanticTypeIdentities identities) {
         Node eventNode = context.event();
-        CoordinationEventNodes.TimelineEntryView entry = CoordinationEventNodes.timelineEntry(eventNode);
+        CoordinationEventNodes.TimelineEntryView entry =
+                CoordinationEventNodes.timelineEntry(
+                        eventNode, identities);
         if (entry == null) {
             return ChannelEvaluation.noMatch();
         }
-        if (!TimelineExternalSubscriptionFunctions.INSTANCE
-                .accepts(contract, eventNode)) {
+        if (!matchesTimelineAndActor(
+                contract, entry, identities)) {
             return ChannelEvaluation.noMatch();
         }
         return ChannelEvaluation.match(eventNode, eventId(eventNode));
@@ -42,12 +54,22 @@ public final class TimelineProviderSupport {
 
     static boolean matchesTimelineAndActor(TimelineChannel contract,
                                            CoordinationEventNodes.TimelineEntryView entry) {
+        return matchesTimelineAndActor(
+                contract,
+                entry,
+                CoordinationSemanticTypeIdentities.publishedDefaults());
+    }
+
+    static boolean matchesTimelineAndActor(
+            TimelineChannel contract,
+            CoordinationEventNodes.TimelineEntryView entry,
+            CoordinationSemanticTypeIdentities identities) {
         return contract != null
                 && entry != null
                 && CoordinationEventNodes.matchesGeneratedBinding(
-                        entry.timeline(), contract.getTimeline())
+                        entry.timeline(), contract.getTimeline(), identities)
                 && CoordinationEventNodes.matchesGeneratedBinding(
-                        entry.actor(), contract.getActor());
+                        entry.actor(), contract.getActor(), identities);
     }
 
     static ChannelEvaluation preserveUnionPayload(ChannelEvaluation childEvaluation,

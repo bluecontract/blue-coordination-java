@@ -38,7 +38,7 @@ final class ComputeDefinitionResolver {
         if (definition == null || FrozenNodeUtil.isEmpty(definition)) {
             return null;
         }
-        if (definition.isReferenceOnly()) {
+        if (definition.getReferenceBlueId() != null) {
             return materializeExactDefinition(
                     definition,
                     context,
@@ -68,7 +68,7 @@ final class ComputeDefinitionResolver {
         if (definition == null || NodeUtil.isEmpty(definition)) {
             return null;
         }
-        if (definition.isReferenceOnly()) {
+        if (definition.getBlueId() != null) {
             return materializeExactDefinition(
                     FrozenNode.fromNode(definition),
                     context,
@@ -104,8 +104,20 @@ final class ComputeDefinitionResolver {
                             + "workflow steps capability");
             return null;
         }
+        /*
+         * Effective workflow bodies may retain their exact provider BlueId
+         * beside resolved fields.  Reopen that identity through Language's
+         * selected-body capability instead of giving hosted BEX the expanded
+         * view: static BEX literals must retain the provider-authored pure
+         * reference shape for their nested type values.
+         */
+        FrozenNode exactReference = reference.isReferenceOnly()
+                ? reference
+                : FrozenNode.fromNode(
+                        new Node().blueId(
+                                reference.getReferenceBlueId()));
         FrozenNode materialized =
-                selectedBody.materializeExactReference(reference);
+                selectedBody.materializeExactReference(exactReference);
         incrementFrozenDirectHit(invocationMetrics);
         return materialized;
     }

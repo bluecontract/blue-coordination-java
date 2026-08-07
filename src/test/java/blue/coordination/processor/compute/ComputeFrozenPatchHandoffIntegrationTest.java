@@ -21,7 +21,7 @@ class ComputeFrozenPatchHandoffIntegrationTest {
 
     @Test
     void shouldRetainCanonicalFrozenBindingWithoutNodeMaterialization() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeWorkflowTestSupport support = support(metrics);
         Node document = support.initializedOperationWorkflow(String.join("\n",
@@ -39,10 +39,10 @@ class ComputeFrozenPatchHandoffIntegrationTest {
                 "                $changeset: true"));
         Counters before = Counters.capture(metrics);
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertEquals("ownerChannel", result.document().get("/copiedChannel"));
         assertEquals(1L, metrics.directBexChangesetHits());
@@ -58,7 +58,7 @@ class ComputeFrozenPatchHandoffIntegrationTest {
 
     @Test
     void shouldKeepEffectOrderForIndependentlyReturnedEffects() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeWorkflowTestSupport support = support(metrics);
         Node document = support.initialize(support.yaml(
@@ -94,10 +94,10 @@ class ComputeFrozenPatchHandoffIntegrationTest {
                         "            val: forbidden")))).document();
         Counters before = Counters.capture(metrics);
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertEquals("changed", result.document().get("/status"));
         assertEquals("value", result.document().get("/added/nested"));

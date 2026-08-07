@@ -1,31 +1,36 @@
 package blue.coordination.processor;
 
-import blue.language.Blue;
-import blue.language.NodeProvider;
+import blue.language.processor.CoordinationRoutingHarness;
+
+import blue.language.provider.NodeProvider;
 import blue.language.model.Node;
 import blue.language.processor.ChannelProcessor;
-import blue.language.processor.ContractMatchingService;
-import blue.language.processor.CoordinationRoutingHarness;
+import blue.language.processor.BlueContracts;
+import blue.language.processor.ContractProcessorRegistry;
+import blue.language.processor.ContractProcessorRegistryBuilder;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.DocumentProcessor;
 import blue.language.processor.ExternalChannelFunctionContext;
 import blue.language.processor.ExternalChannelSubscriptionFunctions;
 import blue.language.processor.HandlerMatchContext;
-import blue.language.processor.HandlerMatchContextFactory;
 import blue.language.processor.HandlerProcessor;
-import blue.language.processor.ProcessingMetricsSink;
+import blue.language.processor.ProcessingMetricId;
+import blue.language.processor.ProcessingObservation;
+import blue.language.processor.ProcessingObserver;
 import blue.language.processor.ProcessorExecutionContext;
 import blue.language.processor.ProcessorStatus;
 import blue.language.processor.model.ChannelContract;
 import blue.language.processor.model.EmbeddedNodeChannel;
 import blue.language.processor.registry.RuntimeBlueIds;
+import blue.language.processor.registry.BlueRuntimeTypeRegistry;
 import blue.language.provider.SequentialNodeProvider;
-import blue.language.utils.BlueIdCalculator;
-import blue.repo.BlueRepository;
+import blue.language.identity.DirectBlueIdCalculator;
+import blue.language.runtime.BlueLanguage;
 import blue.repo.coordination.OperationRequest;
-import blue.repo.coordination.SequentialWorkflow;
 import blue.repo.coordination.SequentialWorkflowOperation;
 import blue.repo.coordination.TimelineEntry;
+import blue.repo.BlueRepository;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigInteger;
@@ -40,41 +45,53 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class OperationRequestLogicalRoutingTest {
+    private static final NodeProvider REPOSITORY_PROVIDER =
+            BlueRepository.current().nodeProvider();
+    private static final List<Fixture> OPEN_FIXTURES =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
     private static final Node CHANNEL_TYPE =
             new Node().name(
                     "Coordination Logical Routing Test Channel");
     private static final String CHANNEL_TYPE_BLUE_ID =
-            BlueIdCalculator.calculateBlueId(CHANNEL_TYPE);
+            DirectBlueIdCalculator.calculateBlueId(CHANNEL_TYPE);
     private static final Node TARGET_CHANNEL_TYPE =
             new Node()
                     .name("Coordination Logical Routing Processor-Managed Target")
                     .type(reference(RuntimeBlueIds.CHANNEL));
     private static final String TARGET_CHANNEL_TYPE_BLUE_ID =
-            BlueIdCalculator.calculateBlueId(TARGET_CHANNEL_TYPE);
+            DirectBlueIdCalculator.calculateBlueId(TARGET_CHANNEL_TYPE);
     private static final Node OPERATION_TYPE =
             new Node().name(
                     "Coordination Logical Routing Test Operation");
     private static final String OPERATION_TYPE_BLUE_ID =
-            BlueIdCalculator.calculateBlueId(OPERATION_TYPE);
+            DirectBlueIdCalculator.calculateBlueId(OPERATION_TYPE);
     private static final Node OBSERVER_TYPE =
             new Node().name(
                     "Coordination Logical Routing Test Observer");
     private static final String OBSERVER_TYPE_BLUE_ID =
-            BlueIdCalculator.calculateBlueId(OBSERVER_TYPE);
+            DirectBlueIdCalculator.calculateBlueId(OBSERVER_TYPE);
+
+    @AfterAll
+    static void shouldCloseOpenFixtures() {
+        for (Fixture fixture : OPEN_FIXTURES) {
+            fixture.close();
+        }
+        OPEN_FIXTURES.clear();
+    }
 
     @Test
-    void shouldEnsureThatTwoSourcesRouteOnceSuppressOrdinaryHandlersAndOwnCheckpoints() {
-        // Given
+    void shouldTwoSourcesRouteOnceSuppressOrdinaryHandlersAndOwnCheckpoints() {
+        // given
         Fixture fixture = new Fixture(null);
         Node initialized = fixture.initialize(document());
 
-        // When
+        // when
         DocumentProcessingResult result =
                 fixture.process(
                         initialized,
                         request("increment", "target"));
 
-        // Then
+        // then
         assertSuccess(result);
         assertEquals(
                 1,
@@ -95,15 +112,15 @@ final class OperationRequestLogicalRoutingTest {
     }
 
     @Test
-    void shouldEnsureThatMalformedUnknownAndNonChannelTargetsKeepIndependentOrdinaryDelivery() {
-        // Given
+    void shouldKeepIndependentOrdinaryDeliveryForMalformedUnknownAndNonChannelTargets() {
+        // given
         Node[] events = new Node[] {
                 request(null, "target"),
                 request("increment", null),
                 request("increment", "missing"),
                 request("increment", "observer-a")
         };
-        // When
+        // when
         for (Node event : events) {
             Fixture fixture = new Fixture(null);
             Node initialized =
@@ -113,7 +130,7 @@ final class OperationRequestLogicalRoutingTest {
                     fixture.process(
                             initialized, event);
 
-            // Then
+            // then
             assertSuccess(result);
             assertEquals(0, fixture.operations.executions);
             assertEquals(2, fixture.metrics.handlersExecuted);
@@ -127,18 +144,18 @@ final class OperationRequestLogicalRoutingTest {
     }
 
     @Test
-    void shouldEnsureThatValidTargetWithUnknownOperationSuppressesOrdinaryWorkflow() {
-        // Given
+    void shouldSuppressOrdinaryWorkflowForValidTargetWithUnknownOperation() {
+        // given
         Fixture fixture = new Fixture(null);
         Node initialized = fixture.initialize(document());
 
-        // When
+        // when
         DocumentProcessingResult result =
                 fixture.process(
                         initialized,
                         request("missing-operation", "target"));
 
-        // Then
+        // then
         assertSuccess(result);
         assertEquals(0, fixture.operations.executions);
         assertEquals(0, fixture.metrics.handlersExecuted);
@@ -151,8 +168,8 @@ final class OperationRequestLogicalRoutingTest {
     }
 
     @Test
-    void shouldEnsureThatFragmentedTimelineAndOperationRequestProjectWithoutLosingRoute() {
-        // Given
+    void shouldPreserveRouteForFragmentedTimelineAndOperationRequest() {
+        // given
         FragmentedEvent fragments =
                 fragmentedTimelineRequest(
                         "increment", "target");
@@ -160,13 +177,13 @@ final class OperationRequestLogicalRoutingTest {
                 new Fixture(fragments.provider);
         Node initialized = fixture.initialize(document());
 
-        // When
+        // when
         DocumentProcessingResult result =
                 fixture.process(
                         initialized,
                         fragments.event);
 
-        // Then
+        // then
         List<Node> exactOperationCandidates =
                 fragments.provider.fetchByBlueId(
                         fragments.operationBlueId);
@@ -178,7 +195,7 @@ final class OperationRequestLogicalRoutingTest {
                                 .getValue())
                         && fragments.operationBlueId
                         .equals(
-                                BlueIdCalculator
+                                DirectBlueIdCalculator
                                         .calculateBlueId(
                                                 exactOperationCandidates
                                                         .get(0)));
@@ -236,10 +253,10 @@ final class OperationRequestLogicalRoutingTest {
     }
 
     @Test
-    void shouldEnsureThatMissingRequiredFragmentFailsInsteadOfFallingBackToOrdinaryDelivery() {
-        // Given
+    void shouldFailForMissingFragmentInsteadOfFallingBackToOrdinaryDelivery() {
+        // given
         String missingMessageBlueId =
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         new Node()
                                 .type(new Node().blueId(
                                         OperationRequest.blueId()))
@@ -258,14 +275,14 @@ final class OperationRequestLogicalRoutingTest {
                         missingMessageBlueId));
 
         boolean failed = false;
-        // When
+        // when
         try {
             fixture.process(initialized, event);
         } catch (RuntimeException expected) {
             failed = true;
         }
 
-        // Then
+        // then
         assertTrue(failed);
         assertEquals(0, fixture.operations.executions);
         assertEquals(0, fixture.metrics.handlersExecuted);
@@ -276,8 +293,8 @@ final class OperationRequestLogicalRoutingTest {
     }
 
     @Test
-    void shouldEnsureThatFragmentedWhitespaceOperationKeepsOrdinarySourceDelivery() {
-        // Given
+    void shouldKeepOrdinarySourceDeliveryForFragmentedWhitespaceOperation() {
+        // given
         FragmentedEvent fragments =
                 fragmentedTimelineRequest(
                         " \t", "source-a");
@@ -286,13 +303,13 @@ final class OperationRequestLogicalRoutingTest {
         Node initialized =
                 fixture.initialize(document());
 
-        // When
+        // when
         DocumentProcessingResult result =
                 fixture.process(
                         initialized,
                         fragments.event);
 
-        // Then
+        // then
         assertSuccess(result);
         assertEquals(0, fixture.operations.executions);
         assertEquals(
@@ -310,43 +327,33 @@ final class OperationRequestLogicalRoutingTest {
     }
 
     @Test
-    void shouldEnsureThatProductionOrdinaryWorkflowSuppressesOnlyEffectiveRoutableTarget() {
-        // Given
-        SequentialWorkflow workflow =
-                new SequentialWorkflow();
-        SequentialWorkflowProcessor processor =
-                new SequentialWorkflowProcessor();
-        // When
-        Node routed =
-                request("increment", "target");
+    void shouldSuppressOnlyEffectiveRoutableTargetInProductionOrdinaryWorkflow() {
+        // given
+        Fixture routedFixture = new Fixture(null);
+        Node routedDocument = routedFixture.initialize(document());
+        Fixture whitespaceFixture = new Fixture(null);
+        Node whitespaceDocument = whitespaceFixture.initialize(document());
 
-        // Then
-        assertFalse(processor.matches(
-                workflow,
-                HandlerMatchContextFactory.create(
-                        new Blue(),
-                        "observer-target",
-                        "target",
-                        routed)));
-        assertTrue(processor.matches(
-                workflow,
-                HandlerMatchContextFactory.create(
-                        new Blue(),
-                        "observer-source",
-                        "source-a",
-                        routed)));
-        assertTrue(processor.matches(
-                workflow,
-                HandlerMatchContextFactory.create(
-                        new Blue(),
-                        "observer-source",
-                        "source-a",
-                        request(" \t", "source-a"))));
+        // when
+        DocumentProcessingResult routed = routedFixture.process(
+                routedDocument,
+                request("increment", "target"));
+        DocumentProcessingResult whitespace = whitespaceFixture.process(
+                whitespaceDocument,
+                request(" \t", "source-a"));
+
+        // then
+        assertSuccess(routed);
+        assertEquals(1, routedFixture.operations.executions);
+        assertEquals(1, routedFixture.metrics.handlersExecuted);
+        assertSuccess(whitespace);
+        assertEquals(0, whitespaceFixture.operations.executions);
+        assertEquals(2, whitespaceFixture.metrics.handlersExecuted);
     }
 
     @Test
     void shouldRouteToAnInheritedEffectiveTargetByItsExactRawKey() {
-        // Given
+        // given
         String targetKey = "inherited-target";
         Node inheritedTarget = targetChannel(2);
         Node scopeType = new Node().contracts(
@@ -354,7 +361,7 @@ final class OperationRequestLogicalRoutingTest {
                         targetKey,
                         inheritedTarget));
         String scopeTypeBlueId =
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         scopeType);
         NodeProvider inheritedProvider = blueId ->
                 scopeTypeBlueId.equals(blueId)
@@ -371,7 +378,7 @@ final class OperationRequestLogicalRoutingTest {
         Node initialized =
                 fixture.initialize(authored);
 
-        // When
+        // when
         DocumentProcessingResult result =
                 fixture.process(
                         initialized,
@@ -379,7 +386,7 @@ final class OperationRequestLogicalRoutingTest {
                                 "increment",
                                 targetKey));
 
-        // Then
+        // then
         assertSuccess(result);
         assertEquals(1, fixture.operations.executions);
         assertEquals(
@@ -395,14 +402,14 @@ final class OperationRequestLogicalRoutingTest {
 
     @Test
     void shouldTreatSlashAndTildeInTargetKeyAsRawCharacters() {
-        // Given
+        // given
         String targetKey = "target/branch~leaf";
         Fixture fixture = new Fixture(null);
         Node initialized = fixture.initialize(
                 documentWithTargetKey(
                         targetKey, true));
 
-        // When
+        // when
         DocumentProcessingResult result =
                 fixture.process(
                         initialized,
@@ -410,7 +417,7 @@ final class OperationRequestLogicalRoutingTest {
                                 "increment",
                                 targetKey));
 
-        // Then
+        // then
         assertSuccess(result);
         assertEquals(1, fixture.operations.executions);
         assertEquals(
@@ -635,7 +642,7 @@ final class OperationRequestLogicalRoutingTest {
             Map<String, Node> exact,
             Node content) {
         String blueId =
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         content);
         exact.put(blueId, content.clone());
         return blueId;
@@ -930,8 +937,9 @@ final class OperationRequestLogicalRoutingTest {
         }
     }
 
-    private static final class Fixture {
-        private final Blue language;
+    private static final class Fixture implements AutoCloseable {
+        private final BlueLanguage language;
+        private final BlueContracts contracts;
         private final DocumentProcessor processor;
         private final RoutingChannelProcessor channels =
                 new RoutingChannelProcessor();
@@ -954,62 +962,57 @@ final class OperationRequestLogicalRoutingTest {
                         ? provider.fetchByBlueId(blueId)
                         : null;
             };
-            language = BlueRepository.latest()
-                    .configure(new Blue());
             NodeProvider repositoryProvider =
-                    language.getNodeProvider();
-            language.nodeProvider(
-                    new SequentialNodeProvider(
-                            fixtureProvider,
-                            repositoryProvider));
+                    REPOSITORY_PROVIDER;
             SequentialWorkflowProcessor workflows =
                     new SequentialWorkflowProcessor();
-            language.registerExternalContractType(
-                    CHANNEL_TYPE_BLUE_ID,
-                    CHANNEL_TYPE,
-                    channels);
-            language.registerExternalContractType(
-                    OPERATION_TYPE_BLUE_ID,
-                    OPERATION_TYPE,
-                    operations);
-            language.registerExternalContractType(
-                    OBSERVER_TYPE_BLUE_ID,
-                    OBSERVER_TYPE,
-                    workflows);
-            language.registerContractProcessor(
-                    TARGET_CHANNEL_TYPE_BLUE_ID,
-                    targets);
+            ContractProcessorRegistry registry =
+                    ContractProcessorRegistryBuilder.create()
+                            .registerDefaults()
+                            .register(
+                                    CHANNEL_TYPE_BLUE_ID,
+                                    CHANNEL_TYPE,
+                                    channels)
+                            .register(
+                                    OPERATION_TYPE_BLUE_ID,
+                                    OPERATION_TYPE,
+                                    operations)
+                            .register(
+                                    OBSERVER_TYPE_BLUE_ID,
+                                    OBSERVER_TYPE,
+                                    workflows)
+                            .register(
+                                    TARGET_CHANNEL_TYPE_BLUE_ID,
+                                    TARGET_CHANNEL_TYPE,
+                                    targets)
+                            .build();
+            NodeProvider nodeProvider =
+                    new SequentialNodeProvider(
+                            fixtureProvider,
+                            BlueRuntimeTypeRegistry.getDefault()
+                                    .asProcessorSnapshotProvider(),
+                            registry.exactTypeProvider(),
+                            repositoryProvider);
+            language = BlueLanguage.builder()
+                    .nodeProvider(nodeProvider)
+                    .build();
+            contracts = BlueContracts.builder(
+                            language.processing())
+                    .runtimeRegistry(registry)
+                    .build();
             processor = DocumentProcessor.builder()
-                    .registerContractProcessor(
-                            CHANNEL_TYPE_BLUE_ID,
-                            CHANNEL_TYPE,
-                            channels)
-                    .registerContractProcessor(
-                            OPERATION_TYPE_BLUE_ID,
-                            OPERATION_TYPE,
-                            operations)
-                    .registerContractProcessor(
-                            OBSERVER_TYPE_BLUE_ID,
-                            OBSERVER_TYPE,
-                            workflows)
-                    .registerContractProcessor(
-                            TARGET_CHANNEL_TYPE_BLUE_ID,
-                            TARGET_CHANNEL_TYPE,
-                            targets)
-                    .withMatchingService(
-                            new ContractMatchingService(
-                                    language))
-                    .withSnapshotManager(
-                            CoordinationRoutingHarness
-                                    .snapshotManager(
-                                            language))
-                    .withProcessingMetricsSink(
+                    .runtimeAccess(contracts.runtimeAccess())
+                    .runtimeRegistry(registry)
+                    .runtimeRegistryIdentity(
+                            "blue.coordination/test/operation-routing/1")
+                    .observer(
                             metrics)
-                    .withExternalDeliveryEvidenceVerifier(
+                    .evidenceVerifier(
                             (root, event, evidence) -> {
                                 // Exact binding is revalidated by evidence.
                             })
                     .build();
+            OPEN_FIXTURES.add(this);
         }
 
         private Node initialize(Node document) {
@@ -1037,15 +1040,26 @@ final class OperationRequestLogicalRoutingTest {
                             "source-a",
                             "source-b");
         }
+
+        @Override
+        public void close() {
+            processor.close();
+            contracts.close();
+            language.close();
+        }
     }
 
     private static final class RecordingMetrics
-            implements ProcessingMetricsSink {
+            implements ProcessingObserver {
         private int handlersExecuted;
 
         @Override
-        public void incrementHandlersExecuted() {
-            handlersExecuted++;
+        public void record(ProcessingObservation observation) {
+            if (observation.metricId()
+                    == ProcessingMetricId.HANDLERS_EXECUTED) {
+                handlersExecuted += Math.toIntExact(
+                        observation.value());
+            }
         }
     }
 }

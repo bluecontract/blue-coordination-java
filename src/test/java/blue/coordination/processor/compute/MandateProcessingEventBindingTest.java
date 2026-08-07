@@ -1,14 +1,13 @@
 package blue.coordination.processor.compute;
 
 import blue.coordination.processor.CoordinationProcessorOptions;
-import blue.coordination.processor.CoordinationProcessors;
-import blue.coordination.processor.CoordinationDeliveryPlanning;
+import blue.coordination.processor.CoordinationTestRuntime;
 import blue.coordination.processor.CoordinationTestResources;
 import blue.coordination.processor.ExternalBlockerProbeAssertions;
 import blue.coordination.processor.TestTimelineProvider;
 import blue.coordination.processor.bex.BexProcessingMetrics;
-import blue.language.Blue;
 import blue.language.model.Node;
+import blue.language.model.TypeBlueId;
 import blue.language.processor.ChannelEvaluation;
 import blue.language.processor.ChannelEvaluationContext;
 import blue.language.processor.ChannelProcessor;
@@ -16,12 +15,12 @@ import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ExternalChannelSubscriptionFunctions;
 import blue.language.processor.ProcessingDebugResult;
 import blue.language.processor.ProcessorStatus;
-import blue.language.processor.conformance.MockExternalChannel;
-import blue.language.processor.conformance.MockTypeBlueIds;
+import blue.language.processor.model.ChannelContract;
 import blue.language.processor.registry.BlueRuntimeTypeRegistry;
+import blue.language.processor.registry.RuntimeBlueIds;
 import blue.language.processor.registry.RuntimeTypeKey;
-import blue.language.snapshot.ResolvedSnapshot;
-import blue.language.utils.BlueIdCalculator;
+import blue.language.merge.ResolvedSnapshot;
+import blue.language.identity.DirectBlueIdCalculator;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.StatusPending;
 import blue.repo.mandate.Mandate;
@@ -52,22 +51,19 @@ class MandateProcessingEventBindingTest {
 
     @Test
     void shouldUseRootProcessingEventTimestampForMandateConfirmation() {
-        // Given
+        // given
         Fixture fixture = fixture();
         DocumentProcessingResult initialized = fixture.initialize(mandateDocument());
         ResolvedSnapshot initializedSnapshot =
-                blue.coordination.processor
-                        .ProcessingResultTestSupport
-                        .snapshot(
-                                fixture.blue,
-                                initialized);
+                fixture.runtime.resolveToSnapshot(
+                        initialized.document());
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.process(
                 initializedSnapshot,
                 fixture.confirmAuthorityEvent(PROCESSING_EVENT_TIMESTAMP));
 
-        // Then
+        // then
         ExternalBlockerProbeAssertions
                 .classifyMandateContractRefresh(
                         result,
@@ -80,7 +76,7 @@ class MandateProcessingEventBindingTest {
         assertEquals(StatusPending.blueId(),
                 initialized.document().getAsText("/status/type/blueId"));
         assertSuccess(result);
-        // Declared-type event matching owns final lifecycle state; this case isolates processingEvent.
+        // declared-type event matching owns final lifecycle state; this case isolates processingEvent.
         assertEquals(BigInteger.valueOf(PROCESSING_EVENT_TIMESTAMP),
                 result.document().get("/authorityConfirmedAt"));
         assertTrue(result.events().stream().anyMatch(event -> event.getType() != null
@@ -92,33 +88,33 @@ class MandateProcessingEventBindingTest {
 
     @Test
     void shouldReturnUndefinedWhenMandateTimestampIsMissing() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node processEvent = new Node().properties(
                 "kind", scalar("missing-timestamp"));
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.processUninitialized(
                 timestampGuardDocument(fixture.repository),
                 processEvent);
 
-        // Then
+        // then
         assertGuardReturnsUndefined(fixture, result);
     }
 
     @Test
     void shouldReturnUndefinedForNonIntegerMandateTimestamp() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node processEvent = new Node().properties(
                 "timestamp", scalar("7000001"));
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.processUninitialized(
                 timestampGuardDocument(fixture.repository),
                 processEvent);
 
-        // Then
+        // then
         assertGuardReturnsUndefined(fixture, result);
     }
 
@@ -202,8 +198,8 @@ class MandateProcessingEventBindingTest {
                 IMPLICIT_SOURCE,
                 new Node()
                         .type(new Node().blueId(
-                                MockTypeBlueIds
-                                        .MOCK_EXTERNAL_CHANNEL))
+                                RuntimeBlueIds
+                                        .SCRIPTED_EXTERNAL_CHANNEL))
                         .properties(
                                 "subscriptionKey",
                                 scalar(
@@ -216,15 +212,13 @@ class MandateProcessingEventBindingTest {
     }
 
     private static void configureImplicitInitializationSource(
-            Blue blue) {
-        blue.registerExternalContractType(
-                MockTypeBlueIds.MOCK_EXTERNAL_CHANNEL,
+            CoordinationTestRuntime runtime) {
+        runtime.registerExternalContractType(
+                RuntimeBlueIds.SCRIPTED_EXTERNAL_CHANNEL,
                 BlueRuntimeTypeRegistry.getDefault()
                         .node(RuntimeTypeKey
                                 .SCRIPTED_EXTERNAL_CHANNEL),
                 new ImplicitInitializationChannelProcessor());
-        CoordinationDeliveryPlanning
-                .currentRootCompatibility(blue);
     }
 
     private static void assertSuccess(DocumentProcessingResult result) {
@@ -238,27 +232,53 @@ class MandateProcessingEventBindingTest {
 
     private static Fixture fixture() {
         BexProcessingMetrics metrics = new BexProcessingMetrics();
-        BlueRepository repository = BlueRepository.latest();
-        Blue blue = CoordinationTestResources.configuredBlue(repository);
-        CoordinationProcessors.registerWith(blue, CoordinationProcessorOptions.builder()
+        BlueRepository repository = BlueRepository.current();
+        CoordinationTestRuntime runtime =
+                CoordinationTestResources.configuredBlue(repository);
+        runtime.configure(CoordinationProcessorOptions.builder()
                 .processingMetrics(metrics)
                 .build());
-        blue.getDocumentProcessor().processingMetricsSink(metrics);
         configureImplicitInitializationSource(
-                blue);
-        return new Fixture(repository, blue, metrics);
+                runtime);
+        return new Fixture(repository, runtime, metrics);
+    }
+
+    @TypeBlueId(RuntimeBlueIds.SCRIPTED_EXTERNAL_CHANNEL)
+    public static final class ImplicitInitializationChannel
+            extends ChannelContract {
+        private String subscriptionKey;
+        private String checkpointDomain;
+
+        public ImplicitInitializationChannel() {
+        }
+
+        public String getSubscriptionKey() {
+            return subscriptionKey;
+        }
+
+        public void setSubscriptionKey(String subscriptionKey) {
+            this.subscriptionKey = subscriptionKey;
+        }
+
+        public String getCheckpointDomain() {
+            return checkpointDomain;
+        }
+
+        public void setCheckpointDomain(String checkpointDomain) {
+            this.checkpointDomain = checkpointDomain;
+        }
     }
 
     private static final class
             ImplicitInitializationChannelProcessor
-            implements ChannelProcessor<MockExternalChannel> {
+            implements ChannelProcessor<ImplicitInitializationChannel> {
         private final ExternalChannelSubscriptionFunctions<
-                MockExternalChannel> subscriptions =
+                ImplicitInitializationChannel> subscriptions =
                 new ExternalChannelSubscriptionFunctions<
-                        MockExternalChannel>() {
+                        ImplicitInitializationChannel>() {
                     @Override
                     public List<String> channelKeys(
-                            MockExternalChannel contract) {
+                            ImplicitInitializationChannel contract) {
                         return Collections.singletonList(
                                 contract.getSubscriptionKey());
                     }
@@ -272,26 +292,26 @@ class MandateProcessingEventBindingTest {
 
                     @Override
                     public String checkpointDomainDiscriminator(
-                            MockExternalChannel contract) {
+                            ImplicitInitializationChannel contract) {
                         return contract
                                 .getCheckpointDomain();
                     }
                 };
 
         @Override
-        public Class<MockExternalChannel> contractType() {
-            return MockExternalChannel.class;
+        public Class<ImplicitInitializationChannel> contractType() {
+            return ImplicitInitializationChannel.class;
         }
 
         @Override
         public ExternalChannelSubscriptionFunctions<
-                MockExternalChannel> externalSubscriptionFunctions() {
+                ImplicitInitializationChannel> externalSubscriptionFunctions() {
             return subscriptions;
         }
 
         @Override
         public ChannelEvaluation evaluate(
-                MockExternalChannel contract,
+                ImplicitInitializationChannel contract,
                 ChannelEvaluationContext context) {
             return ChannelEvaluation.match(
                     context.event(),
@@ -301,23 +321,27 @@ class MandateProcessingEventBindingTest {
 
     private static final class Fixture {
         private final BlueRepository repository;
-        private final Blue blue;
+        private final CoordinationTestRuntime runtime;
         private final BexProcessingMetrics metrics;
 
-        Fixture(BlueRepository repository, Blue blue, BexProcessingMetrics metrics) {
+        Fixture(
+                BlueRepository repository,
+                CoordinationTestRuntime runtime,
+                BexProcessingMetrics metrics) {
             this.repository = repository;
-            this.blue = blue;
+            this.runtime = runtime;
             this.metrics = metrics;
         }
 
         DocumentProcessingResult initialize(Node document) {
-            ResolvedSnapshot snapshot = blue.resolveToSnapshot(
+            ResolvedSnapshot snapshot = runtime.resolveToSnapshot(
                     CoordinationTestResources
                             .preprocessWithFixedRepository(
-                                    blue,
+                                    runtime,
                                     repository,
                                     document));
-            DocumentProcessingResult result = blue.initializeDocument(snapshot);
+            DocumentProcessingResult result =
+                    runtime.processor().initializeDocument(snapshot);
             assertSuccess(result);
             return result;
         }
@@ -328,12 +352,12 @@ class MandateProcessingEventBindingTest {
             Node prepared =
                     CoordinationTestResources
                             .preprocessWithFixedRepository(
-                                    blue,
+                                    runtime,
                                     repository,
                                     withImplicitInitializationSource(
                                             document));
             String originalEventBlueId =
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             event);
             List<String> expectedExactBlueIds =
                     ExternalBlockerProbeAssertions
@@ -342,7 +366,7 @@ class MandateProcessingEventBindingTest {
                                     event);
             ProcessingDebugResult debug;
             try {
-                debug = blue.getDocumentProcessor()
+                debug = runtime.processor()
                         .processDocumentWithTrace(
                                 prepared, event);
             } catch (RuntimeException failure) {
@@ -363,11 +387,11 @@ class MandateProcessingEventBindingTest {
         }
 
         DocumentProcessingResult process(ResolvedSnapshot snapshot, Node event) {
-            return blue.processDocument(snapshot, event);
+            return runtime.processor().processDocument(snapshot, event);
         }
 
         Node confirmAuthorityEvent(int timestamp) {
-            return TestTimelineProvider.timelineEntry(blue,
+            return TestTimelineProvider.timelineEntry(runtime,
                     repository,
                     "guarantor",
                     "guarantor",

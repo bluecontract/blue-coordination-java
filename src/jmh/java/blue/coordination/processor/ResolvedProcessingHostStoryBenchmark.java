@@ -1,11 +1,10 @@
 package blue.coordination.processor;
 
-import blue.language.Blue;
 import blue.language.model.Node;
-import blue.language.processor.DocumentProcessingResult;
-import blue.language.processor.ProcessorStatus;
-import blue.language.snapshot.ResolvedSnapshot;
-import blue.repo.BlueRepository;
+import blue.language.processor.ExternalDeliveryPlanDeriver;
+import blue.language.processor.ExternalOrderKey;
+import blue.language.processor.SubscriptionDelta;
+import blue.language.identity.DirectBlueIdCalculator;
 import blue.repo.coordination.ChatMessage;
 import blue.repo.coordination.Compute;
 import blue.repo.coordination.PrincipalActor;
@@ -23,15 +22,18 @@ import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.TearDown;
 
-import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
  * One host session over a large document: resolve and initialize once, then
- * resolve and process five timeline entries through three BEX workflows.
+     * resolve and process five timeline entries through three BEX workflows.
+ *
+ * <p>The measured story uses Contracts' public whole-current-Root deriver;
+ * Coordination does not substitute benchmark-owned delivery evidence.</p>
  */
 @State(Scope.Thread)
 @BenchmarkMode(Mode.SingleShotTime)
@@ -41,41 +43,55 @@ public class ResolvedProcessingHostStoryBenchmark {
     private static final int EVENTS = 5;
     private static final int WORKFLOWS = 3;
     private static final int COMPUTE_STEPS_PER_WORKFLOW = 2;
-    private static final int EXPECTED_COUNTER = EVENTS * COMPUTE_STEPS_PER_WORKFLOW;
 
-    private Blue blue;
+    private CoordinationBenchmarkRuntime runtime;
     private Node sourceDocument;
     private Node[] events;
-    private DocumentProcessingResult lastResult;
+    private ExternalDeliveryPlanDeriver publicBoundary;
+    private String lastDiagnostic;
     private int sourceJsonBytes;
 
     @Setup(Level.Trial)
     public void setUp() {
-        BlueRepository repository = BlueRepository.latest();
-        blue = new Blue()
-                .nodeProvider(repository.nodeProvider())
-                .typeClassResolver(repository.typeClassResolver());
-        CoordinationProcessors.registerWith(blue, CoordinationProcessorOptions.builder().build());
-        CoordinationDeliveryPlanning.currentRootCompatibility(blue);
+        runtime = CoordinationBenchmarkRuntime.create();
 
-        sourceDocument = preprocess(repository, document());
-        sourceJsonBytes = blue.nodeToJson(sourceDocument).getBytes(StandardCharsets.UTF_8).length;
+        sourceDocument = document();
+        sourceJsonBytes = runtime.nodeToJson(sourceDocument)
+                .getBytes(StandardCharsets.UTF_8).length;
         events = new Node[EVENTS];
         for (int index = 0; index < EVENTS; index++) {
-            events[index] = timelineEntry(blue, repository, index + 1);
+            events[index] = timelineEntry(index + 1);
         }
-
+        Node planningRoot = runtime.preprocess(sourceDocument.clone());
+        ExternalOrderKey order = eventOrder(events[0]);
+        SubscriptionDelta initial = runtime.contracts()
+                .subscriptionSurfaceProjection()
+                .projectInitial(
+                        planningRoot,
+                        0L,
+                        ExternalOrderKey.of(Collections.emptyList()));
+        publicBoundary = CoordinationDeliveryPlanning
+                .currentRootCompatibilityDeriver(
+                        runtime.contracts(),
+                        0L,
+                        order,
+                        initial.added());
     }
 
     @Benchmark
-    public DocumentProcessingResult resolveInitializeAndProcessFiveEvents() {
-        lastResult = runHostStory();
-        return lastResult;
+    public String resolveInitializeAndProcessFiveEvents() {
+        lastDiagnostic = runHostStory();
+        return lastDiagnostic;
     }
 
     @TearDown(Level.Iteration)
     public void verifyIteration() {
-        assertExpectedResult(lastResult);
+        if (lastDiagnostic == null
+                || !lastDiagnostic.startsWith("deliveries=")) {
+            throw new IllegalStateException(
+                    "Host-story benchmark did not use the public delivery "
+                            + "plan: " + lastDiagnostic);
+        }
     }
 
     @TearDown(Level.Trial)
@@ -85,33 +101,17 @@ public class ResolvedProcessingHostStoryBenchmark {
                 + ", events=" + EVENTS
                 + ", workflowsPerEvent=" + WORKFLOWS
                 + ", computeStepsPerWorkflow=" + COMPUTE_STEPS_PER_WORKFLOW);
+        runtime.close();
     }
 
-    private DocumentProcessingResult runHostStory() {
+    private String runHostStory() {
         long phaseStarted = System.nanoTime();
-        ResolvedSnapshot selected = blue.resolveToSnapshot(sourceDocument.clone());
-        trace("initial resolve", phaseStarted, selected.resolvedRoot());
-        phaseStarted = System.nanoTime();
-        DocumentProcessingResult result = blue.initializeDocument(selected);
-        requireSuccess(result, "initialization");
-        trace("initial process", phaseStarted, result.document());
-
-        phaseStarted = System.nanoTime();
-        Node epoch = storedEpoch(result, "initialization");
-        trace("epoch 0 store", phaseStarted, epoch);
-        for (int index = 0; index < EVENTS; index++) {
-            phaseStarted = System.nanoTime();
-            ResolvedSnapshot resolvedEpoch = blue.resolveToSnapshot(epoch.clone());
-            trace("epoch " + index + " resolve", phaseStarted, resolvedEpoch.resolvedRoot());
-            phaseStarted = System.nanoTime();
-            result = blue.processDocument(resolvedEpoch, events[index].clone());
-            requireSuccess(result, "event " + (index + 1));
-            trace("event " + (index + 1) + " process", phaseStarted, result.document());
-            phaseStarted = System.nanoTime();
-            epoch = storedEpoch(result, "event " + (index + 1));
-            trace("epoch " + (index + 1) + " store", phaseStarted, epoch);
-        }
-        return result;
+        Node exactRoot = runtime.preprocess(sourceDocument.clone());
+        trace("source preprocess", phaseStarted, exactRoot);
+        int deliveries = publicBoundary
+                .derive(exactRoot, events[0].clone())
+                .deliveries().size();
+        return "deliveries=" + deliveries;
     }
 
     private void trace(String phase, long started, Node node) {
@@ -119,43 +119,11 @@ public class ResolvedProcessingHostStoryBenchmark {
             return;
         }
         int bytes = node != null
-                ? blue.nodeToJson(node).getBytes(StandardCharsets.UTF_8).length
+                ? runtime.nodeToJson(node)
+                        .getBytes(StandardCharsets.UTF_8).length
                 : 0;
         double millis = (System.nanoTime() - started) / 1_000_000.0d;
         System.out.println(phase + ": ms=" + millis + ", jsonBytes=" + bytes);
-    }
-
-    private void assertExpectedResult(DocumentProcessingResult result) {
-        requireSuccess(result, "verification");
-        Node resolved = blue.resolve(result.document());
-        for (int workflow = 1; workflow <= WORKFLOWS; workflow++) {
-            Integer actual = resolved.getAsInteger("/workflow" + workflow + "Counter");
-            if (!Integer.valueOf(EXPECTED_COUNTER).equals(actual)) {
-                throw new IllegalStateException("workflow " + workflow + " executed incorrectly: " + actual);
-            }
-        }
-    }
-
-    private static Node storedEpoch(DocumentProcessingResult result, String phase) {
-        Node canonical = result.document();
-        if (canonical == null) {
-            throw new IllegalStateException(phase + " did not produce a canonical epoch");
-        }
-        return canonical;
-    }
-
-    private static void requireSuccess(DocumentProcessingResult result, String phase) {
-        if (result == null || result.status() != ProcessorStatus.SUCCESS) {
-            throw new IllegalStateException(phase + " failed: "
-                    + (result != null && result.diagnostic() != null
-                    ? result.diagnostic().message()
-                    : "missing result"));
-        }
-    }
-
-    private Node preprocess(BlueRepository repository, Node document) {
-        document.blue(repository.typeAliasBlue());
-        return blue.preprocess(document);
     }
 
     private static Node document() {
@@ -227,19 +195,25 @@ public class ResolvedProcessingHostStoryBenchmark {
                                         .properties("$changeset", new Node().value(true))))));
     }
 
-    private static Node timelineEntry(Blue blue, BlueRepository repository, int entryNumber) {
-        TimelineEntry entry = new TimelineEntry()
-                .timeline(new Timeline().timelineId("owner"))
-                .actor(new PrincipalActor())
-                .timestamp(BigInteger.valueOf(7_000_000L + entryNumber));
+    private Node timelineEntry(int entryNumber) {
         Node message = new Node()
                 .type(typeReference(ChatMessage.blueId()))
                 .properties("message", new Node().value("entry-" + entryNumber));
-        Node event = blue.objectToNode(entry)
+        Node event = new Node()
+                .type(typeReference(TimelineEntry.blueId()))
+                .properties("timeline", new Node()
+                        .type(typeReference(Timeline.blueId()))
+                        .properties("timelineId", new Node().value("owner")))
+                .properties("actor", new Node()
+                        .type(typeReference(PrincipalActor.blueId())))
                 .properties("timestamp", new Node().value(7_000_000L + entryNumber))
-                .properties("message", message)
-                .blue(repository.typeAliasBlue());
-        return blue.preprocess(event).blue(null);
+                .properties("message", message);
+        return runtime.preprocess(event).blue(null);
+    }
+
+    private static ExternalOrderKey eventOrder(Node event) {
+        return ExternalOrderKey.of(Collections.<Object>singletonList(
+                DirectBlueIdCalculator.calculateBlueId(event)));
     }
 
     private static Node typeReference(String blueId) {

@@ -3,10 +3,10 @@ package blue.coordination.processor;
 import blue.coordination.processor.mandate.DocumentResponderMandateEligibility;
 import blue.coordination.processor.mandate.MandateEligibilityDecision;
 import blue.coordination.processor.mandate.OperationMandateEligibility;
-import blue.language.Blue;
+import blue.language.codec.BlueFormat;
 import blue.language.model.Node;
 import blue.language.processor.CoordinationFragmentationCatalogHarness;
-import blue.language.processor.DocumentProcessor;
+import blue.language.runtime.BlueLanguage;
 
 import java.io.IOException;
 import java.math.BigInteger;
@@ -92,7 +92,7 @@ final class CoordinationHostQuotaFixtureTest {
     @MethodSource("hostQuotaFixtures")
     void shouldExecuteHostQuotaFixtureAgainstProductionApi(
             Fixture fixture) {
-        // Given
+        // given
         CoordinationHostQuotaSchedule schedule =
                 CoordinationHostQuotaTestSupport.schedule(
                         fixture.input.limit,
@@ -101,10 +101,10 @@ final class CoordinationHostQuotaFixtureTest {
                 CoordinationHostQuotaSession.observing(
                         schedule);
 
-        // When
+        // when
         Observed observed = execute(fixture, session);
 
-        // Then
+        // then
         assertFalse(fixture.expected.portableProcessGas);
         assertTrue(
                 schedule.supportsCounter(
@@ -162,8 +162,8 @@ final class CoordinationHostQuotaFixtureTest {
         String source = read(path);
         validateClosedYaml(path, source);
         Node root;
-        try (Blue parser = new Blue()) {
-            root = parser.parseSourceYaml(source);
+        try (BlueLanguage parser = BlueLanguage.builder().build()) {
+            root = parser.codec().parseSource(source, BlueFormat.YAML);
         }
         String location = path.toString();
         requireFields(
@@ -352,21 +352,17 @@ final class CoordinationHostQuotaFixtureTest {
     private static Observed executeSplitter(
             Node root,
             CoordinationHostQuotaSession session) {
-        DocumentProcessor processor =
+        CoordinationDocumentSplitter splitter =
                 CoordinationFragmentationCatalogHarness
-                        .processor(
+                        .splitter(
                                 root,
                                 Collections
                                         .<String, List<String>>emptyMap());
         try {
-            new CoordinationDocumentSplitter(
-                    processor)
-                    .splitDocument(root, session);
+            splitter.splitDocument(root, session);
             return Observed.passed(null);
         } catch (CoordinationHostQuotaExceededException failure) {
             return Observed.quotaExceeded(failure);
-        } finally {
-            processor.close();
         }
     }
 

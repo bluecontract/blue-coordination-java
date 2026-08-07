@@ -22,6 +22,23 @@ import java.util.Set;
  * successful members into one logical external delivery.</p>
  */
 public final class CompositeTimelineChannelProcessor implements ChannelProcessor<CompositeTimelineChannel> {
+    private final ExternalChannelSubscriptionFunctions<
+            CompositeTimelineChannel> subscriptionFunctions;
+
+    public CompositeTimelineChannelProcessor() {
+        this.subscriptionFunctions =
+                CompositeTimelineExternalSubscriptionFunctions.INSTANCE;
+    }
+
+    CompositeTimelineChannelProcessor(
+            String timelineChannelTypeBlueId,
+            CoordinationSemanticTypeIdentities identities) {
+        this.subscriptionFunctions =
+                new CompositeTimelineExternalSubscriptionFunctions(
+                        timelineChannelTypeBlueId,
+                        identities);
+    }
+
     @Override
     public Class<CompositeTimelineChannel> contractType() {
         return CompositeTimelineChannel.class;
@@ -30,7 +47,7 @@ public final class CompositeTimelineChannelProcessor implements ChannelProcessor
     @Override
     public ExternalChannelSubscriptionFunctions<
             CompositeTimelineChannel> externalSubscriptionFunctions() {
-        return CompositeTimelineExternalSubscriptionFunctions.INSTANCE;
+        return subscriptionFunctions;
     }
 
     @Override

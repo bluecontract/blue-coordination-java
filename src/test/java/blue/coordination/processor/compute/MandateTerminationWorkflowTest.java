@@ -3,15 +3,15 @@ package blue.coordination.processor.compute;
 import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationProcessors;
 import blue.coordination.processor.CoordinationTestResources;
+import blue.coordination.processor.CoordinationTestRuntime;
 import blue.coordination.processor.ExternalBlockerProbeAssertions;
 import blue.coordination.processor.TestTimelineProvider;
 import blue.coordination.processor.bex.BexProcessingMetrics;
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorStatus;
 import blue.language.processor.registry.RuntimeBlueIds;
-import blue.language.snapshot.ResolvedSnapshot;
+import blue.language.merge.ResolvedSnapshot;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.StatusFailed;
 import blue.repo.mandate.Mandate;
@@ -33,18 +33,18 @@ class MandateTerminationWorkflowTest {
 
     @Test
     void shouldApplyGeneratedMandateTerminationExactlyOnce() {
-        // Given
+        // given
         Fixture fixture = fixture();
         DocumentProcessingResult initialized = fixture.initialize(mandateDocument(false));
         long handlersBeforeTermination = fixture.metrics.handlersExecuted();
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.process(
                 blue.coordination.processor.ProcessingResultTestSupport.snapshot(
                         fixture.blue, initialized),
                 fixture.terminateMandateEvent(TERMINATION_TIMESTAMP));
 
-        // Then
+        // then
         assertEquals(1L, handlersBeforeTermination);
         assertSuccess(result);
         assertEquals(StatusTerminated.blueId(),
@@ -69,7 +69,7 @@ class MandateTerminationWorkflowTest {
 
     @Test
     void shouldIgnoreDuplicateGeneratedMandateTermination() {
-        // Given
+        // given
         Fixture fixture = fixture();
         DocumentProcessingResult initialized = fixture.initialize(
                 mandateDocument(false));
@@ -79,13 +79,13 @@ class MandateTerminationWorkflowTest {
                 fixture.terminateMandateEvent(TERMINATION_TIMESTAMP));
         long handlersBeforeDuplicate = fixture.metrics.handlersExecuted();
 
-        // When
+        // when
         DocumentProcessingResult duplicate = fixture.process(
                 blue.coordination.processor.ProcessingResultTestSupport.snapshot(
                         fixture.blue, terminated),
                 fixture.terminateMandateEvent(TERMINATION_TIMESTAMP));
 
-        // Then
+        // then
         assertSuccess(terminated);
         assertSuccess(duplicate);
         assertTrue(eventsOfType(duplicate, MandateTerminated.blueId()).isEmpty());
@@ -99,17 +99,17 @@ class MandateTerminationWorkflowTest {
 
     @Test
     void shouldTerminateFailedMandateWithoutReplacingFailureState() {
-        // Given
+        // given
         Fixture fixture = fixture();
         DocumentProcessingResult initialized = fixture.initialize(mandateDocument(true));
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.process(
                 blue.coordination.processor.ProcessingResultTestSupport.snapshot(
                         fixture.blue, initialized),
                 fixture.terminateMandateEvent(TERMINATION_TIMESTAMP));
 
-        // Then
+        // then
         assertEquals(StatusFailed.blueId(), initialized.document().getAsText("/status/type/blueId"));
         assertNull(optionalValue(initialized.document(), "/terminatedAt"));
         assertSuccess(result);
@@ -186,22 +186,25 @@ class MandateTerminationWorkflowTest {
     }
 
     private static Fixture fixture() {
-        BlueRepository repository = BlueRepository.latest();
-        Blue blue = CoordinationTestResources.configuredBlue(repository);
+        BlueRepository repository = BlueRepository.current();
+        CoordinationTestRuntime blue =
+                CoordinationTestResources.configuredBlue(repository);
         BexProcessingMetrics metrics = new BexProcessingMetrics();
-        CoordinationProcessors.registerWith(blue, CoordinationProcessorOptions.builder()
+        blue.configure(CoordinationProcessorOptions.builder()
                 .processingMetrics(metrics)
                 .build());
-        blue.getDocumentProcessor().processingMetricsSink(metrics);
         return new Fixture(repository, blue, metrics);
     }
 
     private static final class Fixture {
         private final BlueRepository repository;
-        private final Blue blue;
+        private final CoordinationTestRuntime blue;
         private final BexProcessingMetrics metrics;
 
-        private Fixture(BlueRepository repository, Blue blue, BexProcessingMetrics metrics) {
+        private Fixture(
+                BlueRepository repository,
+                CoordinationTestRuntime blue,
+                BexProcessingMetrics metrics) {
             this.repository = repository;
             this.blue = blue;
             this.metrics = metrics;

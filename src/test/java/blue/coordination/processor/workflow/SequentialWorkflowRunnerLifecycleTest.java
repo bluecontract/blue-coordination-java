@@ -5,11 +5,11 @@ import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationProcessors;
 import blue.coordination.processor.ProcessingResultTestSupport;
 import blue.coordination.processor.bex.BexProcessingMetrics;
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.model.TypeBlueId;
 import blue.language.processor.ChannelEvaluationContext;
 import blue.language.processor.ChannelProcessor;
+import blue.language.processor.BlueContracts;
 import blue.language.processor.CheckpointDomain;
 import blue.language.processor.ContractMatchingService;
 import blue.language.processor.DocumentProcessingResult;
@@ -26,17 +26,18 @@ import blue.language.processor.SubscriptionDelta;
 import blue.language.processor.WorkingDocument;
 import blue.language.processor.model.ChannelContract;
 import blue.language.processor.model.JsonPatch;
+import blue.language.runtime.BlueLanguage;
 import blue.language.snapshot.CanonicalPatchResult;
+import blue.language.snapshot.CanonicalOverlayPatchEngine;
 import blue.language.snapshot.FrozenNode;
-import blue.language.snapshot.ResolvedSnapshot;
-import blue.language.utils.BlueIdCalculator;
+import blue.language.merge.ResolvedSnapshot;
+import blue.language.identity.DirectBlueIdCalculator;
 import blue.repo.coordination.Compute;
 import blue.repo.coordination.SequentialWorkflow;
 import blue.repo.coordination.SequentialWorkflowStep;
 import blue.repo.coordination.TerminateProcessing;
 import blue.repo.coordination.TriggerEvent;
 import blue.repo.coordination.UpdateDocument;
-import blue.repo.BlueRepository;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -47,9 +48,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterAll;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Lifecycle regressions for the workflow-owned Language working document. */
@@ -57,18 +60,38 @@ class SequentialWorkflowRunnerLifecycleTest {
 
     private static final String CHANNEL_BLUE_ID =
             "BHRKnD9toWwiU34GJvqLJ3Rtiv6W7Mmubai7CdrA1i3L";
+    private static final BlueLanguage HOST_LANGUAGE =
+            BlueLanguage.builder().build();
+    private static final BlueContracts HOST_CONTRACTS =
+            BlueContracts.builder(
+                            HOST_LANGUAGE.processing())
+                    .build();
+
+    @AfterAll
+    static void shouldCloseHostedContractsRuntime() {
+        // given
+        BlueContracts contracts = HOST_CONTRACTS;
+        BlueLanguage language = HOST_LANGUAGE;
+
+        // when
+        contracts.close();
+        language.close();
+
+        // then
+        assertTrue(contracts.isClosed());
+    }
 
     @Test
     void shouldCreateAndCloseOneFrozenWorkingDocumentForNormalWorkflow() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         SequentialWorkflowRunner runner = runner(metrics, frozenObservingExecutor());
         Fixture fixture = fixture(runner, triggerStep());
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.process();
 
-        // Then
+        // then
         assertEquals(ProcessorStatus.SUCCESS, result.status(),
                 ProcessingResultTestSupport.diagnosticMessage(result));
         fixture.assertOneWorkflowScopeReleased();
@@ -78,15 +101,15 @@ class SequentialWorkflowRunnerLifecycleTest {
 
     @Test
     void shouldCloseWorkingDocumentForZeroStepWorkflow() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         SequentialWorkflowRunner runner = runner(metrics);
         Fixture fixture = fixture(runner);
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.process();
 
-        // Then
+        // then
         assertEquals(ProcessorStatus.SUCCESS, result.status(),
                 ProcessingResultTestSupport.diagnosticMessage(result));
         fixture.assertOneWorkflowScopeReleased();
@@ -96,7 +119,7 @@ class SequentialWorkflowRunnerLifecycleTest {
 
     @Test
     void shouldCloseWorkingDocumentAndRecordTimingWhenExecutorThrows() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         WorkflowStepExecutor<TriggerEvent> throwing = new WorkflowStepExecutor<TriggerEvent>() {
             @Override
@@ -111,10 +134,10 @@ class SequentialWorkflowRunnerLifecycleTest {
         };
         Fixture fixture = fixture(runner(metrics, throwing), triggerStep());
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.process();
 
-        // Then
+        // then
         assertRuntimeFatal(result, "executor exploded");
         fixture.assertOneWorkflowScopeReleased();
         assertTrue(metrics.workflowRunnerNanos() > 0L,
@@ -123,7 +146,7 @@ class SequentialWorkflowRunnerLifecycleTest {
 
     @Test
     void shouldCloseWorkingDocumentWhenExecutorRequestsFatalFailure() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         WorkflowStepExecutor<TriggerEvent> fatal = new WorkflowStepExecutor<TriggerEvent>() {
             @Override
@@ -139,17 +162,17 @@ class SequentialWorkflowRunnerLifecycleTest {
         };
         Fixture fixture = fixture(runner(metrics, fatal), triggerStep());
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.process();
 
-        // Then
+        // then
         assertRuntimeFatal(result, "requested fatal");
         fixture.assertOneWorkflowScopeReleased();
     }
 
     @Test
     void shouldCloseAndSkipLaterPatchAfterDeclarativeTermination() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         AtomicInteger patchSelections = new AtomicInteger();
         AtomicInteger patchExecutions = new AtomicInteger();
@@ -174,10 +197,10 @@ class SequentialWorkflowRunnerLifecycleTest {
                 terminateStep("finished"),
                 updateStep("replace", "/counter", new Node().value(99)));
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.process();
 
-        // Then
+        // then
         assertEquals(ProcessorStatus.SUCCESS, result.status(),
                 ProcessingResultTestSupport.diagnosticMessage(result));
         assertEquals(0, patchExecutions.get(),
@@ -199,7 +222,7 @@ class SequentialWorkflowRunnerLifecycleTest {
 
     @Test
     void shouldNotPopulateStepPlanCacheWhenGasRejectsBeforePlanning() {
-        // Given
+        // given
         WorkflowStepExecutor<UpdateDocument> referenceExecutor =
                 noOpUpdateExecutor(new AtomicInteger());
         ProcessingDebugResult reference =
@@ -232,11 +255,11 @@ class SequentialWorkflowRunnerLifecycleTest {
                                 "/counter",
                                 new Node().value(1)));
 
-        // When
+        // when
         ProcessingDebugResult rejected =
                 limited.processWithTrace();
 
-        // Then
+        // then
         assertEquals(
                 ProcessorStatus.GAS_LIMIT_EXCEEDED,
                 rejected.processResult().status(),
@@ -262,7 +285,7 @@ class SequentialWorkflowRunnerLifecycleTest {
 
     @Test
     void shouldProduceIdenticalGasTraceForColdAndWarmedStepPlans() {
-        // Given
+        // given
         BexProcessingMetrics metrics =
                 new BexProcessingMetrics();
         AtomicInteger supportsCalls = new AtomicInteger();
@@ -279,13 +302,13 @@ class SequentialWorkflowRunnerLifecycleTest {
         Fixture warmFixture =
                 fixture(runner, update);
 
-        // When
+        // when
         ProcessingDebugResult cold =
                 coldFixture.processWithTrace();
         ProcessingDebugResult warmed =
                 warmFixture.processWithTrace();
 
-        // Then
+        // then
         assertEquals(
                 ProcessorStatus.SUCCESS,
                 cold.processResult().status(),
@@ -311,17 +334,84 @@ class SequentialWorkflowRunnerLifecycleTest {
     }
 
     @Test
+    void shouldPassCurrentExactStepIntoExecutorOnWarmPlanHit() {
+        // given
+        BexProcessingMetrics metrics =
+                new BexProcessingMetrics();
+        AtomicInteger supportsCalls =
+                new AtomicInteger();
+        List<FrozenNode> observedSteps =
+                new ArrayList<FrozenNode>();
+        WorkflowStepExecutor<UpdateDocument> observing =
+                new WorkflowStepExecutor<UpdateDocument>() {
+                    @Override
+                    public boolean supports(
+                            SequentialWorkflowStep step) {
+                        supportsCalls.incrementAndGet();
+                        return step instanceof UpdateDocument;
+                    }
+
+                    @Override
+                    public WorkflowStepResult execute(
+                            UpdateDocument step,
+                            StepExecutionContext context) {
+                        observedSteps.add(
+                                context.stepFrozenNode());
+                        return WorkflowStepResult.none();
+                    }
+                };
+        SequentialWorkflowRunner runner =
+                runner(metrics, observing);
+        Node update = updateStep(
+                "replace",
+                "/counter",
+                new Node().value(1));
+        Fixture coldFixture =
+                fixture(runner, update);
+        Fixture warmFixture =
+                fixture(runner, update);
+
+        // when
+        DocumentProcessingResult cold =
+                coldFixture.process();
+        DocumentProcessingResult warm =
+                warmFixture.process();
+
+        // then
+        assertEquals(
+                ProcessorStatus.SUCCESS,
+                cold.status(),
+                ProcessingResultTestSupport
+                        .diagnosticMessage(cold));
+        assertEquals(
+                ProcessorStatus.SUCCESS,
+                warm.status(),
+                ProcessingResultTestSupport
+                        .diagnosticMessage(warm));
+        assertEquals(1, supportsCalls.get());
+        assertEquals(2, observedSteps.size());
+        assertNotSame(
+                observedSteps.get(0),
+                observedSteps.get(1));
+        assertEquals(
+                observedSteps.get(0)
+                        .resolvedStructuralKey(),
+                observedSteps.get(1)
+                        .resolvedStructuralKey());
+    }
+
+    @Test
     void shouldValidateComputeResultAndCloseWorkingDocumentWhenCapabilityIsAvailable() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         SequentialWorkflowRunner runner = SequentialWorkflowRunner.withBexEngine(
                 BexEngine.builder().build(), 100_000L, metrics);
         Fixture fixture = fixture(runner, invalidComputeResultStep());
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.process();
 
-        // Then
+        // then
         assertRuntimeFatal(result,
                 "Invalid Compute result: Compute result changeset must be a list");
         fixture.assertNoTransientSequenceLeak();
@@ -330,7 +420,7 @@ class SequentialWorkflowRunnerLifecycleTest {
 
     @Test
     void shouldMergeOneDistinctHostedLedgerPerComputeStep() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         SequentialWorkflowRunner runner = SequentialWorkflowRunner.withBexEngine(
                 BexEngine.builder().build(), 100_000L, metrics);
@@ -338,13 +428,13 @@ class SequentialWorkflowRunnerLifecycleTest {
                 returningComputeStep(1),
                 returningComputeStep(2));
 
-        // When
+        // when
         ProcessingDebugResult debug =
                 fixture.processWithTrace();
         DocumentProcessingResult result =
                 debug.processResult();
 
-        // Then
+        // then
         assertEquals(ProcessorStatus.SUCCESS, result.status(),
                 ProcessingResultTestSupport.diagnosticMessage(result));
         assertEquals(2L, metrics.computeStepsExecuted());
@@ -360,7 +450,7 @@ class SequentialWorkflowRunnerLifecycleTest {
 
     @Test
     void shouldMergeAdmittedLedgerPrefixOnceWhenSecondComputeFails() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         SequentialWorkflowRunner runner = SequentialWorkflowRunner.withBexEngine(
                 BexEngine.builder().build(), 100_000L, metrics);
@@ -368,10 +458,10 @@ class SequentialWorkflowRunnerLifecycleTest {
                 returningComputeStep(1),
                 failingComputeStep("synthetic-boom"));
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.process();
 
-        // Then
+        // then
         assertRuntimeFatal(result, "Compute failed: synthetic-boom");
         assertEquals(2L, metrics.computeStepsExecuted());
         assertTrue(result.totalGas() > 0L,
@@ -381,7 +471,7 @@ class SequentialWorkflowRunnerLifecycleTest {
 
     @Test
     void shouldRetainEarlierComputeLedgerWhenLaterStepFails() {
-        // Given
+        // given
         DocumentProcessingResult updateOnly = fixture(
                 SequentialWorkflowRunner.withBexEngine(
                         BexEngine.builder().build(), 100_000L),
@@ -393,10 +483,10 @@ class SequentialWorkflowRunnerLifecycleTest {
                 returningComputeStep(1),
                 updateStep("unsupported", "/counter", new Node().value(7)));
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.process();
 
-        // Then
+        // then
         assertRuntimeFatal(result,
                 "Unsupported Update Document patch operation");
         assertTrue(result.totalGas() > updateOnly.totalGas(),
@@ -407,17 +497,17 @@ class SequentialWorkflowRunnerLifecycleTest {
 
     @Test
     void shouldCloseWorkingDocumentWhenPatchPreviewFails() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         SequentialWorkflowRunner runner = SequentialWorkflowRunner.withBexEngine(
                 BexEngine.builder().build(), 100_000L, metrics);
         Fixture fixture = fixture(runner,
                 updateStep("add", "/counter/child", new Node().value(1)));
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.process();
 
-        // Then
+        // then
         assertEquals(ProcessorStatus.RUNTIME_FATAL, result.status(),
                 ProcessingResultTestSupport.diagnosticMessage(result));
         fixture.assertNoTransientSequenceLeak();
@@ -426,7 +516,7 @@ class SequentialWorkflowRunnerLifecycleTest {
 
     @Test
     void shouldReleaseEverySequenceScopeWhenProcessorFailsAfterPreview() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         final TrackingSnapshotManager snapshotManager = new TrackingSnapshotManager();
         WorkflowStepExecutor<TriggerEvent> previewThenFail =
@@ -451,10 +541,10 @@ class SequentialWorkflowRunnerLifecycleTest {
                 snapshotManager,
                 triggerStep());
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.process();
 
-        // Then
+        // then
         assertRuntimeFatal(result, "simulated post-preview failure");
         fixture.assertNoTransientSequenceLeak();
         assertTrue(fixture.snapshotManager.openCalls() >= 2,
@@ -463,17 +553,17 @@ class SequentialWorkflowRunnerLifecycleTest {
 
     @Test
     void shouldKeepTransferredPreviewValidAfterWorkflowDocumentCloses() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         SequentialWorkflowRunner runner = SequentialWorkflowRunner.withBexEngine(
                 BexEngine.builder().build(), 100_000L, metrics);
         Fixture fixture = fixture(runner,
                 updateStep("replace", "/counter", new Node().value(7)));
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.process();
 
-        // Then
+        // then
         assertEquals(ProcessorStatus.SUCCESS, result.status(),
                 ProcessingResultTestSupport.diagnosticMessage(result));
         assertEquals(BigInteger.valueOf(7), result.document().get("/counter"),
@@ -484,12 +574,12 @@ class SequentialWorkflowRunnerLifecycleTest {
 
     @Test
     void shouldNotAccumulateTransientSequenceStateAcrossTenThousandWorkflows() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         SequentialWorkflowRunner runner = runner(metrics, noOpExecutor());
         Fixture fixture = fixture(runner, triggerStep());
 
-        // When
+        // when
         for (int i = 0; i < 10_000; i++) {
             DocumentProcessingResult result = fixture.process();
             assertEquals(ProcessorStatus.SUCCESS, result.status(),
@@ -498,7 +588,7 @@ class SequentialWorkflowRunnerLifecycleTest {
                     "transient scope leak after repetition " + i);
         }
 
-        // Then
+        // then
         assertEquals(10_000, fixture.snapshotManager.openCalls());
         assertEquals(10_000, fixture.snapshotManager.releaseCalls());
         assertEquals(10_000L, metrics.workflowDocumentViewsFromFrozen());
@@ -610,18 +700,19 @@ class SequentialWorkflowRunnerLifecycleTest {
             SequentialWorkflowRunner runner,
             TrackingSnapshotManager snapshotManager,
             Long gasLimit) {
-        Blue blue = BlueRepository.latest().configure(new Blue());
         DocumentProcessor.Builder builder = DocumentProcessor.builder()
-                .withSnapshotManager(snapshotManager)
-                .withMatchingService(new ContractMatchingService(blue))
-                .withExternalDeliveryPlanDeriver(
+                .snapshotStore(snapshotManager)
+                .matchingService(new ContractMatchingService(
+                        HOST_CONTRACTS.runtimeAccess()
+                                .languageRuntime()))
+                .deliveryPlanDeriver(
                         SequentialWorkflowRunnerLifecycleTest::deliveryPlan);
         CoordinationProcessors.configure(builder,
                 CoordinationProcessorOptions.builder()
                         .sequentialWorkflowRunner(runner)
                         .build());
         if (gasLimit != null) {
-            builder.withGasLimit(gasLimit.longValue());
+            builder.gasLimit(gasLimit.longValue());
         }
         return builder
                 .registerContractProcessor(new LifecycleChannelProcessor())
@@ -652,7 +743,7 @@ class SequentialWorkflowRunnerLifecycleTest {
     private static ExternalDeliveryPlan deliveryPlan(Node root, Node event) {
         Node channel = root.getContracts().getProperties().get("channel");
         String contributionBlueId =
-                BlueIdCalculator.calculateBlueId(channel);
+                DirectBlueIdCalculator.calculateBlueId(channel);
         String checkpointDomainBlueId = CheckpointDomain.derive(
                 CHANNEL_BLUE_ID,
                 Collections.singletonList(contributionBlueId),
@@ -664,7 +755,7 @@ class SequentialWorkflowRunnerLifecycleTest {
                         .subscriptionKey("channel")
                         .checkpointDomainBlueId(checkpointDomainBlueId)
                         .checkpointSubjectBlueId(
-                                BlueIdCalculator.calculateBlueId(event))
+                                DirectBlueIdCalculator.calculateBlueId(event))
                         .build();
         SubscriptionDelta.Entry activeInterval =
                 new SubscriptionDelta.Entry(
@@ -682,7 +773,7 @@ class SequentialWorkflowRunnerLifecycleTest {
                 .revisions(0L, 0L)
                 .eventOrderKey(ExternalOrderKey.of(
                         Collections.singletonList(
-                                BlueIdCalculator.calculateBlueId(event))))
+                                DirectBlueIdCalculator.calculateBlueId(event))))
                 .delivery(delivery)
                 .activeSubscriptionInterval(activeInterval)
                 .exactRuntimeState()
@@ -929,7 +1020,10 @@ class SequentialWorkflowRunnerLifecycleTest {
 
         @Override
         public ResolvedSnapshot applyPatch(ResolvedSnapshot snapshot, JsonPatch patch) {
-            CanonicalPatchResult patched = snapshot.applyCanonicalPatch(patch);
+            CanonicalPatchResult patched =
+                    new CanonicalOverlayPatchEngine(
+                            snapshot.frozenCanonicalRoot())
+                            .apply(patch);
             return new ResolvedSnapshot(patched.root(),
                     FrozenNode.fromResolvedNode(patched.root().toNode()),
                     patched.blueId());

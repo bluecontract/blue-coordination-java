@@ -20,6 +20,28 @@ import java.util.Map;
  * member and returns at most one logical delivery for the union.</p>
  */
 public final class AllTimelinesChannelProcessor implements ChannelProcessor<AllTimelinesChannel> {
+    private final CoordinationSemanticTypeIdentities identities;
+    private final ExternalChannelSubscriptionFunctions<
+            AllTimelinesChannel> subscriptionFunctions;
+
+    public AllTimelinesChannelProcessor() {
+        this.identities = CoordinationSemanticTypeIdentities
+                .publishedDefaults();
+        this.subscriptionFunctions =
+                AllTimelinesExternalSubscriptionFunctions.INSTANCE;
+    }
+
+    AllTimelinesChannelProcessor(
+            String timelineChannelTypeBlueId,
+            CoordinationSemanticTypeIdentities identities) {
+        this.identities = java.util.Objects.requireNonNull(
+                identities, "identities");
+        this.subscriptionFunctions =
+                new AllTimelinesExternalSubscriptionFunctions(
+                        timelineChannelTypeBlueId,
+                        identities);
+    }
+
     @Override
     public Class<AllTimelinesChannel> contractType() {
         return AllTimelinesChannel.class;
@@ -28,13 +50,13 @@ public final class AllTimelinesChannelProcessor implements ChannelProcessor<AllT
     @Override
     public ExternalChannelSubscriptionFunctions<AllTimelinesChannel>
     externalSubscriptionFunctions() {
-        return AllTimelinesExternalSubscriptionFunctions.INSTANCE;
+        return subscriptionFunctions;
     }
 
     @Override
     public ChannelEvaluation evaluate(AllTimelinesChannel contract, ChannelEvaluationContext context) {
         Node event = context.event();
-        if (!CoordinationEventNodes.isTimelineEntry(event)) {
+        if (!CoordinationEventNodes.isTimelineEntry(event, identities)) {
             return ChannelEvaluation.noMatch();
         }
         MatchingTimeline matching = matchingTimeline(context);

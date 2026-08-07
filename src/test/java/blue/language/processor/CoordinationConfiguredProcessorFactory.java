@@ -1,28 +1,28 @@
-package blue.language.processor;
+package blue.coordination.processor;
 
-import blue.language.Blue;
+import blue.language.processor.DocumentProcessor;
+import blue.language.processor.ExternalDeliveryPlan;
+import blue.language.processor.ExternalDeliverySnapshot;
+import blue.language.processor.VerifiedExecutionEvidence;
 
 import java.util.Objects;
 
 /**
- * Test-harness bridge that retains a configured Blue runtime's exact
- * collaborators while selecting one fixture-local process gas limit.
+ * Test fixture that derives successor immutable processor generations from
+ * the current public builder snapshot API.
  */
 public final class CoordinationConfiguredProcessorFactory {
     private CoordinationConfiguredProcessorFactory() {
     }
 
     public static DocumentProcessor withGasLimit(
-            Blue blue,
+            CoordinationTestRuntime runtime,
             long gasLimit) {
-        DocumentProcessor processor =
-                configuredBuilder(blue)
-                        .withGasLimit(gasLimit)
-                        .build();
-        processor.externalDeliveryPlanDeriver(
-                new CoordinationCurrentRootDeliveryPlanDeriver(
-                        processor));
-        return processor;
+        return DocumentProcessor.Builder.from(
+                        Objects.requireNonNull(runtime, "runtime")
+                                .processor())
+                .gasLimit(gasLimit)
+                .build();
     }
 
     /**
@@ -36,7 +36,7 @@ public final class CoordinationConfiguredProcessorFactory {
      * @return caller-owned processor retaining the runtime collaborators
      */
     public static DocumentProcessor withExecutionEvidencePlan(
-            Blue blue,
+            CoordinationTestRuntime runtime,
             Long gasLimit,
             VerifiedExecutionEvidence evidence) {
         VerifiedExecutionEvidence exactEvidence =
@@ -46,11 +46,14 @@ public final class CoordinationConfiguredProcessorFactory {
         ExternalDeliveryPlan plan =
                 plan(exactEvidence);
         DocumentProcessor.Builder builder =
-                configuredBuilder(blue)
-                        .withExternalDeliveryPlanDeriver(
+                DocumentProcessor.Builder.from(
+                                Objects.requireNonNull(
+                                        runtime, "runtime")
+                                        .processor())
+                        .deliveryPlanDeriver(
                                 (root, event) -> plan);
         if (gasLimit != null) {
-            builder.withGasLimit(
+            builder.gasLimit(
                     gasLimit.longValue());
         }
         return builder.build();
@@ -88,35 +91,4 @@ public final class CoordinationConfiguredProcessorFactory {
         return builder.build();
     }
 
-    private static DocumentProcessor.Builder configuredBuilder(
-            Blue blue) {
-        Blue runtime = Objects.requireNonNull(
-                blue, "blue");
-        DocumentProcessor configured =
-                runtime.getDocumentProcessor();
-        return DocumentProcessor.builder()
-                .withRegistry(
-                        configured.getContractRegistry())
-                .withContractTypeResolver(
-                        configured.getContractTypeResolver())
-                .withConformanceEngine(
-                        configured.conformanceEngine())
-                .withConformancePlannerOverride(
-                        configured
-                                .conformancePlannerOverride())
-                .withSnapshotManager(
-                        configured.snapshotManager())
-                .withMatchingService(
-                        new ContractMatchingService(runtime))
-                .withProcessingMetricsSink(
-                        configured.metricsSink())
-                .withGasSchedule(
-                        configured.gasSchedule())
-                .withRuntimeRegistryIdentity(
-                        configured
-                                .runtimeRegistryIdentity())
-                .withSubscriptionSurfaceValidator(
-                        configured
-                                .subscriptionSurfaceValidator());
-    }
 }

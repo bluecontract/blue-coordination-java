@@ -16,17 +16,26 @@ import java.util.List;
  */
 public final class SequentialWorkflowOperationProcessor implements HandlerProcessor<SequentialWorkflowOperation> {
     private final SequentialWorkflowRunner runner;
-    private final OperationRequestMatcher matcher = new OperationRequestMatcher();
+    private final OperationRequestMatcher matcher;
 
     public SequentialWorkflowOperationProcessor() {
-        this(new SequentialWorkflowRunner());
+        this(new SequentialWorkflowRunner(),
+                CoordinationSemanticTypeIdentities.publishedDefaults());
     }
 
     public SequentialWorkflowOperationProcessor(SequentialWorkflowRunner runner) {
+        this(runner,
+                CoordinationSemanticTypeIdentities.publishedDefaults());
+    }
+
+    public SequentialWorkflowOperationProcessor(
+            SequentialWorkflowRunner runner,
+            CoordinationSemanticTypeIdentities identities) {
         if (runner == null) {
             throw new IllegalArgumentException("runner must not be null");
         }
         this.runner = runner;
+        this.matcher = new OperationRequestMatcher(identities);
     }
 
     @Override

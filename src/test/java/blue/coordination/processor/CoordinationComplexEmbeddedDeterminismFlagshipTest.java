@@ -1,28 +1,28 @@
 package blue.coordination.processor;
 
 import blue.coordination.processor.bex.BexProcessingMetrics;
-import blue.language.Blue;
-import blue.language.NodeProvider;
+import blue.language.provider.NodeProvider;
 import blue.language.model.Node;
-import blue.language.processor.CoordinationConfiguredProcessorFactory;
-import blue.language.processor.CoordinationRoutingHarness;
-import blue.language.processor.DocumentProcessor;
 import blue.language.processor.DocumentProcessingResult;
+import blue.language.processor.ExternalDeliveryPlan;
+import blue.language.processor.ExternalDeliverySnapshot;
+import blue.language.processor.ExternalOrderKey;
+import blue.language.processor.ExternalSubscriptionOccurrenceKey;
 import blue.language.processor.GasTraceEntry;
+import blue.language.processor.IndexedDeliveryPreparation;
+import blue.language.processor.PlatformProcessInvocation;
+import blue.language.processor.PlatformProcessingResult;
 import blue.language.processor.ProcessingConformanceTrace;
 import blue.language.processor.ProcessingDebugResult;
-import blue.language.processor.ProcessorErrorCategory;
 import blue.language.processor.ProcessingTraceConstants;
 import blue.language.processor.ProcessingTraceRecord;
 import blue.language.processor.ProcessorStatus;
+import blue.language.processor.SubscriptionDelta;
 import blue.language.processor.VerifiedExecutionEvidence;
 import blue.language.processor.registry.RuntimeBlueIds;
-import blue.language.provider.SequentialNodeProvider;
-import blue.language.utils.BlueIdCalculator;
-import blue.language.utils.NodeToMapListOrValue;
-import blue.language.utils.UncheckedObjectMapper;
-import blue.repo.BlueRepository;
-import blue.repo.coordination.ChatMessage;
+import blue.language.identity.DirectBlueIdCalculator;
+import blue.language.model.NodeWireForm;
+import blue.language.codec.jackson.UncheckedObjectMapper;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 
@@ -41,6 +41,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -60,19 +61,43 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
 
     private static final String ROOT = "/";
-    private static final String EMB1 = "/emb1";
-    private static final String EMB2 = "/emb1/emb2";
-    private static final String EMB3 = "/emb1/emb2/emb3";
+    private static final String EMB1 =
+            "/agreements/agreement-a";
+    private static final String EMB2 =
+            EMB1 + "/lessons/lesson-a";
+    private static final String EMB3 =
+            EMB2 + "/cancellations/cancel-a";
+    private static final String LESSON_B =
+            EMB1 + "/lessons/lesson-b";
+    private static final String PAYMENT_A =
+            EMB1 + "/payments/payment-a";
+    private static final String AGREEMENT_B =
+            "/agreements/agreement-b";
+    private static final String LESSON_C =
+            AGREEMENT_B + "/lessons/lesson-c";
     private static final String TIMELINE = "timeline";
     private static final String PULSE_OPERATION = "pulse";
     private static final int TIMESTAMP = 4242;
-    private static final int LARGE_DECOY_SIZE = 12_000;
+    private static final long ROOT_REVISION = 7L;
+    private static final ExternalOrderKey ACTIVATION_ORDER =
+            ExternalOrderKey.of(
+                    Arrays.<Object>asList(
+                            6L,
+                            "coordination-flagship-activation",
+                            0L));
+    private static final ExternalOrderKey EVENT_ORDER =
+            ExternalOrderKey.of(
+                    Arrays.<Object>asList(
+                            7L,
+                            "coordination-flagship-event",
+                            1L));
+    private static final int LARGE_DECOY_SIZE = 64_000;
     private static MatrixResult descendantsOnlyEvidence;
     private static MatrixResult rootD1D2Evidence;
 
     @AfterAll
     static void shouldWriteEvidenceOnlyAfterBothPublicEventVariantsComplete() {
-        // Given
+        // given
         MatrixResult descendantsOnly =
                 descendantsOnlyEvidence;
         MatrixResult rootD1D2 =
@@ -81,7 +106,7 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                 System.getProperty(
                         "coordination.flagship.report");
 
-        // When
+        // when
         if (reportPath == null
                 || descendantsOnly == null
                 || rootD1D2 == null) {
@@ -92,7 +117,7 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                 rootD1D2,
                 Paths.get(reportPath));
 
-        // Then
+        // then
         assertEquals(
                 32,
                 descendantsOnly.runs.size()
@@ -101,15 +126,15 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
 
     @Test
     void shouldKeepDescendantEventsInternalAcrossEveryRepresentationProviderVariant() {
-        // Given
+        // given
         Scenario descendantsOnlyScenario =
                 Scenario.create(RootEmissionMode.DESCENDANTS_ONLY);
 
-        // When
+        // when
         MatrixResult descendantsOnly =
                 executeMatrix(descendantsOnlyScenario);
 
-        // Then
+        // then
         assertDescendantsOnlyPublicEvents(
                 descendantsOnly);
         descendantsOnlyEvidence = descendantsOnly;
@@ -117,19 +142,71 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
 
     @Test
     void shouldExposeOnlyOrderedRootEventsAcrossEveryRepresentationProviderVariant() {
-        // Given
+        // given
         Scenario rootD1D2Scenario =
                 Scenario.create(RootEmissionMode.ROOT_D1_D2);
 
-        // When
+        // when
         MatrixResult rootD1D2 =
                 executeMatrix(rootD1D2Scenario);
 
-        // Then
+        // then
         assertRootD1D2PublicEvents(
                 rootD1D2Scenario,
                 rootD1D2);
         rootD1D2Evidence = rootD1D2;
+    }
+
+    @Test
+    void shouldDeclareTheExecutableGraphAsStableKeyObjectCollections() {
+        // given
+        Scenario scenario =
+                Scenario.create(
+                        RootEmissionMode.DESCENDANTS_ONLY);
+
+        // when
+        Node root = scenario.exactRoot;
+
+        // then
+        assertCollectionMembers(
+                root,
+                "/agreements",
+                "agreement-a",
+                "agreement-b");
+        assertCollectionMembers(
+                root,
+                EMB1 + "/lessons",
+                "lesson-a",
+                "lesson-b");
+        assertCollectionMembers(
+                root,
+                EMB1 + "/payments",
+                "payment-a");
+        assertCollectionMembers(
+                root,
+                EMB2 + "/cancellations",
+                "cancel-a");
+        assertCollectionMembers(
+                root,
+                AGREEMENT_B + "/lessons",
+                "lesson-c");
+        assertCollectionPaths(
+                root,
+                ROOT,
+                "/agreements");
+        assertCollectionPaths(
+                root,
+                EMB1,
+                "/lessons",
+                "/payments");
+        assertCollectionPaths(
+                root,
+                EMB2,
+                "/cancellations");
+        assertCollectionPaths(
+                root,
+                AGREEMENT_B,
+                "/lessons");
     }
 
     private static void assertDescendantsOnlyPublicEvents(
@@ -336,7 +413,7 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                 markdown,
                 "Root-only public events",
                 observedRootEvents(
-                        baseline.debug
+                        baseline.platformResult
                                 .processResult()
                                 .events()));
         appendObservedList(
@@ -387,35 +464,35 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                     .append(run.variant.providerMode)
                     .append(" | ")
                     .append(
-                            run.debug.processResult()
+                            run.platformResult.processResult()
                                     .status())
                     .append(" | ")
                     .append(
-                            run.providerMetrics
+                            run.platformProviderMetrics
                                     .requestedBlueIds
                                     .size())
                     .append(" | ")
                     .append(
-                            run.providerMetrics
+                            run.platformProviderMetrics
                                     .backendLoadedBlueIds
                                     .size())
                     .append(" | ")
                     .append(
-                            run.providerMetrics
+                            run.platformProviderMetrics
                                     .backendTrips)
                     .append(" | ")
                     .append(
                             bytesFor(
                                     run.scenario
                                             .fragmentBytes,
-                                    run.providerMetrics
+                                    run.platformProviderMetrics
                                             .requestedBlueIds))
                     .append(" | ")
                     .append(
                             bytesFor(
                                     run.scenario
                                             .fragmentBytes,
-                                    run.providerMetrics
+                                    run.platformProviderMetrics
                                             .backendLoadedBlueIds))
                     .append(" | ")
                     .append(
@@ -427,7 +504,7 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                                     .canonicalBytes)
                     .append(" | ")
                     .append(
-                            run.debug.processResult()
+                            run.platformResult.processResult()
                                     .totalGas())
                     .append(" |\n");
         }
@@ -441,9 +518,9 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
         for (Run run : matrix.runs) {
             identities.addAll(
                     requested
-                            ? run.providerMetrics
+                            ? run.platformProviderMetrics
                             .requestedBlueIds
-                            : run.providerMetrics
+                            : run.platformProviderMetrics
                             .backendLoadedBlueIds);
         }
         return sortedIdentities(identities);
@@ -540,7 +617,7 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                 new ArrayList<>();
         for (Node event : events) {
             result.add(
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             event)
                             + "|" + event.get(
                             "/message"));
@@ -552,58 +629,156 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
     private static Run execute(
             Scenario scenario,
             Variant variant) {
+        PlatformExecution platformExecution =
+                executePlatformCommit(
+                        scenario,
+                        variant);
+        ProcessingDebugResult debug =
+                scenario.traceOracle;
+        assertSuccessfulProcessingBeforeHandlerProjection(
+                scenario,
+                variant,
+                debug);
+        assertPlatformCommitEquivalent(
+                scenario,
+                variant,
+                debug,
+                platformExecution.result);
+        return new Run(
+                scenario,
+                variant,
+                debug,
+                platformExecution.result,
+                platformExecution.providerMetrics,
+                platformExecution.metrics);
+    }
+
+    private static PlatformExecution executePlatformCommit(
+            Scenario scenario,
+            Variant variant) {
         StrictFragmentProvider fragments =
                 new StrictFragmentProvider(
                         scenario.fragments,
                         scenario.forbiddenBlueIds,
+                        scenario.selectedPrefetchOrder,
+                        scenario.selectedClosure,
                         variant.providerMode);
         if (variant.cacheMode == CacheMode.WARM) {
-            fragments.warmAllowed();
+            fragments.warmSelectedClosure();
         }
-        fragments.resetMetrics();
-
+        fragments.resetRequestMetrics();
         BexProcessingMetrics metrics =
                 new BexProcessingMetrics();
-        Blue blue =
-                scenario.repository.configure(
-                        new Blue());
-        NodeProvider configuredRepositoryProvider =
-                blue.getNodeProvider();
-        blue.nodeProvider(
-                new SequentialNodeProvider(
-                        fragments,
-                        configuredRepositoryProvider));
-        CoordinationProcessors.registerWith(
-                blue,
+        RepositoryIndependentCoordinationTestRuntime blue =
+                RepositoryIndependentCoordinationTestRuntime.create();
+        blue.addNodeProvider(fragments);
+        blue.configure(
                 CoordinationProcessorOptions.builder()
                         .processingMetrics(metrics)
                         .build());
-        DocumentProcessor processor =
-                CoordinationConfiguredProcessorFactory
-                        .withExecutionEvidencePlan(
-                                blue,
-                                null,
-                                scenario.evidence);
         try {
-            ProcessingDebugResult debug =
-                    processor.processDocumentWithTrace(
+            EvidenceBundle execution =
+                    publicExecutionEvidence(
+                            blue,
+                            scenario.exactRoot,
+                            scenario.exactEvent);
+            fragments.resetRequestMetrics();
+            PlatformProcessInvocation invocation =
+                    PlatformProcessInvocation.builder()
+                            .deliveryPlan(
+                                    execution.deliveryPlan)
+                            .nodeProvider(
+                                    blue.nodeProvider())
+                            .build();
+            PlatformProcessingResult result =
+                    blue.contracts()
+                            .processForPlatformCommit(
                             variant.document(scenario),
                             variant.event(scenario),
-                            scenario.evidence);
-            assertSuccessfulProcessingBeforeHandlerProjection(
-                    scenario,
-                    variant,
-                    debug);
-            return new Run(
-                    scenario,
-                    variant,
-                    debug,
+                            invocation);
+            return new PlatformExecution(
+                    result,
                     fragments.metrics(),
                     metrics);
         } finally {
-            processor.close();
             blue.close();
         }
+    }
+
+    private static void assertPlatformCommitEquivalent(
+            Scenario scenario,
+            Variant variant,
+            ProcessingDebugResult debug,
+            PlatformProcessingResult committed) {
+        String context = scenario.emissionMode
+                + "/" + variant;
+        DocumentProcessingResult traced =
+                debug.processResult();
+        DocumentProcessingResult platform =
+                committed.processResult();
+        assertEquals(
+                traced.status(),
+                platform.status(),
+                context + ": platform status, traceDiagnostic="
+                        + ProcessingResultTestSupport
+                        .diagnosticMessage(traced)
+                        + ", platformDiagnostic="
+                        + ProcessingResultTestSupport
+                        .diagnosticMessage(platform));
+        assertEquals(
+                DirectBlueIdCalculator.calculateBlueId(
+                        traced.document()),
+                DirectBlueIdCalculator.calculateBlueId(
+                        platform.document()),
+                context
+                        + ": platform Root semantic value/identity");
+        assertEquals(
+                nodeBlueIds(traced.events()),
+                nodeBlueIds(platform.events()),
+                context + ": platform Root events");
+        assertEquals(
+                traced.totalGas(),
+                platform.totalGas(),
+                context + ": platform gas");
+        assertEquals(
+                ProcessingResultTestSupport
+                        .diagnosticMessage(traced),
+                ProcessingResultTestSupport
+                        .diagnosticMessage(platform),
+                context + ": platform diagnostic");
+        assertEquals(
+                scenario.evidence.rootBlueId(),
+                committed.commitCompanion()
+                        .expectedRootBlueId(),
+                context);
+        assertEquals(
+                scenario.evidence.eventBlueId(),
+                committed.commitCompanion()
+                        .eventBlueId(),
+                context);
+        assertEquals(
+                ROOT_REVISION,
+                committed.commitCompanion()
+                        .expectedRootRevision(),
+                context);
+        assertEquals(
+                ROOT_REVISION + 1L,
+                committed.commitCompanion()
+                        .resultingRootRevision(),
+                context);
+        assertEquals(
+                EVENT_ORDER,
+                committed.commitCompanion()
+                        .eventOrderKey(),
+                context);
+        assertTrue(
+                committed.commitCompanion()
+                        .commitsRootAndOutbox(),
+                context);
+        assertNotNull(
+                committed.commitCompanion()
+                        .subscriptionDelta(),
+                context);
     }
 
     private static void assertSuccessfulProcessingBeforeHandlerProjection(
@@ -620,42 +795,6 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                         .diagnosticMessage(result);
         String failureMessage =
                 context + ": " + diagnostic;
-        List<String> retainedDeliveries =
-                new ArrayList<String>();
-        scenario.evidence.deliveries()
-                .forEach(delivery ->
-                        retainedDeliveries.add(
-                                delivery.scopePath()
-                                        + "|"
-                                        + delivery.channelKey()));
-        boolean exactDrift =
-                result.status()
-                        == ProcessorStatus
-                        .INVALID_PROCESSING_DOCUMENT
-                        && ProcessingResultTestSupport
-                        .diagnosticCategory(result)
-                        == ProcessorErrorCategory
-                        .InvalidExternalChannelSnapshot
-                        && diagnostic.startsWith(
-                        "External delivery changed during "
-                                + "accepted-new preflight at ")
-                        && diagnostic.endsWith(
-                        "/" + TIMELINE)
-                        && retainedDeliveries.equals(
-                        Arrays.asList(
-                                EMB3 + "|" + TIMELINE,
-                                EMB2 + "|" + TIMELINE,
-                                EMB1 + "|" + TIMELINE,
-                                ROOT + "|" + TIMELINE))
-                        && result.events().isEmpty();
-        ExternalBlockerProbeAssertions.classify(
-                "flagship-external-delivery-evidence-drift",
-                "Language flagship external-delivery evidence drift:",
-                exactDrift,
-                result.status() == ProcessorStatus.SUCCESS,
-                failureMessage
-                        + ", retainedDeliveries="
-                        + retainedDeliveries);
         assertEquals(
                 ProcessorStatus.SUCCESS,
                 result.status(),
@@ -665,7 +804,7 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
     private static void assertSuccessfulFinalState(
             Run run) {
         DocumentProcessingResult result =
-                run.debug.processResult();
+                run.platformResult.processResult();
         String context =
                 run.scenario.emissionMode
                         + "/" + run.variant;
@@ -765,22 +904,46 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                 run.metrics.computeStepsExecuted(),
                 context);
         assertEquals(
-                1L,
+                0L,
                 run.metrics
                         .processEventSnapshotBuilds(),
-                context);
+                context
+                        + ": hosted BEX must borrow Language's immutable "
+                        + "processing-event snapshot without rebuilding it");
 
         for (Map.Entry<String, String> sibling :
                 run.scenario.coldSiblingBlueIds
                         .entrySet()) {
             assertEquals(
                     sibling.getValue(),
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             nodeAt(
                                     result.document(),
                                     sibling.getKey())),
                     context + ": cold sibling changed at "
                             + sibling.getKey());
+        }
+        for (String changedScope :
+                Arrays.asList(
+                        ROOT,
+                        EMB1,
+                        EMB2,
+                        EMB3)) {
+            String before =
+                    DirectBlueIdCalculator.calculateBlueId(
+                            nodeAt(
+                                    run.scenario.exactRoot,
+                                    changedScope));
+            String after =
+                    DirectBlueIdCalculator.calculateBlueId(
+                            nodeAt(
+                                    result.document(),
+                                    changedScope));
+            assertFalse(
+                    before.equals(after),
+                    context
+                            + ": selected identity spine did not change at "
+                            + changedScope);
         }
     }
 
@@ -883,7 +1046,7 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
         assertEquals(4, writes.size(), context);
         assertEquals(
                 Arrays.asList(
-                        EMB3, EMB2, EMB1, ROOT),
+                        ROOT, EMB1, EMB2, EMB3),
                 scopeProjection(writes),
                 context);
         String expectedSubject =
@@ -906,7 +1069,7 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                     write.node(), "/subject");
             assertEquals(
                     expectedSubject,
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             subject),
                     context);
             assertEquals(
@@ -922,7 +1085,8 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                 Arrays.asList(
                         EMB3, EMB2, EMB1, ROOT)) {
             Node entries = nodeAt(
-                    run.debug.processResult().document(),
+                    run.platformResult
+                            .processResult().document(),
                     scopePointer(
                             scope,
                             "/contracts/checkpoint/entries"));
@@ -939,6 +1103,36 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
         String context =
                 run.scenario.emissionMode
                         + "/" + run.variant;
+        Set<String> executableBodies =
+                executableBodyBlueIds(
+                        run.scenario.exactRoot);
+        Set<String> selectedBodies =
+                new LinkedHashSet<>(
+                        run.selectedBodies.blueIds);
+        assertEquals(
+                run.scenario
+                        .selectedExecutableBodyBlueIds,
+                selectedBodies,
+                context
+                        + ": authored selected-body closure changed from observed handlers");
+        Set<String> closureExecutableBodies =
+                new LinkedHashSet<>(
+                        run.scenario.selectedClosure);
+        closureExecutableBodies.retainAll(
+                executableBodies);
+        assertEquals(
+                selectedBodies,
+                closureExecutableBodies,
+                context
+                        + ": prefetch closure includes an unselected executable body");
+        String selectedOperationBody =
+                DirectBlueIdCalculator.calculateBlueId(
+                        nodeAt(
+                                run.scenario.exactRoot,
+                                EMB3
+                                        + "/contracts/"
+                                        + PULSE_OPERATION
+                                        + "/steps"));
         long totalStoredBytes =
                 totalBytes(
                         run.scenario.fragmentBytes);
@@ -951,22 +1145,9 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                         > totalStoredBytes
                         - forbiddenStoredBytes,
                 context
-                        + ": forbidden large siblings must dominate stored bytes");
-        assertTrue(
-                bytesFor(
-                        run.scenario.fragmentBytes,
-                        run.providerMetrics
-                                .requestedBlueIds)
-                        < forbiddenStoredBytes,
-                context
-                        + ": selected provider bytes must stay below cold decoy bytes");
-        assertTrue(
-                Collections.disjoint(
-                        run.providerMetrics
-                                .requestedBlueIds,
-                        run.scenario
-                                .forbiddenBlueIds),
-                context);
+                        + ": forbidden large siblings must dominate stored bytes"
+                        + " (forbidden=" + forbiddenStoredBytes
+                        + ", total=" + totalStoredBytes + ")");
         assertTrue(
                 Collections.disjoint(
                         new LinkedHashSet<>(
@@ -976,37 +1157,232 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                                 .forbiddenBlueIds),
                 context);
         assertTrue(
-                run.scenario.allowedBlueIds
+                selectedBodies.contains(
+                        selectedOperationBody),
+                context
+                        + ": selected operation body was not executed");
+        assertProviderPhysicalLocality(
+                run,
+                "platform",
+                run.platformProviderMetrics,
+                executableBodies,
+                selectedBodies,
+                selectedOperationBody,
+                forbiddenStoredBytes);
+    }
+
+    private static void assertProviderPhysicalLocality(
+            Run run,
+            String lane,
+            ProviderMetrics provider,
+            Set<String> executableBodies,
+            Set<String> selectedBodies,
+            String selectedOperationBody,
+            long forbiddenStoredBytes) {
+        String context =
+                run.scenario.emissionMode
+                        + "/" + run.variant
+                        + "/" + lane;
+        Set<String> requestedBodies =
+                new LinkedHashSet<>(
+                        provider.requestedBlueIds);
+        requestedBodies.retainAll(
+                executableBodies);
+        Set<String> loadedBodies =
+                new LinkedHashSet<>(
+                        provider.backendLoadedBlueIds);
+        loadedBodies.retainAll(
+                executableBodies);
+
+        assertTrue(
+                run.scenario.selectedClosure
                         .containsAll(
-                                run.providerMetrics
-                                        .requestedBlueIds),
+                                provider.requestedBlueIds),
+                context
+                        + ": requests escaped the selected closure: "
+                        + provider.requestedBlueIds);
+        assertTrue(
+                run.scenario.selectedClosure
+                        .containsAll(
+                                provider.backendLoadedBlueIds),
+                context
+                        + ": cumulative backend loads escaped the selected closure: "
+                        + provider.backendLoadedBlueIds);
+        assertTrue(
+                Collections.disjoint(
+                        provider.requestedBlueIds,
+                        run.scenario.forbiddenBlueIds),
                 context);
         assertTrue(
-                run.scenario.allowedBlueIds
-                        .containsAll(
-                                run.providerMetrics
-                                        .backendLoadedBlueIds),
+                Collections.disjoint(
+                        provider.backendLoadedBlueIds,
+                        run.scenario.forbiddenBlueIds),
                 context);
+        assertTrue(
+                selectedBodies.containsAll(
+                        requestedBodies),
+                context
+                        + ": an unselected executable body was requested: "
+                        + requestedBodies);
+        assertTrue(
+                selectedBodies.containsAll(
+                        loadedBodies),
+                context
+                        + ": an unselected executable body was loaded: "
+                        + loadedBodies);
+        assertTrue(
+                bytesFor(
+                        run.scenario.fragmentBytes,
+                        provider.requestedBlueIds)
+                        < forbiddenStoredBytes,
+                context
+                        + ": requested bytes must stay below cold decoy bytes");
+        assertTrue(
+                bytesFor(
+                        run.scenario.fragmentBytes,
+                        provider.backendLoadedBlueIds)
+                        < forbiddenStoredBytes,
+                context
+                        + ": cumulative backend-loaded bytes must stay below cold decoy bytes");
+
+        if (run.variant.cacheMode
+                == CacheMode.WARM) {
+            assertEquals(
+                    run.scenario.selectedClosure,
+                    provider.backendLoadedBlueIds,
+                    context
+                            + ": warm prefetch must expose the exact selected closure");
+            assertEquals(
+                    0L,
+                    provider.backendTrips,
+                    context);
+        } else if (run.variant.entryMode
+                == EntryMode.INLINE) {
+            assertTrue(
+                    provider.backendLoadedBlueIds.isEmpty(),
+                    context
+                            + ": cold inline execution must not load fragments");
+            assertEquals(
+                    0L,
+                    provider.backendTrips,
+                    context);
+        } else {
+            assertTrue(
+                    provider.backendTrips > 0L,
+                    context);
+        }
+
         if (run.variant.entryMode
                 != EntryMode.INLINE) {
             assertFalse(
-                    run.providerMetrics
-                            .requestedBlueIds.isEmpty(),
+                    provider.requestedBlueIds.isEmpty(),
                     context);
-            if (run.variant.cacheMode
-                    == CacheMode.WARM) {
-                assertEquals(
-                        0L,
-                        run.providerMetrics
-                                .backendTrips,
-                        context);
-            } else {
-                assertTrue(
-                        run.providerMetrics
-                                .backendTrips > 0L,
-                        context);
+            assertTrue(
+                    requestedBodies.contains(
+                            selectedOperationBody),
+                    context
+                            + ": fragmented run did not request the selected operation body");
+            assertTrue(
+                    requestedBodies.size() > 1,
+                    context
+                            + ": causally reached listener bodies were not requested on demand");
+        }
+    }
+
+    private static Set<String> executableBodyBlueIds(
+            Node root) {
+        Set<String> result =
+                new LinkedHashSet<>();
+        for (String scope :
+                Arrays.asList(
+                        ROOT,
+                        EMB1,
+                        EMB2,
+                        EMB3,
+                        LESSON_B,
+                        PAYMENT_A,
+                        AGREEMENT_B,
+                        LESSON_C)) {
+            Node contracts =
+                    nodeAt(root, scope)
+                            .getContracts();
+            for (Node contract :
+                    contracts.getProperties()
+                            .values()) {
+                Node steps = contract.getProperties()
+                        == null
+                        ? null
+                        : contract.getProperties()
+                        .get("steps");
+                if (steps != null) {
+                    result.add(
+                            DirectBlueIdCalculator
+                                    .calculateBlueId(
+                                            steps));
+                }
             }
         }
+        return result;
+    }
+
+    private static Set<String> selectedExecutableBodyBlueIds(
+            Node root,
+            RootEmissionMode emissionMode) {
+        Set<String> selected =
+                new LinkedHashSet<>();
+        for (String handler :
+                expectedHandlerProjection(
+                        emissionMode)) {
+            String[] components =
+                    handler.split("\\|", 3);
+            if (components.length != 3) {
+                throw new AssertionError(
+                        "Invalid expected handler projection: "
+                                + handler);
+            }
+            Node body = nodeAt(
+                    root,
+                    scopePointer(
+                            components[0],
+                            "/contracts/"
+                                    + pointerSegment(
+                                    components[1])
+                                    + "/steps"));
+            selected.add(
+                    DirectBlueIdCalculator.calculateBlueId(
+                            body));
+        }
+        if (selected.isEmpty()) {
+            throw new AssertionError(
+                    "Flagship selected executable-body closure is empty");
+        }
+        return immutableSet(selected);
+    }
+
+    private static List<String> selectedPrefetchOrder(
+            Node exactRoot,
+            DocumentFragmentGraph documentGraph,
+            CoordinationDocumentSplitter.SplitGraph eventGraph,
+            Set<String> selectedExecutableBodies) {
+        LinkedHashSet<String> order =
+                new LinkedHashSet<>();
+        order.add(documentGraph.rootBlueId);
+        order.add(eventGraph.rootBlueId());
+        order.addAll(eventGraph.fragments().keySet());
+        for (String selectedScope :
+                Arrays.asList(
+                        EMB1,
+                        EMB2,
+                        EMB3)) {
+            order.add(
+                    DirectBlueIdCalculator.calculateBlueId(
+                            nodeAt(
+                                    exactRoot,
+                                    selectedScope)));
+        }
+        order.addAll(selectedExecutableBodies);
+        return Collections.unmodifiableList(
+                new ArrayList<>(order));
     }
 
     private static void assertTrueAt(
@@ -1033,7 +1409,7 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                         "/audit/processingTimestamp");
         Node captured =
                 nodeAt(
-                        run.debug.processResult()
+                        run.platformResult.processResult()
                                 .document(),
                         eventPath);
         assertEquals(
@@ -1042,14 +1418,14 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                 normalizedJson(captured),
                 context + ": " + eventPath);
         assertEquals(
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         run.scenario.exactEvent),
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         captured),
                 context + ": " + eventPath);
         assertEquals(
                 BigInteger.valueOf(TIMESTAMP),
-                run.debug.processResult()
+                run.platformResult.processResult()
                         .document().get(
                                 timestampPath),
                 context + ": " + timestampPath);
@@ -1388,7 +1764,7 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                         missingBody);
             }
             String bodyBlueId =
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             body);
             Node storedBody =
                     scenario.fragments.get(
@@ -1405,7 +1781,7 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                     || canonicalBytes.longValue()
                     <= 0L
                     || !bodyBlueId.equals(
-                    BlueIdCalculator
+                    DirectBlueIdCalculator
                             .calculateBlueId(
                                     storedBody))) {
                 throw new AssertionError(
@@ -1500,7 +1876,7 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                         eventReference.getBlueId();
             } else {
                 eventBlueId =
-                        BlueIdCalculator.calculateBlueId(
+                        DirectBlueIdCalculator.calculateBlueId(
                                 traced);
             }
             result.add(delivery(
@@ -1528,7 +1904,7 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
         List<String> result = new ArrayList<>();
         for (ProcessingTraceRecord record : records) {
             result.add(
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             record.node()));
         }
         return Collections.unmodifiableList(result);
@@ -1539,7 +1915,7 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
         List<String> result = new ArrayList<>();
         for (Node node : nodes) {
             result.add(
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             node));
         }
         return Collections.unmodifiableList(result);
@@ -1592,6 +1968,64 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
             }
         }
         return current;
+    }
+
+    private static void assertCollectionMembers(
+            Node root,
+            String collectionPath,
+            String... expectedMemberKeys) {
+        Node collection =
+                nodeAt(root, collectionPath);
+        assertNotNull(
+                collection.getProperties(),
+                collectionPath
+                        + " must be a stable-key object collection");
+        assertNull(
+                collection.getItems(),
+                collectionPath
+                        + " must not be a list-position collection");
+        assertEquals(
+                new LinkedHashSet<>(
+                        Arrays.asList(
+                                expectedMemberKeys)),
+                new LinkedHashSet<>(
+                        collection.getProperties()
+                                .keySet()),
+                collectionPath);
+    }
+
+    private static void assertCollectionPaths(
+            Node root,
+            String scope,
+            String... expectedCollectionPaths) {
+        Node processEmbedded =
+                nodeAt(
+                        root,
+                        scopePointer(
+                                scope,
+                                "/contracts/embedded"));
+        assertNull(
+                processEmbedded.getProperties()
+                        .get("paths"),
+                scope + " must not declare legacy paths");
+        Node collectionPaths =
+                processEmbedded.getProperties()
+                        .get("collectionPaths");
+        assertNotNull(
+                collectionPaths,
+                scope + " collectionPaths");
+        List<String> actual =
+                new ArrayList<>();
+        for (Node path : collectionPaths.getItems()) {
+            actual.add(
+                    Objects.toString(
+                            path.getValue()));
+        }
+        assertEquals(
+                Arrays.asList(
+                        expectedCollectionPaths),
+                actual,
+                scope);
     }
 
     private enum RootEmissionMode {
@@ -1699,10 +2133,11 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
      * participating scopes and executable bodies after processor-owned
      * initialization markers are inserted.
      *
-     * <p>The production splitter is covered independently. This flagship's
-     * proof surface is the real provider-backed PROCESS matrix, so fixture
-     * assembly deliberately does not depend on a second effective-catalog
-     * pass over processor markers.</p>
+     * <p>The backing inventory remains the fixture's exact canonical graph,
+     * while PROCESS-visible identities use the production splitter's
+     * ephemeral header views. This preserves the physical-fragment proof and
+     * gives Language the same selective materialization surface used by the
+     * production Coordination path.</p>
      */
     private static final class DocumentFragmentGraph {
         private final String rootBlueId;
@@ -1727,17 +2162,20 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
         }
 
         private static DocumentFragmentGraph create(
-                Node exactRoot) {
+                Node exactRoot,
+                CoordinationDocumentSplitter.SplitGraph
+                        productionGraph) {
             Set<String> scopes =
                     new LinkedHashSet<>(
                             Arrays.asList(
                                     ROOT,
-                                    "/coldRoot",
                                     EMB1,
-                                    EMB1 + "/coldEmb1",
                                     EMB2,
-                                    EMB2 + "/coldEmb2",
-                                    EMB3));
+                                    EMB3,
+                                    LESSON_B,
+                                    PAYMENT_A,
+                                    AGREEMENT_B,
+                                    LESSON_C));
 
             Map<String, Node> scopeFragments =
                     new LinkedHashMap<>();
@@ -1752,11 +2190,13 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                         exactScope.clone();
                 for (String child : scopes) {
                     if (!scope.equals(
-                            parentScope(child))) {
+                            owningScope(
+                                    child,
+                                    scopes))) {
                         continue;
                     }
                     String childBlueId =
-                            BlueIdCalculator
+                            DirectBlueIdCalculator
                                     .calculateBlueId(
                                             nodeAt(
                                                     exactRoot,
@@ -1789,7 +2229,7 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                                                             .getKey())
                                             + "/steps");
                     String bodyBlueId =
-                            BlueIdCalculator
+                            DirectBlueIdCalculator
                                     .calculateBlueId(body);
                     bodyFragments.put(
                             bodyBlueId,
@@ -1803,12 +2243,13 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                                     bodyBlueId));
                     if (pointer
                             .contains("zzDecoy")) {
-                        forbidden.add(
-                                bodyBlueId);
+                        addDescendantIdentities(
+                                body,
+                                forbidden);
                     }
                 }
                 String scopeBlueId =
-                        BlueIdCalculator
+                        DirectBlueIdCalculator
                                 .calculateBlueId(
                                         exactScope);
                 requireSameIdentity(
@@ -1817,9 +2258,10 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                         "fragment at " + scope);
                 scopeFragments.put(
                         scopeBlueId, fragment);
-                if (scope.contains("/cold")) {
-                    forbidden.add(
-                            scopeBlueId);
+                if (isUnrelatedScope(scope)) {
+                    addDescendantIdentities(
+                            exactScope,
+                            forbidden);
                 }
             }
             Map<String, Node> all =
@@ -1830,20 +2272,225 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
              * coincide with a shallower structural fragment.
              */
             all.putAll(bodyFragments);
+            for (String blueId :
+                    productionGraph.fragments().keySet()) {
+                List<Node> processViews =
+                        productionGraph.provider()
+                                .fetchByBlueId(blueId);
+                if (processViews != null
+                        && processViews.size() == 1) {
+                    all.put(
+                            blueId,
+                            processViews.get(0).clone());
+                }
+            }
+            Node headerRoot =
+                    productionGraph.processingRootView();
+            Map<String, Node> mutationViews =
+                    selectedMutationViews(
+                            exactRoot,
+                            headerRoot,
+                            scopes);
+            all.putAll(mutationViews);
             String rootBlueId =
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             exactRoot);
             Node rootFragment =
-                    all.get(rootBlueId);
+                    mutationViews.get(rootBlueId);
             if (rootFragment == null) {
                 throw new AssertionError(
-                        "Initialized Root fragment is missing");
+                        "Selected-chain PROCESS Root view is missing");
             }
             return new DocumentFragmentGraph(
                     rootBlueId,
                     rootFragment,
                     all,
                     forbidden);
+        }
+
+        private static void addDescendantIdentities(
+                Node node,
+                Set<String> identities) {
+            if (node == null) {
+                return;
+            }
+            identities.add(
+                    DirectBlueIdCalculator.calculateBlueId(
+                            node));
+            if (node.isReferenceOnly()) {
+                return;
+            }
+            /*
+             * Type definitions are shared runtime dependencies, not physical
+             * descendants owned by a cold document branch. Classifying their
+             * references as forbidden would reject legitimate type
+             * resolution while inspecting an otherwise body-free header.
+             */
+            addDescendantIdentities(
+                    node.getContracts(),
+                    identities);
+            if (node.getProperties() != null) {
+                for (Node child :
+                        node.getProperties().values()) {
+                    addDescendantIdentities(
+                            child,
+                            identities);
+                }
+            }
+            if (node.getItems() != null) {
+                for (Node child : node.getItems()) {
+                    addDescendantIdentities(
+                            child,
+                            identities);
+                }
+            }
+        }
+
+        /**
+         * Builds identity-equivalent PROCESS views with the complete selected
+         * mutation spine inline. Ordinary state below the selected scopes is
+         * therefore authored patch input rather than a provider-provenance
+         * wrapper. Unrelated collection members retain only the splitter's
+         * body-free PROCESS headers, and every executable body remains an
+         * exact pure reference.
+         */
+        private static Map<String, Node> selectedMutationViews(
+                Node exactRoot,
+                Node headerRoot,
+                Set<String> allScopes) {
+            List<String> selectedScopes =
+                    Arrays.asList(
+                            ROOT,
+                            EMB1,
+                            EMB2,
+                            EMB3);
+            Map<String, Node> byPath =
+                    new LinkedHashMap<>();
+            for (int index = selectedScopes.size() - 1;
+                 index >= 0;
+                 index--) {
+                String scope = selectedScopes.get(index);
+                Node exactScope = nodeAt(
+                        exactRoot,
+                        scope);
+                Node view = exactScope.clone();
+                collapseExecutableBodies(view);
+                for (String child : allScopes) {
+                    if (!scope.equals(
+                            owningScope(
+                                    child,
+                                    allScopes))) {
+                        continue;
+                    }
+                    Node selectedChild =
+                            byPath.get(child);
+                    Node replacement =
+                            selectedChild != null
+                                    ? selectedChild.clone()
+                                    : coldScopeHeader(
+                                            nodeAt(
+                                                    headerRoot,
+                                                    child));
+                    replaceAt(
+                            view,
+                            relativePointer(
+                                    scope,
+                                    child),
+                            replacement);
+                }
+                requireSameIdentity(
+                        exactScope,
+                        view,
+                        "selected mutation PROCESS view at "
+                                + scope);
+                byPath.put(scope, view);
+            }
+            Map<String, Node> byBlueId =
+                    new LinkedHashMap<>();
+            for (String scope : selectedScopes) {
+                Node exactScope = nodeAt(
+                        exactRoot,
+                        scope);
+                byBlueId.put(
+                        DirectBlueIdCalculator
+                                .calculateBlueId(
+                                        exactScope),
+                        byPath.get(scope).clone());
+            }
+            return byBlueId;
+        }
+
+        private static Node coldScopeHeader(
+                Node header) {
+            Node result = header.clone();
+            collapseColdState(result);
+            requireSameIdentity(
+                    header,
+                    result,
+                    "cold scope PROCESS header");
+            return result;
+        }
+
+        private static void collapseColdState(
+                Node node) {
+            if (node == null) {
+                return;
+            }
+            Map<String, Node> properties =
+                    node.getProperties();
+            if (properties != null) {
+                for (Map.Entry<String, Node> entry :
+                        properties.entrySet()) {
+                    Node child = entry.getValue();
+                    if (child == null) {
+                        continue;
+                    }
+                    if ("payload".equals(entry.getKey())
+                            || "state".equals(entry.getKey())
+                            || "audit".equals(entry.getKey())) {
+                        if (!child.isReferenceOnly()) {
+                            entry.setValue(
+                                    new Node().blueId(
+                                            DirectBlueIdCalculator
+                                                    .calculateBlueId(
+                                                            child)));
+                        }
+                        continue;
+                    }
+                    collapseColdState(child);
+                }
+            }
+            if (node.getItems() != null) {
+                for (Node item : node.getItems()) {
+                    collapseColdState(item);
+                }
+            }
+        }
+
+        private static void collapseExecutableBodies(
+                Node scopeView) {
+            Node contracts = scopeView.getContracts();
+            if (contracts == null
+                    || contracts.getProperties() == null) {
+                return;
+            }
+            for (Node contract :
+                    contracts.getProperties().values()) {
+                Node body = contract != null
+                        && contract.getProperties() != null
+                        ? contract.getProperties().get("steps")
+                        : null;
+                if (body == null
+                        || body.isReferenceOnly()) {
+                    continue;
+                }
+                contract.getProperties().put(
+                        "steps",
+                        new Node().blueId(
+                                DirectBlueIdCalculator
+                                        .calculateBlueId(
+                                                body)));
+            }
         }
 
         private Node pureReference() {
@@ -1867,18 +2514,34 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                 .replace("/", "~1");
     }
 
-    private static String parentScope(
-            String scope) {
-        if (scope == null
-                || ROOT.equals(scope)) {
+    private static String owningScope(
+            String child,
+            Set<String> scopes) {
+        if (child == null
+                || ROOT.equals(child)) {
             return null;
         }
-        int separator =
-                scope.lastIndexOf('/');
-        return separator == 0
-                ? ROOT
-                : scope.substring(
-                        0, separator);
+        String owner = ROOT;
+        for (String candidate : scopes) {
+            if (ROOT.equals(candidate)
+                    || candidate.equals(child)
+                    || !child.startsWith(candidate + "/")) {
+                continue;
+            }
+            if (owner.equals(ROOT)
+                    || candidate.length() > owner.length()) {
+                owner = candidate;
+            }
+        }
+        return owner;
+    }
+
+    private static boolean isUnrelatedScope(
+            String scope) {
+        return LESSON_B.equals(scope)
+                || PAYMENT_A.equals(scope)
+                || AGREEMENT_B.equals(scope)
+                || LESSON_C.equals(scope);
     }
 
     private static String relativePointer(
@@ -1936,7 +2599,6 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
 
     private static final class Scenario {
         private final RootEmissionMode emissionMode;
-        private final BlueRepository repository;
         private final Events events;
         private final Node exactRoot;
         private final Node exactEvent;
@@ -1947,16 +2609,20 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
         private final CoordinationDocumentSplitter.SplitGraph
                 eventGraph;
         private final VerifiedExecutionEvidence evidence;
+        private final ProcessingDebugResult traceOracle;
         private final Map<String, Node> fragments;
         private final Map<String, Long> fragmentBytes;
         private final Set<String> allowedBlueIds;
         private final Set<String> forbiddenBlueIds;
+        private final List<String> selectedPrefetchOrder;
+        private final Set<String> selectedClosure;
+        private final Set<String>
+                selectedExecutableBodyBlueIds;
         private final Map<String, String>
                 coldSiblingBlueIds;
 
         private Scenario(
                 RootEmissionMode emissionMode,
-                BlueRepository repository,
                 Events events,
                 Node exactRoot,
                 Node exactEvent,
@@ -1967,14 +2633,17 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                 CoordinationDocumentSplitter.SplitGraph
                         eventGraph,
                 VerifiedExecutionEvidence evidence,
+                ProcessingDebugResult traceOracle,
                 Map<String, Node> fragments,
                 Map<String, Long> fragmentBytes,
                 Set<String> allowedBlueIds,
                 Set<String> forbiddenBlueIds,
+                List<String> selectedPrefetchOrder,
+                Set<String> selectedClosure,
+                Set<String> selectedExecutableBodyBlueIds,
                 Map<String, String>
                         coldSiblingBlueIds) {
             this.emissionMode = emissionMode;
-            this.repository = repository;
             this.events = events;
             this.exactRoot = exactRoot;
             this.exactEvent = exactEvent;
@@ -1983,46 +2652,51 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
             this.documentGraph = documentGraph;
             this.eventGraph = eventGraph;
             this.evidence = evidence;
+            this.traceOracle = Objects.requireNonNull(
+                    traceOracle, "traceOracle");
             this.fragments = fragments;
             this.fragmentBytes = fragmentBytes;
             this.allowedBlueIds = allowedBlueIds;
             this.forbiddenBlueIds =
                     forbiddenBlueIds;
+            this.selectedPrefetchOrder =
+                    selectedPrefetchOrder;
+            this.selectedClosure = selectedClosure;
+            this.selectedExecutableBodyBlueIds =
+                    selectedExecutableBodyBlueIds;
             this.coldSiblingBlueIds =
                     coldSiblingBlueIds;
         }
 
         private static Scenario create(
                 RootEmissionMode emissionMode) {
-            BlueRepository repository =
-                    BlueRepository.latest();
-            Blue blue =
-                    CoordinationTestResources
-                            .configuredBlue(repository);
-            CoordinationProcessors.registerWith(blue);
+            RepositoryIndependentCoordinationTestRuntime blue =
+                    RepositoryIndependentCoordinationTestRuntime.create();
             try {
                 Events events =
-                        Events.create(
-                                blue, repository);
+                        Events.create();
                 Node authored = deepRoot(
-                        repository,
                         events,
                         emissionMode);
                 Node contractSurfaceRoot =
                         blue.preprocess(authored);
                 CoordinationDocumentSplitter splitter =
                         new CoordinationDocumentSplitter(
-                                blue.getDocumentProcessor());
+                                blue.contracts());
                 Node exactRoot =
                         initializedWithoutLifecycleHandlers(
                                 contractSurfaceRoot);
+                CoordinationDocumentSplitter.SplitGraph
+                        productionDocumentGraph =
+                        splitter.splitDocument(
+                                exactRoot);
                 Node exactEvent =
-                        CoordinationTestResources
-                                .operationRequestEvent(
-                                        blue,
-                                        repository,
+                        RepositoryIndependentCoordinationTypes
+                                .operationRequestTimelineEntry(
                                         "flagship-timeline",
-                                        TIMESTAMP,
+                                        "flagship-timeline",
+                                        BigInteger.valueOf(
+                                                TIMESTAMP),
                                         PULSE_OPERATION,
                                         TIMELINE,
                                         new Node()
@@ -2035,29 +2709,38 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                 DocumentFragmentGraph
                         documentGraph =
                         DocumentFragmentGraph.create(
-                                exactRoot);
+                                exactRoot,
+                                productionDocumentGraph);
                 CoordinationDocumentSplitter.SplitGraph
                         eventGraph =
                         splitter.splitEvent(
                                 exactEvent);
-                VerifiedExecutionEvidence evidence =
-                        CoordinationRoutingHarness.evidence(
-                                blue.getDocumentProcessor(),
-                                contractSurfaceRoot,
+                EvidenceBundle execution =
+                        publicExecutionEvidence(
+                                blue,
                                 exactRoot,
-                                exactEvent,
-                                CoordinationRoutingHarness
-                                        .DeliveryOccurrence
-                                        .at(EMB3, TIMELINE),
-                                CoordinationRoutingHarness
-                                        .DeliveryOccurrence
-                                        .at(EMB2, TIMELINE),
-                                CoordinationRoutingHarness
-                                        .DeliveryOccurrence
-                                        .at(EMB1, TIMELINE),
-                                CoordinationRoutingHarness
-                                        .DeliveryOccurrence
-                                        .at(ROOT, TIMELINE));
+                                exactEvent);
+                // Language currently exposes the conformance trace only on
+                // the non-invocation debug facade. Capture one fully inline
+                // observational oracle; every matrix cell still performs its
+                // own public invocation and must equal this oracle.
+                blue.configureDeliveryPlanDeriver(
+                        (root, event) ->
+                                execution.deliveryPlan);
+                ProcessingDebugResult traceOracle =
+                        blue.processor()
+                                .processDocumentWithTrace(
+                                        exactRoot.clone(),
+                                        exactEvent.clone(),
+                                        execution.evidence);
+                assertEquals(
+                        ProcessorStatus.SUCCESS,
+                        traceOracle.processResult()
+                                .status(),
+                        ProcessingResultTestSupport
+                                .diagnosticMessage(
+                                        traceOracle
+                                                .processResult()));
 
                 Map<String, Node> fragments =
                         new LinkedHashMap<>();
@@ -2076,6 +2759,41 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                     throw new AssertionError(
                             "Flagship has no forbidden decoy fragments");
                 }
+                Set<String> selectedExecutableBodies =
+                        selectedExecutableBodyBlueIds(
+                                exactRoot,
+                                emissionMode);
+                List<String> selectedPrefetchOrder =
+                        selectedPrefetchOrder(
+                                exactRoot,
+                                documentGraph,
+                                eventGraph,
+                                selectedExecutableBodies);
+                Set<String> selectedClosure =
+                        new LinkedHashSet<>(
+                                selectedPrefetchOrder);
+                if (!fragments.keySet().containsAll(
+                        selectedClosure)) {
+                    Set<String> missing =
+                            new LinkedHashSet<>(
+                                    selectedClosure);
+                    missing.removeAll(
+                            fragments.keySet());
+                    throw new AssertionError(
+                            "Selected prefetch closure is missing exact fragments: "
+                                    + missing);
+                }
+                if (!Collections.disjoint(
+                        selectedClosure,
+                        forbidden)) {
+                    throw new AssertionError(
+                            "Selected prefetch closure contains forbidden decoys");
+                }
+                if (!allowed.containsAll(
+                        selectedClosure)) {
+                    throw new AssertionError(
+                            "Selected prefetch closure escaped the allowed inventory");
+                }
                 Map<String, Long> fragmentBytes =
                         new LinkedHashMap<>();
                 for (Map.Entry<String, Node> fragment :
@@ -2093,14 +2811,14 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                 Node partialRoot =
                         exactRoot.clone();
                 String leafBlueId =
-                        BlueIdCalculator.calculateBlueId(
+                        DirectBlueIdCalculator.calculateBlueId(
                                 nodeAt(
                                         exactRoot, EMB3));
-                nodeAt(partialRoot, EMB2)
-                        .properties(
-                                "emb3",
-                                new Node().blueId(
-                                        leafBlueId));
+                replaceAt(
+                        partialRoot,
+                        EMB3,
+                        new Node().blueId(
+                                leafBlueId));
                 requireSameIdentity(
                         exactRoot, partialRoot,
                         "partial Root");
@@ -2112,7 +2830,7 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                                 exactEvent,
                                 "/message/request");
                 String requestBlueId =
-                        BlueIdCalculator.calculateBlueId(
+                        DirectBlueIdCalculator.calculateBlueId(
                                 exactRequest);
                 nodeAt(partialEvent, "/message")
                         .properties(
@@ -2132,12 +2850,12 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                         new LinkedHashMap<>();
                 for (String path :
                         Arrays.asList(
-                                "/coldRoot",
-                                EMB1 + "/coldEmb1",
-                                EMB2 + "/coldEmb2")) {
+                                LESSON_B,
+                                PAYMENT_A,
+                                AGREEMENT_B)) {
                     cold.put(
                             path,
-                            BlueIdCalculator
+                            DirectBlueIdCalculator
                                     .calculateBlueId(
                                             nodeAt(
                                                     exactRoot,
@@ -2145,7 +2863,6 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                 }
                 return new Scenario(
                         emissionMode,
-                        repository,
                         events,
                         exactRoot.clone(),
                         exactEvent.clone(),
@@ -2153,18 +2870,213 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                         partialEvent,
                         documentGraph,
                         eventGraph,
-                        evidence,
+                        execution.evidence,
+                        traceOracle,
                         immutableNodeMap(fragments),
                         Collections.unmodifiableMap(
                                 fragmentBytes),
                         immutableSet(allowed),
                         immutableSet(forbidden),
+                        Collections.unmodifiableList(
+                                new ArrayList<>(
+                                        selectedPrefetchOrder)),
+                        immutableSet(selectedClosure),
+                        immutableSet(
+                                selectedExecutableBodies),
                         Collections.unmodifiableMap(
                                 cold));
             } finally {
                 blue.close();
             }
         }
+    }
+
+    private static EvidenceBundle publicExecutionEvidence(
+            RepositoryIndependentCoordinationTestRuntime runtime,
+            Node exactRoot,
+            Node exactEvent) {
+        SubscriptionDelta initial =
+                runtime.subscriptionSurfaceProjection().projectInitial(
+                        exactRoot,
+                        ROOT_REVISION,
+                        ACTIVATION_ORDER);
+        assertTrue(initial.removed().isEmpty());
+        assertFalse(initial.added().isEmpty());
+        for (SubscriptionDelta.Entry interval
+                : initial.added()) {
+            assertEquals(
+                    Long.valueOf(ROOT_REVISION),
+                    interval.activationRootRevision());
+            assertEquals(
+                    ACTIVATION_ORDER,
+                    interval.startAfterExternalOrderKey());
+            assertNull(interval.endAtRootRevision());
+        }
+        assertTrue(
+                EVENT_ORDER.compareTo(
+                        ACTIVATION_ORDER) > 0);
+
+        SubscriptionDelta contractsInitial = runtime.contracts()
+                .subscriptionSurfaceProjection()
+                .projectInitial(
+                        exactRoot,
+                        ROOT_REVISION,
+                        ACTIVATION_ORDER);
+        ExternalDeliveryPlan currentRoot =
+                runtime.currentRootDeliveryPlanDeriver(
+                                ROOT_REVISION,
+                                EVENT_ORDER,
+                                contractsInitial.added())
+                        .derive(exactRoot, exactEvent);
+        List<ExternalSubscriptionOccurrenceKey> candidates =
+                new ArrayList<>();
+        List<String> selectedOccurrences =
+                new ArrayList<>();
+        for (ExternalDeliverySnapshot delivery
+                : currentRoot.deliveries()) {
+            candidates.add(
+                    ExternalSubscriptionOccurrenceKey.of(
+                            delivery.scopePath(),
+                            delivery.channelKey()));
+            selectedOccurrences.add(
+                    delivery.scopePath()
+                            + "|"
+                            + delivery.channelKey());
+        }
+        assertEquals(
+                Arrays.asList(
+                        EMB3 + "|" + TIMELINE,
+                        EMB2 + "|" + TIMELINE,
+                        EMB1 + "|" + TIMELINE,
+                        ROOT + "|" + TIMELINE),
+                selectedOccurrences);
+
+        IndexedDeliveryPreparation indexed =
+                runtime.indexedDeliveryEvaluator().prepare(
+                        exactRoot,
+                        exactEvent,
+                        ROOT_REVISION,
+                        EVENT_ORDER,
+                        initial.added(),
+                        candidates);
+        assertEquivalentDeliveryPlans(
+                currentRoot,
+                indexed.deliveryPlan());
+        VerifiedExecutionEvidence evidence =
+                runtime.executionEvidence(
+                        exactRoot,
+                        exactEvent,
+                        indexed.deliveryPlan());
+        assertEquals(
+                DirectBlueIdCalculator.calculateBlueId(
+                        exactRoot),
+                evidence.rootBlueId());
+        assertEquals(
+                DirectBlueIdCalculator.calculateBlueId(
+                        exactEvent),
+                evidence.eventBlueId());
+        assertEquals(
+                selectedOccurrences,
+                evidenceDeliveryProjection(evidence));
+        return new EvidenceBundle(
+                indexed.deliveryPlan(),
+                evidence);
+    }
+
+    private static final class EvidenceBundle {
+        private final ExternalDeliveryPlan deliveryPlan;
+        private final VerifiedExecutionEvidence evidence;
+
+        private EvidenceBundle(
+                ExternalDeliveryPlan deliveryPlan,
+                VerifiedExecutionEvidence evidence) {
+            this.deliveryPlan = deliveryPlan;
+            this.evidence = evidence;
+        }
+    }
+
+    private static void assertEquivalentDeliveryPlans(
+            ExternalDeliveryPlan currentRoot,
+            ExternalDeliveryPlan indexed) {
+        assertEquals(
+                currentRoot.managedRootRevision(),
+                indexed.managedRootRevision());
+        assertEquals(
+                currentRoot.indexedRootRevision(),
+                indexed.indexedRootRevision());
+        assertEquals(
+                currentRoot.eventOrderKey(),
+                indexed.eventOrderKey());
+        assertEquals(
+                currentRoot.hasActiveSubscriptionIntervals(),
+                indexed.hasActiveSubscriptionIntervals());
+        assertEquals(
+                currentRoot.availableExactNodeBlueIds(),
+                indexed.availableExactNodeBlueIds());
+        assertEquals(
+                currentRoot.requiredExactNodeBlueIds(),
+                indexed.requiredExactNodeBlueIds());
+        assertEquals(
+                currentRoot.exactRuntimeState(),
+                indexed.exactRuntimeState());
+        assertEquals(
+                currentRoot.deliveries().size(),
+                indexed.deliveries().size());
+        for (int index = 0;
+                index < currentRoot.deliveries().size();
+                index++) {
+            assertEquivalentDelivery(
+                    currentRoot.deliveries().get(index),
+                    indexed.deliveries().get(index));
+        }
+    }
+
+    private static void assertEquivalentDelivery(
+            ExternalDeliverySnapshot currentRoot,
+            ExternalDeliverySnapshot indexed) {
+        assertEquals(
+                currentRoot.scopePath(),
+                indexed.scopePath());
+        assertEquals(
+                currentRoot.channelKey(),
+                indexed.channelKey());
+        assertEquals(
+                currentRoot.order(),
+                indexed.order());
+        assertEquals(
+                currentRoot.sourceContributionNodeBlueIds(),
+                indexed.sourceContributionNodeBlueIds());
+        assertEquals(
+                currentRoot.effectiveTypeBlueId(),
+                indexed.effectiveTypeBlueId());
+        assertEquals(
+                currentRoot.subscriptionKeys(),
+                indexed.subscriptionKeys());
+        assertEquals(
+                currentRoot.checkpointDomainBlueId(),
+                indexed.checkpointDomainBlueId());
+        assertEquals(
+                currentRoot.checkpointSubjectBlueId(),
+                indexed.checkpointSubjectBlueId());
+        assertEquals(
+                currentRoot.activationStartExclusive(),
+                indexed.activationStartExclusive());
+        assertEquals(
+                currentRoot.activationEndInclusive(),
+                indexed.activationEndInclusive());
+    }
+
+    private static List<String> evidenceDeliveryProjection(
+            VerifiedExecutionEvidence evidence) {
+        List<String> result = new ArrayList<>();
+        for (ExternalDeliverySnapshot delivery
+                : evidence.deliveries()) {
+            result.add(
+                    delivery.scopePath()
+                            + "|"
+                            + delivery.channelKey());
+        }
+        return Collections.unmodifiableList(result);
     }
 
     private static Set<String> forbiddenBlueIds(
@@ -2201,16 +3113,17 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
         for (String scope :
                 Arrays.asList(
                         EMB3,
-                        EMB2 + "/coldEmb2",
                         EMB2,
-                        EMB1 + "/coldEmb1",
+                        LESSON_B,
+                        PAYMENT_A,
                         EMB1,
-                        "/coldRoot",
+                        LESSON_C,
+                        AGREEMENT_B,
                         ROOT)) {
             Node selected =
                     nodeAt(result, scope);
             String initialBlueId =
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             selected);
             selected.getContracts().properties(
                     "initialized",
@@ -2231,10 +3144,10 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
             Node actual,
             String label) {
         String expectedBlueId =
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         expected);
         String actualBlueId =
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         actual);
         if (!expectedBlueId.equals(actualBlueId)) {
             throw new AssertionError(
@@ -2293,87 +3206,74 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
             this.d1 = d1;
             this.d2 = d2;
             this.aBlueId =
-                    BlueIdCalculator.calculateBlueId(a);
+                    DirectBlueIdCalculator.calculateBlueId(a);
             this.bBlueId =
-                    BlueIdCalculator.calculateBlueId(b);
+                    DirectBlueIdCalculator.calculateBlueId(b);
             this.cBlueId =
-                    BlueIdCalculator.calculateBlueId(c);
+                    DirectBlueIdCalculator.calculateBlueId(c);
             this.repeatedBlueId =
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             repeated);
             this.d1BlueId =
-                    BlueIdCalculator.calculateBlueId(d1);
+                    DirectBlueIdCalculator.calculateBlueId(d1);
             this.d2BlueId =
-                    BlueIdCalculator.calculateBlueId(d2);
+                    DirectBlueIdCalculator.calculateBlueId(d2);
         }
 
-        private static Events create(
-                Blue blue,
-                BlueRepository repository) {
+        private static Events create() {
             return new Events(
-                    exactChat(
-                            blue, repository, "A"),
-                    exactChat(
-                            blue, repository, "B"),
-                    exactChat(
-                            blue, repository, "C"),
-                    exactChat(
-                            blue, repository,
-                            "identical-occurrence"),
-                    exactChat(
-                            blue, repository, "D1"),
-                    exactChat(
-                            blue, repository, "D2"));
+                    exactChat("A"),
+                    exactChat("B"),
+                    exactChat("C"),
+                    exactChat("identical-occurrence"),
+                    exactChat("D1"),
+                    exactChat("D2"));
         }
     }
 
-    private static Node exactChat(
-            Blue blue,
-            BlueRepository repository,
-            String message) {
-        return blue.preprocess(
-                new Node()
-                        .blue(repository
-                                .typeAliasBlue())
-                        .type(ChatMessage
-                                .qualifiedName())
-                        .properties(
-                                "message",
-                                new Node().value(
-                                        message)))
-                .blue(null);
+    private static Node exactChat(String message) {
+        return RepositoryIndependentCoordinationTypes
+                .chatMessage(message);
     }
 
     private static Node deepRoot(
-            BlueRepository repository,
             Events events,
             RootEmissionMode emissionMode) {
         Node emb3 = emb3(events);
         Node emb2 = emb2(events, emb3);
-        Node emb1 = emb1(events, emb2);
+        Node lessonB = coldSibling("lesson-b");
+        Node paymentA = coldSibling("payment-a");
+        Node emb1 = emb1(
+                events,
+                emb2,
+                lessonB,
+                paymentA);
+        Node lessonC = coldSibling("lesson-c");
+        Node agreementB = unrelatedAgreementB(lessonC);
         Map<String, Node> contracts =
                 new LinkedHashMap<>();
         contracts.put(
                 "embedded",
-                processEmbedded(
-                        "/emb1",
-                        "/coldRoot"));
+                processEmbeddedCollections(
+                        "/agreements"));
         contracts.put(
                 TIMELINE,
-                TestTimelineProvider.channel(
-                        "flagship-timeline"));
+                RepositoryIndependentCoordinationTypes
+                        .timelineChannel(
+                                "flagship-timeline",
+                                "flagship-timeline"));
         contracts.put(
                 "deepPulseUpdates",
                 documentUpdateChannel(
-                        "/emb1/emb2/emb3/state/pulseSeen"));
+                        EMB3 + "/state/pulseSeen"));
         contracts.put(
                 "emb2AReceiptUpdates",
                 documentUpdateChannel(
-                        "/emb1/emb2/state/aReceived"));
+                        EMB2 + "/state/aReceived"));
         contracts.put(
                 "emb1BReceiptUpdates",
                 documentUpdateChannel(
-                        "/emb1/state/bReceived"));
+                        EMB1 + "/state/bReceived"));
         contracts.put(
                 "cUpdates",
                 documentUpdateChannel(
@@ -2384,15 +3284,15 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
         contracts.put(
                 "leafEvents",
                 embeddedChannel(
-                        "/emb1/emb2/emb3"));
+                        EMB3));
         contracts.put(
                 "emb2Events",
                 embeddedChannel(
-                        "/emb1/emb2"));
+                        EMB2));
         contracts.put(
                 "emb1Events",
                 embeddedChannel(
-                        "/emb1"));
+                        EMB1));
         contracts.put(
                 PULSE_OPERATION,
                 operationWorkflow(
@@ -2494,7 +3394,6 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                 contracts, "root");
 
         return new Node()
-                .blue(repository.typeAliasBlue())
                 .properties(
                         "state",
                         object(
@@ -2528,11 +3427,13 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                                 emptyObject(),
                                 "processingTimestamp",
                                 0))
-                .properties("emb1", emb1)
                 .properties(
-                        "coldRoot",
-                        coldSibling(
-                                "root-cold"))
+                        "agreements",
+                        object(
+                                "agreement-a",
+                                emb1,
+                                "agreement-b",
+                                agreementB))
                 .properties(
                         "contracts",
                         new Node().properties(
@@ -2541,26 +3442,30 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
 
     private static Node emb1(
             Events events,
-            Node emb2) {
+            Node emb2,
+            Node lessonB,
+            Node paymentA) {
         Map<String, Node> contracts =
                 new LinkedHashMap<>();
         contracts.put(
                 "embedded",
-                processEmbedded(
-                        "/emb2",
-                        "/coldEmb1"));
+                processEmbeddedCollections(
+                        "/lessons",
+                        "/payments"));
         contracts.put(
                 TIMELINE,
-                TestTimelineProvider.channel(
-                        "flagship-timeline"));
+                RepositoryIndependentCoordinationTypes
+                        .timelineChannel(
+                                "flagship-timeline",
+                                "flagship-timeline"));
         contracts.put(
                 "deepPulseUpdates",
                 documentUpdateChannel(
-                        "/emb2/emb3/state/pulseSeen"));
+                        "/lessons/lesson-a/cancellations/cancel-a/state/pulseSeen"));
         contracts.put(
                 "emb2AReceiptUpdates",
                 documentUpdateChannel(
-                        "/emb2/state/aReceived"));
+                        "/lessons/lesson-a/state/aReceived"));
         contracts.put(
                 "bReceiptUpdates",
                 documentUpdateChannel(
@@ -2571,11 +3476,11 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
         contracts.put(
                 "leafEvents",
                 embeddedChannel(
-                        "/emb2/emb3"));
+                        "/lessons/lesson-a/cancellations/cancel-a"));
         contracts.put(
                 "emb2Events",
                 embeddedChannel(
-                        "/emb2"));
+                        "/lessons/lesson-a"));
         contracts.put(
                 PULSE_OPERATION,
                 operationWorkflow(
@@ -2666,11 +3571,18 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                                 emptyObject(),
                                 "processingTimestamp",
                                 0))
-                .properties("emb2", emb2)
                 .properties(
-                        "coldEmb1",
-                        coldSibling(
-                                "emb1-cold"))
+                        "lessons",
+                        object(
+                                "lesson-a",
+                                emb2,
+                                "lesson-b",
+                                lessonB))
+                .properties(
+                        "payments",
+                        object(
+                                "payment-a",
+                                paymentA))
                 .properties(
                         "contracts",
                         new Node().properties(
@@ -2684,17 +3596,18 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                 new LinkedHashMap<>();
         contracts.put(
                 "embedded",
-                processEmbedded(
-                        "/emb3",
-                        "/coldEmb2"));
+                processEmbeddedCollections(
+                        "/cancellations"));
         contracts.put(
                 TIMELINE,
-                TestTimelineProvider.channel(
-                        "flagship-timeline"));
+                RepositoryIndependentCoordinationTypes
+                        .timelineChannel(
+                                "flagship-timeline",
+                                "flagship-timeline"));
         contracts.put(
                 "leafPulseUpdates",
                 documentUpdateChannel(
-                        "/emb3/state/pulseSeen"));
+                        "/cancellations/cancel-a/state/pulseSeen"));
         contracts.put(
                 "sawLeafPulseUpdates",
                 documentUpdateChannel(
@@ -2709,7 +3622,7 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
         contracts.put(
                 "leafEvents",
                 embeddedChannel(
-                        "/emb3"));
+                        "/cancellations/cancel-a"));
         contracts.put(
                 PULSE_OPERATION,
                 operationWorkflow(
@@ -2790,11 +3703,11 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                                 emptyObject(),
                                 "processingTimestamp",
                                 0))
-                .properties("emb3", emb3)
                 .properties(
-                        "coldEmb2",
-                        coldSibling(
-                                "emb2-cold"))
+                        "cancellations",
+                        object(
+                                "cancel-a",
+                                emb3))
                 .properties(
                         "contracts",
                         new Node().properties(
@@ -2807,8 +3720,10 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                 new LinkedHashMap<>();
         contracts.put(
                 TIMELINE,
-                TestTimelineProvider.channel(
-                        "flagship-timeline"));
+                RepositoryIndependentCoordinationTypes
+                        .timelineChannel(
+                                "flagship-timeline",
+                                "flagship-timeline"));
         contracts.put(
                 "pulseUpdates",
                 documentUpdateChannel(
@@ -2885,14 +3800,9 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                 "zzDecoyCold",
                 workflow(
                         "triggered",
-                        new Node()
-                                .type(ChatMessage
-                                        .qualifiedName())
-                                .properties(
-                                        "message",
-                                        new Node().value(
-                                                "never-"
-                                                        + label)),
+                        RepositoryIndependentCoordinationTypes
+                                .chatMessage(
+                                        "never-" + label),
                         largeDecoyStep(
                                 label)));
         return new Node()
@@ -2907,6 +3817,49 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                         object(
                                 "untouched",
                                 true))
+                .properties(
+                        "contracts",
+                        new Node().properties(
+                                contracts));
+    }
+
+    private static Node unrelatedAgreementB(
+            Node lessonC) {
+        Map<String, Node> contracts =
+                new LinkedHashMap<>();
+        contracts.put(
+                "embedded",
+                processEmbeddedCollections(
+                        "/lessons"));
+        contracts.put(
+                "triggered",
+                triggeredChannel());
+        contracts.put(
+                "zzDecoyCold",
+                workflow(
+                        "triggered",
+                        RepositoryIndependentCoordinationTypes
+                                .chatMessage(
+                                        "never-agreement-b"),
+                        largeDecoyStep(
+                                "agreement-b")));
+        return new Node()
+                .properties(
+                        "payload",
+                        new Node().value(
+                                repeated(
+                                        "agreement-b",
+                                        LARGE_DECOY_SIZE)))
+                .properties(
+                        "state",
+                        object(
+                                "untouched",
+                                true))
+                .properties(
+                        "lessons",
+                        object(
+                                "lesson-c",
+                                lessonC))
                 .properties(
                         "contracts",
                         new Node().properties(
@@ -2931,7 +3884,9 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
     private static Node largeDecoyStep(
             String label) {
         return new Node()
-                .type("Coordination/Update Document")
+                .type(new Node().blueId(
+                        RepositoryIndependentCoordinationTypes
+                                .UPDATE_DOCUMENT_BLUE_ID))
                 .properties(
                         "changeset",
                         new Node().items(
@@ -2969,25 +3924,27 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
         return result.toString();
     }
 
-    private static Node processEmbedded(
-            String... paths) {
+    private static Node processEmbeddedCollections(
+            String... collectionPaths) {
         List<Node> values =
                 new ArrayList<>();
-        for (String path : paths) {
+        for (String path : collectionPaths) {
             values.add(
                     new Node().value(path));
         }
         return new Node()
-                .type("Process Embedded")
+                .type(new Node().blueId(
+                        RuntimeBlueIds.PROCESS_EMBEDDED))
                 .properties(
-                        "paths",
+                        "collectionPaths",
                         new Node().items(values));
     }
 
     private static Node documentUpdateChannel(
             String path) {
         return new Node()
-                .type("Document Update Channel")
+                .type(new Node().blueId(
+                        RuntimeBlueIds.DOCUMENT_UPDATE_CHANNEL))
                 .properties(
                         "path",
                         new Node().value(path));
@@ -2995,13 +3952,15 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
 
     private static Node triggeredChannel() {
         return new Node()
-                .type("Triggered Event Channel");
+                .type(new Node().blueId(
+                        RuntimeBlueIds.TRIGGERED_EVENT_CHANNEL));
     }
 
     private static Node embeddedChannel(
             String sourcePath) {
         return new Node()
-                .type("Embedded Node Channel")
+                .type(new Node().blueId(
+                        RuntimeBlueIds.EMBEDDED_NODE_CHANNEL))
                 .properties(
                         "sourcePath",
                         new Node().value(
@@ -3011,7 +3970,9 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
     private static Node operationWorkflow(
             Node... steps) {
         return new Node()
-                .type("Coordination/Sequential Workflow Operation")
+                .type(new Node().blueId(
+                        RepositoryIndependentCoordinationTypes
+                                .SEQUENTIAL_WORKFLOW_OPERATION_BLUE_ID))
                 .properties(
                         "channel",
                         new Node().value(
@@ -3027,7 +3988,9 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
             Node event,
             Node... steps) {
         Node workflow = new Node()
-                .type("Coordination/Sequential Workflow")
+                .type(new Node().blueId(
+                        RepositoryIndependentCoordinationTypes
+                                .SEQUENTIAL_WORKFLOW_BLUE_ID))
                 .properties(
                         "channel",
                         new Node().value(
@@ -3047,7 +4010,9 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
             String path,
             boolean value) {
         return new Node()
-                .type("Coordination/Update Document")
+                .type(new Node().blueId(
+                        RepositoryIndependentCoordinationTypes
+                                .UPDATE_DOCUMENT_BLUE_ID))
                 .properties(
                         "changeset",
                         new Node().items(
@@ -3072,7 +4037,9 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
     private static Node triggerStep(
             Node event) {
         return new Node()
-                .type("Coordination/Trigger Event")
+                .type(new Node().blueId(
+                        RepositoryIndependentCoordinationTypes
+                                .TRIGGER_EVENT_BLUE_ID))
                 .properties(
                         "event", event.clone());
     }
@@ -3081,7 +4048,9 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
             String eventPath,
             String timestampPath) {
         return new Node()
-                .type("Coordination/Compute")
+                .type(new Node().blueId(
+                        RepositoryIndependentCoordinationTypes
+                                .COMPUTE_BLUE_ID))
                 .properties(
                         "do",
                         new Node().items(
@@ -3154,8 +4123,36 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
             Node node) {
         return UncheckedObjectMapper.JSON_MAPPER
                 .writeValueAsString(
-                        NodeToMapListOrValue.get(
-                                node));
+                        canonicalWireValue(
+                                NodeWireForm.get(
+                                        node)));
+    }
+
+    private static Object canonicalWireValue(
+            Object value) {
+        if (value instanceof Map) {
+            Map<String, Object> canonical =
+                    new TreeMap<>();
+            for (Map.Entry<?, ?> entry :
+                    ((Map<?, ?>) value).entrySet()) {
+                canonical.put(
+                        Objects.toString(
+                                entry.getKey()),
+                        canonicalWireValue(
+                                entry.getValue()));
+            }
+            return canonical;
+        }
+        if (value instanceof List) {
+            List<Object> canonical =
+                    new ArrayList<>();
+            for (Object item : (List<?>) value) {
+                canonical.add(
+                        canonicalWireValue(item));
+            }
+            return canonical;
+        }
+        return value;
     }
 
     private static Node object(
@@ -3188,8 +4185,10 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
         private static final int BATCH_SIZE = 8;
 
         private final Map<String, Node> backing;
-        private final List<String> allowedOrder;
         private final Set<String> forbidden;
+        private final List<String>
+                selectedPrefetchOrder;
+        private final Set<String> selectedClosure;
         private final ProviderMode providerMode;
         private final Map<String, Node> cache =
                 new LinkedHashMap<>();
@@ -3202,24 +4201,41 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
         private StrictFragmentProvider(
                 Map<String, Node> backing,
                 Set<String> forbidden,
+                List<String> selectedPrefetchOrder,
+                Set<String> selectedClosure,
                 ProviderMode providerMode) {
             this.backing =
                     new LinkedHashMap<>(backing);
             this.forbidden =
                     new LinkedHashSet<>(
                             forbidden);
+            this.selectedPrefetchOrder =
+                    Collections.unmodifiableList(
+                            new ArrayList<>(
+                                    selectedPrefetchOrder));
+            this.selectedClosure =
+                    immutableSet(
+                            selectedClosure);
             this.providerMode =
                     Objects.requireNonNull(
                             providerMode,
                             "providerMode");
-            this.allowedOrder =
-                    new ArrayList<>();
-            for (String blueId :
-                    backing.keySet()) {
-                if (!forbidden.contains(
-                        blueId)) {
-                    allowedOrder.add(blueId);
-                }
+            if (!new LinkedHashSet<>(
+                    this.selectedPrefetchOrder)
+                    .equals(this.selectedClosure)) {
+                throw new IllegalArgumentException(
+                        "Selected prefetch order must enumerate the exact closure");
+            }
+            if (!this.backing.keySet().containsAll(
+                    this.selectedClosure)) {
+                throw new IllegalArgumentException(
+                        "Selected prefetch closure contains unavailable fragments");
+            }
+            if (!Collections.disjoint(
+                    this.selectedClosure,
+                    this.forbidden)) {
+                throw new IllegalArgumentException(
+                        "Selected prefetch closure contains forbidden fragments");
             }
         }
 
@@ -3237,6 +4253,12 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
             if (exact == null) {
                 return null;
             }
+            if (!selectedClosure.contains(
+                    blueId)) {
+                throw new AssertionError(
+                        "PROCESS demanded fragment outside the selected closure "
+                                + blueId);
+            }
             requests.add(blueId);
             Node cached =
                     cache.get(blueId);
@@ -3247,7 +4269,7 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                         == ProviderMode.BOUNDED_BATCH) {
                     int loaded = 1;
                     for (String candidate :
-                            allowedOrder) {
+                            selectedPrefetchOrder) {
                         if (loaded
                                 >= BATCH_SIZE) {
                             break;
@@ -3266,6 +4288,12 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
         }
 
         private void load(String blueId) {
+            if (!selectedClosure.contains(
+                    blueId)) {
+                throw new AssertionError(
+                        "Prefetch escaped the selected closure "
+                                + blueId);
+            }
             Node exact =
                     backing.get(blueId);
             if (exact == null
@@ -3277,16 +4305,15 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
             backendLoaded.add(blueId);
         }
 
-        private synchronized void warmAllowed() {
+        private synchronized void warmSelectedClosure() {
             for (String blueId :
-                    allowedOrder) {
+                    selectedPrefetchOrder) {
                 load(blueId);
             }
         }
 
-        private synchronized void resetMetrics() {
+        private synchronized void resetRequestMetrics() {
             requests.clear();
-            backendLoaded.clear();
             backendTrips = 0L;
         }
 
@@ -3321,6 +4348,25 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
         }
     }
 
+    private static final class PlatformExecution {
+        private final PlatformProcessingResult result;
+        private final ProviderMetrics providerMetrics;
+        private final BexProcessingMetrics metrics;
+
+        private PlatformExecution(
+                PlatformProcessingResult result,
+                ProviderMetrics providerMetrics,
+                BexProcessingMetrics metrics) {
+            this.result = Objects.requireNonNull(
+                    result, "result");
+            this.providerMetrics = Objects.requireNonNull(
+                    providerMetrics,
+                    "providerMetrics");
+            this.metrics = Objects.requireNonNull(
+                    metrics, "metrics");
+        }
+    }
+
     private static final class SelectedBodies {
         private final List<String> blueIds;
         private final List<String>
@@ -3343,8 +4389,10 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
         private final Scenario scenario;
         private final Variant variant;
         private final ProcessingDebugResult debug;
+        private final PlatformProcessingResult
+                platformResult;
         private final ProviderMetrics
-                providerMetrics;
+                platformProviderMetrics;
         private final BexProcessingMetrics metrics;
         private final SelectedBodies
                 selectedBodies;
@@ -3353,13 +4401,17 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                 Scenario scenario,
                 Variant variant,
                 ProcessingDebugResult debug,
-                ProviderMetrics providerMetrics,
+                PlatformProcessingResult platformResult,
+                ProviderMetrics platformProviderMetrics,
                 BexProcessingMetrics metrics) {
             this.scenario = scenario;
             this.variant = variant;
             this.debug = debug;
-            this.providerMetrics =
-                    providerMetrics;
+            this.platformResult = Objects.requireNonNull(
+                    platformResult,
+                    "platformResult");
+            this.platformProviderMetrics =
+                    platformProviderMetrics;
             this.metrics = metrics;
             this.selectedBodies =
                     observedSelectedBodies(
@@ -3395,6 +4447,10 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                 semanticDemands;
         private final List<String>
                 checkpointBlueIds;
+        private final List<SubscriptionDelta.Entry>
+                subscriptionAdditions;
+        private final List<SubscriptionDelta.Entry>
+                subscriptionRemovals;
         private final List<String>
                 selectedBodyBlueIds;
         private final List<String>
@@ -3412,6 +4468,10 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                 List<String> processingTrace,
                 List<String> semanticDemands,
                 List<String> checkpointBlueIds,
+                List<SubscriptionDelta.Entry>
+                        subscriptionAdditions,
+                List<SubscriptionDelta.Entry>
+                        subscriptionRemovals,
                 List<String> selectedBodyBlueIds,
                 List<String> selectedBodyCanonicalBytes,
                 long selectedBodyBytes) {
@@ -3431,6 +4491,10 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                     semanticDemands;
             this.checkpointBlueIds =
                     checkpointBlueIds;
+            this.subscriptionAdditions =
+                    subscriptionAdditions;
+            this.subscriptionRemovals =
+                    subscriptionRemovals;
             this.selectedBodyBlueIds =
                     selectedBodyBlueIds;
             this.selectedBodyCanonicalBytes =
@@ -3444,7 +4508,12 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
             ProcessingDebugResult debug =
                     run.debug;
             DocumentProcessingResult result =
-                    debug.processResult();
+                    run.platformResult
+                            .processResult();
+            SubscriptionDelta subscriptionDelta =
+                    run.platformResult
+                            .commitCompanion()
+                            .subscriptionDelta();
             List<String> checkpoints =
                     new ArrayList<>();
             for (ProcessingTraceRecord record :
@@ -3452,15 +4521,23 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                             ProcessingTraceRecord.Kind
                                     .CHECKPOINT_WRITE)) {
                 checkpoints.add(
-                        BlueIdCalculator
+                        DirectBlueIdCalculator
                                 .calculateBlueId(
                                         record.node()));
             }
             return new SemanticProjection(
                     result.status(),
+                    /*
+                     * The public fragmented lane deliberately retains cold
+                     * exact references in its result. Its Root BlueId plus
+                     * the selected-state assertions establish equality with
+                     * this fully inline canonical control value without
+                     * opening those cold references merely for reporting.
+                     */
                     normalizedJson(
-                            result.document()),
-                    BlueIdCalculator.calculateBlueId(
+                            debug.processResult()
+                                    .document()),
+                    DirectBlueIdCalculator.calculateBlueId(
                             result.document()),
                     nodeBlueIds(result.events()),
                     ProcessingResultTestSupport
@@ -3476,6 +4553,8 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                                             .semanticDemands())),
                     Collections.unmodifiableList(
                             checkpoints),
+                    subscriptionDelta.added(),
+                    subscriptionDelta.removed(),
                     run.selectedBodies.blueIds,
                     run.selectedBodies
                             .canonicalBytesByBlueId,
@@ -3509,6 +4588,10 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                     that.semanticDemands)
                     && checkpointBlueIds.equals(
                     that.checkpointBlueIds)
+                    && subscriptionAdditions.equals(
+                    that.subscriptionAdditions)
+                    && subscriptionRemovals.equals(
+                    that.subscriptionRemovals)
                     && selectedBodyBlueIds.equals(
                     that.selectedBodyBlueIds)
                     && selectedBodyCanonicalBytes.equals(
@@ -3530,6 +4613,8 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                     processingTrace,
                     semanticDemands,
                     checkpointBlueIds,
+                    subscriptionAdditions,
+                    subscriptionRemovals,
                     selectedBodyBlueIds,
                     selectedBodyCanonicalBytes,
                     selectedBodyBytes);
@@ -3589,7 +4674,7 @@ final class CoordinationComplexEmbeddedDeterminismFlagshipTest {
                             + "|" + record.logicalPath()
                             + "|" + record.details()
                             + "|" + (node != null
-                            ? BlueIdCalculator
+                            ? DirectBlueIdCalculator
                             .calculateBlueId(node)
                             : null));
         }

@@ -7,7 +7,7 @@ import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorErrorCategory;
 import blue.language.processor.ProcessorStatus;
-import blue.language.snapshot.ResolvedSnapshot;
+import blue.language.merge.ResolvedSnapshot;
 import java.math.BigInteger;
 import org.junit.jupiter.api.Test;
 
@@ -43,7 +43,7 @@ class DynamicEmbeddedParticipantsWorkflowTest {
 
     @Test
     void shouldCountChatsAfterAliceAddsEmbeddedParticipants() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create(
                 CoordinationProcessorOptions.builder()
@@ -66,7 +66,7 @@ class DynamicEmbeddedParticipantsWorkflowTest {
         assertNotNull(currentDocument.getAsNode("/contractTemplates/embeddedChatCounter"));
         assertFalse(currentDocument.getProperties().containsKey("embeddedTemplates"));
 
-        // When
+        // when
         for (int i = 1; i <= EMBEDDED_PARTICIPANTS; i++) {
             // Alice creates /embedded_i plus the root contracts that make this new document routable:
             // a simple timeline channel, an embedded-node bridge, a chat counter workflow, and a
@@ -200,7 +200,7 @@ class DynamicEmbeddedParticipantsWorkflowTest {
             assertEquals(Boolean.valueOf(i + 1 >= 5), currentDocument.get("/success"));
         }
 
-        // Then
+        // then
         assertEquals(Boolean.TRUE, currentDocument.get("/success"));
         long expectedPatchApplications = EMBEDDED_PARTICIPANTS + (CHAT_MESSAGES * 3L);
         assertEquals(expectedPatchApplications, metrics.directBexChangesetHits(),

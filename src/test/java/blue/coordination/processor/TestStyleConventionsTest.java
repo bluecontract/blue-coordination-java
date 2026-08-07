@@ -39,21 +39,21 @@ final class TestStyleConventionsTest {
                             + "(?:final\\s+|abstract\\s+)?"
                             + "(?:class|interface|enum)\\s+"
                             + "([A-Za-z_$][A-Za-z0-9_$]*)\\b");
-    private static final String GIVEN = "// Given";
-    private static final String WHEN = "// When";
-    private static final String THEN = "// Then";
+    private static final String GIVEN = "// given";
+    private static final String WHEN = "// when";
+    private static final String THEN = "// then";
 
     @Test
     void shouldRequireReadableNamesAndOrderedGivenWhenThenSections()
             throws IOException {
-        // Given
+        // given
         Path testRoot = Paths.get(
                 "src", "test", "java");
 
-        // When
+        // when
         ScanReport report = scan(testRoot);
 
-        // Then
+        // then
         assertTrue(
                 report.javaFileCount > 0,
                 "No Java test sources were scanned under "
@@ -72,12 +72,12 @@ final class TestStyleConventionsTest {
     @Test
     void shouldDocumentEveryProductionType()
             throws IOException {
-        // Given
+        // given
         Path productionRoot = Paths.get(
                 "src", "main", "java");
         List<String> issues = new ArrayList<>();
 
-        // When
+        // when
         for (Path source : javaSources(productionRoot)) {
             String content = new String(
                     Files.readAllBytes(source),
@@ -112,7 +112,7 @@ final class TestStyleConventionsTest {
             }
         }
 
-        // Then
+        // then
         assertTrue(
                 issues.isEmpty(),
                 "Production documentation convention violations:\n"

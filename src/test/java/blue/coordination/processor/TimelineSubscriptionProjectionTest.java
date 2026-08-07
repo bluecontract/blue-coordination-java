@@ -1,6 +1,5 @@
 package blue.coordination.processor;
 
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.model.TypeBlueId;
 import blue.language.processor.ExternalChannelFunctionContext;
@@ -44,7 +43,7 @@ class TimelineSubscriptionProjectionTest {
 
     @Test
     void shouldBoundMyosSubtypeProjectionToNineUniqueKeys() {
-        // Given
+        // given
         try (ProjectionFixture fixture = configuredFixture()) {
             MyOSTimeline timeline = new MyOSTimeline();
             timeline.timelineId("timeline-a");
@@ -57,13 +56,13 @@ class TimelineSubscriptionProjectionTest {
                     fixture.blue.objectToNode(timeline),
                     fixture.blue.objectToNode(actor));
 
-            // When
+            // when
             List<String> eventKeys = eventKeys(
                     fixture, event, Collections.<String, Node>emptyMap());
             List<String> channelKeys =
                     TimelineSubscriptionProjection.channelKeys(channel);
 
-            // Then
+            // then
             assertFalse(eventKeys.isEmpty());
             assertTrue(eventKeys.size() <= 9, eventKeys.toString());
             assertEquals(
@@ -77,7 +76,7 @@ class TimelineSubscriptionProjectionTest {
 
     @Test
     void shouldSelectOnlyEventsWithTheSameTimelineAndActor() {
-        // Given
+        // given
         try (ProjectionFixture fixture = configuredFixture()) {
             TimelineChannel channel = channel(
                     "timeline-a", "actor-a");
@@ -95,7 +94,7 @@ class TimelineSubscriptionProjectionTest {
             List<String> channelKeys =
                     TimelineSubscriptionProjection.channelKeys(channel);
 
-            // When
+            // when
             List<String> matchingKeys =
                     TimelineSubscriptionProjection.eventKeys(
                             matching, context);
@@ -106,7 +105,7 @@ class TimelineSubscriptionProjectionTest {
                     TimelineSubscriptionProjection.eventKeys(
                             differentActor, context);
 
-            // Then
+            // then
             assertFalse(Collections.disjoint(
                     channelKeys, matchingKeys));
             assertTrue(Collections.disjoint(
@@ -118,7 +117,7 @@ class TimelineSubscriptionProjectionTest {
 
     @Test
     void shouldProduceIdenticalKeysForInlineAndReferenceHeaders() {
-        // Given
+        // given
         try (ProjectionFixture fixture = configuredFixture()) {
             Node timeline = timeline(fixture, "timeline-a");
             Node actor = actor(fixture, "actor-a");
@@ -137,7 +136,7 @@ class TimelineSubscriptionProjectionTest {
             ExternalChannelFunctionContext context =
                     context(fixture, references);
 
-            // When
+            // when
             List<String> inlineKeys =
                     TimelineSubscriptionProjection.eventKeys(
                             inline, context);
@@ -145,7 +144,7 @@ class TimelineSubscriptionProjectionTest {
                     TimelineSubscriptionProjection.eventKeys(
                             referenced, context);
 
-            // Then
+            // then
             assertFalse(inlineKeys.isEmpty());
             assertEquals(inlineKeys, referenceKeys);
         }
@@ -153,7 +152,7 @@ class TimelineSubscriptionProjectionTest {
 
     @Test
     void shouldProjectVerifiedPartialTimelineEntryHeaderLikeInlineEvent() {
-        // Given
+        // given
         try (ProjectionFixture fixture = configuredFixture()) {
             Node timeline = timeline(fixture, "timeline-a");
             Node actor = actor(fixture, "actor-a");
@@ -188,7 +187,7 @@ class TimelineSubscriptionProjectionTest {
             ExternalChannelFunctionContext context =
                     context(fixture, references);
 
-            // When
+            // when
             List<String> inlineKeys =
                     TimelineSubscriptionProjection.eventKeys(
                             inline, context);
@@ -197,7 +196,7 @@ class TimelineSubscriptionProjectionTest {
                             referencedPartialHeader,
                             context);
 
-            // Then
+            // then
             assertFalse(partialKeys.isEmpty());
             assertEquals(inlineKeys, partialKeys);
         }
@@ -205,7 +204,7 @@ class TimelineSubscriptionProjectionTest {
 
     @Test
     void shouldFailClosedWhenVerifiedTimelineHeaderEvidenceIsUnavailable() {
-        // Given
+        // given
         try (ProjectionFixture fixture = configuredFixture()) {
             Node exactHeader = entry(
                     timeline(fixture, "timeline-a"),
@@ -219,7 +218,7 @@ class TimelineSubscriptionProjectionTest {
                             fixture,
                             Collections.<String, Node>emptyMap());
 
-            // When
+            // when
             IllegalArgumentException failure =
                     assertThrows(
                             IllegalArgumentException.class,
@@ -228,7 +227,7 @@ class TimelineSubscriptionProjectionTest {
                                             unavailable,
                                             context));
 
-            // Then
+            // then
             assertTrue(
                     failure.getMessage().contains(
                             "Missing exact reference"),
@@ -238,7 +237,7 @@ class TimelineSubscriptionProjectionTest {
 
     @Test
     void shouldFailClosedWhenVerifiedTimelineHeaderEvidenceIsInvalid() {
-        // Given
+        // given
         try (ProjectionFixture fixture = configuredFixture()) {
             Node expectedHeader = entry(
                     timeline(fixture, "timeline-a"),
@@ -257,7 +256,7 @@ class TimelineSubscriptionProjectionTest {
             ExternalChannelFunctionContext context =
                     context(fixture, references);
 
-            // When
+            // when
             IllegalStateException failure =
                     assertThrows(
                             IllegalStateException.class,
@@ -267,7 +266,7 @@ class TimelineSubscriptionProjectionTest {
                                                     expectedBlueId),
                                             context));
 
-            // Then
+            // then
             assertTrue(
                     failure.getMessage().contains(
                             "does not match exact reference"),
@@ -277,7 +276,7 @@ class TimelineSubscriptionProjectionTest {
 
     @Test
     void shouldPreserveProjectionAcrossColdAndWarmReferenceMaterialization() {
-        // Given
+        // given
         try (ProjectionFixture fixture = configuredFixture()) {
             Node timeline = timeline(
                     fixture, "timeline-a");
@@ -306,7 +305,7 @@ class TimelineSubscriptionProjectionTest {
                             entry(timeline, actor),
                             Collections.<String, Node>emptyMap());
 
-            // When
+            // when
             List<String> coldKeys =
                     TimelineSubscriptionProjection.eventKeys(
                             referenced,
@@ -319,7 +318,7 @@ class TimelineSubscriptionProjectionTest {
                             referenced,
                             warmContext);
 
-            // Then
+            // then
             assertEquals(inlineKeys, coldKeys);
             assertEquals(coldKeys, warmKeys);
         }
@@ -327,7 +326,7 @@ class TimelineSubscriptionProjectionTest {
 
     @Test
     void shouldSelectOneChannelFromLargeSameScopeTimelineCatalog() {
-        // Given
+        // given
         try (ProjectionFixture fixture = configuredFixture()) {
             int memberCount = 513;
             int matchingIndex = 377;
@@ -356,7 +355,7 @@ class TimelineSubscriptionProjectionTest {
             List<Integer> selected =
                     new ArrayList<Integer>();
 
-            // When
+            // when
             for (int index = 0;
                  index < catalog.size();
                  index++) {
@@ -370,7 +369,7 @@ class TimelineSubscriptionProjectionTest {
                 }
             }
 
-            // Then
+            // then
             assertEquals(
                     Collections.singletonList(
                             Integer.valueOf(
@@ -384,7 +383,7 @@ class TimelineSubscriptionProjectionTest {
 
     @Test
     void shouldUseBroaderKeysForPartialPatterns() {
-        // Given
+        // given
         Timeline exactTimeline =
                 new Timeline().timelineId("timeline-a");
         TimelineChannel timelineOnly = new TimelineChannel()
@@ -394,7 +393,7 @@ class TimelineSubscriptionProjectionTest {
                 .timeline(new Timeline())
                 .actor(new Actor());
 
-        // When
+        // when
         List<String> timelineOnlyKeys =
                 TimelineSubscriptionProjection.channelKeys(
                         timelineOnly);
@@ -402,7 +401,7 @@ class TimelineSubscriptionProjectionTest {
                 TimelineSubscriptionProjection.channelKeys(
                         fullyBroad);
 
-        // Then
+        // then
         assertEquals(1, timelineOnlyKeys.size());
         assertTrue(timelineOnlyKeys.get(0).startsWith(
                 TimelineSubscriptionProjection.VERSION
@@ -415,7 +414,7 @@ class TimelineSubscriptionProjectionTest {
 
     @Test
     void shouldReturnNoKeysForMalformedTimelineEntryHeaders() {
-        // Given
+        // given
         try (ProjectionFixture fixture = configuredFixture()) {
             List<Node> malformed = Arrays.asList(
                     new Node().value("not an event"),
@@ -442,7 +441,7 @@ class TimelineSubscriptionProjectionTest {
             ExternalChannelFunctionContext context =
                     context(fixture, Collections.<String, Node>emptyMap());
 
-            // When
+            // when
             List<List<String>> projected =
                     new ArrayList<List<String>>();
             for (Node event : malformed) {
@@ -451,7 +450,7 @@ class TimelineSubscriptionProjectionTest {
                                 event, context));
             }
 
-            // Then
+            // then
             for (List<String> keys : projected) {
                 assertTrue(keys.isEmpty(), keys.toString());
             }
@@ -460,7 +459,7 @@ class TimelineSubscriptionProjectionTest {
 
     @Test
     void shouldNotChargeHeaderReadsForNonTimelineEntryAtZeroGasLimit() {
-        // Given
+        // given
         try (ProjectionFixture fixture = configuredFixture()) {
             GasMeter parent = new GasMeter(
                     GasSchedule.contracts10(),
@@ -473,13 +472,13 @@ class TimelineSubscriptionProjectionTest {
             Node nonTimelineEntry =
                     new Node().value("not-a-timeline-entry");
 
-            // When
+            // when
             List<String> keys =
                     TimelineSubscriptionProjection.eventKeys(
                             nonTimelineEntry,
                             context);
 
-            // Then
+            // then
             assertTrue(keys.isEmpty());
             assertTrue(
                     context.runtimeWorkSession()
@@ -490,7 +489,7 @@ class TimelineSubscriptionProjectionTest {
 
     @Test
     void shouldChargeExactlyTwoHeaderReadsForTimelineEntry() {
-        // Given
+        // given
         try (ProjectionFixture fixture = configuredFixture()) {
             GasMeter parent = new GasMeter(
                     GasSchedule.contracts10(),
@@ -504,13 +503,13 @@ class TimelineSubscriptionProjectionTest {
                     timeline(fixture, "timeline-a"),
                     actor(fixture, "actor-a"));
 
-            // When
+            // when
             List<String> keys =
                     TimelineSubscriptionProjection.eventKeys(
                             timelineEntry,
                             context);
 
-            // Then
+            // then
             assertFalse(keys.isEmpty());
             assertEquals(
                     1,
@@ -534,7 +533,7 @@ class TimelineSubscriptionProjectionTest {
 
     @Test
     void shouldChargeOnlyTimelineComparisonWhenMismatchShortCircuits() {
-        // Given
+        // given
         try (ProjectionFixture fixture = configuredFixture()) {
             GasMeter parent = new GasMeter(
                     GasSchedule.contracts10(),
@@ -550,7 +549,7 @@ class TimelineSubscriptionProjectionTest {
                     timeline(fixture, "timeline-b"),
                     actor(fixture, "actor-a"));
 
-            // When
+            // when
             boolean accepted =
                     TimelineExternalSubscriptionFunctions
                             .INSTANCE
@@ -559,7 +558,7 @@ class TimelineSubscriptionProjectionTest {
                                     differentTimeline,
                                     context);
 
-            // Then
+            // then
             assertFalse(accepted);
             assertEquals(
                     1,
@@ -589,7 +588,7 @@ class TimelineSubscriptionProjectionTest {
 
     @Test
     void shouldChargeTimelineAndActorComparisonsForAcceptedEntry() {
-        // Given
+        // given
         try (ProjectionFixture fixture = configuredFixture()) {
             GasMeter parent = new GasMeter(
                     GasSchedule.contracts10(),
@@ -605,7 +604,7 @@ class TimelineSubscriptionProjectionTest {
                     timeline(fixture, "timeline-a"),
                     actor(fixture, "actor-a"));
 
-            // When
+            // when
             boolean accepted =
                     TimelineExternalSubscriptionFunctions
                             .INSTANCE
@@ -614,7 +613,7 @@ class TimelineSubscriptionProjectionTest {
                                     matching,
                                     context);
 
-            // Then
+            // then
             assertTrue(accepted);
             assertEquals(
                     2,
@@ -652,7 +651,7 @@ class TimelineSubscriptionProjectionTest {
 
     @Test
     void shouldIntersectKeysWheneverFinalAcceptanceSucceeds() {
-        // Given
+        // given
         try (ProjectionFixture fixture = configuredFixture()) {
             List<TimelineChannel> channels = Arrays.asList(
                     channel("timeline-a", "actor-a"),
@@ -671,7 +670,7 @@ class TimelineSubscriptionProjectionTest {
                     context(fixture, Collections.<String, Node>emptyMap());
             int accepted = 0;
 
-            // When
+            // when
             for (TimelineChannel channel : channels) {
                 for (Node event : events) {
                     if (!TimelineExternalSubscriptionFunctions.INSTANCE
@@ -686,7 +685,7 @@ class TimelineSubscriptionProjectionTest {
                             TimelineSubscriptionProjection.eventKeys(
                                     event, context);
 
-                    // Then
+                    // then
                     assertFalse(
                             Collections.disjoint(
                                     channelKeys, eventKeys),
@@ -699,7 +698,7 @@ class TimelineSubscriptionProjectionTest {
 
     @Test
     void shouldRecognizeRegisteredMyosSubtypeMembership() {
-        // Given
+        // given
         try (ProjectionFixture fixture = configuredFixture()) {
             MyOSTimeline timeline = new MyOSTimeline();
             timeline.timelineId("timeline-a");
@@ -708,13 +707,13 @@ class TimelineSubscriptionProjectionTest {
             Node timelineNode = fixture.blue.objectToNode(timeline);
             Node actorNode = fixture.blue.objectToNode(actor);
 
-            // When
+            // when
             List<String> keys = eventKeys(
                     fixture,
                     entry(timelineNode, actorNode),
                     Collections.<String, Node>emptyMap());
 
-            // Then
+            // then
             assertEquals(
                     MyOSTimeline.class,
                     fixture.blue.getTypeClassResolver()
@@ -736,7 +735,7 @@ class TimelineSubscriptionProjectionTest {
 
     @Test
     void shouldProjectValidUnlistedSubtypesWithoutClosedTypeLists() {
-        // Given
+        // given
         try (ProjectionFixture fixture = configuredFixture()) {
             fixture.blue.getTypeClassResolver()
                     .registerAnnotatedClass(
@@ -761,7 +760,7 @@ class TimelineSubscriptionProjectionTest {
                             fixture,
                             Collections.<String, Node>emptyMap());
 
-            // When
+            // when
             boolean accepted =
                     TimelineExternalSubscriptionFunctions
                             .INSTANCE
@@ -777,7 +776,7 @@ class TimelineSubscriptionProjectionTest {
                             event,
                             context);
 
-            // Then
+            // then
             assertTrue(accepted);
             assertTrue(contains(
                     channelKeys,
@@ -869,8 +868,9 @@ class TimelineSubscriptionProjectionTest {
 
     private static ProjectionFixture configuredFixture() {
         BlueRepository repository =
-                BlueRepository.latest();
-        Blue blue = repository.configure(new Blue());
+                BlueRepository.current();
+        CoordinationTestRuntime blue =
+                CoordinationTestResources.configuredBlue(repository);
         return new ProjectionFixture(blue);
     }
 
@@ -1099,10 +1099,10 @@ class TimelineSubscriptionProjectionTest {
                 return true;
             }
             Class<?> candidateClass =
-                    fixture.blue.getTypeClassResolver()
+                    fixture.blue.typeClassResolver()
                             .resolveClass(candidateBlueId);
             Class<?> patternClass =
-                    fixture.blue.getTypeClassResolver()
+                    fixture.blue.typeClassResolver()
                             .resolveClass(patternBlueId);
             return candidateClass != null
                     && patternClass != null
@@ -1113,9 +1113,9 @@ class TimelineSubscriptionProjectionTest {
 
     private static final class ProjectionFixture
             implements AutoCloseable {
-        private final Blue blue;
+        private final CoordinationTestRuntime blue;
 
-        private ProjectionFixture(Blue blue) {
+        private ProjectionFixture(CoordinationTestRuntime blue) {
             this.blue = blue;
         }
 

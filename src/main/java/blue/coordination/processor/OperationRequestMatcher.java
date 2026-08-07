@@ -16,6 +16,17 @@ import blue.repo.coordination.SequentialWorkflowOperation;
  * context.</p>
  */
 final class OperationRequestMatcher {
+    private final CoordinationSemanticTypeIdentities identities;
+
+    OperationRequestMatcher() {
+        this(CoordinationSemanticTypeIdentities.publishedDefaults());
+    }
+
+    OperationRequestMatcher(
+            CoordinationSemanticTypeIdentities identities) {
+        this.identities = java.util.Objects.requireNonNull(
+                identities, "identities");
+    }
 
     boolean matches(SequentialWorkflowOperation contract, HandlerMatchContext context) {
         if (contract == null || context == null) {
@@ -51,7 +62,8 @@ final class OperationRequestMatcher {
                         || isEmptyRequestPattern(requestPattern)
                         ? null
                         : requestPattern,
-                context);
+                context,
+                identities);
         return requestMatches;
     }
 

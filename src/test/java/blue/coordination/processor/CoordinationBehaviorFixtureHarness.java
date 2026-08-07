@@ -1,5 +1,7 @@
 package blue.coordination.processor;
 
+import blue.language.processor.CoordinationRoutingHarness;
+
 import blue.bex.api.BexEngine;
 import blue.bex.api.BexExecutionContext;
 import blue.bex.api.BexProgramSource;
@@ -12,13 +14,9 @@ import blue.coordination.processor.mandate.DocumentResponderMandateEligibility;
 import blue.coordination.processor.mandate.MandateEligibilityDecision;
 import blue.coordination.processor.mandate.MandateValidationEvidence;
 import blue.coordination.processor.mandate.OperationMandateEligibility;
-import blue.language.Blue;
-import blue.language.NodeProvider;
+import blue.language.provider.NodeProvider;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
-import blue.language.processor.CoordinationConfiguredProcessorFactory;
-import blue.language.processor.CoordinationProcessHeaderBridge;
-import blue.language.processor.CoordinationRoutingHarness;
 import blue.language.processor.DocumentProcessor;
 import blue.language.processor.GasSchedule;
 import blue.language.processor.GasTraceEntry;
@@ -27,13 +25,15 @@ import blue.language.processor.ProcessingDebugResult;
 import blue.language.processor.ProcessingTraceConstants;
 import blue.language.processor.ProcessingTraceRecord;
 import blue.language.processor.VerifiedExecutionEvidence;
-import blue.language.provider.NodeProviderOutcome;
+import blue.language.api.NodeProviderOutcome;
 import blue.language.provider.NodeProviderResult;
 import blue.language.provider.SequentialNodeProvider;
+import blue.language.codec.BlueFormat;
+import blue.language.runtime.BlueLanguage;
 import blue.language.snapshot.FrozenNode;
-import blue.language.snapshot.ResolvedSnapshot;
-import blue.language.utils.BlueIdCalculator;
-import blue.language.utils.JsonPointer;
+import blue.language.merge.ResolvedSnapshot;
+import blue.language.identity.DirectBlueIdCalculator;
+import blue.language.model.wire.JsonPointer;
 import blue.repo.BlueRepository;
 import blue.repo.mandate.OperationMandate;
 import blue.repo.myos.MyOSTimelineChannel;
@@ -495,7 +495,7 @@ final class CoordinationBehaviorFixtureHarness {
                             ? exactPartialRootFragment(
                                     root.getBlueId(),
                                     runtime.blue
-                                            .getNodeProvider())
+                                            .nodeProvider())
                             : root;
             debug = runtime.processor
                     .processDocumentWithTrace(
@@ -1070,7 +1070,7 @@ final class CoordinationBehaviorFixtureHarness {
         }
         Node fragment = candidates.get(0);
         String actualBlueId =
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         fragment);
         if (!rootBlueId.equals(actualBlueId)) {
             throw new FixtureExecutionException(
@@ -1442,7 +1442,7 @@ final class CoordinationBehaviorFixtureHarness {
             Runtime runtime,
             Node exactRoot) {
         NodeProvider configured =
-                runtime.blue.getNodeProvider();
+                runtime.blue.nodeProvider();
         Node suppliedInlineType =
                 Objects.requireNonNull(
                         exactRoot, "exactRoot")
@@ -1462,14 +1462,14 @@ final class CoordinationBehaviorFixtureHarness {
         if (inheritedContracts == null
                 || inheritedContracts.getProperties() == null) {
             return new CoordinationDocumentSplitter(
-                    runtime.processor,
+                    runtime.blue.contracts(),
                     configured);
         }
 
         Map<String, Node> exactSources =
                 new LinkedHashMap<String, Node>();
         exactSources.put(
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         inlineType),
                 inlineType.clone());
         for (Node contribution :
@@ -1479,13 +1479,13 @@ final class CoordinationBehaviorFixtureHarness {
                 continue;
             }
             exactSources.put(
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             contribution),
                     contribution.clone());
         }
         if (exactSources.isEmpty()) {
             return new CoordinationDocumentSplitter(
-                    runtime.processor,
+                    runtime.blue.contracts(),
                     configured);
         }
 
@@ -1497,7 +1497,7 @@ final class CoordinationBehaviorFixtureHarness {
                     : null;
         };
         return new CoordinationDocumentSplitter(
-                runtime.processor,
+                runtime.blue.contracts(),
                 new SequentialNodeProvider(
                         authoredSources,
                         configured));
@@ -1545,7 +1545,7 @@ final class CoordinationBehaviorFixtureHarness {
                     requiredProperty(
                             entry, "timeline");
             String timelineBlueId =
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             timeline);
             if (!timelineIdByBlueId
                     .containsKey(timelineBlueId)) {
@@ -1612,7 +1612,7 @@ final class CoordinationBehaviorFixtureHarness {
                     requiredProperty(
                             entry, "timeline");
             String timelineBlueId =
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             timeline);
             if (finalTimelineBlueIds.contains(
                     timelineBlueId)
@@ -1730,7 +1730,7 @@ final class CoordinationBehaviorFixtureHarness {
             authority.getProperties().put(
                     "initialMandateDocument",
                     new Node().blueId(
-                            BlueIdCalculator.calculateBlueId(
+                            DirectBlueIdCalculator.calculateBlueId(
                                     initialMandateDocument)));
         }
         Node request =
@@ -1782,7 +1782,7 @@ final class CoordinationBehaviorFixtureHarness {
         }
         BexEngine engine =
                 BexEngine.builder()
-                        .blue(runtime.blue)
+                        .language(runtime.blue.language())
                         .build();
         BexExecutionContext context =
                 BexExecutionContext.builder()
@@ -2786,7 +2786,7 @@ final class CoordinationBehaviorFixtureHarness {
             return node.isReferenceOnly()
                     ? "reference(" + node.getBlueId() + ")"
                     : "node("
-                    + BlueIdCalculator.calculateBlueId(
+                    + DirectBlueIdCalculator.calculateBlueId(
                             node)
                     + ")" + diagnostic;
         }
@@ -2814,11 +2814,12 @@ final class CoordinationBehaviorFixtureHarness {
                     path + ": unknown or misplaced schema");
         }
         Node fixture;
-        try (Blue parser = new Blue()) {
-            fixture = parser.parseSourceYaml(
+        try (BlueLanguage parser = BlueLanguage.builder().build()) {
+            fixture = parser.codec().parseSource(
                     "fixtureSchema:"
                             + source.substring(
-                            "schema:".length()));
+                            "schema:".length()),
+                    BlueFormat.YAML);
         }
         requireFields(
                 fixture,
@@ -3792,7 +3793,7 @@ final class CoordinationBehaviorFixtureHarness {
                 return node.getBlueId();
             }
             try {
-                return BlueIdCalculator.calculateBlueId(
+                return DirectBlueIdCalculator.calculateBlueId(
                         node.clone().blue(null));
             } catch (IllegalArgumentException
                      | NullPointerException unsupported) {
@@ -3807,8 +3808,8 @@ final class CoordinationBehaviorFixtureHarness {
             return null;
         }
         try {
-            return BlueIdCalculator.INSTANCE
-                    .calculate(value);
+            return DirectBlueIdCalculator.INSTANCE
+                    .directBlueIdFromCanonicalInput(value);
         } catch (IllegalArgumentException
                  | NullPointerException unsupported) {
             return null;
@@ -4659,7 +4660,7 @@ final class CoordinationBehaviorFixtureHarness {
     private static final class Runtime
             implements AutoCloseable {
         private final BlueRepository repository;
-        private final Blue blue;
+        private final CoordinationTestRuntime blue;
         private final Long gasLimit;
         private final ProcessingEventIdentityEvidence
                 processingEventIdentityEvidence;
@@ -4667,7 +4668,7 @@ final class CoordinationBehaviorFixtureHarness {
 
         private Runtime(Long gasLimit) {
             this.repository =
-                    BlueRepository.latest();
+                    BlueRepository.current();
             this.gasLimit = gasLimit;
             /*
              * This is the isolated behavior-conformance lane. It exercises
@@ -4675,19 +4676,13 @@ final class CoordinationBehaviorFixtureHarness {
              * or substitutes for the fail-closed fixed-Repository release
              * audit.
              */
-            this.blue =
-                    repository.configure(
-                            new Blue());
+            this.blue = CoordinationTestResources
+                    .configuredBlue(repository);
             this.processingEventIdentityEvidence =
                     new ProcessingEventIdentityEvidence();
-            CoordinationProcessors
-                    .registerWith(
-                            blue,
-                            processorOptions());
-            CoordinationProcessors
-                    .registerTimelineSubtype(
-                            blue,
-                            MyOSTimelineChannel.class);
+            blue.configure(processorOptions());
+            blue.registerTimelineSubtype(
+                    MyOSTimelineChannel.class);
             this.processor = configuredProcessor();
         }
 
@@ -4703,7 +4698,7 @@ final class CoordinationBehaviorFixtureHarness {
         private DocumentProcessor
         configuredProcessor() {
             return gasLimit == null
-                    ? blue.getDocumentProcessor()
+                    ? blue.processor()
                     : CoordinationConfiguredProcessorFactory
                     .withGasLimit(
                             blue,
@@ -4713,33 +4708,21 @@ final class CoordinationBehaviorFixtureHarness {
         private void installFragmentProvider(
                 NodeProvider fragmentProvider) {
             DocumentProcessor configured =
-                    blue.getDocumentProcessor();
+                    blue.processor();
             if (processor != configured) {
                 processor.close();
             }
-            NodeProvider existing =
-                    blue.getNodeProvider();
-            blue.nodeProvider(
-                    new SequentialNodeProvider(
-                            Objects.requireNonNull(
-                                    fragmentProvider,
-                                    "fragmentProvider"),
-                            existing));
-            CoordinationProcessors
-                    .registerWith(
-                            blue,
-                            processorOptions());
-            CoordinationProcessors
-                    .registerTimelineSubtype(
-                            blue,
-                            MyOSTimelineChannel.class);
+            blue.addNodeProvider(
+                    Objects.requireNonNull(
+                            fragmentProvider,
+                            "fragmentProvider"));
             processor = configuredProcessor();
         }
 
         private void installExecutionEvidencePlan(
                 VerifiedExecutionEvidence evidence) {
             DocumentProcessor configured =
-                    blue.getDocumentProcessor();
+                    blue.processor();
             if (processor != configured) {
                 processor.close();
             }
@@ -4762,7 +4745,7 @@ final class CoordinationBehaviorFixtureHarness {
                     authored.clone()
                             .blue(
                                     repository
-                                            .typeAliasBlue());
+                                            .importsDirective());
             return blue.preprocess(
                     exactAuthoredNode);
         }
@@ -4782,7 +4765,7 @@ final class CoordinationBehaviorFixtureHarness {
                             .canonicalExactCopy(
                                     suppliedType);
             String typeBlueId =
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             exactType);
             Map<String, Node> exactSources =
                     new LinkedHashMap<String, Node>();
@@ -4808,7 +4791,7 @@ final class CoordinationBehaviorFixtureHarness {
                                     .canonicalExactCopy(
                                             contribution);
                     exactSources.put(
-                            BlueIdCalculator
+                            DirectBlueIdCalculator
                                     .calculateBlueId(
                                             exactContribution),
                             exactContribution);
@@ -4826,10 +4809,10 @@ final class CoordinationBehaviorFixtureHarness {
                     .type(new Node().blueId(
                             typeBlueId));
             String expectedRootBlueId =
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             root);
             String boundRootBlueId =
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             bound);
             if (!expectedRootBlueId.equals(
                     boundRootBlueId)) {
@@ -4871,7 +4854,7 @@ final class CoordinationBehaviorFixtureHarness {
         @Override
         public void close() {
             if (processor
-                    != blue.getDocumentProcessor()) {
+                    != blue.processor()) {
                 processor.close();
             }
             blue.close();

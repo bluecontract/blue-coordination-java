@@ -1,402 +1,313 @@
 # Blue Coordination Java
 
-`blue-coordination-java` is the reusable Coordination 1.0 layer over the Blue
-Language, BEX, and fixed Repository implementations. It provides concrete
-Timeline-derived Channels, source-to-target Operation routing, workflows,
-hosted BEX integration, Mandate eligibility helpers, indexed delivery
-preparation, and deterministic physical fragmentation.
+Blue Coordination is the application-level Timeline, Channel, workflow,
+indexed-delivery, and physical-fragmentation layer for the Blue stack. Generic
+contract processing belongs to `blue-language-java`; expression execution
+belongs to the focused BEX modules. Coordination composes those capabilities
+without reimplementing either one.
 
-The generic Contracts engine remains in `blue-language-java`. This project
-does not provide persistence, Timeline networking, cross-document scheduling,
-managed-Root compare-and-swap, authorization policy, or an outbox.
+The current integration targets:
 
-Given the same exact Root, Event, verified delivery evidence, runtime
-registrations, and portable gas schedule, PROCESS has one deterministic
-result. Subscription snapshots, delivery plans, fragment inventories, and
-preparation results are evidence bound to those semantic inputs; none is a
-third semantic PROCESS input.
+| Input | Exact local source | Locked revision | Focused production modules |
+|---|---|---|---|
+| Language/Contracts | `../blue-language-java` | `c3d58561220e6de6be6e302cb16799c1a1b5159f` | `blue-language-model`, `blue-language-core`, `blue-language-mapping`, `blue-contracts-core` |
+| BEX | `../blue-bex-java` | `09f89f0b63a84007fcf7ae13b7439bc24dbb1d03` | `blue-bex-core`, `blue-bex-contracts` |
+| fixed Repository | `../blue-repository-java` | `63be6b7d8d2752b5a8c90f38e672859e9b3949a1` | exact locally materialized and hash-verified `blue-repo-java` JAR |
 
-## Local source graph
-
-Development and release verification require these sibling checkouts:
-
-```text
-../blue-language-java
-../blue-bex-java
-../blue-repository-java
-```
-
-`settings.gradle` includes all three builds and substitutes:
-
-```text
-blue.language:blue-language-java
-blue.bex:blue-bex-java
-blue.repo:blue-repo-java
-```
-
-Those groups are excluded from remote resolution. A missing sibling therefore
-fails configuration instead of silently selecting a published artifact.
-Coordination also passes the same Language checkout into the included BEX
-build. Exact sibling heads are locked in
+Neither the Language nor BEX aggregate orchestration project is a production
+dependency. Remote resolution is not a fallback in local mode. Exact commits,
+versions, artifact hashes, and normative package identities are locked in
 `gradle/blue-sibling-lock.properties`.
 
-Check the local dependency boundary with:
+The current `blue-contracts-core` JAR is bound to
+`sha256:5845c6bead274dffd8d22afcb323f7cdf6e53b5656e0070bd241a1a660516280`.
+The current BEX green receipt is bound to
+`sha256:d64f99979e18a50f379389ca15579d6cad3b2e9e1238fecce599474d3d371c02`.
+
+## Quick start
+
+The sibling checkouts must be present beside this repository. Verify their
+commits, the zero Language implementation delta, the BEX working receipt, every
+focused artifact, and the selected dependency graph before relying on a test
+result:
 
 ```bash
-./gradlew test \
-  --tests blue.coordination.processor.LocalCompositeDependencyTest \
-  --offline --no-daemon -PtestJfr=false
-./gradlew verifyNestedLocalCompositeDependencies \
-  --offline --no-daemon -PtestJfr=false
+./gradlew --offline --no-daemon \
+  verifyLatestBlueSiblingInputs \
+  writeLatestBlueDependencyLock \
+  -PtestJfr=false
 ```
 
-## Working/development verification
-
-The closed working gate executes every Coordination-owned capability except
-the exact probes declared in
-`gradle/coordination-external-blockers.json`. It then executes every declared
-probe separately and accepts it only when it passes or reproduces its exact
-catalogued diagnostic:
+Then run the focused collection and fragmentation tests, followed by the
+ordinary suite:
 
 ```bash
-./gradlew coordinationWorkingVerification \
-  --offline --no-daemon -PtestJfr=false
+./gradlew --offline --no-daemon test \
+  --tests 'blue.coordination.processor.*Collection*' \
+  --tests 'blue.coordination.processor.*Fragment*' \
+  -PtestJfr=false
+
+./gradlew --offline --no-daemon test -PtestJfr=false
 ```
 
-The gate writes:
-
-```text
-build/reports/coordination-working/final.json
-build/reports/coordination-working/final.md
-build/reports/coordination-working/external-blockers.json
-build/reports/coordination-working/dependency-lock.json
-```
-
-`workingEligible` means the local Coordination artifact is usable against the
-exact locked sibling sources. It does not imply public release eligibility.
-The strict release command remains fail-closed while any external probe is
-blocked:
+Start with [START-HERE.md](START-HERE.md) for the repository map and the first
+processing path. The nested collection scenario is described in
+[the executable example](docs/examples/nested-agreement-lesson-cancellation.md).
+The product-facing MyOS/Playground stories and their indexed feeder are in
+[the executable MyOS demo suite](docs/examples/myos-demo-examples.md). Run its
+focused Java 17 source set without expanding into the upstream conformance
+corpora:
 
 ```bash
-./gradlew finalCoordinationVerification \
-  --offline --no-daemon -PtestJfr=false
+./gradlew --offline --no-daemon \
+  coordinationExamplesVerification \
+  -PtestJfr=false
 ```
 
-## Runtime registration and delivery-planning modes
-
-Configure a Language runtime with an exact verified provider, then register
-Coordination runtime semantics:
+The smallest story admits the authored Counter YAML, appends one exact entry,
+and lets the persisted subscription snapshot choose every indexed candidate:
 
 ```java
-BlueRepository repository = BlueRepository.latest();
-Blue blue = hostVerifiedRuntime(repository);
-CoordinationProcessors.registerWith(blue);
+try (MyOsDemoRuntime demo = MyOsDemoRuntime.create()) {
+    demo.addDocument("counter", BasicsCounterDocuments.COUNTER);
+    MyOsDemoTimeline alice = demo.timeline(
+            "examples/basics-counter/alice",
+            MyOsDemoActor.principal("alice"));
+    MyOsDemoEntry entry = demo.append(alice, incrementByOne);
+    MyOsDemoResult result = demo.process(entry).onlyResult();
+    MyOsDemoAssertions.assertSuccessful(result);
+    MyOsDemoAssertions.assertValue(demo, "counter", "/counter", 1);
+}
 ```
 
-`hostVerifiedRuntime` is host assembly, not a Coordination API. Its
-`NodeProvider` must admit the fixed Repository through Language's
-`BOUND_SOURCE_CONTENT` evidence mode and bind the exact Repository coordinate,
-manifest identity, source commit, loaded artifact digest, Language release,
-registry, preprocessing environment, and provider domain. Directly installing
-`repository.nodeProvider()` is not a verified release configuration. The
-release suite exercises the library's internal fixed-Repository adapter and
-publishes its fail-closed catalog audit.
+Storage-host integration starts at the
+[processing-engine guide](docs/engine/start-here.md). The engine report is
+generated by `coordinationProcessingEngineReport`; the stricter
+`coordinationProcessingEngineWorkingVerification` remains fail-closed unless
+the complete runtime, locality, compatibility, and reproducibility evidence is
+green in the same verification graph.
 
-For direct builder use:
+## Runtime composition
+
+Applications own one immutable `BlueLanguage` runtime, one frozen Contracts
+registry generation, and one `BlueContracts` service. Coordination adds its
+processors to the registry; it does not own or mutate Language:
 
 ```java
-DocumentProcessor processor =
-        CoordinationProcessors.configure(DocumentProcessor.builder())
+BlueLanguage language = BlueLanguage.builder()
+        .nodeProvider(exactProvider)
+        .build();
+
+CoordinationProcessorOptions options =
+        CoordinationProcessorOptions.builder()
+                .language(language)
                 .build();
+
+ContractProcessorRegistry registry =
+        CoordinationProcessors.configure(
+                ContractProcessorRegistryBuilder.create()
+                        .registerDefaults(),
+                options)
+                .build();
+
+BlueContracts contracts = BlueContracts.builder(language.processing())
+        .runtimeRegistry(registry)
+        .build();
 ```
 
-Registration installs concrete Channel, Handler, workflow, step, gas, and BEX
-semantics. It deliberately installs no external delivery-plan deriver. The
-host architecture is an explicit choice.
+The provider must return exact content and preserve `NOT_FOUND`,
+`UNAVAILABLE`, and `INVALID_EVIDENCE` as distinct outcomes. Close Contracts
+before Language. Hosted BEX borrows that same Language runtime and does not
+close it.
 
-Timeline Channel subtypes are also an explicit host choice; the default
-registration contains no product-specific subtype list:
+For narrow tools and tests, the standalone processor builder remains useful:
 
 ```java
-CoordinationProcessors.registerTimelineSubtype(
-        blue, HostTimelineChannel.class);
+DocumentProcessor processor = CoordinationProcessors.configure(
+        DocumentProcessor.builder(), options).build();
 ```
 
-The corresponding builder overload accepts the same exact subtype class.
-Language still verifies the subtype's Blue type evidence when it is used.
+Builder configuration is immutable after `build()`. Operational observations
+use `ProcessingObserver`; observers are failure-isolated and cannot alter
+semantic results.
 
-### Whole-current-Root compatibility
+Coordination consumes the current public Contracts services directly:
+`runtimeAccess()`, `subscriptionSurfaceProjection()`,
+`indexedDeliveryEvaluator()`, `currentRootDeliveryPlanDeriver(...)`,
+`effectiveFragmentationCatalog(...)`, and
+`processForPlatformCommit(...)`. Missing-operation placeholders for these
+services are not part of the supported surface. Engine execution builds one
+immutable `PlatformProcessInvocation` from the plan's verified delivery plan
+and the bundle loader's exact request-local provider, then passes that
+invocation to `processForPlatformCommit(...)` exactly once.
 
-Small or transitional hosts can opt into the deterministic compatibility
-deriver:
+## One Root, one semantic operation
 
-```java
-CoordinationProcessors.registerWith(blue);
-CoordinationDeliveryPlanning.currentRootCompatibility(blue);
-```
-
-The equivalent `DocumentProcessor` overload mutates and returns the supplied
-processor. `currentRootCompatibilityDeriver(processor)` returns the deriver
-without installing it. This mode derives delivery evidence by examining the
-complete current Root for each event.
-
-### Indexed planning
-
-Hosts that maintain a subscription index use the public persistence-neutral
-façades:
-
-```java
-CoordinationSubscriptionProjector projector =
-        CoordinationDeliveryPlanning.subscriptionProjector(processor);
-CoordinationSubscriptionSnapshot snapshot =
-        projector.projectCurrent(root, rootRevision, activationFrontier);
-
-CoordinationIndexedDeliveryPlanner planner =
-        CoordinationDeliveryPlanning.indexed(processor);
-CoordinationPreparedDelivery prepared =
-        planner.prepare(
-                rootBlueId,
-                eventBlueId,
-                snapshot,
-                orderedCandidateOccurrenceKeys,
-                exactProvider,
-                rootRevision,
-                eventOrderKey);
-```
-
-The ordered candidate collection is an exact index contract. The planner
-rejects duplicates, omissions, extras, stale snapshots, wrong revisions,
-wrong order, runtime identity drift, and provider evidence that does not bind
-to the requested Root or Event. It re-runs the registered Language
-subscription and complete-acceptance functions before producing
-`VerifiedExecutionEvidence` and the canonical `ExternalDeliveryPlan`.
-
-`CoordinationPreparedDelivery` also exposes canonical source diagnostics,
-checkpoint domains and subjects, effective routed targets, logical-delivery
-keys, selected scope chains, required seed fragments, deterministic prefetch
-suggestions, and a strict semantic-demand boundary. These values are immutable
-diagnostics and evidence, not mutable runtime contracts.
-
-## Subscription snapshots and deltas
-
-`CoordinationSubscriptionProjector` delegates generic admission and
-incremental validation to Language. `projectCurrent` performs the initial
-complete projection. `projectUpdate` accepts the resulting Root revision,
-strictly advancing order key, and exact changed paths so unaffected branches
-can be retained without expanding executable bodies. The overload without
-changed paths intentionally treats the whole Root as changed.
-
-`CoordinationSubscriptionSnapshot` is:
-
-- immutable and canonically ordered;
-- bound to the Root BlueId, host revision, activation frontier, Language and
-  Coordination runtime identities, and projection algorithm;
-- identity-bearing through `digest()`;
-- serializable as scalar/list/map data with `toMap()` and fail-closed
-  `rehydrate(...)`;
-- free of executable bodies and provider transport details;
-- complete enough to retain occurrence paths, exact scope/header identities,
-  source contributions, subscription keys, dependency identities, active
-  intervals, Process Embedded topology, and pruned scopes.
-
-`CoordinationSubscriptionUpdate` separates `added`, `retired`, and `unchanged`
-occurrences and contains the resulting snapshot. A changed domain or header is
-represented as retire plus add. Removing and later re-adding the same
-occurrence begins a new activation interval.
-
-Persistence, index layout, revision allocation, and atomic publication of a
-snapshot remain host concerns.
-
-## Timeline Channels and Operation routing
-
-Timeline subscription projection emits bounded keys for exact Timeline and
-Actor identities and uses a broad key only when richer structural matching
-requires it. Complete Language matching remains authoritative. Registered
-subtypes participate through verified type evidence; semantic matching is not
-a concrete-class whitelist.
-
-For an Operation Request:
+The semantic boundary remains:
 
 ```text
-source external Channel
-  owns acceptance, attribution, payload, freshness, checkpoint domain,
-  checkpoint subject, and checkpoint commit
-
-target same-scope Channel
-  is selected by Operation Request.channel for Handler discovery
-  is frozen as an immutable dispatch header
-  is not externally evaluated and owns no source checkpoint
+PROCESS(Root, Event) -> ProcessResult
 ```
 
-Equivalent fresh sources may coalesce only when their payload, target, and
-logical-delivery identities agree. Every participating source retains its own
-checkpoint, and none commits until the complete logical delivery succeeds. A
-stale source cannot piggyback on a fresh one.
+One invocation has one authoritative Root and at most one resulting Root.
+Embedded scopes are owned occurrences within that Root, not independently
+committed sessions. Only Root emissions enter `ProcessResult.events`.
+Timelines, Channels, workflow steps, indexed planning, and fragments prepare
+or execute that one operation; they do not add another semantic input.
 
-## Workflows and hosted BEX
+## Embedded collections
 
-Sequential Workflow executes exact declared steps in order over one
-workflow-owned working document:
+`Process Embedded` supports both exact paths and stable-key object
+collections:
+
+```yaml
+contracts:
+  embedded:
+    type: Process Embedded
+    paths:
+      - /primaryProcess
+    collectionPaths:
+      - /lessons
+      - /paymentProcesses
+```
+
+For each `collectionPaths` declaration, every direct ordinary object member
+becomes a concrete embedded occurrence. Coordination consumes Language's
+`EmbeddedScopePlanView`; it does not parse the authored contract again.
+Declaration origin is retained as `EXPLICIT` or `COLLECTION_MEMBER`.
+
+Important boundaries:
+
+- keys are stable object keys ordered by Unicode code point and escaped as
+  Runtime Pointer segments;
+- `collectionPaths` is not a wildcard and `/lessons/*` is invalid;
+- lists and list positions are not collection scope identities;
+- the same child BlueId at two keys creates two independent occurrences;
+- a member added by event `E` activates after `E` commits;
+- removal retires an occurrence, and re-adding the key creates a fresh
+  activation lineage;
+- collection declarations cannot traverse `/contracts` or other reserved
+  Language fields.
+
+See [embedded collections](docs/architecture/embedded-collections.md) for the
+full model.
+
+## Fragmentation is physical
+
+`CoordinationDocumentSplitter` receives Language's effective structured
+catalog and cuts every concrete embedded root plus registered executable-body
+boundary. Each BlueId has one canonical stored fragment; edge occurrences
+retain scope path, raw collection key, declaration path, and origin.
+
+Splitting must not change:
+
+- Root or event identity;
+- selected deliveries or workflow effects;
+- portable gas or trace order;
+- checkpoints or subscription intervals;
+- provider outcome semantics;
+- Root-only public events.
+
+Pure-reference, partially fragmented, fully fragmented, cold-provider,
+warm-provider, and batched-provider variants must produce the same semantic
+projection. Reconstruction verifies every fragment before admitting the
+inventory and rejects conflicting content atomically. Details are in
+[fragmentation and reconstruction](docs/architecture/fragmentation-and-reconstruction.md).
+
+## Subscriptions and indexed delivery
+
+Subscription snapshots persist active Channel occurrences, not executable
+bodies. A snapshot is bound to the Root BlueId and revision, activation
+frontier, Language and Coordination runtime identities, projection algorithm,
+and canonical digest. Updates classify occurrences as added, retired, or
+unchanged.
+
+Indexed planning treats the host index as a candidate accelerator only.
+Language remains authoritative for exact Channel preselection, acceptance,
+targeting, dependencies, checkpoint evidence, and delivery-plan validation.
+The compatibility planner and indexed planner must agree for the same current
+Root and event.
+
+See
+[subscription projection and indexed delivery](docs/architecture/subscription-projection-and-indexed-delivery.md).
+
+## Workflows and BEX
+
+Sequential workflows execute declared steps in order over the invocation's
+working Root:
 
 - Update Document delegates patch semantics to Language;
-- Trigger Event delegates event delivery to Language;
-- Terminate Processing accepts optional `reason` and derives its cause from
-  the exact fixed type identity;
-- Compute resolves the exact Compute Definition and uses the
-  processor-owned BEX semantic-output boundary.
+- Trigger Event delegates delivery to Contracts;
+- Terminate Processing ends the current processing path deterministically;
+- Compute executes through modular BEX with the exact shared Language runtime.
 
-Compute execution uses the parent-bounded Language runtime-work session. BEX
-and Coordination retain their own named counter namespaces without
-double-charging Language work. Rejected charges are absent from the trace;
-deterministic exhaustion retains the admitted prefix and rolls back Root
-changes, Root-public events, and checkpoints.
+Coordination and BEX retain separate observation namespaces. Portable gas is
+charged once at the owning semantic boundary. A failure or exhaustion rolls
+back Root changes, public events, and checkpoint effects.
 
-## Canonical fragmentation and processing preparation
+## Fixed Repository boundary
 
-`CoordinationDocumentSplitter` is a physical preparation accelerator. It does
-not select deliveries, authorize evidence, execute a contract, alter portable
-gas, or create another semantic PROCESS input.
+The fixed Repository is an immutable input, not a place to patch compatibility
+classes. Local mode consumes an exact JAR materialized from the locked local
+checkout and verifies its digest. Runtime closure auditing verifies every
+exact definition required transitively by Coordination. The complete catalog
+audit remains diagnostic evidence.
 
-Its stable physical profile is:
+Never add identity aliases, provider trust bypasses, fake definitions, or
+generated-class patches to make a probe green.
 
-```text
-blue.coordination/fragmentation/canonical-direct-node/1.0
-```
+## Verification and reports
 
-Every exact BlueId has one canonical direct-node fragment representation
-within that profile, whether encountered as a document Root, event Root,
-embedded scope, source contribution, or executable body. The split graph
-separates physical fragments from canonically ordered edge occurrences. Edge
-metadata records the owning Root and node, scope and pointers, child BlueId,
-edge kind, authored-reference versus splitter-created status, and applicable
-effective Handler/body/source-contribution identities.
-
-`SplitGraph.reconstruct()` uses only the immutable inventory and edge metadata,
-preserves authored references, verifies the final identity, and rejects
-missing, unreachable, mixed-profile, or inconsistent content.
-`CoordinationFragmentAdmissionVerifier` supports immutable concurrent
-admission: it re-reads and verifies the winning canonical bytes, treats an
-equal duplicate as idempotent, and rejects inconsistent content.
-
-An indexed plan and independently produced document/event split graphs can be
-combined without persistence:
-
-```java
-CoordinationProcessingPreparation preparation =
-        CoordinationProcessingPreparation.combine(
-                preparedDelivery,
-                documentSplitGraph,
-                eventSplitGraph);
-```
-
-The result carries exact references, verified evidence, plan and snapshot
-identities, scope-chain diagnostics, fragment-profile and inventory
-identities, exact edge occurrences, required seeds, prefetch suggestions, and
-the semantic-demand boundary. Combining does not itself plan, split, persist,
-schedule, authorize, or execute.
-
-## Cyclic boundary
-
-Cyclic-set member edges remain opaque exact references:
-
-```text
-MASTER#index is an opaque edge
-member content requires complete cyclic-set proof
-a pure cyclic member is not an independently processable top-level value
-Process Embedded cannot end at or traverse an opaque member edge
-a patch below the member edge fails before provider demand
-whole-edge replacement remains allowed
-```
-
-Projection never promotes opaque members into subscription scopes. Splitting
-does not fabricate member fragments, and reconstruction does not traverse an
-opaque edge.
-
-## Portable gas and nonportable host quotas
-
-Portable PROCESS gas is loaded from
-`coordination-gas-1.0.yaml`. Coordination charges its named counters through
-Language's runtime-work boundary before work. Provider bytes, caches,
-persistence, index maintenance, fragment storage, and splitter work are never
-reported as portable PROCESS gas.
-
-Preparation work is bounded separately by the manifest-backed
-`CoordinationHostQuotaSession`. These invocation-local quotas are diagnostic
-host limits, not consensus gas. Quota exhaustion fails deterministically and
-does not add to `PROCESS.totalGas`. APIs without a supplied session use a
-disabled-tracing session that still enforces the manifest limits. A host that
-needs an auditable preparation trace should pass an explicit session to the
-available projection, planning, splitter, and Mandate overloads.
-
-## Fixed Repository evidence
-
-The generated catalog is read-only. `FixedRepositoryBoundSourceProvider`
-binds the Repository coordinate, version, manifest identity, source commit,
-artifact hash, Language release, Contracts runtime registry, provider domain,
-and `BOUND_SOURCE_CONTENT` verification mode. It preserves `NOT_FOUND`,
-`UNAVAILABLE`, and `INVALID_EVIDENCE`; it does not trust an authored `blueId`,
-create aliases, or patch catalog content.
-
-`FixedRepositoryBoundSourceProviderTest` defines the complete catalog audit:
-
-```text
-1,107 definitions
-10 cyclic sets
-27 cyclic members
-provider mode BOUND_SOURCE_CONTENT
-required result: 1,107 verified, 0 failed
-```
-
-The audit writes
-`build/reports/coordination-release/fixed-repository.json`. Absence of that
-same-run report, any failed definition, or a manifest binding mismatch blocks
-release. The durable pre-edit baseline records earlier dependency-evidence
-failures; it is historical evidence and must not be presented as the current
-catalog result.
-
-## Tests and release evidence
-
-JUnit methods use readable `should...` names and exact `// Given`,
-`// When`, and `// Then` sections. Useful focused commands include:
+The Repository-independent engine gate derives its PROCESS/commit, 10×10,
+storage-TCK, physical-locality, incremental-fragmentation, and 32-run flagship
+status from tasks in the same invocation:
 
 ```bash
-./gradlew coordinationTimelineConformanceTest \
-  --offline --no-daemon -PtestJfr=false
-./gradlew coordinationRuntimeGasTest coordinationLoopSafetyTest \
-  --offline --no-daemon -PtestJfr=false
-./gradlew coordinationFlagshipTest localFixedRepositoryCompatibilityTest \
-  --offline --no-daemon -PtestJfr=false
-./gradlew coordinationClosedConformanceTest \
-  --offline --no-daemon -PtestJfr=false
+./gradlew --offline --no-daemon \
+  coordinationProcessingEngineWorkingVerification \
+  -PtestJfr=false
 ```
 
-The hard release graph is:
+The legacy working surface remains independently verifiable:
 
 ```bash
-./gradlew finalCoordinationVerification \
-  --offline --no-daemon -PtestJfr=false
+./gradlew --offline --no-daemon \
+  coordinationWorkingVerification \
+  -PtestJfr=false
 ```
 
-It executes same-run tests and conformance, the 32-run flagship matrix, the
-516-entry trace proof, the full fixed-catalog audit, binary compatibility,
-Java 8 bytecode verification, JMH evidence, API reporting, and reproducible
-Coordination-owned archives. Publication and release tasks depend on this
-gate.
+The strict gate also requires an empty external blocker catalog, published and
+local alignment for the claimed release surface, reproducible archives, the
+complete flagship matrix, Java 8 bytecode, API checks, and performance
+evidence:
 
-Release evidence lives at:
+```bash
+./gradlew --offline --no-daemon \
+  finalCoordinationVerification \
+  -PtestJfr=false
+```
+
+Latest-stack evidence is written under:
 
 ```text
-gradle/coordination-release-baseline.json
-build/reports/coordination-release/baseline.json
-build/reports/coordination-release/final.json
-build/reports/coordination-release/final.md
-build/reports/coordination-release/fixed-repository.json
+build/reports/latest-language-embedded-collections/
+  dependency-lock.json
+  migration.json
+  fragmentation.json
+  subscriptions.json
+  performance.json
+  final.json
 ```
 
-The baseline source is the immutable pre-edit capture; the build copy is
-restored after `clean`. The final JSON has schema
-`blue.coordination/release-result/1.0` and is written for both green and red
-candidates. `releaseEligible` is true only when `blockingReasons` is empty and
-every required result was produced from the same exact source/dependency
-state. A missing, stale, skipped, or failed result keeps
-`finalCoordinationVerification` red.
+`tools/generate-latest-language-embedded-collections-reports.js` accepts one
+same-run manifest. It rejects mixed run IDs and derives release eligibility;
+it never trusts a caller-supplied pass flag or historical total. Missing work
+must be represented as `notExecuted` with a reason.
+
+## Scope exclusions
+
+Coordination defines storage-neutral fragment/session SPIs and orchestrates a
+revision-bound session CAS plus Root-outbox evidence through those SPIs. It
+does not provide a durable database, Timeline networking, distributed
+scheduling, authorization policy, backup/retention, or outbox publisher. Those
+remain host responsibilities around the deterministic processing boundary.

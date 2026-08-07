@@ -1,15 +1,15 @@
 package blue.coordination.processor.workflow;
 
 import blue.bex.api.BexGasLedgerHost;
-import blue.bex.api.ProcessorExecutionContextBexGasLedgerHost;
+import blue.bex.contracts.ProcessorExecutionContextBexGasLedgerHost;
 import blue.bex.gas.BexGasCounter;
+import blue.bex.gas.BexGasLedgerCapability;
 import blue.bex.gas.BexGasLimitExceededException;
-import blue.language.processor.GasLimitExceededException;
-import blue.language.processor.GasMeter;
+import blue.bex.gas.BexHostGasExhaustion;
+import blue.bex.gas.BexSharedGasBudget;
 import blue.language.processor.ProcessorExecutionContext;
 import blue.language.processor.ProcessorErrorCategory;
 import blue.language.processor.ProcessorFailureException;
-import blue.language.processor.RuntimeWorkBudget;
 import blue.language.processor.RuntimeWorkSession;
 
 import java.util.Collections;
@@ -31,28 +31,33 @@ import java.util.WeakHashMap;
  * merge, deterministic-prefix retention, or transient discard.</p>
  */
 final class WorkflowBexGasLedgerHost implements BexGasLedgerHost {
-    private static final Map<RuntimeWorkSession, Integer> NEXT_WORKFLOW =
-            new WeakHashMap<RuntimeWorkSession, Integer>();
+    private static final Map<Object, Integer> NEXT_WORKFLOW =
+            new WeakHashMap<Object, Integer>();
 
+    private final ProcessorExecutionContext processorContext;
     private final RuntimeWorkSession workSession;
     private final String workflowNamespace;
-    private final Map<GasMeter.ChildGasLedger, BexGasLedgerHost> owners =
-            new IdentityHashMap<GasMeter.ChildGasLedger, BexGasLedgerHost>();
-    private final Set<GasMeter.ChildGasLedger> activeLedgers =
+    private final Map<BexGasLedgerCapability, BexGasLedgerHost> owners =
+            new IdentityHashMap<BexGasLedgerCapability, BexGasLedgerHost>();
+    private final Set<BexGasLedgerCapability> activeLedgers =
             Collections.newSetFromMap(
-                    new IdentityHashMap<GasMeter.ChildGasLedger, Boolean>());
+                    new IdentityHashMap<BexGasLedgerCapability, Boolean>());
     private BexGasLedgerHost activeHost;
-    private RuntimeWorkBudget activeBudget;
+    private BexSharedGasBudget activeBudget;
     private int nextExecution;
     private boolean finalized;
 
     WorkflowBexGasLedgerHost(ProcessorExecutionContext processorContext) {
-        this(Objects.requireNonNull(
-                processorContext, "processorContext")
-                .runtimeWorkSession());
+        this.processorContext = Objects.requireNonNull(
+                processorContext, "processorContext");
+        this.workSession = null;
+        this.workflowNamespace = "bex.workflow."
+                + sequence(nextWorkflow(
+                        processorContext));
     }
 
     WorkflowBexGasLedgerHost(RuntimeWorkSession workSession) {
+        this.processorContext = null;
         this.workSession = Objects.requireNonNull(
                 workSession, "workSession");
         this.workflowNamespace = "bex.workflow."
@@ -60,8 +65,20 @@ final class WorkflowBexGasLedgerHost implements BexGasLedgerHost {
     }
 
     @Override
-    public RuntimeWorkBudget openSharedBudget(long maximumGas) {
+    public BexSharedGasBudget openSharedBudget(long maximumGas) {
+        if (maximumGas < 0L) {
+            throw new IllegalArgumentException(
+                    "Shared BEX gas budget must be non-negative");
+        }
         ensureExecutionCanStart();
+        if (workSession == null) {
+            // The public ProcessorExecutionContext boundary exposes live
+            // parent ledgers but intentionally not its internal shared-budget
+            // session. BEX retains the one aggregate local precheck in this
+            // hosted mode and every admitted charge still enters Contracts
+            // exactly once through the official adapter.
+            return null;
+        }
         beginExecution();
         try {
             activeBudget =
@@ -74,7 +91,7 @@ final class WorkflowBexGasLedgerHost implements BexGasLedgerHost {
     }
 
     @Override
-    public GasMeter.ChildGasLedger open(
+    public BexGasLedgerCapability open(
             String requestedNamespace,
             Map<String, Long> requestedWeights) {
         if (activeBudget != null) {
@@ -89,11 +106,11 @@ final class WorkflowBexGasLedgerHost implements BexGasLedgerHost {
     }
 
     @Override
-    public GasMeter.ChildGasLedger open(
+    public BexGasLedgerCapability open(
             String requestedNamespace,
             Map<String, Long> requestedWeights,
-            RuntimeWorkBudget sharedBudget) {
-        RuntimeWorkBudget exactBudget =
+            BexSharedGasBudget sharedBudget) {
+        BexSharedGasBudget exactBudget =
                 Objects.requireNonNull(
                         sharedBudget, "sharedBudget");
         if (activeHost == null
@@ -109,14 +126,14 @@ final class WorkflowBexGasLedgerHost implements BexGasLedgerHost {
     }
 
     @Override
-    public void submit(GasMeter.ChildGasLedger submittedLedger) {
+    public void submit(BexGasLedgerCapability submittedLedger) {
         finishLedger(
                 submittedLedger,
                 new LedgerAction() {
                     @Override
                     public void apply(
                             BexGasLedgerHost owner,
-                            GasMeter.ChildGasLedger ledger) {
+                            BexGasLedgerCapability ledger) {
                         owner.submit(ledger);
                     }
                 },
@@ -125,14 +142,14 @@ final class WorkflowBexGasLedgerHost implements BexGasLedgerHost {
 
     @Override
     public void failedDeterministically(
-            GasMeter.ChildGasLedger failedLedger) {
+            BexGasLedgerCapability failedLedger) {
         finishLedger(
                 failedLedger,
                 new LedgerAction() {
                     @Override
                     public void apply(
                             BexGasLedgerHost owner,
-                            GasMeter.ChildGasLedger ledger) {
+                            BexGasLedgerCapability ledger) {
                         owner.failedDeterministically(ledger);
                     }
                 },
@@ -141,14 +158,14 @@ final class WorkflowBexGasLedgerHost implements BexGasLedgerHost {
 
     @Override
     public void evidenceUnavailable(
-            GasMeter.ChildGasLedger unavailableLedger) {
+            BexGasLedgerCapability unavailableLedger) {
         finishLedger(
                 unavailableLedger,
                 new LedgerAction() {
                     @Override
                     public void apply(
                             BexGasLedgerHost owner,
-                            GasMeter.ChildGasLedger ledger) {
+                            BexGasLedgerCapability ledger) {
                         owner.evidenceUnavailable(ledger);
                     }
                 },
@@ -163,15 +180,6 @@ final class WorkflowBexGasLedgerHost implements BexGasLedgerHost {
                 Objects.requireNonNull(exhaustion, "exhaustion");
         Objects.requireNonNull(
                 originalFailure, "originalFailure");
-        GasLimitExceededException hostExhaustion =
-                exact.hostGasLimitExceeded();
-        if (hostExhaustion != null) {
-            workSession.propagateGasExhaustion(
-                    hostExhaustion);
-            throw new IllegalStateException(
-                    "The runtime work session returned after propagating "
-                            + "its exact BEX gas rejection");
-        }
         return new ProcessorFailureException(
                 ProcessorErrorCategory.GasLimitExceeded,
                 exact.getMessage(),
@@ -180,8 +188,8 @@ final class WorkflowBexGasLedgerHost implements BexGasLedgerHost {
 
     @Override
     public void propagateGasExhaustion(
-            GasMeter.ChildGasLedger rejectedLedger,
-            GasLimitExceededException exhaustion) {
+            BexGasLedgerCapability rejectedLedger,
+            BexHostGasExhaustion exhaustion) {
         BexGasLedgerHost owner =
                 requireOwner(rejectedLedger);
         owner.propagateGasExhaustion(
@@ -225,10 +233,10 @@ final class WorkflowBexGasLedgerHost implements BexGasLedgerHost {
         }
     }
 
-    private GasMeter.ChildGasLedger openInternal(
+    private BexGasLedgerCapability openInternal(
             String requestedNamespace,
             Map<String, Long> requestedWeights,
-            RuntimeWorkBudget sharedBudget) {
+            BexSharedGasBudget sharedBudget) {
         ensureNotFinalized();
         String logicalNamespace =
                 requireNamespace(requestedNamespace);
@@ -250,7 +258,7 @@ final class WorkflowBexGasLedgerHost implements BexGasLedgerHost {
                     "A hosted BEX execution already opened its primary "
                             + "ledger");
         }
-        GasMeter.ChildGasLedger ledger;
+        BexGasLedgerCapability ledger;
         try {
             ledger = sharedBudget == null
                     ? activeHost.open(
@@ -275,7 +283,7 @@ final class WorkflowBexGasLedgerHost implements BexGasLedgerHost {
     }
 
     private void finishLedger(
-            GasMeter.ChildGasLedger ledger,
+            BexGasLedgerCapability ledger,
             LedgerAction action,
             String verb) {
         ensureNotFinalized();
@@ -298,7 +306,7 @@ final class WorkflowBexGasLedgerHost implements BexGasLedgerHost {
     }
 
     private BexGasLedgerHost requireOwner(
-            GasMeter.ChildGasLedger ledger) {
+            BexGasLedgerCapability ledger) {
         Objects.requireNonNull(ledger, "ledger");
         BexGasLedgerHost owner = owners.get(ledger);
         if (owner == null) {
@@ -313,12 +321,16 @@ final class WorkflowBexGasLedgerHost implements BexGasLedgerHost {
             throw new IllegalStateException(
                     "Workflow BEX execution sequence exhausted");
         }
-        activeHost =
-                new ProcessorExecutionContextBexGasLedgerHost(
+        String runtimeNamespace = workflowNamespace
+                + ".compute."
+                + sequence(nextExecution);
+        activeHost = processorContext != null
+                ? new ProcessorExecutionContextBexGasLedgerHost(
+                        processorContext,
+                        runtimeNamespace)
+                : new ProcessorExecutionContextBexGasLedgerHost(
                         workSession,
-                        workflowNamespace
-                                + ".compute."
-                                + sequence(nextExecution));
+                        runtimeNamespace);
         nextExecution++;
     }
 
@@ -357,8 +369,8 @@ final class WorkflowBexGasLedgerHost implements BexGasLedgerHost {
     }
 
     private static synchronized int nextWorkflow(
-            RuntimeWorkSession session) {
-        Integer current = NEXT_WORKFLOW.get(session);
+            Object invocationKey) {
+        Integer current = NEXT_WORKFLOW.get(invocationKey);
         int sequence = current != null
                 ? current.intValue()
                 : 0;
@@ -367,7 +379,7 @@ final class WorkflowBexGasLedgerHost implements BexGasLedgerHost {
                     "Workflow BEX runtime sequence exhausted");
         }
         NEXT_WORKFLOW.put(
-                session,
+                invocationKey,
                 Integer.valueOf(sequence + 1));
         return sequence;
     }
@@ -382,6 +394,6 @@ final class WorkflowBexGasLedgerHost implements BexGasLedgerHost {
     private interface LedgerAction {
         void apply(
                 BexGasLedgerHost owner,
-                GasMeter.ChildGasLedger ledger);
+                BexGasLedgerCapability ledger);
     }
 }

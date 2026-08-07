@@ -1,24 +1,25 @@
 package blue.coordination.processor;
 
-import blue.language.Blue;
 import blue.language.model.Node;
-import blue.language.processor.CoordinationProcessHeaderBridge;
-import blue.language.utils.BlueIdCalculator;
-import blue.language.utils.BlueIds;
-import blue.repo.BlueRepository;
+import blue.language.identity.DirectBlueIdCalculator;
+import blue.language.identity.BlueIds;
+import blue.language.mapping.BlueMapper;
 
 /**
  * Compares Blue values by semantic identity rather than serialized
  * representation.
  *
  * <p>Reference-only nodes keep their declared identity. Equality completes
- * materialized values through Language, while exact event/checkpoint identity
- * hashes Language's canonical exact representation without recursively
- * opening opaque header references. Each comparison owns and closes its
- * Language facade, so context-free matching retains no thread-local registry
- * or cache state.</p>
+ * materialized values through Language's current mapping and identity APIs,
+ * while exact event/checkpoint identity hashes Language's canonical exact
+ * representation without recursively opening opaque header references.</p>
  */
 final class BlueSemanticIdentity {
+    private static final BlueMapper REPOSITORY_MAPPER =
+            BlueMapper.builder()
+                    .scanPackage("blue.repo")
+                    .build();
+
     private BlueSemanticIdentity() {
     }
 
@@ -31,47 +32,27 @@ final class BlueSemanticIdentity {
             return referenceIdentity(left).equals(
                     referenceIdentity(right));
         }
-        BlueRepository repository = BlueRepository.latest();
-        try (Blue blue = repository.configure(new Blue())) {
-            if (left.isReferenceOnly()) {
-                return referenceMatches(
-                        referenceIdentity(left),
-                        right,
-                        blue);
-            }
-            if (right.isReferenceOnly()) {
-                return referenceMatches(
-                        referenceIdentity(right),
-                        left,
-                        blue);
-            }
-            Node leftExact = exactCopy(left);
-            Node rightExact = exactCopy(right);
-            Class<?> leftClass =
-                    semanticClass(leftExact, blue);
-            Class<?> rightClass =
-                    semanticClass(rightExact, blue);
-            /*
-             * A typed parent can legitimately omit the type on one of its
-             * authored children. Resolution then materializes that inherited
-             * child type. Compare the two values with the class known by
-             * either representation, instead of treating the untyped
-             * authored child as an unrelated standalone map.
-             */
-            return semanticIdentity(
-                    leftExact,
-                    blue,
-                    leftClass != null
-                            ? leftClass
-                            : rightClass)
-                    .equals(
-                            semanticIdentity(
-                                    rightExact,
-                                    blue,
-                                    rightClass != null
-                                            ? rightClass
-                                            : leftClass));
+        if (left.isReferenceOnly()) {
+            return referenceMatches(referenceIdentity(left), right);
         }
+        if (right.isReferenceOnly()) {
+            return referenceMatches(referenceIdentity(right), left);
+        }
+        Node leftExact = exactCopy(left);
+        Node rightExact = exactCopy(right);
+        Class<?> leftClass = semanticClass(leftExact);
+        Class<?> rightClass = semanticClass(rightExact);
+        /*
+         * A typed parent can legitimately omit the type on one of its
+         * authored children. Mapping the two values through the class known
+         * by either representation preserves that authored semantic shape.
+         */
+        return semanticIdentity(
+                leftExact,
+                leftClass != null ? leftClass : rightClass)
+                .equals(semanticIdentity(
+                        rightExact,
+                        rightClass != null ? rightClass : leftClass));
     }
 
     static String identity(Node node) {
@@ -84,38 +65,20 @@ final class BlueSemanticIdentity {
                     node.getBlueId(),
                     "Exact identity reference");
         }
-        return BlueIdCalculator.calculateBlueId(
+        return DirectBlueIdCalculator.calculateBlueId(
                 CoordinationProcessHeaderBridge
                         .canonicalExactCopy(node));
     }
 
     private static String semanticIdentity(
-            Node node,
-            Blue blue) {
-        if (node.isReferenceOnly()) {
-            return referenceIdentity(node);
-        }
-        Node exact = exactCopy(node);
-        return semanticIdentity(
-                exact,
-                blue,
-                semanticClass(exact, blue));
-    }
-
-    private static String semanticIdentity(
             Node exact,
-            Blue blue,
             Class<?> semanticClass) {
-        return blue.calculateSemanticBlueId(
-                normalize(
-                        exact,
-                        blue,
-                        semanticClass));
+        return DirectBlueIdCalculator.calculateBlueId(
+                normalize(exact, semanticClass));
     }
 
     private static Node normalize(
             Node exact,
-            Blue blue,
             Class<?> semanticClass) {
         if (semanticClass != null) {
             /*
@@ -126,8 +89,8 @@ final class BlueSemanticIdentity {
              * canonical exact copy above prevents a resolved nominal type
              * from becoming an illegal mixed BlueId node.
              */
-            exact = blue.objectToNode(
-                    blue.nodeToObject(
+            exact = REPOSITORY_MAPPER.toNode(
+                    REPOSITORY_MAPPER.fromNode(
                             exact, semanticClass));
         }
         return exact;
@@ -135,19 +98,12 @@ final class BlueSemanticIdentity {
 
     private static boolean referenceMatches(
             String referenceIdentity,
-            Node materialized,
-            Blue blue) {
+            Node materialized) {
         Node exact = exactCopy(materialized);
-        Class<?> semanticClass =
-                semanticClass(exact, blue);
-        Node normalized =
-                normalize(
-                        exact,
-                        blue,
-                        semanticClass);
+        Class<?> semanticClass = semanticClass(exact);
+        Node normalized = normalize(exact, semanticClass);
         if (referenceIdentity.equals(
-                blue.calculateSemanticBlueId(
-                        normalized))) {
+                DirectBlueIdCalculator.calculateBlueId(normalized))) {
             return true;
         }
         if (semanticClass == null) {
@@ -164,14 +120,12 @@ final class BlueSemanticIdentity {
                 normalized.clone()
                         .type((Node) null);
         return referenceIdentity.equals(
-                blue.calculateSemanticBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         inferredChildProjection));
     }
 
-    private static Class<?> semanticClass(
-            Node exact,
-            Blue blue) {
-        return blue.determineClass(exact)
+    private static Class<?> semanticClass(Node exact) {
+        return REPOSITORY_MAPPER.mappedClass(exact)
                 .filter(candidate ->
                         !Object.class.equals(candidate)
                                 && !Node.class.equals(candidate))

@@ -1,18 +1,20 @@
 package blue.coordination.processor;
 
 import blue.language.model.Node;
-import blue.language.processor.CoordinationProcessHeaderBridge;
-import blue.language.processor.CoordinationSubscriptionProjectionBridge;
+import blue.coordination.processor.subscription.CoordinationSubscriptionProjectionBridge;
+import blue.coordination.processor.fragmentation.EffectiveCutCatalogReader;
+import blue.language.processor.BlueContracts;
 import blue.language.processor.DocumentProcessor;
+import blue.language.processor.EffectiveFragmentationCatalog;
+import blue.language.processor.EmbeddedScopePlanView;
 import blue.language.processor.ExternalOrderKey;
+import blue.language.processor.PlatformCommitCompanion;
+import blue.language.processor.PlatformProcessingResult;
 import blue.language.processor.SubscriptionDelta;
 import blue.language.processor.registry.RuntimeBlueIds;
 import blue.language.processor.util.ProcessorContractConstants;
 import blue.language.processor.util.PointerUtils;
-import blue.language.utils.JsonPointer;
-import blue.repo.coordination.AllTimelinesChannel;
-import blue.repo.coordination.CompositeTimelineChannel;
-import blue.repo.coordination.TimelineChannel;
+import blue.language.model.wire.JsonPointer;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -37,19 +39,14 @@ public final class CoordinationSubscriptionProjector {
     private final DocumentProcessor processor;
     private final CoordinationSubscriptionProjectionBridge bridge;
 
-    /**
-     * Creates a projector bound to one configured Coordination processor.
-     *
-     * @param processor configured processor
-     */
     CoordinationSubscriptionProjector(
-            DocumentProcessor processor) {
+            DocumentProcessor processor,
+            BlueContracts contracts) {
         this.processor =
                 Objects.requireNonNull(
                         processor, "processor");
-        this.bridge =
-                new CoordinationSubscriptionProjectionBridge(
-                        this.processor);
+        this.bridge = new CoordinationSubscriptionProjectionBridge(
+                Objects.requireNonNull(contracts, "contracts"));
     }
 
     /**
@@ -97,6 +94,10 @@ public final class CoordinationSubscriptionProjector {
                 activationFrontier);
         preflightDirectRootSubscriptions(
                 root, quotas);
+        EffectiveFragmentationCatalog catalog =
+                bridge.effectiveFragmentationCatalog(root);
+        Map<String, ScopeProvenance> provenanceByScope =
+                provenanceByScope(catalog);
         CoordinationSubscriptionProjectionBridge.Projection
                 projection =
                 bridge.projectCurrent(
@@ -108,14 +109,16 @@ public final class CoordinationSubscriptionProjector {
                 quotas,
                 CoordinationHostQuotaSession
                         .PROJECT_CURRENT_SUBSCRIPTIONS,
-                false);
+                        false);
+        requireCatalogBinding(catalog, projection);
         List<CoordinationSubscriptionOccurrence> occurrences =
                 occurrences(
                         projection,
                         Collections
                                 .<String,
                                         CoordinationSubscriptionOccurrence>
-                                emptyMap());
+                                emptyMap(),
+                        provenanceByScope);
         return new CoordinationSubscriptionSnapshot(
                 projection.languageRuntimeRegistryIdentity(),
                 coordinationRuntimeRegistryIdentity(),
@@ -181,6 +184,84 @@ public final class CoordinationSubscriptionProjector {
     }
 
     /**
+     * Applies the exact Language-owned subscription transition from a
+     * successful platform commit.
+     *
+     * <p>The companion was produced and validated in the same Contracts
+     * invocation as the semantic Root result. This overload therefore does
+     * not re-run subscription semantics over the published output Root. It
+     * verifies the companion against the retained snapshot, applies its exact
+     * interval transition, and derives only Coordination's persistence
+     * metadata for the resulting active surface.</p>
+     *
+     * @param previous exact prior projection
+     * @param platformResult exact semantic result and companion pair returned
+     *                       by the committing Contracts invocation
+     * @return immutable exact delta and resulting snapshot
+     */
+    public CoordinationSubscriptionUpdate applyPlatformCommit(
+            CoordinationSubscriptionSnapshot previous,
+            PlatformProcessingResult platformResult,
+            Node exactResultingRoot) {
+        CoordinationSubscriptionSnapshot prior =
+                Objects.requireNonNull(previous, "previous");
+        PlatformProcessingResult platform =
+                Objects.requireNonNull(platformResult, "platformResult");
+        PlatformCommitCompanion committed = platform.commitCompanion();
+        if (!platform.processResult().commits()
+                || !committed.commitsRootAndOutbox()) {
+            throw new IllegalArgumentException(
+                    "Platform result must commit Root and outbox");
+        }
+        requireBinding(prior);
+        if (!prior.rootBlueId().equals(
+                        committed.expectedRootBlueId())
+                || prior.rootRevision()
+                        != committed.expectedRootRevision()) {
+            throw new IllegalArgumentException(
+                    "Platform commit companion does not bind the previous "
+                            + "subscription snapshot");
+        }
+
+        Node newRoot = materializeRoot(
+                exactResultingRoot,
+                "exactResultingRoot");
+        long newRootRevision = committed.resultingRootRevision();
+        ExternalOrderKey order = committed.eventOrderKey();
+        requireUpdateArguments(
+                prior,
+                newRootRevision,
+                order);
+        CoordinationHostQuotaSession quotas =
+                CoordinationHostQuotaSession.disabled();
+        preflightDirectRootSubscriptions(newRoot, quotas);
+        EffectiveFragmentationCatalog catalog =
+                bridge.effectiveFragmentationCatalog(newRoot);
+        Map<String, ScopeProvenance> provenanceByScope =
+                provenanceByScope(catalog);
+        List<SubscriptionDelta.Entry> active =
+                activeEntries(prior);
+        Map<String, CoordinationSubscriptionOccurrence>
+                previousByInternalKey =
+                indexByInternalKey(prior.occurrences());
+        CoordinationSubscriptionProjectionBridge.Projection projection =
+                bridge.projectUpdate(
+                        active,
+                        platform,
+                        newRoot,
+                        catalog);
+        return finalizeUpdate(
+                prior,
+                newRootRevision,
+                order,
+                quotas,
+                catalog,
+                provenanceByScope,
+                previousByInternalKey,
+                projection);
+    }
+
+    /**
      * Projects an incremental transition over exact changed branches.
      *
      * @param previous exact prior projection, including rehydrated values
@@ -237,38 +318,23 @@ public final class CoordinationSubscriptionProjector {
                         transitionOrderKey,
                         "transitionOrderKey");
         requireBinding(prior);
-        if (newRootRevision
-                <= prior.rootRevision()) {
-            throw new IllegalArgumentException(
-                    "newRootRevision must be greater than "
-                            + "the previous revision");
-        }
-        if (order.compareTo(
-                prior.activationFrontier()) <= 0) {
-            throw new IllegalArgumentException(
-                    "transitionOrderKey must advance beyond "
-                            + "the previous frontier");
-        }
+        requireUpdateArguments(
+                prior,
+                newRootRevision,
+                order);
         Set<String> exactChanges =
                 canonicalChangedPaths(changedPaths);
         preflightDirectRootSubscriptions(
                 newRoot, quotas);
+        EffectiveFragmentationCatalog catalog =
+                bridge.effectiveFragmentationCatalog(newRoot);
+        Map<String, ScopeProvenance> provenanceByScope =
+                provenanceByScope(catalog);
         List<SubscriptionDelta.Entry> active =
-                new ArrayList<SubscriptionDelta.Entry>();
+                activeEntries(prior);
         Map<String, CoordinationSubscriptionOccurrence>
                 previousByInternalKey =
-                new LinkedHashMap<
-                        String,
-                        CoordinationSubscriptionOccurrence>();
-        for (CoordinationSubscriptionOccurrence occurrence
-                : prior.occurrences()) {
-            SubscriptionDelta.Entry entry =
-                    occurrence.toSubscriptionDeltaEntry();
-            active.add(entry);
-            previousByInternalKey.put(
-                    internalKey(entry),
-                    occurrence);
-        }
+                indexByInternalKey(prior.occurrences());
 
         CoordinationSubscriptionProjectionBridge.Projection
                 projection =
@@ -280,10 +346,30 @@ public final class CoordinationSubscriptionProjector {
                         order,
                         prior.processEmbeddedRoutes(),
                         prior.prunedScopePaths());
+        return finalizeUpdate(
+                prior,
+                newRootRevision,
+                order,
+                quotas,
+                catalog,
+                provenanceByScope,
+                previousByInternalKey,
+                projection);
+    }
+
+    private CoordinationSubscriptionUpdate finalizeUpdate(
+            CoordinationSubscriptionSnapshot prior,
+            long newRootRevision,
+            ExternalOrderKey order,
+            CoordinationHostQuotaSession quotas,
+            EffectiveFragmentationCatalog catalog,
+            Map<String, ScopeProvenance> provenanceByScope,
+            Map<String, CoordinationSubscriptionOccurrence>
+                    previousByInternalKey,
+            CoordinationSubscriptionProjectionBridge.Projection
+                    projection) {
         if (!prior.languageRuntimeRegistryIdentity()
-                .equals(
-                        projection
-                                .languageRuntimeRegistryIdentity())) {
+                .equals(projection.languageRuntimeRegistryIdentity())) {
             throw new IllegalArgumentException(
                     "Language runtime registry identity changed "
                             + "during subscription projection");
@@ -294,15 +380,16 @@ public final class CoordinationSubscriptionProjector {
                 CoordinationHostQuotaSession
                         .PROJECT_UPDATED_SUBSCRIPTIONS,
                 true);
+        requireCatalogBinding(catalog, projection);
 
         List<CoordinationSubscriptionOccurrence> resulting =
                 occurrences(
                         projection,
-                        previousByInternalKey);
+                        previousByInternalKey,
+                        provenanceByScope);
         CoordinationSubscriptionSnapshot snapshot =
                 new CoordinationSubscriptionSnapshot(
-                        projection
-                                .languageRuntimeRegistryIdentity(),
+                        projection.languageRuntimeRegistryIdentity(),
                         coordinationRuntimeRegistryIdentity(),
                         projection.rootBlueId(),
                         newRootRevision,
@@ -315,26 +402,25 @@ public final class CoordinationSubscriptionProjector {
                 resultingByInternalKey =
                 indexByInternalKey(resulting);
         List<CoordinationSubscriptionOccurrence> added =
-                new ArrayList<
-                        CoordinationSubscriptionOccurrence>();
+                new ArrayList<CoordinationSubscriptionOccurrence>();
         for (SubscriptionDelta.Entry entry
                 : projection.delta().added()) {
             CoordinationSubscriptionOccurrence occurrence =
-                    resultingByInternalKey.get(
-                            internalKey(entry));
+                    resultingByInternalKey.get(internalKey(entry));
             if (occurrence == null) {
                 throw new IllegalStateException(
                         "Added occurrence is absent from "
                                 + "the resulting snapshot");
             }
-            added.add(occurrence);
+            added.add(
+                    occurrence.withScopeAndInterval(
+                            occurrence.scopeBlueId(),
+                            entry));
         }
 
         List<CoordinationSubscriptionOccurrence> retired =
-                new ArrayList<
-                        CoordinationSubscriptionOccurrence>();
-        Set<String> changed =
-                new LinkedHashSet<String>();
+                new ArrayList<CoordinationSubscriptionOccurrence>();
+        Set<String> changed = new LinkedHashSet<String>();
         for (SubscriptionDelta.Entry entry
                 : projection.delta().removed()) {
             String key = internalKey(entry);
@@ -357,14 +443,12 @@ public final class CoordinationSubscriptionProjector {
         }
 
         List<CoordinationSubscriptionOccurrence> unchanged =
-                new ArrayList<
-                        CoordinationSubscriptionOccurrence>();
+                new ArrayList<CoordinationSubscriptionOccurrence>();
         for (CoordinationSubscriptionOccurrence occurrence
                 : resulting) {
             if (!changed.contains(
                     internalKey(
-                            occurrence
-                                    .toSubscriptionDeltaEntry()))) {
+                            occurrence.toSubscriptionDeltaEntry()))) {
                 unchanged.add(occurrence);
             }
         }
@@ -373,7 +457,35 @@ public final class CoordinationSubscriptionProjector {
                 added,
                 retired,
                 unchanged,
-                order);
+                order,
+                catalog);
+    }
+
+    private static void requireUpdateArguments(
+            CoordinationSubscriptionSnapshot prior,
+            long newRootRevision,
+            ExternalOrderKey order) {
+        if (newRootRevision <= prior.rootRevision()) {
+            throw new IllegalArgumentException(
+                    "newRootRevision must be greater than "
+                            + "the previous revision");
+        }
+        if (order.compareTo(prior.activationFrontier()) <= 0) {
+            throw new IllegalArgumentException(
+                    "transitionOrderKey must advance beyond "
+                            + "the previous frontier");
+        }
+    }
+
+    private static List<SubscriptionDelta.Entry> activeEntries(
+            CoordinationSubscriptionSnapshot snapshot) {
+        List<SubscriptionDelta.Entry> active =
+                new ArrayList<SubscriptionDelta.Entry>();
+        for (CoordinationSubscriptionOccurrence occurrence
+                : snapshot.occurrences()) {
+            active.add(occurrence.toSubscriptionDeltaEntry());
+        }
+        return active;
     }
 
     private Node materializeRoot(
@@ -385,12 +497,7 @@ public final class CoordinationSubscriptionProjector {
         if (!root.isReferenceOnly()) {
             return root;
         }
-        return CoordinationProcessHeaderBridge
-                .canonicalExactCopy(
-                        CoordinationProcessHeaderBridge
-                                .materializeVerifiedExactReference(
-                                        processor,
-                                        root));
+        return bridge.materializeExactRoot(root);
     }
 
     /*
@@ -422,10 +529,11 @@ public final class CoordinationSubscriptionProjector {
         }
         Set<String> subscriptionTypes =
                 new LinkedHashSet<String>();
-        subscriptionTypes.add(TimelineChannel.blueId());
-        subscriptionTypes.add(AllTimelinesChannel.blueId());
-        subscriptionTypes.add(
-                CompositeTimelineChannel.blueId());
+        CoordinationCurrentRepositoryIdentities current =
+                CoordinationCurrentRepositoryIdentities.current();
+        subscriptionTypes.add(current.timelineChannelBlueId());
+        subscriptionTypes.add(current.allTimelinesChannelBlueId());
+        subscriptionTypes.add(current.compositeTimelineChannelBlueId());
         subscriptionTypes.addAll(
                 CoordinationRuntimeRegistrations
                         .timelineSubtypeBlueIds(processor));
@@ -510,7 +618,8 @@ public final class CoordinationSubscriptionProjector {
             CoordinationSubscriptionProjectionBridge.Projection
                     projection,
             Map<String, CoordinationSubscriptionOccurrence>
-                    previous) {
+                    previous,
+            Map<String, ScopeProvenance> provenanceByScope) {
         List<CoordinationSubscriptionOccurrence> result =
                 new ArrayList<
                         CoordinationSubscriptionOccurrence>();
@@ -521,6 +630,14 @@ public final class CoordinationSubscriptionProjector {
                     Objects.requireNonNull(
                             projection.scopeBlueIds().get(key),
                             "scopeBlueId");
+            ScopeProvenance provenance =
+                    provenanceByScope.get(entry.scopePath());
+            if (provenance == null) {
+                throw new IllegalStateException(
+                        "Subscription projection selected a scope absent "
+                                + "from the structured fragmentation "
+                                + "catalog: " + entry.scopePath());
+            }
             CoordinationSubscriptionProjectionBridge
                     .HeaderProjection header =
                     projection.headers().get(key);
@@ -529,6 +646,11 @@ public final class CoordinationSubscriptionProjector {
                         new CoordinationSubscriptionOccurrence(
                                 entry.scopePath(),
                                 scopeBlueId,
+                                provenance.declaringScopePath,
+                                provenance.origin,
+                                provenance.explicitDeclarationPath,
+                                provenance.collectionDeclarationPath,
+                                provenance.collectionMemberKey,
                                 entry.channelKey(),
                                 entry
                                         .sourceContributionNodeBlueIds(),
@@ -551,6 +673,12 @@ public final class CoordinationSubscriptionProjector {
                         "Language retained an occurrence without "
                                 + "prior public header evidence");
             }
+            if (!provenance.matches(retained)) {
+                throw new IllegalStateException(
+                        "Language retained an occurrence after its "
+                                + "structured declaration provenance "
+                                + "changed at " + entry.scopePath());
+            }
             result.add(
                     retained.withScopeAndInterval(
                             scopeBlueId, entry));
@@ -560,6 +688,66 @@ public final class CoordinationSubscriptionProjector {
                 CoordinationSubscriptionOccurrence
                         .CANONICAL_ORDER);
         return Collections.unmodifiableList(result);
+    }
+
+    private static Map<String, ScopeProvenance> provenanceByScope(
+            EffectiveFragmentationCatalog catalog) {
+        Map<String, ScopeProvenance> result =
+                new LinkedHashMap<String, ScopeProvenance>();
+        boolean rootPlanPresent = false;
+        for (EffectiveCutCatalogReader.ScopePlan scopePlan
+                : EffectiveCutCatalogReader.read(catalog)) {
+            if ("/".equals(scopePlan.scopePath())) {
+                rootPlanPresent = true;
+                result.put(
+                        "/",
+                        ScopeProvenance.root());
+            }
+            for (EffectiveCutCatalogReader.EmbeddedOccurrence occurrence
+                    : scopePlan.occurrences()) {
+                CoordinationSubscriptionOccurrence.Origin origin =
+                        occurrence.origin()
+                                        == EmbeddedScopePlanView
+                                                .Origin.EXPLICIT
+                                ? CoordinationSubscriptionOccurrence
+                                        .Origin.EXPLICIT
+                                : CoordinationSubscriptionOccurrence
+                                        .Origin.COLLECTION_MEMBER;
+                ScopeProvenance provenance =
+                        new ScopeProvenance(
+                                occurrence.declaringScopePath(),
+                                origin,
+                                occurrence.explicitDeclarationPath(),
+                                occurrence.collectionDeclarationPath(),
+                                occurrence.collectionMemberKey());
+                if (result.put(
+                        occurrence.concretePath(),
+                        provenance) != null) {
+                    throw new IllegalArgumentException(
+                            "Structured fragmentation catalog declares "
+                                    + "scope more than once: "
+                                    + occurrence.concretePath());
+                }
+            }
+        }
+        if (!rootPlanPresent) {
+            throw new IllegalArgumentException(
+                    "Structured fragmentation catalog has no Root scope "
+                            + "plan");
+        }
+        return Collections.unmodifiableMap(result);
+    }
+
+    private static void requireCatalogBinding(
+            EffectiveFragmentationCatalog catalog,
+            CoordinationSubscriptionProjectionBridge.Projection
+                    projection) {
+        if (!catalog.rootBlueId().equals(
+                projection.rootBlueId())) {
+            throw new IllegalStateException(
+                    "Subscription projection Root identity disagrees with "
+                            + "the structured fragmentation catalog");
+        }
     }
 
     private void requireBinding(
@@ -638,5 +826,51 @@ public final class CoordinationSubscriptionProjector {
             SubscriptionDelta.Entry entry) {
         return entry.scopePath()
                 + "\u001f" + entry.channelKey();
+    }
+
+    private static final class ScopeProvenance {
+        private final String declaringScopePath;
+        private final CoordinationSubscriptionOccurrence.Origin origin;
+        private final String explicitDeclarationPath;
+        private final String collectionDeclarationPath;
+        private final String collectionMemberKey;
+
+        private ScopeProvenance(
+                String declaringScopePath,
+                CoordinationSubscriptionOccurrence.Origin origin,
+                String explicitDeclarationPath,
+                String collectionDeclarationPath,
+                String collectionMemberKey) {
+            this.declaringScopePath = declaringScopePath;
+            this.origin = origin;
+            this.explicitDeclarationPath = explicitDeclarationPath;
+            this.collectionDeclarationPath = collectionDeclarationPath;
+            this.collectionMemberKey = collectionMemberKey;
+        }
+
+        private static ScopeProvenance root() {
+            return new ScopeProvenance(
+                    "/",
+                    CoordinationSubscriptionOccurrence.Origin.ROOT,
+                    null,
+                    null,
+                    null);
+        }
+
+        private boolean matches(
+                CoordinationSubscriptionOccurrence occurrence) {
+            return declaringScopePath.equals(
+                            occurrence.declaringScopePath())
+                    && origin == occurrence.origin()
+                    && Objects.equals(
+                            explicitDeclarationPath,
+                            occurrence.explicitDeclarationPath())
+                    && Objects.equals(
+                            collectionDeclarationPath,
+                            occurrence.collectionDeclarationPath())
+                    && Objects.equals(
+                            collectionMemberKey,
+                            occurrence.collectionMemberKey());
+        }
     }
 }

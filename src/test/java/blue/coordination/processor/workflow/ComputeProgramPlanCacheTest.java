@@ -27,7 +27,7 @@ class ComputeProgramPlanCacheTest {
 
     @Test
     void shouldReusePublishedPlanForEquivalentFrozenIdentityAfterInitialMiss() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeProgramPlanCache cache = new ComputeProgramPlanCache(8, 1_000_000L, metrics);
         FrozenNode rawStep = step("same");
@@ -35,7 +35,7 @@ class ComputeProgramPlanCacheTest {
         AtomicInteger builds = new AtomicInteger();
         ComputeProgramPlanCache.Key firstKey = key(rawStep, null, null);
 
-        // When
+        // when
         ComputeProgramPlanCache.Lookup first = cache.lookup(firstKey, () -> {
             builds.incrementAndGet();
             return expected;
@@ -50,7 +50,7 @@ class ComputeProgramPlanCacheTest {
                     throw new AssertionError("warm lookup rebuilt the plan");
                 });
 
-        // Then
+        // then
         assertFalse(first.cacheHit());
         assertTrue(second.cacheHit());
         assertSame(expected, second.plan());
@@ -61,13 +61,13 @@ class ComputeProgramPlanCacheTest {
         assertEquals(1, cache.size());
         assertTrue(cache.weightBytes() > 0L);
         assertEquals(cache.weightBytes(), metrics.computePlanWeightBytes());
-        assertEquals(expected.sourceIdentity(),
-                blue.bex.compile.BexCompiledProgramKey.from(expected.source()));
+        assertEquals(BexProgramSource.Kind.FULL_PROGRAM,
+                expected.source().kind());
     }
 
     @Test
     void shouldKeepChangedStepDefinitionEntryAndNormalizationKeysDistinct() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeProgramPlanCache cache = new ComputeProgramPlanCache(8, 1_000_000L, metrics);
         FrozenNode baseStep = step("base");
@@ -76,7 +76,7 @@ class ComputeProgramPlanCacheTest {
 
         publish(cache, key(baseStep, definitionA, "run"), plan(baseStep, definitionA));
 
-        // When
+        // when
         ComputeProgramPlanCache.Lookup changedStep =
                 cache.lookup(key(step("changed"), definitionA, "run"),
                         () -> plan(step("changed"), definitionA));
@@ -91,7 +91,7 @@ class ComputeProgramPlanCacheTest {
         ComputeProgramPlanCache.Lookup changedVersion =
                 cache.lookup(otherVersion, () -> plan(baseStep, definitionA));
 
-        // Then
+        // then
         assertFalse(changedStep.cacheHit());
         assertFalse(changedDefinition.cacheHit());
         assertFalse(changedEntry.cacheHit());
@@ -102,7 +102,7 @@ class ComputeProgramPlanCacheTest {
 
     @Test
     void shouldEvictLeastRecentlyUsedPlansAndTrackLiveWeight() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeProgramPlanCache cache = new ComputeProgramPlanCache(2, Long.MAX_VALUE, metrics);
         FrozenNode rawA = step("A");
@@ -111,7 +111,7 @@ class ComputeProgramPlanCacheTest {
         ComputeProgramPlanCache.Key keyA = key(rawA, null, null);
         ComputeProgramPlanCache.Key keyB = key(rawB, null, null);
 
-        // When
+        // when
         publish(cache, keyA, plan(rawA, null));
         publish(cache, keyB, plan(rawB, null));
         boolean retainedA = cache.lookup(keyA,
@@ -120,7 +120,7 @@ class ComputeProgramPlanCacheTest {
                 }).cacheHit();
         publish(cache, key(rawC, null, null), plan(rawC, null));
 
-        // Then
+        // then
         assertTrue(retainedA);
         assertEquals(2, cache.size());
         assertEquals(1L, metrics.computePlanCacheEvictions());
@@ -131,7 +131,7 @@ class ComputeProgramPlanCacheTest {
 
     @Test
     void shouldClearAllWeightAndRejectCandidatesCreatedBeforeClear() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeProgramPlanCache cache = new ComputeProgramPlanCache(4, 1_000_000L, metrics);
         FrozenNode raw = step("clear");
@@ -144,11 +144,11 @@ class ComputeProgramPlanCacheTest {
                 key(staleRaw, null, null),
                 () -> plan(staleRaw, null));
 
-        // When
+        // when
         cache.clear();
         cache.publish(staleCandidate);
 
-        // Then
+        // then
         assertEquals(0, cache.size());
         assertEquals(0L, cache.weightBytes());
         assertEquals(0L, metrics.computePlanWeightBytes());
@@ -156,7 +156,7 @@ class ComputeProgramPlanCacheTest {
 
     @Test
     void shouldCloseCacheReleaseWeightAndPreventRepopulation() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeProgramPlanCache cache = new ComputeProgramPlanCache(4, 1_000_000L, metrics);
         FrozenNode raw = step("close");
@@ -166,12 +166,12 @@ class ComputeProgramPlanCacheTest {
         cache.publish(afterClear);
         int sizeBeforeClose = cache.size();
 
-        // When
+        // when
         cache.close();
         ComputeProgramPlanCache.Lookup afterClose = cache.lookup(key, () -> plan);
         cache.publish(afterClose);
 
-        // Then
+        // then
         assertEquals(1, sizeBeforeClose);
         assertTrue(cache.isClosed());
         assertEquals(0, cache.size());
@@ -181,7 +181,7 @@ class ComputeProgramPlanCacheTest {
 
     @Test
     void shouldDeduplicateSharedFrozenSubgraphsWhenEstimatingRetainedWeight() {
-        // Given
+        // given
         FrozenNode sharedChild = FrozenNode.fromResolvedNode(new Node().value("shared"));
         FrozenNode shared = FrozenNode.empty()
                 .withProperty("left", sharedChild)
@@ -190,18 +190,18 @@ class ComputeProgramPlanCacheTest {
                 .withProperty("left", FrozenNode.fromResolvedNode(new Node().value("shared")))
                 .withProperty("right", FrozenNode.fromResolvedNode(new Node().value("shared")));
 
-        // When
+        // when
         long sharedWeight = plan(shared, null).approximateWeightBytes();
         long duplicateWeight = plan(duplicate, null).approximateWeightBytes();
 
-        // Then
+        // then
         assertSame(shared.getProperties().get("left"), shared.getProperties().get("right"));
         assertTrue(sharedWeight < duplicateWeight);
     }
 
     @Test
     void shouldPreserveExactDefinitionIdentityAndMetadataDuringNormalization() {
-        // Given
+        // given
         FrozenNode exactDefinition =
                 FrozenNode.fromNode(
                         new Node()
@@ -222,11 +222,11 @@ class ComputeProgramPlanCacheTest {
                 new ComputeProgramNormalizer();
         String exactBlueId = exactDefinition.blueId();
 
-        // When
+        // when
         FrozenNode normalized =
                 normalizer.definition(exactDefinition);
 
-        // Then
+        // then
         assertSame(exactDefinition, normalized);
         assertEquals(exactBlueId, normalized.blueId());
         assertEquals(
@@ -242,10 +242,16 @@ class ComputeProgramPlanCacheTest {
 
     @Test
     void shouldProjectOnlyExecutableDefinitionFieldsForBex() {
-        // Given
+        // given
         Node containerType =
                 new Node().name(
                         "resolved container type");
+        Node expandedTextType =
+                new Node()
+                        .blueId(
+                                "GX7CFUmSDrE2MzptunLCCdZwnuwwrenRQqEnHL4x3uoC")
+                        .description(
+                                "resolved provider metadata");
         FrozenNode exactDefinition =
                 FrozenNode.fromResolvedNode(
                         new Node()
@@ -257,6 +263,8 @@ class ComputeProgramPlanCacheTest {
                                                 .properties(
                                                         "kind",
                                                         new Node()
+                                                                .type(
+                                                                        expandedTextType)
                                                                 .value(
                                                                         "projected")))
                                 .properties(
@@ -274,12 +282,12 @@ class ComputeProgramPlanCacheTest {
         ComputeProgramNormalizer normalizer =
                 new ComputeProgramNormalizer();
 
-        // When
+        // when
         FrozenNode source =
                 normalizer.definitionSource(
                         exactDefinition);
 
-        // Then
+        // then
         assertSame(
                 exactDefinition,
                 normalizer.definition(
@@ -292,6 +300,16 @@ class ComputeProgramPlanCacheTest {
                 source.property("constants")
                         .property("kind")
                         .getValue());
+        assertTrue(
+                source.property("constants")
+                        .property("kind")
+                        .getType()
+                        .isReferenceOnly());
+        assertNull(
+                source.property("constants")
+                        .property("kind")
+                        .getType()
+                        .getDescription());
         assertNull(
                 source.property("constants")
                         .getType());
@@ -307,13 +325,13 @@ class ComputeProgramPlanCacheTest {
 
     @Test
     void shouldNeverPublishFailedBuildOrReturnRetryAsHit() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeProgramPlanCache cache = new ComputeProgramPlanCache(4, 1_000_000L, metrics);
         FrozenNode raw = step("malformed");
         ComputeProgramPlanCache.Key key = key(raw, null, null);
 
-        // When
+        // when
         IllegalStateException failure = assertThrows(IllegalStateException.class,
                 () -> cache.lookup(key, () -> {
                     throw new IllegalStateException("malformed");
@@ -325,7 +343,7 @@ class ComputeProgramPlanCacheTest {
         boolean retryHit = retry.cacheHit();
         cache.publish(retry);
 
-        // Then
+        // then
         assertEquals("malformed", failure.getMessage());
         assertEquals(0, sizeAfterFailure);
         assertFalse(retryHit);
@@ -336,7 +354,7 @@ class ComputeProgramPlanCacheTest {
 
     @Test
     void shouldServeConcurrentWarmLookupsWithoutRebuilding() throws Exception {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeProgramPlanCache cache = new ComputeProgramPlanCache(4, 1_000_000L, metrics);
         FrozenNode raw = step("concurrent");
@@ -348,7 +366,7 @@ class ComputeProgramPlanCacheTest {
         ExecutorService executor = Executors.newFixedThreadPool(threads);
         List<Future<Void>> futures = new ArrayList<Future<Void>>();
 
-        // When
+        // when
         try {
             for (int i = 0; i < threads; i++) {
                 futures.add(executor.submit(new Callable<Void>() {
@@ -372,7 +390,7 @@ class ComputeProgramPlanCacheTest {
             executor.shutdownNow();
         }
 
-        // Then
+        // then
         assertEquals((long) threads * lookupsPerThread, metrics.computePlanCacheHits());
         assertEquals(1L, metrics.computePlanCacheMisses());
         assertEquals(1L, metrics.computePlansBuilt());

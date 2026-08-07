@@ -18,7 +18,10 @@ import java.util.List;
  * executor and any static Update Document template are selected only after the
  * runner has admitted that exact step's portable gas charges. Published step
  * plans are immutable and may then be reused safely by concurrent
- * executions.</p>
+ * executions. A slot hit requires both the selected PROCESS representation
+ * and its materialized exact step representation to match; semantic BlueId
+ * equivalence alone never transfers an invocation's exact node or static
+ * changeset into another representation.</p>
  */
 final class SequentialWorkflowPlan {
     private static final long PLAN_BASE_BYTES = 128L;
@@ -61,6 +64,84 @@ final class SequentialWorkflowPlan {
             int index,
             List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors,
             BexProcessingMetrics metrics) {
+        return planAdmittedStep(
+                step,
+                frozenStep(index),
+                index,
+                executors,
+                metrics);
+    }
+
+    synchronized PlannedStep planAdmittedStep(
+            SequentialWorkflowStep step,
+            FrozenNode exactStep,
+            int index,
+            List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors,
+            BexProcessingMetrics metrics) {
+        return planAdmittedStep(
+                step,
+                exactStep,
+                FrozenNodeUtil.property(exactStep, "changeset"),
+                index,
+                executors,
+                metrics);
+    }
+
+    synchronized PlannedStep planAdmittedStep(
+            SequentialWorkflowStep step,
+            FrozenNode exactStep,
+            FrozenNode exactChangeset,
+            int index,
+            List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors,
+            BexProcessingMetrics metrics) {
+        return planAdmittedStep(
+                step,
+                exactStep,
+                exactStep,
+                exactChangeset,
+                index,
+                executors,
+                metrics);
+    }
+
+    PlannedStep planAdmittedStep(
+            SequentialWorkflowStep step,
+            FrozenNode exactStep,
+            FrozenNode selectedStepRepresentation,
+            int index,
+            List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors,
+            BexProcessingMetrics metrics,
+            ExactChangesetFactory exactChangesetFactory) {
+        PlannedStep cached = reuseAdmittedStep(
+                step,
+                exactStep,
+                selectedStepRepresentation,
+                index);
+        if (cached != null) {
+            return cached;
+        }
+        FrozenNode exactChangeset = step instanceof UpdateDocument
+                && exactChangesetFactory != null
+                ? exactChangesetFactory.materialize()
+                : null;
+        return planAdmittedStep(
+                step,
+                exactStep,
+                selectedStepRepresentation,
+                exactChangeset,
+                index,
+                executors,
+                metrics);
+    }
+
+    private synchronized PlannedStep planAdmittedStep(
+            SequentialWorkflowStep step,
+            FrozenNode exactStep,
+            FrozenNode selectedStepRepresentation,
+            FrozenNode exactChangeset,
+            int index,
+            List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors,
+            BexProcessingMetrics metrics) {
         if (index < 0) {
             throw new IndexOutOfBoundsException(
                     "step index must not be negative");
@@ -68,12 +149,21 @@ final class SequentialWorkflowPlan {
         StepPlan cached = index < steps.length
                 ? steps[index]
                 : null;
-        if (cached != null && cached.matches(step)) {
-            return new PlannedStep(cached, false);
+        if (cached != null
+                && cached.matches(
+                        step,
+                        exactStep,
+                        selectedStepRepresentation)) {
+            return new PlannedStep(
+                    cached,
+                    exactStep,
+                    false);
         }
         StepPlan planned = planStep(
                 step,
-                frozenStep(index),
+                exactStep,
+                selectedStepRepresentation,
+                exactChangeset,
                 index,
                 executors,
                 metrics);
@@ -82,19 +172,85 @@ final class SequentialWorkflowPlan {
             approximateWeightBytes = saturatedAdd(
                     approximateWeightBytes,
                     estimateStepWeight(planned));
-            return new PlannedStep(planned, true);
+            return new PlannedStep(
+                    planned,
+                    exactStep,
+                    true);
         }
         /*
-         * A runtime-class mismatch cannot be shared under the structural cache
-         * key. Execute the exact fallback without replacing a plan that may be
-         * in use concurrently.
+         * A runtime-class or selected-representation mismatch cannot share an
+         * exact step/static plan. Execute the invocation-local fallback
+         * without replacing a plan that may be in use concurrently.
          */
-        return new PlannedStep(planned, false);
+        return new PlannedStep(
+                planned,
+                exactStep,
+                false);
+    }
+
+    private synchronized PlannedStep reuseAdmittedStep(
+            SequentialWorkflowStep step,
+            FrozenNode exactStep,
+            FrozenNode selectedStepRepresentation,
+            int index) {
+        if (index < 0) {
+            throw new IndexOutOfBoundsException(
+                    "step index must not be negative");
+        }
+        StepPlan cached = index < steps.length
+                ? steps[index]
+                : null;
+        if (cached == null
+                || !cached.matches(
+                        step,
+                        exactStep,
+                        selectedStepRepresentation)) {
+            return null;
+        }
+        return new PlannedStep(
+                cached,
+                exactStep,
+                false);
     }
 
     static StepPlan planStep(
             SequentialWorkflowStep step,
             FrozenNode frozenStep,
+            int index,
+            List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors,
+            BexProcessingMetrics metrics) {
+        return planStep(
+                step,
+                frozenStep,
+                frozenStep,
+                FrozenNodeUtil.property(frozenStep, "changeset"),
+                index,
+                executors,
+                metrics);
+    }
+
+    static StepPlan planStep(
+            SequentialWorkflowStep step,
+            FrozenNode frozenStep,
+            FrozenNode exactChangeset,
+            int index,
+            List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors,
+            BexProcessingMetrics metrics) {
+        return planStep(
+                step,
+                frozenStep,
+                frozenStep,
+                exactChangeset,
+                index,
+                executors,
+                metrics);
+    }
+
+    private static StepPlan planStep(
+            SequentialWorkflowStep step,
+            FrozenNode frozenStep,
+            FrozenNode selectedStepRepresentation,
+            FrozenNode exactChangeset,
             int index,
             List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors,
             BexProcessingMetrics metrics) {
@@ -114,9 +270,7 @@ final class SequentialWorkflowPlan {
         StaticUpdatePlan staticUpdatePlan = null;
         if (step instanceof UpdateDocument && frozenStep != null) {
             StaticUpdatePlan candidate = StaticUpdatePlan.compile(
-                    FrozenNodeUtil.property(
-                            frozenStep,
-                            "changeset"),
+                    exactChangeset,
                     metrics);
             if (candidate.valid()) {
                 staticUpdatePlan = candidate;
@@ -130,6 +284,7 @@ final class SequentialWorkflowPlan {
                 stepKey(frozenStep, index),
                 stepName(step),
                 frozenStep,
+                selectedStepRepresentation,
                 step != null ? step.getClass() : null,
                 selected,
                 staticUpdatePlan);
@@ -248,17 +403,24 @@ final class SequentialWorkflowPlan {
 
     static final class PlannedStep {
         private final StepPlan step;
+        private final FrozenNode exactStep;
         private final boolean published;
 
         private PlannedStep(
                 StepPlan step,
+                FrozenNode exactStep,
                 boolean published) {
             this.step = step;
+            this.exactStep = exactStep;
             this.published = published;
         }
 
         StepPlan step() {
             return step;
+        }
+
+        FrozenNode exactStep() {
+            return exactStep;
         }
 
         boolean published() {
@@ -271,6 +433,11 @@ final class SequentialWorkflowPlan {
         private final String key;
         private final String kind;
         private final FrozenNode frozenStep;
+        private final String frozenStepBlueId;
+        private final FrozenNode.ResolvedStructuralKey
+                frozenStepRepresentation;
+        private final FrozenNode.ResolvedStructuralKey
+                selectedStepRepresentation;
         private final Class<?> runtimeStepClass;
         private final WorkflowStepExecutor<? extends SequentialWorkflowStep> executor;
         private final StaticUpdatePlan staticUpdatePlan;
@@ -280,6 +447,7 @@ final class SequentialWorkflowPlan {
                 String key,
                 String kind,
                 FrozenNode frozenStep,
+                FrozenNode selectedStepRepresentation,
                 Class<?> runtimeStepClass,
                 WorkflowStepExecutor<? extends SequentialWorkflowStep> executor,
                 StaticUpdatePlan staticUpdatePlan) {
@@ -287,6 +455,11 @@ final class SequentialWorkflowPlan {
             this.key = key;
             this.kind = kind;
             this.frozenStep = frozenStep;
+            this.frozenStepBlueId = exactBlueId(frozenStep);
+            this.frozenStepRepresentation = representationKey(
+                    frozenStep);
+            this.selectedStepRepresentation = representationKey(
+                    selectedStepRepresentation);
             this.runtimeStepClass = runtimeStepClass;
             this.executor = executor;
             this.staticUpdatePlan = staticUpdatePlan;
@@ -313,14 +486,70 @@ final class SequentialWorkflowPlan {
         }
 
         boolean matches(
-                SequentialWorkflowStep step) {
-            return step == null
+                SequentialWorkflowStep step,
+                FrozenNode exactStep) {
+            return matches(
+                    step,
+                    exactStep,
+                    exactStep);
+        }
+
+        boolean matches(
+                SequentialWorkflowStep step,
+                FrozenNode exactStep,
+                FrozenNode selectedRepresentation) {
+            boolean runtimeClassMatches = step == null
                     ? runtimeStepClass == null
                     : step.getClass() == runtimeStepClass;
+            String candidateBlueId = exactBlueId(exactStep);
+            return runtimeClassMatches
+                    && (frozenStepBlueId == null
+                            ? candidateBlueId == null
+                            : frozenStepBlueId.equals(candidateBlueId))
+                    && equalRepresentation(
+                            frozenStepRepresentation,
+                            representationKey(exactStep))
+                    && equalRepresentation(
+                            selectedStepRepresentation,
+                            representationKey(
+                                    selectedRepresentation));
+        }
+
+        boolean matches(SequentialWorkflowStep step) {
+            return matches(step, frozenStep);
         }
 
         StaticUpdatePlan staticUpdatePlan() {
             return staticUpdatePlan;
         }
+
+        private static String exactBlueId(FrozenNode exactStep) {
+            if (exactStep == null) {
+                return null;
+            }
+            return exactStep.isReferenceOnly()
+                    ? exactStep.getReferenceBlueId()
+                    : exactStep.blueId();
+        }
+
+        private static FrozenNode.ResolvedStructuralKey representationKey(
+                FrozenNode node) {
+            return node != null
+                    ? node.resolvedStructuralKey()
+                    : null;
+        }
+
+        private static boolean equalRepresentation(
+                FrozenNode.ResolvedStructuralKey left,
+                FrozenNode.ResolvedStructuralKey right) {
+            return left == null
+                    ? right == null
+                    : left.equals(right);
+        }
+    }
+
+    /** Invocation-local expansion used only after an exact slot miss. */
+    interface ExactChangesetFactory {
+        FrozenNode materialize();
     }
 }

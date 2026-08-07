@@ -14,15 +14,15 @@ class ProcessingEventIdentityEvidenceTest {
 
     @Test
     void shouldKeepEmptyEvidenceExplicitlyUnobserved() {
-        // Given
+        // given
         ProcessingEventIdentityEvidence evidence =
                 new ProcessingEventIdentityEvidence();
 
-        // When
+        // when
         ProcessingEventIdentityEvidence.Snapshot snapshot =
                 evidence.snapshot();
 
-        // Then
+        // then
         assertFalse(snapshot.observed());
         assertNull(snapshot.admittedBlueId());
         assertEquals(0L, snapshot.workflowObservations());
@@ -31,7 +31,7 @@ class ProcessingEventIdentityEvidenceTest {
 
     @Test
     void shouldProveSameIdentityAcrossWorkflowAndBexBoundaries() {
-        // Given
+        // given
         ProcessingEventIdentityEvidence evidence =
                 new ProcessingEventIdentityEvidence();
         FrozenNode processingEvent =
@@ -39,7 +39,7 @@ class ProcessingEventIdentityEvidenceTest {
         String admittedBlueId =
                 processingEvent.blueId();
 
-        // When
+        // when
         evidence.observe(
                 processingEvent,
                 admittedBlueId,
@@ -53,7 +53,7 @@ class ProcessingEventIdentityEvidenceTest {
         ProcessingEventIdentityEvidence.Snapshot snapshot =
                 evidence.snapshot();
 
-        // Then
+        // then
         assertTrue(snapshot.observed());
         assertTrue(snapshot.stable());
         assertEquals(
@@ -65,13 +65,13 @@ class ProcessingEventIdentityEvidenceTest {
 
     @Test
     void shouldRejectIdentityDifferentFromExposedBexBinding() {
-        // Given
+        // given
         ProcessingEventIdentityEvidence evidence =
                 new ProcessingEventIdentityEvidence();
         FrozenNode processingEvent =
                 event("original");
 
-        // When
+        // when
         evidence.observe(
                 processingEvent,
                 event("different").blueId(),
@@ -80,14 +80,14 @@ class ProcessingEventIdentityEvidenceTest {
         ProcessingEventIdentityEvidence.Snapshot snapshot =
                 evidence.snapshot();
 
-        // Then
+        // then
         assertTrue(snapshot.observed());
         assertFalse(snapshot.stable());
     }
 
     @Test
     void shouldRejectChangedProcessingEventAcrossWorkflowInvocations() {
-        // Given
+        // given
         ProcessingEventIdentityEvidence evidence =
                 new ProcessingEventIdentityEvidence();
         FrozenNode original =
@@ -95,7 +95,7 @@ class ProcessingEventIdentityEvidenceTest {
         FrozenNode changed =
                 event("changed");
 
-        // When
+        // when
         evidence.observe(
                 original,
                 original.blueId(),
@@ -109,7 +109,7 @@ class ProcessingEventIdentityEvidenceTest {
         ProcessingEventIdentityEvidence.Snapshot snapshot =
                 evidence.snapshot();
 
-        // Then
+        // then
         assertTrue(snapshot.observed());
         assertFalse(snapshot.stable());
     }

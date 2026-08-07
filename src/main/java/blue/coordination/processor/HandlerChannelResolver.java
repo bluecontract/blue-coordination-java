@@ -2,7 +2,7 @@ package blue.coordination.processor;
 
 import blue.language.model.Node;
 import blue.language.processor.HandlerRegistrationContext;
-import blue.language.utils.BlueIdCalculator;
+import blue.language.identity.DirectBlueIdCalculator;
 
 /**
  * Resolves an immutable Handler channel header without opening an executable
@@ -47,8 +47,8 @@ final class HandlerChannelResolver {
          */
         for (String candidate : context.contractKeys()) {
             if (channel.getBlueId().equals(
-                    BlueIdCalculator.INSTANCE.calculate(
-                            candidate))) {
+                    DirectBlueIdCalculator.calculateBlueId(
+                            new Node().value(candidate)))) {
                 return candidate;
             }
         }

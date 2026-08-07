@@ -1,6 +1,5 @@
 package blue.coordination.processor;
 
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.ChannelEvaluation;
 import blue.language.processor.ChannelEvaluationContextFactory;
@@ -35,73 +34,73 @@ class TimelineChannelBindingMatchingTest {
 
     @Test
     void shouldEnsureThatMatchingTimelineAndActorAccepts() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
 
-        // When
+        // when
         ChannelEvaluation evaluation = evaluateTimeline(
                 channel(TIMELINE, ACTOR),
                 resolvedEvent(fixture, TIMELINE, ACTOR));
 
-        // Then
+        // then
         assertTrue(evaluation.matches());
     }
 
     @Test
     void shouldEnsureThatDifferentTimelineRejects() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
 
-        // When
+        // when
         ChannelEvaluation evaluation = evaluateTimeline(
                 channel(TIMELINE, ACTOR),
                 resolvedEvent(fixture, "different-timeline", ACTOR));
 
-        // Then
+        // then
         assertFalse(evaluation.matches());
     }
 
     @Test
     void shouldEnsureThatDifferentActorRejects() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
 
-        // When
+        // when
         ChannelEvaluation evaluation = evaluateTimeline(
                 channel(TIMELINE, ACTOR),
                 resolvedEvent(fixture, TIMELINE, "different-account"));
 
-        // Then
+        // then
         assertFalse(evaluation.matches());
     }
 
     @Test
     void shouldEnsureThatMissingFixedTimelineFieldRejects() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node event = resolvedEvent(fixture, TIMELINE, ACTOR);
-        // When
+        // when
         event.getAsNode("/timeline").getProperties().remove("timelineId");
 
-        // Then
+        // then
         assertFalse(evaluateTimeline(channel(TIMELINE, ACTOR), event).matches());
     }
 
     @Test
     void shouldEnsureThatMissingFixedActorFieldRejects() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node event = resolvedEvent(fixture, TIMELINE, ACTOR);
-        // When
+        // when
         event.getAsNode("/actor").getProperties().remove("accountId");
 
-        // Then
+        // then
         assertFalse(evaluateTimeline(channel(TIMELINE, ACTOR), event).matches());
     }
 
     @Test
     void shouldEnsureThatAdditionalTimelineFieldsDoNotReject() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         MyOSTimeline configuredTimeline = new MyOSTimeline();
         configuredTimeline.timelineId(TIMELINE);
@@ -110,56 +109,56 @@ class TimelineChannelBindingMatchingTest {
         Node event = resolvedEvent(fixture, entryTimeline, principal(ACTOR));
         event.getAsNode("/timeline").properties("providerExtension", new Node().value("present"));
 
-        // When
+        // when
         ChannelEvaluation evaluation = evaluateTimeline(
                 channel(configuredTimeline, principal(ACTOR)),
                 event);
 
-        // Then
+        // then
         assertTrue(evaluation.matches());
     }
 
     @Test
     void shouldEnsureThatAdditionalActorFieldsDoNotReject() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         MyOSAgentActor configuredActor = new MyOSAgentActor().accountId(ACTOR);
         MyOSAgentActor entryActor = new MyOSAgentActor().accountId(ACTOR);
         entryActor.onBehalfOf(principal("represented-account"));
 
-        // When
+        // when
         ChannelEvaluation evaluation = evaluateTimeline(
                 channel(timeline(TIMELINE), configuredActor),
                 resolvedEvent(fixture, timeline(TIMELINE), entryActor));
 
-        // Then
+        // then
         assertTrue(evaluation.matches());
     }
 
     @Test
     void shouldEnsureThatMissingRequiredEntryBindingRejects() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node missingTimeline = resolvedEvent(fixture, TIMELINE, ACTOR);
         missingTimeline.getProperties().remove("timeline");
         Node missingActor = resolvedEvent(fixture, TIMELINE, ACTOR);
         missingActor.getProperties().remove("actor");
 
-        // When
+        // when
         TimelineChannel channel = channel(TIMELINE, ACTOR);
-        // Then
+        // then
         assertFalse(evaluateTimeline(channel, missingTimeline).matches());
         assertFalse(evaluateTimeline(channel, missingActor).matches());
     }
 
     @Test
     void shouldEnsureThatMissingConfiguredBindingRejects() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
-        // When
+        // when
         Node event = resolvedEvent(fixture, TIMELINE, ACTOR);
 
-        // Then
+        // then
         assertFalse(evaluateTimeline(
                 new TimelineChannel().actor(principal(ACTOR)), event).matches());
         assertFalse(evaluateTimeline(
@@ -168,13 +167,13 @@ class TimelineChannelBindingMatchingTest {
 
     @Test
     void shouldEnsureThatMissingMatchingInputsReject() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
-        // When
+        // when
         CoordinationEventNodes.TimelineEntryView entry = CoordinationEventNodes.timelineEntry(
                 resolvedEvent(fixture, TIMELINE, ACTOR));
 
-        // Then
+        // then
         assertFalse(TimelineProviderSupport.matchesTimelineAndActor(null, entry));
         assertFalse(TimelineProviderSupport.matchesTimelineAndActor(
                 channel(TIMELINE, ACTOR), null));
@@ -182,16 +181,16 @@ class TimelineChannelBindingMatchingTest {
 
     @Test
     void shouldEnsureThatCompositeDelegatesCorrectedActorMatch() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node event = resolvedEvent(fixture, TIMELINE, ACTOR);
         Map<String, ChannelContract> wrongOnly = channels(
                 "wrong", channel(TIMELINE, "different-account"));
-        // When
+        // when
         CompositeTimelineChannel wrongOnlyComposite = new CompositeTimelineChannel()
                 .channels(Collections.singletonList("wrong"));
 
-        // Then
+        // then
         assertFalse(evaluateComposite(wrongOnlyComposite, event, wrongOnly).matches());
 
         Map<String, ChannelContract> withMatch = channels(
@@ -215,14 +214,14 @@ class TimelineChannelBindingMatchingTest {
 
     @Test
     void shouldEnsureThatAllTimelinesDelegatesCorrectedActorMatch() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node event = resolvedEvent(fixture, TIMELINE, ACTOR);
-        // When
+        // when
         Map<String, ChannelContract> wrongOnly = channels(
                 "wrong", channel(TIMELINE, "different-account"));
 
-        // Then
+        // then
         assertFalse(evaluateAll(event, wrongOnly).matches());
 
         Map<String, ChannelContract> withMatch = channels(
@@ -296,7 +295,7 @@ class TimelineChannelBindingMatchingTest {
         Node event = fixture.blue.objectToNode(entry)
                 .properties("timestamp", new Node().value(BigInteger.ONE))
                 .properties("message", TestTimelineProvider.chatMessage("hello"))
-                .blue(fixture.repository.typeAliasBlue());
+                .blue(fixture.repository.importsDirective());
         return fixture.blue.resolve(fixture.blue.preprocess(event).blue(null));
     }
 
@@ -321,16 +320,19 @@ class TimelineChannelBindingMatchingTest {
     }
 
     private static Fixture configuredFixture() {
-        BlueRepository repository = BlueRepository.latest();
-        Blue blue = CoordinationTestResources.configuredBlue(repository);
+        BlueRepository repository = BlueRepository.current();
+        CoordinationTestRuntime blue =
+                CoordinationTestResources.configuredBlue(repository);
         return new Fixture(repository, blue);
     }
 
     private static final class Fixture {
         private final BlueRepository repository;
-        private final Blue blue;
+        private final CoordinationTestRuntime blue;
 
-        private Fixture(BlueRepository repository, Blue blue) {
+        private Fixture(
+                BlueRepository repository,
+                CoordinationTestRuntime blue) {
             this.repository = repository;
             this.blue = blue;
         }

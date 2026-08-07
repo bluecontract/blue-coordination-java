@@ -1,11 +1,12 @@
 package blue.coordination.processor;
 
+import blue.coordination.processor.support.CoordinationProcessHeaderSupport;
+import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.model.Node;
+import blue.language.model.NodeWireForm;
 import blue.language.model.Schema;
+import blue.language.model.wire.JsonPointer;
 import blue.language.provider.ExactNodeGraphFragments;
-import blue.language.utils.BlueIdCalculator;
-import blue.language.utils.JsonPointer;
-import blue.language.utils.NodeToMapListOrValue;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -31,6 +32,111 @@ import java.util.TreeMap;
 public final class CoordinationFragmentReconstructor {
 
     private CoordinationFragmentReconstructor() {
+    }
+
+    /**
+     * Expands one retained fragment from an already selected local closure.
+     * Authored pure references remain opaque; only splitter-created physical
+     * edges are opened. This is the request-local counterpart to reconstructing
+     * an entire semantic Root.
+     */
+    public static Node reconstructSelectedFragment(
+            String profileIdentity,
+            String semanticRootBlueId,
+            String fragmentBlueId,
+            Map<String, Node> selectedFragments,
+            List<CoordinationDocumentSplitter.EdgeOccurrence>
+                    selectedEdges) {
+        return reconstructSelectedFragment(
+                profileIdentity,
+                semanticRootBlueId,
+                fragmentBlueId,
+                selectedFragments,
+                selectedEdges,
+                Collections.<String>emptySet());
+    }
+
+    /**
+     * Expands a selected fragment while retaining nominated dependency roots
+     * as exact references. PROCESS uses this to keep executable bodies lazy
+     * even when their enclosing structural chain is materialized.
+     */
+    public static Node reconstructSelectedFragment(
+            String profileIdentity,
+            String semanticRootBlueId,
+            String fragmentBlueId,
+            Map<String, Node> selectedFragments,
+            List<CoordinationDocumentSplitter.EdgeOccurrence> selectedEdges,
+            Set<String> opaqueChildBlueIds) {
+        Map<String, Node> fragments = immutableFragments(selectedFragments);
+        List<CoordinationDocumentSplitter.EdgeOccurrence> edges =
+                physicalEdges(
+                        fragments,
+                        immutableEdges(selectedEdges));
+        SortedMap<String, SortedMap<String,
+                CoordinationDocumentSplitter.EdgeOccurrence>> indexed =
+                indexEdges(
+                        Objects.requireNonNull(
+                                profileIdentity, "profileIdentity"),
+                        Objects.requireNonNull(
+                                semanticRootBlueId, "semanticRootBlueId"),
+                        fragments,
+                        edges);
+        verifyEveryPhysicalReferenceDescribed(fragments, indexed);
+        Node expanded = expand(
+                Objects.requireNonNull(fragmentBlueId, "fragmentBlueId"),
+                fragments,
+                indexed,
+                new HashSet<String>(),
+                new HashSet<String>(),
+                Collections.unmodifiableSet(new HashSet<String>(
+                        Objects.requireNonNull(
+                                opaqueChildBlueIds,
+                                "opaqueChildBlueIds"))));
+        expanded = CoordinationProcessHeaderSupport.canonicalExactCopy(
+                expanded);
+        requireIdentity(
+                fragmentBlueId,
+                expanded,
+                "Selected reconstructed fragment");
+        return expanded;
+    }
+
+    /**
+     * One semantic BlueId can occur through more than one physical owner
+     * shape in the enclosing inventory.  A selected request contains one
+     * canonical direct fragment for that identity, so retain only occurrence
+     * records that are physical edges of that exact fragment body.
+     */
+    private static List<CoordinationDocumentSplitter.EdgeOccurrence>
+    physicalEdges(
+            Map<String, Node> fragments,
+            List<CoordinationDocumentSplitter.EdgeOccurrence> edges) {
+        List<CoordinationDocumentSplitter.EdgeOccurrence> result =
+                new ArrayList<>();
+        for (CoordinationDocumentSplitter.EdgeOccurrence edge : edges) {
+            Node owner = fragments.get(edge.ownerNodeBlueId());
+            if (isPhysicalEdge(
+                    owner,
+                    edge.ownerRelativePointer(),
+                    edge.childBlueId())) {
+                result.add(edge);
+            }
+        }
+        return Collections.unmodifiableList(result);
+    }
+
+    /** Returns whether an occurrence describes this exact direct body. */
+    public static boolean isPhysicalEdge(
+            Node owner,
+            String ownerRelativePointer,
+            String childBlueId) {
+        Node child = owner != null
+                ? structuralChild(owner, ownerRelativePointer)
+                : null;
+        return child != null
+                && child.isReferenceOnly()
+                && Objects.equals(childBlueId, child.getBlueId());
     }
 
     /**
@@ -109,7 +215,8 @@ public final class CoordinationFragmentReconstructor {
                     retained,
                     edgesByOwner,
                     active,
-                    used);
+                    used,
+                    Collections.<String>emptySet());
             Node previous =
                     reconstructedRoots.put(
                             root.blueId(),
@@ -223,7 +330,8 @@ public final class CoordinationFragmentReconstructor {
                     CoordinationDocumentSplitter.EdgeOccurrence>>
                     edgesByOwner,
             Set<String> active,
-            Set<String> used) {
+            Set<String> used,
+            Set<String> opaqueChildBlueIds) {
         Node direct =
                 fragments.get(
                         blueId);
@@ -245,6 +353,10 @@ public final class CoordinationFragmentReconstructor {
         try {
             used.add(blueId);
             Node expanded = direct.clone();
+            if (expanded.getBlueId() != null
+                    && !expanded.isReferenceOnly()) {
+                expanded.blueId(null);
+            }
             Map<String,
                     CoordinationDocumentSplitter.EdgeOccurrence>
                     ownerEdges =
@@ -275,14 +387,25 @@ public final class CoordinationFragmentReconstructor {
                     throw evidenceFailure(
                             "Non-authored edge is not marked splitter-created "
                                     + "at "
-                                    + edge.absolutePointer());
+                                + edge.absolutePointer());
                 }
+                if (opaqueChildBlueIds.contains(edge.childBlueId())) {
+                    continue;
+                }
+                // A PROCESS header view may carry its established identity
+                // together with physical reference fields. Once a
+                // splitter-created child is opened, the result is semantic
+                // content rather than an established-reference envelope.
+                // Keeping the marker would create an invalid blueId+sibling
+                // hybrid even though the expanded content has the same exact
+                // identity.
                 Node child = expand(
                         edge.childBlueId(),
                         fragments,
                         edgesByOwner,
                         active,
-                        used);
+                        used,
+                        opaqueChildBlueIds);
                 putStructuralChild(
                         expanded,
                         edge.ownerRelativePointer(),
@@ -318,6 +441,12 @@ public final class CoordinationFragmentReconstructor {
                             ? described.keySet()
                             : Collections
                             .<String>emptySet();
+            if (references.containsKey("/type")
+                    && !describedPointers.contains("/type")
+                    && isCanonicalImplicitScalarType(
+                    fragment.getKey(), fragment.getValue())) {
+                references.remove("/type");
+            }
             if (!references.keySet().equals(
                     describedPointers)) {
                 throw evidenceFailure(
@@ -344,6 +473,33 @@ public final class CoordinationFragmentReconstructor {
                 }
             }
         }
+    }
+
+    private static boolean isCanonicalImplicitScalarType(
+            String blueId,
+            Node node) {
+        if (node.getRawValue() == null
+                || node.getType() == null
+                || !node.getType().isReferenceOnly()
+                || node.getName() != null
+                || node.getDescription() != null
+                || node.getItemType() != null
+                || node.getKeyType() != null
+                || node.getValueType() != null
+                || node.getItems() != null
+                || node.getProperties() != null
+                || node.getContracts() != null
+                || node.getBlueId() != null
+                || node.getSchema() != null
+                || node.getMergePolicy() != null
+                || node.getPreviousBlueId() != null
+                || node.getPosition() != null
+                || node.getBlue() != null) {
+            return false;
+        }
+        return blueId.equals(
+                DirectBlueIdCalculator.calculateBlueId(
+                        new Node().value(node.getRawValue())));
     }
 
     private static void verifyCanonicalInventory(
@@ -729,9 +885,9 @@ public final class CoordinationFragmentReconstructor {
     private static boolean sameNode(
             Node left,
             Node right) {
-        return NodeToMapListOrValue.get(
+        return NodeWireForm.get(
                 left).equals(
-                NodeToMapListOrValue.get(
+                NodeWireForm.get(
                         right));
     }
 
@@ -740,8 +896,8 @@ public final class CoordinationFragmentReconstructor {
             Node node,
             String label) {
         String actual =
-                BlueIdCalculator.calculateBlueId(
-                        node);
+                DirectBlueIdCalculator.calculateBlueId(
+                        node.clone());
         if (!expected.equals(actual)) {
             throw evidenceFailure(
                     label

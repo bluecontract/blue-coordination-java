@@ -13,7 +13,7 @@ class CoordinationRuntimeRegistrationsTest {
 
     @Test
     void shouldBindIdentityToActuallyInstalledCoordinationProcessors() {
-        // Given
+        // given
         DocumentProcessor empty =
                 DocumentProcessor.builder().build();
         DocumentProcessor configured =
@@ -22,15 +22,15 @@ class CoordinationRuntimeRegistrationsTest {
                         .build();
 
         try {
-            // When
+            // when
             String emptyIdentity =
-                    CoordinationRuntimeRegistrations
-                            .identity(empty);
+                    CoordinationProcessors
+                            .runtimeRegistrationIdentity(empty);
             String configuredIdentity =
-                    CoordinationRuntimeRegistrations
-                            .identity(configured);
+                    CoordinationProcessors
+                            .runtimeRegistrationIdentity(configured);
 
-            // Then
+            // then
             assertNotEquals(
                     emptyIdentity,
                     configuredIdentity);
@@ -41,8 +41,33 @@ class CoordinationRuntimeRegistrationsTest {
     }
 
     @Test
+    void shouldExposeStableIdentityForTheSuppliedProcessorGeneration() {
+        // given
+        DocumentProcessor configured =
+                CoordinationProcessors.configure(
+                                DocumentProcessor.builder())
+                        .build();
+
+        try {
+            // when
+            String first = CoordinationProcessors
+                    .runtimeRegistrationIdentity(configured);
+            String second = CoordinationProcessors
+                    .runtimeRegistrationIdentity(configured);
+
+            // then
+            assertEquals(first, second);
+            assertEquals(
+                    CoordinationRuntimeRegistrations.identity(configured),
+                    first);
+        } finally {
+            configured.close();
+        }
+    }
+
+    @Test
     void shouldBindIdentityToExplicitTimelineSubtypeRegistration() {
-        // Given
+        // given
         DocumentProcessor base =
                 CoordinationProcessors.configure(
                         DocumentProcessor.builder())
@@ -58,7 +83,7 @@ class CoordinationRuntimeRegistrationsTest {
                         .build();
 
         try {
-            // When
+            // when
             String baseIdentity =
                     CoordinationRuntimeRegistrations
                             .identity(base);
@@ -66,7 +91,7 @@ class CoordinationRuntimeRegistrationsTest {
                     CoordinationRuntimeRegistrations
                             .identity(extended);
 
-            // Then
+            // then
             assertNotEquals(
                     baseIdentity,
                     extendedIdentity);

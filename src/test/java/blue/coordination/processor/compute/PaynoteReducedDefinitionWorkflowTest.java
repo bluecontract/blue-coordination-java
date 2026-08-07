@@ -3,13 +3,13 @@ package blue.coordination.processor.compute;
 import blue.coordination.processor.CoordinationProcessors;
 import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationTestResources;
+import blue.coordination.processor.CoordinationTestRuntime;
 import blue.coordination.processor.ExternalBlockerProbeAssertions;
 import blue.coordination.processor.bex.BexProcessingMetrics;
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorStatus;
-import blue.language.snapshot.ResolvedSnapshot;
+import blue.language.merge.ResolvedSnapshot;
 import blue.repo.BlueRepository;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
@@ -105,10 +105,10 @@ class PaynoteReducedDefinitionWorkflowTest {
     @Test
     @Order(1)
     void shouldMeasureColdAndWarmEventProcessing() {
-        // Given
+        // given
         BexProcessingMetrics.Snapshot beforeCold = metrics.snapshot();
 
-        // When
+        // when
         long start = System.nanoTime();
         DocumentProcessingResult coldHotel = fixture.blue.processDocument(initializedSnapshot, hotelEvent);
         double coldHotelMs = elapsedMs(start);
@@ -133,7 +133,7 @@ class PaynoteReducedDefinitionWorkflowTest {
         double warmRestaurantMs = elapsedMs(start);
         BexProcessingMetrics.Snapshot afterWarm = metrics.snapshot();
 
-        // Then
+        // then
         classifyReducedHandlerSelection(
                 "cold hotel/restaurant",
                 beforeCold,
@@ -175,17 +175,17 @@ class PaynoteReducedDefinitionWorkflowTest {
     @Test
     @Order(2)
     void shouldProcessHotelParticipantOperationWithSharedDefinition() {
-        // Given
+        // given
         long totalStart = System.nanoTime();
         BexProcessingMetrics.Snapshot before = metrics.snapshot();
         printSetupTimings();
 
-        // When
+        // when
         long start = System.nanoTime();
         DocumentProcessingResult hotelResult = fixture.blue.processDocument(initializedSnapshot, hotelEvent);
         printTiming("process hotel participant operation", start);
 
-        // Then
+        // then
         BexProcessingMetrics.Snapshot after =
                 metrics.snapshot();
         classifyReducedHandlerSelection(
@@ -208,7 +208,7 @@ class PaynoteReducedDefinitionWorkflowTest {
     @Test
     @Order(3)
     void shouldProcessRestaurantParticipantOperationWithSharedDefinition() {
-        // Given
+        // given
         BexProcessingMetrics.Snapshot before =
                 metrics.snapshot();
         DocumentProcessingResult hotelResult =
@@ -216,7 +216,7 @@ class PaynoteReducedDefinitionWorkflowTest {
                         initializedSnapshot,
                         hotelEvent);
 
-        // When
+        // when
         DocumentProcessingResult restaurantResult =
                 fixture.blue.processDocument(
                         blue.coordination.processor
@@ -228,7 +228,7 @@ class PaynoteReducedDefinitionWorkflowTest {
         BexProcessingMetrics.Snapshot after =
                 metrics.snapshot();
 
-        // Then
+        // then
         classifyReducedHandlerSelection(
                 "restaurant shared-definition Handler",
                 before,
@@ -252,10 +252,10 @@ class PaynoteReducedDefinitionWorkflowTest {
     @Test
     @Order(4)
     void shouldMeasureColdAndWarmTimingForSameEventPath() {
-        // Given
+        // given
         BexProcessingMetrics.Snapshot beforeHotelCold = metrics.snapshot();
 
-        // When
+        // when
         long start = System.nanoTime();
         DocumentProcessingResult coldHotel = fixture.blue.processDocument(initializedSnapshot, hotelEvent);
         double coldHotelMs = elapsedMs(start);
@@ -277,7 +277,7 @@ class PaynoteReducedDefinitionWorkflowTest {
         double warmRestaurantMs = elapsedMs(start);
         BexProcessingMetrics.Snapshot afterRestaurantWarm = metrics.snapshot();
 
-        // Then
+        // then
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(coldHotel), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(coldHotel));
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(warmHotel), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(warmHotel));
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(coldRestaurant), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(coldRestaurant));
@@ -299,7 +299,7 @@ class PaynoteReducedDefinitionWorkflowTest {
     @Test
     @Order(5)
     void shouldMeasureEventProcessingAfterWarmup() {
-        // Given
+        // given
         BexProcessingMetrics.Snapshot beforeWarm =
                 metrics.snapshot();
         DocumentProcessingResult warmHotel = fixture.blue.processDocument(initializedSnapshot, hotelEvent);
@@ -319,7 +319,7 @@ class PaynoteReducedDefinitionWorkflowTest {
                 warmHotel,
                 warmRestaurant);
 
-        // When
+        // when
         BexProcessingMetrics.Snapshot before = metrics.snapshot();
         long start = System.nanoTime();
         DocumentProcessingResult hotelResult = fixture.blue.processDocument(initializedSnapshot, hotelEvent);
@@ -333,7 +333,7 @@ class PaynoteReducedDefinitionWorkflowTest {
         double processRestaurantMs = elapsedMs(start);
         BexProcessingMetrics.Snapshot after = metrics.snapshot();
 
-        // Then
+        // then
         classifyReducedHandlerSelection(
                 "event-only measured",
                 before,
@@ -930,9 +930,10 @@ class PaynoteReducedDefinitionWorkflowTest {
     }
 
     private static Fixture configuredFixture(BexProcessingMetrics metrics) {
-        BlueRepository repository = BlueRepository.latest();
-        Blue blue = CoordinationTestResources.configuredBlue(repository);
-        CoordinationProcessors.registerWith(blue, CoordinationProcessorOptions.builder()
+        BlueRepository repository = BlueRepository.current();
+        CoordinationTestRuntime blue =
+                CoordinationTestResources.configuredBlue(repository);
+        blue.configure(CoordinationProcessorOptions.builder()
                 .processingMetrics(metrics)
                 .build());
         return new Fixture(repository, blue);
@@ -940,9 +941,11 @@ class PaynoteReducedDefinitionWorkflowTest {
 
     private static final class Fixture {
         private final BlueRepository repository;
-        private final Blue blue;
+        private final CoordinationTestRuntime blue;
 
-        private Fixture(BlueRepository repository, Blue blue) {
+        private Fixture(
+                BlueRepository repository,
+                CoordinationTestRuntime blue) {
             this.repository = repository;
             this.blue = blue;
         }

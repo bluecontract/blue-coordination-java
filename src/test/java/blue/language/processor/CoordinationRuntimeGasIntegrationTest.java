@@ -21,13 +21,13 @@ final class CoordinationRuntimeGasIntegrationTest {
 
     @Test
     void shouldEmitEveryPortableCoordinationCounterInManifestOrder() {
-        // Given
+        // given
         GasMeter parent = new GasMeter();
         RuntimeWorkSession session = processing(parent);
         Map<String, Long> catalog =
                 CoordinationRuntimeGas.counterWeights();
 
-        // When
+        // when
         int index = 0;
         for (Map.Entry<String, Long> counter
                 : catalog.entrySet()) {
@@ -44,7 +44,7 @@ final class CoordinationRuntimeGasIntegrationTest {
         }
         session.complete();
 
-        // Then
+        // then
         assertEquals(14, index);
         assertEquals(catalog.size(), parent.trace().size());
         long expectedTotal = 0L;
@@ -82,7 +82,7 @@ final class CoordinationRuntimeGasIntegrationTest {
 
     @Test
     void shouldRetainAdmittedPrefixAndOmitRejectedCoordinationCharge() {
-        // Given
+        // given
         GasMeter parent =
                 new GasMeter(
                         GasSchedule.contracts10(),
@@ -94,7 +94,7 @@ final class CoordinationRuntimeGasIntegrationTest {
                 1L,
                 GasChargeContext.reason("admitted"));
 
-        // When
+        // when
         GasLimitExceededException rejected =
                 assertThrows(
                         GasLimitExceededException.class,
@@ -110,7 +110,7 @@ final class CoordinationRuntimeGasIntegrationTest {
                         () -> session.propagateGasExhaustion(
                                 rejected));
 
-        // Then
+        // then
         assertSame(rejected, propagated);
         assertEquals(1L, parent.totalGas());
         assertEquals(1, parent.trace().size());
@@ -124,7 +124,7 @@ final class CoordinationRuntimeGasIntegrationTest {
 
     @Test
     void shouldDiscardStagedCoordinationGasWhenEvidenceIsUnavailable() {
-        // Given
+        // given
         GasMeter parent = new GasMeter();
         RuntimeWorkSession session = processing(parent);
         CoordinationRuntimeGas.charge(
@@ -136,10 +136,10 @@ final class CoordinationRuntimeGasIntegrationTest {
         List<GasTraceEntry> staged =
                 session.stagedTrace();
 
-        // When
+        // when
         session.suspend();
 
-        // Then
+        // then
         assertEquals(1, staged.size());
         assertEquals(0L, parent.totalGas());
         assertTrue(parent.trace().isEmpty());
@@ -147,15 +147,15 @@ final class CoordinationRuntimeGasIntegrationTest {
 
     @Test
     void shouldProduceTheSameLogicalTraceForEquivalentRuntimeSessions() {
-        // Given
+        // given
         GasMeter inlineParent = new GasMeter();
         GasMeter referencedParent = new GasMeter();
 
-        // When
+        // when
         runCompositeWork(processing(inlineParent));
         runCompositeWork(processing(referencedParent));
 
-        // Then
+        // then
         assertEquals(
                 fingerprint(inlineParent.trace()),
                 fingerprint(referencedParent.trace()));
@@ -166,13 +166,13 @@ final class CoordinationRuntimeGasIntegrationTest {
 
     @Test
     void shouldRejectUnknownCounterBeforeAnyGasIsAdmitted() {
-        // Given
+        // given
         GasMeter parent = new GasMeter();
         RuntimeWorkSession session = processing(parent);
         CoordinationRuntimeGas.Ledger ledger =
                 CoordinationRuntimeGas.open(session);
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
@@ -182,7 +182,7 @@ final class CoordinationRuntimeGasIntegrationTest {
                                 GasChargeContext.empty()));
         session.suspend();
 
-        // Then
+        // then
         assertTrue(
                 failure.getMessage().contains(
                         "Unknown Coordination gas counter"));

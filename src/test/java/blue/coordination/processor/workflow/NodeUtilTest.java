@@ -2,7 +2,7 @@ package blue.coordination.processor.workflow;
 
 import blue.language.model.Node;
 import blue.language.snapshot.FrozenNode;
-import blue.language.utils.BlueIdCalculator;
+import blue.language.identity.DirectBlueIdCalculator;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigInteger;
@@ -15,20 +15,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class NodeUtilTest {
     private static final String VALID_BLUE_ID =
-            BlueIdCalculator.calculateBlueId(
+            DirectBlueIdCalculator.calculateBlueId(
                     new Node().value("identity"));
 
     @Test
     void shouldTreatOnlyAxisFreeMutableAndFrozenNodesAsEmpty() {
-        // Given
+        // given
         Node empty = new Node();
         FrozenNode frozenEmpty = FrozenNode.fromNode(new Node());
 
-        // When
+        // when
         boolean mutableEmpty = NodeUtil.isEmpty(empty);
         boolean immutableEmpty = FrozenNodeUtil.isEmpty(frozenEmpty);
 
-        // Then
+        // then
         assertTrue(mutableEmpty);
         assertTrue(immutableEmpty);
         assertRetained(new Node().name("named"));
@@ -41,7 +41,7 @@ class NodeUtilTest {
 
     @Test
     void shouldRejectScalarCoercionAcrossContractTypes() {
-        // Given
+        // given
         Node absentText = new Node();
         Node numericText = new Node().value(1);
         Node textualBoolean = new Node().properties(
@@ -50,10 +50,10 @@ class NodeUtilTest {
         FrozenNode oversizedInteger = FrozenNode.fromNode(
                 new Node().value(BigInteger.ONE.shiftLeft(80)));
 
-        // When
+        // when
         String missing = NodeUtil.text(absentText);
 
-        // Then
+        // then
         assertNull(missing);
         assertThrows(IllegalArgumentException.class,
                 () -> NodeUtil.text(numericText));

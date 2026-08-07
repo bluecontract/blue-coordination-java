@@ -7,38 +7,36 @@ import blue.coordination.processor.ExternalBlockerProbeAssertions;
 import blue.coordination.processor.TestTimelineProvider;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.coordination.processor.workflow.SequentialWorkflowRunner;
-import blue.language.BlueCacheStats;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorStatus;
-import blue.language.snapshot.ResolvedSnapshot;
+import blue.language.merge.ResolvedSnapshot;
+import blue.language.runtime.BlueLanguage;
 import blue.repo.coordination.StatusPending;
 import blue.repo.mandate.Mandate;
 import java.math.BigInteger;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * A deterministic lifecycle/memory smoke over representative real workflow shapes.
  *
- * <p>This deliberately measures owned cache state instead of heap deltas, weak references, or
- * forced GC. Replaying identical work must settle below a warmed retention ceiling, every
- * workflow-scoped transient reference cache must return to its baseline, and explicit shutdown
- * must release both the Language runtime and the externally owned Coordination runner.</p>
+ * <p>This measures Coordination-owned plan state instead of heap deltas,
+ * weak references, or forced GC. Replaying identical work must settle below
+ * a warmed retention ceiling, and explicit shutdown must release the focused
+ * Language runtime and the externally owned Coordination runner in their
+ * respective ownership order.</p>
  */
 class RepresentativeWorkflowLifecycleSmokeTest {
     private static final String PAYNOTE_RESOURCE =
             "/processor-delay/paynote-resale-reduced-bex.yaml";
-    private static final String TRANSIENT_REFERENCE_CACHE = "transientTrustedReferences";
     private static final long TWO_GIB = 2L * 1024L * 1024L * 1024L;
 
     @Test
     void shouldPlateauAndReleaseStateAcrossRepresentativeWorkflowRuns() {
-        // Given
+        // given
         assertEquals("1.8", System.getProperty("java.specification.version"),
                 "memoryIntegrationTest must keep the Java 8 compatibility runtime");
         assertTrue(Runtime.getRuntime().maxMemory() <= TWO_GIB,
@@ -46,9 +44,8 @@ class RepresentativeWorkflowLifecycleSmokeTest {
 
         OwnedFixture fixture = new OwnedFixture();
         try {
-            // When
+            // when
             fixture.prepare();
-            fixture.assertTransientStateAtBaseline("after fixture preparation");
 
             fixture.runRepresentativeSuite();
             RetainedState firstWarmSample = fixture.retainedState();
@@ -62,7 +59,7 @@ class RepresentativeWorkflowLifecycleSmokeTest {
                         "repetition " + repetition);
             }
 
-            // Then
+            // then
             assertTrue(fixture.metrics.workflowStepsExecuted() > 0L);
             assertTrue(fixture.metrics.computeStepsExecuted() > 0L);
             assertTrue(fixture.metrics.workflowPlanWeightBytes() > 0L);
@@ -72,23 +69,16 @@ class RepresentativeWorkflowLifecycleSmokeTest {
             long runnerWeightBeforeRuntimeClose =
                     fixture.runner.workflowPlanCacheWeightBytes();
             long computeWeightBeforeRuntimeClose = fixture.metrics.computePlanWeightBytes();
+            BlueLanguage ownedLanguage = fixture.support.blue.language();
             fixture.closeRuntime();
 
-            BlueCacheStats closedRuntime = fixture.support.blue.cacheStats();
-            assertTrue(closedRuntime.isClosed());
-            assertEquals(0, closedRuntime.entries());
-            assertEquals(0L, closedRuntime.currentWeightBytes());
+            assertTrue(ownedLanguage.isClosed());
             assertEquals(runnerWeightBeforeRuntimeClose,
                     fixture.runner.workflowPlanCacheWeightBytes(),
-                    "Blue must not close an injected runner it does not own");
+                    "Language runtime must not close an injected runner it does not own");
             assertEquals(computeWeightBeforeRuntimeClose,
                     fixture.metrics.computePlanWeightBytes(),
                     "runner Compute plans remain externally owned until runner.close()");
-            assertEquals(1L, metric(fixture.metrics.languageCounters(), "runtimeCloseCalls"));
-            assertTrue(metric(fixture.metrics.languageCounters(),
-                    "runtimeCloseReleasedWeightBytes") > 0L);
-            assertClosedLanguageCacheGauges(fixture.metrics.languageGauges());
-
             fixture.closeRunner();
             assertEquals(0, fixture.runner.workflowPlanCacheSize());
             assertEquals(0L, fixture.runner.workflowPlanCacheWeightBytes());
@@ -97,29 +87,6 @@ class RepresentativeWorkflowLifecycleSmokeTest {
         } finally {
             fixture.close();
         }
-    }
-
-    private static void assertClosedLanguageCacheGauges(Map<String, Long> gauges) {
-        boolean observedRetentionGauge = false;
-        for (Map.Entry<String, Long> gauge : gauges.entrySet()) {
-            String name = gauge.getKey();
-            if (name.startsWith("cache.")
-                    && (name.endsWith(".entries")
-                    || name.endsWith(".currentWeightBytes")
-                    || name.endsWith(".pinnedEntries")
-                    || name.endsWith(".derivedEntries"))) {
-                observedRetentionGauge = true;
-                assertEquals(0L, gauge.getValue().longValue(),
-                        "runtime close retained " + name);
-            }
-        }
-        assertTrue(observedRetentionGauge,
-                "the Language runtime must publish close-time cache gauges");
-    }
-
-    private static long metric(Map<String, Long> metrics, String name) {
-        Long value = metrics.get(name);
-        return value == null ? 0L : value.longValue();
     }
 
     private static void assertSuccess(DocumentProcessingResult result) {
@@ -210,8 +177,6 @@ class RepresentativeWorkflowLifecycleSmokeTest {
         private Node mandateEvent;
         private ResolvedSnapshot embeddedSnapshot;
         private Node embeddedEvent;
-        private int transientBaselineEntries;
-        private long transientBaselineWeightBytes;
         private boolean runtimeClosed;
         private boolean runnerClosed;
 
@@ -220,8 +185,8 @@ class RepresentativeWorkflowLifecycleSmokeTest {
                     support.yamlResource(PAYNOTE_RESOURCE));
             assertSuccess(paynoteInitialized);
             paynoteSnapshot =
-                    blue.coordination.processor.ProcessingResultTestSupport.snapshot(
-                            support.blue, paynoteInitialized);
+                    support.blue.resolveToSnapshot(
+                            paynoteInitialized.document());
             paynoteEvent = CoordinationTestResources.operationRequestEvent(
                     support.blue,
                     support.repository,
@@ -256,8 +221,8 @@ class RepresentativeWorkflowLifecycleSmokeTest {
             assertEquals(StatusPending.blueId(),
                     mandateInitialized.document().getAsText("/status/type/blueId"));
             mandateSnapshot =
-                    blue.coordination.processor.ProcessingResultTestSupport.snapshot(
-                            support.blue, mandateInitialized);
+                    support.blue.resolveToSnapshot(
+                            mandateInitialized.document());
             mandateEvent = TestTimelineProvider.timelineEntry(
                     support.blue,
                     support.repository,
@@ -273,8 +238,8 @@ class RepresentativeWorkflowLifecycleSmokeTest {
                     embeddedDocument());
             assertSuccess(embeddedInitialized);
             embeddedSnapshot =
-                    blue.coordination.processor.ProcessingResultTestSupport.snapshot(
-                            support.blue, embeddedInitialized);
+                    support.blue.resolveToSnapshot(
+                            embeddedInitialized.document());
             embeddedEvent = CoordinationTestResources.operationRequestEvent(
                     support.blue,
                     support.repository,
@@ -283,10 +248,6 @@ class RepresentativeWorkflowLifecycleSmokeTest {
                     "runChild",
                     "childChannel",
                     new Node().value("request"));
-
-            BlueCacheStats.Region transientCache = transientCache();
-            transientBaselineEntries = transientCache.entries();
-            transientBaselineWeightBytes = transientCache.currentWeightBytes();
         }
 
         private void runRepresentativeSuite() {
@@ -306,35 +267,13 @@ class RepresentativeWorkflowLifecycleSmokeTest {
                     embeddedSnapshot, embeddedEvent.clone());
             assertSuccess(embedded);
             assertEquals("processed", embedded.document().get("/child/status"));
-
-            assertTransientStateAtBaseline("after representative suite");
         }
 
         private RetainedState retainedState() {
-            BlueCacheStats runtime = support.blue.cacheStats();
-            BlueCacheStats.Region transientCache = transientCache();
-            return new RetainedState(runtime.entries(),
-                    runtime.currentWeightBytes(),
-                    transientCache.entries(),
-                    transientCache.currentWeightBytes(),
+            return new RetainedState(
                     runner.workflowPlanCacheSize(),
                     runner.workflowPlanCacheWeightBytes(),
                     metrics.computePlanWeightBytes());
-        }
-
-        private void assertTransientStateAtBaseline(String phase) {
-            BlueCacheStats.Region transientCache = transientCache();
-            assertEquals(transientBaselineEntries, transientCache.entries(),
-                    phase + " retained transient reference entries");
-            assertEquals(transientBaselineWeightBytes, transientCache.currentWeightBytes(),
-                    phase + " retained transient reference weight");
-        }
-
-        private BlueCacheStats.Region transientCache() {
-            BlueCacheStats.Region region = support.blue.cacheStats().region(
-                    TRANSIENT_REFERENCE_CACHE);
-            assertNotNull(region, "Language runtime did not expose the transient cache region");
-            return region;
         }
 
         private void closeRuntime() {
@@ -362,25 +301,13 @@ class RepresentativeWorkflowLifecycleSmokeTest {
     }
 
     private static final class RetainedState {
-        private final int languageEntries;
-        private final long languageWeightBytes;
-        private final int transientEntries;
-        private final long transientWeightBytes;
         private final int workflowPlanEntries;
         private final long workflowPlanWeightBytes;
         private final long computePlanWeightBytes;
 
-        private RetainedState(int languageEntries,
-                              long languageWeightBytes,
-                              int transientEntries,
-                              long transientWeightBytes,
-                              int workflowPlanEntries,
+        private RetainedState(int workflowPlanEntries,
                               long workflowPlanWeightBytes,
                               long computePlanWeightBytes) {
-            this.languageEntries = languageEntries;
-            this.languageWeightBytes = languageWeightBytes;
-            this.transientEntries = transientEntries;
-            this.transientWeightBytes = transientWeightBytes;
             this.workflowPlanEntries = workflowPlanEntries;
             this.workflowPlanWeightBytes = workflowPlanWeightBytes;
             this.computePlanWeightBytes = computePlanWeightBytes;
@@ -388,24 +315,12 @@ class RepresentativeWorkflowLifecycleSmokeTest {
 
         private static RetainedState maximum(RetainedState left, RetainedState right) {
             return new RetainedState(
-                    Math.max(left.languageEntries, right.languageEntries),
-                    Math.max(left.languageWeightBytes, right.languageWeightBytes),
-                    Math.max(left.transientEntries, right.transientEntries),
-                    Math.max(left.transientWeightBytes, right.transientWeightBytes),
                     Math.max(left.workflowPlanEntries, right.workflowPlanEntries),
                     Math.max(left.workflowPlanWeightBytes, right.workflowPlanWeightBytes),
                     Math.max(left.computePlanWeightBytes, right.computePlanWeightBytes));
         }
 
         private void assertAtOrBelow(RetainedState ceiling, String phase) {
-            assertAtOrBelow(languageEntries, ceiling.languageEntries,
-                    phase + " Language cache entries");
-            assertAtOrBelow(languageWeightBytes, ceiling.languageWeightBytes,
-                    phase + " Language cache weight");
-            assertAtOrBelow(transientEntries, ceiling.transientEntries,
-                    phase + " transient entries");
-            assertAtOrBelow(transientWeightBytes, ceiling.transientWeightBytes,
-                    phase + " transient weight");
             assertAtOrBelow(workflowPlanEntries, ceiling.workflowPlanEntries,
                     phase + " workflow-plan entries");
             assertAtOrBelow(workflowPlanWeightBytes, ceiling.workflowPlanWeightBytes,

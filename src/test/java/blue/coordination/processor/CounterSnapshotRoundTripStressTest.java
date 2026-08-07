@@ -1,17 +1,13 @@
 package blue.coordination.processor;
 
-import blue.coordination.processor.CoordinationProcessors;
-import blue.language.Blue;
-import blue.language.NodeProvider;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.HandlerProcessor;
 import blue.language.processor.ProcessorExecutionContext;
 import blue.language.processor.model.HandlerContract;
 import blue.language.processor.model.JsonPatch;
-import blue.language.snapshot.ResolvedSnapshot;
-import blue.language.provider.BasicNodeProvider;
-import blue.language.provider.SequentialNodeProvider;
+import blue.language.merge.ResolvedSnapshot;
+import blue.language.preprocess.provider.BasicNodeProvider;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.ChatMessage;
 import blue.repo.coordination.TimelineChannel;
@@ -29,16 +25,16 @@ class CounterSnapshotRoundTripStressTest {
 
     @Test
     void shouldPreserveBexOnlyCounterUpdatesAcrossCanonicalSnapshotRoundTrips() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         DocumentProcessingResult initialized = fixture.blue.initializeDocument(
                 fixture.blue.preprocess(bexOnlyCounterDocument(fixture.counterIncrementHandlerBlueId)
-                        .blue(fixture.repository.typeAliasBlue())));
+                        .blue(fixture.repository.importsDirective())));
         ResolvedSnapshot currentSnapshot =
-                ProcessingResultTestSupport.snapshot(fixture.blue, initialized);
+                fixture.blue.resolveToSnapshot(initialized.document());
         assertNotNull(currentSnapshot);
 
-        // When
+        // when
         for (int i = 1; i <= STRESS_ITERATIONS; i++) {
             Node event = timelineEntry(fixture.blue,
                     fixture.repository,
@@ -72,7 +68,7 @@ class CounterSnapshotRoundTripStressTest {
             DocumentProcessingResult result = fixture.blue.processDocument(currentSnapshot, event);
 
             ResolvedSnapshot resultSnapshot =
-                    ProcessingResultTestSupport.snapshot(fixture.blue, result);
+                    fixture.blue.resolveToSnapshot(result.document());
             String resultBlueId = ProcessingResultTestSupport.blueId(result);
             assertNotNull(resultSnapshot,
                     "iteration " + i + " should return a snapshot");
@@ -81,8 +77,8 @@ class CounterSnapshotRoundTripStressTest {
             assertTrue(result.totalGas() > 0, "iteration " + i + " should charge gas");
             assertEquals(1, result.events().size(), "iteration " + i + " should emit one event");
             assertEquals(BigInteger.valueOf(i),
-                    ProcessingResultTestSupport.resolvedDocument(
-                            fixture.blue, result).get("/counter"));
+                    fixture.blue.resolveToSnapshot(result.document())
+                            .resolvedRoot().get("/counter"));
             assertCounterMessage(result.events().get(0), i);
             assertDeterministicColdReplay(currentSnapshot, event, result, i);
 
@@ -98,7 +94,7 @@ class CounterSnapshotRoundTripStressTest {
             fixture = coldFixture;
         }
 
-        // Then
+        // then
         assertEquals(BigInteger.valueOf(STRESS_ITERATIONS), currentSnapshot.resolvedNodeAt("/counter").getValue());
         assertNotNull(currentSnapshot.blueId());
     }
@@ -164,7 +160,7 @@ class CounterSnapshotRoundTripStressTest {
                 .properties("actor", principalActor());
     }
 
-    private static Node timelineEntry(Blue blue,
+    private static Node timelineEntry(CoordinationTestRuntime blue,
                                       BlueRepository repository,
                                       String timelineId,
                                       int timestamp,
@@ -175,7 +171,7 @@ class CounterSnapshotRoundTripStressTest {
                 .properties("actor", principalActor())
                 .properties("timestamp", new Node().value(BigInteger.valueOf(timestamp)))
                 .properties("message", message)
-                .blue(repository.typeAliasBlue());
+                .blue(repository.importsDirective());
         return blue.preprocess(event).blue(null);
     }
 
@@ -201,22 +197,18 @@ class CounterSnapshotRoundTripStressTest {
     }
 
     private static Fixture configuredFixture() {
-        BlueRepository repository = BlueRepository.latest();
-        Blue blue = CoordinationTestResources.configuredBlue(repository);
-        NodeProvider repositoryProvider = blue.getNodeProvider();
+        BlueRepository repository = BlueRepository.current();
+        CoordinationTestRuntime blue =
+                CoordinationTestResources.configuredBlue(repository);
         Node counterIncrementHandlerType = new Node().name("Counter Increment Handler");
         BasicNodeProvider testTypes = new BasicNodeProvider();
         testTypes.addSingleNodes(counterIncrementHandlerType);
         String counterIncrementHandlerBlueId = testTypes.getBlueIdByName(
                 "Counter Increment Handler");
-        blue.nodeProvider(new SequentialNodeProvider(
-                testTypes, repositoryProvider));
-        CoordinationProcessors.registerWith(blue);
+        blue.addNodeProvider(testTypes);
         blue.registerExternalContractType(counterIncrementHandlerBlueId,
                 counterIncrementHandlerType,
                 new CounterIncrementHandlerProcessor());
-        CoordinationDeliveryPlanning.currentRootCompatibility(
-                blue.getDocumentProcessor());
         return new Fixture(repository, blue, counterIncrementHandlerBlueId);
     }
 
@@ -249,10 +241,13 @@ class CounterSnapshotRoundTripStressTest {
 
     private static final class Fixture {
         private final BlueRepository repository;
-        private final Blue blue;
+        private final CoordinationTestRuntime blue;
         private final String counterIncrementHandlerBlueId;
 
-        private Fixture(BlueRepository repository, Blue blue, String counterIncrementHandlerBlueId) {
+        private Fixture(
+                BlueRepository repository,
+                CoordinationTestRuntime blue,
+                String counterIncrementHandlerBlueId) {
             this.repository = repository;
             this.blue = blue;
             this.counterIncrementHandlerBlueId = counterIncrementHandlerBlueId;

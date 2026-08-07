@@ -15,17 +15,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class WorkflowExecutionStateTest {
     @Test
     void shouldKeepSnapshotViewsStableAndOrdered() {
-        // Given
+        // given
         WorkflowExecutionState state = new WorkflowExecutionState();
         WorkflowExecutionState.Snapshot empty = state.snapshotView();
 
-        // When
+        // when
         state.record("First", "a", false);
         WorkflowExecutionState.Snapshot afterFirst = state.snapshotView();
         state.record("Second", "b", true);
         WorkflowExecutionState.Snapshot afterSecond = state.snapshotView();
 
-        // Then
+        // then
         assertTrue(empty.results().isEmpty());
         assertEquals(Arrays.asList("First"), new ArrayList<String>(afterFirst.results().keySet()));
         assertEquals("a", afterFirst.results().get("First"));
@@ -38,18 +38,18 @@ class WorkflowExecutionStateTest {
 
     @Test
     void shouldExposeReadOnlySnapshotResultMaps() {
-        // Given
+        // given
         WorkflowExecutionState state = new WorkflowExecutionState();
         WorkflowExecutionState.Snapshot empty = state.snapshotView();
         state.record("First", "a", false);
         WorkflowExecutionState.Snapshot populated = state.snapshotView();
 
-        // When
+        // when
         Runnable clearEmpty = () -> empty.results().clear();
         Runnable addResult = () -> populated.results().put("Other", "value");
         Runnable removeResult = () -> populated.results().remove("missing");
 
-        // Then
+        // then
         assertThrows(UnsupportedOperationException.class,
                 clearEmpty::run);
         assertThrows(UnsupportedOperationException.class,
@@ -60,18 +60,18 @@ class WorkflowExecutionStateTest {
 
     @Test
     void shouldPreserveEarlierViewsNullValuesAndFirstInsertionOrderForDuplicateKeys() {
-        // Given
+        // given
         WorkflowExecutionState state = new WorkflowExecutionState();
         state.record("Repeated", "first", false);
         WorkflowExecutionState.Snapshot beforeOverwrite = state.snapshotView();
 
-        // When
+        // when
         state.record("Other", "other", false);
         state.record("Repeated", null, true);
         WorkflowExecutionState.Snapshot afterOverwrite = state.snapshotView();
         state.record("Repeated", "third", false);
 
-        // Then
+        // then
         assertEquals("first", beforeOverwrite.results().get("Repeated"));
         assertFalse(beforeOverwrite.wasChangesetHandled("Repeated"));
         assertEquals(Arrays.asList("Repeated", "Other"),
@@ -84,12 +84,12 @@ class WorkflowExecutionStateTest {
 
     @Test
     void shouldRetainSnapshotPrefixesAcrossOneThousandSteps() {
-        // Given
+        // given
         WorkflowExecutionState state = new WorkflowExecutionState();
         List<WorkflowExecutionState.Snapshot> retained =
                 new ArrayList<WorkflowExecutionState.Snapshot>(1001);
 
-        // When
+        // when
         for (int i = 0; i <= 1000; i++) {
             retained.add(state.snapshotView());
             if (i < 1000) {
@@ -97,7 +97,7 @@ class WorkflowExecutionStateTest {
             }
         }
 
-        // Then
+        // then
         assertEquals(0, retained.get(0).size());
         assertEquals(500, retained.get(500).size());
         assertEquals(Integer.valueOf(499), retained.get(500).get("Step500"));

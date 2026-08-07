@@ -2,16 +2,15 @@ package blue.coordination.processor.compute;
 
 import blue.bex.api.BexEngine;
 import blue.coordination.processor.CoordinationProcessorOptions;
+import blue.coordination.processor.CoordinationTestRuntime;
 import blue.coordination.processor.CoordinationTestResources;
-import blue.coordination.processor.ExternalBlockerProbeAssertions;
 import blue.coordination.processor.TestTimelineProvider;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.coordination.processor.workflow.SequentialWorkflowRunner;
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorStatus;
-import blue.language.snapshot.ResolvedSnapshot;
+import blue.language.merge.ResolvedSnapshot;
 import blue.repo.coordination.StatusPending;
 import blue.repo.mandate.Mandate;
 
@@ -46,17 +45,17 @@ class LanguageAdoptionMetricsArtifactTest {
 
     @Test
     void shouldWriteJsonAndCsvForRequiredRepresentativeScenarios() throws Exception {
-        // Given
+        // given
         List<LanguageAdoptionMetricsArtifactWriter.Scenario> scenarios = Arrays.asList(
                 staticUpdateDocumentScenario(),
                 multiPatchComputeScenario(),
                 payNoteFixtureScenario(),
                 mandateFixtureScenario());
 
-        // When
+        // when
         LanguageAdoptionMetricsArtifactWriter.write(REPORT_DIRECTORY, scenarios);
 
-        // Then
+        // then
         Path json = REPORT_DIRECTORY.resolve(LanguageAdoptionMetricsArtifactWriter.JSON_FILE_NAME);
         Path csv = REPORT_DIRECTORY.resolve(LanguageAdoptionMetricsArtifactWriter.CSV_FILE_NAME);
         assertTrue(Files.isRegularFile(json));
@@ -166,11 +165,6 @@ class LanguageAdoptionMetricsArtifactTest {
                             fixture.support.blue, initialized),
                     event);
 
-            ExternalBlockerProbeAssertions
-                    .classifyHostedSemanticOutput(
-                            result,
-                            initialized.document(),
-                            "language-adoption PayNote fixture");
             assertSuccess(fixture.support.blue, result);
             assertEquals(Boolean.TRUE,
                     result.document().get("/orders/package-order-a/hotelOrder/resalePlaced"));
@@ -264,7 +258,9 @@ class LanguageAdoptionMetricsArtifactTest {
         return value != null ? value.longValue() : 0L;
     }
 
-    private static void assertSuccess(Blue language, DocumentProcessingResult result) {
+    private static void assertSuccess(
+            CoordinationTestRuntime language,
+            DocumentProcessingResult result) {
         assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertNotNull(blue.coordination.processor.ProcessingResultTestSupport.snapshot(
                 language, result));

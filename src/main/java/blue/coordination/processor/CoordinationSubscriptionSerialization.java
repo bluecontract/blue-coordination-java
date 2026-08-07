@@ -2,7 +2,7 @@ package blue.coordination.processor;
 
 import blue.language.processor.ExternalChannelDependencySnapshot;
 import blue.language.processor.ExternalOrderKey;
-import blue.language.utils.BlueIdCalculator;
+import blue.language.identity.DirectBlueIdCalculator;
 
 import java.math.BigInteger;
 import java.util.ArrayList;
@@ -20,7 +20,8 @@ final class CoordinationSubscriptionSerialization {
     }
 
     static String digest(Map<String, Object> canonical) {
-        return BlueIdCalculator.INSTANCE.calculate(canonical);
+        return DirectBlueIdCalculator.INSTANCE
+                .directBlueIdFromCanonicalInput(canonical);
     }
 
     /**

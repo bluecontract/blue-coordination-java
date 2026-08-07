@@ -1,14 +1,14 @@
 package blue.coordination.processor;
 
 import blue.language.model.Node;
+import blue.language.model.NodeWireForm;
 import blue.language.processor.registry.RuntimeBlueIds;
-import blue.language.utils.BlueIdCalculator;
-import blue.language.utils.NodeToMapListOrValue;
-import blue.repo.coordination.SequentialWorkflowOperation;
+import blue.language.identity.DirectBlueIdCalculator;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -24,7 +24,7 @@ class CoordinationCanonicalFragmentContractTest {
 
     @Test
     void shouldRetainOneCanonicalFragmentForSameBlueIdAtDifferentCutOccurrences() {
-        // Given
+        // given
         Node shared = new Node().properties(
                 "payload",
                 scalar("same"));
@@ -38,10 +38,10 @@ class CoordinationCanonicalFragmentContractTest {
                                 "/left",
                                 "/right")));
         String sharedBlueId =
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         shared);
 
-        // When
+        // when
         CoordinationDocumentSplitter.SplitGraph split =
                 CoordinationDocumentSplitterTestSupport
                         .splitDocument(root);
@@ -52,7 +52,7 @@ class CoordinationCanonicalFragmentContractTest {
                         .EMBEDDED_ROOT,
                 sharedBlueId);
 
-        // Then
+        // then
         assertEquals(
                 CoordinationDocumentSplitter
                         .FRAGMENTATION_PROFILE_ID,
@@ -91,19 +91,19 @@ class CoordinationCanonicalFragmentContractTest {
                         .isReferenceOnly(),
                 "the stored representation is the canonical shallow node");
         assertEquals(
-                NodeToMapListOrValue.get(root),
-                NodeToMapListOrValue.get(
+                NodeWireForm.get(root),
+                NodeWireForm.get(
                         split.reconstruct()));
     }
 
     @Test
     void shouldPreserveAuthoredReferencesWhileReconstructingCreatedEdges() {
-        // Given
+        // given
         Node inline = new Node().properties(
                 "payload",
                 scalar("inline"));
         String authoredBlueId =
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         scalar("external"));
         Node event = new Node().properties(
                 "inline", inline,
@@ -111,7 +111,7 @@ class CoordinationCanonicalFragmentContractTest {
                 new Node().blueId(
                         authoredBlueId));
 
-        // When
+        // when
         CoordinationDocumentSplitter.SplitGraph split =
                 CoordinationDocumentSplitter
                         .forEventSplitting()
@@ -123,7 +123,7 @@ class CoordinationCanonicalFragmentContractTest {
                 split,
                 "/authored");
 
-        // Then
+        // then
         assertTrue(
                 authored.originalPureReference());
         assertFalse(
@@ -141,67 +141,48 @@ class CoordinationCanonicalFragmentContractTest {
                         .get("authored")
                         .getBlueId());
         assertEquals(
-                NodeToMapListOrValue.get(event),
-                NodeToMapListOrValue.get(
+                NodeWireForm.get(event),
+                NodeWireForm.get(
                         reconstructed));
     }
 
     @Test
-    void shouldDistinguishAuthoredExecutableBodyReferenceFromCreatedCut() {
-        // Given
-        String bodyBlueId =
-                BlueIdCalculator.calculateBlueId(
+    void shouldDistinguishAuthoredReferenceFromCreatedCut() {
+        // given
+        Node inline = new Node().items(
+                scalar("inline-step"));
+        String authoredBlueId =
+                DirectBlueIdCalculator.calculateBlueId(
                         new Node().items(
                                 scalar("external-step")));
-        Node root = new Node().contracts(
-                new Node().properties(
-                        "operation",
-                        new Node()
-                                .type(new Node().blueId(
-                                        SequentialWorkflowOperation
-                                                .blueId()))
-                                .properties(
-                                        "channel",
-                                        scalar("timeline"),
-                                        "steps",
-                                        new Node().blueId(
-                                                bodyBlueId))));
+        Node event = new Node().properties(
+                "inline", inline,
+                "authored", new Node().blueId(authoredBlueId));
 
-        // When
+        // when
         CoordinationDocumentSplitter.SplitGraph split =
-                CoordinationDocumentSplitterTestSupport
-                        .splitDocument(root);
-        CoordinationDocumentSplitter.EdgeOccurrence edge =
-                occurrenceAt(
-                        split,
-                        "/contracts/operation/steps");
+                CoordinationDocumentSplitter.forEventSplitting()
+                        .splitEvent(event);
+        CoordinationDocumentSplitter.EdgeOccurrence authored =
+                occurrenceAt(split, "/authored");
+        CoordinationDocumentSplitter.EdgeOccurrence created =
+                occurrenceAt(split, "/inline");
 
-        // Then
+        // then
         assertEquals(
                 CoordinationDocumentSplitter.EdgeKind
-                        .EXECUTABLE_BODY,
-                edge.edgeKind());
-        assertTrue(
-                edge.originalPureReference());
-        assertFalse(
-                edge.splitterCreated());
-        assertFalse(
-                split.fragments().containsKey(
-                        bodyBlueId));
-        assertEquals(
-                bodyBlueId,
-                split.reconstruct()
-                        .getContracts()
-                        .getProperties()
-                        .get("operation")
-                        .getProperties()
-                        .get("steps")
-                        .getBlueId());
+                        .EVENT_DIRECT_CHILD,
+                authored.edgeKind());
+        assertTrue(authored.originalPureReference());
+        assertFalse(authored.splitterCreated());
+        assertFalse(created.originalPureReference());
+        assertTrue(created.splitterCreated());
+        assertFalse(split.fragments().containsKey(authoredBlueId));
     }
 
     @Test
     void shouldRejectMissingFragmentInventory() {
-        // Given
+        // given
         CoordinationDocumentSplitter.SplitGraph split =
                 eventSplit();
         CoordinationDocumentSplitter.EdgeOccurrence
@@ -213,7 +194,7 @@ class CoordinationCanonicalFragmentContractTest {
         missing.remove(
                 created.childBlueId());
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
@@ -226,7 +207,7 @@ class CoordinationCanonicalFragmentContractTest {
                                         missing,
                                         split.edgeOccurrences()));
 
-        // Then
+        // then
         assertTrue(
                 failure.getMessage()
                         .contains("missing"));
@@ -234,7 +215,7 @@ class CoordinationCanonicalFragmentContractTest {
 
     @Test
     void shouldRejectMixedCompleteAndCanonicalDirectRepresentations() {
-        // Given
+        // given
         Node child = new Node().properties(
                 "payload",
                 scalar("child"));
@@ -246,7 +227,7 @@ class CoordinationCanonicalFragmentContractTest {
                         .forEventSplitting()
                         .splitEvent(event);
         String childBlueId =
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         child);
         Map<String, Node> mixed =
                 new TreeMap<>(
@@ -255,7 +236,7 @@ class CoordinationCanonicalFragmentContractTest {
                 childBlueId,
                 child.clone());
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
@@ -268,7 +249,7 @@ class CoordinationCanonicalFragmentContractTest {
                                         mixed,
                                         split.edgeOccurrences()));
 
-        // Then
+        // then
         assertTrue(
                 failure.getMessage()
                         .contains("nonphysical")
@@ -278,7 +259,7 @@ class CoordinationCanonicalFragmentContractTest {
 
     @Test
     void shouldRejectInconsistentEdgeOccurrenceInventory() {
-        // Given
+        // given
         CoordinationDocumentSplitter.SplitGraph split =
                 eventSplit();
         List<CoordinationDocumentSplitter.EdgeOccurrence>
@@ -294,7 +275,7 @@ class CoordinationCanonicalFragmentContractTest {
                         original,
                         split.rootBlueId()));
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
@@ -307,7 +288,7 @@ class CoordinationCanonicalFragmentContractTest {
                                         split.fragments(),
                                         inconsistent));
 
-        // Then
+        // then
         assertTrue(
                 failure.getMessage()
                         .contains("disagrees"));
@@ -315,7 +296,7 @@ class CoordinationCanonicalFragmentContractTest {
 
     @Test
     void shouldAdmitDuplicateFragmentsIdempotentlyAndReturnDefensiveValues() {
-        // Given
+        // given
         CoordinationDocumentSplitter.SplitGraph split =
                 eventSplit();
         String blueId =
@@ -326,7 +307,7 @@ class CoordinationCanonicalFragmentContractTest {
         InMemoryStore store =
                 new InMemoryStore();
 
-        // When
+        // when
         CoordinationFragmentAdmissionVerifier.AdmissionStatus first =
                 CoordinationFragmentAdmissionVerifier.admit(
                         split.fragmentationProfileIdentity(),
@@ -345,7 +326,7 @@ class CoordinationCanonicalFragmentContractTest {
                         blueId);
         returned.name("mutated");
 
-        // Then
+        // then
         assertEquals(
                 CoordinationFragmentAdmissionVerifier
                         .AdmissionStatus.ADMITTED,
@@ -364,7 +345,7 @@ class CoordinationCanonicalFragmentContractTest {
 
     @Test
     void shouldRejectInconsistentConcurrentAdmissionWinner() {
-        // Given
+        // given
         Node child = new Node().properties(
                 "payload",
                 scalar("child"));
@@ -376,7 +357,7 @@ class CoordinationCanonicalFragmentContractTest {
                                         "child",
                                         child));
         String childBlueId =
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         child);
         Node canonical =
                 split.fragments().get(
@@ -385,7 +366,7 @@ class CoordinationCanonicalFragmentContractTest {
                 new RacingStore(
                         child.clone());
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
@@ -397,7 +378,7 @@ class CoordinationCanonicalFragmentContractTest {
                                         canonical,
                                         store));
 
-        // Then
+        // then
         assertTrue(
                 failure.getMessage()
                         .contains("canonical direct-node")
@@ -406,10 +387,71 @@ class CoordinationCanonicalFragmentContractTest {
     }
 
     @Test
+    void shouldAdmitCompleteFragmentInventoryAtomicallyAndIdempotently() {
+        // given
+        CoordinationDocumentSplitter.SplitGraph split = eventSplit();
+        InMemoryStore store = new InMemoryStore();
+
+        // when
+        CoordinationFragmentAdmissionVerifier.AdmissionStatus first =
+                CoordinationFragmentAdmissionVerifier.admitInventory(
+                        split.fragmentationProfileIdentity(),
+                        split.fragmentRoots(),
+                        split.fragments(),
+                        split.edgeOccurrences(),
+                        store);
+        CoordinationFragmentAdmissionVerifier.AdmissionStatus second =
+                CoordinationFragmentAdmissionVerifier.admitInventory(
+                        split.fragmentationProfileIdentity(),
+                        split.fragmentRoots(),
+                        split.fragments(),
+                        split.edgeOccurrences(),
+                        store);
+
+        // then
+        assertEquals(
+                CoordinationFragmentAdmissionVerifier.AdmissionStatus.ADMITTED,
+                first);
+        assertEquals(
+                CoordinationFragmentAdmissionVerifier.AdmissionStatus
+                        .IDEMPOTENT_DUPLICATE,
+                second);
+        assertEquals(split.fragments().size(), store.size());
+    }
+
+    @Test
+    void shouldRejectConflictingAtomicInventoryWithoutPartialAdmission() {
+        // given
+        CoordinationDocumentSplitter.SplitGraph split = eventSplit();
+        InMemoryStore store = new InMemoryStore();
+        store.putIfAbsent(
+                split.fragmentationProfileIdentity(),
+                split.rootBlueId(),
+                split.originalRoot());
+
+        // when
+        IllegalArgumentException failure = assertThrows(
+                IllegalArgumentException.class,
+                () -> CoordinationFragmentAdmissionVerifier.admitInventory(
+                        split.fragmentationProfileIdentity(),
+                        split.fragmentRoots(),
+                        split.fragments(),
+                        split.edgeOccurrences(),
+                        store));
+
+        // then
+        assertTrue(
+                failure.getMessage().contains("winner")
+                        || failure.getMessage().contains("canonical")
+                        || failure.getMessage().contains("Atomic store"));
+        assertEquals(1, store.size());
+    }
+
+    @Test
     void shouldKeepCyclicMemberEdgeOpaqueWithoutFabricatingFragment() {
-        // Given
+        // given
         String masterBlueId =
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         scalar("cyclic-master"));
         String memberBlueId =
                 masterBlueId + "#0";
@@ -418,7 +460,7 @@ class CoordinationCanonicalFragmentContractTest {
                 new Node().blueId(
                         memberBlueId));
 
-        // When
+        // when
         CoordinationDocumentSplitter.SplitGraph split =
                 CoordinationDocumentSplitter
                         .forEventSplitting()
@@ -430,7 +472,7 @@ class CoordinationCanonicalFragmentContractTest {
                         split,
                         "/member");
 
-        // Then
+        // then
         assertTrue(
                 member.originalPureReference());
         assertFalse(
@@ -447,7 +489,7 @@ class CoordinationCanonicalFragmentContractTest {
 
     @Test
     void shouldProduceStableInventoryIdentityIndependentOfReturnedCopies() {
-        // Given
+        // given
         CoordinationDocumentSplitter.SplitGraph split =
                 eventSplit();
         CoordinationDocumentSplitter.SplitGraph repeated =
@@ -457,14 +499,14 @@ class CoordinationCanonicalFragmentContractTest {
         Map<String, Node> returned =
                 split.fragments();
 
-        // When
+        // when
         returned.get(
                 split.rootBlueId())
                 .description("caller mutation");
         String after =
                 split.inventoryIdentity();
 
-        // Then
+        // then
         assertEquals(before, after);
         assertEquals(
                 before,
@@ -486,6 +528,305 @@ class CoordinationCanonicalFragmentContractTest {
                                         split.rootBlueId())));
     }
 
+    @Test
+    void shouldRetainNestedCollectionDeclarationProvenanceAndEscapedKeys() {
+        // given
+        Node lesson = new Node().properties(
+                "state",
+                scalar("ready"));
+        Node project = projectTemplate(lesson);
+        Node root = collectionRoot(project);
+
+        // when
+        CoordinationDocumentSplitter.SplitGraph split =
+                CoordinationDocumentSplitterTestSupport
+                        .splitCollectionDocument(root);
+        List<CoordinationDocumentSplitter.EdgeOccurrence> embedded =
+                embeddedOccurrences(split);
+        CoordinationDocumentSplitter.EdgeOccurrence rootMember =
+                occurrenceAt(
+                        split,
+                        "/projects/a~0key");
+        CoordinationDocumentSplitter.EdgeOccurrence nestedMember =
+                occurrenceAt(
+                        split,
+                        "/projects/a~0key/lessons/lesson~12");
+        CoordinationDocumentSplitter.EdgeOccurrence explicit =
+                occurrenceAt(
+                        split,
+                        "/projects/a~0key/featured");
+
+        // then
+        assertEquals(
+                Arrays.asList(
+                        "/projects/a~0key",
+                        "/projects/a~0key/featured",
+                        "/projects/a~0key/lessons/lesson~01",
+                        "/projects/a~0key/lessons/lesson~12",
+                        "/projects/z~1key",
+                        "/projects/z~1key/featured",
+                        "/projects/z~1key/lessons/lesson~01",
+                        "/projects/z~1key/lessons/lesson~12"),
+                absolutePointers(embedded));
+        assertEquals("/", rootMember.declaringScopePath());
+        assertEquals(
+                CoordinationDocumentSplitter.EmbeddedEdgeOrigin
+                        .COLLECTION_MEMBER,
+                rootMember.embeddedOrigin());
+        assertEquals(
+                "/projects",
+                rootMember.collectionDeclarationPath());
+        assertEquals("a~key", rootMember.collectionMemberKey());
+        assertEquals(
+                "/projects/a~0key",
+                nestedMember.declaringScopePath());
+        assertEquals(
+                "/lessons",
+                nestedMember.collectionDeclarationPath());
+        assertEquals("lesson/2", nestedMember.collectionMemberKey());
+        assertEquals(
+                CoordinationDocumentSplitter.EmbeddedEdgeOrigin.EXPLICIT,
+                explicit.embeddedOrigin());
+        assertEquals("/featured", explicit.explicitDeclarationPath());
+        assertEquals(null, explicit.collectionDeclarationPath());
+        assertEquals(
+                NodeWireForm.get(root),
+                NodeWireForm.get(split.reconstruct()));
+        assertEquals(
+                DirectBlueIdCalculator.calculateBlueId(root),
+                DirectBlueIdCalculator.calculateBlueId(
+                        split.reconstruct()));
+    }
+
+    @Test
+    void shouldKeepSameChildIdentityAtSeveralCollectionKeysAsSeparateOccurrences() {
+        // given
+        Node lesson = new Node().properties(
+                "state",
+                scalar("shared"));
+        Node project = projectTemplate(lesson);
+        Node root = collectionRoot(project);
+        String projectBlueId =
+                DirectBlueIdCalculator.calculateBlueId(project);
+        String lessonBlueId =
+                DirectBlueIdCalculator.calculateBlueId(lesson);
+
+        // when
+        CoordinationDocumentSplitter.SplitGraph split =
+                CoordinationDocumentSplitterTestSupport
+                        .splitCollectionDocument(root);
+
+        // then
+        assertEquals(
+                2,
+                occurrences(
+                        split,
+                        CoordinationDocumentSplitter.EdgeKind.EMBEDDED_ROOT,
+                        projectBlueId).size());
+        assertEquals(
+                1,
+                countKey(split.fragments(), projectBlueId));
+        assertEquals(
+                1,
+                countKey(split.fragments(), lessonBlueId));
+        assertEquals(
+                6,
+                occurrences(
+                        split,
+                        CoordinationDocumentSplitter.EdgeKind.EMBEDDED_ROOT,
+                        lessonBlueId).size());
+    }
+
+    @Test
+    void shouldRejectListCollectionTargetThroughLanguageCatalog() {
+        // given
+        Node root = invalidCollectionRoot(
+                new Node().items(
+                        new Node().properties(
+                                "state", scalar("invalid"))));
+
+        // when
+        RuntimeException failure = assertThrows(
+                RuntimeException.class,
+                () -> CoordinationDocumentSplitterTestSupport
+                        .splitCollectionDocument(root));
+
+        // then
+        assertTrue(failure.getMessage().contains("collection"));
+        assertTrue(failure.getMessage().contains("object"));
+    }
+
+    @Test
+    void shouldRejectScalarCollectionTargetThroughLanguageCatalog() {
+        // given
+        Node root = invalidCollectionRoot(scalar("invalid"));
+
+        // when
+        RuntimeException failure = assertThrows(
+                RuntimeException.class,
+                () -> CoordinationDocumentSplitterTestSupport
+                        .splitCollectionDocument(root));
+
+        // then
+        assertTrue(failure.getMessage().contains("collection"));
+        assertTrue(failure.getMessage().contains("object"));
+    }
+
+    @Test
+    void shouldRejectScalarCollectionMemberThroughLanguageCatalog() {
+        // given
+        Node root = invalidCollectionRoot(
+                new Node().properties(
+                        "bad-member",
+                        scalar("invalid")));
+
+        // when
+        RuntimeException failure = assertThrows(
+                RuntimeException.class,
+                () -> CoordinationDocumentSplitterTestSupport
+                        .splitCollectionDocument(root));
+
+        // then
+        assertTrue(failure.getMessage().contains("member"));
+        assertTrue(failure.getMessage().contains("object"));
+    }
+
+    @Test
+    void shouldRejectOpaqueCyclicCollectionMemberThroughLanguageCatalog() {
+        // given
+        String cyclicMaster = DirectBlueIdCalculator.calculateBlueId(
+                scalar("cyclic-master"));
+        Node root = invalidCollectionRoot(
+                new Node().properties(
+                        "cyclic-member",
+                        new Node().blueId(cyclicMaster + "#0")));
+
+        // when
+        RuntimeException failure = assertThrows(
+                RuntimeException.class,
+                () -> CoordinationDocumentSplitterTestSupport
+                        .splitCollectionDocument(root));
+
+        // then
+        assertTrue(failure.getMessage().contains("cyclic-set"));
+        assertTrue(failure.getMessage().contains("/projects"));
+    }
+
+    @Test
+    void shouldRejectWildcardCollectionDeclarationThroughLanguageCatalog() {
+        // given
+        Node root = new Node()
+                .properties(
+                        "projects",
+                        new Node().properties(
+                                "one",
+                                new Node().properties(
+                                        "state", scalar("ready"))))
+                .contracts(new Node().properties(
+                        "embedded",
+                        processEmbeddedCollections(
+                                "/projects/*")));
+
+        // when
+        RuntimeException failure = assertThrows(
+                RuntimeException.class,
+                () -> CoordinationDocumentSplitterTestSupport
+                        .splitCollectionDocument(root));
+
+        // then
+        assertTrue(failure.getMessage().contains("selector"));
+    }
+
+    @Test
+    void shouldRejectReservedCollectionDeclarationThroughLanguageCatalog() {
+        // given
+        Node root = new Node().contracts(new Node().properties(
+                "embedded",
+                processEmbeddedCollections(
+                        "/contracts")));
+
+        // when
+        RuntimeException failure = assertThrows(
+                RuntimeException.class,
+                () -> CoordinationDocumentSplitterTestSupport
+                        .splitCollectionDocument(root));
+
+        // then
+        assertTrue(failure.getMessage().contains("reserved"));
+    }
+
+    @Test
+    void shouldRejectExplicitAndCollectionDeclarationOverlapThroughLanguageCatalog() {
+        // given
+        Node root = new Node()
+                .properties(
+                        "projects",
+                        new Node().properties(
+                                "one",
+                                new Node().properties(
+                                        "state", scalar("ready"))))
+                .contracts(new Node().properties(
+                        "embedded",
+                        processEmbedded(
+                                Collections.singletonList(
+                                        "/projects/one"),
+                                Collections.singletonList(
+                                        "/projects"))));
+
+        // when
+        RuntimeException failure = assertThrows(
+                RuntimeException.class,
+                () -> CoordinationDocumentSplitterTestSupport
+                        .splitCollectionDocument(root));
+
+        // then
+        assertTrue(failure.getMessage().contains("Overlapping"));
+    }
+
+    @Test
+    void shouldRejectCollectionEdgeMetadataWhoseRawKeyDisagreesWithPointer() {
+        // given
+        CoordinationDocumentSplitter.SplitGraph split =
+                CoordinationDocumentSplitterTestSupport
+                        .splitCollectionDocument(
+                                collectionRoot(
+                                        projectTemplate(
+                                                new Node().properties(
+                                                        "state",
+                                                        scalar("ready")))));
+        CoordinationDocumentSplitter.EdgeOccurrence source = occurrenceAt(
+                split,
+                "/projects/a~0key");
+
+        // when
+        IllegalArgumentException failure = assertThrows(
+                IllegalArgumentException.class,
+                () -> new CoordinationDocumentSplitter.EdgeOccurrence(
+                        source.fragmentationProfileIdentity(),
+                        source.schemaIdentity(),
+                        source.rootKind(),
+                        source.rootBlueId(),
+                        source.ownerNodeBlueId(),
+                        source.ownerScopePath(),
+                        source.absolutePointer(),
+                        source.ownerRelativePointer(),
+                        source.childBlueId(),
+                        source.edgeKind(),
+                        source.originalPureReference(),
+                        source.splitterCreated(),
+                        source.declaringScopePath(),
+                        source.embeddedOrigin(),
+                        source.explicitDeclarationPath(),
+                        source.collectionDeclarationPath(),
+                        "another-key",
+                        source.handlerEffectiveTypeBlueId(),
+                        source.executableBodyField(),
+                        source.sourceContributionBlueIds()));
+
+        // then
+        assertTrue(failure.getMessage().contains("member key"));
+    }
+
     private static CoordinationDocumentSplitter.SplitGraph
     eventSplit() {
         return CoordinationDocumentSplitter
@@ -500,6 +841,74 @@ class CoordinationCanonicalFragmentContractTest {
                                 new Node().properties(
                                         "payload",
                                         scalar("right"))));
+    }
+
+    private static Node collectionRoot(Node project) {
+        Map<String, Node> projects = new LinkedHashMap<>();
+        projects.put("z/key", project.clone());
+        projects.put("a~key", project.clone());
+        return new Node()
+                .properties(
+                        "projects",
+                        new Node().properties(projects))
+                .contracts(new Node().properties(
+                        "embedded",
+                        processEmbeddedCollections(
+                                "/projects")));
+    }
+
+    private static Node projectTemplate(Node lesson) {
+        Map<String, Node> lessons = new LinkedHashMap<>();
+        lessons.put("lesson/2", lesson.clone());
+        lessons.put("lesson~1", lesson.clone());
+        return new Node()
+                .properties(
+                        "featured",
+                        lesson.clone(),
+                        "lessons",
+                        new Node().properties(lessons))
+                .contracts(new Node().properties(
+                        "embedded",
+                        processEmbedded(
+                                Collections.singletonList(
+                                        "/featured"),
+                                Collections.singletonList(
+                                        "/lessons"))));
+    }
+
+    private static Node invalidCollectionRoot(Node collection) {
+        return new Node()
+                .properties("projects", collection)
+                .contracts(new Node().properties(
+                        "embedded",
+                        processEmbeddedCollections(
+                                "/projects")));
+    }
+
+    private static List<CoordinationDocumentSplitter.EdgeOccurrence>
+    embeddedOccurrences(
+            CoordinationDocumentSplitter.SplitGraph split) {
+        List<CoordinationDocumentSplitter.EdgeOccurrence> result =
+                new ArrayList<>();
+        for (CoordinationDocumentSplitter.EdgeOccurrence edge
+                : split.edgeOccurrences()) {
+            if (edge.edgeKind()
+                    == CoordinationDocumentSplitter.EdgeKind.EMBEDDED_ROOT) {
+                result.add(edge);
+            }
+        }
+        result.sort(java.util.Comparator.comparing(
+                CoordinationDocumentSplitter.EdgeOccurrence::absolutePointer));
+        return result;
+    }
+
+    private static List<String> absolutePointers(
+            List<CoordinationDocumentSplitter.EdgeOccurrence> edges) {
+        List<String> result = new ArrayList<>();
+        for (CoordinationDocumentSplitter.EdgeOccurrence edge : edges) {
+            result.add(edge.absolutePointer());
+        }
+        return result;
     }
 
     private static List<CoordinationDocumentSplitter.EdgeOccurrence>
@@ -570,6 +979,11 @@ class CoordinationCanonicalFragmentContractTest {
                 source.edgeKind(),
                 source.originalPureReference(),
                 source.splitterCreated(),
+                source.declaringScopePath(),
+                source.embeddedOrigin(),
+                source.explicitDeclarationPath(),
+                source.collectionDeclarationPath(),
+                source.collectionMemberKey(),
                 source.handlerEffectiveTypeBlueId(),
                 source.executableBodyField(),
                 source.sourceContributionBlueIds());
@@ -584,19 +998,44 @@ class CoordinationCanonicalFragmentContractTest {
 
     private static Node processEmbedded(
             String... paths) {
+        return processEmbedded(
+                Arrays.asList(paths),
+                Collections.<String>emptyList());
+    }
+
+    private static Node processEmbeddedCollections(
+            String... collectionPaths) {
+        return processEmbedded(
+                Collections.<String>emptyList(),
+                Arrays.asList(collectionPaths));
+    }
+
+    private static Node processEmbedded(
+            List<String> paths,
+            List<String> collectionPaths) {
         List<Node> values =
                 new ArrayList<>();
         for (String path : paths) {
             values.add(
                     scalar(path));
         }
-        return new Node()
+        List<Node> collectionValues = new ArrayList<>();
+        for (String path : collectionPaths) {
+            collectionValues.add(scalar(path));
+        }
+        Node contract = new Node()
                 .type(new Node().blueId(
-                        RuntimeBlueIds.PROCESS_EMBEDDED))
-                .properties(
-                        "paths",
-                        new Node().items(
-                                values));
+                        RuntimeBlueIds.PROCESS_EMBEDDED));
+        Map<String, Node> properties = new LinkedHashMap<>();
+        if (!values.isEmpty()) {
+            properties.put("paths", new Node().items(values));
+        }
+        if (!collectionValues.isEmpty()) {
+            properties.put(
+                    "collectionPaths",
+                    new Node().items(collectionValues));
+        }
+        return contract.properties(properties);
     }
 
     private static Node scalar(
@@ -607,7 +1046,7 @@ class CoordinationCanonicalFragmentContractTest {
 
     private static class InMemoryStore
             implements CoordinationFragmentAdmissionVerifier
-            .ImmutableFragmentStore {
+            .AtomicImmutableFragmentStore {
 
         private final Map<String, Node> values =
                 new LinkedHashMap<>();
@@ -643,6 +1082,36 @@ class CoordinationCanonicalFragmentContractTest {
                     key,
                     exactFragment.clone());
             return true;
+        }
+
+        @Override
+        public boolean putAllIfAbsent(
+                String profileIdentity,
+                Map<String, Node> exactFragments) {
+            for (Map.Entry<String, Node> entry
+                    : exactFragments.entrySet()) {
+                Node existing = values.get(
+                        profileIdentity + ":" + entry.getKey());
+                if (existing != null
+                        && !NodeWireForm.get(existing).equals(
+                        NodeWireForm.get(entry.getValue()))) {
+                    return false;
+                }
+            }
+            boolean changed = false;
+            for (Map.Entry<String, Node> entry
+                    : exactFragments.entrySet()) {
+                String key = profileIdentity + ":" + entry.getKey();
+                if (!values.containsKey(key)) {
+                    values.put(key, entry.getValue().clone());
+                    changed = true;
+                }
+            }
+            return changed;
+        }
+
+        private int size() {
+            return values.size();
         }
     }
 

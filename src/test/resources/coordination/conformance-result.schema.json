@@ -9,9 +9,9 @@
     "schema",
     "status",
     "blueLanguageCommit",
-    "blueLanguageJarSha256",
     "blueBexCommit",
-    "blueBexJarSha256",
+    "blueDependencyLockSha256",
+    "blueSiblingInputsSha256",
     "fixedRepositoryManifestSha256",
     "fixturePackageIdentity",
     "fixedRepositoryVersion",
@@ -48,16 +48,16 @@
       "const": "complete"
     },
     "blueLanguageCommit": {
-      "const": "9706b604d54d59e843f2d0540c1a892470d1aa5c"
+      "const": "a3b38ca9a1d0b9ca8527b26d23b05cfdbc6af7d9"
     },
-    "blueLanguageJarSha256": {
+    "blueBexCommit": {
+      "const": "c3e36c65b9928c5ae7ef0d839b56ff35a0b70d97"
+    },
+    "blueDependencyLockSha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
-    "blueBexCommit": {
-      "const": "395c484111f8c4e9e0e98d2db7f1c5b0777bd5a8"
-    },
-    "blueBexJarSha256": {
+    "blueSiblingInputsSha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },

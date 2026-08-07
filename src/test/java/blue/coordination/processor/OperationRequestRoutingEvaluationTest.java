@@ -1,6 +1,5 @@
 package blue.coordination.processor;
 
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.ChannelEvaluation;
 import blue.language.processor.ChannelEvaluationContext;
@@ -8,8 +7,7 @@ import blue.language.processor.ChannelEvaluationContextFactory;
 import blue.language.processor.ChannelProcessor;
 import blue.language.processor.HandlerMatchContextFactory;
 import blue.language.processor.model.ChannelContract;
-import blue.language.provider.BasicNodeProvider;
-import blue.language.provider.SequentialNodeProvider;
+import blue.language.preprocess.provider.BasicNodeProvider;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.ChatMessage;
 import blue.repo.coordination.OperationRequest;
@@ -38,14 +36,14 @@ class OperationRequestRoutingEvaluationTest {
 
     @Test
     void shouldEnsureThatGeneratedOperationRequestRemainsTheExactSingleTimelinePayload() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node event = entry(fixture, request("increment", TARGET, new Node().value(7)));
 
-        // When
+        // when
         ChannelEvaluation evaluation = evaluate(fixture, event, channels());
 
-        // Then
+        // then
         assertOrdinary(evaluation, event);
         assertEquals(BigInteger.TEN, evaluation.event().get("/timestamp"));
         assertEquals(BigInteger.valueOf(7),
@@ -54,29 +52,29 @@ class OperationRequestRoutingEvaluationTest {
 
     @Test
     void shouldEnsureThatSameChannelTimelineRequestAlsoRemainsAnExactPayload() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Map<String, ChannelContract> channels = channels();
-        // When
+        // when
         Node event = entry(fixture, request("increment", SOURCE, new Node().value(7)));
 
-        // Then
+        // then
         assertOrdinary(evaluate(fixture, event, channels), event);
     }
 
     @Test
     void shouldEnsureThatCompatibleOperationRequestSubtypeRetainsExactFields() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node message = requestWithType(compatibleSubtype(), "increment", TARGET, new Node().value(7))
                 .properties("specializedField", new Node().value("preserved"));
         Node event = entry(fixture, TestTimelineProvider.chatMessage("placeholder"))
                 .properties("message", message);
 
-        // When
+        // when
         ChannelEvaluation evaluation = evaluate(fixture, event, channels());
 
-        // Then
+        // then
         assertOrdinary(evaluation, event);
         assertEquals("preserved",
                 evaluation.event().get("/message/specializedField"));
@@ -84,7 +82,7 @@ class OperationRequestRoutingEvaluationTest {
 
     @Test
     void shouldRejectMaterializedOperationRequestTypeWithoutExactIdentity() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node materializedType = fixture.repository
                 .nodeByBlueId(OperationRequest.blueId())
@@ -98,11 +96,11 @@ class OperationRequestRoutingEvaluationTest {
                 TARGET,
                 new Node().value(7));
 
-        // When
+        // when
         CoordinationEventNodes.OperationRequestView view =
                 CoordinationEventNodes.operationRequest(request);
 
-        // Then
+        // then
         assertNull(view,
                 "a materialized type definition without its exact declared "
                         + "BlueId must not become an Operation Request");
@@ -110,51 +108,51 @@ class OperationRequestRoutingEvaluationTest {
 
     @Test
     void shouldEnsureThatUnrelatedRequestSubtypeKeepsOrdinaryDelivery() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node unrelated = requestWithType(new Node().blueId(Request.blueId()),
                 "increment", TARGET, new Node().value(7));
-        // When
+        // when
         Node event = entry(fixture, TestTimelineProvider.chatMessage("placeholder"))
                 .properties("message", unrelated);
 
-        // Then
+        // then
         assertOrdinary(evaluate(fixture, event, channels()), event);
     }
 
     @Test
     void shouldEnsureThatQualifiedNameAndStructuralLookalikesAreNotRecognized() {
-        // Given
+        // given
         Node qualifiedName = request("increment", TARGET, new Node().value(7));
-        // When
+        // when
         Node structural = new Node()
                 .properties("operation", new Node().value("increment"))
                 .properties("channel", new Node().value(TARGET));
 
-        // Then
+        // then
         assertNull(CoordinationEventNodes.operationRequest(qualifiedName));
         assertNull(CoordinationEventNodes.operationRequest(structural));
     }
 
     @Test
     void shouldEnsureThatUnavailableTypeClaimIsNotRecognized() {
-        // Given
-        // When
+        // given
+        // when
         Node unavailable = requestWithType(
                 new Node().blueId("11111111111111111111111111111111"),
                 "increment",
                 TARGET,
                 new Node().value(7));
 
-        // Then
+        // then
         assertNull(CoordinationEventNodes.operationRequest(unavailable));
     }
 
     @Test
     void shouldEnsureThatAbsentEventAndNonTextRoutingFieldsAreNotRoutable() {
-        // Given
-        // When
-        // Then
+        // given
+        // when
+        // then
         assertNull(CoordinationEventNodes.operationRequest(null));
 
         Node nonTextOperation = new Node()
@@ -172,71 +170,71 @@ class OperationRequestRoutingEvaluationTest {
 
     @Test
     void shouldEnsureThatMalformedInlineTypeMetadataFailsClosed() {
-        // Given
+        // given
         Map<String, Node> malformedProperties = new LinkedHashMap<String, Node>();
         malformedProperties.put("broken", null);
         Node malformedType = new Node()
                 .blueId(Request.blueId())
                 .properties(malformedProperties);
-        // When
+        // when
         Node request = requestWithType(malformedType,
                 "increment", TARGET, new Node().value(7));
 
-        // Then
+        // then
         assertNull(CoordinationEventNodes.operationRequest(request));
     }
 
     @Test
     void shouldEnsureThatMissingAndBlankOperationKeepOrdinaryDelivery() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node missing = resolvedRequest(fixture, null, TARGET);
-        // When
+        // when
         Node blank = resolvedRequest(fixture, " \t", TARGET);
 
-        // Then
+        // then
         assertOrdinary(evaluate(fixture, entry(fixture, missing), channels()), entry(fixture, missing));
         assertOrdinary(evaluate(fixture, entry(fixture, blank), channels()), entry(fixture, blank));
     }
 
     @Test
     void shouldEnsureThatMissingAndBlankChannelKeepOrdinaryDelivery() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node missing = resolvedRequest(fixture, "increment", null);
-        // When
+        // when
         Node blank = resolvedRequest(fixture, "increment", " \n");
 
-        // Then
+        // then
         assertOrdinary(evaluate(fixture, entry(fixture, missing), channels()), entry(fixture, missing));
         assertOrdinary(evaluate(fixture, entry(fixture, blank), channels()), entry(fixture, blank));
     }
 
     @Test
     void shouldEnsureThatUnknownTargetKeepsOrdinaryDelivery() {
-        // Given
+        // given
         Fixture fixture = fixture();
-        // When
+        // when
         Node event = entry(fixture, request("increment", "missing", new Node().value(7)));
 
-        // Then
+        // then
         assertOrdinary(evaluate(fixture, event, channels()), event);
     }
 
     @Test
     void shouldEnsureThatOrdinaryTimelineMessageKeepsOrdinaryDelivery() {
-        // Given
+        // given
         Fixture fixture = fixture();
-        // When
+        // when
         Node event = entry(fixture, TestTimelineProvider.chatMessage("hello"));
 
-        // Then
+        // then
         assertOrdinary(evaluate(fixture, event, channels()), event);
     }
 
     @Test
     void shouldEnsureThatTargetExternalAcceptanceEvaluatorIsNotInvoked() {
-        // Given
+        // given
         Fixture fixture = fixture();
         CountingTimelineProcessor targetProcessor = new CountingTimelineProcessor();
         ChannelEvaluationContext context = ChannelEvaluationContextFactory.create(
@@ -246,27 +244,27 @@ class OperationRequestRoutingEvaluationTest {
                 Collections.emptyMap(),
                 targetProcessor);
 
-        // When
+        // when
         ChannelEvaluation evaluation = new TimelineChannelProcessor().evaluate(sourceContract(), context);
 
-        // Then
+        // then
         assertTrue(evaluation.matches());
         assertEquals(0, targetProcessor.evaluations);
     }
 
     @Test
     void shouldEnsureThatUnionPreservesTheExactChildPayloadWithoutSyntheticMetadata() {
-        // Given
+        // given
         Node event = new Node()
                 .properties("payload", new Node().value("selected"))
                 .properties("meta", new Node()
                         .properties("existing", new Node().value("retained")));
-        // When
+        // when
         ChannelEvaluation evaluation = TimelineProviderSupport.preserveUnionPayload(
                 ChannelEvaluation.match(event, "child-event-id"),
                 new Node().properties("fallback", new Node().value(true)));
 
-        // Then
+        // then
         assertTrue(evaluation.matches());
         assertEquals("selected", evaluation.event().get("/payload"));
         assertEquals("retained", evaluation.event().get("/meta/existing"));
@@ -278,15 +276,15 @@ class OperationRequestRoutingEvaluationTest {
 
     @Test
     void shouldEnsureThatUnionOrdinaryDeliveryUsesFallbackAndPreservesEventId() {
-        // Given
+        // given
         Node fallback = new Node().properties("payload", new Node().value("fallback"));
 
-        // When
+        // when
         ChannelEvaluation evaluation = TimelineProviderSupport.preserveUnionPayload(
                 ChannelEvaluation.match(null, "ordinary-id"),
                 fallback);
 
-        // Then
+        // then
         assertTrue(evaluation.matches());
         assertEquals("fallback", evaluation.event().get("/payload"));
         assertNull(TimelineProviderSupport.property(evaluation.event(), "meta"));
@@ -295,29 +293,29 @@ class OperationRequestRoutingEvaluationTest {
 
     @Test
     void shouldEnsureThatUnionWithoutChildOrFallbackEventDoesNotMatch() {
-        // Given
-        // When
+        // given
+        // when
         ChannelEvaluation evaluation = TimelineProviderSupport.preserveUnionPayload(
                 ChannelEvaluation.match(null),
                 null);
 
-        // Then
+        // then
         assertFalse(evaluation.matches());
     }
 
     @Test
     void shouldEnsureThatOperationMatcherRequiresExactEffectiveChannelAndOperationKey() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node event = entry(fixture, request("increment", TARGET, new Node().value(7)));
         SequentialWorkflowOperation operation = new SequentialWorkflowOperation();
         operation.request(resolvedPattern(fixture, "Integer"));
         operation.setKey("increment");
 
-        // When
+        // when
         OperationRequestMatcher matcher = new OperationRequestMatcher();
 
-        // Then
+        // then
         assertTrue(matcher.matches(operation,
                 HandlerMatchContextFactory.create(fixture.blue, "increment", TARGET, event)));
         assertFalse(matcher.matches(operation,
@@ -329,7 +327,7 @@ class OperationRequestRoutingEvaluationTest {
 
     @Test
     void shouldEnsureThatOperationMatcherTreatsPureReferenceMessageLikeInlineRequest() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node requestContent = new Node()
                 .name("Referenced Operation Request")
@@ -341,19 +339,17 @@ class OperationRequestRoutingEvaluationTest {
                 new BasicNodeProvider(requestContent);
         String requestBlueId = requestProvider.getBlueIdByName(
                 "Referenced Operation Request");
-        fixture.blue.nodeProvider(new SequentialNodeProvider(
-                requestProvider,
-                fixture.blue.getNodeProvider()));
+        fixture.blue.addNodeProvider(requestProvider);
         Node event = entry(
                 fixture,
                 new Node().blueId(requestBlueId));
         SequentialWorkflowOperation operation =
                 new SequentialWorkflowOperation();
         operation.request(resolvedPattern(fixture, "Integer"));
-        // When
+        // when
         operation.setKey("increment");
 
-        // Then
+        // then
         assertTrue(new OperationRequestMatcher().matches(
                 operation,
                 HandlerMatchContextFactory.create(
@@ -365,15 +361,15 @@ class OperationRequestRoutingEvaluationTest {
 
     @Test
     void shouldDistinguishMetadataOnlyFromPayloadConstrainedRequestPatterns() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node event = entry(fixture, resolvedRequest(fixture, "run", TARGET));
         SequentialWorkflowOperation operation = new SequentialWorkflowOperation();
         operation.setKey("run");
-        // When
+        // when
         OperationRequestMatcher matcher = new OperationRequestMatcher();
 
-        // Then
+        // then
         assertTrue(matcher.matches(operation,
                 HandlerMatchContextFactory.create(fixture.blue, "run", TARGET, event)));
 
@@ -392,15 +388,15 @@ class OperationRequestRoutingEvaluationTest {
 
     @Test
     void shouldEnsureThatOperationMatcherFailsClosedForMissingInputsAndMalformedRoute() {
-        // Given
+        // given
         Fixture fixture = fixture();
         OperationRequestMatcher matcher = new OperationRequestMatcher();
         SequentialWorkflowOperation operation = new SequentialWorkflowOperation();
         operation.setKey("run");
-        // When
+        // when
         Node validEvent = entry(fixture, resolvedRequest(fixture, "run", TARGET));
 
-        // Then
+        // then
         assertFalse(matcher.matches(null,
                 HandlerMatchContextFactory.create(fixture.blue, "run", TARGET, validEvent)));
         assertFalse(matcher.matches(operation, null));
@@ -425,22 +421,22 @@ class OperationRequestRoutingEvaluationTest {
 
     @Test
     void shouldEnsureThatExplicitlyEmptyRequestPatternAllowsAbsentPayload() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node event = entry(fixture, resolvedRequest(fixture, "run", TARGET));
         SequentialWorkflowOperation operation = new SequentialWorkflowOperation();
         operation.setKey("run");
-        // When
+        // when
         operation.request(new Node());
 
-        // Then
+        // then
         assertTrue(new OperationRequestMatcher().matches(operation,
                 HandlerMatchContextFactory.create(fixture.blue, "run", TARGET, event)));
     }
 
     @Test
     void shouldTreatRepositoryDescriptionOnlyRequestAsUnconstrained() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node event = entry(
                 fixture,
@@ -451,7 +447,7 @@ class OperationRequestRoutingEvaluationTest {
         operation.request(new Node().description(
                 "Repository-authored request documentation"));
 
-        // When
+        // when
         boolean matched =
                 new OperationRequestMatcher().matches(
                         operation,
@@ -461,7 +457,7 @@ class OperationRequestRoutingEvaluationTest {
                                 TARGET,
                                 event));
 
-        // Then
+        // then
         assertTrue(matched);
     }
 
@@ -528,7 +524,7 @@ class OperationRequestRoutingEvaluationTest {
         if (channel != null) {
             request.properties("channel", new Node().value(channel));
         }
-        return fixture.blue.preprocess(request.blue(fixture.repository.typeAliasBlue())).blue(null);
+        return fixture.blue.preprocess(request.blue(fixture.repository.importsDirective())).blue(null);
     }
 
     private static Node requestWithType(Node type, String operation, String channel, Node payload) {
@@ -548,11 +544,11 @@ class OperationRequestRoutingEvaluationTest {
     private static Node resolvedPattern(Fixture fixture, String type) {
         return fixture.blue.preprocess(new Node()
                 .type(type)
-                .blue(fixture.repository.typeAliasBlue())).blue(null);
+                .blue(fixture.repository.importsDirective())).blue(null);
     }
 
     private static Fixture fixture() {
-        BlueRepository repository = BlueRepository.latest();
+        BlueRepository repository = BlueRepository.current();
         return new Fixture(repository, CoordinationTestResources.configuredBlue(repository));
     }
 
@@ -573,9 +569,11 @@ class OperationRequestRoutingEvaluationTest {
 
     private static final class Fixture {
         private final BlueRepository repository;
-        private final Blue blue;
+        private final CoordinationTestRuntime blue;
 
-        private Fixture(BlueRepository repository, Blue blue) {
+        private Fixture(
+                BlueRepository repository,
+                CoordinationTestRuntime blue) {
             this.repository = repository;
             this.blue = blue;
         }

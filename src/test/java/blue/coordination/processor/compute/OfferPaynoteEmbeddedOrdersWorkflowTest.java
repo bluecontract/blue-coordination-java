@@ -8,7 +8,7 @@ import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorErrorCategory;
 import blue.language.processor.ProcessorStatus;
 import blue.language.processor.registry.RuntimeBlueIds;
-import blue.language.snapshot.ResolvedSnapshot;
+import blue.language.merge.ResolvedSnapshot;
 import java.math.BigInteger;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -48,16 +48,16 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
 
     @Test
     void shouldInitializeExpectedOfferWithoutRootTemplates() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = support(null);
         Node authored = support.yamlResource(DOCUMENT_RESOURCE);
 
-        // When
+        // when
         ResolvedSnapshot initialized =
                 blue.coordination.processor.ProcessingResultTestSupport.snapshot(
                         support.blue, support.initialize(authored));
 
-        // Then
+        // then
         assertNoRootTemplates(authored);
         assertEquals("Awaiting PayNote", initialized.resolvedNodeAt("/order/status").getValue());
         assertEquals("20-21 June weekend", initialized.resolvedNodeAt("/package/title").getValue());
@@ -68,17 +68,17 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
 
     @Test
     void shouldDeliverEmbeddedPaynoteAndRequestAuthorization() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = support(null);
         ResolvedSnapshot initialized = initializedSnapshot(support);
 
-        // When
+        // when
         DocumentProcessingResult delivered = support.blue.processDocument(
                 initialized,
                 operationEvent(support, "travel-agency", 12,
                         "deliverPaynote", packagePaynote(support)));
 
-        // Then
+        // then
         assertSuccessful(delivered);
         assertEquals("Waiting for PayNote capture", delivered.document().get("/order/status"));
         assertEquals(Boolean.TRUE, delivered.document().get("/order/paynoteDelivered"));
@@ -89,13 +89,13 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
 
     @Test
     void shouldAuthorizeDeliveredPackagePaynote() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = support(null);
         ResolvedSnapshot delivered =
                 deliveredPaynoteSnapshot(
                         support, true);
 
-        // When
+        // when
         DocumentProcessingResult authorized = processForProbe(
                 support,
                 delivered,
@@ -104,20 +104,20 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
                 ProcessorStatus.SUCCESS,
                 "confirmAuthorization");
 
-        // Then
+        // then
         assertSuccessful(authorized);
         assertEquals("Authorized", authorized.document().get("/paynote/status"));
     }
 
     @Test
     void shouldEmbedRestaurantAndHotelOrdersAfterAuthorization() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = support(null);
         ResolvedSnapshot authorized =
                 authorizedPaynoteSnapshot(
                         support, true);
 
-        // When
+        // when
         DocumentProcessingResult restaurantProvided = processForProbe(
                 support,
                 authorized,
@@ -136,7 +136,7 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
                 ProcessorStatus.SUCCESS,
                 "provideHotelOrder");
 
-        // Then
+        // then
         assertSuccessful(restaurantProvided);
         assertSuccessful(hotelProvided);
         assertEquals("Restaurant Order", hotelProvided.document().get("/paynote/restaurantOrder/name"));
@@ -149,13 +149,13 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
 
     @Test
     void shouldRequestCaptureOnlyAfterBothComponentOrdersConfirm() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = support(null);
         ResolvedSnapshot ordersProvided =
                 componentOrdersProvidedSnapshot(
                         support, true);
 
-        // When
+        // when
         DocumentProcessingResult restaurantConfirmed = processForProbe(
                 support,
                 ordersProvided,
@@ -174,7 +174,7 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
                 ProcessorStatus.SUCCESS,
                 "hotel confirm");
 
-        // Then
+        // then
         assertSuccessful(restaurantConfirmed);
         assertSuccessful(hotelConfirmed);
         assertEquals("Confirmed", restaurantConfirmed.document().get("/paynote/restaurantOrder/status"));
@@ -187,13 +187,13 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
 
     @Test
     void shouldMakePackageReadyAfterCapturingConfirmedComponentOrders() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = support(null);
         ResolvedSnapshot confirmedOrders =
                 confirmedOrdersSnapshot(
                         support, true);
 
-        // When
+        // when
         DocumentProcessingResult captured = processForProbe(
                 support,
                 confirmedOrders,
@@ -202,7 +202,7 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
                 ProcessorStatus.SUCCESS,
                 "confirmCapture");
 
-        // Then
+        // then
         assertSuccessful(captured);
         assertEquals("Captured", captured.document().get("/paynote/status"));
         assertEquals(Boolean.TRUE, captured.document().get("/paynote/captured"));
@@ -212,13 +212,13 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
 
     @Test
     void shouldPreserveSnapshotOptimizationsAcrossPackageLifecycle() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
 
-        // When
+        // when
         MeasuredLifecycle lifecycle = runMeasuredLifecycle(metrics);
 
-        // Then
+        // then
         assertSuccessful(lifecycle.captured);
         assertEquals(0L, metrics.updateIndividualPatchApplications());
         assertEquals(metrics.updateBatchPatchApplications(), metrics.directBexChangesetHits());
@@ -234,14 +234,14 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
 
     @Test
     void shouldRejectPaynoteWithWrongAmount() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = support(null);
         ResolvedSnapshot current =
                 blue.coordination.processor.ProcessingResultTestSupport.snapshot(
                         support.blue,
                         support.initialize(support.yamlResource(DOCUMENT_RESOURCE)));
 
-        // When
+        // when
         // Illegal: wrong PayNote amount. The package order only accepts the exact 499 PLN PayNote for
         // this Hotel Badura + Cud Malina weekend package. This is rejected by deliverPaynote.request
         // matching, so the workflow does not run and the document is unchanged.
@@ -250,7 +250,7 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
         DocumentProcessingResult wrongPaynoteResult = support.blue.processDocument(current,
                 operationEvent(support, "travel-agency", 11, "deliverPaynote", wrongPaynote));
 
-        // Then
+        // then
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(wrongPaynoteResult), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(wrongPaynoteResult));
         assertFalse(wrongPaynoteResult.document().getProperties().containsKey("paynote"));
         assertEquals("Awaiting PayNote", wrongPaynoteResult.document().get("/order/status"));
@@ -258,13 +258,13 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
 
     @Test
     void shouldRejectComponentOrderBeforePaynoteAuthorization() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = support(null);
         ResolvedSnapshot current =
                 deliveredPaynoteSnapshot(
                         support, true);
 
-        // When
+        // when
         // Illegal: Travel Agency cannot provide component orders until Card Processor authorizes the
         // embedded PayNote.
         DocumentProcessingResult beforeAuthorization = processForProbe(
@@ -275,23 +275,23 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
                 ProcessorStatus.RUNTIME_FATAL,
                 "provideHotelOrder before authorization");
 
-        // Then
+        // then
         assertRuntimeFatal(beforeAuthorization, "after PayNote authorization");
     }
 
     @Test
     void shouldRejectHotelDocumentForRestaurantOrder() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = support(null);
         ResolvedSnapshot current = authorizedPaynoteSnapshot(support);
 
-        // When
+        // when
         // Illegal: provideRestaurantOrder rejects a hotel document at operation-request matching time.
         // Restaurant and hotel fulfillment documents are intentionally specific and not interchangeable.
         DocumentProcessingResult wrongRestaurantDocument = support.blue.processDocument(current,
                 operationEvent(support, "travel-agency", 15, "provideRestaurantOrder", hotelOrder(support)));
 
-        // Then
+        // then
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(wrongRestaurantDocument), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(wrongRestaurantDocument));
         assertFalse(wrongRestaurantDocument.document().getAsNode("/paynote").getProperties()
                 .containsKey("restaurantOrder"));
@@ -300,13 +300,13 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
 
     @Test
     void shouldRejectCaptureBeforeBothComponentOrdersConfirm() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = support(null);
         ResolvedSnapshot current =
                 componentOrdersProvidedSnapshot(
                         support, true);
 
-        // When
+        // when
         // Illegal: Card Processor cannot capture before both Restaurant and Hotel have confirmed.
         DocumentProcessingResult earlyCapture = processForProbe(
                 support,
@@ -316,7 +316,7 @@ class OfferPaynoteEmbeddedOrdersWorkflowTest {
                 ProcessorStatus.RUNTIME_FATAL,
                 "confirmCapture before confirmations");
 
-        // Then
+        // then
         assertRuntimeFatal(earlyCapture, "before both orders confirm");
     }
 

@@ -1,13 +1,12 @@
 package blue.coordination.processor;
 
-import blue.language.Blue;
-import blue.language.NodeProvider;
+import blue.language.provider.NodeProvider;
+import blue.language.provider.SequentialNodeProvider;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.model.ProcessingTerminatedMarker;
 import blue.language.processor.registry.RuntimeBlueIds;
-import blue.language.provider.SequentialNodeProvider;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.Timeline;
 import blue.repo.coordination.TimelineChannel;
@@ -36,7 +35,7 @@ final class CoordinationSubscriptionProjectorTest {
 
     @Test
     void shouldProjectNestedTimelineChannelAtItsSelectedScope() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node root = initialized(
                 fixture,
@@ -48,13 +47,13 @@ final class CoordinationSubscriptionProjectorTest {
         CoordinationSubscriptionProjector projector =
                 CoordinationDeliveryPlanning
                         .subscriptionProjector(
-                                fixture.blue
-                                        .getDocumentProcessor());
+                                fixture.blue.processor(),
+                                fixture.blue.contracts());
         ExternalOrderKey frontier = order(100);
         CoordinationHostQuotaSession hostQuotas =
                 CoordinationHostQuotaSession.observing();
 
-        // When
+        // when
         CoordinationSubscriptionSnapshot snapshot =
                 projector.projectCurrent(
                         root.clone(),
@@ -62,7 +61,7 @@ final class CoordinationSubscriptionProjectorTest {
                         frontier,
                         hostQuotas);
 
-        // Then
+        // then
         assertEquals(1, snapshot.occurrences().size());
         assertEquals(
                 "/emb1/emb2/emb3",
@@ -87,7 +86,7 @@ final class CoordinationSubscriptionProjectorTest {
 
     @Test
     void shouldProduceDeterministicSubscriptionSnapshotForRepeatedProjection() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node root = initialized(
                 fixture,
@@ -99,11 +98,11 @@ final class CoordinationSubscriptionProjectorTest {
         CoordinationSubscriptionProjector projector =
                 CoordinationDeliveryPlanning
                         .subscriptionProjector(
-                                fixture.blue
-                                        .getDocumentProcessor());
+                                fixture.blue.processor(),
+                                fixture.blue.contracts());
         ExternalOrderKey frontier = order(100);
 
-        // When
+        // when
         CoordinationSubscriptionSnapshot first =
                 projector.projectCurrent(
                         root.clone(),
@@ -115,7 +114,7 @@ final class CoordinationSubscriptionProjectorTest {
                         7L,
                         frontier);
 
-        // Then
+        // then
         assertEquals(first.digest(), second.digest());
         assertEquals(first.toMap(), second.toMap());
         assertEquals(
@@ -129,7 +128,7 @@ final class CoordinationSubscriptionProjectorTest {
 
     @Test
     void shouldRehydratePersistedSubscriptionSnapshotWithoutIdentityDrift() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node root = initialized(
                 fixture,
@@ -141,20 +140,20 @@ final class CoordinationSubscriptionProjectorTest {
         CoordinationSubscriptionSnapshot projected =
                 CoordinationDeliveryPlanning
                         .subscriptionProjector(
-                                fixture.blue
-                                        .getDocumentProcessor())
+                                fixture.blue.processor(),
+                                fixture.blue.contracts())
                         .projectCurrent(
                                 root,
                                 7L,
                                 order(100));
 
-        // When
+        // when
         CoordinationSubscriptionSnapshot rehydrated =
                 CoordinationSubscriptionSnapshot
                         .rehydrate(
                                 projected.toMap());
 
-        // Then
+        // then
         assertEquals(
                 projected.toMap(),
                 rehydrated.toMap());
@@ -165,7 +164,7 @@ final class CoordinationSubscriptionProjectorTest {
 
     @Test
     void shouldProjectRootOnlyTimelineChannel() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node root = initialized(
                 fixture,
@@ -176,17 +175,17 @@ final class CoordinationSubscriptionProjectorTest {
         CoordinationSubscriptionProjector projector =
                 CoordinationDeliveryPlanning
                         .subscriptionProjector(
-                                fixture.blue
-                                        .getDocumentProcessor());
+                                fixture.blue.processor(),
+                                fixture.blue.contracts());
 
-        // When
+        // when
         CoordinationSubscriptionSnapshot snapshot =
                 projector.projectCurrent(
                         root,
                         1L,
                         order(1));
 
-        // Then
+        // then
         assertEquals(
                 1,
                 snapshot.occurrences().size());
@@ -205,7 +204,7 @@ final class CoordinationSubscriptionProjectorTest {
 
     @Test
     void shouldProjectTimelineChannelFromOneEmbeddedScope() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Map<String, Node> contracts =
                 new LinkedHashMap<String, Node>();
@@ -229,17 +228,17 @@ final class CoordinationSubscriptionProjectorTest {
         CoordinationSubscriptionProjector projector =
                 CoordinationDeliveryPlanning
                         .subscriptionProjector(
-                                fixture.blue
-                                        .getDocumentProcessor());
+                                fixture.blue.processor(),
+                                fixture.blue.contracts());
 
-        // When
+        // when
         CoordinationSubscriptionSnapshot snapshot =
                 projector.projectCurrent(
                         root,
                         1L,
                         order(1));
 
-        // Then
+        // then
         assertEquals(
                 1,
                 snapshot.occurrences().size());
@@ -255,7 +254,7 @@ final class CoordinationSubscriptionProjectorTest {
 
     @Test
     void shouldProjectInheritedTimelineChannel() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node inheritedChannel =
                 exactTimelineChannel(
@@ -287,17 +286,17 @@ final class CoordinationSubscriptionProjectorTest {
         CoordinationSubscriptionProjector projector =
                 CoordinationDeliveryPlanning
                         .subscriptionProjector(
-                                fixture.blue
-                                        .getDocumentProcessor());
+                                fixture.blue.processor(),
+                                fixture.blue.contracts());
 
-        // When
+        // when
         CoordinationSubscriptionSnapshot snapshot =
                 projector.projectCurrent(
                         root,
                         1L,
                         order(1));
 
-        // Then
+        // then
         assertEquals(
                 1,
                 snapshot.occurrences().size());
@@ -319,7 +318,7 @@ final class CoordinationSubscriptionProjectorTest {
 
     @Test
     void shouldFollowInheritedProcessEmbeddedPath() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node inheritedEmbedded =
                 exactProcessEmbedded(
@@ -358,17 +357,17 @@ final class CoordinationSubscriptionProjectorTest {
         CoordinationSubscriptionProjector projector =
                 CoordinationDeliveryPlanning
                         .subscriptionProjector(
-                                fixture.blue
-                                        .getDocumentProcessor());
+                                fixture.blue.processor(),
+                                fixture.blue.contracts());
 
-        // When
+        // when
         CoordinationSubscriptionSnapshot snapshot =
                 projector.projectCurrent(
                         root,
                         1L,
                         order(1));
 
-        // Then
+        // then
         assertEquals(
                 1,
                 snapshot.occurrences().size());
@@ -390,7 +389,7 @@ final class CoordinationSubscriptionProjectorTest {
 
     @Test
     void shouldProduceEquivalentSnapshotsForInlineColdAndWarmProviderRepresentations() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node inlineRoot = initialized(
                 fixture,
@@ -417,12 +416,12 @@ final class CoordinationSubscriptionProjectorTest {
         CoordinationSubscriptionProjector projector =
                 CoordinationDeliveryPlanning
                         .subscriptionProjector(
-                                fixture.blue
-                                        .getDocumentProcessor());
+                                fixture.blue.processor(),
+                                fixture.blue.contracts());
         Node reference =
                 reference(rootBlueId);
 
-        // When
+        // when
         CoordinationSubscriptionSnapshot cold =
                 projector.projectCurrent(
                         reference.clone(),
@@ -443,7 +442,7 @@ final class CoordinationSubscriptionProjectorTest {
                         4L,
                         order(4));
 
-        // Then
+        // then
         assertTrue(
                 coldRootProviderRequests > 0,
                 "the first pure-reference projection must "
@@ -458,7 +457,7 @@ final class CoordinationSubscriptionProjectorTest {
 
     @Test
     void shouldProduceExactSnapshotForPartiallyMaterializedNestedRoot() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node inlineRoot = initialized(
                 fixture,
@@ -470,7 +469,7 @@ final class CoordinationSubscriptionProjectorTest {
         CoordinationDocumentSplitter.SplitGraph split =
                 new CoordinationDocumentSplitter(
                         fixture.blue
-                                .getDocumentProcessor())
+                                .contracts())
                         .splitDocument(
                                 inlineRoot.clone());
         List<String> providerRequests =
@@ -487,10 +486,10 @@ final class CoordinationSubscriptionProjectorTest {
         CoordinationSubscriptionProjector projector =
                 CoordinationDeliveryPlanning
                         .subscriptionProjector(
-                                fixture.blue
-                                        .getDocumentProcessor());
+                                fixture.blue.processor(),
+                                fixture.blue.contracts());
 
-        // When
+        // when
         CoordinationSubscriptionSnapshot inline =
                 projector.projectCurrent(
                         inlineRoot.clone(),
@@ -502,7 +501,7 @@ final class CoordinationSubscriptionProjectorTest {
                         11L,
                         order(11));
 
-        // Then
+        // then
         assertEquals(
                 split.rootBlueId(),
                 fixture.blue.calculateBlueId(
@@ -527,7 +526,7 @@ final class CoordinationSubscriptionProjectorTest {
 
     @Test
     void shouldProduceExactSnapshotAcrossBatchedComposedProviderSegments() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node inlineRoot = initialized(
                 fixture,
@@ -539,7 +538,7 @@ final class CoordinationSubscriptionProjectorTest {
         CoordinationDocumentSplitter.SplitGraph split =
                 new CoordinationDocumentSplitter(
                         fixture.blue
-                                .getDocumentProcessor())
+                                .contracts())
                         .splitDocument(
                                 inlineRoot.clone());
         String rootBlueId =
@@ -559,7 +558,7 @@ final class CoordinationSubscriptionProjectorTest {
         List<String> secondSegmentRequests =
                 new ArrayList<String>();
         NodeProvider existingProvider =
-                fixture.blue.getNodeProvider();
+                fixture.blue.nodeProvider();
         NodeProvider firstProvider =
                 requestedBlueId -> {
                     if (!firstSegment.contains(
@@ -598,10 +597,10 @@ final class CoordinationSubscriptionProjectorTest {
         CoordinationSubscriptionProjector projector =
                 CoordinationDeliveryPlanning
                         .subscriptionProjector(
-                                fixture.blue
-                                        .getDocumentProcessor());
+                                fixture.blue.processor(),
+                                fixture.blue.contracts());
 
-        // When
+        // when
         CoordinationSubscriptionSnapshot inline =
                 projector.projectCurrent(
                         inlineRoot.clone(),
@@ -617,7 +616,7 @@ final class CoordinationSubscriptionProjectorTest {
                         12L,
                         order(12));
 
-        // Then
+        // then
         assertFalse(
                 firstSegmentRequests.isEmpty(),
                 "the first provider segment must serve "
@@ -636,7 +635,7 @@ final class CoordinationSubscriptionProjectorTest {
 
     @Test
     void shouldKeepCyclicMemberEdgeOpaqueDuringSubscriptionProjection() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node root = initialized(
                 fixture,
@@ -668,17 +667,17 @@ final class CoordinationSubscriptionProjectorTest {
         CoordinationSubscriptionProjector projector =
                 CoordinationDeliveryPlanning
                         .subscriptionProjector(
-                                fixture.blue
-                                        .getDocumentProcessor());
+                                fixture.blue.processor(),
+                                fixture.blue.contracts());
 
-        // When
+        // when
         CoordinationSubscriptionSnapshot snapshot =
                 projector.projectCurrent(
                         root,
                         1L,
                         order(1));
 
-        // Then
+        // then
         assertEquals(
                 1,
                 snapshot.occurrences().size());
@@ -705,7 +704,7 @@ final class CoordinationSubscriptionProjectorTest {
 
     @Test
     void shouldBindSnapshotIdentityToExplicitTimelineSubtypeRegistrations() {
-        // Given
+        // given
         Fixture base = fixture(false);
         Fixture extended = fixture(true);
         Node baseRoot = initialized(
@@ -721,12 +720,12 @@ final class CoordinationSubscriptionProjectorTest {
                         TestTimelineProvider.channel(
                                 "timeline")));
 
-        // When
+        // when
         CoordinationSubscriptionSnapshot baseSnapshot =
                 CoordinationDeliveryPlanning
                         .subscriptionProjector(
-                                base.blue
-                                        .getDocumentProcessor())
+                                base.blue.processor(),
+                                base.blue.contracts())
                         .projectCurrent(
                                 baseRoot,
                                 1L,
@@ -735,14 +734,14 @@ final class CoordinationSubscriptionProjectorTest {
                 extendedSnapshot =
                 CoordinationDeliveryPlanning
                         .subscriptionProjector(
-                                extended.blue
-                                        .getDocumentProcessor())
+                                extended.blue.processor(),
+                                extended.blue.contracts())
                         .projectCurrent(
                                 extendedRoot,
                                 1L,
                                 order(1));
 
-        // Then
+        // then
         assertNotEquals(
                 baseSnapshot
                         .coordinationRuntimeRegistryIdentity(),
@@ -755,7 +754,7 @@ final class CoordinationSubscriptionProjectorTest {
                 CoordinationRuntimeRegistrations
                         .timelineSubtypeBlueIds(
                                 base.blue
-                                        .getDocumentProcessor())
+                                        .processor())
                         .isEmpty());
         assertEquals(
                 Collections.singletonList(
@@ -763,12 +762,12 @@ final class CoordinationSubscriptionProjectorTest {
                 CoordinationRuntimeRegistrations
                         .timelineSubtypeBlueIds(
                                 extended.blue
-                                        .getDocumentProcessor()));
+                                        .processor()));
     }
 
     @Test
     void shouldRejectUpdateAfterTimelineSubtypeRegistryChanges() {
-        // Given
+        // given
         Fixture fixture = fixture(false);
         Node root = initialized(
                 fixture,
@@ -779,18 +778,17 @@ final class CoordinationSubscriptionProjectorTest {
         CoordinationSubscriptionProjector projector =
                 CoordinationDeliveryPlanning
                         .subscriptionProjector(
-                                fixture.blue
-                                        .getDocumentProcessor());
+                                fixture.blue.processor(),
+                                fixture.blue.contracts());
         CoordinationSubscriptionSnapshot initial =
                 projector.projectCurrent(
                         root.clone(),
                         1L,
                         order(1));
-        CoordinationProcessors.registerTimelineSubtype(
-                fixture.blue,
+        fixture.blue.registerTimelineSubtype(
                 MyOSTimelineChannel.class);
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
@@ -800,7 +798,7 @@ final class CoordinationSubscriptionProjectorTest {
                                 2L,
                                 order(2)));
 
-        // Then
+        // then
         assertTrue(
                 failure.getMessage().contains(
                         "Coordination runtime registry identity "
@@ -810,7 +808,7 @@ final class CoordinationSubscriptionProjectorTest {
 
     @Test
     void shouldKeepSameExactChildAtTwoPathsAsTwoOccurrences() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node child = scopeWithChannel(
                 "shared",
@@ -834,15 +832,15 @@ final class CoordinationSubscriptionProjectorTest {
         CoordinationSubscriptionProjector projector =
                 CoordinationDeliveryPlanning
                         .subscriptionProjector(
-                                fixture.blue
-                                        .getDocumentProcessor());
+                                fixture.blue.processor(),
+                                fixture.blue.contracts());
 
-        // When
+        // when
         CoordinationSubscriptionSnapshot snapshot =
                 projector.projectCurrent(
                         root, 1L, order(1));
 
-        // Then
+        // then
         assertEquals(2, snapshot.occurrences().size());
         assertEquals(
                 Arrays.asList("/left", "/right"),
@@ -861,7 +859,7 @@ final class CoordinationSubscriptionProjectorTest {
 
     @Test
     void shouldRejectProjectionBeforeTheOverLimitOccurrenceIsAdmitted() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node child = scopeWithChannel(
                 "shared",
@@ -885,14 +883,14 @@ final class CoordinationSubscriptionProjectorTest {
         CoordinationSubscriptionProjector projector =
                 CoordinationDeliveryPlanning
                         .subscriptionProjector(
-                                fixture.blue
-                                        .getDocumentProcessor());
+                                fixture.blue.processor(),
+                                fixture.blue.contracts());
         CoordinationHostQuotaSession hostQuotas =
                 CoordinationHostQuotaSession.observing(
                         CoordinationHostQuotaTestSupport
                                 .limitedSubscriptionOccurrences(1));
 
-        // When
+        // when
         CoordinationHostQuotaExceededException failure =
                 assertThrows(
                         CoordinationHostQuotaExceededException.class,
@@ -902,7 +900,7 @@ final class CoordinationSubscriptionProjectorTest {
                                 order(1),
                                 hostQuotas));
 
-        // Then
+        // then
         assertEquals(
                 "maxSubscriptionOccurrencesPerProjection",
                 failure.limitName());
@@ -925,7 +923,7 @@ final class CoordinationSubscriptionProjectorTest {
 
     @Test
     void shouldRejectDirectRootLowerBoundBeforeLanguageProjectionWork() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Map<String, Node> contracts =
                 new LinkedHashMap<String, Node>();
@@ -945,14 +943,14 @@ final class CoordinationSubscriptionProjectorTest {
         CoordinationSubscriptionProjector projector =
                 CoordinationDeliveryPlanning
                         .subscriptionProjector(
-                                fixture.blue
-                                        .getDocumentProcessor());
+                                fixture.blue.processor(),
+                                fixture.blue.contracts());
         CoordinationHostQuotaSession hostQuotas =
                 CoordinationHostQuotaSession.observing(
                         CoordinationHostQuotaTestSupport
                                 .limitedSubscriptionOccurrences(1));
 
-        // When
+        // when
         CoordinationHostQuotaExceededException failure =
                 assertThrows(
                         CoordinationHostQuotaExceededException.class,
@@ -962,7 +960,7 @@ final class CoordinationSubscriptionProjectorTest {
                                 order(1),
                                 hostQuotas));
 
-        // Then
+        // then
         assertEquals(
                 "maxSubscriptionOccurrencesPerProjection",
                 failure.limitName());
@@ -974,7 +972,7 @@ final class CoordinationSubscriptionProjectorTest {
 
     @Test
     void shouldRepresentRetypeAsRetireAddAndMatchFreshProjection() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node before = initialized(
                 fixture,
@@ -1003,13 +1001,13 @@ final class CoordinationSubscriptionProjectorTest {
         CoordinationSubscriptionProjector projector =
                 CoordinationDeliveryPlanning
                         .subscriptionProjector(
-                                fixture.blue
-                                        .getDocumentProcessor());
+                                fixture.blue.processor(),
+                                fixture.blue.contracts());
         CoordinationSubscriptionSnapshot initial =
                 projector.projectCurrent(
                         before, 1L, order(1));
 
-        // When
+        // when
         CoordinationSubscriptionUpdate update =
                 projector.projectUpdate(
                         initial,
@@ -1024,7 +1022,7 @@ final class CoordinationSubscriptionProjectorTest {
                         2L,
                         order(2));
 
-        // Then
+        // then
         assertEquals(1, update.retired().size());
         assertEquals(1, update.added().size());
         assertTrue(update.unchanged().isEmpty());
@@ -1036,11 +1034,15 @@ final class CoordinationSubscriptionProjectorTest {
         assertEquals(
                 fresh.toMap(),
                 update.snapshot().toMap());
+        assertTrue(update.fragmentationCatalog().isPresent());
+        assertEquals(
+                update.snapshot().rootBlueId(),
+                update.fragmentationCatalog().get().rootBlueId());
     }
 
     @Test
     void shouldStartNewActivationIntervalAfterRemovalAndReaddition() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node present = initialized(
                 fixture,
@@ -1059,15 +1061,15 @@ final class CoordinationSubscriptionProjectorTest {
         CoordinationSubscriptionProjector projector =
                 CoordinationDeliveryPlanning
                         .subscriptionProjector(
-                                fixture.blue
-                                        .getDocumentProcessor());
+                                fixture.blue.processor(),
+                                fixture.blue.contracts());
         CoordinationSubscriptionSnapshot initial =
                 projector.projectCurrent(
                         present.clone(),
                         1L,
                         order(1));
 
-        // When
+        // when
         CoordinationSubscriptionUpdate removal =
                 projector.projectUpdate(
                         initial,
@@ -1088,7 +1090,7 @@ final class CoordinationSubscriptionProjectorTest {
                         Collections.singleton(
                                 "/contracts/channel"));
 
-        // Then
+        // then
         assertEquals(1, removal.retired().size());
         assertTrue(removal.snapshot()
                 .occurrences().isEmpty());
@@ -1108,7 +1110,7 @@ final class CoordinationSubscriptionProjectorTest {
 
     @Test
     void shouldPruneTerminatedEmbeddedSubscriptionSubtree() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node child = scopeWithChannel(
                 "childChannel",
@@ -1137,15 +1139,15 @@ final class CoordinationSubscriptionProjectorTest {
         CoordinationSubscriptionProjector projector =
                 CoordinationDeliveryPlanning
                         .subscriptionProjector(
-                                fixture.blue
-                                        .getDocumentProcessor());
+                                fixture.blue.processor(),
+                                fixture.blue.contracts());
 
-        // When
+        // when
         CoordinationSubscriptionSnapshot snapshot =
                 projector.projectCurrent(
                         root, 2L, order(2));
 
-        // Then
+        // then
         assertTrue(snapshot.occurrences().isEmpty());
         assertEquals(
                 Collections.singleton("/child"),
@@ -1159,16 +1161,13 @@ final class CoordinationSubscriptionProjectorTest {
     private static Fixture fixture(
             boolean registerMyosTimelineSubtype) {
         BlueRepository repository =
-                BlueRepository.latest();
-        Blue blue =
+                BlueRepository.current();
+        CoordinationTestRuntime blue =
                 CoordinationTestResources
                         .configuredBlue(repository);
-        CoordinationProcessors.registerWith(blue);
         if (registerMyosTimelineSubtype) {
-            CoordinationProcessors
-                    .registerTimelineSubtype(
-                            blue,
-                            MyOSTimelineChannel.class);
+            blue.registerTimelineSubtype(
+                    MyOSTimelineChannel.class);
         }
         return new Fixture(repository, blue);
     }
@@ -1249,10 +1248,7 @@ final class CoordinationSubscriptionProjectorTest {
     private static void installProvider(
             Fixture fixture,
             NodeProvider provider) {
-        fixture.blue.nodeProvider(
-                new SequentialNodeProvider(
-                        provider,
-                        fixture.blue.getNodeProvider()));
+        fixture.blue.addNodeProvider(provider);
     }
 
     private static Node nestedDocument(
@@ -1280,7 +1276,7 @@ final class CoordinationSubscriptionProjectorTest {
                             new Node().properties(
                                     contracts));
         }
-        current.blue(repository.typeAliasBlue());
+        current.blue(repository.importsDirective());
         current.name("Nested subscriptions");
         return current;
     }
@@ -1321,7 +1317,7 @@ final class CoordinationSubscriptionProjectorTest {
             Map<String, Node> contracts,
             Map<String, Node> properties) {
         Node root = new Node()
-                .blue(repository.typeAliasBlue())
+                .blue(repository.importsDirective())
                 .name("Subscription projection")
                 .properties(properties);
         root.properties(
@@ -1375,11 +1371,11 @@ final class CoordinationSubscriptionProjectorTest {
 
     private static final class Fixture {
         private final BlueRepository repository;
-        private final Blue blue;
+        private final CoordinationTestRuntime blue;
 
         private Fixture(
                 BlueRepository repository,
-                Blue blue) {
+                CoordinationTestRuntime blue) {
             this.repository = repository;
             this.blue = blue;
         }

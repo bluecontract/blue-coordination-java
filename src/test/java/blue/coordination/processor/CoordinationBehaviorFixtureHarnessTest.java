@@ -1,12 +1,11 @@
 package blue.coordination.processor;
 
-import blue.language.Blue;
-import blue.language.NodeProvider;
+import blue.language.processor.CoordinationRoutingHarness;
+
+import blue.language.provider.NodeProvider;
 import blue.language.model.Node;
 import blue.language.processor.ChannelEvaluationContext;
 import blue.language.processor.ChannelProcessor;
-import blue.language.processor.CoordinationConfiguredProcessorFactory;
-import blue.language.processor.CoordinationRoutingHarness;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.DocumentProcessor;
 import blue.language.processor.ExternalChannelSubscriptionFunctions;
@@ -15,7 +14,8 @@ import blue.language.processor.ProcessorErrorCategory;
 import blue.language.processor.ProcessorStatus;
 import blue.language.processor.VerifiedExecutionEvidence;
 import blue.language.processor.model.ChannelContract;
-import blue.language.utils.BlueIdCalculator;
+import blue.language.identity.DirectBlueIdCalculator;
+import blue.repo.BlueRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class CoordinationBehaviorFixtureHarnessTest {
     @Test
     void shouldKeepMandateBackedEndToEndResultStableAcrossRepresentations() {
-        // Given
+        // given
         CoordinationBehaviorFixtureHarness harness =
                 new CoordinationBehaviorFixtureHarness();
         CoordinationBehaviorFixtureHarness.FixtureCase
@@ -51,13 +51,13 @@ final class CoordinationBehaviorFixtureHarnessTest {
                         harness,
                         "coord-e2e-01@inline");
 
-        // When
+        // when
         CoordinationBehaviorFixtureHarness.Execution
                 execution =
                 harness.executeAndAssertWithVariantGroup(
                         fixtureCase);
 
-        // Then
+        // then
         assertEquals(
                 fixtureCase.caseId(),
                 execution.caseId());
@@ -65,7 +65,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
 
     @Test
     void shouldProcessPureReferenceTimelineHeadersWithSelectiveEvidence() {
-        // Given
+        // given
         CoordinationBehaviorFixtureHarness harness =
                 new CoordinationBehaviorFixtureHarness();
         CoordinationBehaviorFixtureHarness.FixtureCase
@@ -74,13 +74,13 @@ final class CoordinationBehaviorFixtureHarnessTest {
                         harness,
                         "coord-e2e-01@references");
 
-        // When
+        // when
         CoordinationBehaviorFixtureHarness.Execution
                 execution =
                 harness.executeAndAssert(
                         fixtureCase);
 
-        // Then
+        // then
         assertEquals(
                 fixtureCase.caseId(),
                 execution.caseId());
@@ -88,7 +88,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
 
     @Test
     void shouldRouteReferenceBackedEndToEndCasesToBobWithoutDemandingOpaqueMandateDocument() {
-        // Given
+        // given
         CoordinationBehaviorFixtureHarness harness =
                 new CoordinationBehaviorFixtureHarness();
         List<String> caseIds =
@@ -100,7 +100,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
                 executions =
                 new ArrayList<CoordinationBehaviorFixtureHarness.Execution>();
 
-        // When
+        // when
         for (String caseId : caseIds) {
             executions.add(
                     harness.executeAndAssert(
@@ -109,7 +109,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
                                     caseId)));
         }
 
-        // Then
+        // then
         for (CoordinationBehaviorFixtureHarness.Execution
                 execution : executions) {
             assertEquals(
@@ -143,7 +143,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
 
     @Test
     void shouldAvoidDemandingDecoyBodiesForReferenceEndToEndProcessing() {
-        // Given
+        // given
         CoordinationBehaviorFixtureHarness harness =
                 new CoordinationBehaviorFixtureHarness();
         CoordinationBehaviorFixtureHarness.FixtureCase
@@ -152,13 +152,13 @@ final class CoordinationBehaviorFixtureHarnessTest {
                         harness,
                         "coord-e2e-02@references");
 
-        // When
+        // when
         CoordinationBehaviorFixtureHarness.Execution
                 execution =
                 harness.executeAndAssert(
                         fixtureCase);
 
-        // Then
+        // then
         assertEquals(
                 fixtureCase.caseId(),
                 execution.caseId());
@@ -166,7 +166,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
 
     @Test
     void shouldAvoidDemandingDecoyBodyForReferenceSplitProcessing() {
-        // Given
+        // given
         CoordinationBehaviorFixtureHarness harness =
                 new CoordinationBehaviorFixtureHarness();
         CoordinationBehaviorFixtureHarness.FixtureCase
@@ -175,13 +175,13 @@ final class CoordinationBehaviorFixtureHarnessTest {
                         harness,
                         "coord-split-02@references");
 
-        // When
+        // when
         CoordinationBehaviorFixtureHarness.Execution
                 execution =
                 harness.executeAndAssert(
                         fixtureCase);
 
-        // Then
+        // then
         assertEquals(
                 fixtureCase.caseId(),
                 execution.caseId());
@@ -189,7 +189,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
 
     @Test
     void shouldAvoidDemandingDecoyBodiesWhenDescendantsEmitNoRootEvent() {
-        // Given
+        // given
         CoordinationBehaviorFixtureHarness harness =
                 new CoordinationBehaviorFixtureHarness();
         CoordinationBehaviorFixtureHarness.FixtureCase
@@ -198,13 +198,13 @@ final class CoordinationBehaviorFixtureHarnessTest {
                         harness,
                         "coord-split-08@no-root-emission");
 
-        // When
+        // when
         CoordinationBehaviorFixtureHarness.Execution
                 execution =
                 harness.executeAndAssert(
                         fixtureCase);
 
-        // Then
+        // then
         assertEquals(
                 fixtureCase.caseId(),
                 execution.caseId());
@@ -212,7 +212,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
 
     @Test
     void shouldAvoidDemandingDecoyBodiesWhenRootEmitsPublicEvents() {
-        // Given
+        // given
         CoordinationBehaviorFixtureHarness harness =
                 new CoordinationBehaviorFixtureHarness();
         CoordinationBehaviorFixtureHarness.FixtureCase
@@ -221,13 +221,13 @@ final class CoordinationBehaviorFixtureHarnessTest {
                         harness,
                         "coord-split-09@root-emits");
 
-        // When
+        // when
         CoordinationBehaviorFixtureHarness.Execution
                 execution =
                 harness.executeAndAssert(
                         fixtureCase);
 
-        // Then
+        // then
         assertEquals(
                 fixtureCase.caseId(),
                 execution.caseId());
@@ -235,89 +235,89 @@ final class CoordinationBehaviorFixtureHarnessTest {
 
     @Test
     void shouldRecordSelectedDeepHandlerLocation() {
-        // Given
+        // given
         CoordinationBehaviorFixtureHarness harness =
                 new CoordinationBehaviorFixtureHarness();
         CoordinationBehaviorFixtureHarness.FixtureCase fixtureCase =
                 fixtureCase(harness, "coord-split-03@default");
 
-        // When
+        // when
         CoordinationBehaviorFixtureHarness.Execution execution =
                 harness.executeAndAssert(fixtureCase);
 
-        // Then
+        // then
         assertEquals(fixtureCase.caseId(), execution.caseId());
     }
 
     @Test
     void shouldKeepRootOnlyOperationOutOfEmbeddedScopes() {
-        // Given
+        // given
         CoordinationBehaviorFixtureHarness harness =
                 new CoordinationBehaviorFixtureHarness();
         CoordinationBehaviorFixtureHarness.FixtureCase fixtureCase =
                 fixtureCase(harness, "coord-split-04@default");
 
-        // When
+        // when
         CoordinationBehaviorFixtureHarness.Execution execution =
                 harness.executeAndAssert(fixtureCase);
 
-        // Then
+        // then
         assertEquals(fixtureCase.caseId(), execution.caseId());
     }
 
     @Test
     void shouldRecordDirectChildReactiveHandlerLocations() {
-        // Given
+        // given
         CoordinationBehaviorFixtureHarness harness =
                 new CoordinationBehaviorFixtureHarness();
         CoordinationBehaviorFixtureHarness.FixtureCase fixtureCase =
                 fixtureCase(harness, "coord-split-05@default");
 
-        // When
+        // when
         CoordinationBehaviorFixtureHarness.Execution execution =
                 harness.executeAndAssert(fixtureCase);
 
-        // Then
+        // then
         assertEquals(fixtureCase.caseId(), execution.caseId());
     }
 
     @Test
     void shouldSplitInheritedEffectiveContracts() {
-        // Given
+        // given
         CoordinationBehaviorFixtureHarness harness =
                 new CoordinationBehaviorFixtureHarness();
         CoordinationBehaviorFixtureHarness.FixtureCase fixtureCase =
                 fixtureCase(harness, "coord-split-06@default");
 
-        // When
+        // when
         CoordinationBehaviorFixtureHarness.Execution execution =
                 harness.executeAndAssert(fixtureCase);
 
-        // Then
+        // then
         assertEquals(fixtureCase.caseId(), execution.caseId());
     }
 
     @Test
     void shouldComparePureReferenceWithCanonicalScalar() {
-        // Given
+        // given
         BigInteger expected = BigInteger.valueOf(7L);
         Node actual = new Node().blueId(
-                BlueIdCalculator.INSTANCE
-                        .calculate(expected));
+                DirectBlueIdCalculator.INSTANCE
+                        .directBlueIdFromCanonicalInput(expected));
 
-        // When
+        // when
         boolean equivalent =
                 CoordinationBehaviorFixtureHarness
                         .equivalentValues(
                                 actual, expected);
 
-        // Then
+        // then
         assertTrue(equivalent);
     }
 
     @Test
     void shouldComparePureReferenceWithCanonicalStructuredValue() {
-        // Given
+        // given
         Map<String, Object> expected =
                 new LinkedHashMap<String, Object>();
         expected.put(
@@ -326,48 +326,48 @@ final class CoordinationBehaviorFixtureHarnessTest {
                         BigInteger.ONE,
                         "two"));
         Node actual = new Node().blueId(
-                BlueIdCalculator.INSTANCE
-                        .calculate(expected));
+                DirectBlueIdCalculator.INSTANCE
+                        .directBlueIdFromCanonicalInput(expected));
 
-        // When
+        // when
         boolean equivalent =
                 CoordinationBehaviorFixtureHarness
                         .equivalentValues(
                                 actual, expected);
 
-        // Then
+        // then
         assertTrue(equivalent);
     }
 
     @Test
     void shouldRejectUnresolvedNonScalarComparison() {
-        // Given
+        // given
         Node unresolved =
                 new Node().type(
                         new Node().blueId(
                                 "8aohWT7jcoaC1j2siQzBxoKM8HhQ4HF13BkZDNnq5UHf"));
 
-        // When
+        // when
         boolean equivalent =
                 CoordinationBehaviorFixtureHarness
                         .equivalentValues(
                                 unresolved, "alice");
 
-        // Then
+        // then
         assertFalse(equivalent);
     }
 
     @Test
     void shouldStrictlyDecodeAllAuthoredBehaviorExecutionCases() {
-        // Given
+        // given
         CoordinationBehaviorFixtureHarness harness =
                 new CoordinationBehaviorFixtureHarness();
 
-        // When
+        // when
         List<CoordinationBehaviorFixtureHarness.FixtureCase>
                 cases = harness.loadCases();
 
-        // Then
+        // then
         assertEquals(65, cases.size());
         assertEquals(
                 65,
@@ -387,7 +387,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
 
     @Test
     void shouldExecuteAllCompositeAndDirectMyOsSourcesInCanonicalOrder() {
-        // Given
+        // given
         CoordinationBehaviorFixtureHarness harness =
                 new CoordinationBehaviorFixtureHarness();
         CoordinationBehaviorFixtureHarness.FixtureCase
@@ -406,13 +406,13 @@ final class CoordinationBehaviorFixtureHarnessTest {
                                                 + "conformance "
                                                 + "fixture"));
 
-        // When
+        // when
         CoordinationBehaviorFixtureHarness.Execution
                 execution =
                 harness.executeAndAssertWithVariantGroup(
                         fixtureCase);
 
-        // Then
+        // then
         assertEquals(
                 "coord-chan-07@default",
                 execution.caseId());
@@ -420,7 +420,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
 
     @Test
     void shouldExecuteMandateAndTimelineCasesIndependently() {
-        // Given
+        // given
         CoordinationBehaviorFixtureHarness harness =
                 new CoordinationBehaviorFixtureHarness();
         CoordinationBehaviorFixtureHarness.FixtureCase
@@ -434,7 +434,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
                         harness,
                         "coord-chan-01@default");
 
-        // When
+        // when
         CoordinationBehaviorFixtureHarness.Execution
                 mandateExecution =
                 harness.executeAndAssertWithVariantGroup(
@@ -444,7 +444,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
                 harness.executeAndAssertWithVariantGroup(
                         timelineChannelCase);
 
-        // Then
+        // then
         assertEquals(
                 "coord-mand-07@default",
                 mandateExecution.caseId());
@@ -455,7 +455,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
 
     @Test
     void shouldRollbackDocumentUpdateLoopToExactInitializedRoot() {
-        // Given
+        // given
         CoordinationBehaviorFixtureHarness harness =
                 new CoordinationBehaviorFixtureHarness();
         CoordinationBehaviorFixtureHarness.FixtureCase
@@ -464,13 +464,13 @@ final class CoordinationBehaviorFixtureHarnessTest {
                         harness,
                         "coord-fail-02@default");
 
-        // When
+        // when
         CoordinationBehaviorFixtureHarness.Execution
                 execution =
                 harness.executeAndAssert(
                         fixtureCase);
 
-        // Then
+        // then
         assertEquals(
                 fixtureCase.caseId(),
                 execution.caseId());
@@ -485,11 +485,11 @@ final class CoordinationBehaviorFixtureHarnessTest {
     void shouldExecuteOneAuthoredBehaviorCaseAgainstProductionApis(
             CoordinationBehaviorFixtureHarness.FixtureCase
                     fixtureCase) {
-        // Given
+        // given
         CoordinationBehaviorFixtureHarness harness =
                 new CoordinationBehaviorFixtureHarness();
 
-        // When
+        // when
         CoordinationBehaviorFixtureHarness.Execution
                 execution;
         try {
@@ -507,7 +507,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
             throw failure;
         }
 
-        // Then
+        // then
         assertNotNull(execution);
         assertEquals(
                 fixtureCase.caseId(),
@@ -650,7 +650,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
 
     @Test
     void shouldKeepCandidateExecutorFreeOfReceiptWriting() {
-        // Given
+        // given
         List<Method> methods = Arrays.asList(
                 CoordinationBehaviorFixtureHarness
                         .class.getDeclaredMethods());
@@ -663,7 +663,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
                         "coordination/conformance/"
                                 + "behavior-fixtures.yaml");
 
-        // When
+        // when
         boolean ownsReceiptWriter =
                 methods.stream()
                         .map(Method::getName)
@@ -672,7 +672,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
                                         java.util.Locale.ROOT)
                                         .contains("receipt"));
 
-        // Then
+        // then
         assertFalse(ownsReceiptWriter);
         assertTrue(manifest.contains(
                 "status: candidate"));
@@ -682,7 +682,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
 
     @Test
     void shouldProjectOnlyForbiddenBodyDemandsInObservedTraceOrder() {
-        // Given
+        // given
         List<String> semanticDemands =
                 Arrays.asList(
                         "/",
@@ -696,14 +696,14 @@ final class CoordinationBehaviorFixtureHarnessTest {
                                 "forbidden-blue-id-1",
                                 "forbidden-blue-id-2"));
 
-        // When
+        // when
         List<String> projection =
                 CoordinationBehaviorFixtureHarness
                         .forbiddenDemandProjection(
                                 semanticDemands,
                                 forbiddenBlueIds);
 
-        // Then
+        // then
         assertEquals(
                 Arrays.asList(
                         "forbidden-blue-id-2",
@@ -713,13 +713,13 @@ final class CoordinationBehaviorFixtureHarnessTest {
 
     @Test
     void shouldBuildPartialRepresentationFromOneExactRootFetch() {
-        // Given
+        // given
         Node fragment =
                 new Node().properties(
                         "state",
                         new Node().value("ready"));
         String rootBlueId =
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         fragment);
         List<String> demands =
                 new ArrayList<String>();
@@ -729,14 +729,14 @@ final class CoordinationBehaviorFixtureHarnessTest {
                     fragment);
         };
 
-        // When
+        // when
         Node partial =
                 CoordinationBehaviorFixtureHarness
                         .exactPartialRootFragment(
                                 rootBlueId,
                                 provider);
 
-        // Then
+        // then
         assertEquals(
                 Collections.singletonList(
                         rootBlueId),
@@ -744,26 +744,26 @@ final class CoordinationBehaviorFixtureHarnessTest {
         assertFalse(partial.isReferenceOnly());
         assertEquals(
                 rootBlueId,
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         partial));
     }
 
     @Test
     void shouldRejectPartialRepresentationWithMismatchedRootIdentity() {
-        // Given
+        // given
         Node expected =
                 new Node().value("expected");
         Node mismatched =
                 new Node().value("mismatched");
         String rootBlueId =
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         expected);
         NodeProvider provider =
                 ignored ->
                         Collections.singletonList(
                                 mismatched);
 
-        // When
+        // when
         CoordinationBehaviorFixtureHarness
                 .FixtureExecutionException failure =
                 assertThrows(
@@ -774,14 +774,14 @@ final class CoordinationBehaviorFixtureHarnessTest {
                                         rootBlueId,
                                         provider));
 
-        // Then
+        // then
         assertTrue(failure.getMessage()
                 .contains("changed BlueId"));
     }
 
     @Test
     void shouldPrefetchOnlyTheDeterministicBoundedWindow() {
-        // Given
+        // given
         List<String> backendFetches =
                 new ArrayList<String>();
         NodeProvider backend = blueId -> {
@@ -798,12 +798,12 @@ final class CoordinationBehaviorFixtureHarnessTest {
                                         "d", "b", "a", "c"),
                                 2);
 
-        // When
+        // when
         provider.fetchByBlueId("c");
         provider.fetchByBlueId("d");
         provider.fetchByBlueId("a");
 
-        // Then
+        // then
         assertEquals(
                 Arrays.asList(
                         "c", "d", "a", "b"),
@@ -812,7 +812,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
 
     @Test
     void shouldSelectStructuralAndAllowedBodyFragmentsIndependently() {
-        // Given
+        // given
         Map<String, Set<String>>
                 bodyKeysByBlueId =
                 new LinkedHashMap<String, Set<String>>();
@@ -826,7 +826,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
                 "decoy-body",
                 Collections.singleton("decoy"));
 
-        // When
+        // when
         Set<String> selected =
                 CoordinationBehaviorFixtureHarness
                         .selectedFragmentBlueIds(
@@ -837,7 +837,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
                                 Collections.singleton(
                                         "selected"));
 
-        // Then
+        // then
         assertEquals(
                 new LinkedHashSet<String>(
                         Arrays.asList(
@@ -849,7 +849,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
 
     @Test
     void shouldRejectUnknownAllowedBodyKeyForSelectedBytes() {
-        // Given
+        // given
         Map<String, Set<String>>
                 bodyKeysByBlueId =
                 Collections.singletonMap(
@@ -857,7 +857,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
                         Collections.singleton(
                                 "known"));
 
-        // When
+        // when
         CoordinationBehaviorFixtureHarness
                 .FixtureExecutionException failure =
                 assertThrows(
@@ -871,14 +871,14 @@ final class CoordinationBehaviorFixtureHarnessTest {
                                         Collections.singleton(
                                                 "unknown")));
 
-        // Then
+        // then
         assertTrue(failure.getMessage()
                 .contains("absent from SplitGraph metadata"));
     }
 
     @Test
     void shouldPassAuthoredRevisionEvidenceToLanguageThreeArgumentProcess() {
-        // Given
+        // given
         ProbeRuntime runtime =
                 ProbeRuntime.create();
         VerifiedExecutionEvidence evidence =
@@ -891,7 +891,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
                                 null,
                                 evidence);
 
-        // When
+        // when
         ProcessingDebugResult debug =
                 CoordinationBehaviorFixtureHarness
                         .processDocumentWithVerifiedEvidence(
@@ -900,7 +900,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
                                 runtime.event,
                                 evidence);
 
-        // Then
+        // then
         assertEquals(
                 ProcessorStatus.SUCCESS,
                 runtime.initialized.status());
@@ -919,7 +919,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
 
     @Test
     void shouldRejectAuthoredRevisionThatDiffersFromTheVerifiedPlan() {
-        // Given
+        // given
         ProbeRuntime runtime =
                 ProbeRuntime.create();
         VerifiedExecutionEvidence retained =
@@ -935,7 +935,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
                                 null,
                                 retained);
 
-        // When
+        // when
         ProcessingDebugResult debug =
                 CoordinationBehaviorFixtureHarness
                         .processDocumentWithVerifiedEvidence(
@@ -944,7 +944,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
                                 runtime.event,
                                 stale);
 
-        // Then
+        // then
         assertEquals(
                 ProcessorStatus.INVALID_PROCESSING_DOCUMENT,
                 debug.processResult().status());
@@ -962,11 +962,11 @@ final class CoordinationBehaviorFixtureHarnessTest {
 
     @Test
     void shouldRejectAuthoredSourceThatDoesNotAcceptTheExactEvent() {
-        // Given
+        // given
         ProbeRuntime runtime =
                 ProbeRuntime.create();
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
@@ -974,7 +974,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
                                 29L,
                                 "rejected"));
 
-        // Then
+        // then
         assertTrue(failure.getMessage()
                 .contains(
                         "exact accepting source sequence"));
@@ -987,7 +987,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
 
     @Test
     void shouldRejectMismatchedAuthoredFeederRevisionPair() {
-        // Given
+        // given
         Node input = new Node().properties(
                 "feeder",
                 new Node()
@@ -1003,7 +1003,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
                                         new Node().value(
                                                 "accepted"))));
 
-        // When
+        // when
         CoordinationBehaviorFixtureHarness
                 .FixtureExecutionException failure =
                 assertThrows(
@@ -1014,14 +1014,14 @@ final class CoordinationBehaviorFixtureHarnessTest {
                                         input,
                                         "revision-mismatch"));
 
-        // Then
+        // then
         assertTrue(failure.getMessage()
                 .contains("revision-complete"));
     }
 
     @Test
     void shouldParseAuthoredRevisionAndSourceEvidence() {
-        // Given
+        // given
         Node input = new Node().properties(
                 "feeder",
                 new Node()
@@ -1039,7 +1039,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
                                         new Node().value(
                                                 "/child:embedded"))));
 
-        // When
+        // when
         CoordinationBehaviorFixtureHarness
                 .AuthoredFeederEvidence evidence =
                 CoordinationBehaviorFixtureHarness
@@ -1047,7 +1047,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
                                 input,
                                 "authored-evidence");
 
-        // Then
+        // then
         assertNotNull(evidence);
         assertEquals(
                 9L,
@@ -1070,7 +1070,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
 
     @Test
     void shouldRejectIncompleteAuthoredFeederEvidence() {
-        // Given
+        // given
         Node input = new Node().properties(
                 "feeder",
                 new Node()
@@ -1083,7 +1083,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
                                         new Node().value(
                                                 "root"))));
 
-        // When
+        // when
         CoordinationBehaviorFixtureHarness
                 .FixtureExecutionException failure =
                 assertThrows(
@@ -1094,7 +1094,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
                                         input,
                                         "incomplete-evidence"));
 
-        // Then
+        // then
         assertTrue(failure.getMessage()
                 .contains(
                         "managedRootRevision, "
@@ -1104,13 +1104,13 @@ final class CoordinationBehaviorFixtureHarnessTest {
 
     private static final class ProbeRuntime
             implements AutoCloseable {
-        private final Blue blue;
+        private final CoordinationTestRuntime blue;
         private final Node contractSurface;
         private final Node event;
         private final DocumentProcessingResult initialized;
 
         private ProbeRuntime(
-                Blue blue,
+                CoordinationTestRuntime blue,
                 Node contractSurface,
                 Node event,
                 DocumentProcessingResult initialized) {
@@ -1122,13 +1122,15 @@ final class CoordinationBehaviorFixtureHarnessTest {
         }
 
         private static ProbeRuntime create() {
-            Blue blue = new Blue();
+            CoordinationTestRuntime blue =
+                    CoordinationTestResources.configuredBlue(
+                            BlueRepository.current());
             Node type =
                     new Node().name(
                             ProbeChannel.class
                                     .getSimpleName());
             String typeBlueId =
-                    BlueIdCalculator
+                    DirectBlueIdCalculator
                             .calculateBlueId(type);
             blue.registerExternalContractType(
                     typeBlueId,
@@ -1160,7 +1162,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
                             new Node().value(
                                     "accepted"));
             DocumentProcessingResult initialized =
-                    blue.getDocumentProcessor()
+                    blue.processor()
                             .initializeDocument(root);
             return new ProbeRuntime(
                     blue,
@@ -1180,7 +1182,7 @@ final class CoordinationBehaviorFixtureHarnessTest {
             }
             return CoordinationRoutingHarness
                     .evidence(
-                            blue.getDocumentProcessor(),
+                            blue.processor(),
                             contractSurface,
                             initialized.document(),
                             event,

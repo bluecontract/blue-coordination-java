@@ -2,11 +2,10 @@ package blue.coordination.processor.bex;
 
 import blue.bex.api.BexExecutionContext;
 import blue.bex.api.BexStepResults;
-import blue.bex.output.ProcessorExecutionContextBexSemanticIdentityBoundary;
+import blue.bex.contracts.BexContractsExecutionContext;
 import blue.bex.result.BexExecutionResult;
 import blue.bex.value.BexValue;
 import blue.bex.value.BexValues;
-import blue.coordination.processor.workflow.StepExecutionContext;
 import blue.language.model.Node;
 import blue.language.processor.ProcessorExecutionContext;
 import blue.language.snapshot.FrozenNode;
@@ -47,7 +46,9 @@ public final class BexWorkflowContextFactory {
         return metrics;
     }
 
-    public BexExecutionContext create(StepExecutionContext context, long gasLimit) {
+    public BexExecutionContext create(
+            BexWorkflowStepContext context,
+            long gasLimit) {
         return create(
                 context,
                 gasLimit,
@@ -55,11 +56,26 @@ public final class BexWorkflowContextFactory {
     }
 
     /**
+     * Compatibility bridge for callers compiled against the concrete
+     * workflow context signature.
+     *
+     * @deprecated use {@link #create(BexWorkflowStepContext, long)} so hosted
+     *     BEX depends on the capability role rather than the workflow
+     *     implementation.
+     */
+    @Deprecated
+    public BexExecutionContext create(
+            blue.coordination.processor.workflow.StepExecutionContext context,
+            long gasLimit) {
+        return create((BexWorkflowStepContext) context, gasLimit);
+    }
+
+    /**
      * Creates a hosted context without materializing the Root processing
      * event when the immutable Compute plan proves the binding is unused.
      */
     public BexExecutionContext create(
-            StepExecutionContext context,
+            BexWorkflowStepContext context,
             long gasLimit,
             boolean processingEventRequired) {
         /*
@@ -92,16 +108,16 @@ public final class BexWorkflowContextFactory {
                     ProcessingEventIdentityObserver.Boundary
                             .BEX_BINDING);
         }
-        return BexExecutionContext.builder()
+        return BexContractsExecutionContext
+                .configure(
+                        BexExecutionContext.builder(),
+                        processorContext)
                 .document(new ScopedProcessorExecutionContextBexDocumentView(context, metrics))
                 .event(event)
                 .processingEvent(processingEvent)
                 .currentContract(currentContract)
                 .steps(steps)
                 .gasLedgerHost(context.bexGasLedgerHost())
-                .semanticIdentityBoundary(
-                        new ProcessorExecutionContextBexSemanticIdentityBoundary(
-                                processorContext))
                 .gasLimit(gasLimit)
                 .build();
     }
@@ -138,7 +154,8 @@ public final class BexWorkflowContextFactory {
         return builder.build();
     }
 
-    public BexValue currentContractBinding(StepExecutionContext context) {
+    public BexValue currentContractBinding(
+            BexWorkflowStepContext context) {
         FrozenNode resolved =
                 context.currentContractFrozenNode();
         if (resolved == null) {
@@ -164,6 +181,20 @@ public final class BexWorkflowContextFactory {
                         resolved)
                 : BexValues.frozen(
                         resolved);
+    }
+
+    /**
+     * Compatibility bridge for callers compiled against the concrete
+     * workflow context signature.
+     *
+     * @deprecated use {@link #currentContractBinding(BexWorkflowStepContext)}
+     *     so hosted BEX depends on the capability role rather than the
+     *     workflow implementation.
+     */
+    @Deprecated
+    public BexValue currentContractBinding(
+            blue.coordination.processor.workflow.StepExecutionContext context) {
+        return currentContractBinding((BexWorkflowStepContext) context);
     }
 
     private String escapePointerSegment(String value) {

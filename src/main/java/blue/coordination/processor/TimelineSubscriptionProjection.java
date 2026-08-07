@@ -3,10 +3,8 @@ package blue.coordination.processor;
 import blue.language.model.Node;
 import blue.language.processor.ExternalChannelFunctionContext;
 import blue.language.processor.GasChargeContext;
-import blue.language.utils.BlueIdCalculator;
-import blue.language.utils.BlueIdResolver;
-import blue.language.utils.TypeClassResolver;
-import blue.repo.BlueRepository;
+import blue.language.identity.DirectBlueIdCalculator;
+import blue.language.mapping.TypeClassResolver;
 import blue.repo.coordination.Actor;
 import blue.repo.coordination.Timeline;
 import blue.repo.coordination.TimelineChannel;
@@ -49,6 +47,14 @@ final class TimelineSubscriptionProjection {
     }
 
     static List<String> channelKeys(TimelineChannel channel) {
+        return channelKeys(
+                channel,
+                CoordinationSemanticTypeIdentities.publishedDefaults());
+    }
+
+    static List<String> channelKeys(
+            TimelineChannel channel,
+            CoordinationSemanticTypeIdentities identities) {
         if (channel == null
                 || channel.getTimeline() == null
                 || channel.getActor() == null) {
@@ -58,12 +64,20 @@ final class TimelineSubscriptionProjection {
         Projection timeline = channelDiscriminator(
                 channel.getTimeline(),
                 Timeline.class,
-                TIMELINE_PROJECTION_TYPES,
+                projectionTypes(
+                        identities.timelineBlueId(),
+                        TIMELINE_PROJECTION_TYPES,
+                        identities),
+                identities.timelineBlueId(),
                 TIMELINE_FIELD);
         Projection actor = channelDiscriminator(
                 channel.getActor(),
                 Actor.class,
-                ACTOR_PROJECTION_TYPES,
+                projectionTypes(
+                        identities.actorBlueId(),
+                        ACTOR_PROJECTION_TYPES,
+                        identities),
+                identities.actorBlueId(),
                 ACTOR_FIELD);
         String selective = mostSelectiveKey(
                 timeline.discriminator,
@@ -85,10 +99,64 @@ final class TimelineSubscriptionProjection {
     static List<String> eventKeys(
             Node exactEvent,
             ExternalChannelFunctionContext context) {
+        return eventKeys(
+                exactEvent,
+                context,
+                CoordinationSemanticTypeIdentities.publishedDefaults());
+    }
+
+    static String exactScalarPairKey(
+            String timelineId,
+            String actorId,
+            CoordinationSemanticTypeIdentities identities) {
+        String timelineScalar = scalarIdentity(
+                new Node().value(requireText(timelineId, "timelineId")));
+        String actorScalar = scalarIdentity(
+                new Node().value(requireText(actorId, "actorId")));
+        return pairKey(
+                canonicalDiscriminator(
+                        identities.timelineBlueId(),
+                        TIMELINE_FIELD,
+                        timelineScalar),
+                canonicalDiscriminator(
+                        identities.actorBlueId(),
+                        ACTOR_FIELD,
+                        actorScalar));
+    }
+
+    static List<String> exactScalarEventKeys(
+            String timelineId,
+            String actorId,
+            CoordinationSemanticTypeIdentities identities) {
+        String timelineScalar = scalarIdentity(
+                new Node().value(requireText(timelineId, "timelineId")));
+        String actorScalar = scalarIdentity(
+                new Node().value(requireText(actorId, "actorId")));
+        String timeline = canonicalDiscriminator(
+                identities.timelineBlueId(),
+                TIMELINE_FIELD,
+                timelineScalar);
+        String actor = canonicalDiscriminator(
+                identities.actorBlueId(),
+                ACTOR_FIELD,
+                actorScalar);
+        LinkedHashSet<String> result = new LinkedHashSet<String>();
+        result.add(pairKey(timeline, actor));
+        result.add(timelineKey(timeline));
+        result.add(actorKey(actor));
+        result.add(BROAD_KEY);
+        return Collections.unmodifiableList(
+                new ArrayList<String>(result));
+    }
+
+    static List<String> eventKeys(
+            Node exactEvent,
+            ExternalChannelFunctionContext context,
+            CoordinationSemanticTypeIdentities identities) {
         Node header = CoordinationEventNodes.materializeHeaderValue(
                 exactEvent, context);
         if (!CoordinationEventNodes.isTimelineEntry(
-                header, context)
+                header, context, identities)
                 || header.getProperties() == null) {
             return Collections.emptyList();
         }
@@ -114,17 +182,20 @@ final class TimelineSubscriptionProjection {
         Node actor = CoordinationEventNodes.materializeHeaderValue(
                 suppliedActor, context);
         if (!matchesType(
-                timeline, Timeline.blueId(), context)
+                timeline, identities.timelineBlueId(), context)
                 || !matchesType(
-                actor, Actor.blueId(), context)) {
+                actor, identities.actorBlueId(), context)) {
             return Collections.emptyList();
         }
 
         Set<String> timelineKeys =
                 eventDiscriminators(
                         timeline,
-                        Timeline.blueId(),
-                        TIMELINE_PROJECTION_TYPES,
+                        identities.timelineBlueId(),
+                        projectionTypes(
+                                identities.timelineBlueId(),
+                                TIMELINE_PROJECTION_TYPES,
+                                identities),
                         TIMELINE_FIELD,
                         context);
         if (timelineKeys.isEmpty()) {
@@ -133,8 +204,11 @@ final class TimelineSubscriptionProjection {
         Set<String> actorKeys =
                 eventDiscriminators(
                         actor,
-                        Actor.blueId(),
-                        ACTOR_PROJECTION_TYPES,
+                        identities.actorBlueId(),
+                        projectionTypes(
+                                identities.actorBlueId(),
+                                ACTOR_PROJECTION_TYPES,
+                                identities),
                         ACTOR_FIELD,
                         context);
 
@@ -160,6 +234,7 @@ final class TimelineSubscriptionProjection {
             Object configuredBinding,
             Class<?> baseClass,
             List<String> registeredFamily,
+            String configuredTypeBlueId,
             String scalarField) {
         if (!baseClass.isInstance(configuredBinding)) {
             return Projection.none();
@@ -167,7 +242,7 @@ final class TimelineSubscriptionProjection {
         Node binding =
                 CoordinationEventNodes.generatedBindingNode(
                         configuredBinding);
-        String type = declaredTypeBlueId(binding);
+        String type = configuredTypeBlueId;
         String discriminator = exactScalarProjection(
                 binding,
                 type,
@@ -178,6 +253,15 @@ final class TimelineSubscriptionProjection {
                         discriminator,
                         !registeredFamily.contains(type))
                 : Projection.none();
+    }
+
+    private static List<String> projectionTypes(
+            String configuredBlueId,
+            List<String> publishedTypes,
+            CoordinationSemanticTypeIdentities identities) {
+        return identities.custom()
+                ? Collections.singletonList(configuredBlueId)
+                : publishedTypes;
     }
 
     /**
@@ -310,9 +394,17 @@ final class TimelineSubscriptionProjection {
                 instanceof String)) {
             return null;
         }
-        return BlueIdCalculator.calculateBlueId(
+        return DirectBlueIdCalculator.calculateBlueId(
                 new Node().value(
                         value.getValue()));
+    }
+
+    private static String requireText(String value, String label) {
+        if (value == null || value.isEmpty()) {
+            throw new IllegalArgumentException(
+                    label + " must be non-empty");
+        }
+        return value;
     }
 
     private static String canonicalDiscriminator(
@@ -362,8 +454,7 @@ final class TimelineSubscriptionProjection {
 
     private static Map<String, Class<?>> registeredTypes() {
         TypeClassResolver resolver =
-                BlueRepository.latest()
-                        .typeClassResolver();
+                new TypeClassResolver("blue.repo");
         return Collections.unmodifiableMap(
                 new LinkedHashMap<String, Class<?>>(
                         resolver.getBlueIdMap()));
@@ -379,10 +470,7 @@ final class TimelineSubscriptionProjection {
             Class<?> candidateClass = entry.getValue();
             if (!baseClass.isAssignableFrom(candidateClass)
                     || !hasScalarAccessor(
-                    candidateClass, scalarAccessor)
-                    || !entry.getKey().equals(
-                    BlueIdResolver.resolveBlueId(
-                            candidateClass))) {
+                    candidateClass, scalarAccessor)) {
                 continue;
             }
             candidates.add(entry);

@@ -6,8 +6,10 @@ import blue.language.processor.ExternalChannelMemberSnapshot;
 import blue.language.processor.ExternalChannelSubscriptionFunctions;
 import blue.language.processor.GasChargeContext;
 import blue.repo.coordination.CompositeTimelineChannel;
+import blue.repo.coordination.TimelineChannel;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Immutable subscription behavior for an explicitly declared union of
@@ -22,11 +24,29 @@ final class CompositeTimelineExternalSubscriptionFunctions
         CompositeTimelineChannel> {
 
     static final CompositeTimelineExternalSubscriptionFunctions INSTANCE =
-            new CompositeTimelineExternalSubscriptionFunctions();
+            new CompositeTimelineExternalSubscriptionFunctions(
+                    CoordinationCurrentRepositoryIdentities.current()
+                            .timelineChannelBlueId(),
+                    CoordinationSemanticTypeIdentities.publishedDefaults());
     static final String ORDER_SUBJECT_VERSION =
             "blue.coordination/1.0/composite-timeline-order-subject-v3";
 
-    private CompositeTimelineExternalSubscriptionFunctions() {
+    private final String timelineChannelTypeBlueId;
+    private final CoordinationSemanticTypeIdentities identities;
+    private final TimelineExternalSubscriptionFunctions<TimelineChannel>
+            timelineFunctions;
+
+    CompositeTimelineExternalSubscriptionFunctions(
+            String timelineChannelTypeBlueId,
+            CoordinationSemanticTypeIdentities identities) {
+        this.timelineChannelTypeBlueId = Objects.requireNonNull(
+                timelineChannelTypeBlueId,
+                "timelineChannelTypeBlueId");
+        this.identities = Objects.requireNonNull(
+                identities, "identities");
+        this.timelineFunctions =
+                TimelineExternalSubscriptionFunctions.with(
+                        this.identities);
     }
 
     @Override
@@ -53,8 +73,7 @@ final class CompositeTimelineExternalSubscriptionFunctions
     public List<String> eventKeys(
             Node exactEvent,
             ExternalChannelFunctionContext context) {
-        return TimelineMemberSubscriptions.timelineEventKeys(
-                exactEvent, context);
+        return timelineFunctions.eventKeys(exactEvent, context);
     }
 
     @Override
@@ -72,7 +91,7 @@ final class CompositeTimelineExternalSubscriptionFunctions
             Node exactEvent,
             ExternalChannelFunctionContext context) {
         return OperationRequestRoutingFunctions
-                .payload(exactEvent, context);
+                .payload(exactEvent, context, identities);
     }
 
     @Override
@@ -101,7 +120,8 @@ final class CompositeTimelineExternalSubscriptionFunctions
                         immutableContractSnapshot,
                         exactEvent,
                         exactPayload,
-                        context);
+                        context,
+                        identities);
     }
 
     @Override
@@ -115,7 +135,8 @@ final class CompositeTimelineExternalSubscriptionFunctions
                         immutableContractSnapshot,
                         exactEvent,
                         exactPayload,
-                        context);
+                        context,
+                        identities);
     }
 
     @Override
@@ -127,8 +148,15 @@ final class CompositeTimelineExternalSubscriptionFunctions
                         context);
         return "coordination.composite-timeline:"
                 + "direct-timeline-members-v2"
+                + semanticProfileSuffix()
                 + "|subject="
                 + ORDER_SUBJECT_VERSION;
+    }
+
+    private String semanticProfileSuffix() {
+        return identities.custom()
+                ? "|semantic-profile=" + identities.profileIdentity()
+                : "";
     }
 
     private TimelineMemberSubscriptions.WinningMember winning(
@@ -168,7 +196,7 @@ final class CompositeTimelineExternalSubscriptionFunctions
             CompositeTimelineChannel contract,
             ExternalChannelFunctionContext context) {
         return TimelineMemberSubscriptions.shallowCompositeMembers(
-                contract, context);
+                contract, context, timelineChannelTypeBlueId);
     }
 
     private static void chargeMemberVisits(

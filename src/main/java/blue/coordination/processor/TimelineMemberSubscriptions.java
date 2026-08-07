@@ -5,7 +5,6 @@ import blue.language.processor.ExternalChannelFunctionContext;
 import blue.language.processor.ExternalChannelMemberEvaluation;
 import blue.language.processor.ExternalChannelMemberSnapshot;
 import blue.repo.coordination.CompositeTimelineChannel;
-import blue.repo.coordination.TimelineChannel;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -27,7 +26,8 @@ final class TimelineMemberSubscriptions {
 
     static List<ExternalChannelMemberSnapshot> shallowCompositeMembers(
             CompositeTimelineChannel contract,
-            ExternalChannelFunctionContext context) {
+            ExternalChannelFunctionContext context,
+            String timelineChannelTypeBlueId) {
         if (contract == null
                 || contract.getChannels() == null
                 || contract.getChannels().isEmpty()) {
@@ -70,7 +70,7 @@ final class TimelineMemberSubscriptions {
                 new ArrayList<ExternalChannelMemberSnapshot>();
         for (ExternalChannelMemberSnapshot candidate
                 : context.membersAssignableToType(
-                TimelineChannel.blueId())) {
+                timelineChannelTypeBlueId)) {
             if (unresolvedKeys.remove(
                     candidate.channelKey())) {
                 /*
@@ -93,7 +93,8 @@ final class TimelineMemberSubscriptions {
     }
 
     static List<ExternalChannelMemberSnapshot> shallowAllTimelineMembers(
-            ExternalChannelFunctionContext context) {
+            ExternalChannelFunctionContext context,
+            String timelineChannelTypeBlueId) {
         /*
          * This generic subtype-family query is Language-owned catalog work
          * and returns identity-only snapshots. No selected Timeline peer is
@@ -101,7 +102,7 @@ final class TimelineMemberSubscriptions {
          */
         List<ExternalChannelMemberSnapshot> members =
                 context.membersAssignableToType(
-                TimelineChannel.blueId());
+                timelineChannelTypeBlueId);
         if (members.size()
                 > CoordinationRuntimeLimits
                 .MAX_ALL_TIMELINES_MEMBERS) {
@@ -137,13 +138,6 @@ final class TimelineMemberSubscriptions {
             }
         }
         return null;
-    }
-
-    static List<String> timelineEventKeys(
-            Node exactEvent,
-            ExternalChannelFunctionContext context) {
-        return TimelineExternalSubscriptionFunctions.INSTANCE
-                .eventKeys(exactEvent, context);
     }
 
     static final class WinningMember {

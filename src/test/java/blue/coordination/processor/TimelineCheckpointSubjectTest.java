@@ -18,62 +18,62 @@ class TimelineCheckpointSubjectTest {
 
     @Test
     void shouldAcceptIncreasingTimestampForDirectTimeline() {
-        // Given
+        // given
         TimelineChannelProcessor processor =
                 new TimelineChannelProcessor();
 
-        // When
+        // when
         boolean newer = processor.isNewerEvent(
                 new TimelineChannel(),
                 context(
                         directSubject(11, "entry-b"),
                         directSubject(10, "entry-a")));
 
-        // Then
+        // then
         assertTrue(newer);
     }
 
     @Test
     void shouldRejectEqualTimestampForDirectTimeline() {
-        // Given
+        // given
         TimelineChannelProcessor processor =
                 new TimelineChannelProcessor();
 
-        // When
+        // when
         boolean newer = processor.isNewerEvent(
                 new TimelineChannel(),
                 context(
                         directSubject(10, "entry-z"),
                         directSubject(10, "entry-a")));
 
-        // Then
+        // then
         assertFalse(newer);
     }
 
     @Test
     void shouldRejectBackdatedEntryForDirectTimeline() {
-        // Given
+        // given
         TimelineChannelProcessor processor =
                 new TimelineChannelProcessor();
 
-        // When
+        // when
         boolean newer = processor.isNewerEvent(
                 new TimelineChannel(),
                 context(
                         directSubject(9, "entry-z"),
                         directSubject(10, "entry-a")));
 
-        // Then
+        // then
         assertFalse(newer);
     }
 
     @Test
     void shouldConsumeVerifiedPlatformOrderAcrossDifferentTimelines() {
-        // Given
+        // given
         CompositeTimelineChannelProcessor processor =
                 new CompositeTimelineChannelProcessor();
 
-        // When
+        // when
         boolean newer = processor.isNewerEvent(
                 new CompositeTimelineChannel(),
                 context(compositeSubject(
@@ -83,17 +83,17 @@ class TimelineCheckpointSubjectTest {
                                 10, "timeline-z",
                                 "entry-z", "z", "domain-z")));
 
-        // Then
+        // then
         assertTrue(newer);
     }
 
     @Test
     void shouldAcceptIncreasingTimestampWithinSameTimelineWhenMemberChanges() {
-        // Given
+        // given
         CompositeTimelineChannelProcessor processor =
                 new CompositeTimelineChannelProcessor();
 
-        // When
+        // when
         boolean newer = processor.isNewerEvent(
                 new CompositeTimelineChannel(),
                 context(compositeSubject(
@@ -103,17 +103,17 @@ class TimelineCheckpointSubjectTest {
                                 10, "timeline-a",
                                 "entry-a", "a", "domain-a")));
 
-        // Then
+        // then
         assertTrue(newer);
     }
 
     @Test
     void shouldRejectEqualTimestampWithinSameTimelineWhenMemberChanges() {
-        // Given
+        // given
         CompositeTimelineChannelProcessor processor =
                 new CompositeTimelineChannelProcessor();
 
-        // When
+        // when
         boolean newer = processor.isNewerEvent(
                 new CompositeTimelineChannel(),
                 context(compositeSubject(
@@ -123,17 +123,17 @@ class TimelineCheckpointSubjectTest {
                                 10, "timeline-a",
                                 "entry-a", "a", "domain-a")));
 
-        // Then
+        // then
         assertFalse(newer);
     }
 
     @Test
     void shouldRejectBackdatedEntryWithinSameTimelineWhenMemberChanges() {
-        // Given
+        // given
         CompositeTimelineChannelProcessor processor =
                 new CompositeTimelineChannelProcessor();
 
-        // When
+        // when
         boolean newer = processor.isNewerEvent(
                 new CompositeTimelineChannel(),
                 context(compositeSubject(
@@ -143,22 +143,22 @@ class TimelineCheckpointSubjectTest {
                                 10, "timeline-z",
                                 "entry-a", "a", "domain-a")));
 
-        // Then
+        // then
         assertFalse(newer);
     }
 
     @Test
     void shouldEnsureThatAllTimelinesRejectsMalformedStoredOrderSubject() {
-        // Given
+        // given
         AllTimelinesChannelProcessor processor =
                 new AllTimelinesChannelProcessor();
-        // When
+        // when
         Node malformed = new Node()
                 .properties("semantics", new Node().value(
                         AllTimelinesExternalSubscriptionFunctions
                                 .ORDER_SUBJECT_VERSION));
 
-        // Then
+        // then
         assertThrows(IllegalArgumentException.class,
                 () -> processor.isNewerEvent(
                         new AllTimelinesChannel(),
@@ -170,12 +170,12 @@ class TimelineCheckpointSubjectTest {
 
     @Test
     void shouldEnsureThatAggregateSubjectsRejectEmptyMemberLineage() {
-        // Given
-        // When
+        // given
+        // when
         AllTimelinesChannelProcessor processor =
                 new AllTimelinesChannelProcessor();
 
-        // Then
+        // then
         assertThrows(IllegalArgumentException.class,
                 () -> processor.isNewerEvent(
                         new AllTimelinesChannel(),

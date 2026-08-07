@@ -1,8 +1,8 @@
 package blue.coordination.processor;
 
 import blue.language.model.Node;
-import blue.language.utils.NodeToMapListOrValue;
-import blue.language.utils.UncheckedObjectMapper;
+import blue.language.model.NodeWireForm;
+import blue.language.codec.jackson.UncheckedObjectMapper;
 import org.openjdk.jmh.annotations.AuxCounters;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -294,7 +294,7 @@ public class FragmentAdmissionBenchmark {
             result +=
                     UncheckedObjectMapper.JSON_MAPPER
                             .writeValueAsString(
-                                    NodeToMapListOrValue.get(
+                                    NodeWireForm.get(
                                             fragment))
                             .getBytes(
                                     java.nio.charset.StandardCharsets.UTF_8)

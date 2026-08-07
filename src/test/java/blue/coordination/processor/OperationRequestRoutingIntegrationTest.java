@@ -4,23 +4,22 @@ import blue.coordination.processor.workflow.SequentialWorkflowRunner;
 import blue.coordination.processor.workflow.StepExecutionContext;
 import blue.coordination.processor.workflow.WorkflowStepExecutor;
 import blue.coordination.processor.workflow.WorkflowStepResult;
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.ChannelCheckpointContext;
 import blue.language.processor.ChannelEvaluation;
 import blue.language.processor.ChannelEvaluationContext;
 import blue.language.processor.ChannelProcessor;
-import blue.language.processor.CoordinationConfiguredProcessorFactory;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.DocumentProcessor;
 import blue.language.processor.ExternalChannelSubscriptionFunctions;
 import blue.language.processor.GasTraceEntry;
 import blue.language.processor.ProcessingDebugResult;
-import blue.language.processor.ProcessingMetricsSink;
+import blue.language.processor.ProcessingMetricId;
+import blue.language.processor.ProcessingObservation;
+import blue.language.processor.ProcessingObserver;
 import blue.language.processor.ProcessorStatus;
-import blue.language.provider.BasicNodeProvider;
-import blue.language.provider.SequentialNodeProvider;
-import blue.language.utils.JsonPointer;
+import blue.language.preprocess.provider.BasicNodeProvider;
+import blue.language.model.wire.JsonPointer;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.Compute;
 import blue.repo.coordination.OperationRequest;
@@ -45,19 +44,19 @@ class OperationRequestRoutingIntegrationTest {
 
     @Test
     void shouldEnsureThatCrossChannelRequestRunsTargetOperationAndKeepsSourceCheckpoint() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Map<String, Node> contracts = baseContracts();
         contracts.put("increment", incrementOperation(BOB_CHANNEL));
         Node initialized = initialize(fixture, contracts);
 
-        // When
+        // when
         DocumentProcessingResult result = process(fixture,
                 initialized,
                 1,
                 request("increment", BOB_CHANNEL, new Node().value(7)));
 
-        // Then
+        // then
         assertSuccess(result);
         assertEquals(BigInteger.ONE, result.document().get("/counter"));
         assertNotNull(checkpoint(result.document(), ALICE_CHANNEL));
@@ -66,7 +65,7 @@ class OperationRequestRoutingIntegrationTest {
 
     @Test
     void shouldChargeRoutingFieldsAndTargetLookupOnceForOneAcceptedSource() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Map<String, Node> contracts = baseContracts();
         contracts.put(
@@ -88,15 +87,15 @@ class OperationRequestRoutingIntegrationTest {
                                 BOB_CHANNEL,
                                 new Node().value(7)));
 
-        // When
+        // when
         ProcessingDebugResult debug =
                 fixture.blue
-                        .getDocumentProcessor()
+                        .processor()
                         .processDocumentWithTrace(
                                 initialized,
                                 event);
 
-        // Then
+        // then
         assertSuccess(
                 debug.processResult());
         assertEquals(
@@ -115,7 +114,7 @@ class OperationRequestRoutingIntegrationTest {
 
     @Test
     void shouldRouteReferencedFieldsWithoutChargingTheRoutingReparse() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node referencedOperation = new Node()
                 .name("Referenced routing operation")
@@ -127,12 +126,7 @@ class OperationRequestRoutingIntegrationTest {
                 new BasicNodeProvider(
                         referencedOperation,
                         referencedChannel);
-        fixture.blue.nodeProvider(
-                new SequentialNodeProvider(
-                        routingFields,
-                        fixture.blue.getNodeProvider()));
-        CoordinationDeliveryPlanning.currentRootCompatibility(
-                fixture.blue);
+        fixture.blue.addNodeProvider(routingFields);
         Map<String, Node> contracts = baseContracts();
         contracts.put(
                 "increment",
@@ -165,15 +159,15 @@ class OperationRequestRoutingIntegrationTest {
                         1,
                         referencedRequest);
 
-        // When
+        // when
         ProcessingDebugResult debug =
                 fixture.blue
-                        .getDocumentProcessor()
+                        .processor()
                         .processDocumentWithTrace(
                                 initialized,
                                 event);
 
-        // Then
+        // then
         assertSuccess(
                 debug.processResult());
         assertEquals(
@@ -208,7 +202,7 @@ class OperationRequestRoutingIntegrationTest {
 
     @Test
     void shouldEnsureThatSourceActorMismatchRejectsBeforeRouting() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Map<String, Node> contracts = baseContracts();
         contracts.put("increment", incrementOperation(BOB_CHANNEL));
@@ -219,10 +213,10 @@ class OperationRequestRoutingIntegrationTest {
                 1,
                 request("increment", BOB_CHANNEL, new Node().value(7)));
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.blue.processDocument(initialized, event);
 
-        // Then
+        // then
         assertEquals(
                 ProcessorStatus.NO_MATCH,
                 result.status());
@@ -232,7 +226,7 @@ class OperationRequestRoutingIntegrationTest {
 
     @Test
     void shouldEnsureThatSourceTimelineMismatchRejectsBeforeRouting() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Map<String, Node> contracts = baseContracts();
         contracts.put("increment", incrementOperation(BOB_CHANNEL));
@@ -243,10 +237,10 @@ class OperationRequestRoutingIntegrationTest {
                 1,
                 request("increment", BOB_CHANNEL, new Node().value(7)));
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.blue.processDocument(initialized, event);
 
-        // Then
+        // then
         assertEquals(
                 ProcessorStatus.NO_MATCH,
                 result.status());
@@ -256,7 +250,7 @@ class OperationRequestRoutingIntegrationTest {
 
     @Test
     void shouldEnsureThatSourceDefinitionDoesNotFilterExternalAcceptance() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Map<String, Node> contracts = baseContracts();
         contracts.get(ALICE_CHANNEL).properties("definition", new Node()
@@ -271,10 +265,10 @@ class OperationRequestRoutingIntegrationTest {
                 request("increment", BOB_CHANNEL, new Node().value(7)))
                 .properties("source", new Node().properties("kind", new Node().value("denied")));
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.blue.processDocument(initialized, event);
 
-        // Then
+        // then
         assertSuccess(result);
         assertEquals(BigInteger.ONE, result.document().get("/counter"));
         assertEquals(BigInteger.valueOf(1_001),
@@ -283,7 +277,7 @@ class OperationRequestRoutingIntegrationTest {
 
     @Test
     void shouldEnsureThatRoutedHandlerSeesFullRootAttributionWithoutTargetActorSubstitution() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node exactAttributionDocument = new Node()
                 .properties("kind", new Node()
@@ -300,10 +294,10 @@ class OperationRequestRoutingIntegrationTest {
                 .properties("onBehalfOf", new Node()
                         .properties("label", new Node().value("mandate-owner")));
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.blue.processDocument(initialized, event);
 
-        // Then
+        // then
         assertSuccess(result);
         assertEquals(ALICE_TIMELINE, result.document().get("/captured/timeline/timelineId"));
         assertEquals(ALICE_ACTOR, result.document().get("/captured/actor/accountId"));
@@ -321,19 +315,19 @@ class OperationRequestRoutingIntegrationTest {
 
     @Test
     void shouldEnsureThatUnknownRequestTargetKeepsOrdinaryDeliveryAndCheckpoint() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Map<String, Node> contracts = baseContracts();
         contracts.put("ordinaryObserver", ordinaryObserver(ALICE_CHANNEL));
         Node initialized = initialize(fixture, contracts);
 
-        // When
+        // when
         DocumentProcessingResult result = process(fixture,
                 initialized,
                 1,
                 request("increment", "missingChannel", new Node().value(7)));
 
-        // Then
+        // then
         assertSuccess(result);
         assertEquals(BigInteger.ONE, result.document().get("/ordinaryCount"));
         assertNotNull(checkpoint(result.document(), ALICE_CHANNEL));
@@ -341,7 +335,7 @@ class OperationRequestRoutingIntegrationTest {
 
     @Test
     void shouldEnsureThatNonChannelRequestTargetKeepsOrdinaryDeliveryAndCheckpoint() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Map<String, Node> contracts = baseContracts();
         contracts.put("ordinaryObserver", ordinaryObserver(ALICE_CHANNEL));
@@ -351,13 +345,13 @@ class OperationRequestRoutingIntegrationTest {
                 .properties("steps", new Node().items()));
         Node initialized = initialize(fixture, contracts);
 
-        // When
+        // when
         DocumentProcessingResult result = process(fixture,
                 initialized,
                 1,
                 request("increment", "notAChannel", new Node().value(7)));
 
-        // Then
+        // then
         assertSuccess(result);
         assertEquals(BigInteger.ONE, result.document().get("/ordinaryCount"));
         assertNotNull(checkpoint(result.document(), ALICE_CHANNEL));
@@ -365,7 +359,7 @@ class OperationRequestRoutingIntegrationTest {
 
     @Test
     void shouldEnsureThatMalformedRoutingFieldsStayOrdinaryAndAdvanceCheckpoint() {
-        // Given
+        // given
         Node[] malformedRequests = new Node[] {
                 requestWithOptionalRoute(null, BOB_CHANNEL),
                 requestWithOptionalRoute(" \t", BOB_CHANNEL),
@@ -373,7 +367,7 @@ class OperationRequestRoutingIntegrationTest {
                 requestWithOptionalRoute("increment", " \n")
         };
 
-        // When
+        // when
         for (Node malformedRequest : malformedRequests) {
             Fixture fixture = fixture();
             Map<String, Node> contracts = baseContracts();
@@ -384,7 +378,7 @@ class OperationRequestRoutingIntegrationTest {
                     1,
                     malformedRequest);
 
-            // Then
+            // then
             assertSuccess(result);
             assertEquals(BigInteger.ONE, result.document().get("/ordinaryCount"));
             assertEquals(BigInteger.valueOf(1_001),
@@ -394,20 +388,20 @@ class OperationRequestRoutingIntegrationTest {
 
     @Test
     void shouldEnsureThatUnknownOperationRunsNoHandlerButAdvancesSourceCheckpoint() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Map<String, Node> contracts = baseContracts();
         contracts.put("ordinaryObserver", ordinaryObserver(ALICE_CHANNEL));
         contracts.put("increment", incrementOperation(BOB_CHANNEL));
         Node initialized = initialize(fixture, contracts);
 
-        // When
+        // when
         DocumentProcessingResult result = process(fixture,
                 initialized,
                 1,
                 request("missingOperation", BOB_CHANNEL, new Node().value(7)));
 
-        // Then
+        // then
         assertSuccess(result);
         assertEquals(BigInteger.ZERO, result.document().get("/counter"));
         assertEquals(BigInteger.ZERO, result.document().get("/ordinaryCount"));
@@ -416,19 +410,19 @@ class OperationRequestRoutingIntegrationTest {
 
     @Test
     void shouldEnsureThatTargetOperationRequestPatternRemainsMandatory() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Map<String, Node> contracts = baseContracts();
         contracts.put("increment", incrementOperation(BOB_CHANNEL));
         Node initialized = initialize(fixture, contracts);
 
-        // When
+        // when
         DocumentProcessingResult result = process(fixture,
                 initialized,
                 1,
                 request("increment", BOB_CHANNEL, new Node().value("7")));
 
-        // Then
+        // then
         assertSuccess(result);
         assertEquals(BigInteger.ZERO, result.document().get("/counter"));
         assertEquals(BigInteger.valueOf(1_001),
@@ -437,7 +431,7 @@ class OperationRequestRoutingIntegrationTest {
 
     @Test
     void shouldEnsureThatTargetOperationEventPatternRemainsMandatory() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Map<String, Node> contracts = baseContracts();
         contracts.put("increment", incrementOperation(BOB_CHANNEL)
@@ -452,10 +446,10 @@ class OperationRequestRoutingIntegrationTest {
                 request("increment", BOB_CHANNEL, new Node().value(7)))
                 .properties("source", new Node().properties("kind", new Node().value("denied")));
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.blue.processDocument(initialized, event);
 
-        // Then
+        // then
         assertSuccess(result);
         assertEquals(BigInteger.ZERO, result.document().get("/counter"));
         assertEquals(BigInteger.valueOf(1_001),
@@ -464,7 +458,7 @@ class OperationRequestRoutingIntegrationTest {
 
     @Test
     void shouldEnsureThatCompositeAndDirectSourcesInvokeTargetOnceAndPersistOwnCheckpoints() {
-        // Given
+        // given
         RecordingMetrics metrics = new RecordingMetrics();
         Fixture fixture = fixture(metrics, null);
         Map<String, Node> contracts = baseContracts();
@@ -473,13 +467,13 @@ class OperationRequestRoutingIntegrationTest {
         contracts.put("increment", incrementOperation(BOB_CHANNEL));
         Node initialized = initialize(fixture, contracts);
 
-        // When
+        // when
         DocumentProcessingResult result = process(fixture,
                 initialized,
                 1,
                 request("increment", BOB_CHANNEL, new Node().value(7)));
 
-        // Then
+        // then
         assertSuccess(result);
         assertEquals(BigInteger.ONE, result.document().get("/counter"));
         assertNotNull(checkpoint(result.document(), ALICE_CHANNEL));
@@ -490,7 +484,7 @@ class OperationRequestRoutingIntegrationTest {
 
     @Test
     void shouldEnsureThatAllTimelinesAndDirectSourcesInvokeTargetOnceAndPersistOwnCheckpoints() {
-        // Given
+        // given
         RecordingMetrics metrics = new RecordingMetrics();
         Fixture fixture = fixture(metrics, null);
         Map<String, Node> contracts = baseContracts();
@@ -501,13 +495,13 @@ class OperationRequestRoutingIntegrationTest {
         contracts.put("increment", incrementOperation(BOB_CHANNEL));
         Node initialized = initialize(fixture, contracts);
 
-        // When
+        // when
         DocumentProcessingResult result = process(fixture,
                 initialized,
                 1,
                 request("increment", BOB_CHANNEL, new Node().value(7)));
 
-        // Then
+        // then
         assertSuccess(result);
         assertEquals(BigInteger.ONE, result.document().get("/counter"));
         assertNotNull(checkpoint(result.document(), ALICE_CHANNEL));
@@ -518,7 +512,7 @@ class OperationRequestRoutingIntegrationTest {
 
     @Test
     void shouldEnsureThatSeveralMatchingDirectSourcesInvokeTargetOnceAndPersistOwnCheckpoints() {
-        // Given
+        // given
         RecordingMetrics metrics = new RecordingMetrics();
         Fixture fixture = fixture(metrics, null);
         Map<String, Node> contracts = baseContracts();
@@ -526,13 +520,13 @@ class OperationRequestRoutingIntegrationTest {
         contracts.put("increment", incrementOperation(BOB_CHANNEL));
         Node initialized = initialize(fixture, contracts);
 
-        // When
+        // when
         DocumentProcessingResult result = process(fixture,
                 initialized,
                 1,
                 request("increment", BOB_CHANNEL, new Node().value(7)));
 
-        // Then
+        // then
         assertEquals(BigInteger.ONE, result.document().get("/counter"));
         assertNotNull(checkpoint(result.document(), ALICE_CHANNEL));
         assertNotNull(checkpoint(result.document(), "aliceMirror"));
@@ -541,22 +535,26 @@ class OperationRequestRoutingIntegrationTest {
 
     @Test
     void shouldEnsureThatStaleSourceDoesNotPiggybackOnSuccessfulRoute() {
-        // Given
+        // given
         Fixture fixture = fixture();
-        fixture.blue.registerContractProcessor(TimelineChannel.blueId(),
+        fixture.blue.registerExternalContractType(
+                TimelineChannel.blueId(),
+                fixture.repository.nodeByBlueId(TimelineChannel.blueId())
+                        .orElseThrow(() -> new AssertionError(
+                                "Timeline Channel type missing")),
                 new SelectiveFreshnessTimelineProcessor());
         Map<String, Node> contracts = baseContracts();
         contracts.put("freshSource", timelineChannel(ALICE_TIMELINE, ALICE_ACTOR));
         contracts.put("increment", incrementOperation(BOB_CHANNEL));
         Node initialized = initialize(fixture, contracts);
 
-        // When
+        // when
         DocumentProcessingResult backfill = process(fixture,
                 initialized,
                 5,
                 request("increment", BOB_CHANNEL, new Node().value(7)));
 
-        // Then
+        // then
         assertSuccess(backfill);
         assertEquals(BigInteger.ONE, backfill.document().get("/counter"));
         assertNull(checkpoint(backfill.document(), ALICE_CHANNEL));
@@ -566,7 +564,7 @@ class OperationRequestRoutingIntegrationTest {
 
     @Test
     void shouldEnsureThatTargetHandlerFailurePersistsNoSourceCheckpoint() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Map<String, Node> contracts = baseContracts();
         contracts.put("fail", operation(BOB_CHANNEL,
@@ -574,13 +572,13 @@ class OperationRequestRoutingIntegrationTest {
                 failStep("target handler failed")));
         Node initialized = initialize(fixture, contracts);
 
-        // When
+        // when
         DocumentProcessingResult result = process(fixture,
                 initialized,
                 1,
                 request("fail", BOB_CHANNEL, new Node().value(7)));
 
-        // Then
+        // then
         assertEquals(ProcessorStatus.RUNTIME_FATAL, result.status());
         assertTrue(blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result).contains("target handler failed"), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertNull(checkpoint(result.document(), ALICE_CHANNEL));
@@ -588,7 +586,7 @@ class OperationRequestRoutingIntegrationTest {
 
     @Test
     void shouldEnsureThatTargetApplicationTerminationPersistsNoSourceCheckpoint() {
-        // Given
+        // given
         SequentialWorkflowRunner runner = new SequentialWorkflowRunner(
                 Collections.<WorkflowStepExecutor<? extends SequentialWorkflowStep>>singletonList(
                         new ApplicationTerminationExecutor()));
@@ -599,20 +597,20 @@ class OperationRequestRoutingIntegrationTest {
                 new Node().type("Coordination/Compute")));
         Node initialized = initialize(fixture, contracts);
 
-        // When
+        // when
         DocumentProcessingResult result = process(fixture,
                 initialized,
                 1,
                 request("finish", BOB_CHANNEL, new Node().value(7)));
 
-        // Then
+        // then
         assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertNull(checkpoint(result.document(), ALICE_CHANNEL));
     }
 
     @Test
     void shouldRollBackEveryPendingSourceCheckpointWhenRoutedGasCutsOff() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Map<String, Node> contracts = baseContracts();
         contracts.put(
@@ -656,13 +654,13 @@ class OperationRequestRoutingIntegrationTest {
                                 successful.totalGas()
                                         - 1L);
 
-        // When
+        // when
         ProcessingDebugResult debug =
                 gasLimited.processDocumentWithTrace(
                         initialized,
                         event);
 
-        // Then
+        // then
         DocumentProcessingResult result =
                 debug.processResult();
         assertEquals(
@@ -696,7 +694,7 @@ class OperationRequestRoutingIntegrationTest {
 
     @Test
     void shouldEnsureThatReplayAfterCommittedSourceCheckpointsRunsNothing() {
-        // Given
+        // given
         RecordingMetrics metrics = new RecordingMetrics();
         Fixture fixture = fixture(metrics, null);
         Map<String, Node> contracts = baseContracts();
@@ -711,10 +709,10 @@ class OperationRequestRoutingIntegrationTest {
 
         DocumentProcessingResult first = fixture.blue.processDocument(initialized, event);
         int handlersAfterFirst = metrics.handlersExecuted;
-        // When
+        // when
         DocumentProcessingResult replay = fixture.blue.processDocument(first.document(), event);
 
-        // Then
+        // then
         assertEquals(BigInteger.ONE, replay.document().get("/counter"));
         assertEquals(handlersAfterFirst, metrics.handlersExecuted);
         assertTrue(replay.totalGas() < first.totalGas());
@@ -830,7 +828,7 @@ class OperationRequestRoutingIntegrationTest {
 
     private static Node initialize(Fixture fixture, Map<String, Node> contracts) {
         Node document = new Node()
-                .blue(fixture.repository.typeAliasBlue())
+                .blue(fixture.repository.importsDirective())
                 .name("Operation Request Routing Test")
                 .properties("counter", new Node().value(0))
                 .properties("ordinaryCount", new Node().value(0))
@@ -883,14 +881,20 @@ class OperationRequestRoutingIntegrationTest {
     }
 
     private static Fixture fixture(RecordingMetrics metrics, SequentialWorkflowRunner runner) {
-        BlueRepository repository = BlueRepository.latest();
-        Blue blue = CoordinationTestResources.configuredBlue(repository);
-        CoordinationProcessors.registerWith(blue);
-        if (runner != null) {
-            blue.registerContractProcessor(new SequentialWorkflowOperationProcessor(runner));
-        }
-        if (metrics != null) {
-            blue.getDocumentProcessor().processingMetricsSink(metrics);
+        BlueRepository repository = BlueRepository.current();
+        CoordinationTestRuntime blue =
+                CoordinationTestResources.configuredBlue(repository);
+        if (runner != null || metrics != null) {
+            CoordinationProcessorOptions.Builder options =
+                    CoordinationProcessorOptions.builder();
+            if (runner != null) {
+                options.sequentialWorkflowRunner(runner);
+            }
+            if (metrics != null) {
+                blue.configure(options.build(), metrics);
+            } else {
+                blue.configure(options.build());
+            }
         }
         return new Fixture(repository, blue);
     }
@@ -918,20 +922,25 @@ class OperationRequestRoutingIntegrationTest {
 
     private static final class Fixture {
         private final BlueRepository repository;
-        private final Blue blue;
+        private final CoordinationTestRuntime blue;
 
-        private Fixture(BlueRepository repository, Blue blue) {
+        private Fixture(
+                BlueRepository repository,
+                CoordinationTestRuntime blue) {
             this.repository = repository;
             this.blue = blue;
         }
     }
 
-    private static final class RecordingMetrics implements ProcessingMetricsSink {
+    private static final class RecordingMetrics implements ProcessingObserver {
         private int handlersExecuted;
 
         @Override
-        public void incrementHandlersExecuted() {
-            handlersExecuted++;
+        public void record(ProcessingObservation observation) {
+            if (observation.metricId()
+                    == ProcessingMetricId.HANDLERS_EXECUTED) {
+                handlersExecuted += (int) observation.value();
+            }
         }
     }
 

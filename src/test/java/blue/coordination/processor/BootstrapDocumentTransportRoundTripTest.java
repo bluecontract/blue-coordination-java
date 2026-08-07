@@ -1,11 +1,10 @@
 package blue.coordination.processor;
 
-import blue.language.Blue;
 import blue.language.model.Node;
+import blue.language.model.NodeWireForm;
 import blue.language.processor.DocumentProcessingResult;
-import blue.language.snapshot.ResolvedSnapshot;
-import blue.language.utils.MinimizedOverlayBuilder;
-import blue.language.utils.NodeToMapListOrValue;
+import blue.language.merge.ResolvedSnapshot;
+import blue.language.resolve.MinimizedOverlayBuilder;
 import blue.repo.BlueRepository;
 import org.junit.jupiter.api.Test;
 
@@ -21,24 +20,24 @@ class BootstrapDocumentTransportRoundTripTest {
 
     @Test
     void shouldRoundTripInitializedBootstrapThroughMinimizedTransport() {
-        // Given
-        BlueRepository repository = BlueRepository.latest();
-        Blue writer = configured(repository);
+        // given
+        BlueRepository repository = BlueRepository.current();
+        CoordinationTestRuntime writer = configured(repository);
         Node source = writer.parseSourceYaml(bootstrapSource());
-        source.blue(repository.typeAliasBlue());
+        source.blue(repository.importsDirective());
 
-        // When
+        // when
         ResolvedSnapshot authored = writer.resolveToSnapshot(source);
         DocumentProcessingResult initialization = writer.initializeDocument(authored);
         ResolvedSnapshot initialized =
                 ProcessingResultTestSupport.snapshot(writer, initialization);
         Node minimized = new MinimizedOverlayBuilder().build(
                 initialized.resolvedRoot());
-        Blue reader = configured(repository);
+        CoordinationTestRuntime reader = configured(repository);
         Node stored = reader.parseSourceJson(writer.nodeToJson(minimized));
         ResolvedSnapshot reloaded = reader.resolveToSnapshot(stored);
 
-        // Then
+        // then
         assertNotNull(initialized.resolvedRoot().getAsNode(
                         "/contracts/declineBootstrap/request/type/type/inResponseTo/type/requestId"),
                 "cold resolution must fully materialize nested inherited Request metadata");
@@ -46,19 +45,18 @@ class BootstrapDocumentTransportRoundTripTest {
                 "the minimized overlay must omit type-derived bootstrap operations");
         assertEquals(initialized.blueId(), reloaded.blueId(), () ->
                 "canonical difference: " + firstDifference(
-                        NodeToMapListOrValue.get(initialized.canonicalRoot()),
-                        NodeToMapListOrValue.get(reloaded.canonicalRoot()), ""));
+                        NodeWireForm.get(initialized.canonicalRoot()),
+                        NodeWireForm.get(reloaded.canonicalRoot()), ""));
         assertEquals(initialized.frozenResolvedRoot().resolvedStructuralKey(),
                 reloaded.frozenResolvedRoot().resolvedStructuralKey(), () ->
                         "resolved difference: " + firstDifference(
-                                NodeToMapListOrValue.get(initialized.resolvedRoot()),
-                                NodeToMapListOrValue.get(reloaded.resolvedRoot()), ""));
+                                NodeWireForm.get(initialized.resolvedRoot()),
+                                NodeWireForm.get(reloaded.resolvedRoot()), ""));
     }
 
-    private static Blue configured(BlueRepository repository) {
-        Blue blue = repository.configure(new Blue());
-        CoordinationProcessors.registerWith(blue);
-        return blue;
+    private static CoordinationTestRuntime configured(
+            BlueRepository repository) {
+        return CoordinationTestResources.configuredBlue(repository);
     }
 
     private static String bootstrapSource() {

@@ -1,0 +1,83 @@
+{
+  "schema": "blue-coordination/latest-language-migration-baseline/1.1",
+  "capturedAt": "2026-08-03",
+  "coordination": {
+    "commit": "a10595beade021be80522587bb9b52a8c9b7ded2",
+    "trackedWorktree": "clean",
+    "version": "2.0.0-rc.8-SNAPSHOT"
+  },
+  "siblings": {
+    "language": {
+      "checkoutCommit": "a3b38ca9a1d0b9ca8527b26d23b05cfdbc6af7d9",
+      "verifiedImplementationCommit": "a3b38ca9a1d0b9ca8527b26d23b05cfdbc6af7d9",
+      "version": "3.1.0-rc.18-SNAPSHOT",
+      "codeEquivalent": true,
+      "checkoutDifferencePaths": []
+    },
+    "bex": {
+      "commit": "c3e36c65b9928c5ae7ef0d839b56ff35a0b70d97",
+      "version": "1.1.0-rc.2-SNAPSHOT",
+      "workingReceipt": "build/reports/latest-language-migration/final.json",
+      "workingReady": true
+    },
+    "repository": {
+      "commit": "63be6b7d8d2752b5a8c90f38e672859e9b3949a1",
+      "version": "3.0.0-rc.17-SNAPSHOT",
+      "sourceWorktree": "dirty-user-owned",
+      "selectedSource": "clean immutable local materialization of the locked commit"
+    }
+  },
+  "declaredDependencies": [
+    "blue.language:blue-language-java:3.1.0-rc.18",
+    "blue.bex:blue-bex-java:1.1.0-rc.2",
+    "blue.repo:blue-repo-java:3.0.0-rc.17"
+  ],
+  "resolutionBaseline": {
+    "mode": "local-composite",
+    "languageRequestedProject": ":",
+    "languageRequiredAggregateProject": ":blue-language-java",
+    "bexRequestedProject": ":",
+    "bexRequiredAggregateProject": ":blue-bex-java",
+    "coherent": false
+  },
+  "compile": {
+    "command": "./gradlew --no-daemon compileJava --stacktrace",
+    "status": "failed",
+    "failedTasks": [
+      ":63be6b7d8d2752b5a8c90f38e672859e9b3949a1:compileJava",
+      ":generateCoordinationRequiredRepositoryClosure"
+    ],
+    "reason": "Aggregate Language was substituted to its empty orchestration root. The immutable Repository consequently compiled without blue.language.model, and the stale closure generator requested a pre-modular Language source path."
+  },
+  "ordinaryTests": {
+    "status": "notExecuted",
+    "passed": 0,
+    "failed": 0,
+    "skipped": 0,
+    "reason": "Compilation failed before tests could execute."
+  },
+  "existingBlockerCatalog": {
+    "status": "staleNotRerun",
+    "groups": 15,
+    "probes": 57,
+    "firstObservedLanguageCommit": "9706b604d54d59e843f2d0540c1a892470d1aa5c"
+  },
+  "publicApiBaseline": {
+    "status": "existingReportNotRerun",
+    "baselineVersion": "2.0.0-rc.4",
+    "baselineClasses": 26,
+    "currentClasses": 79,
+    "compatibleAgainstOldBuild": true
+  },
+  "sourceMigrationBaseline": {
+    "productionSplitPackageClasses": 4,
+    "testSplitPackageClasses": 13,
+    "jmhSplitPackageClasses": 1,
+    "legacyProductionImportLines": 65,
+    "legacyProductionFiles": 30,
+    "legacyAllSourceImportLines": 174,
+    "legacyAllSourceFiles": 90,
+    "collectionPathsOccurrences": 0,
+    "embeddedScopePlanViewOccurrences": 0
+  }
+}

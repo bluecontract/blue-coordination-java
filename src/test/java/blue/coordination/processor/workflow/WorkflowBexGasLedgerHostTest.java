@@ -1,15 +1,16 @@
 package blue.coordination.processor.workflow;
 
 import blue.bex.gas.BexGasCounter;
+import blue.bex.gas.BexGasLedgerCapability;
 import blue.bex.gas.BexGasLimitExceededException;
 import blue.bex.gas.BexGasMeter;
 import blue.bex.gas.BexGasSchedule;
+import blue.bex.gas.BexSharedGasBudget;
 import blue.language.processor.GasLimitExceededException;
 import blue.language.processor.GasMeter;
 import blue.language.processor.GasSchedule;
 import blue.language.processor.ProcessorErrorCategory;
 import blue.language.processor.ProcessorFailureException;
-import blue.language.processor.RuntimeWorkBudget;
 import blue.language.processor.RuntimeWorkSession;
 import blue.language.processor.RuntimeWorkSessionTestSupport;
 
@@ -29,7 +30,7 @@ final class WorkflowBexGasLedgerHostTest {
 
     @Test
     void shouldPropagateParentBoundExhaustionAfterEarlierCompute() {
-        // Given
+        // given
         GasMeter parent = new GasMeter(
                 GasSchedule.contracts10(),
                 10L);
@@ -38,9 +39,9 @@ final class WorkflowBexGasLedgerHostTest {
         WorkflowBexGasLedgerHost host =
                 new WorkflowBexGasLedgerHost(session);
         BexGasSchedule schedule = BexGasSchedule.defaults();
-        RuntimeWorkBudget firstBudget =
+        BexSharedGasBudget firstBudget =
                 host.openSharedBudget(100L);
-        GasMeter.ChildGasLedger firstLedger =
+        BexGasLedgerCapability firstLedger =
                 host.open(
                         BexGasCounter.NAMESPACE,
                         schedule.counterWeights(),
@@ -58,9 +59,9 @@ final class WorkflowBexGasLedgerHostTest {
                 4L);
         first.submitHostLedger(host::submit);
 
-        RuntimeWorkBudget secondBudget =
+        BexSharedGasBudget secondBudget =
                 host.openSharedBudget(100L);
-        GasMeter.ChildGasLedger secondLedger =
+        BexGasLedgerCapability secondLedger =
                 host.open(
                         BexGasCounter.NAMESPACE,
                         schedule.counterWeights(),
@@ -82,19 +83,17 @@ final class WorkflowBexGasLedgerHostTest {
                         () -> second.charge(
                                 BexGasCounter.EXPRESSION_EVALUATED,
                                 3L));
-        second.failHostLedger(
-                host::failedDeterministically);
-
-        // When
+        // when
         GasLimitExceededException propagated =
                 assertThrows(
                         GasLimitExceededException.class,
-                        () -> host.localGasLimitExceeded(
-                                local,
-                                local));
+                        () -> second.propagateHostGasExhaustion(
+                                local.hostGasExhaustion(),
+                                host::failedDeterministically,
+                                host::propagateGasExhaustion));
         host.submitToParent();
 
-        // Then
+        // then
         assertNotSame(firstLedger, secondLedger);
         assertEquals(
                 "bex.workflow.00000000.compute.00000001",
@@ -114,7 +113,7 @@ final class WorkflowBexGasLedgerHostTest {
 
     @Test
     void shouldPropagateSharedLocalExhaustionAfterIntrinsicGas() {
-        // Given
+        // given
         GasMeter parent = new GasMeter(
                 GasSchedule.contracts10(),
                 100L);
@@ -123,9 +122,9 @@ final class WorkflowBexGasLedgerHostTest {
         WorkflowBexGasLedgerHost host =
                 new WorkflowBexGasLedgerHost(session);
         BexGasSchedule schedule = BexGasSchedule.defaults();
-        RuntimeWorkBudget sharedBudget =
+        BexSharedGasBudget sharedBudget =
                 host.openSharedBudget(10L);
-        GasMeter.ChildGasLedger primary =
+        BexGasLedgerCapability primary =
                 host.open(
                         BexGasCounter.NAMESPACE,
                         schedule.counterWeights(),
@@ -134,15 +133,15 @@ final class WorkflowBexGasLedgerHostTest {
                 Collections.singletonMap(
                         "operation",
                         Long.valueOf(1L));
-        GasMeter.ChildGasLedger intrinsic =
+        BexGasLedgerCapability intrinsic =
                 host.open(
                         "test-intrinsic",
                         intrinsicWeights,
                         sharedBudget);
-        Map<String, GasMeter.ChildGasLedger> children =
+        Map<String, BexGasLedgerCapability> children =
                 new LinkedHashMap<
                         String,
-                        GasMeter.ChildGasLedger>();
+                        BexGasLedgerCapability>();
         children.put(BexGasCounter.NAMESPACE, primary);
         children.put("test-intrinsic", intrinsic);
         Map<String, Long> registered =
@@ -170,19 +169,17 @@ final class WorkflowBexGasLedgerHostTest {
                         () -> meter.charge(
                                 BexGasCounter.EXPRESSION_EVALUATED,
                                 3L));
-        meter.failHostLedger(
-                host::failedDeterministically);
-
-        // When
+        // when
         GasLimitExceededException propagated =
                 assertThrows(
                         GasLimitExceededException.class,
-                        () -> host.localGasLimitExceeded(
-                                local,
-                                local));
+                        () -> meter.propagateHostGasExhaustion(
+                                local.hostGasExhaustion(),
+                                host::failedDeterministically,
+                                host::propagateGasExhaustion));
         host.submitToParent();
 
-        // Then
+        // then
         assertEquals(
                 "bex.workflow.00000000.compute.00000000",
                 propagated.namespace());
@@ -202,7 +199,7 @@ final class WorkflowBexGasLedgerHostTest {
 
     @Test
     void shouldKeepStrictLocalBexLimitAsDeterministicFailure() {
-        // Given
+        // given
         GasMeter parent = new GasMeter(
                 GasSchedule.contracts10(),
                 100L);
@@ -211,7 +208,7 @@ final class WorkflowBexGasLedgerHostTest {
         WorkflowBexGasLedgerHost host =
                 new WorkflowBexGasLedgerHost(session);
         BexGasSchedule schedule = BexGasSchedule.defaults();
-        GasMeter.ChildGasLedger ledger =
+        BexGasLedgerCapability ledger =
                 host.open(
                         BexGasCounter.NAMESPACE,
                         schedule.counterWeights());
@@ -232,7 +229,7 @@ final class WorkflowBexGasLedgerHostTest {
         meter.failHostLedger(
                 host::failedDeterministically);
 
-        // When
+        // when
         RuntimeException mapped =
                 host.localGasLimitExceeded(
                         local,
@@ -241,7 +238,7 @@ final class WorkflowBexGasLedgerHostTest {
         RuntimeWorkSessionTestSupport
                 .failDeterministically(session);
 
-        // Then
+        // then
         assertTrue(mapped instanceof ProcessorFailureException);
         ProcessorFailureException failure =
                 (ProcessorFailureException) mapped;

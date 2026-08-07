@@ -1,7 +1,5 @@
 package blue.coordination.processor;
 
-import blue.coordination.processor.merge.CoordinationMerging;
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.Timeline;
@@ -15,6 +13,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
 public final class CoordinationTestResources {
+    public static final String CURRENT_REPOSITORY_BLUE_ID =
+            "msCV6VLe4Y1hayq2RnPbuzqZbroowpfBKexXoXBirZq";
+
     private CoordinationTestResources() {
     }
 
@@ -37,10 +38,13 @@ public final class CoordinationTestResources {
         }
     }
 
-    public static Node yamlResource(Blue blue, BlueRepository repository, String resourcePath) {
-        Node node = blue.parseSourceYaml(readResource(resourcePath));
+    public static Node yamlResource(
+            CoordinationTestRuntime runtime,
+            BlueRepository repository,
+            String resourcePath) {
+        Node node = runtime.parseSourceYaml(readResource(resourcePath));
         return preprocessWithFixedRepository(
-                blue,
+                runtime,
                 repository,
                 node);
     }
@@ -51,46 +55,31 @@ public final class CoordinationTestResources {
      * permitted in Coordination fixtures.
      */
     public static Node preprocessWithFixedRepository(
-            Blue blue,
+            CoordinationTestRuntime runtime,
             BlueRepository repository,
             Node authored) {
-        if (blue == null) {
+        if (runtime == null) {
             throw new IllegalArgumentException(
-                    "blue must not be null");
+                    "runtime must not be null");
         }
         if (repository == null
-                || !BlueRepository.LATEST.equals(
-                repository.repositoryVersion())) {
+                || !CURRENT_REPOSITORY_BLUE_ID.equals(
+                repository.repositoryBlueId())) {
             throw new IllegalArgumentException(
-                    "repository must be the fixed "
-                            + BlueRepository.LATEST
-                            + " Repository release");
+                    "repository must be the verified current dictionary "
+                            + CURRENT_REPOSITORY_BLUE_ID);
         }
         Node source =
                 authored != null
                         ? authored.clone()
                         : new Node();
-        source.blue(repository.typeAliasBlue());
-        return blue.preprocess(source);
+        source.blue(repository.importsDirective());
+        return runtime.preprocess(source);
     }
 
-    public static Blue configuredBlue(BlueRepository repository) {
-        /*
-         * Generic behavior fixtures intentionally remain independent from
-         * the fixed-Repository release-evidence gate. The dedicated
-         * fixedRepositoryBlue path below is the only lane that can satisfy
-         * that gate.
-        */
-        Blue blue = repository.configure(new Blue());
-        /*
-         * Runtime registration installs this same workflow-AST adapter
-         * idempotently. Install it before the host-owned delivery planner so
-         * Language's configuration refresh cannot invalidate the planner.
-         */
-        CoordinationMerging.install(blue);
-        CoordinationDeliveryPlanning.currentRootCompatibility(
-                blue.getDocumentProcessor());
-        return blue;
+    public static CoordinationTestRuntime configuredBlue(
+            BlueRepository repository) {
+        return CoordinationTestRuntime.create(repository);
     }
 
     public static String simpleTimelineChannelYaml(String key, String timelineId, int indent) {
@@ -117,14 +106,14 @@ public final class CoordinationTestResources {
                 .properties("request", safeRequest);
     }
 
-    public static Node operationRequestEvent(Blue blue,
+    public static Node operationRequestEvent(CoordinationTestRuntime runtime,
                                              BlueRepository repository,
                                              String timelineId,
                                              int timestamp,
                                              String operation,
                                              String channel,
                                              Node request) {
-        return TestTimelineProvider.timelineEntry(blue,
+        return TestTimelineProvider.timelineEntry(runtime,
                 repository,
                 timelineId,
                 timestamp,

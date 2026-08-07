@@ -5,6 +5,7 @@ import blue.bex.api.BexEngine;
 import blue.bex.api.BexExecutionContext;
 import blue.bex.api.BexProgramSource;
 import blue.bex.gas.BexGasLimitExceededException;
+import blue.bex.gas.BexHostGasExhaustion;
 import blue.bex.result.BexExecutionResult;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.coordination.processor.bex.BexWorkflowContextFactory;
@@ -17,6 +18,7 @@ import blue.language.processor.ProcessorErrorCategory;
 import blue.language.processor.ProcessorFailureException;
 import blue.language.processor.ProcessorFatalException;
 import blue.language.snapshot.FrozenNode;
+import blue.language.runtime.BlueLanguage;
 import blue.repo.coordination.Compute;
 import blue.repo.coordination.SequentialWorkflowStep;
 
@@ -44,6 +46,13 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute>,
 
     public ComputeStepExecutor() {
         this(BexEngine.builder().build(), 100_000L);
+    }
+
+    /** Creates a hosted executor over the exact borrowed Language runtime. */
+    public ComputeStepExecutor(BlueLanguage language) {
+        this(BexEngine.builder()
+                .language(requireLanguage(language))
+                .build(), 100_000L);
     }
 
     public ComputeStepExecutor(BexEngine bexEngine, long defaultGasLimit) {
@@ -146,7 +155,7 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute>,
             BexExecutionResult result = bexEngine.compileAndExecute(computePlan.source(), bexContext);
             if (metrics != null) {
                 metrics.addComputeCompileExecuteNanos(System.nanoTime() - executeStart);
-                metrics.addBexMetrics(result.metrics());
+                metrics.addBexMetrics(result.metricsSnapshot());
             }
             ComputeEffectPlan effectPlan = resultEmitter.plan(result,
                     context,
@@ -224,11 +233,22 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute>,
                     || current instanceof GasLimitExceededException) {
                 return (RuntimeException) current;
             }
+            if (current instanceof BexHostGasExhaustion) {
+                RuntimeException hostFailure =
+                        ((BexHostGasExhaustion) current).hostFailure();
+                if (hostFailure instanceof GasLimitExceededException) {
+                    return hostFailure;
+                }
+            }
             if (current instanceof BexGasLimitExceededException) {
                 BexGasLimitExceededException exhaustion =
                         (BexGasLimitExceededException) current;
-                if (exhaustion.hostGasLimitExceeded() != null) {
-                    return exhaustion.hostGasLimitExceeded();
+                BexHostGasExhaustion hostExhaustion =
+                        exhaustion.hostGasExhaustion();
+                if (hostExhaustion != null
+                        && hostExhaustion.hostFailure()
+                        instanceof GasLimitExceededException) {
+                    return hostExhaustion.hostFailure();
                 }
                 return new ProcessorFailureException(
                         ProcessorErrorCategory.GasLimitExceeded,
@@ -303,6 +323,15 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute>,
                 FrozenNodeUtil.booleanProperty(programNode, "returnResult", true),
                 rawStepNode,
                 rawDefinitionNode);
+    }
+
+    private static BlueLanguage requireLanguage(
+            BlueLanguage language) {
+        if (language == null) {
+            throw new IllegalArgumentException(
+                    "language must not be null");
+        }
+        return language;
     }
 
 }

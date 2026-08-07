@@ -6,9 +6,11 @@ import blue.language.processor.ExternalChannelMemberSnapshot;
 import blue.language.processor.ExternalChannelSubscriptionFunctions;
 import blue.language.processor.GasChargeContext;
 import blue.repo.coordination.AllTimelinesChannel;
+import blue.repo.coordination.TimelineChannel;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Immutable subscription behavior for the union of every same-scope Timeline
@@ -23,13 +25,31 @@ final class AllTimelinesExternalSubscriptionFunctions
         AllTimelinesChannel> {
 
     static final AllTimelinesExternalSubscriptionFunctions INSTANCE =
-            new AllTimelinesExternalSubscriptionFunctions();
+            new AllTimelinesExternalSubscriptionFunctions(
+                    CoordinationCurrentRepositoryIdentities.current()
+                            .timelineChannelBlueId(),
+                    CoordinationSemanticTypeIdentities.publishedDefaults());
     static final String ALL_TIMELINES_KEY =
             "blue.coordination/1.0/all-timelines";
     static final String ORDER_SUBJECT_VERSION =
             "blue.coordination/1.0/all-timelines-order-subject-v3";
 
-    private AllTimelinesExternalSubscriptionFunctions() {
+    private final String timelineChannelTypeBlueId;
+    private final CoordinationSemanticTypeIdentities identities;
+    private final TimelineExternalSubscriptionFunctions<TimelineChannel>
+            timelineFunctions;
+
+    AllTimelinesExternalSubscriptionFunctions(
+            String timelineChannelTypeBlueId,
+            CoordinationSemanticTypeIdentities identities) {
+        this.timelineChannelTypeBlueId = Objects.requireNonNull(
+                timelineChannelTypeBlueId,
+                "timelineChannelTypeBlueId");
+        this.identities = Objects.requireNonNull(
+                identities, "identities");
+        this.timelineFunctions =
+                TimelineExternalSubscriptionFunctions.with(
+                        this.identities);
     }
 
     @Override
@@ -64,7 +84,7 @@ final class AllTimelinesExternalSubscriptionFunctions
     public List<String> eventKeys(
             Node exactEvent,
             ExternalChannelFunctionContext context) {
-        return !TimelineMemberSubscriptions.timelineEventKeys(
+        return !timelineFunctions.eventKeys(
                 exactEvent, context).isEmpty()
                 ? Collections.singletonList(ALL_TIMELINES_KEY)
                 : Collections.<String>emptyList();
@@ -84,7 +104,7 @@ final class AllTimelinesExternalSubscriptionFunctions
             Node exactEvent,
             ExternalChannelFunctionContext context) {
         return OperationRequestRoutingFunctions
-                .payload(exactEvent, context);
+                .payload(exactEvent, context, identities);
     }
 
     @Override
@@ -112,7 +132,8 @@ final class AllTimelinesExternalSubscriptionFunctions
                         immutableContractSnapshot,
                         exactEvent,
                         exactPayload,
-                        context);
+                        context,
+                        identities);
     }
 
     @Override
@@ -126,7 +147,8 @@ final class AllTimelinesExternalSubscriptionFunctions
                         immutableContractSnapshot,
                         exactEvent,
                         exactPayload,
-                        context);
+                        context,
+                        identities);
     }
 
     @Override
@@ -138,8 +160,15 @@ final class AllTimelinesExternalSubscriptionFunctions
                         context);
         return "coordination.all-timelines:"
                 + "timeline-type-family-v2"
+                + semanticProfileSuffix()
                 + "|subject="
                 + ORDER_SUBJECT_VERSION;
+    }
+
+    private String semanticProfileSuffix() {
+        return identities.custom()
+                ? "|semantic-profile=" + identities.profileIdentity()
+                : "";
     }
 
     private TimelineMemberSubscriptions.WinningMember winning(
@@ -175,7 +204,7 @@ final class AllTimelinesExternalSubscriptionFunctions
     private List<ExternalChannelMemberSnapshot> members(
             ExternalChannelFunctionContext context) {
         return TimelineMemberSubscriptions.shallowAllTimelineMembers(
-                context);
+                context, timelineChannelTypeBlueId);
     }
 
     private static void chargeMemberVisits(

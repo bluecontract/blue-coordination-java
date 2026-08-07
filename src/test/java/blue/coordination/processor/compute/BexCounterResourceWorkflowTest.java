@@ -1,8 +1,7 @@
 package blue.coordination.processor.compute;
 
-import blue.coordination.processor.CoordinationProcessors;
+import blue.coordination.processor.CoordinationTestRuntime;
 import blue.coordination.processor.CoordinationTestResources;
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.repo.BlueRepository;
@@ -34,7 +33,7 @@ class BexCounterResourceWorkflowTest {
 
     @Test
     void shouldProcessTimelineIncrementOperationWithBexCounterWorkflow() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = CoordinationTestResources.yamlResource(fixture.blue, fixture.repository, COUNTER_RESOURCE);
         DocumentProcessingResult initialized = fixture.blue.initializeDocument(document);
@@ -46,10 +45,10 @@ class BexCounterResourceWorkflowTest {
                 "ownerChannel",
                 new Node().value(1));
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.blue.processDocument(initialized.document(), event);
 
-        // Then
+        // then
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertNotNull(result.document());
         assertEquals(BigInteger.ONE, result.document().get("/counter"));
@@ -59,17 +58,19 @@ class BexCounterResourceWorkflowTest {
     }
 
     private static Fixture configuredFixture() {
-        BlueRepository repository = BlueRepository.latest();
-        Blue blue = CoordinationTestResources.configuredBlue(repository);
-        CoordinationProcessors.registerWith(blue);
+        BlueRepository repository = BlueRepository.current();
+        CoordinationTestRuntime blue =
+                CoordinationTestResources.configuredBlue(repository);
         return new Fixture(repository, blue);
     }
 
     private static final class Fixture {
         private final BlueRepository repository;
-        private final Blue blue;
+        private final CoordinationTestRuntime blue;
 
-        private Fixture(BlueRepository repository, Blue blue) {
+        private Fixture(
+                BlueRepository repository,
+                CoordinationTestRuntime blue) {
             this.repository = repository;
             this.blue = blue;
         }

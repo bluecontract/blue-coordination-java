@@ -1,5 +1,8 @@
 package blue.coordination.processor.bex;
 
+import blue.bex.result.BexMetrics;
+import blue.bex.result.BexMetricsRecorder;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -18,33 +21,58 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class BexProcessingMetricsTest {
 
     @Test
+    @SuppressWarnings("deprecation")
+    void shouldDelegateLegacyBexMetricsViewToImmutableSnapshot() {
+        // given
+        BexMetricsRecorder recorder = new BexMetricsRecorder();
+        recorder.incrementCompiledExecutions();
+        recorder.incrementCompileCacheHits();
+        recorder.incrementCompileCacheMisses();
+        recorder.addCompileNanos(13L);
+        recorder.addExecuteNanos(17L);
+        BexMetrics legacy =
+                BexMetrics.fromSnapshot(recorder.snapshot());
+        BexProcessingMetrics metrics = new BexProcessingMetrics();
+
+        // when
+        metrics.addBexMetrics(legacy);
+
+        // then
+        assertEquals(1L, metrics.bexCompiledExecutions());
+        assertEquals(1L, metrics.bexCompileCacheHits());
+        assertEquals(1L, metrics.bexCompileCacheMisses());
+        assertEquals(13L, metrics.bexCompileNanos());
+        assertEquals(17L, metrics.bexExecuteNanos());
+    }
+
+    @Test
     void shouldRecordConcurrentLanguageMetricAdditionsSafely() throws Exception {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         int workers = 8;
         int additionsPerWorker = 2_000;
 
-        // When
+        // when
         recordConcurrentAdditions(metrics, workers, additionsPerWorker);
 
-        // Then
+        // then
         assertEquals((long) workers * additionsPerWorker,
                 metrics.snapshot().languageCounters.get("concurrent.additions"));
     }
 
     @Test
     void shouldExposeLanguageMetricsInSortedImmutableSnapshots() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         metrics.addMetric("zulu", 3L);
         metrics.addMetric("alpha", 2L);
         metrics.setMetric("cache.plan.entries", 7L);
         metrics.recordMetricHighWater("cache.plan.highWaterBytes", 11L);
 
-        // When
+        // when
         BexProcessingMetrics.Snapshot snapshot = metrics.snapshot();
 
-        // Then
+        // then
         assertEquals(Arrays.asList("alpha", "zulu"),
                 new ArrayList<>(snapshot.languageCounters.keySet()));
         assertEquals(7L, snapshot.languageGauges.get("cache.plan.entries"));
@@ -60,19 +88,19 @@ class BexProcessingMetricsTest {
 
     @Test
     void shouldKeepLanguageMetricSnapshotsStableAfterLaterUpdates() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         metrics.addMetric("alpha", 2L);
         metrics.setMetric("cache.plan.entries", 7L);
         metrics.recordMetricHighWater("cache.plan.highWaterBytes", 11L);
         BexProcessingMetrics.Snapshot snapshot = metrics.snapshot();
 
-        // When
+        // when
         metrics.addMetric("alpha", 5L);
         metrics.setMetric("cache.plan.entries", 9L);
         metrics.recordMetricHighWater("cache.plan.highWaterBytes", 13L);
 
-        // Then
+        // then
         assertEquals(2L, snapshot.languageCounters.get("alpha"));
         assertEquals(7L, snapshot.languageGauges.get("cache.plan.entries"));
         assertEquals(11L,
@@ -106,22 +134,25 @@ class BexProcessingMetricsTest {
 
     @Test
     void shouldRetainLanguageMetricSuffixesAndCacheMetricKinds() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
 
-        // When
-        metrics.incrementFullSnapshotFallback("stalePreview");
-        metrics.incrementNodeCloneCalls("patchValue");
-        metrics.incrementNodeCloneCalls("patchValue");
-        metrics.incrementCacheHits("processingSnapshot");
-        metrics.setCacheCurrentWeightBytes("processingSnapshot", 40L);
-        metrics.setCacheEntries("processingSnapshot", 3L);
-        metrics.recordCacheHighWaterBytes("processingSnapshot", 40L);
-        metrics.recordCacheHighWaterBytes("processingSnapshot", 35L);
-        metrics.recordCacheHighWaterBytes("processingSnapshot", 52L);
+        // when
+        metrics.addMetric("fullSnapshotFallbacks", 1L);
+        metrics.addMetric("fullSnapshotFallbackReason.stalePreview", 1L);
+        metrics.addMetric("nodeCloneCallsByPurpose.patchValue", 2L);
+        metrics.addMetric("cache.processingSnapshot.hits", 1L);
+        metrics.setMetric("cache.processingSnapshot.currentWeightBytes", 40L);
+        metrics.setMetric("cache.processingSnapshot.entries", 3L);
+        metrics.recordMetricHighWater(
+                "cache.processingSnapshot.highWaterBytes", 40L);
+        metrics.recordMetricHighWater(
+                "cache.processingSnapshot.highWaterBytes", 35L);
+        metrics.recordMetricHighWater(
+                "cache.processingSnapshot.highWaterBytes", 52L);
         Map<String, Long> counters = metrics.languageCounters();
 
-        // Then
+        // then
         assertEquals(1L, counters.get("fullSnapshotFallbacks"));
         assertEquals(1L, counters.get("fullSnapshotFallbackReason.stalePreview"));
         assertEquals(2L, counters.get("nodeCloneCallsByPurpose.patchValue"));
@@ -136,20 +167,20 @@ class BexProcessingMetricsTest {
 
     @Test
     void shouldCapLanguageMetricNamesAcrossMetricKinds() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         for (int index = 0; index < BexProcessingMetrics.MAX_LANGUAGE_METRIC_NAMES; index++) {
             metrics.addMetric("bounded." + index, 1L);
         }
 
-        // When
+        // when
         metrics.setMetric("bounded.0", 7L);
         metrics.setMetric("overflow.gauge", 9L);
         metrics.recordMetricHighWater("overflow.highWater", 11L);
         metrics.addMetric("overflow.counter", 1L);
         BexProcessingMetrics.Snapshot snapshot = metrics.snapshot();
 
-        // Then
+        // then
         assertEquals(BexProcessingMetrics.MAX_LANGUAGE_METRIC_NAMES,
                 snapshot.languageCounters.size());
         assertEquals(7L, snapshot.languageGauges.get("bounded.0"));
@@ -162,16 +193,16 @@ class BexProcessingMetricsTest {
 
     @Test
     void shouldExposeProcessEventSnapshotCounters() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
 
-        // When
+        // when
         metrics.incrementProcessEventSnapshotAttempts();
         metrics.incrementProcessEventSnapshotBuilds();
         metrics.incrementProcessEventSnapshotFailures();
         metrics.addProcessEventSnapshotConstructionNanos(-1L);
 
-        // Then
+        // then
         assertEquals(1L, metrics.processEventSnapshotAttempts());
         assertEquals(1L, metrics.processEventSnapshotBuilds());
         assertEquals(1L, metrics.processEventSnapshotFailures());
@@ -181,48 +212,48 @@ class BexProcessingMetricsTest {
 
     @Test
     void shouldAccumulateProcessEventMetricsWithoutMutatingEarlierSnapshots() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         metrics.incrementProcessEventSnapshotAttempts();
         metrics.incrementProcessEventSnapshotBuilds();
         metrics.addProcessEventSnapshotConstructionNanos(11L);
         BexProcessingMetrics.Snapshot first = metrics.snapshot();
 
-        // When
+        // when
         metrics.incrementProcessEventSnapshotAttempts();
         metrics.incrementProcessEventSnapshotBuilds();
         metrics.incrementProcessEventSnapshotFailures();
         metrics.addProcessEventSnapshotConstructionNanos(13L);
         BexProcessingMetrics.Snapshot second = metrics.snapshot();
 
-        // Then
+        // then
         assertSnapshot(first, 1L, 1L, 0L, 11L);
         assertSnapshot(second, 2L, 2L, 1L, 24L);
     }
 
     @Test
     void shouldAccumulateTerminationCountersWithoutMutatingEarlierSnapshots() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         metrics.incrementSuccessfulComputeTerminationRequests();
         metrics.incrementDeclarativeTerminationSteps();
         metrics.incrementComputeResultValidationFailures();
         BexProcessingMetrics.Snapshot first = metrics.snapshot();
 
-        // When
+        // when
         metrics.incrementSuccessfulComputeTerminationRequests();
         metrics.incrementDeclarativeTerminationSteps();
         metrics.incrementComputeResultValidationFailures();
         BexProcessingMetrics.Snapshot second = metrics.snapshot();
 
-        // Then
+        // then
         assertTerminationSnapshot(first, 1L);
         assertTerminationSnapshot(second, 2L);
     }
 
     @Test
     void shouldExposeLanguageSequenceAliasesWithoutMutatingEarlierSnapshots() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         metrics.incrementPatchSequencesPrepared();
         metrics.addPatchesPrepared(3L);
@@ -243,14 +274,14 @@ class BexProcessingMetricsTest {
         metrics.incrementPatchValueMaterializations();
         BexProcessingMetrics.Snapshot first = metrics.snapshot();
 
-        // When
+        // when
         metrics.incrementPatchSequencesPrepared();
         metrics.addPatchesPrepared(2L);
         metrics.incrementSequenceFinalSnapshotCacheInserts();
         metrics.incrementPatchValueMaterializations();
         BexProcessingMetrics.Snapshot second = metrics.snapshot();
 
-        // Then
+        // then
         assertLanguageSnapshot(first, 1L, 3L, 1L, 1L);
         assertEquals(0L, first.sequencePlanningNanos);
         assertEquals(2L, first.sequenceConformanceNanos);
@@ -269,7 +300,7 @@ class BexProcessingMetricsTest {
 
     @Test
     void shouldExposeWorkflowPlanMetrics() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         metrics.incrementWorkflowPlansBuilt();
         metrics.incrementWorkflowPlanCacheHits();
@@ -280,10 +311,10 @@ class BexProcessingMetricsTest {
         metrics.incrementWorkflowStepResultSnapshotsCreated();
         metrics.incrementWorkflowStepResultViewHits();
 
-        // When
+        // when
         BexProcessingMetrics.Snapshot snapshot = metrics.snapshot();
 
-        // Then
+        // then
         assertEquals(1L, snapshot.workflowPlansBuilt);
         assertEquals(1L, snapshot.workflowPlanCacheHits);
         assertEquals(1L, snapshot.workflowPlanCacheMisses);
@@ -296,7 +327,7 @@ class BexProcessingMetricsTest {
 
     @Test
     void shouldExposeComputePlanMetrics() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         metrics.incrementComputePlansBuilt();
         metrics.incrementComputePlanCacheHits();
@@ -307,10 +338,10 @@ class BexProcessingMetricsTest {
         metrics.incrementComputeDefinitionFrozenDirectHits();
         metrics.incrementComputeProgramSourceBuilds();
 
-        // When
+        // when
         BexProcessingMetrics.Snapshot snapshot = metrics.snapshot();
 
-        // Then
+        // then
         assertEquals(1L, snapshot.computePlansBuilt);
         assertEquals(1L, snapshot.computePlanCacheHits);
         assertEquals(1L, snapshot.computePlanCacheMisses);
@@ -323,7 +354,7 @@ class BexProcessingMetricsTest {
 
     @Test
     void shouldExposeConversionAndStaticUpdateMetrics() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         metrics.incrementBexPatchFrozenDirectConversions();
         metrics.incrementBexPatchNodeMaterializations();
@@ -331,10 +362,10 @@ class BexProcessingMetricsTest {
         metrics.incrementUpdateStaticTemplateHits();
         metrics.incrementUpdateReflectionFallbacks();
 
-        // When
+        // when
         BexProcessingMetrics.Snapshot snapshot = metrics.snapshot();
 
-        // Then
+        // then
         assertEquals(1L, snapshot.bexPatchFrozenDirectConversions);
         assertEquals(1L, snapshot.bexPatchNodeMaterializations);
         assertEquals(1L, snapshot.updateStaticTemplatesBuilt);
@@ -344,17 +375,17 @@ class BexProcessingMetricsTest {
 
     @Test
     void shouldClampPlanWeightGaugesAtZero() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         metrics.addWorkflowPlanWeightBytes(100L);
         metrics.addComputePlanWeightBytes(200L);
 
-        // When
+        // when
         metrics.addWorkflowPlanWeightBytes(-150L);
         metrics.addComputePlanWeightBytes(-250L);
         BexProcessingMetrics.Snapshot snapshot = metrics.snapshot();
 
-        // Then
+        // then
         assertEquals(0L, snapshot.workflowPlanWeightBytes);
         assertEquals(0L, snapshot.computePlanWeightBytes);
     }

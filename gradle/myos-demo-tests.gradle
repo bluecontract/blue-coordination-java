@@ -1,0 +1,2416 @@
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+import groovy.xml.XmlSlurper
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+
+/*
+ * Dedicated Java 17 source set for executable Blue documents authored with
+ * Java text blocks. The published Coordination artifact and the ordinary
+ * protocol test suite remain Java 8.
+ */
+sourceSets {
+    coordinationTestSupport {
+        java.srcDir 'src/coordinationTestSupport/java'
+        resources.srcDir 'src/coordinationTestSupport/resources'
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += output + compileClasspath
+    }
+    test {
+        compileClasspath += sourceSets.coordinationTestSupport.output
+        runtimeClasspath += sourceSets.coordinationTestSupport.output
+    }
+    myosDemoTest {
+        java.srcDir 'src/myosDemoTest/java'
+        resources.srcDir 'src/myosDemoTest/resources'
+        compileClasspath += sourceSets.main.output \
+                + sourceSets.coordinationTestSupport.output
+        runtimeClasspath += output + compileClasspath
+    }
+}
+
+/*
+ * Reuse the production focused-module graph and compiled test-only
+ * CoordinationTestRuntime, but do not inherit the ordinary test suite's
+ * aggregate Language and conformance dependencies.
+ */
+configurations {
+    coordinationTestSupportImplementation.extendsFrom implementation
+    coordinationTestSupportCompileOnly.extendsFrom compileOnly
+    coordinationTestSupportRuntimeOnly.extendsFrom runtimeOnly
+    myosDemoTestImplementation.extendsFrom implementation
+    myosDemoTestCompileOnly.extendsFrom compileOnly
+    myosDemoTestRuntimeOnly.extendsFrom runtimeOnly
+}
+
+dependencies {
+    myosDemoTestImplementation platform('org.junit:junit-bom:5.10.2')
+    myosDemoTestImplementation 'org.junit.jupiter:junit-jupiter'
+    myosDemoTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+def myosReports =
+        layout.buildDirectory.dir('reports/myos-demo-examples')
+def myosDependencyReport =
+        myosReports.map { it.file('dependency-lock.json') }
+def myosBaselineReport =
+        myosReports.map { it.file('baseline.json') }
+def myosSourceStyleReport =
+        myosReports.map { it.file('source-style.json') }
+def myosRuntimeEvidence =
+        myosReports.map { it.file('runtime-evidence.json') }
+def myosRuntimeEvidenceShards =
+        myosReports.map { it.dir('runtime-shards') }
+def myosDocumentsManifest =
+        myosReports.map { it.file('documents.json') }
+def myosArtifactIsolationReport =
+        myosReports.map { it.file('artifact-isolation.json') }
+def myosFinalJson =
+        myosReports.map { it.file('final.json') }
+def myosFinalMarkdown =
+        myosReports.map { it.file('final.md') }
+def myosPerformanceGatesEnabled = Boolean.parseBoolean(
+        System.getProperty('coordination.performance.gates', 'false'))
+
+/*
+ * Closed test registries are shared by source inspection and final reporting.
+ * Any new JUnit class must be declared in exactly one registry or the final
+ * report fails closed.
+ */
+def myosExampleByClass = [
+        'blue.coordination.examples.CounterBasicsExampleTest'                  :
+                'counter-basics',
+        'blue.coordination.examples.SharedCounterExampleTest'                  :
+                'shared-counter',
+        'blue.coordination.examples.EmbeddedCounterExampleTest'                :
+                'embedded-counter',
+        'blue.coordination.examples.DynamicActivationExampleTest'              :
+                'dynamic-activation',
+        'blue.coordination.examples.OperationMandateExampleTest'               :
+                'operation-mandate',
+        'blue.coordination.examples.VetVisitExampleTest'                       :
+                'vet-visit',
+        'blue.coordination.examples.PawStartPlanExampleTest'                   :
+                'pawstart-plan',
+        'blue.coordination.examples.WadowiceHotelDinnerOrderExampleTest'       :
+                'wadowice-hotel-dinner',
+        'blue.coordination.examples.WadowiceHotelDinnerLocalityTest'            :
+                'wadowice-hotel-dinner',
+        'blue.coordination.examples.TimelineFirstCounterExampleTest'           :
+                'counter-basics',
+        'blue.coordination.examples.TimelineFirstNestedAttachmentExampleTest'  :
+                'embedded-counter',
+        'blue.coordination.examples.TimelineFirstChunkEquivalenceExampleTest'  :
+                'shared-counter',
+        'blue.coordination.examples.TimelineFirstCompleteFanoutExampleTest'     :
+                'embedded-counter',
+        'blue.coordination.examples.WadowiceTimelineFirstWorkBudgetTest'        :
+                'wadowice-hotel-dinner',
+        'blue.coordination.examples.WadowiceRestaurantIndexedLocalityBudgetTest':
+                'wadowice-hotel-dinner',
+        'blue.coordination.examples.WadowiceMeasuredWorkBudgetTest'             :
+                'wadowice-hotel-dinner',
+        'blue.coordination.examples.WadowicePreparedFixtureTest'                :
+                'wadowice-hotel-dinner',
+        'blue.coordination.examples.WadowicePayNoteAppendFastPathTest'          :
+                'wadowice-hotel-dinner',
+        'blue.coordination.examples.WadowiceAttachPayNoteLatencyTest'          :
+                'wadowice-hotel-dinner',
+        'blue.coordination.examples.WadowiceOperationLatencyCampaignTest'     :
+                'wadowice-hotel-dinner'
+].asImmutable()
+def myosInfrastructureOnlyTestClasses = [
+        'blue.coordination.examples.MyOsDemoDocumentIntegrityTest',
+        'blue.coordination.examples.CoordinationPhysicalSlicePlannerTest',
+        'blue.coordination.examples.support.CoordinationPhysicalSliceLoaderTest',
+        'blue.coordination.examples.support.MyOsEvidenceShardingTest',
+        'blue.coordination.examples.support.MyOsInverseAndChunkIndexTest',
+        'blue.coordination.examples.support.MyOsLateAttachmentTopologyTest',
+        'blue.coordination.examples.support.MyOsAppendFastPathTest',
+        'blue.coordination.examples.support.MyOsSingleResolutionAppendTest',
+        'blue.coordination.examples.support.MyOsPreparedOperationAppendTest',
+        'blue.coordination.examples.support.CanonicalEventArtifactAtomicityTest',
+        'blue.coordination.examples.support.ManagedDocumentDynamicLinkReconciliationTest',
+        'blue.coordination.examples.support.TimelineCanonicalAppendTest'
+] as Set
+
+/* Optional monotonic diagnostics are infrastructure, not wall-clock budgets. */
+def myosTimingInfrastructureSources = [
+        'src/myosDemoTest/java/blue/coordination/examples/support/'
+                + 'MyOsDemoRuntime.java',
+        'src/myosDemoTest/java/blue/coordination/examples/support/'
+                + 'MyOsOperationTimingRecorder.java',
+        'src/myosDemoTest/java/blue/coordination/examples/support/'
+                + 'MyOsLatencyProbe.java'
+] as Set
+
+def myosSiblingInputs =
+        layout.buildDirectory.file(
+                'reports/latest-language-embedded-collections/'
+                        + 'sibling-inputs.json')
+def myosResolvedDependencyLock =
+        layout.buildDirectory.file(
+                'reports/latest-language-embedded-collections/'
+                        + 'resolved-dependency-lock.json')
+def myosJava8BytecodeReport =
+        layout.buildDirectory.file('reports/bytecode/java8-bytecode.txt')
+def myosPublicApiReport =
+        layout.buildDirectory.file('reports/coordination-release/api.json')
+def myosSha256 = { File source ->
+    if (source == null || !source.isFile()) {
+        return null
+    }
+    def digest = java.security.MessageDigest.getInstance('SHA-256')
+    source.withInputStream { input ->
+        byte[] buffer = new byte[8192]
+        int read
+        while ((read = input.read(buffer)) >= 0) {
+            if (read > 0) {
+                digest.update(buffer, 0, read)
+            }
+        }
+    }
+    digest.digest().collect {
+        String.format(java.util.Locale.ROOT, '%02x', it & 0xff)
+    }.join()
+}
+
+def myosGit = { File directory, String... arguments ->
+    def command = new ArrayList<String>()
+    command.add('git')
+    command.addAll(Arrays.asList(arguments))
+    def process = new ProcessBuilder(command)
+            .directory(directory)
+            .redirectErrorStream(true)
+            .start()
+    String output = process.inputStream.getText('UTF-8').trim()
+    if (process.waitFor() != 0) {
+        throw new GradleException(
+                "Git command failed in ${directory}: ${command}\n${output}")
+    }
+    output
+}
+
+def myosWriteJson = { File target, Object value ->
+    target.parentFile.mkdirs()
+    target.setText(
+            JsonOutput.prettyPrint(JsonOutput.toJson(value)) + '\n',
+            'UTF-8')
+}
+
+def myosEvidenceSource = { File source ->
+    [
+            path  : source == null ? null : source.absolutePath,
+            sha256: myosSha256(source),
+            status: source != null && source.isFile()
+                    ? 'present'
+                    : 'missing'
+    ]
+}
+
+tasks.named('compileMyosDemoTestJava', JavaCompile) {
+    javaCompiler.set(javaToolchains.compilerFor {
+        languageVersion = JavaLanguageVersion.of(17)
+    })
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+    options.release.set(17)
+    options.encoding = 'UTF-8'
+    options.compilerArgs.addAll([
+            '-Xlint:all',
+            '-Xlint:-serial',
+            '-Werror'
+    ])
+}
+
+/*
+ * The existing topology tasks validate the exact sibling commits, BEX
+ * receipt, nested BEX -> Language composite, six focused project artifacts,
+ * and immutable local Repository binary. This additional receipt proves that
+ * the dedicated example source set resolves that same seven-artifact graph
+ * and has not reintroduced aggregate/conformance artifacts.
+ */
+def verifyMyosDemoDependencyClasspath = tasks.register(
+        'verifyMyosDemoDependencyClasspath') {
+    group = 'verification'
+    description =
+            'Verifies the exact focused Blue graph used by the MyOS examples.'
+    dependsOn(
+            'verifyLatestBlueSiblingInputs',
+            'writeLatestBlueDependencyLock',
+            'verifyNestedLocalCompositeDependencies',
+            'writeLocalCompositeDependencyEvidence')
+    inputs.file(myosResolvedDependencyLock)
+    inputs.file(myosSiblingInputs)
+    outputs.file(myosDependencyReport)
+    outputs.upToDateWhen { false }
+    doFirst {
+        delete(myosDependencyReport.get().asFile)
+    }
+    doLast {
+        File authoritativeFile =
+                myosResolvedDependencyLock.get().asFile
+        def authoritative = new JsonSlurper().parse(authoritativeFile)
+        def failures = new ArrayList<String>()
+        if (authoritative?.schema
+                != 'blue-coordination/latest-blue-dependency-lock/1.0'
+                || authoritative?.status != 'verified'
+                || authoritative?.mode
+                != 'published-language-local-bex-repository'
+                || authoritative?.failures != []) {
+            failures.add(
+                    'The authoritative focused dependency lock is not verified.')
+        }
+
+        def configuration = configurations.myosDemoTestRuntimeClasspath
+        def resolution = configuration.incoming.resolutionResult
+        def blueComponents = resolution.allComponents.findAll { component ->
+            component.moduleVersion != null
+                    && component.moduleVersion.group in [
+                    'blue.language',
+                    'blue.bex',
+                    'blue.repo'
+            ]
+        }
+        def byCoordinate = blueComponents.groupBy { component ->
+            "${component.moduleVersion.group}:${component.moduleVersion.name}"
+                    .toString()
+        }
+        def resolved = new TreeMap<String, Object>()
+        byCoordinate.each { coordinate, matches ->
+            if (matches.size() != 1) {
+                failures.add(
+                        "Expected one component for ${coordinate}; found "
+                                + matches.size())
+                return
+            }
+            def component = matches[0]
+            def identifier = component.id
+            def value = [
+                    selectedVersion: component.moduleVersion.version,
+                    componentType : identifier.class.simpleName
+            ]
+            if (identifier instanceof ProjectComponentIdentifier) {
+                value.buildPath = identifier.build.buildPath.toString()
+                value.projectPath = identifier.projectPath.toString()
+            } else if (identifier instanceof ModuleComponentIdentifier) {
+                value.module = identifier.displayName
+            }
+            resolved.put(coordinate, value)
+        }
+
+        def artifacts = new TreeMap<String, Object>()
+        configuration.resolvedConfiguration.resolvedArtifacts
+                .findAll { artifact ->
+                    artifact.moduleVersion.id.group in [
+                            'blue.language',
+                            'blue.bex',
+                            'blue.repo'
+                    ] && artifact.extension == 'jar'
+                }
+                .sort { left, right ->
+                    String leftCoordinate =
+                            "${left.moduleVersion.id.group}:${left.name}"
+                    String rightCoordinate =
+                            "${right.moduleVersion.id.group}:${right.name}"
+                    leftCoordinate <=> rightCoordinate
+                }
+                .each { artifact ->
+                    String coordinate =
+                            "${artifact.moduleVersion.id.group}:${artifact.name}"
+                    if (artifacts.containsKey(coordinate)) {
+                        failures.add(
+                                "Multiple example artifacts resolved for "
+                                        + coordinate)
+                    }
+                    artifacts.put(
+                            coordinate,
+                            [
+                                    file  : artifact.file.absolutePath,
+                                    bytes : artifact.file.length(),
+                                    sha256: myosSha256(artifact.file)
+                            ])
+                }
+
+        def expectedComponents = authoritative?.resolvedComponents
+                instanceof Map
+                ? authoritative.resolvedComponents
+                : [:]
+        def expectedArtifacts = authoritative?.artifacts instanceof Map
+                ? authoritative.artifacts
+                : [:]
+        if ((resolved.keySet() as Set)
+                != (expectedComponents.keySet() as Set)) {
+            failures.add(
+                    'Example Blue components differ from the authoritative '
+                            + "focused set: ${resolved.keySet()}")
+        }
+        if ((artifacts.keySet() as Set)
+                != (expectedArtifacts.keySet() as Set)) {
+            failures.add(
+                    'Example Blue artifacts differ from the authoritative '
+                            + "focused set: ${artifacts.keySet()}")
+        }
+        expectedComponents.each { coordinate, expected ->
+            def actual = resolved.get(coordinate)
+            if (actual == null
+                    || actual.selectedVersion != expected.selectedVersion
+                    || actual.componentType != expected.componentType
+                    || (expected.buildPath != null
+                    && actual.buildPath != expected.buildPath)
+                    || (expected.projectPath != null
+                    && actual.projectPath != expected.projectPath)) {
+                failures.add(
+                        "Example component ${coordinate}=${actual}; expected "
+                                + expected)
+            }
+        }
+        expectedArtifacts.each { coordinate, expected ->
+            def actual = artifacts.get(coordinate)
+            if (actual == null
+                    || actual.sha256 != expected.sha256
+                    || actual.bytes != expected.bytes) {
+                failures.add(
+                        "Example artifact ${coordinate}=${actual}; expected "
+                                + "SHA-256 ${expected.sha256} and bytes "
+                                + expected.bytes)
+            }
+        }
+        def forbiddenCoordinates = artifacts.keySet().findAll { coordinate ->
+            coordinate in [
+                    'blue.language:blue-language-java',
+                    'blue.language:blue-conformance',
+                    'blue.bex:blue-bex-java'
+            ]
+        }
+        if (!forbiddenCoordinates.isEmpty()) {
+            failures.add(
+                    'Example classpath contains aggregate/conformance Blue '
+                            + "artifacts: ${forbiddenCoordinates}")
+        }
+
+        def report = [
+                schema                 :
+                        'blue-coordination/myos-demo-dependency-lock/1.0',
+                status                 : failures.isEmpty()
+                        ? 'verified'
+                        : 'failed',
+                configuration          : configuration.name,
+                authoritativeLock      : [
+                        path  : authoritativeFile.absolutePath,
+                        sha256: myosSha256(authoritativeFile)
+                ],
+                siblingInputs          : myosEvidenceSource(
+                        myosSiblingInputs.get().asFile),
+                resolvedComponents     : resolved,
+                artifacts              : artifacts,
+                aggregateAndConformance: [
+                        status     : forbiddenCoordinates.isEmpty()
+                                ? 'absent'
+                                : 'present',
+                        coordinates: forbiddenCoordinates.sort()
+                ],
+                failures               : failures.sort()
+        ]
+        myosWriteJson(myosDependencyReport.get().asFile, report)
+        if (!failures.isEmpty()) {
+            throw new GradleException(
+                    'MyOS demo dependency preflight failed: ' + failures)
+        }
+    }
+}
+
+/*
+ * Observation and strict rejection are separate so the aggregate report can
+ * remain truthful even when a style regression is present.
+ */
+def inspectMyosDemoSourceStyle = tasks.register(
+        'inspectMyosDemoSourceStyle') {
+    group = 'verification'
+    description =
+            'Writes deterministic source-quality evidence for MyOS examples.'
+    def sources = fileTree('src/myosDemoTest/java') {
+        include '**/*.java'
+    }
+    inputs.files(sources)
+    outputs.file(myosSourceStyleReport)
+    outputs.upToDateWhen { false }
+    doFirst {
+        delete(myosSourceStyleReport.get().asFile)
+    }
+    doLast {
+        def violations = new ArrayList<Map<String, String>>()
+        def testInventory = new ArrayList<String>()
+        def performanceTestInventory = new ArrayList<String>()
+        def javaFiles = sources.files.sort { left, right ->
+            projectDir.toPath().relativize(left.toPath()).toString()
+                    <=> projectDir.toPath().relativize(right.toPath())
+                    .toString()
+        }
+        javaFiles.each { source ->
+            String relative = projectDir.toPath()
+                    .relativize(source.toPath())
+                    .toString()
+                    .replace(File.separatorChar, '/' as char)
+            String text = source.getText('UTF-8')
+            def forbidden = [
+                    [pattern: ~/(?s)\bnew\s+(?:blue\.language\.model\.)?Node\s*\(/,
+                     token  : 'new Node(',
+                     reason : 'imperative Blue document construction'],
+                    [pattern: ~/\bSystem\s*\.\s*out\b/,
+                     token  : 'System.out',
+                     reason : 'console logging in business examples'],
+                    [pattern: ~/\bSystem\s*\.\s*err\b/,
+                     token  : 'System.err',
+                     reason : 'console logging in business examples'],
+                    [pattern: ~/\bThread\s*\.\s*sleep\s*\(/,
+                     token  : 'Thread.sleep',
+                     reason : 'sleep-based synchronization']
+            ]
+            if (!myosTimingInfrastructureSources.contains(relative)) {
+                forbidden.addAll([
+                        [pattern: ~/\bSystem\s*\.\s*nanoTime\s*\(/,
+                         token  : 'System.nanoTime',
+                         reason : 'ad hoc benchmark/timing code'],
+                        [pattern: ~/\b(?:System\s*\.\s*)?currentTimeMillis\s*\(/,
+                         token  : 'currentTimeMillis',
+                         reason : 'ad hoc benchmark/timing code']
+                ])
+            }
+            forbidden.each { check ->
+                if (check.pattern.matcher(text).find()) {
+                    violations.add([
+                            path  : relative,
+                            token : check.token,
+                            reason: check.reason
+                    ])
+                }
+            }
+            if (source.name.endsWith('Test.java')) {
+                int testCount = (text =~ /(?m)^\s*@Test\s*$/).count
+                def testMethods = new ArrayList<String>()
+                def performanceTestMethods = new ArrayList<Boolean>()
+                def testMethodStarts = new ArrayList<Integer>()
+                def matcher = (text =~ /(?s)@Test\s+(?:@[^\n]+\s+)*(?:public\s+|protected\s+|private\s+)?void\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/)
+                while (matcher.find()) {
+                    testMethods.add(matcher.group(1).toString())
+                    performanceTestMethods.add(
+                            matcher.group(0).contains(
+                                    '@Tag("performance")'))
+                    testMethodStarts.add(matcher.start())
+                }
+                if (testMethods.size() != testCount) {
+                    violations.add([
+                            path  : relative,
+                            token : '@Test',
+                            reason: 'every JUnit method must be a void method'
+                    ])
+                }
+                testMethods.findAll { !it.startsWith('should') }.each {
+                    method ->
+                        violations.add([
+                                path  : relative,
+                                token : method,
+                                reason: 'JUnit method names must start with should'
+                        ])
+                }
+                testMethods.eachWithIndex { method, index ->
+                    int end = index + 1 < testMethodStarts.size()
+                            ? testMethodStarts[index + 1]
+                            : text.length()
+                    String methodRegion = text.substring(
+                            testMethodStarts[index], end)
+                    [
+                            '// given': 'given',
+                            '// when' : 'when',
+                            '// then' : 'then'
+                    ].each { marker, label ->
+                        int count = methodRegion.count(marker)
+                        if (count != 1) {
+                            violations.add([
+                                    path  : relative,
+                                    token : method + ':' + marker,
+                                    reason: "expected one ${label} section "
+                                            + "in ${method}; found ${count}"
+                            ])
+                        }
+                    }
+                }
+                def packageMatcher =
+                        (text =~ /(?m)^\s*package\s+([A-Za-z_][A-Za-z0-9_.]*)\s*;/)
+                String packageName = packageMatcher.find()
+                        ? packageMatcher.group(1)
+                        : ''
+                String className = source.name.substring(
+                        0, source.name.length() - '.java'.length())
+                testMethods.eachWithIndex { method, index ->
+                    String testId = (packageName.isEmpty()
+                            ? className
+                            : packageName + '.' + className) + '#' + method
+                    testInventory.add(testId)
+                    if (performanceTestMethods[index]) {
+                        performanceTestInventory.add(testId)
+                    }
+                }
+            }
+        }
+        violations.sort { left, right ->
+            int pathOrder = left.path <=> right.path
+            if (pathOrder != 0) {
+                return pathOrder
+            }
+            int tokenOrder = left.token <=> right.token
+            return tokenOrder != 0
+                    ? tokenOrder
+                    : left.reason <=> right.reason
+        }
+        testInventory.sort()
+        performanceTestInventory.sort()
+        def correctnessTestInventory = testInventory.findAll { testId ->
+            !performanceTestInventory.contains(testId)
+        }
+        def report = [
+                schema             :
+                        'blue-coordination/myos-demo-source-style/1.0',
+                status             : violations.isEmpty()
+                        ? 'passed'
+                        : 'failed',
+                javaFiles          : (long) javaFiles.size(),
+                testMethods        : testInventory,
+                correctnessTestMethods: correctnessTestInventory,
+                performanceTestMethods: performanceTestInventory,
+                businessTestMethods:
+                        (long) testInventory.count {
+                            String testId ->
+                                int separator = testId.indexOf('#')
+                                separator > 0
+                                        && myosExampleByClass.containsKey(
+                                        testId.substring(0, separator))
+                        },
+                violations         : violations
+        ]
+        myosWriteJson(myosSourceStyleReport.get().asFile, report)
+    }
+}
+
+def verifyMyosDemoSourceStyle = tasks.register(
+        'verifyMyosDemoSourceStyle') {
+    group = 'verification'
+    description =
+            'Rejects imperative construction, noisy code, and malformed business tests.'
+    dependsOn inspectMyosDemoSourceStyle
+    inputs.file(myosSourceStyleReport)
+    doLast {
+        def report = new JsonSlurper().parse(
+                myosSourceStyleReport.get().asFile)
+        if (report.status != 'passed'
+                || !(report.violations instanceof List)
+                || !report.violations.isEmpty()) {
+            throw new GradleException(
+                    'MyOS demo source-style verification failed; see '
+                            + myosSourceStyleReport.get().asFile)
+        }
+    }
+}
+
+/*
+ * Round-two removals are architectural constraints, not review conventions.
+ * Assemble retired names from fragments so this gate can scan its own Gradle
+ * source without exempting the verification implementation.
+ */
+def verifyMyosRoundTwoStaticProhibitions = tasks.register(
+        'verifyMyosRoundTwoStaticProhibitions') {
+    group = 'verification'
+    description =
+            'Rejects retired dispatch helpers, target-key appends, and operation literals.'
+
+    def broadSources = files(
+            fileTree('src'),
+            file('README.md'),
+            fileTree('docs'),
+            fileTree('gradle'))
+    def timelineSources = files(
+            fileTree('src/myosDemoTest'),
+            file('README.md'),
+            fileTree('docs'))
+    def operationSources = files(
+            fileTree('src/myosDemoTest/java/blue/coordination/examples/support'),
+            fileTree('src/main/java/blue/coordination/engine'))
+    inputs.files(broadSources, timelineSources, operationSources)
+    outputs.upToDateWhen { false }
+
+    doLast {
+        def retiredDispatchNames = [
+                'richestRoute' + 'Groups',
+                'deliver' + 'Matching',
+                'deliverSameEntry' + 'Matching'
+        ]
+        def quotedAlternatives = { List<String> values ->
+            values.collect { value ->
+                java.util.regex.Pattern.quote(value)
+            }.join('|')
+        }
+        def rules = [
+                [id     : 'retired-dispatch-api',
+                 sources: broadSources,
+                 pattern: java.util.regex.Pattern.compile(
+                         quotedAlternatives(retiredDispatchNames))],
+                [id     : 'target-key-timeline-append',
+                 sources: timelineSources,
+                 pattern: java.util.regex.Pattern.compile(
+                         'append\\s*\\(\\s*"[^"]+"\\s*,')],
+                [id     : 'operation-name-literal',
+                 sources: operationSources,
+                 pattern: java.util.regex.Pattern.compile(
+                         java.util.regex.Pattern.quote(
+                                 'authorize' + 'Amount'))]
+        ]
+        def violations = new ArrayList<Map<String, Object>>()
+        rules.each { rule ->
+            rule.sources.files.findAll { source ->
+                source.isFile()
+            }.sort { left, right ->
+                projectDir.toPath().relativize(left.toPath()).toString()
+                        <=> projectDir.toPath().relativize(right.toPath())
+                        .toString()
+            }.each { source ->
+                String relative = projectDir.toPath()
+                        .relativize(source.toPath())
+                        .toString()
+                        .replace(File.separatorChar, '/' as char)
+                String text = source.getText('UTF-8')
+                def matcher = rule.pattern.matcher(text)
+                while (matcher.find()) {
+                    violations.add([
+                            path: relative,
+                            line: 1L + text.substring(0, matcher.start())
+                                    .count('\n'),
+                            rule: rule.id
+                    ])
+                }
+            }
+        }
+        violations.sort { left, right ->
+            int pathOrder = left.path <=> right.path
+            if (pathOrder != 0) {
+                return pathOrder
+            }
+            int lineOrder = left.line <=> right.line
+            return lineOrder != 0
+                    ? lineOrder
+                    : left.rule <=> right.rule
+        }
+        if (!violations.isEmpty()) {
+            String details = violations.collect { violation ->
+                "${violation.path}:${violation.line}: ${violation.rule}"
+            }.join(System.lineSeparator())
+            throw new GradleException(
+                    'MyOS round-two static prohibitions failed:'
+                            + System.lineSeparator() + details)
+        }
+    }
+}
+
+/*
+ * This is the strict, single-execution MyOS campaign. Reports consume its
+ * JUnit XML and evidence without rerunning any behavior.
+ */
+def coordinationMyosDemoTest = tasks.register(
+        'coordinationMyosDemoTest', Test) {
+    group = 'verification'
+    description = 'Runs the executable MyOS/Playground business examples.'
+    dependsOn(
+            tasks.named('myosDemoTestClasses'),
+            verifyMyosDemoDependencyClasspath,
+            inspectMyosDemoSourceStyle)
+    testClassesDirs = sourceSets.myosDemoTest.output.classesDirs
+    classpath = sourceSets.coordinationTestSupport.output \
+            + sourceSets.myosDemoTest.runtimeClasspath
+    javaLauncher.set(javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(17)
+    })
+    useJUnitPlatform {
+        if (!myosPerformanceGatesEnabled) {
+            excludeTags 'performance'
+        }
+    }
+    systemProperty(
+            'junit.jupiter.execution.parallel.enabled',
+            'false')
+    systemProperty(
+            'coordination.performance.gates',
+            Boolean.toString(myosPerformanceGatesEnabled))
+    [
+            'coordination.performance.paynote.samples',
+            'coordination.performance.operation.samples',
+            'myos.demo.latencyEvidenceDir'
+    ].each { forwardedProperty ->
+        String supplied = System.getProperty(forwardedProperty)
+        if (supplied != null && !supplied.trim().isEmpty()) {
+            systemProperty(forwardedProperty, supplied)
+        }
+    }
+    systemProperty(
+            'myos.demo.runtimeEvidence',
+            myosRuntimeEvidence.get().asFile.absolutePath)
+    systemProperty(
+            'myos.demo.runtimeEvidenceShards',
+            myosRuntimeEvidenceShards.get().asFile.absolutePath)
+    systemProperty(
+            'myos.demo.documentsEvidence',
+            myosDocumentsManifest.get().asFile.absolutePath)
+    def requestedOperationTiming =
+            System.getProperty('myos.demo.operationTiming')
+    def operationTimingDestination = requestedOperationTiming != null
+            && !requestedOperationTiming.trim().isEmpty()
+            ? requestedOperationTiming
+            : (myosPerformanceGatesEnabled
+            ? layout.buildDirectory.file(
+                    'reports/myos-demo-examples/'
+                            + 'performance-operation-timing.json')
+                    .get().asFile.absolutePath
+            : null)
+    if (operationTimingDestination != null) {
+        systemProperty(
+                'myos.demo.operationTiming',
+                operationTimingDestination)
+    }
+    def requestedJfr = System.getProperty('myos.demo.jfr')
+    if (requestedJfr != null && !requestedJfr.trim().isEmpty()) {
+        File jfrDestination = file(requestedJfr)
+                .absoluteFile
+        jvmArgs(
+                '-XX:FlightRecorderOptions=stackdepth=256',
+                '-XX:StartFlightRecording=filename='
+                        + jfrDestination.absolutePath
+                        + ',settings=profile,dumponexit=true')
+        doFirst {
+            jfrDestination.parentFile.mkdirs()
+            if (jfrDestination.exists()
+                    && !jfrDestination.delete()) {
+                throw new GradleException(
+                        'Could not replace MyOS JFR recording: '
+                                + jfrDestination)
+            }
+        }
+    }
+    maxHeapSize = '4g'
+    maxParallelForks = 1
+    forkEvery = 0L
+    failFast = false
+    ignoreFailures = false
+    reports {
+        junitXml.required = true
+        html.required = true
+    }
+    outputs.files(
+            myosRuntimeEvidence,
+            myosDocumentsManifest)
+    outputs.dir(myosRuntimeEvidenceShards)
+    outputs.upToDateWhen { false }
+    doFirst {
+        delete(
+                myosRuntimeEvidence.get().asFile,
+                myosRuntimeEvidenceShards.get().asFile,
+                myosDocumentsManifest.get().asFile)
+        if (operationTimingDestination != null) {
+            delete(file(operationTimingDestination))
+        }
+        mkdir(myosRuntimeEvidenceShards.get().asFile)
+    }
+    testLogging {
+        events 'FAILED', 'SKIPPED'
+        showStandardStreams = false
+        exceptionFormat = 'full'
+    }
+}
+
+/*
+ * Capture the current source/dependency baseline without trusting a retained
+ * engine receipt from an earlier invocation. The engine gate remains an
+ * explicit post-example command, so its baseline status is truthfully
+ * notExecuted here.
+ */
+def generateMyosDemoBaselineReport = tasks.register(
+        'generateMyosDemoBaselineReport') {
+    group = 'verification'
+    description =
+            'Records exact source and dependency inputs for the MyOS example run.'
+    dependsOn verifyMyosDemoDependencyClasspath
+    inputs.files(
+            myosDependencyReport,
+            myosSiblingInputs)
+    outputs.file(myosBaselineReport)
+    outputs.upToDateWhen { false }
+    doFirst {
+        delete(myosBaselineReport.get().asFile)
+    }
+    doLast {
+        def topology = project.ext.latestBlueDependencyTopology
+        def sourceState = { File root ->
+            String status = myosGit(root, 'status', '--porcelain')
+            [
+                    commit : myosGit(root, 'rev-parse', 'HEAD'),
+                    state  : status.isEmpty() ? 'clean' : 'dirty',
+                    entries: status.isEmpty()
+                            ? 0L
+                            : (long) status.readLines().size()
+            ]
+        }
+        def dependency = new JsonSlurper().parse(
+                myosDependencyReport.get().asFile)
+        def report = [
+                schema           :
+                        'blue-coordination/myos-demo-baseline/1.0',
+                status           : dependency.status == 'verified'
+                        ? 'notExecuted'
+                        : 'failed',
+                repositories     : [
+                        coordination: sourceState(projectDir),
+                        language    : sourceState(topology.languageRoot),
+                        bex         : sourceState(topology.bexRoot),
+                        repository  : sourceState(
+                                topology.repositorySourceRoot)
+                ],
+                siblingLock      : [
+                        path  : topology.lockFile.absolutePath,
+                        sha256: myosSha256(topology.lockFile)
+                ],
+                dependencyReceipt: myosEvidenceSource(
+                        myosDependencyReport.get().asFile),
+                artifacts        : dependency.artifacts,
+                engineWorkingGate: [
+                        task  : 'coordinationProcessingEngineWorkingVerification',
+                        status: 'notExecuted',
+                        reason:
+                                'The prompt requires this as a separate post-example invocation; retained historical reports are not consumed.'
+                ],
+                externalBlockers : []
+        ]
+        myosWriteJson(myosBaselineReport.get().asFile, report)
+    }
+}
+
+/*
+ * Source-set separation is a Gradle default, but the RC evidence verifies the
+ * produced artifacts rather than trusting configuration intent. The source
+ * distribution is intentionally excluded: it should carry the executable
+ * examples, while the published binary/sources/Javadoc/API must not.
+ */
+def inspectMyosDemoPublishedArtifactIsolation = tasks.register(
+        'inspectMyosDemoPublishedArtifactIsolation') {
+    group = 'verification'
+    description =
+            'Proves Java 17 example classes do not contaminate published artifacts.'
+    dependsOn(
+            tasks.named('jar'),
+            tasks.named('sourcesJar'),
+            tasks.named('javadocJar'),
+            tasks.named('verifyJava8Bytecode'),
+            tasks.named('generateCoordinationPublicApiReport'))
+    inputs.files(
+            tasks.named('jar').flatMap { it.archiveFile },
+            tasks.named('sourcesJar').flatMap { it.archiveFile },
+            tasks.named('javadocJar').flatMap { it.archiveFile },
+            myosJava8BytecodeReport,
+            myosPublicApiReport)
+    outputs.file(myosArtifactIsolationReport)
+    outputs.upToDateWhen { false }
+    doFirst {
+        delete(myosArtifactIsolationReport.get().asFile)
+    }
+    doLast {
+        String forbiddenPath = 'blue/coordination/examples/'
+        def archiveEvidence = new TreeMap<String, Object>()
+        def violations = new ArrayList<String>()
+        def archives = [
+                binary : tasks.named('jar').get()
+                        .archiveFile.get().asFile,
+                sources: tasks.named('sourcesJar').get()
+                        .archiveFile.get().asFile,
+                javadoc: tasks.named('javadocJar').get()
+                        .archiveFile.get().asFile
+        ]
+        archives.each { label, archive ->
+            def zip = new java.util.zip.ZipFile(archive)
+            def forbiddenEntries
+            try {
+                forbiddenEntries = Collections.list(zip.entries())
+                        .findAll { entry ->
+                            !entry.directory
+                                    && entry.name.startsWith(forbiddenPath)
+                        }
+                        .collect { it.name }
+                        .sort()
+            } finally {
+                zip.close()
+            }
+            if (!forbiddenEntries.isEmpty()) {
+                violations.add(
+                        "${label} artifact contains MyOS example entries: "
+                                + forbiddenEntries)
+            }
+            archiveEvidence.put(
+                    label,
+                    [
+                            path            : archive.absolutePath,
+                            sha256          : myosSha256(archive),
+                            bytes           : archive.length(),
+                            forbiddenEntries: forbiddenEntries
+                    ])
+        }
+
+        File bytecodeFile = myosJava8BytecodeReport.get().asFile
+        def bytecodeProperties = new Properties()
+        bytecodeFile.withInputStream {
+            bytecodeProperties.load(it)
+        }
+        if (bytecodeProperties.getProperty('compatible') != 'true') {
+            violations.add(
+                    'The published binary is not Java 8 bytecode compatible.')
+        }
+
+        File apiFile = myosPublicApiReport.get().asFile
+        def api = new JsonSlurper().parse(apiFile)
+        def apiExampleClasses = api?.classes instanceof List
+                ? api.classes.findAll { value ->
+            value?.name?.toString()
+                    ?.startsWith('blue.coordination.examples.')
+        }.collect { it.name.toString() }.sort()
+                : []
+        if (!apiExampleClasses.isEmpty()) {
+            violations.add(
+                    'The public API inventory contains MyOS example classes: '
+                            + apiExampleClasses)
+        }
+
+        def mainClasses = sourceSets.main.output.classesDirs.files.collect {
+            it.canonicalPath
+        } as Set
+        def exampleClasses =
+                sourceSets.myosDemoTest.output.classesDirs.files.collect {
+                    it.canonicalPath
+                } as Set
+        def sharedOutputDirectories = mainClasses.intersect(exampleClasses)
+        if (!sharedOutputDirectories.isEmpty()) {
+            violations.add(
+                    'Main and MyOS example source sets share class output '
+                            + 'directories: ' + sharedOutputDirectories)
+        }
+
+        def report = [
+                schema                 :
+                        'blue-coordination/myos-demo-artifact-isolation/1.0',
+                status                 : violations.isEmpty()
+                        ? 'passed'
+                        : 'failed',
+                forbiddenPublishedPath : forbiddenPath,
+                archives               : archiveEvidence,
+                java8Bytecode           : [
+                        path   : bytecodeFile.absolutePath,
+                        sha256 : myosSha256(bytecodeFile),
+                        status : bytecodeProperties.getProperty('compatible')
+                                == 'true' ? 'passed' : 'failed',
+                        maximumObservedMajorVersion:
+                                bytecodeProperties.getProperty(
+                                        'maximumObservedMajorVersion')
+                ],
+                publicApi              : [
+                        path          : apiFile.absolutePath,
+                        sha256        : myosSha256(apiFile),
+                        exampleClasses: apiExampleClasses
+                ],
+                sharedOutputDirectories:
+                        sharedOutputDirectories.toList().sort(),
+                violations             : violations.sort()
+        ]
+        myosWriteJson(myosArtifactIsolationReport.get().asFile, report)
+    }
+}
+
+def verifyMyosDemoPublishedArtifactIsolation = tasks.register(
+        'verifyMyosDemoPublishedArtifactIsolation') {
+    group = 'verification'
+    description =
+            'Rejects MyOS Java 17 contamination of published artifacts.'
+    dependsOn inspectMyosDemoPublishedArtifactIsolation
+    inputs.file(myosArtifactIsolationReport)
+    doLast {
+        def report = new JsonSlurper().parse(
+                myosArtifactIsolationReport.get().asFile)
+        if (report.status != 'passed'
+                || !(report.violations instanceof List)
+                || !report.violations.isEmpty()) {
+            throw new GradleException(
+                    'MyOS demo artifact isolation failed; see '
+                            + myosArtifactIsolationReport.get().asFile)
+        }
+    }
+}
+
+def myosNormalizeTestId = { String className, String testName ->
+    String normalized = testName == null ? '' : testName.trim()
+    if (normalized.endsWith('()')) {
+        normalized = normalized.substring(0, normalized.length() - 2)
+    }
+    className + '#' + normalized
+}
+
+def myosReadJUnit = { File directory ->
+    def records = new ArrayList<Map<String, Object>>()
+    if (directory.isDirectory()) {
+        fileTree(directory) {
+            include 'TEST-*.xml'
+        }.files.sort { left, right ->
+            left.name <=> right.name
+        }.each { resultFile ->
+            def suite = new XmlSlurper(false, false).parse(resultFile)
+            suite.testcase.each { testCase ->
+                def failure = testCase.failure.size() > 0
+                        ? testCase.failure[0]
+                        : (testCase.error.size() > 0
+                        ? testCase.error[0]
+                        : null)
+                String status = failure != null
+                        ? 'failed'
+                        : (testCase.skipped.size() > 0
+                        ? 'skipped'
+                        : 'passed')
+                records.add([
+                        id         : myosNormalizeTestId(
+                                testCase.@classname.toString(),
+                                testCase.@name.toString()),
+                        className  : testCase.@classname.toString(),
+                        name       : testCase.@name.toString(),
+                        status     : status,
+                        failureType: failure == null
+                                ? null
+                                : failure.@type.toString(),
+                        message    : failure == null
+                                ? null
+                                : failure.@message.toString(),
+                        failureBody: failure == null
+                                ? null
+                                : failure.text().toString(),
+                        resultFile : resultFile.absolutePath
+                ])
+            }
+        }
+    }
+    records.sort { left, right -> left.id <=> right.id }
+    long failed = records.count { it.status == 'failed' }
+    long skipped = records.count { it.status == 'skipped' }
+    [
+            total  : (long) records.size(),
+            passed : (long) records.size() - failed - skipped,
+            failed : failed,
+            skipped: skipped,
+            records: records
+    ]
+}
+
+def generateMyosDemoFinalReport = tasks.register(
+        'generateMyosDemoFinalReport') {
+    group = 'verification'
+    description =
+            'Writes truthful same-run JSON and Markdown MyOS example evidence.'
+    dependsOn(
+            generateMyosDemoBaselineReport,
+            inspectMyosDemoSourceStyle,
+            coordinationMyosDemoTest,
+            inspectMyosDemoPublishedArtifactIsolation)
+    inputs.files(
+            myosDependencyReport,
+            myosBaselineReport,
+            myosSourceStyleReport,
+            myosArtifactIsolationReport,
+            myosSiblingInputs)
+    inputs.property(
+            'runtimeEvidenceSha256',
+            providers.provider {
+                myosSha256(myosRuntimeEvidence.get().asFile) ?: 'missing'
+            })
+    inputs.property(
+            'documentsManifestSha256',
+            providers.provider {
+                myosSha256(myosDocumentsManifest.get().asFile) ?: 'missing'
+            })
+    inputs.dir(
+            layout.buildDirectory.dir(
+                    'test-results/coordinationMyosDemoTest'))
+    outputs.files(myosFinalJson, myosFinalMarkdown)
+    outputs.upToDateWhen { false }
+    doFirst {
+        delete(
+                myosFinalJson.get().asFile,
+                myosFinalMarkdown.get().asFile)
+    }
+    doLast {
+        File junitDirectory = file(
+                'build/test-results/coordinationMyosDemoTest')
+        def tests = myosReadJUnit(junitDirectory)
+        def style = new JsonSlurper().parse(
+                myosSourceStyleReport.get().asFile)
+        def dependency = new JsonSlurper().parse(
+                myosDependencyReport.get().asFile)
+        def baseline = new JsonSlurper().parse(
+                myosBaselineReport.get().asFile)
+        def artifacts = new JsonSlurper().parse(
+                myosArtifactIsolationReport.get().asFile)
+        def siblingInputs = new JsonSlurper().parse(
+                myosSiblingInputs.get().asFile)
+        File runtimeFile = myosRuntimeEvidence.get().asFile
+        File documentsFile = myosDocumentsManifest.get().asFile
+        def runtime = runtimeFile.isFile()
+                ? new JsonSlurper().parse(runtimeFile)
+                : null
+        def documents = documentsFile.isFile()
+                ? new JsonSlurper().parse(documentsFile)
+                : null
+
+        def expectedTestInventory = myosPerformanceGatesEnabled
+                ? style.testMethods
+                : style.correctnessTestMethods
+        def expectedTests = expectedTestInventory instanceof List
+                ? expectedTestInventory.collect { it.toString() }.sort()
+                : []
+        def actualTests = tests.records.collect {
+            it.id.toString()
+        }.sort()
+        def missingTests = expectedTests.findAll {
+            !actualTests.contains(it)
+        }
+        def unexpectedTests = actualTests.findAll {
+            !expectedTests.contains(it)
+        }
+
+        def exampleByClass = myosExampleByClass
+        def infrastructureOnlyTestClasses =
+                myosInfrastructureOnlyTestClasses
+        def declaredTestClasses = new TreeSet<String>()
+        declaredTestClasses.addAll(exampleByClass.keySet())
+        declaredTestClasses.addAll(infrastructureOnlyTestClasses)
+        def declaredSourceTests = style.testMethods instanceof List
+                ? style.testMethods
+                : []
+        def sourceTestClasses = declaredSourceTests.collect { testId ->
+            int separator = testId.indexOf('#')
+            separator > 0 ? testId.substring(0, separator) : testId
+        }.toSet()
+        def missingDeclaredTestClasses = declaredTestClasses.findAll {
+            !sourceTestClasses.contains(it)
+        }.sort()
+        def overlappingTestRegistries = exampleByClass.keySet().findAll {
+            infrastructureOnlyTestClasses.contains(it)
+        }.sort()
+        def requiredRoundTwoTestIds = [
+                'blue.coordination.examples.TimelineFirstCounterExampleTest#shouldAppendToTheTimelineThenLetTheEnvironmentFindTheCounter',
+                'blue.coordination.examples.support.TimelineCanonicalAppendTest#shouldLeaveTimelineAndJournalUnchangedWhenAdmissionFails',
+                'blue.coordination.examples.support.TimelineCanonicalAppendTest#shouldUseCanonicalJournalMetadataInsteadOfForgedRecordFields',
+                'blue.coordination.examples.support.TimelineCanonicalAppendTest#shouldNotExposeTimelineMutationAsPublicApi',
+                'blue.coordination.examples.TimelineFirstCompleteFanoutExampleTest#shouldSelectEveryMatchingRootForThreeUnrelatedOperationNames',
+                'blue.coordination.examples.TimelineFirstChunkEquivalenceExampleTest#shouldProduceIdenticalResultsAtChunkSizesOneTwoAndOneTwentyEight',
+                'blue.coordination.examples.TimelineFirstNestedAttachmentExampleTest#shouldAdoptAnAlreadyProcessedEmb2AndFanOutLaterWorkInChunks',
+                'blue.coordination.examples.TimelineFirstNestedAttachmentExampleTest#shouldNeverOverrideExplicitManagedIdentityFromABlueIdReference',
+                'blue.coordination.examples.support.MyOsLateAttachmentTopologyTest#shouldGraftCurrentStateAndNeverReplayEntriesAtAdmissionHighWater',
+                'blue.coordination.examples.support.MyOsLateAttachmentTopologyTest#shouldRejectCycleWithoutPublishingPartialReplacement',
+                'blue.coordination.examples.support.MyOsLateAttachmentTopologyTest#shouldRejectDirectSelfCycleBeforePublishingStagedAdmission',
+                'blue.coordination.examples.support.MyOsLateAttachmentTopologyTest#shouldNeverInferLogicalIdentityFromEqualContent',
+                'blue.coordination.examples.support.MyOsLateAttachmentTopologyTest#shouldReconcileRemovalInBothTopologyDirections',
+                'blue.coordination.examples.support.MyOsLateAttachmentTopologyTest#shouldInitializeOneLogicalDocumentExactlyOnceUnderContention',
+                'blue.coordination.examples.support.MyOsInverseAndChunkIndexTest#shouldMaintainExactBidirectionalTimelineMembership',
+                'blue.coordination.examples.CoordinationPhysicalSlicePlannerTest#shouldSelectOnlyEmb1Emb2PhysicalRootsAndExcludeSibling',
+                'blue.coordination.examples.support.CoordinationPhysicalSliceLoaderTest#shouldLoadAndReconstructOnlyTheSelectedEmbeddedRootClosure',
+                'blue.coordination.examples.support.CoordinationPhysicalSliceLoaderTest#shouldRejectAStoreBodyThatDoesNotMatchItsSelectedIdentity',
+                'blue.coordination.examples.WadowiceHotelDinnerOrderExampleTest#shouldCaptureAndConfirmTheCompleteHotelAndDinnerOrder',
+                'blue.coordination.examples.WadowiceHotelDinnerOrderExampleTest#shouldCancelRestaurantWithinRangeAndRefundOnlyItsComponent',
+                'blue.coordination.examples.WadowiceHotelDinnerOrderExampleTest#shouldCompleteDinnerWithTenPercentAdjustment',
+                'blue.coordination.examples.WadowiceHotelDinnerOrderExampleTest#shouldDeclineLateCancellationWithoutChangingRestaurantState',
+                'blue.coordination.examples.WadowiceHotelDinnerLocalityTest#shouldLoadOnlyTheTwoRestaurantBranchesForOneRestaurantEntry',
+                'blue.coordination.examples.WadowiceRestaurantIndexedLocalityBudgetTest#shouldRouteRestaurantConfirmationWithoutScanningTheOrderRoot',
+                'blue.coordination.examples.WadowicePreparedFixtureTest#shouldBuildAllPurposefulCheckpointsInOneLinearPreparation',
+                'blue.coordination.examples.WadowicePreparedFixtureTest#shouldForkWithoutParsingInitializingReadingOrReplayingHistory',
+                'blue.coordination.examples.WadowicePreparedFixtureTest#shouldKeepOneMutatedBranchItsClosedSiblingAndSourceIsolated',
+                'blue.coordination.examples.WadowiceMeasuredWorkBudgetTest#shouldPrepareOneAuthorizationEntryForExactlyTwoRoots',
+                'blue.coordination.examples.WadowiceMeasuredWorkBudgetTest#shouldConfirmBothOccurrencesInOneSparseRootProcess',
+                'blue.coordination.examples.support.MyOsEvidenceShardingTest#shouldWriteBoundedRuntimeShardsAndAggregateThemExactlyOnce',
+                'blue.coordination.examples.support.MyOsEvidenceShardingTest#shouldRejectDuplicateRuntimeAndTransitionIdentities',
+                'blue.coordination.examples.MyOsDemoDocumentIntegrityTest#shouldParseAndIdentifyEveryPortableBlueDocument',
+                'blue.coordination.examples.support.ManagedDocumentDynamicLinkReconciliationTest#shouldReconcileProcessAddedAndRemovedManagedLinkAcrossEveryIndex',
+                'blue.coordination.examples.support.ManagedDocumentDynamicLinkReconciliationTest#shouldRejectDynamicCycleBeforePublishingAnyMutableRegistry'
+        ]
+        def missingRoundTwoTests = requiredRoundTwoTestIds.findAll {
+            !actualTests.contains(it)
+        }
+        def nonPassingRoundTwoTests = requiredRoundTwoTestIds.findAll {
+            String requiredId ->
+                tests.records.any { record ->
+                    record.id == requiredId && record.status != 'passed'
+                }
+        }
+        boolean roundTwoCampaignVerified = missingRoundTwoTests.isEmpty()
+                && nonPassingRoundTwoTests.isEmpty()
+        def perExample = new TreeMap<String, Object>()
+        exampleByClass.values().toSet().sort().each { exampleId ->
+            def records = tests.records.findAll { record ->
+                exampleByClass.get(record.className) == exampleId
+            }
+            perExample.put(
+                    exampleId,
+                    [
+                            total  : (long) records.size(),
+                            passed : (long) records.count {
+                                it.status == 'passed'
+                            },
+                            failed : (long) records.count {
+                                it.status == 'failed'
+                            },
+                            skipped: (long) records.count {
+                                it.status == 'skipped'
+                            }
+                    ])
+        }
+        def unclassifiedTests = tests.records.findAll { record ->
+            !exampleByClass.containsKey(record.className)
+                    && !infrastructureOnlyTestClasses.contains(record.className)
+        }
+
+        def unclassifiedFailures = unclassifiedTests.findAll { record ->
+            record.status == 'failed'
+        }
+
+        def transitions = runtime?.transitions instanceof List
+                ? runtime.transitions
+                : []
+        def observations = runtime?.observations instanceof List
+                ? runtime.observations
+                : []
+        def runtimeSummaries = observations.findAll { observation ->
+            observation instanceof Map
+                    && observation.kind == 'runtime-summary'
+        }
+        def checkpointObservations = observations.findAll { observation ->
+            observation instanceof Map
+                    && observation.kind == 'checkpoint'
+        }
+        def physicalSliceObservations = observations.findAll { observation ->
+            observation instanceof Map
+                    && observation.kind == 'physical-slice'
+        }
+        def hostWorkFields = [
+                'sourceParses',
+                'documentInitializations',
+                'eventPreparations',
+                'eventSplits',
+                'routeIndexProbes',
+                'fanoutPages'
+        ]
+        def engineWorkFields = [
+                'plans',
+                'bundleLoads',
+                'bundleBatches',
+                'loadedFragmentIdentities',
+                'loadedBytes',
+                'processCompletions',
+                'commitAttempts',
+                'committed',
+                'alreadyCommitted',
+                'conflicts'
+        ]
+        def storeWorkFields = [
+                'singleReads',
+                'batchReads',
+                'requestedIdentities'
+        ]
+        def nonBlankText = { value ->
+            value instanceof String && !value.isEmpty()
+        }
+        def nonNegativeNumber = { value ->
+            value instanceof Number
+                    && Double.isFinite(value.doubleValue())
+                    && value.doubleValue() >= 0.0d
+                    && value.doubleValue()
+                    == Math.rint(value.doubleValue())
+        }
+        def numericFieldsComplete = { value, fields ->
+            value instanceof Map && fields.every { field ->
+                nonNegativeNumber(value[field])
+            }
+        }
+        long forbiddenReads = transitions.collect { transition ->
+            transition.forbiddenReadCount instanceof Number
+                    ? transition.forbiddenReadCount.longValue()
+                    : 0L
+        }.sum(0L) as long
+        long fallbackReads = transitions.collect { transition ->
+            transition.fallbackReadCount instanceof Number
+                    ? transition.fallbackReadCount.longValue()
+                    : 0L
+        }.sum(0L) as long
+        long backendLoadedFragments = transitions.collect { transition ->
+            transition.backendLoadedBlueIds instanceof List
+                    ? (long) transition.backendLoadedBlueIds.size()
+                    : 0L
+        }.sum(0L) as long
+        long backendLoadedBytes = transitions.collect { transition ->
+            transition.loadedBytes instanceof Number
+                    ? transition.loadedBytes.longValue()
+                    : 0L
+        }.sum(0L) as long
+        def transitionsByExample = new TreeMap<String, Long>()
+        exampleByClass.values().toSet().sort().each {
+            transitionsByExample.put(it, 0L)
+        }
+        transitions.each { transition ->
+            String exampleId = transition.exampleId?.toString()
+            if (transitionsByExample.containsKey(exampleId)) {
+                transitionsByExample.put(
+                        exampleId,
+                        transitionsByExample.get(exampleId) + 1L)
+            }
+        }
+
+        def requiredWadowiceScopeOrder = [
+                '/payNotes/packagePayment/productConditions/restaurant/product',
+                '/product/products/restaurant'
+        ]
+        def wadowiceLocalityTransitions = transitions.findAll { transition ->
+            transition.caseId == 'wadowice-locality'
+                    && transition.documentKey == 'package-order'
+                    && transition.operation == 'confirmProduct'
+        }
+        boolean wadowiceLocalityVerified =
+                wadowiceLocalityTransitions.size() == 1
+                        && wadowiceLocalityTransitions[0]
+                        .selectedScopeOrder == requiredWadowiceScopeOrder
+                        && wadowiceLocalityTransitions[0]
+                        .forbiddenReadCount == 0
+                        && wadowiceLocalityTransitions[0]
+                        .fallbackReadCount == 0
+
+        def requiredDocumentFields = [
+                'exampleId',
+                'documentKey',
+                'sourceDocumentBlueId',
+                'initialCanonicalIdentityInputBlueId',
+                'requiredParticipantTimelineIds',
+                'requiredActorIds',
+                'directProcessEmbeddedPaths',
+                'sourceConstant',
+                'sourceKind',
+                'sourceDependencies'
+        ] as Set
+        def requiredGeneratedFixtureSources = [
+                'NestedTopologyDocuments.EMB2',
+                'NestedTopologyDocuments.emb1Linking(emb2InitialBlueId)',
+                'NestedTopologyDocuments.rootLinking(emb1InitialBlueId)'
+        ]
+        def documentRecords = documents?.documents instanceof List
+                ? documents.documents
+                : []
+        long catalogDocumentCount =
+                documents?.catalogDocumentCount instanceof Number
+                        ? documents.catalogDocumentCount.longValue()
+                        : 0L
+        long generatedFixtureCount =
+                documents?.generatedFixtureCount instanceof Number
+                        ? documents.generatedFixtureCount.longValue()
+                        : 0L
+        long expectedDocumentCount = Math.addExact(
+                catalogDocumentCount,
+                (long) requiredGeneratedFixtureSources.size())
+        def generatedFixtureDocuments = documentRecords.findAll { document ->
+            document instanceof Map
+                    && document.sourceKind == 'generated-fixture'
+        }
+        boolean generatedFixturesVerified =
+                generatedFixtureDocuments.collect { document ->
+                    document.sourceConstant
+                } == requiredGeneratedFixtureSources
+                        && generatedFixtureDocuments.collect { document ->
+                    document.sourceDependencies instanceof List
+                            ? (long) document.sourceDependencies.size()
+                            : -1L
+                } == [0L, 1L, 1L]
+                        && generatedFixtureDocuments.size()
+                        == requiredGeneratedFixtureSources.size()
+                        && generatedFixtureDocuments[1].sourceDependencies
+                        == [generatedFixtureDocuments[0].sourceDocumentBlueId]
+                        && generatedFixtureDocuments[2].sourceDependencies
+                        == [generatedFixtureDocuments[1].sourceDocumentBlueId]
+        boolean documentsVerified = documents?.schema
+                == 'blue.coordination/myos-demo-documents/1.0'
+                && documents?.status == 'passed'
+                && catalogDocumentCount > 0L
+                && generatedFixtureCount
+                == requiredGeneratedFixtureSources.size()
+                && documents?.documentCount instanceof Number
+                && documents.documentCount.longValue()
+                == expectedDocumentCount
+                && documentRecords.size() == expectedDocumentCount
+                && documentRecords.collect {
+                    it.documentKey
+                }.toSet().size() == expectedDocumentCount
+                && documentRecords.count { document ->
+                    document.sourceKind == 'catalog'
+                } == catalogDocumentCount
+                && documentRecords.findAll { document ->
+                    document.sourceKind == 'catalog'
+                }.every { document ->
+                    document.sourceDependencies instanceof List
+                            && document.sourceDependencies.isEmpty()
+                }
+                && generatedFixturesVerified
+                && documentRecords.every { document ->
+                    (document.keySet() as Set).containsAll(
+                            requiredDocumentFields)
+                            && document.exampleId instanceof String
+                            && !document.exampleId.isEmpty()
+                            && document.documentKey instanceof String
+                            && !document.documentKey.isEmpty()
+                            && document.sourceDocumentBlueId instanceof String
+                            && !document.sourceDocumentBlueId.isEmpty()
+                            && document.initialCanonicalIdentityInputBlueId
+                            instanceof String
+                            && !document.initialCanonicalIdentityInputBlueId
+                            .isEmpty()
+                            && document.requiredParticipantTimelineIds
+                            instanceof List
+                            && document.requiredActorIds instanceof List
+                            && document.directProcessEmbeddedPaths
+                            instanceof List
+                            && document.sourceConstant instanceof String
+                            && !document.sourceConstant.isEmpty()
+                            && document.sourceKind
+                            in ['catalog', 'generated-fixture']
+                            && document.sourceDependencies instanceof List
+                            && document.sourceDependencies.every { blueId ->
+                        blueId instanceof String && !blueId.isEmpty()
+                    }
+                }
+        def admissions = runtime?.admissions instanceof List
+                ? runtime.admissions
+                : []
+        boolean admissionsComplete = admissions.every { admission ->
+            admission instanceof Map
+                    && admission.exampleId instanceof String
+                    && !admission.exampleId.isEmpty()
+                    && admission.caseId instanceof String
+                    && !admission.caseId.isEmpty()
+                    && admission.runtimeId instanceof String
+                    && !admission.runtimeId.isEmpty()
+                    && admission.documentKey instanceof String
+                    && !admission.documentKey.isEmpty()
+                    && admission.sourceDocumentBlueId instanceof String
+                    && !admission.sourceDocumentBlueId.isEmpty()
+                    && admission.canonicalIdentityInputBlueId
+                    instanceof String
+                    && !admission.canonicalIdentityInputBlueId.isEmpty()
+                    && admission.sessionId instanceof String
+                    && !admission.sessionId.isEmpty()
+                    && admission.logicalDocumentId instanceof String
+                    && !admission.logicalDocumentId.isEmpty()
+                    && admission.initializationAttempt instanceof Number
+                    && admission.initializationAttempt.longValue() > 0L
+                    && admission.initializationStatus == 'SUCCEEDED'
+                    && admission.initializationInputBlueId
+                    == admission.sourceDocumentBlueId
+                    && admission.initializationResultRootBlueId
+                    instanceof String
+                    && !admission.initializationResultRootBlueId.isEmpty()
+        }
+        boolean transitionsComplete = transitions.every { transition ->
+            transition instanceof Map
+                    && transition.exampleId instanceof String
+                    && !transition.exampleId.isEmpty()
+                    && transition.caseId instanceof String
+                    && !transition.caseId.isEmpty()
+                    && transition.runtimeId instanceof String
+                    && !transition.runtimeId.isEmpty()
+                    && transition.transitionOrdinal instanceof Number
+                    && transition.transitionOrdinal.longValue() > 0L
+                    && transition.documentKey instanceof String
+                    && !transition.documentKey.isEmpty()
+                    && transition.sessionId instanceof String
+                    && !transition.sessionId.isEmpty()
+                    && transition.entryBlueId instanceof String
+                    && !transition.entryBlueId.isEmpty()
+                    && transition.timelineId instanceof String
+                    && !transition.timelineId.isEmpty()
+                    && transition.operation instanceof String
+                    && !transition.operation.isEmpty()
+                    && transition.processorStatus == 'success'
+                    && transition.cas instanceof Map
+                    && transition.cas.status instanceof String
+                    && !transition.cas.status.isEmpty()
+                    && transition.cas.committed == true
+                    && transition.cas.transitionIdentity instanceof String
+                    && !transition.cas.transitionIdentity.isEmpty()
+                    && transition.selectedOccurrenceOrder instanceof List
+                    && transition.selectedScopeOrder instanceof List
+                    && transition.selectedScopeChains instanceof Map
+                    && transition.selectedScopeChains.values().every {
+                        it instanceof List
+                                && it.every { blueId ->
+                            blueId instanceof String && !blueId.isEmpty()
+                        }
+                    }
+                    && transition.selectedScopeOrder
+                    == transition.selectedScopeChains.keySet().toList()
+                    && transition.backendLoadedBlueIds instanceof List
+                    && transition.backendLoadedBlueIds.every { blueId ->
+                        blueId instanceof String && !blueId.isEmpty()
+                    }
+                    && transition.causallySelectedBlueIds instanceof List
+                    && transition.causallySelectedBlueIds.every { blueId ->
+                        blueId instanceof String && !blueId.isEmpty()
+                    }
+                    && transition.batchCount instanceof Number
+                    && transition.batchCount.longValue() >= 0L
+                    && transition.loadedBytes instanceof Number
+                    && transition.loadedBytes.longValue() >= 0L
+                    && transition.forbiddenReadCount instanceof Number
+                    && transition.forbiddenReadCount.longValue() >= 0L
+                    && transition.fallbackReadCount instanceof Number
+                    && transition.fallbackReadCount.longValue() >= 0L
+        }
+        boolean observationOwnershipComplete = observations.every {
+            observation ->
+                observation instanceof Map
+                        && nonBlankText(observation.exampleId)
+                        && nonBlankText(observation.caseId)
+                        && nonBlankText(observation.runtimeId)
+                        && nonBlankText(observation.kind)
+                        && nonBlankText(observation.observationId)
+                        && observation.kind in [
+                        'runtime-summary',
+                        'checkpoint',
+                        'physical-slice'
+                ]
+        }
+        boolean runtimeSummariesComplete = runtimeSummaries.every {
+            summary ->
+                summary.work instanceof Map
+                        && numericFieldsComplete(
+                        summary.work.host, hostWorkFields)
+                        && numericFieldsComplete(
+                        summary.work.engine, engineWorkFields)
+                        && numericFieldsComplete(
+                        summary.work.store, storeWorkFields)
+                        && numericFieldsComplete(
+                        summary.state,
+                        [
+                                'documentCount',
+                                'timelineCount',
+                                'journalEntryCount',
+                                'storedEventInventoryCount'
+                        ])
+        }
+        boolean checkpointsComplete = checkpointObservations.every {
+            checkpoint ->
+                nonBlankText(checkpoint.name)
+                        && nonBlankText(checkpoint.stateFingerprint)
+                        && numericFieldsComplete(
+                        checkpoint,
+                        [
+                                'documentCount',
+                                'timelineCount',
+                                'journalEntryCount',
+                                'physicalFragmentCount'
+                        ])
+        }
+        boolean physicalSlicesComplete = physicalSliceObservations.every {
+            slice ->
+                nonBlankText(slice.rootDocumentKey)
+                        && nonBlankText(slice.absolutePath)
+                        && nonBlankText(slice.owningRootSessionId)
+                        && nonBlankText(slice.selectedLogicalDocumentId)
+                        && nonBlankText(slice.expectedSelectedRootBlueId)
+                        && slice.expectedSelectedRootBlueId
+                        == slice.actualSelectedRootBlueId
+                        && slice.relationshipChain instanceof List
+                        && slice.relationshipChain.every { link ->
+                    link instanceof Map
+                            && nonBlankText(link.parentLogicalId)
+                            && nonBlankText(link.relativePath)
+                            && nonBlankText(link.childLogicalId)
+                }
+                        && slice.selectedFragmentBlueIds instanceof List
+                        && !slice.selectedFragmentBlueIds.isEmpty()
+                        && slice.selectedFragmentBlueIds.every { blueId ->
+                    nonBlankText(blueId)
+                }
+                        && slice.selectedFragmentBlueIds.toSet().size()
+                        == slice.selectedFragmentBlueIds.size()
+                        && nonNegativeNumber(slice.loadedFragmentCount)
+                        && slice.loadedFragmentCount.longValue() > 0L
+                        && slice.loadedFragmentCount.longValue()
+                        == slice.selectedFragmentBlueIds.size()
+                        && nonNegativeNumber(slice.fullFragmentCount)
+                        && slice.fullFragmentCount.longValue()
+                        >= slice.loadedFragmentCount.longValue()
+                        && numericFieldsComplete(
+                        slice.store, storeWorkFields)
+        }
+        def observationIdentities = observations.collect { observation ->
+            observation instanceof Map
+                    ? "${observation.runtimeId}\u0000${observation.observationId}"
+                    : null
+        }
+        boolean observationIdentitiesUnique =
+                !observationIdentities.contains(null)
+                        && observationIdentities.toSet().size()
+                        == observationIdentities.size()
+        boolean exactlyOneSummaryPerRuntime = observationOwnershipComplete
+                && !observations.isEmpty()
+                && observations.groupBy { observation ->
+            observation.runtimeId
+        }.every { runtimeId, records ->
+            nonBlankText(runtimeId)
+                    && records.count { record ->
+                record.kind == 'runtime-summary'
+            } == 1
+                    && records.collect { record ->
+                [record.exampleId, record.caseId]
+            }.toSet().size() == 1
+        }
+        def summariesByRuntime = runtimeSummaries.groupBy { summary ->
+            summary.runtimeId
+        }
+        boolean runtimeRecordsBoundToSummaries =
+                (admissions + transitions).every { record ->
+                    if (!(record instanceof Map)) {
+                        return false
+                    }
+                    def matching = summariesByRuntime[record.runtimeId]
+                    matching instanceof List
+                            && matching.size() == 1
+                            && matching[0].exampleId == record.exampleId
+                            && matching[0].caseId == record.caseId
+                }
+        boolean observationsComplete = observationOwnershipComplete
+                && runtimeSummariesComplete
+                && checkpointsComplete
+                && physicalSlicesComplete
+                && observationIdentitiesUnique
+                && exactlyOneSummaryPerRuntime
+                && runtimeRecordsBoundToSummaries
+
+        def summaryTransitionsMatch = { summary ->
+            if (!(summary instanceof Map)
+                    || !(summary.work instanceof Map)
+                    || !(summary.work.engine instanceof Map)) {
+                return false
+            }
+            def sameRuntime = transitions.findAll { transition ->
+                transition instanceof Map
+                        && transition.runtimeId == summary.runtimeId
+            }
+            summary.work.engine.processCompletions instanceof Number
+                    && summary.work.engine.committed instanceof Number
+                    && summary.work.engine.processCompletions.longValue()
+                    == sameRuntime.size()
+                    && summary.work.engine.committed.longValue()
+                    == sameRuntime.count { transition ->
+                transition.cas instanceof Map
+                        && transition.cas.committed == true
+            }
+        }
+        def exactNumericFields = { actual, expected ->
+            actual instanceof Map && expected.every { field, value ->
+                actual[field] instanceof Number
+                        && actual[field].longValue() == value
+            }
+        }
+        def authorizationSummaries = runtimeSummaries.findAll { summary ->
+            summary.caseId == 'measured-authorization'
+        }
+        def authorizationSummary = authorizationSummaries.size() == 1
+                ? authorizationSummaries[0]
+                : null
+        boolean authorizationWorkVerified = authorizationSummary != null
+                && numericFieldsComplete(
+                authorizationSummary.work?.host, hostWorkFields)
+                && numericFieldsComplete(
+                authorizationSummary.work?.engine, engineWorkFields)
+                && numericFieldsComplete(
+                authorizationSummary.work?.store, storeWorkFields)
+                && exactNumericFields(
+                authorizationSummary.work.host,
+                [
+                        sourceParses          : 0L,
+                        documentInitializations: 0L,
+                        eventPreparations     : 1L,
+                        eventSplits           : 1L,
+                        routeIndexProbes      : 1L,
+                        fanoutPages           : 1L
+                ])
+                && exactNumericFields(
+                authorizationSummary.work.engine,
+                [
+                        plans             : 2L,
+                        bundleLoads       : 2L,
+                        bundleBatches     : 2L,
+                        processCompletions: 2L,
+                        commitAttempts    : 2L,
+                        committed         : 2L,
+                        alreadyCommitted  : 0L,
+                        conflicts         : 0L
+                ])
+                && authorizationSummary.work.store.singleReads.longValue() == 0L
+                && authorizationSummary.work.store.batchReads.longValue() <= 4L
+                && summaryTransitionsMatch(authorizationSummary)
+
+        def restaurantSummaries = runtimeSummaries.findAll { summary ->
+            summary.caseId == 'measured-restaurant-locality'
+        }
+        def restaurantSummary = restaurantSummaries.size() == 1
+                ? restaurantSummaries[0]
+                : null
+        boolean restaurantWorkVerified = restaurantSummary != null
+                && numericFieldsComplete(
+                restaurantSummary.work?.host, hostWorkFields)
+                && numericFieldsComplete(
+                restaurantSummary.work?.engine, engineWorkFields)
+                && numericFieldsComplete(
+                restaurantSummary.work?.store, storeWorkFields)
+                && exactNumericFields(
+                restaurantSummary.work.host,
+                [
+                        sourceParses          : 0L,
+                        documentInitializations: 0L,
+                        eventPreparations     : 1L,
+                        eventSplits           : 1L,
+                        routeIndexProbes      : 1L,
+                        fanoutPages           : 1L
+                ])
+                && exactNumericFields(
+                restaurantSummary.work.engine,
+                [
+                        plans             : 1L,
+                        bundleLoads       : 1L,
+                        bundleBatches     : 1L,
+                        processCompletions: 1L,
+                        commitAttempts    : 1L,
+                        committed         : 1L,
+                        alreadyCommitted  : 0L,
+                        conflicts         : 0L
+                ])
+                && restaurantSummary.work.store.singleReads.longValue() == 0L
+                && restaurantSummary.work.store.batchReads.longValue() <= 2L
+                && summaryTransitionsMatch(restaurantSummary)
+
+        def fastForkSummaries = runtimeSummaries.findAll { summary ->
+            summary.caseId == 'fast-fork'
+        }
+        def fastForkSummary = fastForkSummaries.size() == 1
+                ? fastForkSummaries[0]
+                : null
+        boolean fastForkWorkVerified = fastForkSummary != null
+                && numericFieldsComplete(
+                fastForkSummary.work?.host, hostWorkFields)
+                && numericFieldsComplete(
+                fastForkSummary.work?.engine, engineWorkFields)
+                && numericFieldsComplete(
+                fastForkSummary.work?.store, storeWorkFields)
+                && hostWorkFields.every { field ->
+            fastForkSummary.work.host[field].longValue() == 0L
+        }
+                && engineWorkFields.every { field ->
+            fastForkSummary.work.engine[field].longValue() == 0L
+        }
+                && storeWorkFields.every { field ->
+            fastForkSummary.work.store[field].longValue() == 0L
+        }
+                && summaryTransitionsMatch(fastForkSummary)
+        boolean measuredWorkVerified = observationsComplete
+                && authorizationWorkVerified
+                && restaurantWorkVerified
+                && fastForkWorkVerified
+
+        def nestedPhysicalSlices = physicalSliceObservations.findAll { slice ->
+            slice.caseId == 'timeline-first-nested-attachment'
+        }
+        def nestedPhysicalSlice = nestedPhysicalSlices.size() == 1
+                ? nestedPhysicalSlices[0]
+                : null
+        def requiredNestedRelationshipChain = [
+                [
+                        parentLogicalId: 'myos-demo/root',
+                        relativePath   : '/emb1',
+                        childLogicalId : 'myos-demo/emb1'
+                ],
+                [
+                        parentLogicalId: 'myos-demo/emb1',
+                        relativePath   : '/emb2',
+                        childLogicalId : 'myos-demo/emb2'
+                ]
+        ]
+        boolean physicalSlicesVerified = observationsComplete
+                && nestedPhysicalSlice != null
+                && nestedPhysicalSlice.rootDocumentKey == 'root'
+                && nestedPhysicalSlice.absolutePath == '/emb1/emb2'
+                && nestedPhysicalSlice.owningRootSessionId == 'myos-demo/root'
+                && nestedPhysicalSlice.selectedLogicalDocumentId
+                == 'myos-demo/emb2'
+                && nestedPhysicalSlice.expectedSelectedRootBlueId
+                == nestedPhysicalSlice.actualSelectedRootBlueId
+                && nestedPhysicalSlice.relationshipChain
+                == requiredNestedRelationshipChain
+                && nestedPhysicalSlice.loadedFragmentCount.longValue()
+                == nestedPhysicalSlice.selectedFragmentBlueIds.size()
+                && nestedPhysicalSlice.loadedFragmentCount.longValue() > 0L
+                && nestedPhysicalSlice.loadedFragmentCount.longValue()
+                < nestedPhysicalSlice.fullFragmentCount.longValue()
+                && nestedPhysicalSlice.store.singleReads.longValue() == 0L
+                && nestedPhysicalSlice.store.batchReads.longValue() == 1L
+                && nestedPhysicalSlice.store.requestedIdentities.longValue()
+                == nestedPhysicalSlice.loadedFragmentCount.longValue()
+
+        def preparedSourceSummaries = runtimeSummaries.findAll { summary ->
+            summary.caseId == 'wadowice-prepared-source'
+        }
+        def preparedSourceSummary = preparedSourceSummaries.size() == 1
+                ? preparedSourceSummaries[0]
+                : null
+        def preparedCheckpoints = preparedSourceSummary == null
+                ? []
+                : checkpointObservations.findAll { checkpoint ->
+            checkpoint.runtimeId == preparedSourceSummary.runtimeId
+        }
+        def preparedCheckpointsByName = preparedCheckpoints.groupBy {
+            checkpoint -> checkpoint.name
+        }
+        def requiredPreparedJournalCounts = [
+                'pay-note-attached'  : 1L,
+                'conditions-attached': 7L,
+                'restaurant-outcome' : 11L
+        ]
+        def branchSuffixProcessCalls = new LinkedHashMap<String, Long>()
+        [
+                'complete-order'     : 1L,
+                'cancel-refund'      : 4L,
+                'discount-adjustment': 3L,
+                'late-cancellation'  : 2L
+        ].each { caseId, ignored ->
+            branchSuffixProcessCalls.put(
+                    caseId,
+                    (long) transitions.count { transition ->
+                        transition instanceof Map
+                                && transition.caseId == caseId
+                    })
+        }
+        long totalBranchSuffixProcessCalls =
+                branchSuffixProcessCalls.values().sum(0L) as long
+        def restaurantOutcomeCheckpoint =
+                preparedCheckpointsByName['restaurant-outcome']?.size() == 1
+                        ? preparedCheckpointsByName['restaurant-outcome'][0]
+                        : null
+        boolean wadowicePreparedVerified = observationsComplete
+                && preparedSourceSummary != null
+                && preparedCheckpoints.size() == 3
+                && preparedCheckpointsByName.keySet()
+                == requiredPreparedJournalCounts.keySet()
+                && requiredPreparedJournalCounts.every { name, count ->
+            preparedCheckpointsByName[name].size() == 1
+                    && preparedCheckpointsByName[name][0]
+                    .journalEntryCount.longValue() == count
+        }
+                && restaurantOutcomeCheckpoint != null
+                && restaurantOutcomeCheckpoint.documentCount.longValue() == 2L
+                && restaurantOutcomeCheckpoint.timelineCount.longValue() == 5L
+                && preparedSourceSummary.state.documentCount.longValue() == 2L
+                && preparedSourceSummary.state.timelineCount.longValue() == 5L
+                && preparedSourceSummary.state.journalEntryCount.longValue()
+                == 11L
+                && preparedSourceSummary.state
+                .storedEventInventoryCount.longValue() == 11L
+                && preparedSourceSummary.work.engine
+                .processCompletions.longValue() == 19L
+                && summaryTransitionsMatch(preparedSourceSummary)
+                && branchSuffixProcessCalls == [
+                'complete-order'     : 1L,
+                'cancel-refund'      : 4L,
+                'discount-adjustment': 3L,
+                'late-cancellation'  : 2L
+                ]
+                && totalBranchSuffixProcessCalls == 10L
+        def preparedSourceEngine = preparedSourceSummary?.work?.engine
+        def commonPrefixProcessCalls =
+                preparedSourceEngine?.processCompletions instanceof Number
+                ? preparedSourceEngine.processCompletions
+                .longValue()
+                : null
+        def fourBusinessBranchProcessCalls =
+                commonPrefixProcessCalls instanceof Number
+                        ? Math.addExact(
+                        commonPrefixProcessCalls.longValue(),
+                        totalBranchSuffixProcessCalls)
+                        : null
+        boolean runtimeVerified = runtime?.schema
+                == 'blue.coordination/myos-demo-runtime-evidence/1.1'
+                && runtime?.admissions instanceof List
+                && !admissions.isEmpty()
+                && admissionsComplete
+                && transitions instanceof List
+                && !transitions.isEmpty()
+                && transitionsComplete
+                && runtime?.observations instanceof List
+                && !observations.isEmpty()
+                && observationsComplete
+        boolean testsVerified = tests.total == expectedTests.size()
+                && tests.failed == 0L
+                && tests.skipped == 0L
+                && missingTests.isEmpty()
+                && unexpectedTests.isEmpty()
+                && unclassifiedTests.isEmpty()
+                && missingDeclaredTestClasses.isEmpty()
+                && overlappingTestRegistries.isEmpty()
+                && roundTwoCampaignVerified
+        boolean workingReady =
+                dependency.status == 'verified'
+                        && style.status == 'passed'
+                        && artifacts.status == 'passed'
+                        && testsVerified
+                        && documentsVerified
+                        && runtimeVerified
+                        && forbiddenReads == 0L
+                        && fallbackReads == 0L
+                        && wadowiceLocalityVerified
+                        && measuredWorkVerified
+                        && physicalSlicesVerified
+                        && wadowicePreparedVerified
+
+        def blockingReasons = new ArrayList<String>()
+        if (dependency.status != 'verified') {
+            blockingReasons.add('The exact example dependency graph is not verified.')
+        }
+        if (style.status != 'passed') {
+            blockingReasons.add('The example source-style gate is red.')
+        }
+        if (artifacts.status != 'passed') {
+            blockingReasons.add('Published artifact isolation is red.')
+        }
+        if (!testsVerified) {
+            blockingReasons.add(
+                    'The complete expected example JUnit inventory is not green.')
+        }
+        if (!missingDeclaredTestClasses.isEmpty()) {
+            blockingReasons.add(
+                    'Declared test classes have no discoverable JUnit methods: '
+                            + missingDeclaredTestClasses)
+        }
+        if (!overlappingTestRegistries.isEmpty()) {
+            blockingReasons.add(
+                    'Test classes occur in both closed registries: '
+                            + overlappingTestRegistries)
+        }
+        if (!roundTwoCampaignVerified) {
+            blockingReasons.add(
+                    'Required round-two behavioral tests are absent or not green: '
+                            + [
+                            missing   : missingRoundTwoTests,
+                            nonPassing: nonPassingRoundTwoTests
+                    ])
+        }
+        if (!documentsVerified) {
+            blockingReasons.add(
+                    'The same-run catalog and generated-fixture document manifest is missing or invalid.')
+        }
+        if (!runtimeVerified) {
+            blockingReasons.add(
+                    'The same-run PROCESS/locality evidence is missing or invalid.')
+        }
+        if (forbiddenReads != 0L || fallbackReads != 0L) {
+            blockingReasons.add(
+                    'The example runtime observed forbidden or fallback reads.')
+        }
+        if (!wadowiceLocalityVerified) {
+            blockingReasons.add(
+                    'The exact two-scope Wadowice locality proof is absent.')
+        }
+        if (!measuredWorkVerified) {
+            blockingReasons.add(
+                    'Exact same-run measured-work budgets are absent or invalid.')
+        }
+        if (!physicalSlicesVerified) {
+            blockingReasons.add(
+                    'The bounded Root/Emb1/Emb2 physical-slice proof is absent or invalid.')
+        }
+        if (!wadowicePreparedVerified) {
+            blockingReasons.add(
+                    'The one-pass Wadowice preparation/checkpoint proof is absent or invalid.')
+        }
+
+        def report = [
+                schema                 :
+                        'blue-coordination/myos-demo-final/1.1',
+                status                 : workingReady ? 'passed' : 'failed',
+                workingReady           : workingReady,
+                sourceSet              : [
+                        name       : 'myosDemoTest',
+                        javaRelease: 17,
+                        testJvm    : 17,
+                        maxForks   : 1,
+                        forkEvery  : 0
+                ],
+                sourceIdentity         : [
+                        coordination: baseline.repositories.coordination,
+                        language    : siblingInputs.language,
+                        bex         : siblingInputs.bex,
+                        repository  : siblingInputs.repository
+                ],
+                dependencyGraph       : dependency,
+                artifacts             : artifacts.archives,
+                documents             : [
+                        expected         : expectedDocumentCount,
+                        observed         :
+                                (long) documentRecords.size(),
+                        catalog          : catalogDocumentCount,
+                        generatedFixtures: generatedFixtureCount,
+                        status           : documentsVerified
+                                ? 'verified'
+                                : 'missing',
+                        evidence         : myosEvidenceSource(documentsFile)
+                ],
+                tests                 : [
+                        expected            : (long) expectedTests.size(),
+                        businessMethods     : style.businessTestMethods,
+                        total               : tests.total,
+                        passed              : tests.passed,
+                        failed              : tests.failed,
+                        skipped             : tests.skipped,
+                        missing             : missingTests,
+                        unexpected          : unexpectedTests,
+                        unclassified        : unclassifiedTests,
+                        unclassifiedFailures: unclassifiedFailures,
+                        missingDeclaredClasses:
+                                missingDeclaredTestClasses,
+                        overlappingRegistries:
+                                overlappingTestRegistries,
+                        perExample          : perExample
+                ],
+                roundTwoAcceptance      : [
+                        status : roundTwoCampaignVerified
+                                ? 'verified'
+                                : 'missing',
+                        required: requiredRoundTwoTestIds,
+                        missing : missingRoundTwoTests,
+                        nonPassing: nonPassingRoundTwoTests
+                ],
+                processing            : [
+                        transitions               : (long) transitions.size(),
+                        perExample                : transitionsByExample,
+                        forbiddenReadCount        : forbiddenReads,
+                        fallbackReadCount         : fallbackReads,
+                        backendLoadedFragmentCount:
+                                backendLoadedFragments,
+                        backendLoadedBytes        : backendLoadedBytes,
+                        selectedScopes            : transitions.collect {
+                            transition ->
+                                [
+                                        exampleId: transition.exampleId,
+                                        caseId   : transition.caseId,
+                                        paths    : transition.selectedScopeOrder
+                                                instanceof List
+                                                ? new ArrayList(
+                                                transition.selectedScopeOrder)
+                                                : []
+                                ]
+                        },
+                        runtimeEvidence           :
+                                myosEvidenceSource(runtimeFile)
+                ],
+                measuredWork         : [
+                        status        : measuredWorkVerified
+                                ? 'verified'
+                                : 'missing',
+                        counterSources: [
+                                host  : [
+                                        owner  :
+                                                'MyOsDemoRuntime/MyOsWorkRecorder',
+                                        methods: [
+                                                'addDocument',
+                                                'append',
+                                                'process'
+                                        ]
+                                ],
+                                engine: [
+                                        owner  :
+                                                'CoordinationProcessingEngine/CoordinationEngineWorkRecorder',
+                                        methods: [
+                                                'onPlan',
+                                                'onBatchLoad',
+                                                'onProcessComplete',
+                                                'onCommit'
+                                        ]
+                                ],
+                                store : [
+                                        owner  :
+                                                'InMemoryCoordinationFragmentStore',
+                                        methods: [
+                                                'fetchByBlueId',
+                                                'fetchResultByBlueId',
+                                                'readAll',
+                                                'readCanonical',
+                                                'readProcessingAll',
+                                                'readProcessing',
+                                                'readRepresentations',
+                                                'readRepresentationsByInventory'
+                                        ]
+                                ]
+                        ],
+                        cases         : [
+                                authorization    : authorizationSummary,
+                                restaurantLocality: restaurantSummary,
+                                fastFork         : fastForkSummary
+                        ]
+                ],
+                physicalSlices       : [
+                        status : physicalSlicesVerified
+                                ? 'verified'
+                                : 'missing',
+                        records: physicalSliceObservations
+                ],
+                wadowicePrepared     : [
+                        status                        :
+                                wadowicePreparedVerified
+                                        ? 'verified'
+                                        : 'missing',
+                        sourceRuntimeId               :
+                                preparedSourceSummary?.runtimeId,
+                        preparationExecutions        :
+                                preparedSourceSummaries.size() == 1
+                                        ? 1L
+                                        : null,
+                        checkpoints                  : preparedCheckpoints,
+                        commonPrefixProcessCalls     :
+                                commonPrefixProcessCalls,
+                        branchSuffixProcessCalls     :
+                                branchSuffixProcessCalls,
+                        totalBranchSuffixProcessCalls:
+                                totalBranchSuffixProcessCalls,
+                        fourBusinessBranchProcessCalls:
+                                fourBusinessBranchProcessCalls
+                ],
+                wadowiceLocality      : [
+                        status       : wadowiceLocalityVerified
+                                ? 'verified'
+                                : 'missing',
+                        requiredPaths: requiredWadowiceScopeOrder,
+                        observedRuns : (long) wadowiceLocalityTransitions.size()
+                ],
+                sourceStyle           : style,
+                artifactIsolation     : artifacts,
+                knownExternalBlockers : [],
+                evidenceSources       : [
+                        baseline       : myosEvidenceSource(
+                                myosBaselineReport.get().asFile),
+                        dependencyLock : myosEvidenceSource(
+                                myosDependencyReport.get().asFile),
+                        siblingInputs  : myosEvidenceSource(
+                                myosSiblingInputs.get().asFile),
+                        sourceStyle    : myosEvidenceSource(
+                                myosSourceStyleReport.get().asFile),
+                        artifactIsolation:
+                                myosEvidenceSource(
+                                        myosArtifactIsolationReport
+                                                .get().asFile),
+                        junitDirectory : [
+                                path  : junitDirectory.absolutePath,
+                                files : junitDirectory.isDirectory()
+                                        ? (long) fileTree(junitDirectory) {
+                                    include 'TEST-*.xml'
+                                }.files.size()
+                                        : 0L,
+                                status: junitDirectory.isDirectory()
+                                        ? 'present'
+                                        : 'missing'
+                        ]
+                ],
+                blockingReasons        : blockingReasons.unique().sort()
+        ]
+        myosWriteJson(myosFinalJson.get().asFile, report)
+
+        File markdown = myosFinalMarkdown.get().asFile
+        markdown.parentFile.mkdirs()
+        markdown.withWriter('UTF-8') { writer ->
+            writer.writeLine('# MyOS demo example verification')
+            writer.writeLine('')
+            writer.writeLine("- Status: `${report.status}`")
+            writer.writeLine("- Working ready: `${report.workingReady}`")
+            writer.writeLine(
+                    "- Documents: `${report.documents.observed}/"
+                            + "${report.documents.expected}`")
+            writer.writeLine(
+                    "- Tests: `${tests.passed} passed, ${tests.failed} failed, "
+                            + "${tests.skipped} skipped`")
+            writer.writeLine(
+                    "- PROCESS transitions: `${transitions.size()}`")
+            writer.writeLine(
+                    "- Forbidden/fallback reads: `${forbiddenReads}/${fallbackReads}`")
+            writer.writeLine(
+                    "- Wadowice locality: `${report.wadowiceLocality.status}`")
+            writer.writeLine(
+                    "- Measured work: `${report.measuredWork.status}`")
+            writer.writeLine(
+                    "- Physical slices: `${report.physicalSlices.status}`")
+            writer.writeLine(
+                    "- Wadowice prepared fixture: `${report.wadowicePrepared.status}`")
+            writer.writeLine(
+                    "- Wadowice PROCESS calls (prefix/suffix/all branches): "
+                            + "`${report.wadowicePrepared.commonPrefixProcessCalls}/"
+                            + "${report.wadowicePrepared.totalBranchSuffixProcessCalls}/"
+                            + "${report.wadowicePrepared.fourBusinessBranchProcessCalls}`")
+            writer.writeLine('')
+            writer.writeLine('## Per-example tests')
+            writer.writeLine('')
+            writer.writeLine('| Example | Passed | Failed | Skipped | Transitions |')
+            writer.writeLine('|---|---:|---:|---:|---:|')
+            perExample.each { exampleId, counts ->
+                writer.writeLine(
+                        "| ${exampleId} | ${counts.passed} | ${counts.failed} | "
+                                + "${counts.skipped} | "
+                                + "${transitionsByExample.get(exampleId)} |")
+            }
+            writer.writeLine('')
+            writer.writeLine('## Blocking reasons')
+            writer.writeLine('')
+            if (report.blockingReasons.isEmpty()) {
+                writer.writeLine('- None.')
+            } else {
+                report.blockingReasons.each { reason ->
+                    writer.writeLine('- ' + reason)
+                }
+            }
+            writer.writeLine('')
+            writer.writeLine('The report is derived only from evidence produced or deleted in this Gradle invocation; retained historical engine reports are not used.')
+        }
+    }
+}
+
+verifyMyosDemoDependencyClasspath.configure {
+    actions.clear()
+    setDependsOn([
+            tasks.named('verifyLatestBlueSiblingInputs'),
+            tasks.named('writeLatestBlueDependencyLock')
+    ])
+    doLast {
+        File authoritativeFile = myosResolvedDependencyLock.get().asFile
+        def authoritative = new JsonSlurper().parse(authoritativeFile)
+        def failures = []
+        if (authoritative.status != 'verified'
+                || authoritative.mode
+                != 'published-language-local-bex-repository') {
+            failures.add('The authoritative dependency receipt is not verified.')
+        }
+        def components = new TreeMap<String, Object>()
+        configurations.myosDemoTestRuntimeClasspath.incoming
+                .resolutionResult.allComponents.each { component ->
+            def id = component.id
+            if (id instanceof ModuleComponentIdentifier
+                    && id.group in ['blue.language', 'blue.repo', 'blue.bex']) {
+                components["${id.group}:${id.module}".toString()] = [
+                        kind   : 'module',
+                        version: id.version
+                ]
+            } else if (id instanceof ProjectComponentIdentifier
+                    && id.projectPath in [
+                    ':blue-bex-core', ':blue-bex-contracts']) {
+                components['blue.bex:' + id.projectName] = [
+                        kind       : 'project',
+                        projectPath: id.projectPath,
+                        version    : project.ext.latestBlueDependencyTopology
+                                .lock.blueBexLocalVersion
+                ]
+            }
+        }
+        def forbidden = [
+                'blue.language:blue-language-java',
+                'blue.language:blue-conformance',
+                'blue.bex:blue-bex-java'
+        ].findAll { components.containsKey(it) }
+        if (!forbidden.isEmpty()) {
+            failures.add("Aggregate artifacts selected: ${forbidden}")
+        }
+        components.findAll { key, value ->
+            key.startsWith('blue.language:')
+        }.each { key, value ->
+            if (value.kind != 'module'
+                    || value.version != '3.1.0-rc.20') {
+                failures.add("${key} is not published 3.1.0-rc.20")
+            }
+        }
+        def artifacts = new TreeMap<String, Object>()
+        configurations.myosDemoTestRuntimeClasspath.incoming
+                .artifactView { }.artifacts.artifacts.each { artifact ->
+            def id = artifact.id.componentIdentifier
+            String key = null
+            if (id instanceof ModuleComponentIdentifier
+                    && id.group in ['blue.language', 'blue.repo', 'blue.bex']) {
+                key = "${id.group}:${id.module}"
+            } else if (id instanceof ProjectComponentIdentifier
+                    && id.projectPath in [
+                    ':blue-bex-core', ':blue-bex-contracts']) {
+                key = 'blue.bex:' + id.projectName
+            }
+            if (key != null) {
+                artifacts[key] = [
+                        fileName: artifact.file.name,
+                        sha256  : myosSha256(artifact.file)
+                ]
+            }
+        }
+        def report = [
+                schema              :
+                        'blue-coordination/myos-demo-dependency-lock/1.1',
+                status              : failures.isEmpty()
+                        ? 'verified' : 'failed',
+                authoritativeReceipt: myosEvidenceSource(authoritativeFile),
+                components          : components,
+                artifacts           : artifacts,
+                aggregateArtifacts  : forbidden,
+                failures            : failures
+        ]
+        myosWriteJson(myosDependencyReport.get().asFile, report)
+        if (!failures.isEmpty()) {
+            throw new GradleException(
+                    "MyOS dependency classpath failed: ${failures}")
+        }
+    }
+}
+
+tasks.register('coordinationExamplesVerification') {
+    group = 'verification'
+    description =
+            'Fails closed unless every shipped MyOS business example and evidence gate is green.'
+    dependsOn generateMyosDemoFinalReport,
+            verifyMyosRoundTwoStaticProhibitions
+    inputs.file(myosFinalJson)
+    doLast {
+        File reportFile = myosFinalJson.get().asFile
+        def report = new JsonSlurper().parse(reportFile)
+        if (report.schema
+                != 'blue-coordination/myos-demo-final/1.1'
+                || report.status != 'passed'
+                || report.workingReady != true
+                || report.measuredWork?.status != 'verified'
+                || report.physicalSlices?.status != 'verified'
+                || report.wadowicePrepared?.status != 'verified'
+                || report.wadowicePrepared?.preparationExecutions != 1
+                || report.wadowicePrepared?.commonPrefixProcessCalls != 19
+                || report.wadowicePrepared.totalBranchSuffixProcessCalls != 10
+                || report.wadowicePrepared.fourBusinessBranchProcessCalls != 29
+                || !(report.blockingReasons instanceof List)
+                || !report.blockingReasons.isEmpty()) {
+            throw new GradleException(
+                    'MyOS demo examples are not working-ready; see '
+                            + reportFile)
+        }
+    }
+}
+
+/*
+ * Keep this explicit gate out of `check` and the existing RC graph until the
+ * locked Repository runtime can execute it green and it has proved stable.
+ */

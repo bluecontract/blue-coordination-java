@@ -1,7 +1,6 @@
 package blue.coordination.processor;
 
 import blue.coordination.processor.CoordinationProcessors;
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.repo.BlueRepository;
@@ -20,18 +19,20 @@ class RepositoryStyleCounterDocumentTest {
 
     @Test
     void shouldInitializeRichCounterWithoutCheckpointState() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node authored = richCounterDocument(fixture);
 
-        // When
+        // when
         DocumentProcessingResult initialized = fixture.blue.initializeDocument(authored);
 
-        // Then
+        // then
         assertNull(property(property(authored, "contracts"), "initialized"));
         assertNull(property(property(authored, "contracts"), "checkpoint"));
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(initialized), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(initialized));
-        assertTrue(fixture.blue.isInitialized(initialized.document()));
+        assertTrue(
+                fixture.blue.processor()
+                        .isInitialized(initialized.document()));
         assertNotNull(ProcessingResultTestSupport.snapshot(fixture.blue, initialized));
         assertNotNull(ProcessingResultTestSupport.blueId(initialized));
         Node initializedDocument =
@@ -57,7 +58,7 @@ class RepositoryStyleCounterDocumentTest {
 
     @Test
     void shouldProcessIncrementAndWriteTimelineCheckpoint() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node authored = richCounterDocument(fixture);
         DocumentProcessingResult initialized =
@@ -77,11 +78,11 @@ class RepositoryStyleCounterDocumentTest {
                 1777987926,
                 operationRequest("increment", 5));
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.blue.processDocument(
                 ProcessingResultTestSupport.snapshot(fixture.blue, initialized), event);
 
-        // Then
+        // then
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertNotNull(ProcessingResultTestSupport.snapshot(fixture.blue, result));
         assertNotNull(ProcessingResultTestSupport.blueId(result));
@@ -121,7 +122,7 @@ class RepositoryStyleCounterDocumentTest {
 
     private static Node richCounterDocument(Fixture fixture) {
         Node parsed = fixture.blue.yamlToNode(richCounterDocumentYaml());
-        return fixture.blue.preprocess(parsed.blue(fixture.repository.typeAliasBlue()));
+        return fixture.blue.preprocess(parsed.blue(fixture.repository.importsDirective()));
     }
 
     private static String richCounterDocumentYaml() {
@@ -278,17 +279,19 @@ class RepositoryStyleCounterDocumentTest {
     }
 
     private static Fixture configuredFixture() {
-        BlueRepository repository = BlueRepository.latest();
-        Blue blue = CoordinationTestResources.configuredBlue(repository);
-        CoordinationProcessors.registerWith(blue);
+        BlueRepository repository = BlueRepository.current();
+        CoordinationTestRuntime blue =
+                CoordinationTestResources.configuredBlue(repository);
         return new Fixture(repository, blue);
     }
 
     private static final class Fixture {
         private final BlueRepository repository;
-        private final Blue blue;
+        private final CoordinationTestRuntime blue;
 
-        private Fixture(BlueRepository repository, Blue blue) {
+        private Fixture(
+                BlueRepository repository,
+                CoordinationTestRuntime blue) {
             this.repository = repository;
             this.blue = blue;
         }

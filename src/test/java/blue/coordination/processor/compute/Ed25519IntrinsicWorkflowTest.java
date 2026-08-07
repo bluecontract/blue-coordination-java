@@ -24,15 +24,15 @@ class Ed25519IntrinsicWorkflowTest {
 
     @Test
     void shouldGrantHotelAccessForValidEd25519SignedRequest() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = supportWithCommonIntrinsics();
         Node document = support.initialize(support.yamlResource(HOTEL_DOCUMENT)).document();
 
-        // When
+        // when
         DocumentProcessingResult result = support.process(document,
                 support.operationRequest("hotel", 1, "checkIn", "hotelChannel", hotelRequest()));
 
-        // Then
+        // then
         assertSuccess(result);
         assertEquals(Boolean.TRUE, result.document().get("/usedNonces/customerA/hotel-nonce-1"));
         assertEquals("Hotel Access Granted", onlyEvent(result).get("/kind"));
@@ -42,11 +42,11 @@ class Ed25519IntrinsicWorkflowTest {
 
     @Test
     void shouldExecuteThresholdActionAfterTwoValidEd25519Approvals() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = supportWithCommonIntrinsics();
         Node document = support.initialize(support.yamlResource(THRESHOLD_DOCUMENT)).document();
 
-        // When
+        // when
         DocumentProcessingResult afterAlice = support.process(document,
                 support.operationRequest("admin", 1, "approveAction", "adminChannel",
                         approvalRequest("alice", "alice-nonce-1", ALICE_SIGNATURE)));
@@ -54,7 +54,7 @@ class Ed25519IntrinsicWorkflowTest {
                 support.operationRequest("admin", 2, "approveAction", "adminChannel",
                         approvalRequest("bob", "bob-nonce-1", BOB_SIGNATURE)));
 
-        // Then
+        // then
         assertSuccess(afterAlice);
         assertEquals("Admin Approval Recorded", onlyEvent(afterAlice).get("/kind"));
         assertEquals(Boolean.TRUE, afterAlice.document().get("/approvals/delete-file-123/alice"));

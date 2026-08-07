@@ -1,9 +1,9 @@
 package blue.coordination.processor.workflow;
 
 import blue.bex.api.BexEngine;
-import blue.coordination.processor.CoordinationBexIntrinsics;
-import blue.coordination.processor.CoordinationRuntimeLimits;
-import blue.coordination.processor.CoordinationRuntimeGas;
+import blue.coordination.processor.support.CoordinationBexIntrinsicsSupport;
+import blue.coordination.processor.support.CoordinationRuntimeGasSupport;
+import blue.coordination.processor.support.CoordinationRuntimeLimitsSupport;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.coordination.processor.bex.BexWorkflowContextFactory;
 import blue.coordination.processor.bex.ProcessingEventIdentityObserver;
@@ -11,7 +11,10 @@ import blue.language.processor.ExecutionEvidenceUnavailableException;
 import blue.language.processor.GasChargeContext;
 import blue.language.processor.GasLimitExceededException;
 import blue.language.processor.ProcessorExecutionContext;
+import blue.language.processor.SelectedExecutableBody;
 import blue.language.processor.WorkingDocument;
+import blue.language.model.Node;
+import blue.language.runtime.BlueLanguage;
 import blue.language.snapshot.FrozenNode;
 import blue.repo.coordination.Compute;
 import blue.repo.coordination.SequentialWorkflow;
@@ -38,9 +41,18 @@ public final class SequentialWorkflowRunner implements AutoCloseable {
     private final ProcessingEventIdentityObserver
             processingEventIdentityObserver;
     private final SequentialWorkflowPlanCache planCache;
+    private final WorkflowStepTypeProfile stepTypeProfile;
 
     public SequentialWorkflowRunner() {
         this(defaultExecutors());
+    }
+
+    /**
+     * Creates the default workflow stack over the exact Language runtime
+     * already owned by the hosting application.
+     */
+    public SequentialWorkflowRunner(BlueLanguage language) {
+        this(defaultExecutors(language));
     }
 
     public SequentialWorkflowRunner(List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors) {
@@ -62,7 +74,22 @@ public final class SequentialWorkflowRunner implements AutoCloseable {
                 metrics,
                 processingEventIdentityObserver,
                 SequentialWorkflowPlanCache.DEFAULT_MAX_ENTRIES,
-                SequentialWorkflowPlanCache.DEFAULT_MAX_WEIGHT_BYTES);
+                SequentialWorkflowPlanCache.DEFAULT_MAX_WEIGHT_BYTES,
+                WorkflowStepTypeProfile.publishedDefaults());
+    }
+
+    private SequentialWorkflowRunner(
+            List<WorkflowStepExecutor<? extends SequentialWorkflowStep>>
+                    executors,
+            BexProcessingMetrics metrics,
+            ProcessingEventIdentityObserver processingEventIdentityObserver,
+            WorkflowStepTypeProfile stepTypeProfile) {
+        this(executors,
+                metrics,
+                processingEventIdentityObserver,
+                SequentialWorkflowPlanCache.DEFAULT_MAX_ENTRIES,
+                SequentialWorkflowPlanCache.DEFAULT_MAX_WEIGHT_BYTES,
+                stepTypeProfile);
     }
 
     SequentialWorkflowRunner(List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors,
@@ -74,7 +101,8 @@ public final class SequentialWorkflowRunner implements AutoCloseable {
                 metrics,
                 null,
                 planCacheMaxEntries,
-                planCacheMaxWeightBytes);
+                planCacheMaxWeightBytes,
+                WorkflowStepTypeProfile.publishedDefaults());
     }
 
     SequentialWorkflowRunner(
@@ -85,6 +113,22 @@ public final class SequentialWorkflowRunner implements AutoCloseable {
                     processingEventIdentityObserver,
             int planCacheMaxEntries,
             long planCacheMaxWeightBytes) {
+        this(executors,
+                metrics,
+                processingEventIdentityObserver,
+                planCacheMaxEntries,
+                planCacheMaxWeightBytes,
+                WorkflowStepTypeProfile.publishedDefaults());
+    }
+
+    private SequentialWorkflowRunner(
+            List<WorkflowStepExecutor<? extends SequentialWorkflowStep>>
+                    executors,
+            BexProcessingMetrics metrics,
+            ProcessingEventIdentityObserver processingEventIdentityObserver,
+            int planCacheMaxEntries,
+            long planCacheMaxWeightBytes,
+            WorkflowStepTypeProfile stepTypeProfile) {
         if (executors == null) {
             throw new IllegalArgumentException("executors must not be null");
         }
@@ -92,6 +136,8 @@ public final class SequentialWorkflowRunner implements AutoCloseable {
         this.metrics = metrics;
         this.processingEventIdentityObserver =
                 processingEventIdentityObserver;
+        this.stepTypeProfile = java.util.Objects.requireNonNull(
+                stepTypeProfile, "stepTypeProfile");
         this.planCache = new SequentialWorkflowPlanCache(planCacheMaxEntries,
                 planCacheMaxWeightBytes,
                 metrics);
@@ -101,7 +147,7 @@ public final class SequentialWorkflowRunner implements AutoCloseable {
         long start = System.nanoTime();
         WorkflowBexGasLedgerHost bexGasLedgerHost =
                 new WorkflowBexGasLedgerHost(context);
-        CoordinationRuntimeGas.Ledger coordinationGas = null;
+        CoordinationRuntimeGasSupport.Ledger coordinationGas = null;
         Throwable failure = null;
         try {
             observeProcessingEvent(context);
@@ -109,13 +155,17 @@ public final class SequentialWorkflowRunner implements AutoCloseable {
             if (steps == null) {
                 return;
             }
-            coordinationGas = CoordinationRuntimeGas.open(
-                    context.runtimeWorkSession());
+            coordinationGas = CoordinationRuntimeGasSupport.open(context);
             FrozenNode contractNode = rawContractNode(context);
-            if (steps.size() > CoordinationRuntimeLimits.MAX_WORKFLOW_STEPS) {
+            SelectedExecutableBody selectedSteps =
+                    context.selectedExecutableBody("steps");
+            if (steps.size()
+                    > CoordinationRuntimeLimitsSupport
+                            .MAX_WORKFLOW_STEPS) {
                 context.throwFatal("Sequential Workflow exceeds the portable "
                         + "step limit of "
-                        + CoordinationRuntimeLimits.MAX_WORKFLOW_STEPS);
+                        + CoordinationRuntimeLimitsSupport
+                                .MAX_WORKFLOW_STEPS);
                 return;
             }
             SequentialWorkflowPlan plan = null;
@@ -127,7 +177,23 @@ public final class SequentialWorkflowRunner implements AutoCloseable {
                             context,
                             "workflowStepVisited",
                             "visit Sequential Workflow step");
-                    SequentialWorkflowStep step = steps.get(i);
+                    final SelectedStep selectedStep = selectStep(
+                            contractNode,
+                            selectedSteps,
+                            i);
+                    FrozenNode exactStep = selectedStep.exactStep();
+                    SequentialWorkflowStep mappedStep = steps.get(i);
+                    FrozenNode profileChangeset = stepTypeProfile
+                            .requiresExactChangeset(
+                                    mappedStep,
+                                    exactStep)
+                            ? selectedStep.exactChangeset()
+                            : null;
+                    SequentialWorkflowStep step =
+                            stepTypeProfile.materialize(
+                                    mappedStep,
+                                    exactStep,
+                                    profileChangeset);
                     charge(
                             coordinationGas,
                             context,
@@ -148,9 +214,13 @@ public final class SequentialWorkflowRunner implements AutoCloseable {
                     SequentialWorkflowPlan.PlannedStep planned =
                             plan.planAdmittedStep(
                                     step,
+                                    exactStep,
+                                    selectedStep
+                                            .selectedRepresentation(),
                                     i,
                                     executors,
-                                    metrics);
+                                    metrics,
+                                    selectedStep);
                     if (planned.published()
                             && contractNode != null) {
                         planCache.refreshWeight(plan);
@@ -160,6 +230,7 @@ public final class SequentialWorkflowRunner implements AutoCloseable {
                     WorkflowStepResult result = executeStep(workflow,
                             step,
                             stepPlan,
+                            planned.exactStep(),
                             contractNode,
                             executionState,
                             context,
@@ -219,7 +290,7 @@ public final class SequentialWorkflowRunner implements AutoCloseable {
     }
 
     private static void chargeStepKind(
-            CoordinationRuntimeGas.Ledger gas,
+            CoordinationRuntimeGasSupport.Ledger gas,
             ProcessorExecutionContext context,
             SequentialWorkflowStep step) {
         if (step instanceof UpdateDocument) {
@@ -240,7 +311,7 @@ public final class SequentialWorkflowRunner implements AutoCloseable {
     }
 
     private static void charge(
-            CoordinationRuntimeGas.Ledger gas,
+            CoordinationRuntimeGasSupport.Ledger gas,
             ProcessorExecutionContext context,
             String counter,
             String reason) {
@@ -257,6 +328,7 @@ public final class SequentialWorkflowRunner implements AutoCloseable {
     private WorkflowStepResult executeStep(SequentialWorkflow workflow,
                                            SequentialWorkflowStep step,
                                            SequentialWorkflowPlan.StepPlan stepPlan,
+                                           FrozenNode exactStep,
                                            FrozenNode contractNode,
                                            WorkflowExecutionState executionState,
                                            ProcessorExecutionContext context,
@@ -270,7 +342,10 @@ public final class SequentialWorkflowRunner implements AutoCloseable {
         WorkflowStepExecutor<? extends SequentialWorkflowStep> executor = stepPlan.executor();
         if (executor == null) {
             bexGasLedgerHost.submitToParent();
-            context.throwFatal("Unsupported sequential workflow step: " + stepPlan.kind());
+            context.throwFatal(
+                    "Unsupported sequential workflow step: "
+                            + stepPlan.kind()
+                            + exactStepTypeSuffix(exactStep));
             return WorkflowStepResult.none();
         }
         WorkflowExecutionState.Snapshot stateView = executionState.snapshotView();
@@ -280,7 +355,7 @@ public final class SequentialWorkflowRunner implements AutoCloseable {
         StepExecutionContext stepContext = new StepExecutionContext(context,
                 workflow,
                 step,
-                stepPlan.frozenStep(),
+                exactStep,
                 contractNode,
                 stepPlan.index(),
                 stateView,
@@ -288,6 +363,18 @@ public final class SequentialWorkflowRunner implements AutoCloseable {
                 bexGasLedgerHost,
                 workingDocument);
         return executeSupported(executor, step, stepContext);
+    }
+
+    private static String exactStepTypeSuffix(FrozenNode exactStep) {
+        if (exactStep == null || exactStep.getType() == null) {
+            return "";
+        }
+        FrozenNode exactType = exactStep.getType();
+        String identity = exactType.getReferenceBlueId();
+        if (identity == null) {
+            identity = exactType.blueId();
+        }
+        return identity == null ? "" : " (exact type " + identity + ")";
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
@@ -299,8 +386,63 @@ public final class SequentialWorkflowRunner implements AutoCloseable {
 
     private static List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> defaultExecutors() {
         return executorsFor(BexEngine.builder()
-                .intrinsics(CoordinationBexIntrinsics.common())
+                .intrinsics(CoordinationBexIntrinsicsSupport.common())
                 .build(), 100_000L);
+    }
+
+    private static List<WorkflowStepExecutor<? extends SequentialWorkflowStep>>
+    defaultExecutors(BlueLanguage language) {
+        if (language == null) {
+            throw new IllegalArgumentException(
+                    "language must not be null");
+        }
+        return executorsFor(BexEngine.builder()
+                .language(language)
+                .intrinsics(CoordinationBexIntrinsicsSupport.common())
+                .build(), 100_000L);
+    }
+
+    /** Builds a hosted runner whose BEX engine borrows the exact runtime. */
+    public static SequentialWorkflowRunner withLanguage(
+            BlueLanguage language,
+            long computeGasLimit,
+            BexProcessingMetrics metrics,
+            ProcessingEventIdentityObserver
+                    processingEventIdentityObserver) {
+        return withLanguage(
+                language,
+                computeGasLimit,
+                metrics,
+                processingEventIdentityObserver,
+                WorkflowStepTypeProfile.publishedDefaults());
+    }
+
+    /**
+     * Creates the hosted workflow stack with exact alternate step identities.
+     */
+    public static SequentialWorkflowRunner withLanguage(
+            BlueLanguage language,
+            long computeGasLimit,
+            BexProcessingMetrics metrics,
+            ProcessingEventIdentityObserver processingEventIdentityObserver,
+            WorkflowStepTypeProfile stepTypeProfile) {
+        if (language == null) {
+            throw new IllegalArgumentException(
+                    "language must not be null");
+        }
+        BexEngine engine = BexEngine.builder()
+                .language(language)
+                .intrinsics(CoordinationBexIntrinsicsSupport.common())
+                .build();
+        return new SequentialWorkflowRunner(
+                executorsFor(
+                        engine,
+                        computeGasLimit,
+                        metrics,
+                        processingEventIdentityObserver),
+                metrics,
+                processingEventIdentityObserver,
+                stepTypeProfile);
     }
 
     public static SequentialWorkflowRunner withBexEngine(BexEngine bexEngine) {
@@ -452,6 +594,134 @@ public final class SequentialWorkflowRunner implements AutoCloseable {
 
     private FrozenNode rawContractNode(ProcessorExecutionContext context) {
         return context.frozenContractNode();
+    }
+
+    private static SelectedStep selectStep(
+            FrozenNode contractNode,
+            SelectedExecutableBody selectedSteps,
+            int index) {
+        FrozenNode steps = selectedSteps != null
+                ? selectedSteps.exactBody()
+                : null;
+        FrozenNode selectedRepresentation = steps;
+        boolean selectedWholeBody = steps != null
+                && steps.isReferenceOnly();
+        if (steps != null && steps.isReferenceOnly()) {
+            steps = selectedSteps.materializeExactReference(steps);
+        }
+        if (steps == null
+                && contractNode != null
+                && contractNode.getProperties() != null) {
+            steps = contractNode.getProperties().get("steps");
+        }
+        if (steps == null
+                || steps.getItems() == null
+                || index < 0
+                || index >= steps.getItems().size()) {
+            return new SelectedStep(
+                    null,
+                    selectedRepresentation,
+                    selectedSteps);
+        }
+        FrozenNode exactStep = steps.getItems().get(index);
+        if (!selectedWholeBody) {
+            selectedRepresentation = exactStep;
+        }
+        if (exactStep != null
+                && exactStep.isReferenceOnly()
+                && selectedSteps != null) {
+            exactStep = selectedSteps.materializeExactReference(
+                    exactStep);
+        }
+        return new SelectedStep(
+                exactStep,
+                selectedRepresentation,
+                selectedSteps);
+    }
+
+    private static FrozenNode materializeExactChangeset(
+            FrozenNode exactStep,
+            SelectedExecutableBody selectedSteps) {
+        FrozenNode changeset = FrozenNodeUtil.property(
+                exactStep, "changeset");
+        if (changeset == null || selectedSteps == null) {
+            return changeset;
+        }
+        if (changeset.isReferenceOnly()) {
+            changeset = selectedSteps.materializeExactReference(
+                    changeset);
+        }
+        if (changeset.getItems() == null) {
+            return changeset;
+        }
+        List<Node> exactItems = null;
+        for (int index = 0;
+                index < changeset.getItems().size();
+                index++) {
+            FrozenNode item = changeset.getItems().get(index);
+            FrozenNode exactItem = item != null
+                    && item.isReferenceOnly()
+                    ? selectedSteps.materializeExactReference(item)
+                    : item;
+            if (exactItem != item && exactItems == null) {
+                exactItems = new ArrayList<Node>(
+                        changeset.getItems().size());
+                for (int copied = 0; copied < index; copied++) {
+                    FrozenNode prior = changeset.getItems().get(copied);
+                    exactItems.add(prior == null ? null : prior.toNode());
+                }
+            }
+            if (exactItems != null) {
+                exactItems.add(exactItem == null
+                        ? null
+                        : exactItem.toNode());
+            }
+        }
+        return exactItems == null
+                ? changeset
+                : FrozenNode.fromNode(
+                        new Node().items(exactItems));
+    }
+
+    private static final class SelectedStep
+            implements SequentialWorkflowPlan.ExactChangesetFactory {
+        private final FrozenNode exactStep;
+        private final FrozenNode selectedRepresentation;
+        private final SelectedExecutableBody selectedSteps;
+        private FrozenNode exactChangeset;
+        private boolean exactChangesetMaterialized;
+
+        private SelectedStep(
+                FrozenNode exactStep,
+                FrozenNode selectedRepresentation,
+                SelectedExecutableBody selectedSteps) {
+            this.exactStep = exactStep;
+            this.selectedRepresentation = selectedRepresentation;
+            this.selectedSteps = selectedSteps;
+        }
+
+        private FrozenNode exactStep() {
+            return exactStep;
+        }
+
+        private FrozenNode selectedRepresentation() {
+            return selectedRepresentation;
+        }
+
+        private FrozenNode exactChangeset() {
+            if (!exactChangesetMaterialized) {
+                exactChangeset = materializeExactChangeset(
+                        exactStep,
+                        selectedSteps);
+                exactChangesetMaterialized = true;
+            }
+            return exactChangeset;
+        }
+
+        @Override
+        public FrozenNode materialize() {
+            return exactChangeset();
+        }
     }
 
     private WorkingDocument rootWorkingDocument(ProcessorExecutionContext context) {

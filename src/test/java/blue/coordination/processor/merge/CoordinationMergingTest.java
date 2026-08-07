@@ -1,13 +1,12 @@
 package blue.coordination.processor.merge;
 
-import blue.coordination.processor.CoordinationProcessors;
-import blue.language.Blue;
-import blue.language.NodeProvider;
+import blue.language.provider.NodeProvider;
 import blue.language.merge.MergingProcessor;
 import blue.language.merge.NodeResolver;
 import blue.language.model.Node;
-import blue.language.processor.DocumentProcessor;
+import blue.language.processor.registry.BlueRuntimeTypeRegistry;
 import blue.language.processor.registry.RuntimeBlueIds;
+import blue.language.runtime.BlueLanguage;
 import blue.repo.coordination.Compute;
 import blue.repo.coordination.ComputeDefinition;
 import org.junit.jupiter.api.Test;
@@ -16,6 +15,7 @@ import java.util.LinkedHashMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -23,118 +23,101 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class CoordinationMergingTest {
 
     @Test
-    void shouldKeepSupportedSetupPathsEquivalentWhileDelegatingLanguageMerging() {
-        // Given
+    void shouldWrapLanguageMergerExactlyOnce() {
+        // given
         MergingProcessor languageMerger = new LanguageOwnedMergingProcessor();
-        Blue blue = new Blue(node -> null, languageMerger);
-        DocumentProcessor builderProcessor = null;
 
-        try {
-            // When
-            Blue registered = CoordinationProcessors.registerWith(blue);
-            builderProcessor = CoordinationProcessors.configure(
-                    DocumentProcessor.builder()).build();
+        // when
+        MergingProcessor wrapped = CoordinationMerging.wrap(languageMerger);
+        MergingProcessor wrappedAgain = CoordinationMerging.wrap(wrapped);
 
-            // Then
-            assertTrue(registered.getMergingProcessor()
-                    instanceof ComputeRuntimeDefaultMergingProcessor);
-            assertEquals(
-                    registered.getDocumentProcessor()
-                            .getContractRegistry()
-                            .processors()
-                            .keySet(),
-                    builderProcessor.getContractRegistry()
-                            .processors()
-                            .keySet());
-        } finally {
-            blue.close();
-            if (builderProcessor != null) {
-                builderProcessor.close();
-            }
-        }
+        // then
+        assertTrue(wrapped instanceof ComputeRuntimeDefaultMergingProcessor);
+        assertSame(wrapped, wrappedAgain);
     }
 
     @Test
     void shouldPreserveLanguageMergeOutputAfterPostProcessing() {
-        // Given
+        // given
         MergingProcessor languageMerger = new LanguageOwnedMergingProcessor();
         Node target = new Node().properties(
                 "emitEvents", new Node().value(true),
                 "returnResult", new Node().value(true));
         Node source = computeSource();
-        try (Blue blue = new Blue(node -> null, languageMerger)) {
-            CoordinationMerging.install(blue);
-            MergingProcessor activeMerger = blue.getMergingProcessor();
+        MergingProcessor activeMerger = CoordinationMerging.wrap(
+                languageMerger);
 
-            // When
-            activeMerger.process(target, source, null, null);
-            activeMerger.postProcess(target, source, null, null);
-            activeMerger.validateCompleted(target, true, "");
+        // when
+        activeMerger.process(target, source, null, null);
+        activeMerger.postProcess(target, source, null, null);
+        activeMerger.validateCompleted(target, true, "");
 
-            // Then
-            assertTrue(activeMerger
-                    instanceof ComputeRuntimeDefaultMergingProcessor);
-            assertEquals(
-                    "post-processed-by-language",
-                    target.getAsText("/phase"));
-            assertEquals(
-                    2,
-                    target.getAsNode(
-                            "/expr/$add")
-                            .getItems().size());
-            assertEquals(
-                    1,
-                    ((Number) target.getAsNode(
-                            "/expr/$add")
-                            .getItems().get(0)
-                            .getValue()).intValue());
-            assertEquals(
-                    2,
-                    ((Number) target.getAsNode(
-                            "/expr/$add")
-                            .getItems().get(1)
-                            .getValue()).intValue());
-            assertEquals(
-                    "literal-value",
-                    target.getAsText(
-                            "/constants/literal"));
-            assertNotNull(source.getAsNode("/expr/$add"));
-            assertEquals(
-                    "literal-value",
-                    source.get(
-                            "/constants/literal"));
-        }
+        // then
+        assertTrue(activeMerger
+                instanceof ComputeRuntimeDefaultMergingProcessor);
+        assertEquals(
+                "post-processed-by-language",
+                target.getAsText("/phase"));
+        assertEquals(
+                2,
+                target.getAsNode(
+                        "/expr/$add")
+                        .getItems().size());
+        assertEquals(
+                1,
+                ((Number) target.getAsNode(
+                        "/expr/$add")
+                        .getItems().get(0)
+                        .getValue()).intValue());
+        assertEquals(
+                2,
+                ((Number) target.getAsNode(
+                        "/expr/$add")
+                        .getItems().get(1)
+                        .getValue()).intValue());
+        assertEquals(
+                "literal-value",
+                target.getAsText(
+                        "/constants/literal"));
+        assertNotNull(source.getAsNode("/expr/$add"));
+        assertEquals(
+                "literal-value",
+                source.get(
+                        "/constants/literal"));
     }
 
     @Test
-    void shouldRejectNullBlueForCompatibilityInstall() {
-        // Given
-        Blue missingBlue = null;
+    void shouldRejectNullLanguageMerger() {
+        // given
+        MergingProcessor missingMerger = null;
 
-        // When
-        IllegalArgumentException failure = assertThrows(
-                IllegalArgumentException.class,
-                () -> CoordinationMerging.install(missingBlue));
+        // when
+        NullPointerException failure = assertThrows(
+                NullPointerException.class,
+                () -> CoordinationMerging.wrap(missingMerger));
 
-        // Then
-        assertEquals("blue must not be null", failure.getMessage());
+        // then
+        assertEquals("current", failure.getMessage());
     }
 
     @Test
     void shouldResolveProcessEmbeddedWithoutInheritingTypeRootLabels() {
-        // Given
+        // given
         Node authored = new Node()
                 .type(new Node().blueId(RuntimeBlueIds.PROCESS_EMBEDDED))
                 .properties("paths", new Node().items(
                         new Node().value("/child")));
 
-        // When
+        // when
         Node resolved;
-        try (Blue blue = CoordinationProcessors.registerWith(new Blue())) {
-            resolved = blue.resolve(authored);
+        try (BlueLanguage language = BlueLanguage.builder()
+                .nodeProvider(BlueRuntimeTypeRegistry.getDefault()
+                        .asProcessorSnapshotProvider())
+                .build()) {
+            resolved = language.resolution().resolve(authored);
         }
 
-        // Then
+        // then
         Node paths = resolved.getAsNode("/paths");
         assertNotNull(paths);
         assertEquals(1, paths.getItems().size());
@@ -145,7 +128,7 @@ final class CoordinationMergingTest {
 
     @Test
     void shouldKeepInheritedComputeMapsWhenChildCarriesOnlySchemaMetadata() {
-        // Given
+        // given
         Node target = inheritedComputeDefinition();
         Node source = new Node()
                 .type(new Node().blueId(ComputeDefinition.blueId()))
@@ -156,11 +139,11 @@ final class CoordinationMergingTest {
                 new ComputeRuntimeDefaultMergingProcessor(
                         new NoOpMergingProcessor());
 
-        // When
+        // when
         merger.process(target, source, null, null);
         merger.postProcess(target, source, null, null);
 
-        // Then
+        // then
         assertEquals("inherited literal",
                 target.getAsText("/constants/inherited"));
         assertNotNull(target.getAsNode("/functions/inheritedFunction"));
@@ -168,7 +151,7 @@ final class CoordinationMergingTest {
 
     @Test
     void shouldMergeAuthoredComputeMapsWithInheritedEntries() {
-        // Given
+        // given
         Node target = inheritedComputeDefinition();
         Node source = new Node()
                 .type(new Node().blueId(ComputeDefinition.blueId()))
@@ -182,11 +165,11 @@ final class CoordinationMergingTest {
                 new ComputeRuntimeDefaultMergingProcessor(
                         new NoOpMergingProcessor());
 
-        // When
+        // when
         merger.process(target, source, null, null);
         merger.postProcess(target, source, null, null);
 
-        // Then
+        // then
         assertEquals("inherited literal",
                 target.getAsText("/constants/inherited"));
         assertEquals("child literal",

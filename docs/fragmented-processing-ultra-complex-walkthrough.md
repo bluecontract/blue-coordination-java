@@ -149,15 +149,15 @@ flagship test   -> PROCESS semantics are invariant across exact representations
 
 Neither side authorizes provider evidence or changes application semantics.
 
-## Observed report
+## Fixed-scope runtime evidence boundary
 
-The successful focused test pair writes:
+Only a successful focused test pair writes the fixed-scope report:
 
 ```text
 build/reports/coordination-flagship/trace.md
 ```
 
-An order-independent `@AfterAll` writer derives the file from the two observed
+An order-independent `@AfterAll` writer derives that file from the two observed
 baseline `ProcessingDebugResult` values and the
 metrics from all 32 runs across both public-event variants. It contains one
 observed trace section for descendants-only and one for Root D1,D2, followed by
@@ -170,6 +170,13 @@ body/byte totals for every matrix row. The event streams retain both equal
 `identical-occurrence` entries. No expected-only prose is copied into the
 report as if it were execution evidence.
 
+This Root/Emb1/Emb2/Emb3 report is not the nested agreement collection trace
+and is not valid input to `tools/publish-nested-agreement-trace.js`. The nested
+walkthrough has its own JSON schema and explicitly separates structural proof
+from PROCESS runtime lanes. Its checked-in generated page currently reports
+zero attempted scenarios rather than copying the expected results above into
+an observed trace.
+
 Run:
 
 ```bash
@@ -181,7 +188,9 @@ Run:
 
 The Markdown report is release evidence only when the focused test above
 finishes successfully and writes both observed variant baselines in that same
-run. A stale report, a partially executed matrix, or prose in this document
-cannot substitute for execution. Any current local-composite blocker belongs
-in `docs/final-coordination-implementation-blockers.md`, not as a permanent
-claim in this walkthrough.
+run. The required public Contracts operations are now available, so their
+former absence is not an accepted blocker. A stale report, a partially
+executed matrix, a passing structural reconstruction test, or prose in this
+document cannot substitute for runtime execution. The resolved boundary and
+evidence rule are recorded in
+`docs/architecture/latest-language-public-api-gap.md`.

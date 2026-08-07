@@ -1,16 +1,17 @@
 package blue.coordination.processor;
 
+import blue.language.codec.jackson.UncheckedObjectMapper;
+import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.model.Node;
+import blue.language.model.NodeWireForm;
 import blue.language.provider.ExactNodeGraphFragments;
-import blue.language.utils.BlueIdCalculator;
-import blue.language.utils.NodeToMapListOrValue;
-import blue.language.utils.UncheckedObjectMapper;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -54,11 +55,161 @@ public final class CoordinationFragmentAdmissionVerifier {
     }
 
     /**
+     * Store extension for one all-or-nothing immutable inventory admission.
+     *
+     * <p>The implementation must compare every existing key and install every
+     * missing key in one transaction. If any existing value conflicts, it
+     * must install none of the proposed values. The verifier always reads the
+     * winners back after this call, so a false return is not trusted as proof
+     * of idempotence.</p>
+     */
+    public interface AtomicImmutableFragmentStore
+            extends ImmutableFragmentStore {
+
+        /**
+         * Atomically verifies existing values and installs all missing ones.
+         *
+         * @return {@code true} when at least one fragment was installed
+         */
+        boolean putAllIfAbsent(
+                String profileIdentity,
+                Map<String, Node> exactFragments);
+    }
+
+    /**
      * Outcome of a byte-verified immutable admission.
      */
     public enum AdmissionStatus {
         ADMITTED,
         IDEMPOTENT_DUPLICATE
+    }
+
+    /**
+     * Atomically admits one complete canonical fragment inventory.
+     *
+     * @param profileIdentity physical fragmentation profile
+     * @param fragmentRoots exact semantic roots represented by the inventory
+     * @param fragments canonical direct fragments by exact BlueId
+     * @param edgeOccurrences complete direct-edge occurrence evidence
+     * @param store transactional immutable store
+     * @return whether this call installed content or observed an identical
+     *         inventory
+     */
+    public static AdmissionStatus admitInventory(
+            String profileIdentity,
+            Collection<CoordinationDocumentSplitter.FragmentRoot>
+                    fragmentRoots,
+            Map<String, Node> fragments,
+            Collection<CoordinationDocumentSplitter.EdgeOccurrence>
+                    edgeOccurrences,
+            AtomicImmutableFragmentStore store) {
+        requireSupportedProfile(profileIdentity);
+        AtomicImmutableFragmentStore checkedStore =
+                Objects.requireNonNull(store, "store");
+        SortedMap<String, Node> proposed = new TreeMap<>();
+        for (Map.Entry<String, Node> entry
+                : Objects.requireNonNull(fragments, "fragments").entrySet()) {
+            String blueId = Objects.requireNonNull(
+                    entry.getKey(), "fragment BlueId");
+            Node fragment = Objects.requireNonNull(
+                    entry.getValue(), "fragment").clone();
+            requireIdentity(blueId, fragment, "Proposed fragment");
+            requireCanonicalDirectRepresentation(
+                    fragment,
+                    "Proposed fragment");
+            proposed.put(blueId, fragment);
+        }
+        if (proposed.isEmpty()) {
+            throw evidenceFailure("Fragment inventory is empty");
+        }
+        // Validate the complete graph before allowing the store transaction.
+        String rootBlueId = documentOrEventRootBlueId(fragmentRoots);
+        CoordinationFragmentReconstructor.reconstruct(
+                profileIdentity,
+                rootBlueId,
+                fragmentRoots,
+                proposed,
+                edgeOccurrences);
+        boolean installed = checkedStore.putAllIfAbsent(
+                profileIdentity,
+                defensiveFragments(proposed));
+        for (Map.Entry<String, Node> entry : proposed.entrySet()) {
+            Node winner = checkedStore.read(
+                    profileIdentity,
+                    entry.getKey());
+            if (winner == null) {
+                throw evidenceFailure(
+                        "Atomic store did not return a winner for "
+                                + entry.getKey());
+            }
+            verifyWinner(
+                    profileIdentity,
+                    entry.getKey(),
+                    entry.getValue(),
+                    winner);
+        }
+        return installed
+                ? AdmissionStatus.ADMITTED
+                : AdmissionStatus.IDEMPOTENT_DUPLICATE;
+    }
+
+    /**
+     * Atomically admits only the newly cut portion of a verified transition.
+     *
+     * <p>The caller must have obtained every reused identity from an already
+     * admitted prior inventory. This boundary deliberately validates and
+     * reads back only {@code newFragments}; it must not reload the unchanged
+     * inventory merely to prove content that was proved at its original
+     * admission.</p>
+     *
+     * @param profileIdentity physical fragmentation profile
+     * @param newFragments canonical new direct fragments by exact BlueId
+     * @param store transactional immutable store
+     * @return whether this call installed content or observed identical
+     *         winners
+     */
+    public static AdmissionStatus admitDelta(
+            String profileIdentity,
+            Map<String, Node> newFragments,
+            AtomicImmutableFragmentStore store) {
+        requireSupportedProfile(profileIdentity);
+        AtomicImmutableFragmentStore checkedStore =
+                Objects.requireNonNull(store, "store");
+        SortedMap<String, Node> proposed = new TreeMap<>();
+        for (Map.Entry<String, Node> entry : Objects.requireNonNull(
+                newFragments, "newFragments").entrySet()) {
+            String blueId = Objects.requireNonNull(
+                    entry.getKey(), "fragment BlueId");
+            Node fragment = Objects.requireNonNull(
+                    entry.getValue(), "fragment").clone();
+            requireIdentity(blueId, fragment, "Proposed delta fragment");
+            requireCanonicalDirectRepresentation(
+                    fragment, "Proposed delta fragment");
+            proposed.put(blueId, fragment);
+        }
+        if (proposed.isEmpty()) {
+            return AdmissionStatus.IDEMPOTENT_DUPLICATE;
+        }
+        boolean installed = checkedStore.putAllIfAbsent(
+                profileIdentity,
+                defensiveFragments(proposed));
+        for (Map.Entry<String, Node> entry : proposed.entrySet()) {
+            Node winner = checkedStore.read(
+                    profileIdentity, entry.getKey());
+            if (winner == null) {
+                throw evidenceFailure(
+                        "Atomic store did not return a delta winner for "
+                                + entry.getKey());
+            }
+            verifyWinner(
+                    profileIdentity,
+                    entry.getKey(),
+                    entry.getValue(),
+                    winner);
+        }
+        return installed
+                ? AdmissionStatus.ADMITTED
+                : AdmissionStatus.IDEMPOTENT_DUPLICATE;
     }
 
     /**
@@ -147,9 +298,9 @@ public final class CoordinationFragmentAdmissionVerifier {
         requireCanonicalDirectRepresentation(
                 checkedWinner,
                 "Stored winner");
-        if (!NodeToMapListOrValue.get(
+        if (!NodeWireForm.get(
                 checkedProposed).equals(
-                NodeToMapListOrValue.get(
+                NodeWireForm.get(
                         checkedWinner))) {
             throw evidenceFailure(
                     "Immutable winner bytes disagree for profile "
@@ -167,7 +318,7 @@ public final class CoordinationFragmentAdmissionVerifier {
         String json =
                 UncheckedObjectMapper.JSON_MAPPER
                         .writeValueAsString(
-                                NodeToMapListOrValue.get(
+                                NodeWireForm.get(
                                         Objects.requireNonNull(
                                                 fragment,
                                                 "fragment")));
@@ -260,6 +411,20 @@ public final class CoordinationFragmentAdmissionVerifier {
                                 CoordinationDocumentSplitter
                                 .EdgeOccurrence::originalPureReference)
                         .thenComparing(
+                                value -> value.embeddedOrigin().name())
+                        .thenComparing(
+                                value -> nullToEmpty(
+                                        value.declaringScopePath()))
+                        .thenComparing(
+                                value -> nullToEmpty(
+                                        value.explicitDeclarationPath()))
+                        .thenComparing(
+                                value -> nullToEmpty(
+                                        value.collectionDeclarationPath()))
+                        .thenComparing(
+                                value -> nullToEmpty(
+                                        value.collectionMemberKey()))
+                        .thenComparing(
                                 value -> nullToEmpty(
                                         value.handlerEffectiveTypeBlueId()))
                         .thenComparing(
@@ -288,6 +453,11 @@ public final class CoordinationFragmentAdmissionVerifier {
                     canonical,
                     Boolean.toString(
                             edge.splitterCreated()));
+            append(canonical, edge.declaringScopePath());
+            append(canonical, edge.embeddedOrigin().name());
+            append(canonical, edge.explicitDeclarationPath());
+            append(canonical, edge.collectionDeclarationPath());
+            append(canonical, edge.collectionMemberKey());
             append(canonical, edge.handlerEffectiveTypeBlueId());
             append(canonical, edge.executableBodyField());
             for (String source
@@ -313,13 +483,46 @@ public final class CoordinationFragmentAdmissionVerifier {
         }
     }
 
+    private static String documentOrEventRootBlueId(
+            Collection<CoordinationDocumentSplitter.FragmentRoot> roots) {
+        String selected = null;
+        for (CoordinationDocumentSplitter.FragmentRoot root
+                : Objects.requireNonNull(roots, "fragmentRoots")) {
+            if (root.kind()
+                    != CoordinationDocumentSplitter.FragmentRootKind.DOCUMENT
+                    && root.kind()
+                    != CoordinationDocumentSplitter.FragmentRootKind.EVENT) {
+                continue;
+            }
+            if (selected != null && !selected.equals(root.blueId())) {
+                throw evidenceFailure(
+                        "Inventory contains more than one semantic Root");
+            }
+            selected = root.blueId();
+        }
+        if (selected == null) {
+            throw evidenceFailure(
+                    "Inventory contains no document or event Root");
+        }
+        return selected;
+    }
+
+    private static Map<String, Node> defensiveFragments(
+            Map<String, Node> source) {
+        Map<String, Node> copy = new TreeMap<>();
+        for (Map.Entry<String, Node> entry : source.entrySet()) {
+            copy.put(entry.getKey(), entry.getValue().clone());
+        }
+        return Collections.unmodifiableMap(copy);
+    }
+
     private static void requireIdentity(
             String expected,
             Node node,
             String label) {
         String actual =
-                BlueIdCalculator.calculateBlueId(
-                        node);
+                DirectBlueIdCalculator.calculateBlueId(
+                        node.clone());
         if (!Objects.equals(
                 expected,
                 actual)) {
@@ -340,9 +543,9 @@ public final class CoordinationFragmentAdmissionVerifier {
                         fragment)
                         .roots().get(0)
                         .directFragment();
-        if (!NodeToMapListOrValue.get(
+        if (!NodeWireForm.get(
                 canonicalDirect).equals(
-                NodeToMapListOrValue.get(
+                NodeWireForm.get(
                         fragment))) {
             throw evidenceFailure(
                     label

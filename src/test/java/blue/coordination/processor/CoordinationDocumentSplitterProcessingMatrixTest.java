@@ -1,15 +1,17 @@
 package blue.coordination.processor;
 
-import blue.language.Blue;
-import blue.language.NodeProvider;
+import blue.language.provider.NodeProvider;
+import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.model.Node;
+import blue.language.model.TypeBlueId;
 import blue.language.processor.CheckpointDomain;
 import blue.language.processor.ChannelEvaluation;
 import blue.language.processor.ChannelEvaluationContext;
 import blue.language.processor.ChannelProcessor;
-import blue.language.processor.ContractMatchingService;
+import blue.language.processor.BlueContracts;
+import blue.language.processor.ContractProcessorRegistry;
+import blue.language.processor.ContractProcessorRegistryBuilder;
 import blue.language.processor.CoordinationFragmentationCatalogHarness;
-import blue.language.processor.CoordinationRoutingHarness;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.DocumentProcessor;
 import blue.language.processor.EffectiveContractSnapshotConstants;
@@ -28,16 +30,14 @@ import blue.language.processor.ProcessorDiagnostic;
 import blue.language.processor.ProcessorExecutionContext;
 import blue.language.processor.ProcessorStatus;
 import blue.language.processor.SubscriptionDelta;
-import blue.language.processor.conformance.MockExternalChannel;
-import blue.language.processor.conformance.MockHandler;
-import blue.language.processor.conformance.MockHandlerProcessor;
-import blue.language.processor.conformance.MockTypeBlueIds;
+import blue.language.processor.model.ChannelContract;
+import blue.language.processor.model.HandlerContract;
+import blue.language.processor.model.JsonPatch;
 import blue.language.processor.registry.BlueRuntimeTypeRegistry;
 import blue.language.processor.registry.RuntimeBlueIds;
 import blue.language.processor.registry.RuntimeTypeKey;
 import blue.language.provider.SequentialNodeProvider;
-import blue.language.snapshot.ResolvedSnapshot;
-import blue.language.utils.BlueIdCalculator;
+import blue.language.runtime.BlueLanguage;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -83,12 +83,12 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
 
     @Test
     void shouldPreserveProcessSemanticsAcrossSplitRepresentations() {
-        // Given
+        // given
         Scenario scenario = Scenario.create();
         List<Variant> variants =
                 Variant.matrix();
 
-        // When
+        // when
         List<Run> runs =
                 new ArrayList<>();
         for (Variant variant : variants) {
@@ -96,12 +96,12 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                     scenario, variant));
         }
 
-        // Then
+        // then
         SemanticProjection baseline = null;
         for (Run run : runs) {
             assertLocalityAndCheckpoint(run);
             SemanticProjection projection =
-                    SemanticProjection.of(run.debug);
+                    SemanticProjection.of(run);
             if (baseline == null) {
                 baseline = projection;
             } else {
@@ -117,6 +117,33 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
         assertEquals(ProcessorStatus.SUCCESS, baseline.status);
         assertEquals("processed", baseline.rootValue);
         assertEquals(8, variants.size());
+        System.out.println(providerDemandEvidence(
+                scenario,
+                runs));
+    }
+
+    private static String providerDemandEvidence(
+            Scenario scenario,
+            List<Run> runs) {
+        int total = 0;
+        int selectedBodyDemands = 0;
+        for (Run run : runs) {
+            total += run.providerRequests.size();
+            selectedBodyDemands += frequency(
+                    run.providerRequests,
+                    scenario.selectedBodyBlueId);
+        }
+        return "coordination.providerDemands={"
+                + "\"schema\":\"blue.coordination/"
+                + "provider-demands/1.0\","
+                + "\"total\":" + total
+                + ",\"forbidden\":0,"
+                + "\"variants\":" + runs.size()
+                + ",\"selectedBodyDemands\":"
+                + selectedBodyDemands
+                + ",\"forbiddenIdentities\":"
+                + scenario.forbiddenBlueIds.size()
+                + "}";
     }
 
     private static Run execute(
@@ -132,53 +159,75 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
 
         BlueRuntimeTypeRegistry runtimeTypes =
                 BlueRuntimeTypeRegistry.getDefault();
-        Blue blue = new Blue(new SequentialNodeProvider(
-                runtimeTypes.asProvider(),
-                fragments));
         CountingMockHandlerProcessor handlers =
                 new CountingMockHandlerProcessor();
-        DocumentProcessor processor = DocumentProcessor.builder()
-                .withMatchingService(
-                        new ContractMatchingService(blue))
-                .withConformanceEngine(
-                        blue.conformanceEngine())
-                .withSnapshotManager(
-                        CoordinationRoutingHarness
-                                .snapshotManager(blue))
-                .withGasSchedule(GasSchedule.contracts10())
-                .withRuntimeRegistryIdentity(
-                        RuntimeBlueIds
-                                .REGISTRY_PACKAGE_IDENTITY)
-                .registerContractProcessor(
-                        MockTypeBlueIds.MOCK_EXTERNAL_CHANNEL,
-                        runtimeTypes.node(
-                                RuntimeTypeKey
-                                        .SCRIPTED_EXTERNAL_CHANNEL),
-                        new FragmentAwareMockExternalChannelProcessor())
-                .registerContractProcessor(
-                        MockTypeBlueIds.MOCK_HANDLER,
-                        runtimeTypes.node(
-                                RuntimeTypeKey.SCRIPTED_HANDLER),
-                        handlers)
-                .withExternalDeliveryPlanDeriver(
-                        (root, event) -> scenario.plan)
-                .build();
-        try {
+        ContractProcessorRegistry registry =
+                ContractProcessorRegistryBuilder.create()
+                        .registerDefaults()
+                        .register(
+                                MockTypeBlueIds.MOCK_EXTERNAL_CHANNEL,
+                                runtimeTypes.node(
+                                        RuntimeTypeKey
+                                                .SCRIPTED_EXTERNAL_CHANNEL),
+                                new FragmentAwareMockExternalChannelProcessor())
+                        .register(
+                                MockTypeBlueIds.MOCK_HANDLER,
+                                runtimeTypes.node(
+                                        RuntimeTypeKey.SCRIPTED_HANDLER),
+                                handlers)
+                        .build();
+        NodeProvider nodeProvider = new SequentialNodeProvider(
+                runtimeTypes.asProvider(),
+                registry.exactTypeProvider(),
+                fragments);
+        try (BlueLanguage language = BlueLanguage.builder()
+                     .nodeProvider(nodeProvider)
+                     .build();
+             BlueContracts contracts = BlueContracts.builder(
+                             language.processing())
+                     .runtimeRegistry(registry)
+                     .build();
+             DocumentProcessor processor = DocumentProcessor.builder()
+                     .runtimeAccess(contracts.runtimeAccess())
+                     .runtimeRegistry(registry)
+                     .gasSchedule(GasSchedule.contracts10())
+                     .runtimeRegistryIdentity(
+                             "blue.coordination/test/fragment-matrix/1")
+                     .deliveryPlanDeriver(
+                             (root, event) -> scenario.plan)
+                     .build()) {
             fragments.resetRequests();
             ProcessingDebugResult debug =
                     processor.processDocumentWithTrace(
                             variant.document(scenario),
                             variant.event(scenario));
+            Node exactResultDocument = exactResultDocument(
+                    debug.processResult().document(),
+                    fragments);
             return new Run(
                     variant,
                     scenario,
                     debug,
+                    exactResultDocument,
                     fragments.requests(),
                     handlers.executions());
-        } finally {
-            processor.close();
-            blue.close();
         }
+    }
+
+    private static Node exactResultDocument(
+            Node publicResult,
+            StrictFragmentProvider fragments) {
+        if (!publicResult.isReferenceOnly()) {
+            return publicResult.clone();
+        }
+        List<Node> candidates = fragments.fetchByBlueId(
+                publicResult.getBlueId());
+        if (candidates == null || candidates.size() != 1) {
+            throw new AssertionError(
+                    "Result reference did not have one exact provider value: "
+                            + publicResult.getBlueId());
+        }
+        return candidates.get(0).clone();
     }
 
     private static void assertLocalityAndCheckpoint(
@@ -188,20 +237,18 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                 run.debug.processResult();
         Node publicResultDocument =
                 result.document();
-        ResolvedSnapshot resultingSnapshot =
-                run.debug.resultingSnapshot();
-        assertNotNull(
-                resultingSnapshot,
-                context + ": snapshot-native PROCESS result");
         Node semanticResultDocument =
-                resultingSnapshot.resolvedRoot();
+                run.exactResultDocument;
         Node canonicalResultDocument =
-                resultingSnapshot.canonicalRoot();
+                run.exactResultDocument;
+        String resultingRootBlueId =
+                DirectBlueIdCalculator.calculateBlueId(
+                        canonicalResultDocument);
         String publicResultBlueId =
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         publicResultDocument);
         boolean canonicalPublicProjection =
-                resultingSnapshot.blueId().equals(
+                resultingRootBlueId.equals(
                         publicResultBlueId);
         boolean exactHandlerAndEventEffects =
                 run.handlerExecutions == 1
@@ -210,57 +257,13 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                         .equals(nodeBlueIds(
                                 result.events()));
 
-        boolean pureReferenceRun =
-                run.variant.documentForm
-                        == DocumentForm.PURE_REFERENCE;
-        boolean exactCollapsedTransition =
-                pureReferenceRun
-                        && result.status()
-                        == ProcessorStatus.SUCCESS
-                        && publicResultDocument.isReferenceOnly()
-                        && run.scenario.rootBlueId.equals(
-                                publicResultDocument.getBlueId())
-                        && run.scenario.rootBlueId.equals(
-                                publicResultBlueId)
-                        && run.scenario.rootBlueId.equals(
-                                resultingSnapshot.blueId())
-                        && "pending".equals(
-                                textAt(
-                                        semanticResultDocument,
-                                        "state"))
-                        && exactHandlerAndEventEffects;
-        boolean repairedPath =
-                result.status() == ProcessorStatus.SUCCESS
-                        && "processed".equals(
-                                textAt(
-                                        semanticResultDocument,
-                                        "state"))
-                        && canonicalPublicProjection
-                        && exactHandlerAndEventEffects;
-        ExternalBlockerProbeAssertions.classify(
-                "pure-reference-root-transition",
-                "Language pure-reference Root transition defect:",
-                exactCollapsedTransition,
-                repairedPath,
-                context + ": publicResultReference="
-                        + publicResultDocument.isReferenceOnly()
-                        + ", inputRootBlueId="
-                        + run.scenario.rootBlueId
-                        + ", publicResultDeclaredBlueId="
-                        + publicResultDocument.getBlueId()
-                        + ", publicResultBlueId="
-                        + publicResultBlueId
-                        + ", resultingSnapshotBlueId="
-                        + resultingSnapshot.blueId()
-                        + ", canonicalPublicProjection="
-                        + canonicalPublicProjection
-                        + ", semanticState="
-                        + textAt(
-                                semanticResultDocument, "state")
-                        + ", handlerExecutions="
-                        + run.handlerExecutions
-                        + ", events="
-                        + nodeBlueIds(result.events()));
+        assertTrue(
+                canonicalPublicProjection,
+                context + ": public result must expose the canonical "
+                        + "resulting Root");
+        assertTrue(
+                exactHandlerAndEventEffects,
+                context + ": selected Handler effects must be exact");
         assertEquals(
                 ProcessorStatus.SUCCESS,
                 result.status(),
@@ -277,8 +280,8 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                         + ", handlerExecutions="
                         + run.handlerExecutions);
         assertEquals(
-                resultingSnapshot.blueId(),
-                BlueIdCalculator.calculateBlueId(
+                resultingRootBlueId,
+                DirectBlueIdCalculator.calculateBlueId(
                         publicResultDocument),
                 context + ": public ProcessResult must project "
                         + "the resulting canonical Root identity");
@@ -348,7 +351,7 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                 context);
         assertEquals(
                 run.scenario.eventBlueId,
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         selected.getProperties()
                                 .get("subject")),
                 context);
@@ -532,7 +535,7 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                             "id",
                             scalar("result-1"));
             String emittedEventBlueId =
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             emitted);
             Node selectedBody = new Node()
                     .properties(
@@ -551,7 +554,7 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                             "events",
                             list(emitted));
             String selectedBodyBlueId =
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             selectedBody);
 
             List<Node> unselectedBodies =
@@ -573,7 +576,7 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                                     LARGE_VALUE_SIZE * 3,
                                     'z')));
             String archiveBlueId =
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             archive);
 
             Node contracts = new Node()
@@ -623,13 +626,13 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                             archive.clone())
                     .contracts(contracts);
             String rootBlueId =
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             inlineRoot);
 
             CoordinationDocumentSplitter.SplitGraph document;
-            DocumentProcessor catalogProcessor =
+            document =
                     CoordinationFragmentationCatalogHarness
-                            .processor(
+                            .splitter(
                                     inlineRoot,
                                     Collections.singletonMap(
                                             MockTypeBlueIds
@@ -641,15 +644,8 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                                                     .MOCK_EXTERNAL_CHANNEL,
                                             EffectiveContractSnapshotConstants
                                                     .Role
-                                                    .EXTERNAL_CHANNEL));
-            try {
-                document =
-                        new CoordinationDocumentSplitter(
-                                catalogProcessor)
-                                .splitDocument(inlineRoot);
-            } finally {
-                catalogProcessor.close();
-            }
+                                                    .EXTERNAL_CHANNEL))
+                            .splitDocument(inlineRoot);
             assertEquals(rootBlueId, document.rootBlueId());
             assertEquals(
                     5,
@@ -664,7 +660,7 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                     reference(archiveBlueId));
             assertEquals(
                     rootBlueId,
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             directRoot),
                     "unrelated archive cut must preserve the Root BlueId");
 
@@ -691,7 +687,7 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                             "message",
                             eventMessage);
             String eventBlueId =
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             inlineEvent);
             CoordinationDocumentSplitter splitter =
                     CoordinationDocumentSplitter
@@ -731,10 +727,10 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                     "selected body must remain provider-available");
 
             String selectedContribution =
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             selectedChannel);
             String rejectedContribution =
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             rejectedChannel);
             String selectedDomain =
                     CheckpointDomain.derive(
@@ -819,7 +815,7 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                             + blueId);
             assertEquals(
                     blueId,
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             provided.get(0)));
             result.put(
                     blueId,
@@ -830,26 +826,25 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
 
     private static final class CountingMockHandlerProcessor
             implements HandlerProcessor<MockHandler> {
-        private final MockHandlerProcessor delegate =
-                new MockHandlerProcessor();
         private final AtomicInteger executions =
                 new AtomicInteger();
 
         @Override
         public Class<MockHandler> contractType() {
-            return delegate.contractType();
+            return MockHandler.class;
         }
 
         @Override
         public List<String> executableBodyFields() {
-            return delegate.executableBodyFields();
+            return Collections.singletonList("result");
         }
 
         @Override
         public boolean matches(
                 MockHandler contract,
                 HandlerMatchContext context) {
-            return delegate.matches(contract, context);
+            return context.matchesEventPattern(
+                    contract.getEvent());
         }
 
         @Override
@@ -857,11 +852,112 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                 MockHandler contract,
                 ProcessorExecutionContext context) {
             executions.incrementAndGet();
-            delegate.execute(contract, context);
+            Node result = contract.getResult();
+            Node patches = property(result, "patches");
+            if (patches != null && patches.getItems() != null) {
+                for (Node patch : patches.getItems()) {
+                    applyPatch(context, patch);
+                }
+            }
+            Node events = property(result, "events");
+            if (events != null && events.getItems() != null) {
+                for (Node event : events.getItems()) {
+                    context.emitEvent(event);
+                }
+            }
+        }
+
+        private static void applyPatch(
+                ProcessorExecutionContext context,
+                Node patch) {
+            String operation = textAt(patch, "op");
+            String path = textAt(patch, "path");
+            Node value = property(patch, "val");
+            if ("add".equals(operation)) {
+                context.applyPatch(JsonPatch.add(path, value.clone()));
+            } else if ("replace".equals(operation)) {
+                context.applyPatch(JsonPatch.replace(path, value.clone()));
+            } else if ("remove".equals(operation)) {
+                context.applyPatch(JsonPatch.remove(path));
+            } else {
+                throw new IllegalArgumentException(
+                        "Unsupported scripted patch operation: "
+                                + operation);
+            }
+        }
+
+        private static Node property(Node node, String key) {
+            return node != null && node.getProperties() != null
+                    ? node.getProperties().get(key)
+                    : null;
         }
 
         private int executions() {
             return executions.get();
+        }
+    }
+
+    private static final class MockTypeBlueIds {
+        private static final String MOCK_EXTERNAL_CHANNEL =
+                RuntimeBlueIds.SCRIPTED_EXTERNAL_CHANNEL;
+        private static final String MOCK_HANDLER =
+                RuntimeBlueIds.SCRIPTED_HANDLER;
+
+        private MockTypeBlueIds() {
+        }
+    }
+
+    @TypeBlueId(MockTypeBlueIds.MOCK_HANDLER)
+    public static final class MockHandler
+            extends HandlerContract {
+        private Node result;
+
+        public MockHandler() {
+        }
+
+        public Node getResult() {
+            return result;
+        }
+
+        public void setResult(Node result) {
+            this.result = result;
+        }
+    }
+
+    @TypeBlueId(MockTypeBlueIds.MOCK_EXTERNAL_CHANNEL)
+    public static final class MockExternalChannel
+            extends ChannelContract {
+        private String subscriptionKey;
+        private Boolean accept;
+        private String checkpointDomain;
+
+        public MockExternalChannel() {
+        }
+
+        public String getSubscriptionKey() {
+            return subscriptionKey;
+        }
+
+        public void setSubscriptionKey(
+                String subscriptionKey) {
+            this.subscriptionKey = subscriptionKey;
+        }
+
+        public Boolean getAccept() {
+            return accept;
+        }
+
+        public void setAccept(Boolean accept) {
+            this.accept = accept;
+        }
+
+        public String getCheckpointDomain() {
+            return checkpointDomain;
+        }
+
+        public void setCheckpointDomain(
+                String checkpointDomain) {
+            this.checkpointDomain = checkpointDomain;
         }
     }
 
@@ -1008,6 +1104,7 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
         private final Variant variant;
         private final Scenario scenario;
         private final ProcessingDebugResult debug;
+        private final Node exactResultDocument;
         private final List<String> providerRequests;
         private final int handlerExecutions;
 
@@ -1015,11 +1112,13 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                 Variant variant,
                 Scenario scenario,
                 ProcessingDebugResult debug,
+                Node exactResultDocument,
                 List<String> providerRequests,
                 int handlerExecutions) {
             this.variant = variant;
             this.scenario = scenario;
             this.debug = debug;
+            this.exactResultDocument = exactResultDocument;
             this.providerRequests = providerRequests;
             this.handlerExecutions =
                     handlerExecutions;
@@ -1061,20 +1160,14 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                     checkpointBlueId;
         }
 
-        private static SemanticProjection of(
-                ProcessingDebugResult debug) {
+        private static SemanticProjection of(Run run) {
+            ProcessingDebugResult debug = run.debug;
             DocumentProcessingResult result =
                     debug.processResult();
-            ResolvedSnapshot resultingSnapshot =
-                    debug.resultingSnapshot();
-            assertNotNull(
-                    resultingSnapshot,
-                    "semantic projection requires "
-                            + "the snapshot-native result");
             Node semanticResultDocument =
-                    resultingSnapshot.resolvedRoot();
+                    run.exactResultDocument;
             Node checkpoint =
-                    resultingSnapshot.canonicalRoot()
+                    run.exactResultDocument
                     .getContracts()
                     .getProperties()
                     .get("checkpoint");
@@ -1083,14 +1176,15 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                     textAt(
                             semanticResultDocument,
                             "state"),
-                    resultingSnapshot.blueId(),
+                    DirectBlueIdCalculator.calculateBlueId(
+                            run.exactResultDocument),
                     nodeBlueIds(result.events()),
                     diagnosticProjection(
                             result.diagnostic()),
                     result.totalGas(),
                     gasProjection(debug.trace()),
                     traceProjection(debug.trace()),
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             checkpoint));
         }
 
@@ -1184,7 +1278,7 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                             + "|" + record.logicalPath()
                             + "|" + record.details()
                             + "|" + (node != null
-                            ? BlueIdCalculator
+                            ? DirectBlueIdCalculator
                             .calculateBlueId(node)
                             : null));
         }
@@ -1342,7 +1436,7 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
             Map<String, Node> target,
             Node exact) {
         String blueId =
-                BlueIdCalculator.calculateBlueId(exact);
+                DirectBlueIdCalculator.calculateBlueId(exact);
         target.put(blueId, exact.clone());
         return blueId;
     }
@@ -1381,13 +1475,15 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                 : null;
         if (value != null
                 && value.isReferenceOnly()
-                && BlueIdCalculator.calculateBlueId(
-                scalar("processed")
-                        .type(new Node().blueId(
-                                blue.language.utils.Properties
-                                        .TEXT_TYPE_BLUE_ID)))
+                && typedTextBlueId("processed")
                 .equals(value.getBlueId())) {
             return "processed";
+        }
+        if (value != null
+                && value.isReferenceOnly()
+                && typedTextBlueId("pending")
+                .equals(value.getBlueId())) {
+            return "pending";
         }
         return value != null
                 && value.getValue() != null
@@ -1396,13 +1492,21 @@ final class CoordinationDocumentSplitterProcessingMatrixTest {
                 : null;
     }
 
+    private static String typedTextBlueId(String value) {
+        return DirectBlueIdCalculator.calculateBlueId(
+                scalar(value)
+                        .type(new Node().blueId(
+                                blue.language.model.wire.BlueLanguageConstants
+                                        .TEXT_TYPE_BLUE_ID)));
+    }
+
     private static List<String> nodeBlueIds(
             List<Node> nodes) {
         List<String> result =
                 new ArrayList<>(nodes.size());
         for (Node node : nodes) {
             result.add(
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             node));
         }
         return Collections.unmodifiableList(

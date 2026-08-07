@@ -30,18 +30,18 @@ class CoordinationGasManifestTest {
     @Test
     void shouldBundleOnlyPortableProcessCountersInTheGasManifest()
             throws Exception {
-        // Given
+        // given
         String manifest = readManifest(RESOURCE);
         List<String> counters = portableCounters();
 
-        // When
+        // when
         LinkedHashSet<String> runtimeCounters =
                 new LinkedHashSet<String>(
                         CoordinationRuntimeGas
                                 .counterWeights()
                                 .keySet());
 
-        // Then
+        // then
         assertTrue(manifest.contains(
                 "packageIdentity: " + PACKAGE_IDENTITY));
         assertEquals(14, counters.size());
@@ -61,17 +61,17 @@ class CoordinationGasManifestTest {
     @Test
     void shouldKeepHostCountersOutOfThePortableGasManifest()
             throws Exception {
-        // Given
+        // given
         String manifest = readManifest(RESOURCE);
         String hostManifest = readManifest(HOST_RESOURCE);
         List<String> hostCounters = hostCounters();
 
-        // When
+        // when
         boolean hostManifestIsNonPortable =
                 hostManifest.contains(
                         "portableProcessGas: false");
 
-        // Then
+        // then
         assertTrue(hostManifestIsNonPortable);
         for (String hostCounter : hostCounters) {
             assertFalse(
@@ -89,15 +89,15 @@ class CoordinationGasManifestTest {
     @Test
     void shouldFreezePortableAndHostGasManifestBytes()
             throws Exception {
-        // Given
+        // given
         byte[] portableBytes = readResource(RESOURCE);
         byte[] hostBytes = readResource(HOST_RESOURCE);
 
-        // When
+        // when
         String portableHash = sha256(portableBytes);
         String hostHash = sha256(hostBytes);
 
-        // Then
+        // then
         assertEquals(RAW_SHA_256, portableHash);
         assertEquals(HOST_RAW_SHA_256, hostHash);
     }
@@ -105,16 +105,16 @@ class CoordinationGasManifestTest {
     @Test
     void shouldBindManifestLimitsToTheirOwningRuntimeConstants()
             throws Exception {
-        // Given
+        // given
         String manifest = readManifest(RESOURCE);
         String hostManifest = readManifest(HOST_RESOURCE);
 
-        // When
+        // when
         long runtimeGasLimit =
                 CoordinationRuntimeLimits
                         .MAX_COORDINATION_RUNTIME_GAS_PER_PROCESS;
 
-        // Then
+        // then
         assertTrue(hostManifest.contains(
                 "portableProcessGas: false"));
         assertTrue(manifest.contains("maxCompositeMembers: 1024"));

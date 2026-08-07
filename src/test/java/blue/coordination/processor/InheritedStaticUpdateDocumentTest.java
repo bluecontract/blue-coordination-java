@@ -1,13 +1,10 @@
 package blue.coordination.processor;
 
-import blue.language.Blue;
-import blue.language.NodeProvider;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorStatus;
 import blue.language.processor.registry.RuntimeBlueIds;
-import blue.language.provider.BasicNodeProvider;
-import blue.language.provider.SequentialNodeProvider;
+import blue.language.preprocess.provider.BasicNodeProvider;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.DocumentStatus;
 import blue.repo.coordination.SequentialWorkflow;
@@ -24,51 +21,52 @@ class InheritedStaticUpdateDocumentTest {
 
     @Test
     void shouldWriteInheritedStaticPatchValueFromResolvedContractView() {
-        // Given
-        BlueRepository repository = BlueRepository.latest();
-        Blue blue = repository.configure(new Blue());
-        NodeProvider repositoryProvider = blue.getNodeProvider();
+        // given
+        BlueRepository repository = BlueRepository.current();
+        CoordinationTestRuntime blue =
+                CoordinationTestResources.configuredBlue(repository);
         BasicNodeProvider documentTypes = new BasicNodeProvider();
         documentTypes.addSingleNodes(documentType(new Node()
                 .name("Authored status")
                 .type(reference(StatusInProgress.blueId()))));
         String documentTypeId = documentTypes.getBlueIdByName("Inherited Static Update Document");
-        blue.nodeProvider(new SequentialNodeProvider(
-                documentTypes,
-                repositoryProvider));
-        CoordinationProcessors.registerWith(blue);
+        blue.addNodeProvider(documentTypes);
 
-        // When
+        // when
         DocumentProcessingResult result = blue.initializeDocument(
                 blue.resolveToSnapshot(new Node().type(reference(documentTypeId))));
 
-        // Then
+        // then
         assertEquals(ProcessorStatus.SUCCESS, result.status(),
                 ProcessingResultTestSupport.diagnosticMessage(result));
         assertNull(result.diagnostic());
         Node canonicalStatus = result.document().getProperties().get("status");
         assertEquals(StatusInProgress.blueId(), canonicalStatus.getType().getBlueId());
         assertEquals("Authored status", canonicalStatus.getName());
-        assertEquals("active", ProcessingResultTestSupport
-                .resolvedDocument(blue, result).getAsText("/status/mode"));
+        assertEquals(
+                "active",
+                blue.resolveToSnapshot(result.document())
+                        .resolvedRoot().getAsText("/status/mode"));
         assertNull(canonicalStatus.getDescription(),
                 "metadata inherited by Json Patch Entry.val must not become document content");
+        blue.close();
     }
 
     @Test
     void shouldRejectAuthoredReferenceWithSiblingPayload() {
-        // Given
+        // given
         BasicNodeProvider documentTypes = new BasicNodeProvider();
 
-        // When
+        // when
         IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
                 () -> documentTypes.addSingleNodes(documentType(new Node()
                         .blueId(StatusInProgress.blueId())
                         .properties("mode", new Node().value("tampered")))));
 
-        // Then
-        assertTrue(failure.getMessage().contains(
-                "\"blueId\" nodes must be reference-only and cannot contain sibling fields"));
+        // then
+        String diagnostic = messageChain(failure);
+        assertTrue(diagnostic.contains(
+                "must be a pure reference"), diagnostic);
     }
 
     private static Node documentType(Node patchValue) {
@@ -93,5 +91,17 @@ class InheritedStaticUpdateDocumentTest {
 
     private static Node reference(String blueId) {
         return new Node().blueId(blueId);
+    }
+
+    private static String messageChain(Throwable failure) {
+        StringBuilder messages = new StringBuilder();
+        Throwable current = failure;
+        while (current != null) {
+            if (current.getMessage() != null) {
+                messages.append(current.getMessage()).append('\n');
+            }
+            current = current.getCause();
+        }
+        return messages.toString();
     }
 }

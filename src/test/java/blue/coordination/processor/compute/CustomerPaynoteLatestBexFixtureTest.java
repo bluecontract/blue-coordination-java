@@ -1,16 +1,15 @@
 package blue.coordination.processor.compute;
 
-import blue.coordination.processor.CoordinationProcessors;
+import blue.coordination.processor.CoordinationTestRuntime;
 import blue.coordination.processor.CoordinationTestResources;
 import blue.coordination.processor.ExternalBlockerProbeAssertions;
 import blue.coordination.processor.ProcessingResultTestSupport;
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorErrorCategory;
 import blue.language.processor.ProcessorStatus;
 import blue.language.processor.registry.RuntimeBlueIds;
-import blue.language.utils.BlueIdCalculator;
+import blue.language.identity.DirectBlueIdCalculator;
 import blue.repo.BlueRepository;
 import org.junit.jupiter.api.Test;
 
@@ -45,7 +44,7 @@ class CustomerPaynoteLatestBexFixtureTest {
 
     @Test
     void shouldProcessSnapshotEventWithLatestCustomerPaynoteBexDocument() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = loadYaml(fixture, DOCUMENT_RESOURCE);
         Node event = loadYaml(fixture, EVENT_RESOURCE);
@@ -54,15 +53,15 @@ class CustomerPaynoteLatestBexFixtureTest {
 
         DocumentProcessingResult initialized = fixture.blue.initializeDocument(document);
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.blue.processDocument(initialized.document(), event);
 
-        // Then
+        // then
         boolean rolledBack =
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         initialized.document())
                         .equals(
-                                BlueIdCalculator.calculateBlueId(
+                                DirectBlueIdCalculator.calculateBlueId(
                                         result.document()));
         boolean exactDictionaryDefect =
                 initialized.status()
@@ -131,9 +130,9 @@ class CustomerPaynoteLatestBexFixtureTest {
     }
 
     private static Fixture configuredFixture() {
-        BlueRepository repository = BlueRepository.latest();
-        Blue blue = CoordinationTestResources.configuredBlue(repository);
-        CoordinationProcessors.registerWith(blue);
+        BlueRepository repository = BlueRepository.current();
+        CoordinationTestRuntime blue =
+                CoordinationTestResources.configuredBlue(repository);
         return new Fixture(repository, blue);
     }
 
@@ -275,9 +274,11 @@ class CustomerPaynoteLatestBexFixtureTest {
 
     private static final class Fixture {
         private final BlueRepository repository;
-        private final Blue blue;
+        private final CoordinationTestRuntime blue;
 
-        private Fixture(BlueRepository repository, Blue blue) {
+        private Fixture(
+                BlueRepository repository,
+                CoordinationTestRuntime blue) {
             this.repository = repository;
             this.blue = blue;
         }

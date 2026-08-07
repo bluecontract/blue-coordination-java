@@ -3,15 +3,15 @@ package blue.coordination.processor.compute;
 import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationProcessors;
 import blue.coordination.processor.CoordinationTestResources;
+import blue.coordination.processor.CoordinationTestRuntime;
 import blue.coordination.processor.ExternalBlockerProbeAssertions;
 import blue.coordination.processor.TestTimelineProvider;
 import blue.coordination.processor.bex.BexProcessingMetrics;
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorStatus;
 import blue.language.processor.registry.RuntimeBlueIds;
-import blue.language.snapshot.ResolvedSnapshot;
+import blue.language.merge.ResolvedSnapshot;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.ChatMessage;
 import blue.repo.mandate.Mandate;
@@ -35,10 +35,10 @@ class MandateDeclaredTypeEventMatchingTest {
 
     @Test
     void shouldInitializeOnceAndSelectOnlyTheActivationHandler() {
-        // Given
+        // given
         Fixture fixture = fixture();
 
-        // When
+        // when
         DocumentProcessingResult initialized = fixture.initialize(mandateDocument(true, false));
         long handlersBeforeConfirmation = fixture.metrics.handlersExecuted();
         long stepsBeforeConfirmation = fixture.metrics.workflowStepsExecuted();
@@ -52,7 +52,7 @@ class MandateDeclaredTypeEventMatchingTest {
                 initializedSnapshot,
                 fixture.confirmAuthorityEvent());
 
-        // Then
+        // then
         ExternalBlockerProbeAssertions
                 .classifyMandateContractRefresh(
                         activated,
@@ -75,10 +75,10 @@ class MandateDeclaredTypeEventMatchingTest {
 
     @Test
     void shouldNotReselectInitializationAfterFatalLifecycleDelivery() {
-        // Given
+        // given
         Fixture fixture = fixture();
 
-        // When
+        // when
         DocumentProcessingResult initialized = fixture.initialize(mandateDocument(false, true));
         ResolvedSnapshot initializedSnapshot =
                 blue.coordination.processor
@@ -101,7 +101,7 @@ class MandateDeclaredTypeEventMatchingTest {
                         fixture.blue, confirmed),
                 fixture.fatalProbeEvent());
 
-        // Then
+        // then
         assertSuccess(confirmed);
         assertEquals(StatusAuthorityConfirmed.blueId(),
                 confirmed.document().getAsText("/status/type/blueId"));
@@ -159,22 +159,25 @@ class MandateDeclaredTypeEventMatchingTest {
     }
 
     private static Fixture fixture() {
-        BlueRepository repository = BlueRepository.latest();
-        Blue blue = CoordinationTestResources.configuredBlue(repository);
+        BlueRepository repository = BlueRepository.current();
+        CoordinationTestRuntime blue =
+                CoordinationTestResources.configuredBlue(repository);
         BexProcessingMetrics metrics = new BexProcessingMetrics();
-        CoordinationProcessors.registerWith(blue, CoordinationProcessorOptions.builder()
+        blue.configure(CoordinationProcessorOptions.builder()
                 .processingMetrics(metrics)
                 .build());
-        blue.getDocumentProcessor().processingMetricsSink(metrics);
         return new Fixture(repository, blue, metrics);
     }
 
     private static final class Fixture {
         private final BlueRepository repository;
-        private final Blue blue;
+        private final CoordinationTestRuntime blue;
         private final BexProcessingMetrics metrics;
 
-        private Fixture(BlueRepository repository, Blue blue, BexProcessingMetrics metrics) {
+        private Fixture(
+                BlueRepository repository,
+                CoordinationTestRuntime blue,
+                BexProcessingMetrics metrics) {
             this.repository = repository;
             this.blue = blue;
             this.metrics = metrics;

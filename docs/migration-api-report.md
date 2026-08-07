@@ -42,10 +42,10 @@ now
 Existing registration entry points remain:
 
 ```java
+CoordinationProcessors.contracts(language);
+CoordinationProcessors.contracts(language, options);
 CoordinationProcessors.configure(builder);
 CoordinationProcessors.configure(builder, options);
-CoordinationProcessors.registerWith(blue);
-CoordinationProcessors.registerWith(blue, options);
 ```
 
 They register concrete Channels, Handlers, workflows, steps, runtime gas, and
@@ -56,17 +56,16 @@ BEX integration. They do not install an `ExternalDeliveryPlanDeriver`.
 A host that intentionally accepts complete-current-Root scanning must add:
 
 ```java
-CoordinationDeliveryPlanning.currentRootCompatibility(processor);
+ExternalDeliveryPlanDeriver deriver =
+        CoordinationDeliveryPlanning.currentRootCompatibilityDeriver(
+                contracts,
+                rootRevision,
+                eventOrderKey,
+                completeActiveIntervals);
 ```
 
-or:
-
-```java
-CoordinationDeliveryPlanning.currentRootCompatibility(blue);
-```
-
-`currentRootCompatibilityDeriver(processor)` is available when the host wants
-the deterministic deriver without installing it.
+The host supplies the same revision, event order, and complete retained
+active interval surface used by indexed delivery.
 
 This mode derives current occurrences as compatibility evidence. It is not a
 substitute for durable activation history.
@@ -77,9 +76,10 @@ A host that persists/indexes subscriptions uses:
 
 ```java
 CoordinationSubscriptionProjector projector =
-        CoordinationDeliveryPlanning.subscriptionProjector(processor);
+        CoordinationDeliveryPlanning.subscriptionProjector(
+                processor, contracts);
 CoordinationIndexedDeliveryPlanner planner =
-        CoordinationDeliveryPlanning.indexed(processor);
+        CoordinationDeliveryPlanning.indexed(processor, contracts);
 ```
 
 No persistence implementation or index schema is part of this library.
@@ -306,23 +306,48 @@ host telemetry and must not be converted into portable gas.
 ## Exact-content binary compatibility
 
 The binary compatibility report compares class descriptors with
-`2.0.0-rc.4`. The following pre-release signatures are retained as
-exact-content compatibility shims:
+`2.0.0-rc.4`. Three descriptors whose dependency types still exist are
+retained as deprecated, behavior-preserving overloads:
 
 ```text
-blue.coordination.processor.CoordinationRepositoryCompatibilityNodeProvider
-blue.coordination.processor.RepositoryTypeAliasPreprocessor
-TimelineProviderSupport.isNewerOrDifferentTimelineEvent(ChannelCheckpointContext)
-TimelineProviderSupport.isNewerOrSameTimelineEvent(ChannelCheckpointContext)
-TimelineProviderSupport.matchesEventFilter(TimelineChannel, Node)
+BexProcessingMetrics.addBexMetrics(BexMetrics)
+BexWorkflowContextFactory.create(StepExecutionContext, long)
+BexWorkflowContextFactory.currentContractBinding(StepExecutionContext)
 ```
 
-The provider wrapper now delegates without repair, and the alias preprocessor
-only clones exact content without applying aliases. The Timeline signatures
-delegate to current verified acceptance and strict direct-subject ordering;
-they do not recreate obsolete cross-source ordering. Current behavior
-continues to operate through verified processor contexts, exact source
-delivery evidence, and fixed timestamp semantics.
+The BEX metrics overload reads the immutable compatibility view through its
+baseline-stable counters and delegates to the same accumulator as the current
+snapshot sink. The concrete workflow-context overloads delegate to the current
+`BexWorkflowStepContext` boundary.
+
+The following baseline descriptors are intentional pre-final removals. They
+depend on Language APIs deleted by the modular Language release, or on the
+former mutable `Blue` registration model, and cannot be retained truthfully
+without reintroducing Language-owned compatibility classes or mutable runtime
+state:
+
+```text
+CoordinationProcessors.registerWith(Blue)
+CoordinationProcessors.registerWith(Blue, CoordinationProcessorOptions)
+CoordinationRepositoryCompatibilityNodeProvider implements blue.language.NodeProvider
+CoordinationRepositoryCompatibilityNodeProvider(blue.language.NodeProvider)
+CoordinationRepositoryCompatibilityNodeProvider.isInstalled(blue.language.NodeProvider)
+BexProcessingMetrics implements ProcessingMetricsSink
+CoordinationMerging.install(Blue)
+```
+
+Hosts migrate to `CoordinationProcessors.contracts(BlueLanguage, ...)`, the
+current `blue.language.provider.NodeProvider`, `ProcessingObserver`, and
+`CoordinationMerging.wrap(MergingProcessor)`. Coordination does not define
+classes in a `blue.language.*` package and does not reflect into immutable
+Language runtimes.
+
+The existing pre-final ledger also retains the explicit removals of
+`RepositoryTypeAliasPreprocessor`, the obsolete whole-class form of the
+Repository compatibility provider, and the three legacy
+`TimelineProviderSupport` descriptors. Current behavior operates through
+verified processor contexts, exact source delivery evidence, and fixed
+timestamp semantics.
 
 There is no deprecated production splitter compatibility constructor.
 Production code contains no public application DTO, storage adapter, or
@@ -360,16 +385,15 @@ package-private. The observer contract remains public only because the
 baseline-public workflow runner and BEX context factory occupy distinct Java
 packages and must share the same optional diagnostic callback.
 
-The classes under `blue.language.processor` whose names begin with
-`Coordination` are narrow cross-package bridges. They must be public at the JVM
-descriptor level because they access Language's intentionally package-private
-verified snapshot, subscription-surface, and execution-evidence machinery
-while the host façades remain in `blue.coordination.processor`. They are not
-host storage APIs or application DTOs. Hosts should enter through
-`CoordinationDeliveryPlanning`, `CoordinationSubscriptionProjector`,
-`CoordinationIndexedDeliveryPlanner`, and `CoordinationDocumentSplitter`.
-Characterization tests freeze the bridge surface and fail if internal routing,
-cache, fan-out, or fixture types become public.
+No production class remains under `blue.language.*`. The former cross-package
+bridges were replaced by Coordination-owned adapters that call the public
+`BlueContracts` projection, indexed-delivery, current-Root, runtime-access,
+fragmentation-catalog, and platform-commit services. Hosts enter through
+`CoordinationContractsHost`, `CoordinationDeliveryPlanning`,
+`CoordinationSubscriptionProjector`, `CoordinationIndexedDeliveryPlanner`, and
+`CoordinationDocumentSplitter`. Package-integrity tests fail if a production
+class returns to a Language namespace or if internal routing, cache, fan-out,
+or fixture types become public.
 
 The canonical public API digest is generated at:
 

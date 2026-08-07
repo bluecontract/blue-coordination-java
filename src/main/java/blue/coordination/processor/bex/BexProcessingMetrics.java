@@ -1,7 +1,9 @@
 package blue.coordination.processor.bex;
 
-import blue.bex.result.BexMetrics;
-import blue.language.processor.ProcessingMetricsSink;
+import blue.bex.api.BexMetricsSink;
+import blue.bex.result.BexMetricsSnapshot;
+import blue.language.processor.ProcessingObservation;
+import blue.language.processor.ProcessingObserver;
 
 import java.util.Collections;
 import java.util.Map;
@@ -16,7 +18,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p>All metric names are bounded and snapshots are immutable, so optional
  * observability cannot alter workflow semantics or portable gas.</p>
  */
-public final class BexProcessingMetrics implements ProcessingMetricsSink {
+public final class BexProcessingMetrics
+        implements ProcessingObserver, BexMetricsSink {
     /**
      * Language currently emits a fixed vocabulary, but keep the adapter safe if a future
      * integration accidentally supplies data-derived names.
@@ -389,423 +392,419 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
         bexPatchNodeMaterializations.incrementAndGet();
     }
 
-    public void addBexMetrics(BexMetrics metrics) {
+    public void addBexMetrics(BexMetricsSnapshot metrics) {
         if (metrics == null) {
             return;
         }
-        bexCompileCacheHits.addAndGet(metrics.compileCacheHits());
-        bexCompileCacheMisses.addAndGet(metrics.compileCacheMisses());
-        bexCompiledExecutions.addAndGet(metrics.compiledExecutions());
-        bexCompileNanos.addAndGet(metrics.compileNanos());
-        bexExecuteNanos.addAndGet(metrics.executeNanos());
+        addBexMetricValues(
+                metrics.compileCacheHits(),
+                metrics.compileCacheMisses(),
+                metrics.compiledExecutions(),
+                metrics.compileNanos(),
+                metrics.executeNanos());
     }
 
+    /**
+     * Aggregates the baseline-stable counters exposed by the former BEX
+     * metrics compatibility view.
+     *
+     * @param metrics compatibility metrics view, or {@code null}
+     * @deprecated use {@link #addBexMetrics(BexMetricsSnapshot)}
+     */
+    @Deprecated
+    @SuppressWarnings("deprecation")
+    public void addBexMetrics(
+            blue.bex.result.BexMetrics metrics) {
+        if (metrics == null) {
+            return;
+        }
+        addBexMetricValues(
+                metrics.compileCacheHits(),
+                metrics.compileCacheMisses(),
+                metrics.compiledExecutions(),
+                metrics.compileNanos(),
+                metrics.executeNanos());
+    }
+
+    private void addBexMetricValues(
+            long compileCacheHits,
+            long compileCacheMisses,
+            long compiledExecutions,
+            long compileNanos,
+            long executeNanos) {
+        bexCompileCacheHits.addAndGet(compileCacheHits);
+        bexCompileCacheMisses.addAndGet(compileCacheMisses);
+        bexCompiledExecutions.addAndGet(compiledExecutions);
+        bexCompileNanos.addAndGet(compileNanos);
+        bexExecuteNanos.addAndGet(executeNanos);
+    }
+
+    /** Records one immutable BEX diagnostics snapshot. */
     @Override
+    public void accept(BexMetricsSnapshot metrics) {
+        addBexMetrics(metrics);
+    }
+
+    /**
+     * Aggregates one typed Language observation without participating in
+     * semantic execution. The current Language manifest owns metric names and
+     * aggregation kinds; Coordination only retains an immutable diagnostics
+     * view of those observations.
+     *
+     * @param observation immutable Language observation
+     */
+    @Override
+    public void record(ProcessingObservation observation) {
+        if (observation == null) {
+            return;
+        }
+        switch (observation.kind()) {
+            case COUNTER_DELTA:
+                addMetric(
+                        observation.legacyMetricName(),
+                        observation.value());
+                break;
+            case GAUGE_VALUE:
+                setMetric(
+                        observation.legacyMetricName(),
+                        observation.value());
+                break;
+            case HIGH_WATER_MARK:
+                recordMetricHighWater(
+                        observation.legacyMetricName(),
+                        observation.value());
+                break;
+            default:
+                throw new IllegalStateException(
+                        "Unsupported Language observation kind: "
+                                + observation.kind());
+        }
+    }
+
     public void addProcessDocumentNanos(long nanos) {
         processDocumentNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addBlueProcessDocumentNanos(long nanos) {
         blueProcessDocumentNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addEventPreprocessNanos(long nanos) {
         eventPreprocessNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addResultSnapshotAttachNanos(long nanos) {
         resultSnapshotAttachNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addBlueIdCalculationNanos(long nanos) {
         blueIdCalculationNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addProcessingSnapshotCacheLookupNanos(long nanos) {
         processingSnapshotCacheLookupNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void incrementProcessingSnapshotCacheHits() {
         processingSnapshotCacheHits.incrementAndGet();
     }
 
-    @Override
     public void incrementProcessingSnapshotCacheMisses() {
         processingSnapshotCacheMisses.incrementAndGet();
     }
 
-    @Override
     public void addProcessingSnapshotFromDocumentNanos(long nanos) {
         processingSnapshotFromDocumentNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void incrementProcessingSnapshotFromDocumentBuilds() {
         processingSnapshotFromDocumentBuilds.incrementAndGet();
     }
 
-    @Override
     public void incrementProcessEventSnapshotAttempts() {
         processEventSnapshotAttempts.incrementAndGet();
     }
 
-    @Override
     public void incrementProcessEventSnapshotBuilds() {
         processEventSnapshotBuilds.incrementAndGet();
     }
 
-    @Override
     public void incrementProcessEventSnapshotFailures() {
         processEventSnapshotFailures.incrementAndGet();
     }
 
-    @Override
     public void addProcessEventSnapshotConstructionNanos(long nanos) {
         processEventSnapshotConstructionNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addBundleLoadNanos(long nanos) {
         bundleLoadNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addBundleLoadCacheKeyBuildNanos(long nanos) {
         bundleLoadCacheKeyBuildNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addBundleLoadActualBuildNanos(long nanos) {
         bundleLoadActualBuildNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addBundleLoadReuseNanos(long nanos) {
         bundleLoadReuseNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void incrementBundleLoadCacheHits() {
         bundleLoadCacheHits.incrementAndGet();
     }
 
-    @Override
     public void incrementBundleLoadCacheMisses() {
         bundleLoadCacheMisses.incrementAndGet();
     }
 
-    @Override
     public void incrementBundlesBuilt() {
         bundlesBuilt.incrementAndGet();
     }
 
-    @Override
     public void incrementBundlesReused() {
         bundlesReused.incrementAndGet();
     }
 
-    @Override
     public void incrementBundleScopeLoadAttempts() {
         bundleScopeLoadAttempts.incrementAndGet();
     }
 
-    @Override
     public void incrementBundleScopeExecutionCacheHits() {
         bundleScopeExecutionCacheHits.incrementAndGet();
     }
 
-    @Override
     public void incrementBundleScopeRefreshes() {
         bundleScopeRefreshes.incrementAndGet();
     }
 
-    @Override
     public void addBundleScopeTerminationCheckNanos(long nanos) {
         bundleScopeTerminationCheckNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addBundleScopeResolvedLookupNanos(long nanos) {
         bundleScopeResolvedLookupNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addBundleScopeContractLoadNanos(long nanos) {
         bundleScopeContractLoadNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addChannelDiscoveryNanos(long nanos) {
         channelDiscoveryNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addChannelMatchNanos(long nanos) {
         channelMatchNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void incrementChannelEvaluations() {
         channelEvaluations.incrementAndGet();
     }
 
-    @Override
     public void addHandlerDiscoveryNanos(long nanos) {
         handlerDiscoveryNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addHandlerMatchNanos(long nanos) {
         handlerMatchNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void incrementHandlerMatchAttempts() {
         handlerMatchAttempts.incrementAndGet();
     }
 
-    @Override
     public void addHandlerExecutionNanos(long nanos) {
         handlerExecutionNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void incrementHandlersExecuted() {
         handlersExecuted.incrementAndGet();
     }
 
-    @Override
     public void addTriggeredEventRoutingNanos(long nanos) {
         triggeredEventRoutingNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void incrementTriggeredEventsRouted() {
         triggeredEventsRouted.incrementAndGet();
     }
 
-    @Override
     public void addCheckpointUpdateNanos(long nanos) {
         checkpointUpdateNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addCheckpointEnsureNanos(long nanos) {
         checkpointEnsureNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addCheckpointFindNanos(long nanos) {
         checkpointFindNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addCheckpointCurrentIdentityNanos(long nanos) {
         checkpointCurrentIdentityNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addCheckpointIsNewerNanos(long nanos) {
         checkpointIsNewerNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addCheckpointDuplicateNanos(long nanos) {
         checkpointDuplicateNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addCheckpointPersistNanos(long nanos) {
         checkpointPersistNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void incrementCheckpointIdentityCacheHits() {
         checkpointIdentityCacheHits.incrementAndGet();
     }
 
-    @Override
     public void incrementCheckpointIdentityCacheMisses() {
         checkpointIdentityCacheMisses.incrementAndGet();
     }
 
-    @Override
     public void incrementCheckpointStoredIdentityCacheHits() {
         checkpointStoredIdentityCacheHits.incrementAndGet();
     }
 
-    @Override
     public void incrementCheckpointStoredIdentityCacheMisses() {
         checkpointStoredIdentityCacheMisses.incrementAndGet();
     }
 
-    @Override
     public void addCheckpointDirectBlueIdNanos(long nanos) {
         checkpointDirectBlueIdNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addCheckpointContentBlueIdNanos(long nanos) {
         checkpointContentBlueIdNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addCheckpointFallbackNanos(long nanos) {
         checkpointFallbackNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addSnapshotCommitNanos(long nanos) {
         snapshotCommitNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addPostProcessingNanos(long nanos) {
         postProcessingNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addPatchBoundaryNanos(long nanos) {
         patchBoundaryNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addPatchGasNanos(long nanos) {
         patchGasNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addDocumentUpdateRoutingNanos(long nanos) {
         documentUpdateRoutingNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void incrementDocumentUpdateEventsBuilt() {
         documentUpdateEventsBuilt.incrementAndGet();
     }
 
-    @Override
     public void incrementDocumentUpdateEventsSkippedNoChannel() {
         documentUpdateEventsSkippedNoChannel.incrementAndGet();
     }
 
-    @Override
     public void addBatchPatchPlanningNanos(long nanos) {
         batchPatchPlanningNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addBatchPatchConformanceNanos(long nanos) {
         batchPatchConformanceNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addBatchPatchBuildUpdatesNanos(long nanos) {
         batchPatchBuildUpdatesNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addBatchPatchCommitNanos(long nanos) {
         batchPatchCommitNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void incrementDocumentUpdateBeforeMaterializations() {
         documentUpdateBeforeMaterializations.incrementAndGet();
     }
 
-    @Override
     public void incrementDocumentUpdateAfterMaterializations() {
         documentUpdateAfterMaterializations.incrementAndGet();
     }
 
-    @Override
     public void incrementPatchSequencesPrepared() {
         patchSequencesPrepared.incrementAndGet();
     }
 
-    @Override
     public void addPatchesPrepared(long count) {
         patchesPrepared.addAndGet(count);
     }
 
-    @Override
     public void incrementSingletonPatchTransactions() {
         singletonPatchTransactions.incrementAndGet();
     }
 
-    @Override
     public void addSequencePlanningNanos(long nanos) {
         sequencePlanningNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addSequenceConformanceNanos(long nanos) {
         sequenceConformanceNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addSequenceCommitNanos(long nanos) {
         sequenceCommitNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void addSequenceFinalCacheCommitNanos(long nanos) {
         sequenceFinalCacheCommitNanos.addAndGet(nonNegative(nanos));
     }
 
-    @Override
     public void incrementSequenceIntermediateSnapshotAdvances() {
         sequenceIntermediateSnapshotAdvances.incrementAndGet();
     }
 
-    @Override
     public void incrementSequenceSharedSnapshotCacheInserts() {
         sequenceSharedSnapshotCacheInserts.incrementAndGet();
     }
 
-    @Override
     public void incrementSequenceFinalSnapshotCacheInserts() {
         sequenceFinalSnapshotCacheInserts.incrementAndGet();
     }
 
-    @Override
     public void incrementSequenceSuffixRebases() {
         sequenceSuffixRebases.incrementAndGet();
     }
 
-    @Override
     public void incrementSequenceStalePreviewFallbacks() {
         sequenceStalePreviewFallbacks.incrementAndGet();
     }
 
-    @Override
     public void incrementSequenceFallbackPatches() {
         sequenceFallbackPatches.incrementAndGet();
     }
 
-    @Override
     public void incrementParsedPointerCacheHits() {
         parsedPointerCacheHits.incrementAndGet();
     }
 
-    @Override
     public void incrementParsedPointerCacheMisses() {
         parsedPointerCacheMisses.incrementAndGet();
     }
 
-    @Override
     public void incrementFrozenPatchValueHits() {
         frozenPatchValueHits.incrementAndGet();
     }
 
-    @Override
     public void incrementPatchValueMaterializations() {
         patchValueMaterializations.incrementAndGet();
     }
@@ -1460,7 +1459,6 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
         return bexDocumentViewUndefinedHits.get();
     }
 
-    @Override
     public void addMetric(String metricName, long delta) {
         AtomicLong counter = languageMetric(languageCounters, metricName);
         if (counter != null) {
@@ -1468,7 +1466,6 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
         }
     }
 
-    @Override
     public void setMetric(String metricName, long value) {
         AtomicLong gauge = languageMetric(languageGauges, metricName);
         if (gauge != null) {
@@ -1476,7 +1473,6 @@ public final class BexProcessingMetrics implements ProcessingMetricsSink {
         }
     }
 
-    @Override
     public void recordMetricHighWater(String metricName, long value) {
         AtomicLong highWater = languageMetric(languageHighWaterMarks, metricName);
         if (highWater == null) {

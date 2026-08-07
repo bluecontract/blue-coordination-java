@@ -31,7 +31,7 @@ final class CoordinationRuntimeGasScalingTest {
 
     @Test
     void shouldReuseOneLedgerAcrossMoreThan128CompositeMembers() {
-        // Given
+        // given
         int memberCount = 129;
         GasMeter parent = new GasMeter();
         ExternalChannelFunctionContext context =
@@ -47,7 +47,7 @@ final class CoordinationRuntimeGasScalingTest {
         Node event = new Node().value(
                 "rejected-by-every-member");
 
-        // When
+        // when
         boolean accepted =
                 CompositeTimelineExternalSubscriptionFunctions
                         .INSTANCE
@@ -61,7 +61,7 @@ final class CoordinationRuntimeGasScalingTest {
         CoordinationAggregateGasHarness.complete(
                 context);
 
-        // Then
+        // then
         assertFalse(accepted);
         assertEquals(
                 memberCount * 2,
@@ -108,7 +108,7 @@ final class CoordinationRuntimeGasScalingTest {
 
     @Test
     void shouldPreserveOriginalFailureFromNestedComponentCharge() {
-        // Given
+        // given
         GasMeter parent = new GasMeter();
         ExternalChannelFunctionContext context =
                 CoordinationAggregateGasHarness
@@ -117,7 +117,7 @@ final class CoordinationRuntimeGasScalingTest {
                                 0,
                                 0);
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
@@ -141,7 +141,7 @@ final class CoordinationRuntimeGasScalingTest {
         CoordinationAggregateGasHarness
                 .failDeterministically(context);
 
-        // Then
+        // then
         assertTrue(
                 failure.getMessage().contains(
                         "Unknown Coordination gas counter "
@@ -156,7 +156,7 @@ final class CoordinationRuntimeGasScalingTest {
 
     @Test
     void shouldEvictAbandonedLedgerBeforeReacquiringAfterCaughtNestedFailure() {
-        // Given
+        // given
         GasMeter parent = new GasMeter();
         ExternalChannelFunctionContext context =
                 CoordinationAggregateGasHarness
@@ -167,7 +167,7 @@ final class CoordinationRuntimeGasScalingTest {
         AtomicReference<IllegalArgumentException> nestedFailure =
                 new AtomicReference<IllegalArgumentException>();
 
-        // When
+        // when
         IllegalStateException abandoned =
                 assertThrows(
                         IllegalStateException.class,
@@ -201,7 +201,7 @@ final class CoordinationRuntimeGasScalingTest {
         CoordinationAggregateGasHarness
                 .failDeterministically(context);
 
-        // Then
+        // then
         assertEquals(
                 "nested failure",
                 nestedFailure.get().getMessage());
@@ -227,7 +227,7 @@ final class CoordinationRuntimeGasScalingTest {
     @Test
     void shouldRejectOverlappingIndependentLedgerOwnership()
             throws Exception {
-        // Given
+        // given
         GasMeter parent = new GasMeter();
         ExternalChannelFunctionContext context =
                 CoordinationAggregateGasHarness
@@ -241,7 +241,7 @@ final class CoordinationRuntimeGasScalingTest {
         ExecutorService executor =
                 Executors.newSingleThreadExecutor();
 
-        // When
+        // when
         Throwable overlap;
         try {
             Future<Throwable> attempted =
@@ -271,7 +271,7 @@ final class CoordinationRuntimeGasScalingTest {
         CoordinationAggregateGasHarness.complete(
                 context);
 
-        // Then
+        // then
         assertTrue(
                 overlap instanceof IllegalStateException,
                 String.valueOf(overlap));
@@ -290,7 +290,7 @@ final class CoordinationRuntimeGasScalingTest {
 
     @Test
     void shouldRetainTheFullTraceForA129MemberCompositeScan() {
-        // Given
+        // given
         int memberCount = 129;
         int expectedTraceEntries =
                 memberCount * 4;
@@ -309,7 +309,7 @@ final class CoordinationRuntimeGasScalingTest {
         boolean accepted = false;
         Throwable failure = null;
 
-        // When
+        // when
         try {
             accepted =
                     CompositeTimelineExternalSubscriptionFunctions
@@ -332,7 +332,7 @@ final class CoordinationRuntimeGasScalingTest {
                     .failDeterministically(context);
         }
 
-        // Then
+        // then
         if (failure != null) {
             fail(
                     "A 129-member Composite scan requires "
@@ -396,7 +396,7 @@ final class CoordinationRuntimeGasScalingTest {
 
     @Test
     void shouldAcceptCompositeAtExactOneMemberVisitBudget() {
-        // Given
+        // given
         GasMeter parent = new GasMeter(
                 GasSchedule.contracts10(),
                 2L);
@@ -412,7 +412,7 @@ final class CoordinationRuntimeGasScalingTest {
         Node event = new Node().value(
                 "accepted-by-first-member");
 
-        // When
+        // when
         boolean accepted =
                 CompositeTimelineExternalSubscriptionFunctions
                         .INSTANCE
@@ -426,7 +426,7 @@ final class CoordinationRuntimeGasScalingTest {
         CoordinationAggregateGasHarness.complete(
                 context);
 
-        // Then
+        // then
         assertTrue(accepted);
         assertEquals(1, staged.size());
         assertEquals(
@@ -438,7 +438,7 @@ final class CoordinationRuntimeGasScalingTest {
 
     @Test
     void shouldAcceptAllTimelinesAtExactOneMemberVisitBudget() {
-        // Given
+        // given
         GasMeter parent = new GasMeter(
                 GasSchedule.contracts10(),
                 2L);
@@ -453,7 +453,7 @@ final class CoordinationRuntimeGasScalingTest {
         Node event = new Node().value(
                 "accepted-by-first-member");
 
-        // When
+        // when
         boolean accepted =
                 AllTimelinesExternalSubscriptionFunctions
                         .INSTANCE
@@ -467,7 +467,7 @@ final class CoordinationRuntimeGasScalingTest {
         CoordinationAggregateGasHarness.complete(
                 context);
 
-        // Then
+        // then
         assertTrue(accepted);
         assertEquals(1, staged.size());
         assertEquals(
@@ -479,7 +479,7 @@ final class CoordinationRuntimeGasScalingTest {
 
     @Test
     void shouldRejectCompositeMemberVisitBeforeAnyMemberResolution() {
-        // Given
+        // given
         GasMeter parent = new GasMeter(
                 GasSchedule.contracts10(),
                 0L);
@@ -499,7 +499,7 @@ final class CoordinationRuntimeGasScalingTest {
         Node event = new Node().value(
                 "must-not-reach-member");
 
-        // When
+        // when
         GasLimitExceededException failure =
                 assertThrows(
                         GasLimitExceededException.class,
@@ -515,7 +515,7 @@ final class CoordinationRuntimeGasScalingTest {
                         () -> CoordinationAggregateGasHarness
                                 .failDeterministically(context));
 
-        // Then
+        // then
         assertEquals(
                 "compositeMemberVisited",
                 failure.counter());
@@ -529,7 +529,7 @@ final class CoordinationRuntimeGasScalingTest {
 
     @Test
     void shouldRejectAllTimelinesMemberVisitBeforeAnyMemberResolution() {
-        // Given
+        // given
         GasMeter parent = new GasMeter(
                 GasSchedule.contracts10(),
                 0L);
@@ -548,7 +548,7 @@ final class CoordinationRuntimeGasScalingTest {
         Node event = new Node().value(
                 "must-not-reach-member");
 
-        // When
+        // when
         GasLimitExceededException failure =
                 assertThrows(
                         GasLimitExceededException.class,
@@ -564,7 +564,7 @@ final class CoordinationRuntimeGasScalingTest {
                         () -> CoordinationAggregateGasHarness
                                 .failDeterministically(context));
 
-        // Then
+        // then
         assertEquals(
                 "allTimelinesMemberVisited",
                 failure.counter());

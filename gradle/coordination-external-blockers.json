@@ -1,286 +1,1568 @@
 {
-  "schema": "blue-coordination/external-blockers/1.1",
+  "schema": "blue-coordination/external-blockers/1.2",
+  "expectedSuite": {
+    "full": 954,
+    "working": 445,
+    "probes": 509
+  },
   "blockers": [
     {
-      "id": "language-checkpoint-coalescing",
-      "owner": "blue-language-java",
-      "status": "open",
-      "firstObservedAgainst": {
-        "commit": "9706b604d54d59e843f2d0540c1a892470d1aa5c",
-        "version": "3.1.0-rc.18-SNAPSHOT"
-      },
-      "category": "checkpoint-coalescing",
-      "fingerprintPrefix": "Language checkpoint coalescing defect:",
-      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
-      "notes": "A later handler-group marker write removes a source or aggregate checkpoint already admitted for the same logical delivery.",
-      "probes": [
-        {"test": "blue.coordination.processor.AllTimelinesChannelProcessorTest#shouldEnsureThatAllTimelinesWithSeveralMatchingChildrenDeliversOnce"},
-        {"test": "blue.coordination.processor.AllTimelinesChannelProcessorTest#shouldSelectTheFirstMatchingAllTimelinesChildKeyWhenOrdersTie"},
-        {"test": "blue.coordination.processor.AllTimelinesChannelProcessorTest#shouldConsumePlatformDeliveryOrderAcrossTimelines"},
-        {"test": "blue.coordination.processor.CompositeTimelineChannelProcessorTest#shouldEnsureThatDirectChildAndUnionHandlersMayBothRun"},
-        {"test": "blue.coordination.processor.TimelineSubtypeAggregateTest#shouldIncludeGeneratedMyosMembersInCompositeAndCoalesceTheirDelivery"},
-        {"test": "blue.coordination.processor.TimelineSubtypeAggregateTest#shouldIncludeGeneratedMyosMembersInAllTimelinesAndExcludeUnrelatedChannels"}
-      ]
-    },
-    {
-      "id": "language-mandate-effective-contract-type-refresh",
-      "owner": "blue-language-java",
-      "status": "open",
-      "firstObservedAgainst": {
-        "commit": "9706b604d54d59e843f2d0540c1a892470d1aa5c",
-        "version": "3.1.0-rc.18-SNAPSHOT"
-      },
-      "category": "effective-contract-evidence",
-      "fingerprintPrefix": "Language mandate effective-contract refresh defect:",
-      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
-      "notes": "After initialization, canonical refresh loses the resolved Timeline Channel contribution and lifecycle delivery either reports a typeless guarantor channel or reselects initialization.",
-      "probes": [
-        {"test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-mand-02@default"},
-        {"test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-mand-03@default"},
-        {"test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-mand-04@default"},
-        {"test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-mand-05@default"},
-        {"test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-mand-06@default"},
-        {"test": "blue.coordination.processor.compute.MandateDeclaredTypeEventMatchingTest#shouldInitializeOnceAndSelectOnlyTheActivationHandler"},
-        {"test": "blue.coordination.processor.compute.MandateDeclaredTypeEventMatchingTest#shouldNotReselectInitializationAfterFatalLifecycleDelivery"},
-        {"test": "blue.coordination.processor.compute.MandateProcessingEventBindingTest#shouldUseRootProcessingEventTimestampForMandateConfirmation"},
-        {"test": "blue.coordination.processor.compute.MandateTerminationWorkflowTest#shouldTerminateFailedMandateWithoutReplacingFailureState"},
-        {"test": "blue.coordination.processor.compute.MandateTerminationWorkflowTest#shouldIgnoreDuplicateGeneratedMandateTermination"},
-        {"test": "blue.coordination.processor.compute.MandateTerminationWorkflowTest#shouldApplyGeneratedMandateTerminationExactlyOnce"},
-        {"test": "blue.coordination.processor.compute.RepresentativeWorkflowLifecycleSmokeTest#shouldPlateauAndReleaseStateAcrossRepresentativeWorkflowRuns"}
-      ]
-    },
-    {
-      "id": "language-flagship-external-delivery-evidence-drift",
-      "owner": "blue-language-java",
-      "status": "open",
-      "firstObservedAgainst": {
-        "commit": "9706b604d54d59e843f2d0540c1a892470d1aa5c",
-        "version": "3.1.0-rc.18-SNAPSHOT"
-      },
-      "category": "external-delivery-evidence",
-      "fingerprintPrefix": "Language flagship external-delivery evidence drift:",
-      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
-      "notes": "Accepted-new preflight observes different embedded external-delivery evidence from the independently bound plan.",
-      "probes": [
-        {"test": "blue.coordination.processor.CoordinationComplexEmbeddedDeterminismFlagshipTest#shouldExposeOnlyOrderedRootEventsAcrossEveryRepresentationProviderVariant"},
-        {"test": "blue.coordination.processor.CoordinationComplexEmbeddedDeterminismFlagshipTest#shouldKeepDescendantEventsInternalAcrossEveryRepresentationProviderVariant"}
-      ]
-    },
-    {
-      "id": "language-pure-reference-root-transition",
-      "owner": "blue-language-java",
-      "status": "open",
-      "firstObservedAgainst": {
-        "commit": "9706b604d54d59e843f2d0540c1a892470d1aa5c",
-        "version": "3.1.0-rc.18-SNAPSHOT"
-      },
-      "category": "root-transition",
-      "fingerprintPrefix": "Language pure-reference Root transition defect:",
-      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
-      "notes": "A successful handler execution returns a collapsed pure-reference Root instead of its committed exact state.",
-      "probes": [
-        {"test": "blue.coordination.processor.CoordinationDocumentSplitterProcessingMatrixTest#shouldPreserveProcessSemanticsAcrossSplitRepresentations"}
-      ]
-    },
-    {
-      "id": "fixed-repository-bound-source-evidence",
+      "id": "repository-node-provider-abi",
       "owner": "blue-repository-java",
       "status": "open",
       "firstObservedAgainst": {
         "commit": "63be6b7d8d2752b5a8c90f38e672859e9b3949a1",
         "version": "3.0.0-rc.17-SNAPSHOT"
       },
-      "category": "fixed-repository-evidence",
-      "fingerprintPrefix": "Fixed Repository BOUND_SOURCE_CONTENT incompatibilities:",
+      "category": "immutable-dependency-binary-incompatibility",
+      "failureType": "java.lang.NoClassDefFoundError",
+      "logicalMessagePrefix": "blue/language/NodeProvider",
       "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
-      "notes": "The immutable 1.3.0 catalog contains missing references and schema bodies rejected by the current Language verifier.",
+      "notes": "The locked immutable Repository bytecode references the removed blue.language.NodeProvider ABI.",
       "probes": [
-        {"test": "blue.coordination.processor.FixedRepositoryBoundSourceProviderTest#shouldVerifyEveryFixedRepositoryDefinitionUnderBoundSourceContent"},
-        {"test": "blue.coordination.processor.LocalFixedRepositoryCompatibilityTest#shouldResolveEveryRequiredGeneratedTypeAtItsManifestBlueId"}
+        {
+          "test": "blue.coordination.processor.AllTimelinesChannelProcessorTest#shouldConsumePlatformDeliveryOrderAcrossTimelines"
+        },
+        {
+          "test": "blue.coordination.processor.AllTimelinesChannelProcessorTest#shouldEnsureThatAllTimelinesRejectsEntryThatMatchesNoDeclaredTimelineChannel"
+        },
+        {
+          "test": "blue.coordination.processor.AllTimelinesChannelProcessorTest#shouldEnsureThatAllTimelinesWithNoTimelineMembersAcceptsNothing"
+        },
+        {
+          "test": "blue.coordination.processor.AllTimelinesChannelProcessorTest#shouldEnsureThatAllTimelinesWithSeveralMatchingChildrenDeliversOnce"
+        },
+        {
+          "test": "blue.coordination.processor.AllTimelinesChannelProcessorTest#shouldSelectTheFirstMatchingAllTimelinesChildKeyWhenOrdersTie"
+        },
+        {
+          "test": "blue.coordination.processor.AllTimelinesChannelProcessorTest#shouldSelectTheLowestOrderMatchingAllTimelinesChild"
+        },
+        {
+          "test": "blue.coordination.processor.BootstrapDocumentTransportRoundTripTest#shouldRoundTripInitializedBootstrapThroughMinimizedTransport"
+        },
+        {
+          "test": "blue.coordination.processor.ChatWorkflowOperationIntegrationTest#shouldAdvanceSourceCheckpointOnceForRoutedChatRequest"
+        },
+        {
+          "test": "blue.coordination.processor.ChatWorkflowOperationIntegrationTest#shouldEmitSeededChatMessageBeforeAppendedWorkflowEvent"
+        },
+        {
+          "test": "blue.coordination.processor.ChatWorkflowOperationIntegrationTest#shouldTerminateAfterInheritedChatWorkflowPrefix"
+        },
+        {
+          "test": "blue.coordination.processor.CompositeTimelineChannelProcessorTest#shouldEnsureThatCompositeEvaluationUsesItsOwnExactPayload"
+        },
+        {
+          "test": "blue.coordination.processor.CompositeTimelineChannelProcessorTest#shouldEnsureThatCompositeWithSeveralMatchingChildrenDeliversOnce"
+        },
+        {
+          "test": "blue.coordination.processor.CompositeTimelineChannelProcessorTest#shouldEnsureThatDirectChildAndCompositeBothEvaluateTheExactOccurrence"
+        },
+        {
+          "test": "blue.coordination.processor.CompositeTimelineChannelProcessorTest#shouldEnsureThatDirectChildAndUnionHandlersMayBothRun"
+        },
+        {
+          "test": "blue.coordination.processor.CompositeTimelineChannelProcessorTest#shouldEnsureThatEmptyCompositeFailsSubscriptionSurfaceValidation"
+        },
+        {
+          "test": "blue.coordination.processor.CompositeTimelineChannelProcessorTest#shouldEnsureThatMissingChildChannelFailsClearly"
+        },
+        {
+          "test": "blue.coordination.processor.CompositeTimelineChannelProcessorTest#shouldEnsureThatNewCompositeEvaluatesWithoutCheckpointState"
+        },
+        {
+          "test": "blue.coordination.processor.CompositeTimelineChannelProcessorTest#shouldEnsureThatNonTimelineChildFailsClearly"
+        },
+        {
+          "test": "blue.coordination.processor.CompositeTimelineChannelProcessorTest#shouldEnsureThatPreviewChannelDefinitionDoesNotParticipateInExternalAcceptance"
+        },
+        {
+          "test": "blue.coordination.processor.CompositeTimelineChannelProcessorTest#shouldEnsureThatSelfReferenceFailsClearly"
+        },
+        {
+          "test": "blue.coordination.processor.CompositeTimelineChannelProcessorTest#shouldSelectTheFirstMatchingCompositeChildKeyWhenOrdersTie"
+        },
+        {
+          "test": "blue.coordination.processor.CompositeTimelineChannelProcessorTest#shouldSelectTheLowestOrderMatchingCompositeChild"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-chan-01@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-chan-02@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-chan-03@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-chan-04@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-chan-05@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-chan-06@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-chan-07@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-e2e-01@fragmented"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-e2e-01@inline"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-e2e-01@partial"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-e2e-01@references"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-e2e-02@fragmented"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-e2e-02@inline"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-e2e-02@partial"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-e2e-02@references"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-fail-01@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-fail-02@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-fail-03@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-fail-04@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-mand-01@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-mand-02@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-mand-03@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-mand-04@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-mand-05@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-mand-06@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-mand-07@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-mand-08@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-mand-09@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-mand-10@inline"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-mand-10@reference"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-mand-11@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-mand-12@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-route-01@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-route-02@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-route-03@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-route-04@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-route-05@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-route-06@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-route-07@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-split-01@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-split-02@fragmented"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-split-02@inline"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-split-02@partial"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-split-02@references"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-split-03@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-split-04@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-split-05@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-split-06@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-split-07@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-split-08@no-root-emission"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-split-09@root-emits"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-split-10@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-time-01@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-time-02@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-time-03@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-time-04@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-time-05@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-wf-01@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-wf-02@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-wf-03@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-wf-04@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-wf-05@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-wf-06@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-wf-07@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#coord-wf-08@default"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#shouldAvoidDemandingDecoyBodiesForReferenceEndToEndProcessing"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#shouldAvoidDemandingDecoyBodiesWhenDescendantsEmitNoRootEvent"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#shouldAvoidDemandingDecoyBodiesWhenRootEmitsPublicEvents"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#shouldAvoidDemandingDecoyBodyForReferenceSplitProcessing"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#shouldExecuteAllCompositeAndDirectMyOsSourcesInCanonicalOrder"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#shouldExecuteMandateAndTimelineCasesIndependently"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#shouldKeepMandateBackedEndToEndResultStableAcrossRepresentations"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#shouldKeepRootOnlyOperationOutOfEmbeddedScopes"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#shouldPassAuthoredRevisionEvidenceToLanguageThreeArgumentProcess"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#shouldProcessPureReferenceTimelineHeadersWithSelectiveEvidence"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#shouldRecordDirectChildReactiveHandlerLocations"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#shouldRecordSelectedDeepHandlerLocation"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#shouldRejectAuthoredRevisionThatDiffersFromTheVerifiedPlan"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#shouldRejectAuthoredSourceThatDoesNotAcceptTheExactEvent"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#shouldRollbackDocumentUpdateLoopToExactInitializedRoot"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#shouldRouteReferenceBackedEndToEndCasesToBobWithoutDemandingOpaqueMandateDocument"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationBehaviorFixtureHarnessTest#shouldSplitInheritedEffectiveContracts"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationRepositoryRuntimeCompatibilityProbeTest#shouldLoadLockedRepositoryForDescendantEventRuntimeControl"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationRepositoryRuntimeCompatibilityProbeTest#shouldLoadLockedRepositoryForRootEventRuntimeControl"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationRepositoryRuntimeCompatibilityProbeTest#shouldLoadLockedRepositoryForStableKeyGraphControl"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationConformancePackageIntegrityTest#shouldAuthorEveryRepositoryBackedFixtureTypeAsExactBlueIdReference"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationIndexedDeliveryPlannerTest#shouldCoalesceIndexedPeerRoutesWithoutCheckpointingAStaleSource"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationIndexedDeliveryPlannerTest#shouldNotEvaluateUnrelatedOccurrenceHeadersDuringIndexedPlanning"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationIndexedDeliveryPlannerTest#shouldPermitOnlyRuntimeSelectedHandlerBodiesAtTheRoutedTarget"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationIndexedDeliveryPlannerTest#shouldProduceTheCompatibilityPlannerDeliveryFromAnExactIndex"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationIndexedDeliveryPlannerTest#shouldProduceTheSameIndexedPeerRouteFromFragmentedProvidersWithoutOpeningBodies"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationIndexedDeliveryPlannerTest#shouldRejectADuplicateIndexedCandidate"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationIndexedDeliveryPlannerTest#shouldRejectARevisionThatDoesNotBindTheSnapshot"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationIndexedDeliveryPlannerTest#shouldRejectARootIdentityThatDoesNotBindTheSnapshot"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationIndexedDeliveryPlannerTest#shouldRejectAnEventAtTheSnapshotActivationFrontier"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationIndexedDeliveryPlannerTest#shouldRejectAnIndexedFalsePositiveUnderTheExactCandidateContract"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationIndexedDeliveryPlannerTest#shouldRejectAnOmittedCanonicalCandidate"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationIndexedDeliveryPlannerTest#shouldRejectCandidatesInTheWrongCanonicalOrder"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationIndexedDeliveryPlannerTest#shouldRejectEventContentThatDoesNotVerifyItsRequestedIdentity"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationIndexedDeliveryPlannerTest#shouldRejectIndexedValidationBeforeTheOverLimitCandidateIsAdmitted"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationIndexedDeliveryPlannerTest#shouldRejectPersistedOccurrenceFromAFutureRootGeneration"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationIndexedDeliveryPlannerTest#shouldRejectPersistedSnapshotContentThatRetiresAnActiveOccurrence"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationIndexedDeliveryPlannerTest#shouldRejectSnapshotAfterTimelineSubtypeRegistryChanges"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationIndexedDeliveryPlannerTest#shouldReturnDefensiveAndUnmodifiablePreparationViews"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationIndexedDeliveryPlannerTest#shouldRouteAnIndexedSourceToAPeerTargetWhileCheckpointingOnlyTheSource"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationInfiniteLoopSafetyTest#shouldCompleteRepresentativeLargeFiniteSequentialWorkflowBelowPortableLimit"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationInfiniteLoopSafetyTest#shouldMapParentBoundBexExhaustionToGasLimitExceeded"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationInfiniteLoopSafetyTest#shouldRejectRecursiveBexCompilationBeforeAnyEffectCommits"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationInfiniteLoopSafetyTest#shouldShareGasAcrossCoalescedMultiSourceLogicalDeliveryAndRollbackDeterministically"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationInfiniteLoopSafetyTest#shouldStopCrossScopeUpdateEventLoopAtLiveGasAndRollbackDeterministically"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationInfiniteLoopSafetyTest#shouldStopDocumentUpdateSelfLoopAtLiveGasAndRollbackDeterministically"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationInfiniteLoopSafetyTest#shouldStopEmbeddedChildAncestorEventLoopAtLiveGasAndRollbackDeterministically"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationInfiniteLoopSafetyTest#shouldStopLargeFiniteBexIterationAtExactParentChildBudgetPrefix"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationInfiniteLoopSafetyTest#shouldStopNestedComputeEventLoopAtLiveGasAndRollbackDeterministically"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationInfiniteLoopSafetyTest#shouldStopTriggeredEventSelfLoopAtLiveGasAndRollbackDeterministically"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationProcessorsTest#shouldConfigureStandaloneProcessorBuilderWithoutMutableRuntimeState"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationSubscriptionProjectorTest#shouldBindSnapshotIdentityToExplicitTimelineSubtypeRegistrations"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationSubscriptionProjectorTest#shouldFollowInheritedProcessEmbeddedPath"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationSubscriptionProjectorTest#shouldKeepCyclicMemberEdgeOpaqueDuringSubscriptionProjection"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationSubscriptionProjectorTest#shouldKeepSameExactChildAtTwoPathsAsTwoOccurrences"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationSubscriptionProjectorTest#shouldProduceDeterministicSubscriptionSnapshotForRepeatedProjection"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationSubscriptionProjectorTest#shouldProduceEquivalentSnapshotsForInlineColdAndWarmProviderRepresentations"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationSubscriptionProjectorTest#shouldProduceExactSnapshotAcrossBatchedComposedProviderSegments"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationSubscriptionProjectorTest#shouldProduceExactSnapshotForPartiallyMaterializedNestedRoot"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationSubscriptionProjectorTest#shouldProjectInheritedTimelineChannel"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationSubscriptionProjectorTest#shouldProjectNestedTimelineChannelAtItsSelectedScope"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationSubscriptionProjectorTest#shouldProjectRootOnlyTimelineChannel"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationSubscriptionProjectorTest#shouldProjectTimelineChannelFromOneEmbeddedScope"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationSubscriptionProjectorTest#shouldPruneTerminatedEmbeddedSubscriptionSubtree"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationSubscriptionProjectorTest#shouldRehydratePersistedSubscriptionSnapshotWithoutIdentityDrift"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationSubscriptionProjectorTest#shouldRejectDirectRootLowerBoundBeforeLanguageProjectionWork"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationSubscriptionProjectorTest#shouldRejectProjectionBeforeTheOverLimitOccurrenceIsAdmitted"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationSubscriptionProjectorTest#shouldRejectUpdateAfterTimelineSubtypeRegistryChanges"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationSubscriptionProjectorTest#shouldRepresentRetypeAsRetireAddAndMatchFreshProjection"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationSubscriptionProjectorTest#shouldStartNewActivationIntervalAfterRemovalAndReaddition"
+        },
+        {
+          "test": "blue.coordination.processor.CounterSnapshotRoundTripStressTest#shouldPreserveBexOnlyCounterUpdatesAcrossCanonicalSnapshotRoundTrips"
+        },
+        {
+          "test": "blue.coordination.processor.DeclaredTypeEventMatchingTest#shouldAcceptExactAndChildDeclaredTypesButRejectUnrelatedTypedShapes"
+        },
+        {
+          "test": "blue.coordination.processor.DeclaredTypeEventMatchingTest#shouldApplyDeclaredTypeFilteringToSequentialAndChatOperations"
+        },
+        {
+          "test": "blue.coordination.processor.DeclaredTypeEventMatchingTest#shouldEnforceAdditionalConstraintsForCompatibleDeclaredTypes"
+        },
+        {
+          "test": "blue.coordination.processor.DeclaredTypeEventMatchingTest#shouldMatchDeclaredTypeLineageAcrossPureAndMaterializedRepresentations"
+        },
+        {
+          "test": "blue.coordination.processor.DeclaredTypeEventMatchingTest#shouldRetainGenericStructuralFallbackForRequestPayloadMatching"
+        },
+        {
+          "test": "blue.coordination.processor.DeclaredTypeEventMatchingTest#shouldRetainStructuralMatchingForAnonymousActualTypes"
+        },
+        {
+          "test": "blue.coordination.processor.DeclaredTypeEventMatchingTest#shouldRetainStructuralMatchingForAnonymousExpectedTypes"
+        },
+        {
+          "test": "blue.coordination.processor.DeclaredTypeEventMatchingTest#shouldRetainStructuralMatchingForUntypedAndTypeFreePatterns"
+        },
+        {
+          "test": "blue.coordination.processor.DeclaredTypeEventMatchingTest#shouldReturnSamePureReferenceResultAcrossColdAndWarmContexts"
+        },
+        {
+          "test": "blue.coordination.processor.EmbeddedTerminationWorkflowTest#shouldProduceEquivalentEmbeddedEffectsForComputeAndDeclarativeTermination"
+        },
+        {
+          "test": "blue.coordination.processor.EmbeddedTerminationWorkflowTest#shouldTerminateOnlyEmbeddedScopeForTerminateProcessingStep"
+        },
+        {
+          "test": "blue.coordination.processor.InheritedStaticUpdateDocumentTest#shouldWriteInheritedStaticPatchValueFromResolvedContractView"
+        },
+        {
+          "test": "blue.coordination.processor.MustUnderstandContractsTest#shouldFailClearlyForHandlerBoundToTypelessContract"
+        },
+        {
+          "test": "blue.coordination.processor.MustUnderstandContractsTest#shouldInitializeHandlerBoundToTimelineChannel"
+        },
+        {
+          "test": "blue.coordination.processor.MustUnderstandContractsTest#shouldStopInitializationForUnknownContractType"
+        },
+        {
+          "test": "blue.coordination.processor.MustUnderstandContractsTest#shouldStopInitializationWhenBaseChannelIsExecutableContract"
+        },
+        {
+          "test": "blue.coordination.processor.MustUnderstandContractsTest#shouldSupportTimelineChannelUsedDirectly"
+        },
+        {
+          "test": "blue.coordination.processor.MustUnderstandContractsTest#shouldUseRegisteredSimpleTimelineProvider"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestMatchingTest#shouldAcceptIntegerForIntegerRequestPattern"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestMatchingTest#shouldEnsureThatBareOperationRequestCannotRedirectTriggeredDelivery"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestMatchingTest#shouldEnsureThatDirectOperationRequestRunsThroughTriggeredChannel"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestMatchingTest#shouldEnsureThatDirectSequentialWorkflowOperationDeclaresChannelRequestAndSteps"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestMatchingTest#shouldEnsureThatDocumentValueDoesNotAffectProcessorEligibility"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestMatchingTest#shouldEnsureThatObjectRequestPatternAcceptsRequiredNestedProperty"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestMatchingTest#shouldEnsureThatObjectRequestPatternRejectsMissingRequiredNestedProperty"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestMatchingTest#shouldEnsureThatOperationDeclarationCanBeSpecializedBeforeConcreteSequentialWorkflowOperation"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestMatchingTest#shouldEnsureThatOperationDeclarationCanCoexistWithConcreteSequentialWorkflowOperation"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestMatchingTest#shouldEnsureThatOperationRequestRoutesFromEligibleSourceToDeclaredChannel"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestMatchingTest#shouldEnsureThatRequestPatternIgnoresIrrelevantLargePayloadBranches"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestMatchingTest#shouldEnsureThatRequireExactDocumentVersionFalseIsFeederOwned"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestMatchingTest#shouldEnsureThatRequireExactDocumentVersionTrueIsFeederOwned"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestMatchingTest#shouldEnsureThatSequentialWorkflowOperationEventPatternAllowsMatchingEvent"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestMatchingTest#shouldEnsureThatSequentialWorkflowOperationEventPatternRejectsDifferentEvent"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestMatchingTest#shouldEnsureThatSequentialWorkflowOperationUsesDeclaredChannel"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestMatchingTest#shouldEnsureThatTimelineEntryOperationRequestStillRuns"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestMatchingTest#shouldRejectTextForIntegerRequestPattern"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingEvaluationTest#shouldDistinguishMetadataOnlyFromPayloadConstrainedRequestPatterns"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingEvaluationTest#shouldEnsureThatCompatibleOperationRequestSubtypeRetainsExactFields"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingEvaluationTest#shouldEnsureThatExplicitlyEmptyRequestPatternAllowsAbsentPayload"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingEvaluationTest#shouldEnsureThatGeneratedOperationRequestRemainsTheExactSingleTimelinePayload"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingEvaluationTest#shouldEnsureThatMissingAndBlankChannelKeepOrdinaryDelivery"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingEvaluationTest#shouldEnsureThatMissingAndBlankOperationKeepOrdinaryDelivery"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingEvaluationTest#shouldEnsureThatOperationMatcherFailsClosedForMissingInputsAndMalformedRoute"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingEvaluationTest#shouldEnsureThatOperationMatcherRequiresExactEffectiveChannelAndOperationKey"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingEvaluationTest#shouldEnsureThatOperationMatcherTreatsPureReferenceMessageLikeInlineRequest"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingEvaluationTest#shouldEnsureThatOrdinaryTimelineMessageKeepsOrdinaryDelivery"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingEvaluationTest#shouldEnsureThatSameChannelTimelineRequestAlsoRemainsAnExactPayload"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingEvaluationTest#shouldEnsureThatTargetExternalAcceptanceEvaluatorIsNotInvoked"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingEvaluationTest#shouldEnsureThatUnknownTargetKeepsOrdinaryDelivery"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingEvaluationTest#shouldEnsureThatUnrelatedRequestSubtypeKeepsOrdinaryDelivery"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingEvaluationTest#shouldRejectMaterializedOperationRequestTypeWithoutExactIdentity"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingEvaluationTest#shouldTreatRepositoryDescriptionOnlyRequestAsUnconstrained"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingIntegrationTest#shouldChargeRoutingFieldsAndTargetLookupOnceForOneAcceptedSource"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingIntegrationTest#shouldEnsureThatAllTimelinesAndDirectSourcesInvokeTargetOnceAndPersistOwnCheckpoints"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingIntegrationTest#shouldEnsureThatCompositeAndDirectSourcesInvokeTargetOnceAndPersistOwnCheckpoints"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingIntegrationTest#shouldEnsureThatCrossChannelRequestRunsTargetOperationAndKeepsSourceCheckpoint"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingIntegrationTest#shouldEnsureThatMalformedRoutingFieldsStayOrdinaryAndAdvanceCheckpoint"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingIntegrationTest#shouldEnsureThatNonChannelRequestTargetKeepsOrdinaryDeliveryAndCheckpoint"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingIntegrationTest#shouldEnsureThatReplayAfterCommittedSourceCheckpointsRunsNothing"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingIntegrationTest#shouldEnsureThatRoutedHandlerSeesFullRootAttributionWithoutTargetActorSubstitution"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingIntegrationTest#shouldEnsureThatSeveralMatchingDirectSourcesInvokeTargetOnceAndPersistOwnCheckpoints"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingIntegrationTest#shouldEnsureThatSourceActorMismatchRejectsBeforeRouting"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingIntegrationTest#shouldEnsureThatSourceDefinitionDoesNotFilterExternalAcceptance"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingIntegrationTest#shouldEnsureThatSourceTimelineMismatchRejectsBeforeRouting"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingIntegrationTest#shouldEnsureThatStaleSourceDoesNotPiggybackOnSuccessfulRoute"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingIntegrationTest#shouldEnsureThatTargetApplicationTerminationPersistsNoSourceCheckpoint"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingIntegrationTest#shouldEnsureThatTargetHandlerFailurePersistsNoSourceCheckpoint"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingIntegrationTest#shouldEnsureThatTargetOperationEventPatternRemainsMandatory"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingIntegrationTest#shouldEnsureThatTargetOperationRequestPatternRemainsMandatory"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingIntegrationTest#shouldEnsureThatUnknownOperationRunsNoHandlerButAdvancesSourceCheckpoint"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingIntegrationTest#shouldEnsureThatUnknownRequestTargetKeepsOrdinaryDeliveryAndCheckpoint"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingIntegrationTest#shouldRollBackEveryPendingSourceCheckpointWhenRoutedGasCutsOff"
+        },
+        {
+          "test": "blue.coordination.processor.OperationRequestRoutingIntegrationTest#shouldRouteReferencedFieldsWithoutChargingTheRoutingReparse"
+        },
+        {
+          "test": "blue.coordination.processor.PublishedTimelineChannelResolutionTest#shouldEnsureThatPublishedCheckpointedTimelineEntrySurvivesClonedDocumentRebuild"
+        },
+        {
+          "test": "blue.coordination.processor.PublishedTimelineChannelResolutionTest#shouldEnsureThatPublishedMaterializedTimelineChannelInitializesAsContract"
+        },
+        {
+          "test": "blue.coordination.processor.PublishedTimelineChannelResolutionTest#shouldEnsureThatPublishedMaterializedTimelineChannelResolves"
+        },
+        {
+          "test": "blue.coordination.processor.PublishedTimelineChannelResolutionTest#shouldEnsureThatPublishedTimelineEntryRecursiveTypeResolvesFinitely"
+        },
+        {
+          "test": "blue.coordination.processor.RepositoryStyleCounterDocumentTest#shouldInitializeRichCounterWithoutCheckpointState"
+        },
+        {
+          "test": "blue.coordination.processor.RepositoryStyleCounterDocumentTest#shouldProcessIncrementAndWriteTimelineCheckpoint"
+        },
+        {
+          "test": "blue.coordination.processor.RuntimeChannelsTest#shouldEnsureThatCheckpointDeclaredUnderWrongKeyFails"
+        },
+        {
+          "test": "blue.coordination.processor.RuntimeChannelsTest#shouldEnsureThatDocumentUpdateChannelPathFilteringUsesRepositoryTypes"
+        },
+        {
+          "test": "blue.coordination.processor.RuntimeChannelsTest#shouldEnsureThatDuplicateExternalEventsAreSkippedWithRealRepositoryChannelCheckpointShape"
+        },
+        {
+          "test": "blue.coordination.processor.RuntimeChannelsTest#shouldEnsureThatEmbeddedChildProcessesExternalEventWithRealProcessEmbeddedType"
+        },
+        {
+          "test": "blue.coordination.processor.RuntimeChannelsTest#shouldEnsureThatEmbeddedNodeChannelBridgesConfiguredChildEmissions"
+        },
+        {
+          "test": "blue.coordination.processor.RuntimeChannelsTest#shouldEnsureThatEmbeddedNodeChannelDoesNotBridgeWrongChildPath"
+        },
+        {
+          "test": "blue.coordination.processor.RuntimeChannelsTest#shouldEnsureThatMultipleCheckpointMarkersInOneScopeFail"
+        },
+        {
+          "test": "blue.coordination.processor.RuntimeChannelsTest#shouldEnsureThatNestedUpdatesPropagateToParentWatchers"
+        },
+        {
+          "test": "blue.coordination.processor.RuntimeChannelsTest#shouldEnsureThatParentCannotPatchIntoEmbeddedScope"
+        },
+        {
+          "test": "blue.coordination.processor.RuntimeChannelsTest#shouldEnsureThatReplacingEmbeddedNodeCutsOffChildScopeWithinRun"
+        },
+        {
+          "test": "blue.coordination.processor.RuntimeChannelsTest#shouldEnsureThatRuntimeDocumentUpdateChannelReceivesUpdateEvents"
+        },
+        {
+          "test": "blue.coordination.processor.RuntimeChannelsTest#shouldEnsureThatUpdateEventCanBeMatchedMoreSpecifically"
+        },
+        {
+          "test": "blue.coordination.processor.SelectiveProcessingReportArtifactTest#shouldResolveEveryRequiredFixedRepositoryTypeByManifestBlueId"
+        },
+        {
+          "test": "blue.coordination.processor.SequentialWorkflowExecutionTest#shouldCollectStepResults"
+        },
+        {
+          "test": "blue.coordination.processor.SequentialWorkflowExecutionTest#shouldDecrementCounterWithCompute"
+        },
+        {
+          "test": "blue.coordination.processor.SequentialWorkflowExecutionTest#shouldDeriveAndMatchOperationRequestForWorkflowOperation"
+        },
+        {
+          "test": "blue.coordination.processor.SequentialWorkflowExecutionTest#shouldEmitChatMessageFromFullCounterWorkflow"
+        },
+        {
+          "test": "blue.coordination.processor.SequentialWorkflowExecutionTest#shouldEmitEventFromTriggerEventStep"
+        },
+        {
+          "test": "blue.coordination.processor.SequentialWorkflowExecutionTest#shouldExecuteNamedOperationRequestHandlerAndWorkflowStep"
+        },
+        {
+          "test": "blue.coordination.processor.SequentialWorkflowExecutionTest#shouldExecuteUpdateDocumentInDirectWorkflow"
+        },
+        {
+          "test": "blue.coordination.processor.SequentialWorkflowExecutionTest#shouldExposePreviousStateToLaterComputeSteps"
+        },
+        {
+          "test": "blue.coordination.processor.SequentialWorkflowExecutionTest#shouldExposeUpdatedDocumentToComputeEventStep"
+        },
+        {
+          "test": "blue.coordination.processor.SequentialWorkflowExecutionTest#shouldFailExplicitlyForUnsupportedStep"
+        },
+        {
+          "test": "blue.coordination.processor.SequentialWorkflowExecutionTest#shouldInjectWorkflowRunnerFromProcessorOptions"
+        },
+        {
+          "test": "blue.coordination.processor.SequentialWorkflowExecutionTest#shouldNotCreateStepResultForUpdateDocument"
+        },
+        {
+          "test": "blue.coordination.processor.SequentialWorkflowExecutionTest#shouldNotRunDuplicateRequestTwice"
+        },
+        {
+          "test": "blue.coordination.processor.SequentialWorkflowExecutionTest#shouldNotRunForWrongOperation"
+        },
+        {
+          "test": "blue.coordination.processor.SequentialWorkflowExecutionTest#shouldNotRunForWrongRequestType"
+        },
+        {
+          "test": "blue.coordination.processor.SequentialWorkflowExecutionTest#shouldPassThroughLiteralUpdateValues"
+        },
+        {
+          "test": "blue.coordination.processor.SequentialWorkflowExecutionTest#shouldPreserveNullStepResult"
+        },
+        {
+          "test": "blue.coordination.processor.SequentialWorkflowExecutionTest#shouldResolvePatchPathAgainstEmbeddedScope"
+        },
+        {
+          "test": "blue.coordination.processor.SequentialWorkflowExecutionTest#shouldReuseExactWorkflowPlanAndReplanChangedContract"
+        },
+        {
+          "test": "blue.coordination.processor.SequentialWorkflowExecutionTest#shouldRunNewerRequestAfterPreviousRequest"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelBindingMatchingTest#shouldEnsureThatAdditionalActorFieldsDoNotReject"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelBindingMatchingTest#shouldEnsureThatAdditionalTimelineFieldsDoNotReject"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelBindingMatchingTest#shouldEnsureThatAllTimelinesDelegatesCorrectedActorMatch"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelBindingMatchingTest#shouldEnsureThatCompositeDelegatesCorrectedActorMatch"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelBindingMatchingTest#shouldEnsureThatDifferentActorRejects"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelBindingMatchingTest#shouldEnsureThatDifferentTimelineRejects"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelBindingMatchingTest#shouldEnsureThatMatchingTimelineAndActorAccepts"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelBindingMatchingTest#shouldEnsureThatMissingConfiguredBindingRejects"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelBindingMatchingTest#shouldEnsureThatMissingFixedActorFieldRejects"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelBindingMatchingTest#shouldEnsureThatMissingFixedTimelineFieldRejects"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelBindingMatchingTest#shouldEnsureThatMissingMatchingInputsReject"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelBindingMatchingTest#shouldEnsureThatMissingRequiredEntryBindingRejects"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldAcceptFixedTimelineEntryWithoutInventedSequence"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldEnsureThatCompletedAndMinimalMaterializedBindingsAreEqual"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldEnsureThatDecimalTimestampRejectsWithoutTruncation"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldEnsureThatExactEventReplayDoesNotRunHandlersAgain"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldEnsureThatFirstValidTimestampIsAccepted"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldEnsureThatHigherTimestampAcceptsWithGaps"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldEnsureThatInvalidTimelineEntryReferenceFailsDeterministically"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldEnsureThatInvalidTimestampRejectsWithoutCheckpoint"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldEnsureThatLowerTimestampRejectsWithoutEffectsOrCheckpointMutation"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldEnsureThatMalformedPreviousCheckpointFailsClosedWithoutEffectsOrMutation"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldEnsureThatMatchingTimelineAndActorAccept"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldEnsureThatMissingActorRejectsWithoutCheckpoint"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldEnsureThatMissingMessageRejectsWithoutCheckpoint"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldEnsureThatMissingTimelineRejectsWithoutCheckpoint"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldEnsureThatMissingTimestampRejectsWithoutCheckpoint"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldEnsureThatOptionalOnBehalfOfDoesNotExpandCheckpointSubject"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldEnsureThatOptionalSourceDoesNotExpandCheckpointSubject"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldEnsureThatPureReferenceEqualsEquivalentMaterializedBinding"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldEnsureThatRecognizedTimelineEntriesUseTheConservativePreselectionKey"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldEnsureThatSameActorDifferentTimelineRejectsWithoutCheckpoint"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldEnsureThatSameTimelineDifferentActorRejectsWithoutCheckpoint"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldEnsureThatSameTimelineReferenceAndMaterializedFormsAcceptTogether"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldEnsureThatSameTypeDifferentContentDoesNotEqual"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldEnsureThatTimestampBeyondLongRangeRemainsExact"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldEnsureThatUnrelatedTypedLookalikeRejectsWithoutCheckpoint"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldEnsureThatUntypedTimelineLookalikeRejectsWithoutCheckpoint"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineChannelProcessorTest#shouldRejectDistinctEntryAtEqualTimestampWithoutCheckpointMutation"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineProviderSupportFinalSemanticsTest#shouldEnsureThatLegacyFilterValidatesOnlyExactImmutableTimelineHeaders"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineSubscriptionProjectionTest#shouldBoundMyosSubtypeProjectionToNineUniqueKeys"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineSubscriptionProjectionTest#shouldChargeExactlyTwoHeaderReadsForTimelineEntry"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineSubscriptionProjectionTest#shouldChargeOnlyTimelineComparisonWhenMismatchShortCircuits"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineSubscriptionProjectionTest#shouldChargeTimelineAndActorComparisonsForAcceptedEntry"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineSubscriptionProjectionTest#shouldFailClosedWhenVerifiedTimelineHeaderEvidenceIsInvalid"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineSubscriptionProjectionTest#shouldFailClosedWhenVerifiedTimelineHeaderEvidenceIsUnavailable"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineSubscriptionProjectionTest#shouldIntersectKeysWheneverFinalAcceptanceSucceeds"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineSubscriptionProjectionTest#shouldNotChargeHeaderReadsForNonTimelineEntryAtZeroGasLimit"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineSubscriptionProjectionTest#shouldPreserveProjectionAcrossColdAndWarmReferenceMaterialization"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineSubscriptionProjectionTest#shouldProduceIdenticalKeysForInlineAndReferenceHeaders"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineSubscriptionProjectionTest#shouldProjectValidUnlistedSubtypesWithoutClosedTypeLists"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineSubscriptionProjectionTest#shouldProjectVerifiedPartialTimelineEntryHeaderLikeInlineEvent"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineSubscriptionProjectionTest#shouldRecognizeRegisteredMyosSubtypeMembership"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineSubscriptionProjectionTest#shouldReturnNoKeysForMalformedTimelineEntryHeaders"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineSubscriptionProjectionTest#shouldSelectOneChannelFromLargeSameScopeTimelineCatalog"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineSubscriptionProjectionTest#shouldSelectOnlyEventsWithTheSameTimelineAndActor"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineSubtypeAggregateTest#shouldIncludeGeneratedMyosMembersInAllTimelinesAndExcludeUnrelatedChannels"
+        },
+        {
+          "test": "blue.coordination.processor.TimelineSubtypeAggregateTest#shouldIncludeGeneratedMyosMembersInCompositeAndCoalesceTheirDelivery"
+        },
+        {
+          "test": "blue.coordination.processor.TriggerEventStepExecutorTest#shouldAllowLifecycleProducerToTriggerConsumer"
+        },
+        {
+          "test": "blue.coordination.processor.TriggerEventStepExecutorTest#shouldDeliverEmittedEventToRuntimeTriggeredChannel"
+        },
+        {
+          "test": "blue.coordination.processor.TriggerEventStepExecutorTest#shouldEmitDollarPrefixedLiteralPayloadExactly"
+        },
+        {
+          "test": "blue.coordination.processor.TriggerEventStepExecutorTest#shouldEmitStaticEventPayload"
+        },
+        {
+          "test": "blue.coordination.processor.TriggerEventStepExecutorTest#shouldFailClearlyWhenEventIsMissing"
+        },
+        {
+          "test": "blue.coordination.processor.TriggerEventStepExecutorTest#shouldNotMutateDocumentStateWhenTriggeringEvent"
+        },
+        {
+          "test": "blue.coordination.processor.TriggerEventStepExecutorTest#shouldPreserveEmptyListEventAsExactListPayload"
+        },
+        {
+          "test": "blue.coordination.processor.TriggerEventStepExecutorTest#shouldPreserveNamedOnlyEventAsExactIdentityBearingPayload"
+        },
+        {
+          "test": "blue.coordination.processor.TriggerEventStepExecutorTest#shouldPreserveNonStringValuesInStaticPayload"
+        },
+        {
+          "test": "blue.coordination.processor.TriggerEventStepExecutorTest#shouldRejectCanonicalEmptyObjectEventAsOmittedPayload"
+        },
+        {
+          "test": "blue.coordination.processor.compute.BexCounterPersistenceRoundTripTest#shouldReloadCanonicalDocumentAcrossOneHundredBexIncrements"
+        },
+        {
+          "test": "blue.coordination.processor.compute.BexCounterResourceWorkflowTest#shouldProcessTimelineIncrementOperationWithBexCounterWorkflow"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeFrozenPatchHandoffIntegrationTest#shouldKeepEffectOrderForIndependentlyReturnedEffects"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeFrozenPatchHandoffIntegrationTest#shouldRetainCanonicalFrozenBindingWithoutNodeMaterialization"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeProgramPlanIntegrationTest#shouldBuildSeparatePlanForChangedStepContent"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeProgramPlanIntegrationTest#shouldKeepInvalidDefinitionProviderEvidenceOutOfRuntimeFatal"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeProgramPlanIntegrationTest#shouldMaterializePureBlueIdDefinitionThroughSelectedWorkflowProvider"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeProgramPlanIntegrationTest#shouldNormalizeReferencedDefinitionOnlyOnCacheMiss"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeProgramPlanIntegrationTest#shouldNotCacheMalformedProgramPlan"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeProgramPlanIntegrationTest#shouldNotCachePlanAfterFatalComputeResult"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeProgramPlanIntegrationTest#shouldReuseFrozenPlanForUnchangedInlineCompute"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeProgramPlanIntegrationTest#shouldUseExactDefinitionIdentityAcrossDocuments"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldBufferNoEffectsWhenPatchPreviewFails"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldBufferValidEffectsOnceInSourceOrder"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldChargeBexEvaluationGasForInvalidResult"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldContinueWorkflowWhenTerminationIsAbsent"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldContinueWorkflowWhenTerminationIsNull"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldIgnoreMalformedInactiveEventsWhenEmissionIsDisabled"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldNotIncrementTerminationCountersForOrdinaryCompute"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldNotRequestTerminationForDomainMessageAlone"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldNotRequestTerminationForLifecycleEventAlone"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldOmitEmptyTerminationReason"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldPassApplicationCauseAndTextReasonUnchanged"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldPreferReturnedEffectsOverAccumulators"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldPreserveWhitespaceTerminationReason"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldPreventChangesetAndEventsWhenTerminationIsInvalid"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldPreventEffectsWhenActiveEventsAreInvalid"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldPreventEventsAndTerminationWhenChangesetIsInvalid"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldPreventEveryEffectForExplicitNullEventEntry"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldPreventEveryEffectForInvalidChangesetEntryFields"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldRejectEmptyTerminationWithoutCause"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldRejectMissingEmptyAndNonTextCauses"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldRejectNonTextReasonsWithValidCause"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldRejectScalarAndListTerminationResults"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldRejectUnknownTerminationFields"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldTerminateAndStopWhenReturnResultIsFalse"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldTreatMissingApplicationReasonAsOptional"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldTreatNullTerminationReasonAsAbsent"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeTerminationWorkflowTest#shouldUseAccumulatedEffectsAsFallbackWithReturnedTermination"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldApplyChangesetWhenReturnResultIsFalse"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldApplyComputeChangesetAndRetainStepData"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldEmitEventWithoutMutatingDocumentForInlineCompute"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldEmitEventsWhenReturnResultIsFalse"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldEmitExplicitAndAccumulatedResultEvents"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldEmitScalarEventEntriesAsBlueNodes"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldEscapeJsonPointerSegmentsInDefinitionReference"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldEvaluateNullYamlEventPlaceholderAsBexEmptyPredicate"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldExecuteInlineObjectComputeDefinition"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldExecuteLocalFunctionsWithoutDefinition"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldExportScalarResultFromInlineExpression"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldExportStepResultWhenEventEmissionIsDisabled"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldExportUnnamedComputeStepByIndexKey"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldExposeInlineComputeResultToLaterSteps"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldFailClosedForInvalidChangesetField"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldFailClosedForInvalidEventsField"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldFailClosedForMissingDefinition"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldFailClosedForMissingEntry"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldFailClosedForScalarChangesetEntries"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldNotExecuteComputeDefinitionMarkerByItself"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldOverrideDefinitionConstantsWithStepConstants"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldPreserveAuthoredCurrentContractChannelBinding"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldProvideFrozenStepAndContractNodesToExecutors"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldReadEventDocumentAndCurrentContract"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldReportDefaultBexGasExhaustionAsGasLimitExceeded"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldReportExplicitBexGasExhaustionAsGasLimitExceeded"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldResolveComputeDefinitionByAbsolutePointer"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldResolveComputeDefinitionBySiblingContractKey"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldRunComputeWithSufficientDefaultGasLimit"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldRunLiteralTriggerAndUpdateDocumentSteps"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldRunPureComputeWorkflowWithBexOnlyRunner"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldSuppressAccumulatedChangesWithExplicitEmptyChangeset"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldSuppressComputedEventsWhenEmissionIsDisabled"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldSuppressStepResultWhenReturnResultIsFalse"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ComputeWorkflowExecutionTest#shouldUseBexEngineCompileCacheAcrossRuns"
+        },
+        {
+          "test": "blue.coordination.processor.compute.CustomerPaynoteLatestBexFixtureTest#shouldProcessSnapshotEventWithLatestCustomerPaynoteBexDocument"
+        },
+        {
+          "test": "blue.coordination.processor.compute.DynamicEmbeddedParticipantsWorkflowTest#shouldCountChatsAfterAliceAddsEmbeddedParticipants"
+        },
+        {
+          "test": "blue.coordination.processor.compute.Ed25519IntrinsicWorkflowTest#shouldExecuteThresholdActionAfterTwoValidEd25519Approvals"
+        },
+        {
+          "test": "blue.coordination.processor.compute.Ed25519IntrinsicWorkflowTest#shouldGrantHotelAccessForValidEd25519SignedRequest"
+        },
+        {
+          "test": "blue.coordination.processor.compute.LanguageAdoptionMetricsArtifactTest#shouldWriteJsonAndCsvForRequiredRepresentativeScenarios"
+        },
+        {
+          "test": "blue.coordination.processor.compute.MandateDeclaredTypeEventMatchingTest#shouldInitializeOnceAndSelectOnlyTheActivationHandler"
+        },
+        {
+          "test": "blue.coordination.processor.compute.MandateDeclaredTypeEventMatchingTest#shouldNotReselectInitializationAfterFatalLifecycleDelivery"
+        },
+        {
+          "test": "blue.coordination.processor.compute.MandateProcessingEventBindingTest#shouldReturnUndefinedForNonIntegerMandateTimestamp"
+        },
+        {
+          "test": "blue.coordination.processor.compute.MandateProcessingEventBindingTest#shouldReturnUndefinedWhenMandateTimestampIsMissing"
+        },
+        {
+          "test": "blue.coordination.processor.compute.MandateProcessingEventBindingTest#shouldUseRootProcessingEventTimestampForMandateConfirmation"
+        },
+        {
+          "test": "blue.coordination.processor.compute.MandateTerminationWorkflowTest#shouldApplyGeneratedMandateTerminationExactlyOnce"
+        },
+        {
+          "test": "blue.coordination.processor.compute.MandateTerminationWorkflowTest#shouldIgnoreDuplicateGeneratedMandateTermination"
+        },
+        {
+          "test": "blue.coordination.processor.compute.MandateTerminationWorkflowTest#shouldTerminateFailedMandateWithoutReplacingFailureState"
+        },
+        {
+          "test": "blue.coordination.processor.compute.OfferPaynoteEmbeddedOrdersWorkflowTest#shouldAuthorizeDeliveredPackagePaynote"
+        },
+        {
+          "test": "blue.coordination.processor.compute.OfferPaynoteEmbeddedOrdersWorkflowTest#shouldDeliverEmbeddedPaynoteAndRequestAuthorization"
+        },
+        {
+          "test": "blue.coordination.processor.compute.OfferPaynoteEmbeddedOrdersWorkflowTest#shouldEmbedRestaurantAndHotelOrdersAfterAuthorization"
+        },
+        {
+          "test": "blue.coordination.processor.compute.OfferPaynoteEmbeddedOrdersWorkflowTest#shouldInitializeExpectedOfferWithoutRootTemplates"
+        },
+        {
+          "test": "blue.coordination.processor.compute.OfferPaynoteEmbeddedOrdersWorkflowTest#shouldMakePackageReadyAfterCapturingConfirmedComponentOrders"
+        },
+        {
+          "test": "blue.coordination.processor.compute.OfferPaynoteEmbeddedOrdersWorkflowTest#shouldPreserveSnapshotOptimizationsAcrossPackageLifecycle"
+        },
+        {
+          "test": "blue.coordination.processor.compute.OfferPaynoteEmbeddedOrdersWorkflowTest#shouldRejectCaptureBeforeBothComponentOrdersConfirm"
+        },
+        {
+          "test": "blue.coordination.processor.compute.OfferPaynoteEmbeddedOrdersWorkflowTest#shouldRejectComponentOrderBeforePaynoteAuthorization"
+        },
+        {
+          "test": "blue.coordination.processor.compute.OfferPaynoteEmbeddedOrdersWorkflowTest#shouldRejectHotelDocumentForRestaurantOrder"
+        },
+        {
+          "test": "blue.coordination.processor.compute.OfferPaynoteEmbeddedOrdersWorkflowTest#shouldRejectPaynoteWithWrongAmount"
+        },
+        {
+          "test": "blue.coordination.processor.compute.OfferPaynoteEmbeddedOrdersWorkflowTest#shouldRequestCaptureOnlyAfterBothComponentOrdersConfirm"
+        },
+        {
+          "test": "blue.coordination.processor.compute.PaynoteReducedDefinitionWorkflowTest#initializationError"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldAvoidSnapshotsForWideAndDeepUnusedEvents"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldBuildOneSnapshotForManyReadsInOneRun"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldBuildOneSnapshotOnFirstBindingRead"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldDistinguishTriggeredEventFromProcessingEvent"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldFanOutLanguageObservationsWithoutMixingWorkflowMetrics"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldKeepOriginalProcessingEventAcrossMultipleHops"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldNotChargeMoreGasForProcessingEventBinding"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldNotLeakProcessingEventAcrossSeparateRuns"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldObserveStableIdentityAcrossWorkflowAndBexBoundaries"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldPreservePureReferenceProcessingEventIdentity"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldReadCompleteProcessingEventFromDirectCompute"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldReadProcessingEventDuringImplicitInitialization"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldReadRootProcessingEventFromBridgeHandler"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldReadRootProcessingEventFromEmbeddedScope"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldReadUndefinedDuringExplicitInitialization"
+        },
+        {
+          "test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldSupportNonTimelineScalarListAndObjectEvents"
+        },
+        {
+          "test": "blue.coordination.processor.compute.RepresentativeWorkflowLifecycleSmokeTest#shouldPlateauAndReleaseStateAcrossRepresentativeWorkflowRuns"
+        },
+        {
+          "test": "blue.coordination.processor.compute.TerminateProcessingWorkflowTest#shouldAddNoBexCompilation"
+        },
+        {
+          "test": "blue.coordination.processor.compute.TerminateProcessingWorkflowTest#shouldCountDeclarativeTerminationStep"
+        },
+        {
+          "test": "blue.coordination.processor.compute.TerminateProcessingWorkflowTest#shouldDeriveCauseWhenReasonIsOmitted"
+        },
+        {
+          "test": "blue.coordination.processor.compute.TerminateProcessingWorkflowTest#shouldExportNoStepValue"
+        },
+        {
+          "test": "blue.coordination.processor.compute.TerminateProcessingWorkflowTest#shouldKeepTerminationLifecycleInternalAfterPrecedingEvents"
+        },
+        {
+          "test": "blue.coordination.processor.compute.TerminateProcessingWorkflowTest#shouldNameUnsupportedStepWithoutTerminateExecutor"
+        },
+        {
+          "test": "blue.coordination.processor.compute.TerminateProcessingWorkflowTest#shouldNotCountDeclarativeTerminationAsComputeTermination"
+        },
+        {
+          "test": "blue.coordination.processor.compute.TerminateProcessingWorkflowTest#shouldNotReplaceFirstCoreReasonOnDuplicateTermination"
+        },
+        {
+          "test": "blue.coordination.processor.compute.TerminateProcessingWorkflowTest#shouldOmitEmptyReason"
+        },
+        {
+          "test": "blue.coordination.processor.compute.TerminateProcessingWorkflowTest#shouldPreserveDocumentChangesBeforeTermination"
+        },
+        {
+          "test": "blue.coordination.processor.compute.TerminateProcessingWorkflowTest#shouldPreserveEventsBeforeTermination"
+        },
+        {
+          "test": "blue.coordination.processor.compute.TerminateProcessingWorkflowTest#shouldPreserveStaticReason"
+        },
+        {
+          "test": "blue.coordination.processor.compute.TerminateProcessingWorkflowTest#shouldPreserveWhitespaceReason"
+        },
+        {
+          "test": "blue.coordination.processor.compute.TerminateProcessingWorkflowTest#shouldProduceEquivalentRootEffectsForComputeAndDeclarativeTermination"
+        },
+        {
+          "test": "blue.coordination.processor.compute.TerminateProcessingWorkflowTest#shouldRegisterInConfiguredWorkflowRunner"
+        },
+        {
+          "test": "blue.coordination.processor.compute.TerminateProcessingWorkflowTest#shouldRegisterInDefaultWorkflowRunner"
+        },
+        {
+          "test": "blue.coordination.processor.compute.TerminateProcessingWorkflowTest#shouldRejectAuthoredCause"
+        },
+        {
+          "test": "blue.coordination.processor.compute.TerminateProcessingWorkflowTest#shouldRejectBexShapedReasonAtExecutionBoundary"
+        },
+        {
+          "test": "blue.coordination.processor.compute.TerminateProcessingWorkflowTest#shouldRejectNonTextReason"
+        },
+        {
+          "test": "blue.coordination.processor.compute.TerminateProcessingWorkflowTest#shouldReturnTerminalStepResult"
+        },
+        {
+          "test": "blue.coordination.processor.compute.TerminateProcessingWorkflowTest#shouldRollBackSourceCheckpointWhenDeclarativeTerminationCutsOffInvocation"
+        },
+        {
+          "test": "blue.coordination.processor.compute.TerminateProcessingWorkflowTest#shouldSkipEventsAfterTermination"
+        },
+        {
+          "test": "blue.coordination.processor.compute.TerminateProcessingWorkflowTest#shouldStopExecutingLaterWorkflowSteps"
+        },
+        {
+          "test": "blue.coordination.processor.compute.UpdateDocumentBatchApplyIntegrationTest#shouldPreserveDollarPrefixedLiteralValuesInUpdateDocument"
+        },
+        {
+          "test": "blue.coordination.processor.compute.UpdateDocumentBatchApplyIntegrationTest#shouldUseBatchApplyAndPreserveComputePatchOrder"
+        },
+        {
+          "test": "blue.coordination.processor.compute.UpdateDocumentBatchApplyIntegrationTest#shouldUseBatchApplyForLiteralUpdateDocumentChangesets"
+        },
+        {
+          "test": "blue.coordination.processor.compute.UpdateDocumentBatchApplyIntegrationTest#shouldUseBatchApplyForPureBexComputeEvent"
+        },
+        {
+          "test": "blue.coordination.processor.mandate.DocumentResponderMandateEligibilityTest#shouldAuthorizeVerifiedDocumentResponderMandateSubtype"
+        },
+        {
+          "test": "blue.coordination.processor.mandate.OperationMandateEligibilityTest#shouldAuthorizeFixtureShapedOperationWithActiveExactMandate"
+        },
+        {
+          "test": "blue.coordination.processor.mandate.OperationMandateEligibilityTest#shouldRejectMandateActivatedAfterOriginalEventTime"
+        },
+        {
+          "test": "blue.coordination.processor.workflow.FrozenComputeDifferentialTest#shouldMatchLegacyMutableHandoffForComputeEffectsAndMetrics"
+        },
+        {
+          "test": "blue.coordination.processor.workflow.FrozenUpdateDocumentDifferentialTest#shouldKeepPriorChangesAndSkipLaterPatchesAfterDeclarativeTermination"
+        },
+        {
+          "test": "blue.coordination.processor.workflow.FrozenUpdateDocumentDifferentialTest#shouldMatchLegacyFailureAndCommittedPrefixWhenPatchNFails"
+        },
+        {
+          "test": "blue.coordination.processor.workflow.FrozenUpdateDocumentDifferentialTest#shouldMatchLegacyLaneForOrderedStructuralTypedReferenceAndReentrantUpdates"
+        },
+        {
+          "test": "blue.coordination.processor.workflow.FrozenUpdateDocumentDifferentialTest#shouldMatchLegacyPointerResolutionInsideEmbeddedScope"
+        }
       ]
     },
     {
-      "id": "language-handler-match-reference-materialization",
-      "owner": "blue-language-java",
-      "status": "open",
-      "firstObservedAgainst": {
-        "commit": "9706b604d54d59e843f2d0540c1a892470d1aa5c",
-        "version": "3.1.0-rc.18-SNAPSHOT"
-      },
-      "category": "handler-match-materialization",
-      "fingerprintPrefix": "Language handler-match reference materialization defect:",
-      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
-      "notes": "Fragmented exact scalar evidence is changed while the handler matcher materializes an Operation Request field.",
-      "probes": [
-        {"test": "blue.coordination.processor.OperationRequestLogicalRoutingTest#shouldEnsureThatFragmentedWhitespaceOperationKeepsOrdinarySourceDelivery"}
-      ]
-    },
-    {
-      "id": "language-hosted-bex-semantic-output-provenance",
-      "owner": "blue-language-java",
-      "status": "open",
-      "firstObservedAgainst": {
-        "commit": "9706b604d54d59e843f2d0540c1a892470d1aa5c",
-        "version": "3.1.0-rc.18-SNAPSHOT"
-      },
-      "category": "semantic-output-provenance",
-      "fingerprintPrefix": "Language hosted BEX semantic-output provenance defect:",
-      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
-      "notes": "Hosted BEX output admitted at the semantic boundary is rejected when it re-enters Language's runtime event/update path.",
-      "probes": [
-        {"test": "blue.coordination.processor.RuntimeChannelsTest#shouldEnsureThatNestedUpdatesPropagateToParentWatchers"},
-        {"test": "blue.coordination.processor.RuntimeChannelsTest#shouldEnsureThatRuntimeDocumentUpdateChannelReceivesUpdateEvents"},
-        {"test": "blue.coordination.processor.SequentialWorkflowExecutionTest#shouldExposeUpdatedDocumentToComputeEventStep"},
-        {"test": "blue.coordination.processor.SequentialWorkflowExecutionTest#shouldEmitChatMessageFromFullCounterWorkflow"},
-        {"test": "blue.coordination.processor.compute.LanguageAdoptionMetricsArtifactTest#shouldWriteJsonAndCsvForRequiredRepresentativeScenarios"}
-      ]
-    },
-    {
-      "id": "language-embedded-node-channel-bridge",
-      "owner": "blue-language-java",
-      "status": "open",
-      "firstObservedAgainst": {
-        "commit": "9706b604d54d59e843f2d0540c1a892470d1aa5c",
-        "version": "3.1.0-rc.18-SNAPSHOT"
-      },
-      "category": "embedded-event-bridge",
-      "fingerprintPrefix": "Language Embedded Node Channel bridge defect:",
-      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
-      "notes": "A configured Embedded Node Channel does not bridge the selected child emission to its Root observer.",
-      "probes": [
-        {"test": "blue.coordination.processor.RuntimeChannelsTest#shouldEnsureThatEmbeddedNodeChannelBridgesConfiguredChildEmissions"},
-        {"test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldReadRootProcessingEventFromBridgeHandler"}
-      ]
-    },
-    {
-      "id": "language-invalid-execution-evidence-classification",
-      "owner": "blue-language-java",
-      "status": "open",
-      "firstObservedAgainst": {
-        "commit": "9706b604d54d59e843f2d0540c1a892470d1aa5c",
-        "version": "3.1.0-rc.18-SNAPSHOT"
-      },
-      "category": "failure-classification",
-      "fingerprintPrefix": "Language invalid-execution-evidence classification defect:",
-      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
-      "notes": "Forged selected-definition evidence reaches runtime-fatal instead of the invalid-processing-document boundary.",
-      "probes": [
-        {"test": "blue.coordination.processor.compute.ComputeProgramPlanIntegrationTest#shouldKeepInvalidDefinitionProviderEvidenceOutOfRuntimeFatal"}
-      ]
-    },
-    {
-      "id": "language-customer-paynote-dictionary-generalization",
-      "owner": "blue-language-java",
-      "status": "open",
-      "firstObservedAgainst": {
-        "commit": "9706b604d54d59e843f2d0540c1a892470d1aa5c",
-        "version": "3.1.0-rc.18-SNAPSHOT"
-      },
-      "category": "type-generalization",
-      "fingerprintPrefix": "Language customer PayNote Dictionary generalization defect:",
-      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
-      "notes": "The large exact customer fixture is rejected while Language generalizes a keyType/valueType-bearing Dictionary contribution.",
-      "probes": [
-        {"test": "blue.coordination.processor.compute.CustomerPaynoteLatestBexFixtureTest#shouldProcessSnapshotEventWithLatestCustomerPaynoteBexDocument"}
-      ]
-    },
-    {
-      "id": "bex-admitted-exact-value-materialization",
-      "owner": "blue-bex-java",
-      "status": "open",
-      "firstObservedAgainst": {
-        "commit": "395c484111f8c4e9e0e98d2db7f1c5b0777bd5a8",
-        "version": "1.1.0-rc.2-SNAPSHOT"
-      },
-      "category": "exact-value-materialization",
-      "fingerprintPrefix": "BEX admitted-exact canonical materialization defect:",
-      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
-      "notes": "An already admitted exact BEX value changes identity, or is unavailable, when the selected immutable patch body is materialized.",
-      "probes": [
-        {"test": "blue.coordination.processor.compute.DynamicEmbeddedParticipantsWorkflowTest#shouldCountChatsAfterAliceAddsEmbeddedParticipants"},
-        {"test": "blue.coordination.processor.workflow.FrozenUpdateDocumentDifferentialTest#shouldMatchLegacyLaneForOrderedStructuralTypedReferenceAndReentrantUpdates"}
-      ]
-    },
-    {
-      "id": "language-process-embedded-routing",
-      "owner": "blue-language-java",
-      "status": "open",
-      "firstObservedAgainst": {
-        "commit": "9706b604d54d59e843f2d0540c1a892470d1aa5c",
-        "version": "3.1.0-rc.18-SNAPSHOT"
-      },
-      "category": "embedded-routing",
-      "fingerprintPrefix": "Language Process Embedded routing defect:",
-      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
-      "notes": "Language does not retain the fixed Process Embedded route required for the nested PayNote lifecycle.",
-      "probes": [
-        {"test": "blue.coordination.processor.compute.OfferPaynoteEmbeddedOrdersWorkflowTest#shouldEmbedRestaurantAndHotelOrdersAfterAuthorization"},
-        {"test": "blue.coordination.processor.compute.OfferPaynoteEmbeddedOrdersWorkflowTest#shouldMakePackageReadyAfterCapturingConfirmedComponentOrders"},
-        {"test": "blue.coordination.processor.compute.OfferPaynoteEmbeddedOrdersWorkflowTest#shouldRequestCaptureOnlyAfterBothComponentOrdersConfirm"},
-        {"test": "blue.coordination.processor.compute.OfferPaynoteEmbeddedOrdersWorkflowTest#shouldRejectCaptureBeforeBothComponentOrdersConfirm"},
-        {"test": "blue.coordination.processor.compute.OfferPaynoteEmbeddedOrdersWorkflowTest#shouldRejectComponentOrderBeforePaynoteAuthorization"},
-        {"test": "blue.coordination.processor.compute.OfferPaynoteEmbeddedOrdersWorkflowTest#shouldAuthorizeDeliveredPackagePaynote"},
-        {"test": "blue.coordination.processor.compute.OfferPaynoteEmbeddedOrdersWorkflowTest#shouldPreserveSnapshotOptimizationsAcrossPackageLifecycle"}
-      ]
-    },
-    {
-      "id": "language-paynote-reduced-handler-selection",
-      "owner": "blue-language-java",
-      "status": "open",
-      "firstObservedAgainst": {
-        "commit": "9706b604d54d59e843f2d0540c1a892470d1aa5c",
-        "version": "3.1.0-rc.18-SNAPSHOT"
-      },
-      "category": "handler-selection",
-      "fingerprintPrefix": "Language PayNote reduced-handler selection defect:",
-      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
-      "notes": "The reduced shared-definition PayNote handlers receive no selected delivery, leaving participant requests unchanged and producing no patch batch.",
-      "probes": [
-        {"test": "blue.coordination.processor.compute.PaynoteReducedDefinitionWorkflowTest#shouldMeasureColdAndWarmEventProcessing"},
-        {"test": "blue.coordination.processor.compute.PaynoteReducedDefinitionWorkflowTest#shouldProcessHotelParticipantOperationWithSharedDefinition"},
-        {"test": "blue.coordination.processor.compute.PaynoteReducedDefinitionWorkflowTest#shouldProcessRestaurantParticipantOperationWithSharedDefinition"},
-        {"test": "blue.coordination.processor.compute.PaynoteReducedDefinitionWorkflowTest#shouldMeasureEventProcessingAfterWarmup"}
-      ]
-    },
-    {
-      "id": "language-implicit-initialization-evidence-revalidation",
-      "owner": "blue-language-java",
-      "status": "open",
-      "firstObservedAgainst": {
-        "commit": "9706b604d54d59e843f2d0540c1a892470d1aa5c",
-        "version": "3.1.0-rc.18-SNAPSHOT"
-      },
-      "category": "execution-evidence-revalidation",
-      "fingerprintPrefix": "Language implicit-initialization evidence revalidation defect:",
-      "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
-      "notes": "Language rejects exact compatibility evidence after implicit initialization changes the Root, before Coordination can expose the original processing event.",
-      "probes": [
-        {"test": "blue.coordination.processor.compute.MandateProcessingEventBindingTest#shouldReturnUndefinedForNonIntegerMandateTimestamp"},
-        {"test": "blue.coordination.processor.compute.MandateProcessingEventBindingTest#shouldReturnUndefinedWhenMandateTimestampIsMissing"},
-        {"test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldPreservePureReferenceProcessingEventIdentity"},
-        {"test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldAvoidSnapshotsForWideAndDeepUnusedEvents"},
-        {"test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldReadProcessingEventDuringImplicitInitialization"},
-        {"test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldBuildOneSnapshotOnFirstBindingRead"},
-        {"test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldSupportNonTimelineScalarListAndObjectEvents"},
-        {"test": "blue.coordination.processor.compute.ProcessingEventBindingTest#shouldPreserveIndependentSinkAndFanOutLanguageMetrics"}
-      ]
-    },
-    {
-      "id": "fixed-repository-mandate-subtype-evidence",
+      "id": "repository-historical-registry-blueid-mismatch",
       "owner": "blue-repository-java",
       "status": "open",
       "firstObservedAgainst": {
         "commit": "63be6b7d8d2752b5a8c90f38e672859e9b3949a1",
         "version": "3.0.0-rc.17-SNAPSHOT"
       },
-      "category": "exact-mandate-evidence",
-      "fingerprintPrefix": "Fixed Repository Mandate subtype evidence defect:",
+      "category": "immutable-dependency-evidence-incompatibility",
+      "failureType": "java.lang.IllegalArgumentException",
+      "logicalMessagePrefix": "Historical registry source src/main/resources/registry/",
       "reproductionCommand": "./gradlew coordinationExternalBlockerProbeTest --offline --no-daemon -PtestJfr=false",
-      "notes": "The immutable fixed subtype bodies fail exact provider verification before generic Mandate eligibility can evaluate them.",
+      "notes": "The locked historical Repository registry content no longer calculates to its requested BlueIds under the current Language environment.",
       "probes": [
-        {"test": "blue.coordination.processor.mandate.DocumentResponderMandateEligibilityTest#shouldAuthorizeVerifiedDocumentResponderMandateSubtype"},
-        {"test": "blue.coordination.processor.mandate.OperationMandateEligibilityTest#shouldRejectDifferentFixedMandateType"},
-        {"test": "blue.coordination.processor.mandate.OperationMandateEligibilityTest#shouldAuthorizeVerifiedOperationMandateSubtype"}
+        {
+          "test": "blue.coordination.processor.CoordinationDocumentSplitterDeepLocalityTest#Emb1"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationDocumentSplitterDeepLocalityTest#Emb2"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationDocumentSplitterDeepLocalityTest#Emb3"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationDocumentSplitterDeepLocalityTest#Root"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationDocumentSplitterDeepLocalityTest#Root + Emb1 + Emb2 + Emb3"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationDocumentSplitterDeepLocalityTest#Root + Emb3"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationDocumentSplitterDeepLocalityTest#shouldDemandNoChildOrSiblingRootForRootOnlySurface"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationDocumentSplitterDeepLocalityTest#shouldReconstructExactDeepRootFromCompleteFragmentInventory"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationDocumentSplitterLocalityTest#shouldDemandOnlySelectedSpineAndBodiesFromProvider"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationDocumentSplitterLocalityTest#shouldNotReadEmbeddedRootsForRootOnlyPreparation"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationDocumentSplitterLocalityTest#shouldReconstructExactGraphAndDeduplicateSharedBodies"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationDocumentSplitterTest#shouldClassifyEmbeddedCutsWithoutClassifyingUnrelatedSiblings"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationDocumentSplitterTest#shouldCutRegisteredBodiesAsCanonicalDirectFragments"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationDocumentSplitterTest#shouldDeduplicateIdenticalExecutableBodyContent"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationDocumentSplitterTest#shouldLeaveUnregisteredAndReferencedBodiesUnclaimed"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationDocumentSplitterTest#shouldPreparePureReferencesWithLazyVerifiedProvider"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationDocumentSplitterTest#shouldPreserveMissingAndInvalidFragmentProviderOutcomes"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationDocumentSplitterTest#shouldReconstructExactDocumentAndDefensivelyExposeFragments"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationDocumentSplitterTest#shouldRejectPreparedInputBoundToDifferentEventEvidence"
+        },
+        {
+          "test": "blue.coordination.processor.CoordinationDocumentSplitterTest#shouldServeInlineHeadersWithoutChangingCanonicalStoredFragments"
+        }
       ]
     }
   ]

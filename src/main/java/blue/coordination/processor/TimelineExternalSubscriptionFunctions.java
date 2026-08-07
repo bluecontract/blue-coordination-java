@@ -5,7 +5,6 @@ import blue.language.processor.ExternalChannelFunctionContext;
 import blue.language.processor.ExternalChannelSubscriptionFunctions;
 import blue.language.processor.GasChargeContext;
 import blue.repo.coordination.TimelineChannel;
-import blue.repo.coordination.TimelineEntry;
 
 import java.util.List;
 
@@ -22,14 +21,30 @@ final class TimelineExternalSubscriptionFunctions<T extends TimelineChannel>
 
     static final TimelineExternalSubscriptionFunctions<TimelineChannel>
             INSTANCE =
-            new TimelineExternalSubscriptionFunctions<TimelineChannel>();
+            new TimelineExternalSubscriptionFunctions<TimelineChannel>(
+                    CoordinationSemanticTypeIdentities.publishedDefaults());
 
     static final String TIMELINE_ENTRY_KEY =
             TimelineSubscriptionProjection.BROAD_KEY;
     static final String TIMELINE_ORDER_SUBJECT_VERSION =
             "blue.coordination/1.0/timeline-order-subject-v3";
 
-    private TimelineExternalSubscriptionFunctions() {
+    private final CoordinationSemanticTypeIdentities identities;
+
+    private TimelineExternalSubscriptionFunctions(
+            CoordinationSemanticTypeIdentities identities) {
+        this.identities = java.util.Objects.requireNonNull(
+                identities, "identities");
+    }
+
+    static TimelineExternalSubscriptionFunctions<TimelineChannel> with(
+            CoordinationSemanticTypeIdentities identities) {
+        if (identities == CoordinationSemanticTypeIdentities
+                .publishedDefaults()) {
+            return INSTANCE;
+        }
+        return new TimelineExternalSubscriptionFunctions<TimelineChannel>(
+                identities);
     }
 
     @SuppressWarnings("unchecked")
@@ -48,7 +63,8 @@ final class TimelineExternalSubscriptionFunctions<T extends TimelineChannel>
          * context-aware selective projection below.
          */
         TimelineSubscriptionProjection.channelKeys(
-                immutableContractSnapshot);
+                immutableContractSnapshot,
+                identities);
         return java.util.Collections.singletonList(
                 TimelineSubscriptionProjection.BROAD_KEY);
     }
@@ -58,13 +74,15 @@ final class TimelineExternalSubscriptionFunctions<T extends TimelineChannel>
             T immutableContractSnapshot,
             ExternalChannelFunctionContext context) {
         return TimelineSubscriptionProjection.channelKeys(
-                immutableContractSnapshot);
+                immutableContractSnapshot,
+                identities);
     }
 
     @Override
     public List<String> eventKeys(Node exactEvent) {
         CoordinationEventNodes.TimelineEntryView entry =
-                CoordinationEventNodes.timelineEntry(exactEvent);
+                CoordinationEventNodes.timelineEntry(
+                        exactEvent, identities);
         if (entry == null) {
             return java.util.Collections.emptyList();
         }
@@ -83,20 +101,23 @@ final class TimelineExternalSubscriptionFunctions<T extends TimelineChannel>
             ExternalChannelFunctionContext context) {
         return TimelineSubscriptionProjection.eventKeys(
                 exactEvent,
-                context);
+                context,
+                identities);
     }
 
     @Override
     public boolean accepts(T immutableContractSnapshot,
                            Node exactEvent) {
-        if (CoordinationEventNodes.timelineEntry(exactEvent)
+        if (CoordinationEventNodes.timelineEntry(
+                exactEvent, identities)
                 == null) {
             return false;
         }
         CoordinationEventNodes.TimelineEntryView entry =
-                CoordinationEventNodes.timelineEntry(exactEvent);
+                CoordinationEventNodes.timelineEntry(
+                        exactEvent, identities);
         return TimelineProviderSupport.matchesTimelineAndActor(
-                immutableContractSnapshot, entry);
+                immutableContractSnapshot, entry, identities);
     }
 
     @Override
@@ -106,7 +127,7 @@ final class TimelineExternalSubscriptionFunctions<T extends TimelineChannel>
             ExternalChannelFunctionContext context) {
         CoordinationEventNodes.TimelineEntryView entry =
                 CoordinationEventNodes.timelineEntry(
-                        exactEvent, context);
+                        exactEvent, context, identities);
         if (immutableContractSnapshot == null
                 || entry == null) {
             return false;
@@ -118,7 +139,8 @@ final class TimelineExternalSubscriptionFunctions<T extends TimelineChannel>
                 CoordinationEventNodes.matchesGeneratedBinding(
                 entry.timeline(),
                 immutableContractSnapshot.getTimeline(),
-                context);
+                context,
+                identities);
         if (!timelineMatches) {
             return false;
         }
@@ -128,7 +150,8 @@ final class TimelineExternalSubscriptionFunctions<T extends TimelineChannel>
         return CoordinationEventNodes.matchesGeneratedBinding(
                 entry.actor(),
                 immutableContractSnapshot.getActor(),
-                context);
+                context,
+                identities);
     }
 
     @Override
@@ -137,7 +160,7 @@ final class TimelineExternalSubscriptionFunctions<T extends TimelineChannel>
             Node exactEvent,
             ExternalChannelFunctionContext context) {
         return OperationRequestRoutingFunctions
-                .payload(exactEvent, context);
+                .payload(exactEvent, context, identities);
     }
 
     @Override
@@ -152,7 +175,8 @@ final class TimelineExternalSubscriptionFunctions<T extends TimelineChannel>
                             + "Timeline Entry");
         }
         return TimelineProviderSupport.timelineOrderSubject(
-                CoordinationEventNodes.timelineEntry(exactEvent));
+                CoordinationEventNodes.timelineEntry(
+                        exactEvent, identities));
     }
 
     @Override
@@ -163,7 +187,7 @@ final class TimelineExternalSubscriptionFunctions<T extends TimelineChannel>
             ExternalChannelFunctionContext context) {
         CoordinationEventNodes.TimelineEntryView entry =
                 CoordinationEventNodes.timelineEntryHeader(
-                        exactEvent, context);
+                        exactEvent, context, identities);
         if (entry == null) {
             throw new IllegalArgumentException(
                     "Timeline checkpoint subject requires an accepted "
@@ -183,7 +207,8 @@ final class TimelineExternalSubscriptionFunctions<T extends TimelineChannel>
                         immutableContractSnapshot,
                         exactEvent,
                         exactPayload,
-                        context);
+                        context,
+                        identities);
     }
 
     @Override
@@ -197,7 +222,8 @@ final class TimelineExternalSubscriptionFunctions<T extends TimelineChannel>
                         immutableContractSnapshot,
                         exactEvent,
                         exactPayload,
-                        context);
+                        context,
+                        identities);
     }
 
     @Override
@@ -205,7 +231,9 @@ final class TimelineExternalSubscriptionFunctions<T extends TimelineChannel>
             T immutableContractSnapshot) {
         channelKeys(immutableContractSnapshot);
         return "coordination.timeline-entry:"
-                + TimelineEntry.blueId()
+                + identities.timelineEntryBlueId()
+                + "|semantic-profile="
+                + identities.profileIdentity()
                 + "|projection="
                 + TimelineSubscriptionProjection.VERSION
                 + "|subject="

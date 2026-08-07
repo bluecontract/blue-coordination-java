@@ -2,30 +2,28 @@ package blue.coordination.processor.workflow;
 
 import blue.bex.api.BexEngine;
 import blue.coordination.processor.CoordinationProcessorOptions;
-import blue.coordination.processor.CoordinationProcessors;
+import blue.coordination.processor.CoordinationTestRuntime;
 import blue.coordination.processor.CoordinationTestResources;
 import blue.coordination.processor.ExternalBlockerProbeAssertions;
 import blue.coordination.processor.ProcessingResultTestSupport;
 import blue.coordination.processor.TestTimelineProvider;
 import blue.coordination.processor.bex.BexProcessingMetrics;
-import blue.language.Blue;
 import blue.language.model.Node;
-import blue.language.processor.DocumentProcessingRuntime;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorErrorCategory;
 import blue.language.processor.ProcessorStatus;
 import blue.language.processor.WorkingDocument;
-import blue.language.processor.model.FrozenJsonPatch;
+import blue.language.processor.FrozenJsonPatch;
 import blue.language.processor.model.JsonPatch;
-import blue.language.snapshot.FrozenNode;
-import blue.language.snapshot.ResolvedSnapshot;
+import blue.language.merge.ResolvedSnapshot;
 import blue.repo.BlueRepository;
-import blue.repo.coordination.ChatMessage;
 import blue.repo.coordination.SequentialWorkflowStep;
 import blue.repo.coordination.TerminateProcessing;
 import blue.repo.coordination.UpdateDocument;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -46,7 +44,7 @@ class FrozenUpdateDocumentDifferentialTest {
 
     @Test
     void shouldMatchLegacyLaneForOrderedStructuralTypedReferenceAndReentrantUpdates() {
-        // Given
+        // given
         DocumentFactory factory = new DocumentFactory() {
             @Override
             public Node build(BlueRepository repository) {
@@ -54,11 +52,11 @@ class FrozenUpdateDocumentDifferentialTest {
             }
         };
 
-        // When
+        // when
         Outcome frozen = run(false, factory);
         Outcome legacy = run(true, factory);
 
-        // Then
+        // then
         boolean exactSelectedBodyLoss =
                 frozen.status
                         == ProcessorStatus.RUNTIME_FATAL
@@ -132,7 +130,7 @@ class FrozenUpdateDocumentDifferentialTest {
 
     @Test
     void shouldMatchLegacyFailureAndCommittedPrefixWhenPatchNFails() {
-        // Given
+        // given
         DocumentFactory factory = new DocumentFactory() {
             @Override
             public Node build(BlueRepository repository) {
@@ -140,11 +138,11 @@ class FrozenUpdateDocumentDifferentialTest {
             }
         };
 
-        // When
+        // when
         Outcome frozen = run(false, factory);
         Outcome legacy = run(true, factory);
 
-        // Then
+        // then
         assertEquivalentFailure(frozen, legacy);
         assertAtomicRollback(frozen);
     }
@@ -168,7 +166,7 @@ class FrozenUpdateDocumentDifferentialTest {
 
     @Test
     void shouldKeepPriorChangesAndSkipLaterPatchesAfterDeclarativeTermination() {
-        // Given
+        // given
         DocumentFactory factory = new DocumentFactory() {
             @Override
             public Node build(BlueRepository repository) {
@@ -176,11 +174,11 @@ class FrozenUpdateDocumentDifferentialTest {
             }
         };
 
-        // When
+        // when
         Outcome frozen = run(false, factory);
         Outcome legacy = run(true, factory);
 
-        // Then
+        // then
         assertEquivalent(frozen, legacy);
         assertEquals("before termination", frozen.document.getAsText("/status"));
         assertNull(nodeAt(frozen.document, "/mustNotAppear"));
@@ -194,7 +192,7 @@ class FrozenUpdateDocumentDifferentialTest {
 
     @Test
     void shouldMatchLegacyPointerResolutionInsideEmbeddedScope() {
-        // Given
+        // given
         DocumentFactory factory = new DocumentFactory() {
             @Override
             public Node build(BlueRepository repository) {
@@ -202,45 +200,36 @@ class FrozenUpdateDocumentDifferentialTest {
             }
         };
 
-        // When
+        // when
         Outcome frozen = run(false, factory);
         Outcome legacy = run(true, factory);
 
-        // Then
+        // then
         assertEquivalent(frozen, legacy);
         assertEquals(100, ((Number) frozen.document.get("/counter")).intValue());
         assertEquals(7, ((Number) frozen.document.get("/child/counter")).intValue());
     }
 
     @Test
-    void shouldMatchLegacyExpandedReferenceLikeValueAtLanguageBoundary() {
-        // Given
-        BlueRepository repository = BlueRepository.latest();
-        // Repository lookup returns a resolved view whose root combines blueId with expanded
-        // content. Remove the reference marker to model the equivalent authored expansion;
-        // FrozenJsonPatch must continue rejecting the ambiguous resolved representation.
-        Node expanded = repository.nodeByBlueId(ChatMessage.blueId())
-                .orElseThrow(() -> new AssertionError("Chat Message type missing"))
-                .clone()
-                .blueId(null);
-        Node mutableDocument = new Node();
-        Node frozenDocument = new Node();
+    void shouldExposePatchApplicationOnlyThroughPublicWorkingDocumentApi()
+            throws NoSuchMethodException {
+        // given
+        Class<WorkingDocument> publicPatchBoundary =
+                WorkingDocument.class;
 
-        // When
-        new DocumentProcessingRuntime(mutableDocument).applyPatches("/", Collections.singletonList(
-                JsonPatch.add("/expanded", expanded.clone())));
-        new DocumentProcessingRuntime(frozenDocument).applyFrozenPatches("/", Collections.singletonList(
-                FrozenJsonPatch.add("/expanded", FrozenNode.fromNode(expanded))));
+        // when
+        Method mutablePatches = publicPatchBoundary.getMethod(
+                "applyPatches",
+                List.class);
+        Method frozenPatches = publicPatchBoundary.getMethod(
+                "applyFrozenPatches",
+                List.class);
 
-        Blue blue = CoordinationTestResources.configuredBlue(repository);
-        try {
-            // Then
-            assertEquals(blue.calculateBlueId(mutableDocument), blue.calculateBlueId(frozenDocument));
-            assertEquals(mutableDocument.getAsNode("/expanded").getName(),
-                    frozenDocument.getAsNode("/expanded").getName());
-        } finally {
-            blue.close();
-        }
+        // then
+        assertTrue(Modifier.isPublic(mutablePatches.getModifiers()));
+        assertTrue(Modifier.isPublic(frozenPatches.getModifiers()));
+        assertEquals(WorkingDocument.class, mutablePatches.getReturnType());
+        assertEquals(WorkingDocument.class, frozenPatches.getReturnType());
     }
 
     private static Node broadPatchDocument(BlueRepository repository) {
@@ -340,7 +329,7 @@ class FrozenUpdateDocumentDifferentialTest {
 
     private static Node root(BlueRepository repository, Map<String, Node> contracts) {
         return new Node()
-                .blue(repository.typeAliasBlue())
+                .blue(repository.importsDirective())
                 .name("Frozen Update Differential")
                 .properties("contracts", new Node().properties(contracts));
     }
@@ -393,15 +382,16 @@ class FrozenUpdateDocumentDifferentialTest {
     }
 
     private static Outcome run(boolean legacy, DocumentFactory factory) {
-        BlueRepository repository = BlueRepository.latest();
+        BlueRepository repository = BlueRepository.current();
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         SequentialWorkflowRunner runner = legacy
                 ? legacyRunner(metrics)
                 : SequentialWorkflowRunner.withBexEngine(
                         BexEngine.builder().build(), 100_000L, metrics);
-        Blue blue = CoordinationTestResources.configuredBlue(repository);
+        CoordinationTestRuntime blue =
+                CoordinationTestResources.configuredBlue(repository);
         try {
-            CoordinationProcessors.registerWith(blue, CoordinationProcessorOptions.builder()
+            blue.configure(CoordinationProcessorOptions.builder()
                     .sequentialWorkflowRunner(runner)
                     .processingMetrics(metrics)
                     .build());

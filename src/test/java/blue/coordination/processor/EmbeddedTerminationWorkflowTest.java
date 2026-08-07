@@ -1,7 +1,6 @@
 package blue.coordination.processor;
 
 import blue.coordination.processor.bex.BexProcessingMetrics;
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorStatus;
@@ -19,17 +18,17 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 class EmbeddedTerminationWorkflowTest {
     @Test
     void shouldTerminateOnlyEmbeddedScopeForTerminateProcessingStep() {
-        // Given
+        // given
         Fixture fixture = fixture();
         Node initialized = fixture.initialize(documentWithEmbeddedTermination(false));
 
-        // When
+        // when
         DocumentProcessingResult childResult = fixture.process(initialized,
                 fixture.operationEvent("child", 1, "runChild", "childChannel"));
         DocumentProcessingResult rootResult = fixture.process(childResult.document(),
                 fixture.operationEvent("root", 1, "runRoot", "rootChannel"));
 
-        // Then
+        // then
         assertSuccess(childResult);
         assertEquals("changed-before-stop", childResult.document().get("/child/status"));
         assertEquals(TerminateProcessing.blueId(),
@@ -47,19 +46,19 @@ class EmbeddedTerminationWorkflowTest {
 
     @Test
     void shouldProduceEquivalentEmbeddedEffectsForComputeAndDeclarativeTermination() {
-        // Given
+        // given
         Fixture computeFixture = fixture();
         Fixture declarativeFixture = fixture();
         Node computeDocument = computeFixture.initialize(documentWithEmbeddedTermination(true));
         Node declarativeDocument = declarativeFixture.initialize(documentWithEmbeddedTermination(false));
 
-        // When
+        // when
         DocumentProcessingResult compute = computeFixture.process(computeDocument,
                 computeFixture.operationEvent("child", 1, "runChild", "childChannel"));
         DocumentProcessingResult declarative = declarativeFixture.process(declarativeDocument,
                 declarativeFixture.operationEvent("child", 1, "runChild", "childChannel"));
 
-        // Then
+        // then
         assertSuccess(compute);
         assertSuccess(declarative);
         assertEquals(compute.document().get("/child/status"), declarative.document().get("/child/status"));
@@ -150,28 +149,33 @@ class EmbeddedTerminationWorkflowTest {
     }
 
     private static Fixture fixture() {
-        BlueRepository repository = BlueRepository.latest();
-        Blue blue = CoordinationTestResources.configuredBlue(repository);
+        BlueRepository repository = BlueRepository.current();
+        CoordinationTestRuntime blue =
+                CoordinationTestResources.configuredBlue(repository);
         BexProcessingMetrics metrics = new BexProcessingMetrics();
-        CoordinationProcessors.registerWith(blue, CoordinationProcessorOptions.builder()
-                .processingMetrics(metrics)
-                .build());
+        blue.configure(
+                CoordinationProcessorOptions.builder()
+                        .processingMetrics(metrics)
+                        .build());
         return new Fixture(repository, blue, metrics);
     }
 
     private static final class Fixture {
         private final BlueRepository repository;
-        private final Blue blue;
+        private final CoordinationTestRuntime blue;
         private final BexProcessingMetrics metrics;
 
-        private Fixture(BlueRepository repository, Blue blue, BexProcessingMetrics metrics) {
+        private Fixture(
+                BlueRepository repository,
+                CoordinationTestRuntime blue,
+                BexProcessingMetrics metrics) {
             this.repository = repository;
             this.blue = blue;
             this.metrics = metrics;
         }
 
         private Node initialize(Node document) {
-            document.blue(repository.typeAliasBlue());
+            document.blue(repository.importsDirective());
             return blue.initializeDocument(blue.preprocess(document)).document();
         }
 

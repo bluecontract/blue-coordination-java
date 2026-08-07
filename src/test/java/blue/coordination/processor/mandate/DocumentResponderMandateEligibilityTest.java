@@ -5,9 +5,10 @@ import blue.coordination.processor.CoordinationHostQuotaSession;
 import blue.coordination.processor.CoordinationHostQuotaTraceEntry;
 import blue.coordination.processor.CoordinationHostQuotas;
 import blue.coordination.processor.ExternalBlockerProbeAssertions;
-import blue.language.Blue;
+import blue.coordination.processor.CoordinationTestRuntime;
+import blue.coordination.processor.CoordinationTestResources;
 import blue.language.model.Node;
-import blue.language.utils.BlueIdCalculator;
+import blue.language.identity.DirectBlueIdCalculator;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.Request;
 import blue.repo.mandate.DocumentResponderMandate;
@@ -29,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DocumentResponderMandateEligibilityTest {
     @Test
     void shouldAuthorizeProviderWhenAtLeastOneExactCandidateIsActive() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         Node inactive = fixture.mandate(
                 actor("mallory"),
@@ -37,7 +38,7 @@ class DocumentResponderMandateEligibilityTest {
                 new Node().properties(
                         "requestId", new Node().value("other")));
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 DocumentResponderMandateEligibility.evaluate(
                         fixture.evidenceBuilder()
@@ -48,7 +49,7 @@ class DocumentResponderMandateEligibilityTest {
                                         fixture.candidate()))
                                 .build());
 
-        // Then
+        // then
         assertTrue(decision.isEligible());
         assertEquals(
                 "active-document-responder-mandate",
@@ -57,10 +58,10 @@ class DocumentResponderMandateEligibilityTest {
 
     @Test
     void shouldAllowAdditionalExactFieldsBeyondTheRequestTypePattern() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 DocumentResponderMandateEligibility.evaluate(
                         fixture.evidenceBuilder()
@@ -68,20 +69,20 @@ class DocumentResponderMandateEligibilityTest {
                                         fixture.candidate()))
                                 .build());
 
-        // Then
+        // then
         assertTrue(decision.isEligible());
     }
 
     @Test
     void shouldMatchReferenceInitialDocumentAgainstInlineIdentity() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         Node mandate = fixture.mandate(
                 fixture.alice,
                 reference(fixture.requestingInitialDocument),
                 new Node().type(fixture.requestType.clone()));
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 DocumentResponderMandateEligibility.evaluate(
                         fixture.evidenceBuilder()
@@ -91,16 +92,16 @@ class DocumentResponderMandateEligibilityTest {
                                                 mandate, null)))
                                 .build());
 
-        // Then
+        // then
         assertTrue(decision.isEligible());
     }
 
     @Test
     void shouldSuspendWhenCandidateEvidenceIsUnresolved() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 DocumentResponderMandateEligibility.evaluate(
                         fixture.evidenceBuilder()
@@ -114,7 +115,7 @@ class DocumentResponderMandateEligibilityTest {
                                                                 new Node())))))
                                 .build());
 
-        // Then
+        // then
         assertTrue(decision.isSuspended());
         assertEquals(
                 "responder-mandate-history-incomplete",
@@ -123,7 +124,7 @@ class DocumentResponderMandateEligibilityTest {
 
     @Test
     void shouldSuspendWhenParticipantChannelIsReferenceBacked() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         Node mandate = fixture.mandate(
                 fixture.alice,
@@ -133,7 +134,7 @@ class DocumentResponderMandateEligibilityTest {
                 "authorizedActorChannel",
                 reference(channel(fixture.alice)));
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 DocumentResponderMandateEligibility.evaluate(
                         fixture.evidenceBuilder()
@@ -143,7 +144,7 @@ class DocumentResponderMandateEligibilityTest {
                                                 mandate, null)))
                                 .build());
 
-        // Then
+        // then
         assertTrue(decision.isSuspended());
         assertEquals(
                 "mandate-participant-channel-unavailable",
@@ -152,18 +153,18 @@ class DocumentResponderMandateEligibilityTest {
 
     @Test
     void shouldRejectCandidateWhenAuthorizedActorDoesNotMatch() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         Node wrongActor = fixture.mandate(
                 actor("mallory"),
                 fixture.requestingInitialDocument,
                 new Node().type(fixture.requestType.clone()));
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 evaluateSingleCandidate(fixture, wrongActor);
 
-        // Then
+        // then
         assertTrue(decision.isIneligible());
         assertEquals(
                 "no-matching-document-responder-mandate",
@@ -172,7 +173,7 @@ class DocumentResponderMandateEligibilityTest {
 
     @Test
     void shouldRejectCandidateWhenRequestPatternDoesNotMatch() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         Node wrongPattern = fixture.mandate(
                 fixture.alice,
@@ -181,11 +182,11 @@ class DocumentResponderMandateEligibilityTest {
                         "requestId",
                         new Node().value("different")));
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 evaluateSingleCandidate(fixture, wrongPattern);
 
-        // Then
+        // then
         assertTrue(decision.isIneligible());
         assertEquals(
                 "no-matching-document-responder-mandate",
@@ -194,12 +195,12 @@ class DocumentResponderMandateEligibilityTest {
 
     @Test
     void shouldFailClosedBeforeCandidateWorkWhenCandidateLimitIsExceeded() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         CoordinationHostQuotaSession session =
                 CoordinationHostQuotaSession.observing();
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 DocumentResponderMandateEligibility.evaluate(
                         fixture.evidenceBuilder()
@@ -211,7 +212,7 @@ class DocumentResponderMandateEligibilityTest {
                                 .build(),
                         session);
 
-        // Then
+        // then
         assertTrue(decision.isIneligible());
         assertEquals(
                 "responder-mandate-candidate-limit-exceeded",
@@ -223,12 +224,12 @@ class DocumentResponderMandateEligibilityTest {
 
     @Test
     void shouldStopCandidateDiagnosticsAfterTheFirstEligibleMatch() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         CoordinationHostQuotaSession session =
                 CoordinationHostQuotaSession.observing();
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 DocumentResponderMandateEligibility.evaluate(
                         fixture.evidenceBuilder()
@@ -239,7 +240,7 @@ class DocumentResponderMandateEligibilityTest {
                                 .build(),
                         session);
 
-        // Then
+        // then
         assertTrue(decision.isEligible(), decision.reason());
         assertEquals(
                 1L,
@@ -261,7 +262,7 @@ class DocumentResponderMandateEligibilityTest {
 
     @Test
     void shouldAuthorizeVerifiedDocumentResponderMandateSubtype() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         Node subtype = fixture.mandate(
                 fixture.alice,
@@ -273,7 +274,7 @@ class DocumentResponderMandateEligibilityTest {
                         .repositoryType()
                         .reference());
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 evaluateSingleCandidate(fixture, subtype);
         String providerDiagnostic =
@@ -281,7 +282,7 @@ class DocumentResponderMandateEligibilityTest {
                         MyOSDocumentBootstrapMandate
                                 .blueId());
 
-        // Then
+        // then
         ExternalBlockerProbeAssertions.classify(
                 "fixed-repository-mandate-subtype-evidence",
                 "Fixed Repository Mandate subtype evidence defect:",
@@ -309,7 +310,7 @@ class DocumentResponderMandateEligibilityTest {
 
     @Test
     void shouldRejectDifferentFixedResponderMandateType() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         Node operationMandate = fixture.mandate(
                 fixture.alice,
@@ -321,12 +322,12 @@ class DocumentResponderMandateEligibilityTest {
                         .repositoryType()
                         .reference());
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 evaluateSingleCandidate(
                         fixture, operationMandate);
 
-        // Then
+        // then
         assertTrue(decision.isIneligible());
         assertEquals(
                 "no-matching-document-responder-mandate",
@@ -335,7 +336,7 @@ class DocumentResponderMandateEligibilityTest {
 
     @Test
     void shouldAllowAbsentOptionalRequestPatternProperty() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         Node optionalPattern = new Node()
                 .type(fixture.requestType.clone())
@@ -345,11 +346,11 @@ class DocumentResponderMandateEligibilityTest {
                 fixture.requestingInitialDocument,
                 optionalPattern);
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 evaluateSingleCandidate(fixture, mandate);
 
-        // Then
+        // then
         assertTrue(decision.isEligible());
     }
 
@@ -448,14 +449,14 @@ class DocumentResponderMandateEligibilityTest {
 
     private static Node reference(Node exactNode) {
         return new Node().blueId(
-                BlueIdCalculator.calculateBlueId(exactNode));
+                DirectBlueIdCalculator.calculateBlueId(exactNode));
     }
 
     private static String fixedTypeProviderDiagnostic(
             String blueId) {
-        Blue blue =
-                BlueRepository.latest()
-                        .configure(new Blue());
+        CoordinationTestRuntime blue =
+                CoordinationTestResources.configuredBlue(
+                        BlueRepository.current());
         try {
             blue.loadSnapshot(blueId);
             return null;

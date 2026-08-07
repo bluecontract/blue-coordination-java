@@ -1,7 +1,7 @@
 package blue.coordination.processor.workflow;
 
 import blue.language.model.Node;
-import blue.language.processor.CoordinationProcessHeaderBridge;
+import blue.coordination.processor.support.CoordinationProcessHeaderSupport;
 import blue.language.snapshot.FrozenNode;
 
 import java.math.BigInteger;
@@ -27,7 +27,7 @@ final class FrozenNodeUtil {
         if (node == null) {
             return null;
         }
-        return CoordinationProcessHeaderBridge
+        return CoordinationProcessHeaderSupport
                 .canonicalExactCopy(
                         node.toNode());
     }

@@ -3,7 +3,7 @@ package blue.coordination.processor;
 import blue.language.model.Node;
 import blue.language.processor.HandlerRegistrationContext;
 import blue.language.processor.HandlerRegistrationContextFactory;
-import blue.language.utils.BlueIdCalculator;
+import blue.language.identity.DirectBlueIdCalculator;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
@@ -18,54 +18,54 @@ final class HandlerChannelResolverTest {
 
     @Test
     void shouldPreserveConvertedInlineChannelKey() {
-        // Given
+        // given
         HandlerRegistrationContext context =
                 context(new Node().value("ignored"));
 
-        // When
+        // when
         String resolved =
                 HandlerChannelResolver.resolve(
                         CHANNEL, context);
 
-        // Then
+        // then
         assertEquals(CHANNEL, resolved);
     }
 
     @Test
     void shouldResolvePureScalarIdentityToExactSameScopeChannelKey() {
-        // Given
+        // given
         Node canonicalReference =
                 new Node().blueId(
-                        BlueIdCalculator.INSTANCE
-                                .calculate(CHANNEL));
+                        DirectBlueIdCalculator.calculateBlueId(
+                                new Node().value(CHANNEL)));
         HandlerRegistrationContext context =
                 context(canonicalReference);
 
-        // When
+        // when
         String resolved =
                 HandlerChannelResolver.resolve(
                         null, context);
 
-        // Then
+        // then
         assertEquals(CHANNEL, resolved);
     }
 
     @Test
     void shouldRejectUnknownChannelIdentityWithoutOpeningExecutableBody() {
-        // Given
+        // given
         Node unknownReference =
                 new Node().blueId(
-                        BlueIdCalculator.INSTANCE
-                                .calculate("absent-channel"));
+                        DirectBlueIdCalculator.calculateBlueId(
+                                new Node().value("absent-channel")));
         HandlerRegistrationContext context =
                 context(unknownReference);
 
-        // When
+        // when
         String resolved =
                 HandlerChannelResolver.resolve(
                         null, context);
 
-        // Then
+        // then
         assertNull(resolved);
     }
 
@@ -85,9 +85,9 @@ final class HandlerChannelResolverTest {
                         .properties(
                                 "steps",
                                 new Node().blueId(
-                                        BlueIdCalculator.INSTANCE
-                                                .calculate(
-                                                        "body-must-remain-cold"))));
+                                        DirectBlueIdCalculator.calculateBlueId(
+                                                new Node().value(
+                                                        "body-must-remain-cold")))));
         return HandlerRegistrationContextFactory.create(
                 HANDLER, contracts);
     }

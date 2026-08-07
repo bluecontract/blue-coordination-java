@@ -4,15 +4,15 @@ import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.ExternalBlockerProbeAssertions;
 import blue.coordination.processor.ProcessingResultTestSupport;
 import blue.coordination.processor.bex.BexProcessingMetrics;
-import blue.language.NodeProvider;
+import blue.language.provider.NodeProvider;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorErrorCategory;
 import blue.language.processor.ProcessorStatus;
-import blue.language.provider.BasicNodeProvider;
-import blue.language.provider.NodeProviderOutcome;
+import blue.language.preprocess.provider.BasicNodeProvider;
+import blue.language.api.NodeProviderOutcome;
 import blue.language.provider.NodeProviderResult;
-import blue.language.utils.BlueIdCalculator;
+import blue.language.identity.DirectBlueIdCalculator;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ComputeProgramPlanIntegrationTest {
     @Test
     void shouldReuseFrozenPlanForUnchangedInlineCompute() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeWorkflowTestSupport support = support(metrics);
         Node document = support.initializedOperationWorkflow(String.join("\n",
@@ -35,11 +35,11 @@ class ComputeProgramPlanIntegrationTest {
                 "          - $return:",
                 "              value: warm"));
 
-        // When
+        // when
         DocumentProcessingResult first = support.processRun(document);
         DocumentProcessingResult second = support.processRun(first.document());
 
-        // Then
+        // then
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(first), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(first));
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(second), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(second));
         assertEquals(1L, metrics.computePlanCacheMisses());
@@ -53,16 +53,16 @@ class ComputeProgramPlanIntegrationTest {
 
     @Test
     void shouldNormalizeReferencedDefinitionOnlyOnCacheMiss() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeWorkflowTestSupport support = support(metrics);
         Node document = definitionDocument(support, "Warm Definition");
 
-        // When
+        // when
         DocumentProcessingResult first = support.processRun(document);
         DocumentProcessingResult second = support.processRun(first.document());
 
-        // Then
+        // then
         assertEquals("Warm Definition", onlyEvent(first).get("/kind"));
         assertEquals("Warm Definition", onlyEvent(second).get("/kind"));
         assertEquals(1L, metrics.computePlanCacheMisses());
@@ -77,19 +77,19 @@ class ComputeProgramPlanIntegrationTest {
 
     @Test
     void shouldUseExactDefinitionIdentityAcrossDocuments() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeWorkflowTestSupport support = support(metrics);
         Node documentA = definitionDocument(support, "Definition A");
         Node documentB = definitionDocument(support, "Definition B");
 
-        // When
+        // when
         DocumentProcessingResult firstA = support.processRun(documentA);
         DocumentProcessingResult firstB = support.processRun(documentB);
         DocumentProcessingResult warmA = support.processRun(firstA.document());
         DocumentProcessingResult warmB = support.processRun(firstB.document());
 
-        // Then
+        // then
         assertEquals("Definition A", onlyEvent(firstA).get("/kind"));
         assertEquals("Definition B", onlyEvent(firstB).get("/kind"));
         assertEquals("Definition A", onlyEvent(warmA).get("/kind"));
@@ -103,7 +103,7 @@ class ComputeProgramPlanIntegrationTest {
 
     @Test
     void shouldMaterializePureBlueIdDefinitionThroughSelectedWorkflowProvider() {
-        // Given
+        // given
         BexProcessingMetrics metrics =
                 new BexProcessingMetrics();
         Node exactDefinition =
@@ -123,13 +123,13 @@ class ComputeProgramPlanIntegrationTest {
                 support,
                 definitionBlueId);
 
-        // When
+        // when
         DocumentProcessingResult cold =
                 support.processRun(document);
         DocumentProcessingResult warm =
                 support.processRun(cold.document());
 
-        // Then
+        // then
         assertEquals(
                 "Provider Definition",
                 onlyEvent(cold).get("/kind"));
@@ -146,7 +146,7 @@ class ComputeProgramPlanIntegrationTest {
 
     @Test
     void shouldKeepInvalidDefinitionProviderEvidenceOutOfRuntimeFatal() {
-        // Given
+        // given
         Node exactDefinition =
                 exactProviderDefinition();
         BasicNodeProvider identityProvider =
@@ -166,11 +166,11 @@ class ComputeProgramPlanIntegrationTest {
                 support,
                 definitionBlueId);
 
-        // When
+        // when
         DocumentProcessingResult result =
                 support.processRun(document);
 
-        // Then
+        // then
         NodeProviderResult providerEvidence =
                 invalidProvider.fetchResultByBlueId(
                         definitionBlueId);
@@ -194,9 +194,9 @@ class ComputeProgramPlanIntegrationTest {
                                         .InvalidExternalChannelSnapshot,
                                 "forged definition evidence")
                         && result.events().isEmpty()
-                        && BlueIdCalculator.calculateBlueId(
+                        && DirectBlueIdCalculator.calculateBlueId(
                         document).equals(
-                        BlueIdCalculator.calculateBlueId(
+                        DirectBlueIdCalculator.calculateBlueId(
                                 result.document()));
         ExternalBlockerProbeAssertions.classify(
                 "invalid-execution-evidence-classification",
@@ -217,9 +217,9 @@ class ComputeProgramPlanIntegrationTest {
                         + ", providerDiagnostic="
                         + providerEvidence.diagnostic()
                         + ", rolledBack="
-                        + BlueIdCalculator.calculateBlueId(
+                        + DirectBlueIdCalculator.calculateBlueId(
                         document).equals(
-                        BlueIdCalculator.calculateBlueId(
+                        DirectBlueIdCalculator.calculateBlueId(
                                 result.document())));
         assertEquals(
                 ProcessorStatus.INVALID_PROCESSING_DOCUMENT,
@@ -241,17 +241,17 @@ class ComputeProgramPlanIntegrationTest {
 
     @Test
     void shouldBuildSeparatePlanForChangedStepContent() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeWorkflowTestSupport support = support(metrics);
         Node documentA = inlineDocument(support, "A");
         Node documentB = inlineDocument(support, "B");
 
-        // When
+        // when
         DocumentProcessingResult resultA = support.processRun(documentA);
         DocumentProcessingResult resultB = support.processRun(documentB);
 
-        // Then
+        // then
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport
                 .isCapabilityFailure(resultA));
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport
@@ -265,7 +265,7 @@ class ComputeProgramPlanIntegrationTest {
 
     @Test
     void shouldNotCacheMalformedProgramPlan() {
-        // Given
+        // given
         BexProcessingMetrics malformedMetrics = new BexProcessingMetrics();
         ComputeWorkflowTestSupport malformedSupport = support(malformedMetrics);
         Node malformed = malformedSupport.initialize(malformedSupport.yaml(
@@ -283,11 +283,11 @@ class ComputeProgramPlanIntegrationTest {
                                 "        definition: computeLogic",
                                 "        entry: missing")))).document();
 
-        // When
+        // when
         DocumentProcessingResult first = malformedSupport.processRun(malformed);
         DocumentProcessingResult second = malformedSupport.processRun(malformed);
 
-        // Then
+        // then
         assertRuntimeFatal(first, "Unknown entry function");
         assertRuntimeFatal(second, "Unknown entry function");
         assertEquals(2L, malformedMetrics.computePlanCacheMisses());
@@ -297,7 +297,7 @@ class ComputeProgramPlanIntegrationTest {
 
     @Test
     void shouldNotCachePlanAfterFatalComputeResult() {
-        // Given
+        // given
         BexProcessingMetrics fatalMetrics = new BexProcessingMetrics();
         ComputeWorkflowTestSupport fatalSupport = support(fatalMetrics);
         Node fatal = fatalSupport.initializedOperationWorkflow(String.join("\n",
@@ -308,11 +308,11 @@ class ComputeProgramPlanIntegrationTest {
                 "          - $return:",
                 "              events: malformed"));
 
-        // When
+        // when
         DocumentProcessingResult first = fatalSupport.processRun(fatal);
         DocumentProcessingResult second = fatalSupport.processRun(fatal);
 
-        // Then
+        // then
         assertRuntimeFatal(first, "Compute result events must be a list");
         assertRuntimeFatal(second, "Compute result events must be a list");
         assertEquals(2L, fatalMetrics.computePlanCacheMisses());

@@ -1,6 +1,6 @@
 package blue.coordination.processor;
 
-import blue.language.utils.UncheckedObjectMapper;
+import blue.language.codec.jackson.UncheckedObjectMapper;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.AllTimelinesChannel;
 import blue.repo.coordination.ChatWorkflowOperation;
@@ -131,10 +131,10 @@ final class CoordinationConformancePackageIntegrityTest {
     @Test
     void shouldDeclareAuthoredAndExecutedCountsSeparately()
             throws Exception {
-        // Given
+        // given
         String manifest = read("manifest.yaml");
 
-        // When
+        // when
         List<String> authoredCounts = Arrays.asList(
                 "authoredBehaviorFixtureCount: 55",
                 "authoredPortableGasFixtureCount: 14",
@@ -147,7 +147,7 @@ final class CoordinationConformancePackageIntegrityTest {
                 "executedPortableGasCaseCount: 14",
                 "executedHostQuotaCaseCount: 0");
 
-        // Then
+        // then
         for (String count : authoredCounts) {
             assertTrue(
                     manifest.contains(count),
@@ -165,18 +165,18 @@ final class CoordinationConformancePackageIntegrityTest {
     @Test
     void shouldInventoryEveryCandidateArtifactExactly()
             throws Exception {
-        // Given
+        // given
         List<String> declared =
                 manifestArtifacts();
 
-        // When
+        // when
         List<String> actual =
                 packageArtifacts();
         List<String> sortedDeclared =
                 new ArrayList<String>(declared);
         Collections.sort(sortedDeclared);
 
-        // Then
+        // then
         assertEquals(84, declared.size());
         assertEquals(
                 declared.size(),
@@ -188,7 +188,7 @@ final class CoordinationConformancePackageIntegrityTest {
     @Test
     void shouldDefineTheClosedBehaviorFixtureControlSurface()
             throws Exception {
-        // Given
+        // given
         JsonNode schema =
                 new ObjectMapper()
                         .readTree(
@@ -196,7 +196,7 @@ final class CoordinationConformancePackageIntegrityTest {
                                         "fixture-schema.json")
                                         .toFile());
 
-        // When
+        // when
         List<String> required =
                 textItems(
                         schema.path("required"));
@@ -218,7 +218,7 @@ final class CoordinationConformancePackageIntegrityTest {
             }
         }
 
-        // Then
+        // then
         assertFalse(
                 schema.path("additionalProperties")
                         .asBoolean(true));
@@ -268,13 +268,13 @@ final class CoordinationConformancePackageIntegrityTest {
     @Test
     void shouldInventoryAllAuthoredBehaviorFixturesAndCases()
             throws Exception {
-        // Given
+        // given
         String inventory =
                 read("behavior-fixtures.yaml");
         CoordinationBehaviorFixtureHarness harness =
                 new CoordinationBehaviorFixtureHarness();
 
-        // When
+        // when
         List<CoordinationBehaviorFixtureHarness.FixtureCase>
                 cases = harness.loadCases();
         long resources = cases.stream()
@@ -283,7 +283,7 @@ final class CoordinationConformancePackageIntegrityTest {
                 .distinct()
                 .count();
 
-        // Then
+        // then
         assertTrue(inventory.contains(
                 "status: candidate"));
         assertTrue(inventory.contains(
@@ -303,9 +303,9 @@ final class CoordinationConformancePackageIntegrityTest {
     @Test
     void shouldAuthorEveryRepositoryBackedFixtureTypeAsExactBlueIdReference()
             throws Exception {
-        // Given
+        // given
         BlueRepository repository =
-                BlueRepository.latest();
+                BlueRepository.current();
         Set<String> repositoryAliases =
                 repository.typeAliases().keySet();
         Set<String> repositoryBlueIds =
@@ -319,7 +319,7 @@ final class CoordinationConformancePackageIntegrityTest {
         List<String> nonCanonicalReferences =
                 new ArrayList<String>();
         int[] exactReferences = new int[]{0};
-        // When
+        // when
         for (String resource : behaviorResources) {
             JsonNode input =
                     UncheckedObjectMapper.YAML_MAPPER
@@ -337,7 +337,7 @@ final class CoordinationConformancePackageIntegrityTest {
                     exactReferences);
         }
 
-        // Then
+        // then
         assertEquals(55, behaviorResources.size());
         assertEquals(
                 1121,
@@ -368,7 +368,7 @@ final class CoordinationConformancePackageIntegrityTest {
     @Test
     void shouldMapEveryPortableCounterToOneExecutableMicrofixture()
             throws Exception {
-        // Given
+        // given
         String fixtures =
                 read("gas-fixtures.yaml");
         Map<String, Long> counters =
@@ -376,7 +376,7 @@ final class CoordinationConformancePackageIntegrityTest {
         List<String> resources =
                 fixtureResources("gas-micro");
 
-        // When
+        // when
         Set<String> missingCounters =
                 new LinkedHashSet<String>();
         for (String counter : counters.keySet()) {
@@ -386,7 +386,7 @@ final class CoordinationConformancePackageIntegrityTest {
             }
         }
 
-        // Then
+        // then
         assertEquals(14, counters.size());
         assertEquals(14, resources.size());
         assertTrue(
@@ -408,15 +408,15 @@ final class CoordinationConformancePackageIntegrityTest {
     @Test
     void shouldKeepHostQuotaInventorySeparateFromPortableGas()
             throws Exception {
-        // Given
+        // given
         String fixtures =
                 read("gas-fixtures.yaml");
 
-        // When
+        // when
         List<String> hostResources =
                 fixtureResources("host-quota");
 
-        // Then
+        // then
         assertEquals(7, hostResources.size());
         assertTrue(fixtures.contains(
                 "hostQuotaFixtureCount: 7"));
@@ -435,11 +435,11 @@ final class CoordinationConformancePackageIntegrityTest {
     @Test
     void shouldBindEveryRuntimeRegistrationToItsGeneratedType()
             throws Exception {
-        // Given
+        // given
         String inventory =
                 read("runtime-registrations.yaml");
 
-        // When
+        // when
         List<String> actual = Arrays.asList(
                 new TimelineChannelProcessor()
                         .contractType().getName()
@@ -468,7 +468,7 @@ final class CoordinationConformancePackageIntegrityTest {
                         MyOSTimelineChannel>(
                         MyOSTimelineChannel.class);
 
-        // Then
+        // then
         assertEquals(7, actual.size());
         for (String processor : Arrays.asList(
                 TimelineChannelProcessor.class.getName(),
@@ -511,7 +511,7 @@ final class CoordinationConformancePackageIntegrityTest {
     @Test
     void shouldPreserveVerifiedCrossTimelineOrderInPackageMetadata()
             throws Exception {
-        // Given
+        // given
         String projections =
                 read("projection-catalog.yaml");
         String firstFixture =
@@ -519,14 +519,14 @@ final class CoordinationConformancePackageIntegrityTest {
         String tieFixture =
                 read("fixtures/timeline/coord-time-03.yaml");
 
-        // When
+        // when
         boolean inventsCrossTimelineTieBreak =
                 projections.contains(
                         "identity tie-break across Timelines")
                         || tieFixture.contains(
                         "ordered by exact Timeline identity");
 
-        // Then
+        // then
         assertFalse(inventsCrossTimelineTieBreak);
         assertTrue(projections.contains(
                 "preserve verified platform order across Timelines"));

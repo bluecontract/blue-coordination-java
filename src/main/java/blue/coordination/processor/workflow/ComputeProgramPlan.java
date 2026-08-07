@@ -1,7 +1,6 @@
 package blue.coordination.processor.workflow;
 
 import blue.bex.api.BexProgramSource;
-import blue.bex.compile.BexCompiledProgramKey;
 import blue.language.snapshot.FrozenNode;
 
 import java.util.ArrayDeque;
@@ -22,7 +21,6 @@ final class ComputeProgramPlan {
     private final FrozenNode programNode;
     private final FrozenNode definitionNode;
     private final BexProgramSource source;
-    private final BexCompiledProgramKey sourceIdentity;
     private final String entry;
     private final long gasLimit;
     private final boolean emitEvents;
@@ -51,7 +49,6 @@ final class ComputeProgramPlan {
         this.programNode = programNode;
         this.definitionNode = definitionNode;
         this.source = source;
-        this.sourceIdentity = BexCompiledProgramKey.from(source);
         this.entry = entry;
         this.gasLimit = gasLimit;
         this.emitEvents = emitEvents;
@@ -67,7 +64,7 @@ final class ComputeProgramPlan {
                 definitionNode,
                 source.definitionNode().orElse(null),
                 entry,
-                sourceIdentity);
+                source.kind());
     }
 
     FrozenNode programNode() {
@@ -80,10 +77,6 @@ final class ComputeProgramPlan {
 
     BexProgramSource source() {
         return source;
-    }
-
-    BexCompiledProgramKey sourceIdentity() {
-        return sourceIdentity;
     }
 
     String entry() {
@@ -116,7 +109,7 @@ final class ComputeProgramPlan {
                                           FrozenNode definitionNode,
                                           FrozenNode sourceDefinitionNode,
                                           String entry,
-                                          BexCompiledProgramKey sourceIdentity) {
+                                          BexProgramSource.Kind sourceKind) {
         long weight = PLAN_OVERHEAD_BYTES;
         // Raw nodes approximate the independently retained structural cache
         // keys, while normalized nodes approximate the plan/source graph.
@@ -130,9 +123,8 @@ final class ComputeProgramPlan {
         weight = saturatedAdd(weight,
                 nodeWeight(sourceDefinitionNode, planNodes));
         weight = saturatedAdd(weight, stringWeight(entry));
-        weight = saturatedAdd(weight, stringWeight(sourceIdentity.programIdentity()));
-        weight = saturatedAdd(weight, stringWeight(sourceIdentity.definitionIdentity()));
-        weight = saturatedAdd(weight, stringWeight(sourceIdentity.entryName()));
+        weight = saturatedAdd(weight,
+                stringWeight(sourceKind.name()));
         return Math.max(PLAN_OVERHEAD_BYTES, weight);
     }
 

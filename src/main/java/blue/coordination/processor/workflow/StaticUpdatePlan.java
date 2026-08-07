@@ -3,7 +3,7 @@ package blue.coordination.processor.workflow;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.model.Node;
 import blue.language.processor.SelectedExecutableBody;
-import blue.language.processor.model.FrozenJsonPatch;
+import blue.language.processor.FrozenJsonPatch;
 import blue.language.processor.model.JsonPatch;
 import blue.language.snapshot.FrozenNode;
 

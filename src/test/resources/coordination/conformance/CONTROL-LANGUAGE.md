@@ -16,7 +16,7 @@ The closed top-level fields are `schema`, `id`, `vectors`, `category`,
 - `split`
 - `timeline-order`
 
-The executor configures `BlueRepository.latest()` from the exact local
+The executor configures `BlueRepository.current()` from the exact local
 composite materialized at the locked Repository commit
 `63be6b7d8d2752b5a8c90f38e672859e9b3949a1`. The materialization reads the
 local `../blue-repository-java` Git object database but never consumes or

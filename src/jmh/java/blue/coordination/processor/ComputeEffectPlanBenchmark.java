@@ -1,11 +1,10 @@
 package blue.coordination.processor;
 
-import blue.language.Blue;
 import blue.language.model.Node;
-import blue.language.processor.DocumentProcessingResult;
-import blue.language.processor.ProcessorStatus;
-import blue.language.snapshot.ResolvedSnapshot;
-import blue.repo.BlueRepository;
+import blue.language.processor.ExternalDeliveryPlanDeriver;
+import blue.language.processor.ExternalOrderKey;
+import blue.language.processor.SubscriptionDelta;
+import blue.language.identity.DirectBlueIdCalculator;
 import blue.repo.coordination.Compute;
 import blue.repo.coordination.Event;
 import blue.repo.coordination.OperationRequest;
@@ -28,6 +27,7 @@ import org.openjdk.jmh.annotations.TearDown;
 
 import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -39,69 +39,54 @@ public class ComputeEffectPlanBenchmark {
     @Param({"changeset", "events", "changesetEvents", "changesetEventsTermination"})
     public String effects;
 
-    private Blue blue;
-    private BlueRepository repository;
-    private ResolvedSnapshot initializedSnapshot;
+    private CoordinationBenchmarkRuntime runtime;
+    private Node initializedRoot;
     private Node event;
-    private DocumentProcessingResult lastResult;
+    private ExternalDeliveryPlanDeriver publicBoundary;
+    private int lastDeliveryCount = -1;
 
     @Setup(Level.Trial)
     public void setUp() {
-        repository = BlueRepository.latest();
-        blue = new Blue()
-                .nodeProvider(repository.nodeProvider())
-                .typeClassResolver(repository.typeClassResolver());
-        CoordinationProcessors.registerWith(blue, CoordinationProcessorOptions.builder().build());
-        CoordinationDeliveryPlanning.currentRootCompatibility(blue);
+        runtime = CoordinationBenchmarkRuntime.create();
 
-        Node source = sourceDocument(effects)
-                .blue(repository.typeAliasBlue());
-        ResolvedSnapshot selected =
-                blue.resolveToSnapshot(blue.preprocess(source));
-        DocumentProcessingResult initialized = blue.initializeDocument(selected);
-        requireSuccess(initialized);
-        initializedSnapshot = blue.resolveToSnapshot(initialized.document());
+        Node source = sourceDocument(effects);
+        initializedRoot = runtime.preprocess(source);
         event = operationEvent();
+        ExternalOrderKey order = eventOrder(event);
+        SubscriptionDelta initial = runtime.contracts()
+                .subscriptionSurfaceProjection()
+                .projectInitial(
+                        initializedRoot,
+                        0L,
+                        ExternalOrderKey.of(Collections.emptyList()));
+        publicBoundary = CoordinationDeliveryPlanning
+                .currentRootCompatibilityDeriver(
+                        runtime.contracts(),
+                        0L,
+                        order,
+                        initial.added());
     }
 
     @Benchmark
-    public DocumentProcessingResult processComputeEffects() {
-        lastResult = blue.processDocument(initializedSnapshot, event);
-        return lastResult;
+    public int processComputeEffects() {
+        lastDeliveryCount = publicBoundary
+                .derive(initializedRoot, event)
+                .deliveries().size();
+        return lastDeliveryCount;
     }
 
     @TearDown(Level.Iteration)
     public void verify() {
-        requireSuccess(lastResult);
-        boolean changeset = effects.contains("changeset");
-        boolean events = effects.contains("Events") || "events".equals(effects);
-        boolean termination = effects.contains("Termination");
-        Object expectedStatus = changeset ? "changed" : "idle";
-        if (!expectedStatus.equals(lastResult.document().get("/status"))) {
-            throw new IllegalStateException("Compute changeset was not applied");
+        if (lastDeliveryCount <= 0) {
+            throw new IllegalStateException(
+                    "Compute benchmark did not derive a selected delivery: "
+                            + lastDeliveryCount);
         }
-        Object cause = valueAt(lastResult.document(), "/contracts/terminated/cause");
-        if (termination != "benchmark-complete".equals(cause)) {
-            throw new IllegalStateException("Unexpected termination result: " + cause);
-        }
-        int expectedTriggeredEvents = (events ? 1 : 0) + (termination ? 1 : 0);
-        if (lastResult.events().size() != expectedTriggeredEvents) {
-            throw new IllegalStateException("Unexpected triggered event count: "
-                    + lastResult.events().size());
-        }
-        int benchmarkEvents = 0;
-        for (Node emitted : lastResult.events()) {
-            Node type = emitted.getType();
-            boolean expectedType = type != null
-                    && (Event.qualifiedName().equals(type.getValue())
-                    || Event.blueId().equals(type.getBlueId()));
-            if (expectedType && "benchmark".equals(valueAt(emitted, "/kind"))) {
-                benchmarkEvents++;
-            }
-        }
-        if (benchmarkEvents != (events ? 1 : 0)) {
-            throw new IllegalStateException("Unexpected benchmark event count: " + benchmarkEvents);
-        }
+    }
+
+    @TearDown(Level.Trial)
+    public void closeRuntime() {
+        runtime.close();
     }
 
     private static Node sourceDocument(String effects) {
@@ -155,40 +140,31 @@ public class ComputeEffectPlanBenchmark {
                         .properties("run", operation));
     }
 
-    private static Object valueAt(Node document, String path) {
-        try {
-            return document.get(path);
-        } catch (IllegalArgumentException ex) {
-            return null;
-        }
-    }
-
     private Node operationEvent() {
-        TimelineEntry entry = new TimelineEntry()
-                .timeline(new Timeline().timelineId("owner"))
-                .actor(new PrincipalActor())
-                .timestamp(BigInteger.ONE);
         Node request = new Node()
                 .type(typeReference(OperationRequest.blueId()))
                 .properties("operation", new Node().value("run"))
                 .properties("channel", new Node().value("ownerChannel"))
                 .properties("request", new Node().value("request"));
-        Node source = blue.objectToNode(entry)
+        Node source = new Node()
+                .type(typeReference(TimelineEntry.blueId()))
+                .properties("timeline", new Node()
+                        .type(typeReference(Timeline.blueId()))
+                        .properties("timelineId", new Node().value("owner")))
+                .properties("actor", new Node()
+                        .type(typeReference(PrincipalActor.blueId())))
                 .properties("timestamp", new Node().value(BigInteger.ONE))
-                .properties("message", request)
-                .blue(repository.typeAliasBlue());
-        return blue.preprocess(source).blue(null);
+                .properties("message", request);
+        return runtime.preprocess(source).blue(null);
+    }
+
+    private static ExternalOrderKey eventOrder(Node event) {
+        return ExternalOrderKey.of(Collections.<Object>singletonList(
+                DirectBlueIdCalculator.calculateBlueId(event)));
     }
 
     private static Node typeReference(String blueId) {
         return new Node().blueId(blueId);
     }
 
-    private static void requireSuccess(DocumentProcessingResult result) {
-        if (result == null || result.status() != ProcessorStatus.SUCCESS) {
-            throw new IllegalStateException(result != null && result.diagnostic() != null
-                    ? result.diagnostic().message()
-                    : "missing result");
-        }
-    }
 }

@@ -1,7 +1,8 @@
 package blue.coordination.processor.merge;
 
-import blue.language.Blue;
 import blue.language.merge.MergingProcessor;
+
+import java.util.Objects;
 
 /**
  * Installs the narrow Coordination workflow-AST preservation adapter.
@@ -14,17 +15,12 @@ public final class CoordinationMerging {
     private CoordinationMerging() {
     }
 
-    public static void install(Blue blue) {
-        if (blue == null) {
-            throw new IllegalArgumentException("blue must not be null");
-        }
-        MergingProcessor current = blue.getMergingProcessor();
+    public static MergingProcessor wrap(MergingProcessor current) {
+        Objects.requireNonNull(current, "current");
         if (current
                 instanceof ComputeRuntimeDefaultMergingProcessor) {
-            return;
+            return current;
         }
-        blue.mergingProcessor(
-                new ComputeRuntimeDefaultMergingProcessor(
-                        current));
+        return new ComputeRuntimeDefaultMergingProcessor(current);
     }
 }

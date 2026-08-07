@@ -3,7 +3,7 @@ package blue.language.processor;
 import blue.language.mapping.NodeToObjectConverter;
 import blue.language.model.Node;
 import blue.language.snapshot.FrozenNode;
-import blue.language.utils.TypeClassResolver;
+import blue.language.mapping.TypeClassResolver;
 
 import java.util.LinkedHashMap;
 import java.util.Map;

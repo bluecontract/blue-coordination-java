@@ -6,8 +6,8 @@ import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorDiagnostic;
 import blue.language.processor.ProcessorErrorCategory;
 import blue.language.processor.ProcessorStatus;
-import blue.language.snapshot.ResolvedSnapshot;
-import blue.language.utils.BlueIdCalculator;
+import blue.language.merge.ResolvedSnapshot;
+import blue.language.identity.DirectBlueIdCalculator;
 
 /**
  * Test-only views over the final five-field Contracts 1.0 process result.
@@ -37,7 +37,7 @@ public final class ProcessingResultTestSupport {
     }
 
     public static String blueId(DocumentProcessingResult result) {
-        return BlueIdCalculator.calculateBlueId(result.document());
+        return DirectBlueIdCalculator.calculateBlueId(result.document());
     }
 
     public static ResolvedSnapshot snapshot(Blue blue,
@@ -45,8 +45,20 @@ public final class ProcessingResultTestSupport {
         return blue.resolveToSnapshot(result.document());
     }
 
+    public static ResolvedSnapshot snapshot(
+            CoordinationTestRuntime runtime,
+            DocumentProcessingResult result) {
+        return runtime.resolveToSnapshot(result.document());
+    }
+
     public static Node resolvedDocument(Blue blue,
                                         DocumentProcessingResult result) {
         return snapshot(blue, result).resolvedRoot();
+    }
+
+    public static Node resolvedDocument(
+            CoordinationTestRuntime runtime,
+            DocumentProcessingResult result) {
+        return snapshot(runtime, result).resolvedRoot();
     }
 }

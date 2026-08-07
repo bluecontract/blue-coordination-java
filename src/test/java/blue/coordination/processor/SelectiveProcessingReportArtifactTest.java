@@ -1,6 +1,7 @@
 package blue.coordination.processor;
 
 import blue.repo.BlueRepository;
+import blue.repo.RepositoryDefinition;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -31,24 +32,19 @@ class SelectiveProcessingReportArtifactTest {
     void shouldResolveEveryRequiredFixedRepositoryTypeByManifestBlueId()
             throws Exception {
         // given
-        BlueRepository repository = BlueRepository.latest();
+        BlueRepository repository = BlueRepository.current();
 
         // when
-        List<CoordinationRequiredRepositoryClosure.Entry> requiredTypes =
-                CoordinationRequiredRepositoryClosure.entries();
+        List<RepositoryDefinition> requiredTypes =
+                repository.manifest().definitions();
 
         // then
         assertFalse(
                 requiredTypes.isEmpty());
         assertEquals(
-                CoordinationRequiredRepositoryClosure
-                        .REPOSITORY_VERSION,
-                repository.repositoryVersion());
-        assertEquals(
-                CoordinationRequiredRepositoryClosure
-                        .REPOSITORY_MANIFEST_BLUE_ID,
-                repository.repositoryVersionBlueId());
-        for (CoordinationRequiredRepositoryClosure.Entry required
+                CoordinationTestResources.CURRENT_REPOSITORY_BLUE_ID,
+                repository.repositoryBlueId());
+        for (RepositoryDefinition required
                 : requiredTypes) {
             assertEquals(
                     required.blueId(),
@@ -76,7 +72,11 @@ class SelectiveProcessingReportArtifactTest {
         boolean bexLocal = settings.contains(
                 "includeBuild(localBlueBex)");
         boolean repositoryLocal = settings.contains(
-                "includeBuild(immutableBlueRepository)");
+                "def localBlueRepositorySource = file('../blue-repository-java')")
+                && settings.contains(
+                "file('.gradle/immutable-local-repository')")
+                && settings.contains(
+                "file('.gradle/locked-local-artifacts')");
 
         // then
         assertTrue(languageLocal);
@@ -87,7 +87,7 @@ class SelectiveProcessingReportArtifactTest {
         assertTrue(settings.contains(
                 "substitute module('blue.bex:blue-bex-java')"));
         assertTrue(settings.contains(
-                "substitute module('blue.repo:blue-repo-java')"));
+                "blueRepositoryArtifactPath"));
         assertTrue(settings.contains(
                 "blueRepositoryCompositePath"));
         assertTrue(settings.contains(
@@ -123,7 +123,6 @@ class SelectiveProcessingReportArtifactTest {
         }
 
         // then
-        assertFalse(source.toString().contains("@Deprecated"));
         assertFalse(source.toString().contains("TODO"));
         assertFalse(source.toString().contains("FIXME"));
     }

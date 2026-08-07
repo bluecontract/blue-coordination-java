@@ -1,14 +1,11 @@
 package blue.coordination.processor;
 
-import blue.language.Blue;
-import blue.language.NodeProvider;
+import blue.language.provider.NodeProvider;
 import blue.language.model.Node;
 import blue.language.processor.ChannelCheckpointContext;
 import blue.language.processor.ChannelEvaluation;
 import blue.language.processor.ChannelEvaluationContext;
 import blue.language.processor.ChannelProcessor;
-import blue.language.processor.CoordinationConfiguredProcessorFactory;
-import blue.language.processor.CoordinationCurrentRootDeliveryPlanDeriver;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.DocumentProcessor;
 import blue.language.processor.ExternalChannelFunctionContext;
@@ -21,8 +18,8 @@ import blue.language.processor.ProcessingDebugResult;
 import blue.language.processor.ProcessorStatus;
 import blue.language.processor.SubscriptionDelta;
 import blue.language.provider.SequentialNodeProvider;
-import blue.language.utils.BlueIdCalculator;
-import blue.language.utils.JsonPointer;
+import blue.language.identity.DirectBlueIdCalculator;
+import blue.language.model.wire.JsonPointer;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.OperationRequest;
 import blue.repo.coordination.TimelineChannel;
@@ -52,7 +49,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
 
     @Test
     void shouldProduceTheCompatibilityPlannerDeliveryFromAnExactIndex() {
-        // Given
+        // given
         try (Fixture fixture = fixture(
                 channels("matching", "other"))) {
             Node event = fixture.event("matching", 2);
@@ -65,12 +62,14 @@ final class CoordinationIndexedDeliveryPlannerTest {
                     candidateKeys(snapshot, "matching");
             CoordinationHostQuotaSession hostQuotas =
                     CoordinationHostQuotaSession.observing();
+            CoordinationSubscriptionSnapshot.PlanningMetrics before =
+                    snapshot.planningMetrics();
 
-            // When
+            // when
             CoordinationPreparedDelivery indexed =
                     fixture.planner.prepare(
                             fixture.rootBlueId,
-                            BlueIdCalculator.calculateBlueId(event),
+                            DirectBlueIdCalculator.calculateBlueId(event),
                             snapshot,
                             candidates,
                             fixture.provider(event),
@@ -80,13 +79,15 @@ final class CoordinationIndexedDeliveryPlannerTest {
             ExternalDeliveryPlan compatibility =
                     CoordinationDeliveryPlanning
                             .currentRootCompatibilityDeriver(
-                                    fixture.blue
-                                            .getDocumentProcessor())
+                                    fixture.blue.contracts(),
+                                    fixture.revision,
+                                    order,
+                                    activeIntervals(snapshot))
                             .derive(
                                     fixture.root,
                                     event);
 
-            // Then
+            // then
             assertEquals(
                     deliverySignatures(compatibility),
                     deliverySignatures(
@@ -110,7 +111,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
                     fixture.rootBlueId,
                     indexed.evidence().rootBlueId());
             assertEquals(
-                    BlueIdCalculator.calculateBlueId(event),
+                    DirectBlueIdCalculator.calculateBlueId(event),
                     indexed.evidence().eventBlueId());
             assertTrue(
                     indexed.requiredSeedFragmentIdentities()
@@ -125,12 +126,27 @@ final class CoordinationIndexedDeliveryPlannerTest {
                     hostQuotas.quantity(
                             CoordinationHostQuotaSchedule
                                     .PREFETCH_IDENTITY_CONSTRUCTED));
+            CoordinationSubscriptionSnapshot.PlanningMetrics after =
+                    snapshot.planningMetrics();
+            assertEquals(
+                    snapshot.occurrences().size(),
+                    after.constructionOccurrenceValidationCount());
+            assertEquals(
+                    before.trustedPlanningVerificationCount() + 1L,
+                    after.trustedPlanningVerificationCount());
+            assertEquals(
+                    before.exactOccurrenceLookupCount()
+                            + candidates.size()
+                            + indexed.preselectedOccurrenceOrder().size(),
+                    after.exactOccurrenceLookupCount(),
+                    "trusted planning must perform exact selected-key "
+                            + "lookups, not another complete validation scan");
         }
     }
 
     @Test
     void shouldNotEvaluateUnrelatedOccurrenceHeadersDuringIndexedPlanning() {
-        // Given
+        // given
         AtomicInteger unrelatedHeaderEvaluations =
                 new AtomicInteger();
         try (Fixture fixture = fixture(
@@ -147,11 +163,11 @@ final class CoordinationIndexedDeliveryPlannerTest {
                     candidateKeys(snapshot, "matching");
             unrelatedHeaderEvaluations.set(0);
 
-            // When
+            // when
             CoordinationPreparedDelivery prepared =
                     fixture.planner.prepare(
                             fixture.rootBlueId,
-                            BlueIdCalculator.calculateBlueId(
+                            DirectBlueIdCalculator.calculateBlueId(
                                     event),
                             snapshot,
                             candidates,
@@ -159,7 +175,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
                             fixture.revision,
                             eventOrder(event));
 
-            // Then
+            // then
             assertEquals(
                     candidates,
                     prepared.preselectedOccurrenceOrder());
@@ -172,7 +188,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
 
     @Test
     void shouldRejectSnapshotAfterTimelineSubtypeRegistryChanges() {
-        // Given
+        // given
         try (Fixture fixture = fixture(
                 channels("matching"))) {
             Node event =
@@ -182,17 +198,16 @@ final class CoordinationIndexedDeliveryPlannerTest {
                     fixture.project(
                             ExternalOrderKey.of(
                                     Collections.emptyList()));
-            CoordinationProcessors.registerTimelineSubtype(
-                    fixture.blue,
+            fixture.blue.registerTimelineSubtype(
                     MyOSTimelineChannel.class);
 
-            // When
+            // when
             InvalidExecutionEvidenceException failure =
                     assertThrows(
                             InvalidExecutionEvidenceException.class,
                             () -> fixture.planner.prepare(
                                     fixture.rootBlueId,
-                                    BlueIdCalculator
+                                    DirectBlueIdCalculator
                                             .calculateBlueId(
                                                     event),
                                     snapshot,
@@ -203,7 +218,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
                                     fixture.revision,
                                     eventOrder(event)));
 
-            // Then
+            // then
             assertTrue(
                     failure.getMessage().contains(
                             "runtime or projection identity "
@@ -214,7 +229,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
 
     @Test
     void shouldRejectAnOmittedCanonicalCandidate() {
-        // Given
+        // given
         try (Fixture fixture = fixture(
                 channels("same", "same"))) {
             Node event = fixture.event("same", 3);
@@ -225,13 +240,13 @@ final class CoordinationIndexedDeliveryPlannerTest {
             List<String> complete =
                     candidateKeys(snapshot, "same");
 
-            // When
+            // when
             InvalidExecutionEvidenceException failure =
                     assertThrows(
                             InvalidExecutionEvidenceException.class,
                             () -> fixture.planner.prepare(
                                     fixture.rootBlueId,
-                                    BlueIdCalculator
+                                    DirectBlueIdCalculator
                                             .calculateBlueId(event),
                                     snapshot,
                                     complete.subList(
@@ -241,7 +256,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
                                     fixture.revision,
                                     eventOrder(event)));
 
-            // Then
+            // then
             assertTrue(
                     failure.getMessage().contains("omits"));
         }
@@ -249,7 +264,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
 
     @Test
     void shouldRejectCandidatesInTheWrongCanonicalOrder() {
-        // Given
+        // given
         try (Fixture fixture = fixture(
                 channels("same", "same"))) {
             Node event = fixture.event("same", 4);
@@ -262,13 +277,13 @@ final class CoordinationIndexedDeliveryPlannerTest {
                             candidateKeys(snapshot, "same"));
             Collections.reverse(reversed);
 
-            // When
+            // when
             InvalidExecutionEvidenceException failure =
                     assertThrows(
                             InvalidExecutionEvidenceException.class,
                             () -> fixture.planner.prepare(
                                     fixture.rootBlueId,
-                                    BlueIdCalculator
+                                    DirectBlueIdCalculator
                                             .calculateBlueId(event),
                                     snapshot,
                                     reversed,
@@ -276,7 +291,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
                                     fixture.revision,
                                     eventOrder(event)));
 
-            // Then
+            // then
             assertTrue(
                     failure.getMessage().contains(
                             "wrong canonical order"));
@@ -285,7 +300,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
 
     @Test
     void shouldRejectAnIndexedFalsePositiveUnderTheExactCandidateContract() {
-        // Given
+        // given
         try (Fixture fixture = fixture(
                 channels("matching", "other"))) {
             Node event = fixture.event("matching", 5);
@@ -306,13 +321,13 @@ final class CoordinationIndexedDeliveryPlannerTest {
                 }
             }
 
-            // When
+            // when
             InvalidExecutionEvidenceException failure =
                     assertThrows(
                             InvalidExecutionEvidenceException.class,
                             () -> fixture.planner.prepare(
                                     fixture.rootBlueId,
-                                    BlueIdCalculator
+                                    DirectBlueIdCalculator
                                             .calculateBlueId(event),
                                     snapshot,
                                     candidates,
@@ -320,7 +335,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
                                     fixture.revision,
                                     eventOrder(event)));
 
-            // Then
+            // then
             assertTrue(
                     failure.getMessage().contains(
                             "illegal extras"));
@@ -329,7 +344,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
 
     @Test
     void shouldRejectARevisionThatDoesNotBindTheSnapshot() {
-        // Given
+        // given
         try (Fixture fixture = fixture(
                 channels("matching"))) {
             Node event = fixture.event("matching", 6);
@@ -338,13 +353,13 @@ final class CoordinationIndexedDeliveryPlannerTest {
                             ExternalOrderKey.of(
                                     Collections.emptyList()));
 
-            // When
+            // when
             InvalidExecutionEvidenceException failure =
                     assertThrows(
                             InvalidExecutionEvidenceException.class,
                             () -> fixture.planner.prepare(
                                     fixture.rootBlueId,
-                                    BlueIdCalculator
+                                    DirectBlueIdCalculator
                                             .calculateBlueId(event),
                                     snapshot,
                                     candidateKeys(
@@ -354,7 +369,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
                                     fixture.revision + 1L,
                                     eventOrder(event)));
 
-            // Then
+            // then
             assertTrue(
                     failure.getMessage().contains(
                             "Root revision mismatch"));
@@ -363,7 +378,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
 
     @Test
     void shouldRejectADuplicateIndexedCandidate() {
-        // Given
+        // given
         try (Fixture fixture = fixture(
                 channels("matching"))) {
             Node event = fixture.event("matching", 7);
@@ -376,13 +391,13 @@ final class CoordinationIndexedDeliveryPlannerTest {
                             snapshot, "matching")
                             .get(0);
 
-            // When
+            // when
             InvalidExecutionEvidenceException failure =
                     assertThrows(
                             InvalidExecutionEvidenceException.class,
                             () -> fixture.planner.prepare(
                                     fixture.rootBlueId,
-                                    BlueIdCalculator
+                                    DirectBlueIdCalculator
                                             .calculateBlueId(event),
                                     snapshot,
                                     Arrays.asList(
@@ -392,7 +407,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
                                     fixture.revision,
                                     eventOrder(event)));
 
-            // Then
+            // then
             assertTrue(
                     failure.getMessage().contains(
                             "Duplicate indexed candidate"));
@@ -401,7 +416,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
 
     @Test
     void shouldRejectIndexedValidationBeforeTheOverLimitCandidateIsAdmitted() {
-        // Given
+        // given
         try (Fixture fixture = fixture(
                 channels("same", "same"))) {
             Node event = fixture.event("same", 70);
@@ -416,13 +431,13 @@ final class CoordinationIndexedDeliveryPlannerTest {
                             CoordinationHostQuotaTestSupport
                                     .limitedIndexedCandidates(1));
 
-            // When
+            // when
             CoordinationHostQuotaExceededException failure =
                     assertThrows(
                             CoordinationHostQuotaExceededException.class,
                             () -> fixture.planner.prepare(
                                     fixture.rootBlueId,
-                                    BlueIdCalculator
+                                    DirectBlueIdCalculator
                                             .calculateBlueId(event),
                                     snapshot,
                                     candidates,
@@ -431,7 +446,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
                                     eventOrder(event),
                                     hostQuotas));
 
-            // Then
+            // then
             assertEquals(
                     "maxIndexedCandidatesPerPlan",
                     failure.limitName());
@@ -455,7 +470,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
 
     @Test
     void shouldRejectAnEventAtTheSnapshotActivationFrontier() {
-        // Given
+        // given
         try (Fixture fixture = fixture(
                 channels("matching"))) {
             Node event = fixture.event("matching", 8);
@@ -464,13 +479,13 @@ final class CoordinationIndexedDeliveryPlannerTest {
             CoordinationSubscriptionSnapshot snapshot =
                     fixture.project(frontier);
 
-            // When
+            // when
             InvalidExecutionEvidenceException failure =
                     assertThrows(
                             InvalidExecutionEvidenceException.class,
                             () -> fixture.planner.prepare(
                                     fixture.rootBlueId,
-                                    BlueIdCalculator
+                                    DirectBlueIdCalculator
                                             .calculateBlueId(event),
                                     snapshot,
                                     Collections
@@ -479,7 +494,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
                                     fixture.revision,
                                     frontier));
 
-            // Then
+            // then
             assertTrue(
                     failure.getMessage().contains(
                             "not after"));
@@ -488,7 +503,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
 
     @Test
     void shouldRejectARootIdentityThatDoesNotBindTheSnapshot() {
-        // Given
+        // given
         try (Fixture fixture = fixture(
                 channels("matching"))) {
             Node event = fixture.event("matching", 9);
@@ -497,13 +512,13 @@ final class CoordinationIndexedDeliveryPlannerTest {
                             ExternalOrderKey.of(
                                     Collections.emptyList()));
 
-            // When
+            // when
             InvalidExecutionEvidenceException failure =
                     assertThrows(
                             InvalidExecutionEvidenceException.class,
                             () -> fixture.planner.prepare(
                                     "wrong-root-identity",
-                                    BlueIdCalculator
+                                    DirectBlueIdCalculator
                                             .calculateBlueId(event),
                                     snapshot,
                                     candidateKeys(
@@ -513,7 +528,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
                                     fixture.revision,
                                     eventOrder(event)));
 
-            // Then
+            // then
             assertTrue(
                     failure.getMessage().contains(
                             "Root identity mismatch"));
@@ -522,7 +537,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
 
     @Test
     void shouldRejectEventContentThatDoesNotVerifyItsRequestedIdentity() {
-        // Given
+        // given
         try (Fixture fixture = fixture(
                 channels("matching"))) {
             Node event = fixture.event("matching", 10);
@@ -531,13 +546,13 @@ final class CoordinationIndexedDeliveryPlannerTest {
                             ExternalOrderKey.of(
                                     Collections.emptyList()));
             String eventBlueId =
-                    BlueIdCalculator.calculateBlueId(event);
+                    DirectBlueIdCalculator.calculateBlueId(event);
             Node tampered = event.clone()
                     .properties(
                             "tampered",
                             new Node().value(true));
 
-            // When
+            // when
             InvalidExecutionEvidenceException failure =
                     assertThrows(
                             InvalidExecutionEvidenceException.class,
@@ -554,7 +569,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
                                     fixture.revision,
                                     eventOrder(event)));
 
-            // Then
+            // then
             assertTrue(
                     failure.getMessage().contains(
                             "Provider returned content with BlueId"));
@@ -563,7 +578,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
 
     @Test
     void shouldRejectPersistedSnapshotContentThatRetiresAnActiveOccurrence() {
-        // Given
+        // given
         try (Fixture fixture = fixture(
                 channels("matching"))) {
             CoordinationSubscriptionSnapshot snapshot =
@@ -580,14 +595,14 @@ final class CoordinationIndexedDeliveryPlannerTest {
                     "endAtRootRevision",
                     fixture.revision);
 
-            // When
+            // when
             IllegalArgumentException failure =
                     assertThrows(
                             IllegalArgumentException.class,
                             () -> CoordinationSubscriptionSnapshot
                                     .rehydrate(persisted));
 
-            // Then
+            // then
             assertTrue(
                     failure.getMessage().contains(
                             "retired occurrence"));
@@ -595,8 +610,41 @@ final class CoordinationIndexedDeliveryPlannerTest {
     }
 
     @Test
+    void shouldRejectPersistedOccurrenceFromAFutureRootGeneration() {
+        // given
+        try (Fixture fixture = fixture(
+                channels("matching"))) {
+            CoordinationSubscriptionSnapshot snapshot =
+                    fixture.project(
+                            ExternalOrderKey.of(
+                                    Collections.emptyList()));
+            Map<String, Object> persisted =
+                    mutablePersistedSnapshot(snapshot);
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> occurrences =
+                    (List<Map<String, Object>>)
+                            persisted.get("occurrences");
+            occurrences.get(0).put(
+                    "activationRootRevision",
+                    fixture.revision + 1L);
+
+            // when
+            IllegalArgumentException failure =
+                    assertThrows(
+                            IllegalArgumentException.class,
+                            () -> CoordinationSubscriptionSnapshot
+                                    .rehydrate(persisted));
+
+            // then
+            assertTrue(
+                    failure.getMessage().contains("stale occurrence"),
+                    failure.getMessage());
+        }
+    }
+
+    @Test
     void shouldReturnDefensiveAndUnmodifiablePreparationViews() {
-        // Given
+        // given
         try (Fixture fixture = fixture(
                 channels("matching"))) {
             Node event = fixture.event("matching", 11);
@@ -606,7 +654,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
                     documentGraph =
                     new CoordinationDocumentSplitter(
                             fixture.blue
-                                    .getDocumentProcessor())
+                                    .contracts())
                             .splitDocument(fixture.root);
             CoordinationDocumentSplitter.SplitGraph
                     eventGraph =
@@ -614,7 +662,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
                             .forEventSplitting()
                             .splitEvent(event);
 
-            // When
+            // when
             CoordinationProcessingPreparation result =
                     CoordinationProcessingPreparation.combine(
                             prepared,
@@ -624,7 +672,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
                     result.rootReference();
             mutableReference.blueId("tampered");
 
-            // Then
+            // then
             assertEquals(
                     fixture.rootBlueId,
                     result.rootReference().getBlueId());
@@ -643,7 +691,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
 
     @Test
     void shouldPermitOnlyRuntimeSelectedHandlerBodiesAtTheRoutedTarget() {
-        // Given
+        // given
         try (Fixture fixture = fixture(
                 channels("matching"))) {
             Node event = fixture.event("matching", 12);
@@ -654,7 +702,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
             CoordinationSemanticDemandBoundary boundary =
                     prepared.demandBoundary();
 
-            // When
+            // when
             boolean selected = boundary.permits(
                     new CoordinationSemanticDemandBoundary.Demand(
                             CoordinationSemanticDemandBoundary.Kind
@@ -680,7 +728,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
                             "unrelated-body-blue-id",
                             true));
 
-            // Then
+            // then
             assertTrue(selected);
             assertFalse(notYetSelected);
             assertFalse(unrelated);
@@ -688,8 +736,70 @@ final class CoordinationIndexedDeliveryPlannerTest {
     }
 
     @Test
+    void shouldPermitRuntimeSelectedReactiveReadsOnlyAlongTheNestedSelectedChain() {
+        // given
+        String selectedCancellation =
+                "/agreements/agreement-a/lessons/lesson-a/"
+                        + "cancellations/cancellation-a";
+        CoordinationSemanticDemandBoundary boundary =
+                new CoordinationSemanticDemandBoundary(
+                        "root-blue-id",
+                        "event-blue-id",
+                        Collections.singleton(selectedCancellation),
+                        Arrays.asList("root-blue-id", "event-blue-id"),
+                        Collections.<String>emptySet(),
+                        Collections.<String>emptySet(),
+                        Collections.<String>emptySet(),
+                        Collections.<String>emptyList());
+
+        // when
+        boolean rootListener = boundary.permits(
+                new CoordinationSemanticDemandBoundary.Demand(
+                        CoordinationSemanticDemandBoundary.Kind.REACTIVE_BODY,
+                        "/",
+                        null,
+                        "root-listener-body",
+                        true));
+        boolean agreementListener = boundary.permits(
+                new CoordinationSemanticDemandBoundary.Demand(
+                        CoordinationSemanticDemandBoundary.Kind.REACTIVE_BODY,
+                        "/agreements/agreement-a",
+                        null,
+                        "agreement-listener-body",
+                        true));
+        boolean selectedScopeValue = boundary.permits(
+                new CoordinationSemanticDemandBoundary.Demand(
+                        CoordinationSemanticDemandBoundary.Kind.SCOPE_VALUE,
+                        selectedCancellation,
+                        null,
+                        "selected-scope-value",
+                        true));
+        boolean unrelatedSibling = boundary.permits(
+                new CoordinationSemanticDemandBoundary.Demand(
+                        CoordinationSemanticDemandBoundary.Kind.REACTIVE_BODY,
+                        "/agreements/agreement-b",
+                        null,
+                        "unrelated-listener-body",
+                        true));
+        boolean notRuntimeSelected = boundary.permits(
+                new CoordinationSemanticDemandBoundary.Demand(
+                        CoordinationSemanticDemandBoundary.Kind.REACTIVE_BODY,
+                        "/agreements/agreement-a/lessons/lesson-a",
+                        null,
+                        "not-selected-listener-body",
+                        false));
+
+        // then
+        assertTrue(rootListener);
+        assertTrue(agreementListener);
+        assertTrue(selectedScopeValue);
+        assertFalse(unrelatedSibling);
+        assertFalse(notRuntimeSelected);
+    }
+
+    @Test
     void shouldRouteAnIndexedSourceToAPeerTargetWhileCheckpointingOnlyTheSource() {
-        // Given
+        // given
         try (Fixture fixture = fixture(
                 routingContracts(false))) {
             Node event = fixture.operationEvent(101);
@@ -701,14 +811,14 @@ final class CoordinationIndexedDeliveryPlannerTest {
                     candidateKeysForChannels(
                             snapshot, "alice");
 
-            // When
+            // when
             CoordinationPreparedDelivery prepared =
                     fixture.prepare(
                             event, snapshot, candidates);
             ProcessingDebugResult debug =
                     fixture.execute(event, prepared);
 
-            // Then
+            // then
             CoordinationDeliveryDiagnostic delivery =
                     prepared.sourceDeliveries().get(0);
             assertEquals("alice", delivery.sourceChannelKey());
@@ -735,7 +845,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
 
     @Test
     void shouldCoalesceIndexedPeerRoutesWithoutCheckpointingAStaleSource() {
-        // Given
+        // given
         try (Fixture fixture = fixture(
                 routingContracts(true),
                 new SelectiveFreshnessTimelineProcessor(
@@ -751,14 +861,14 @@ final class CoordinationIndexedDeliveryPlannerTest {
                             "alice",
                             "aliceMirror");
 
-            // When
+            // when
             CoordinationPreparedDelivery prepared =
                     fixture.prepare(
                             event, snapshot, candidates);
             ProcessingDebugResult debug =
                     fixture.execute(event, prepared);
 
-            // Then
+            // then
             assertEquals(2, prepared.sourceDeliveries().size());
             assertEquals(
                     prepared.sourceDeliveries().get(0)
@@ -800,7 +910,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
 
     @Test
     void shouldProduceTheSameIndexedPeerRouteFromFragmentedProvidersWithoutOpeningBodies() {
-        // Given
+        // given
         try (Fixture fixture = fixture(
                 routingContracts(false))) {
             Node event = fixture.operationEvent(103);
@@ -818,7 +928,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
                     documentGraph =
                     new CoordinationDocumentSplitter(
                             fixture.blue
-                                    .getDocumentProcessor())
+                                    .contracts())
                             .splitDocument(fixture.root);
             CoordinationDocumentSplitter.SplitGraph
                     eventGraph =
@@ -834,7 +944,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
                                     documentGraph.provider(),
                                     eventGraph.provider()));
 
-            // When
+            // when
             CoordinationPreparedDelivery fragmented =
                     fixture.prepare(
                             event,
@@ -842,7 +952,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
                             candidates,
                             fragmentedProvider);
 
-            // Then
+            // then
             assertFalse(
                     executableBodyBlueIds.isEmpty(),
                     "the fixture must contain a separately retained "
@@ -1121,6 +1231,16 @@ final class CoordinationIndexedDeliveryPlannerTest {
         return result;
     }
 
+    private static List<SubscriptionDelta.Entry> activeIntervals(
+            CoordinationSubscriptionSnapshot snapshot) {
+        List<SubscriptionDelta.Entry> result = new ArrayList<>();
+        for (CoordinationSubscriptionOccurrence occurrence
+                : snapshot.occurrences()) {
+            result.add(occurrence.toSubscriptionDeltaEntry());
+        }
+        return result;
+    }
+
     private static List<String> activeSurfaceSignatures(
             List<SubscriptionDelta.Entry> intervals) {
         List<String> result = new ArrayList<>();
@@ -1160,10 +1280,10 @@ final class CoordinationIndexedDeliveryPlannerTest {
         Node timeline = event.getProperties().get(
                 "timeline");
         components.add(
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         timeline));
         components.add(
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         event));
         return ExternalOrderKey.of(components);
     }
@@ -1178,17 +1298,20 @@ final class CoordinationIndexedDeliveryPlannerTest {
             ChannelProcessor<TimelineChannel>
                     timelineProcessor) {
         BlueRepository repository =
-                BlueRepository.latest();
-        Blue blue =
+                BlueRepository.current();
+        CoordinationTestRuntime blue =
                 CoordinationTestResources
                         .configuredBlue(repository);
-        CoordinationProcessors.registerWith(blue);
         if (timelineProcessor != null) {
-            blue.registerContractProcessor(
+            blue.registerExternalContractType(
+                    TimelineChannel.blueId(),
+                    repository.nodeByBlueId(TimelineChannel.blueId())
+                            .orElseThrow(() -> new AssertionError(
+                                    "Timeline Channel type missing")),
                     timelineProcessor);
         }
         Node authored = new Node()
-                .blue(repository.typeAliasBlue())
+                .blue(repository.importsDirective())
                 .name("Indexed delivery planner")
                 .properties(
                         "counter",
@@ -1504,7 +1627,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
             implements AutoCloseable {
         private static final long REVISION = 11L;
         private final BlueRepository repository;
-        private final Blue blue;
+        private final CoordinationTestRuntime blue;
         private final Node root;
         private final String rootBlueId;
         private final long revision;
@@ -1515,22 +1638,24 @@ final class CoordinationIndexedDeliveryPlannerTest {
 
         private Fixture(
                 BlueRepository repository,
-                Blue blue,
+                CoordinationTestRuntime blue,
                 Node root) {
             this.repository = repository;
             this.blue = blue;
             this.root = root;
             this.rootBlueId =
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             root);
             this.revision = REVISION;
             this.projector =
                     CoordinationDeliveryPlanning
                             .subscriptionProjector(
-                                    blue.getDocumentProcessor());
+                                    blue.processor(),
+                                    blue.contracts());
             this.planner =
                     new CoordinationIndexedDeliveryPlanner(
-                            blue.getDocumentProcessor());
+                            blue.processor(),
+                            blue.contracts());
         }
 
         private CoordinationSubscriptionSnapshot project(
@@ -1564,7 +1689,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
 
         private NodeProvider provider(Node event) {
             return provider(
-                    BlueIdCalculator.calculateBlueId(event),
+                    DirectBlueIdCalculator.calculateBlueId(event),
                     event);
         }
 
@@ -1603,7 +1728,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
                 NodeProvider exactProvider) {
             return planner.prepare(
                     rootBlueId,
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             event),
                     snapshot,
                     candidates,
@@ -1636,7 +1761,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
                                     Collections.emptyList()));
             return planner.prepare(
                     rootBlueId,
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             event),
                     snapshot,
                     candidateKeys(

@@ -1,6 +1,5 @@
 package blue.coordination.processor;
 
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.repo.BlueRepository;
@@ -17,51 +16,53 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class MustUnderstandContractsTest {
     @Test
     void shouldStopInitializationForUnknownContractType() {
-        // Given
+        // given
         Fixture fixture = configuredFixture(false);
         String unknownType = "3nxchG67TRi4XrYFM2MTjj4LmuHNQzVv9NZLjATrPN19";
         Node document = document(fixture.repository, contract("unknown", new Node()
                 .type(new Node().blueId(unknownType))));
 
-        // When
+        // when
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> initialize(fixture, document));
 
-        // Then
+        // then
         assertTrue(ex.getMessage().contains(unknownType), ex.getMessage());
     }
 
     @Test
     void shouldStopInitializationWhenBaseChannelIsExecutableContract() {
-        // Given
+        // given
         Fixture fixture = configuredFixture(false);
         Node document = document(fixture.repository, contract("owner", new Node().type("Channel")));
 
-        // When
+        // when
         DocumentProcessingResult result = initialize(fixture, document);
 
-        // Then
+        // then
         assertCapabilityFailure(result, "Unsupported contract type");
     }
 
     @Test
     void shouldSupportTimelineChannelUsedDirectly() {
-        // Given
+        // given
         Fixture fixture = configuredFixture(false);
         Node document = document(fixture.repository,
                 contract("owner", TestTimelineProvider.channel("owner")));
 
-        // When
+        // when
         DocumentProcessingResult result = initialize(fixture, document);
 
-        // Then
+        // then
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
-        assertTrue(fixture.blue.isInitialized(result.document()));
+        assertTrue(
+                fixture.blue.processor()
+                        .isInitialized(result.document()));
     }
 
     @Test
     void shouldInitializeHandlerBoundToTimelineChannel() {
-        // Given
+        // given
         Fixture fixture = configuredFixture(false);
         Map<String, Node> contracts = contract("owner", TestTimelineProvider.channel("owner"));
         contracts.put("handler", new Node()
@@ -70,17 +71,19 @@ class MustUnderstandContractsTest {
                 .properties("steps", new Node().items()));
         Node document = document(fixture.repository, contracts);
 
-        // When
+        // when
         DocumentProcessingResult result = initialize(fixture, document);
 
-        // Then
+        // then
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
-        assertTrue(fixture.blue.isInitialized(result.document()));
+        assertTrue(
+                fixture.blue.processor()
+                        .isInitialized(result.document()));
     }
 
     @Test
     void shouldFailClearlyForHandlerBoundToTypelessContract() {
-        // Given
+        // given
         Fixture fixture = configuredFixture(false);
         Map<String, Node> contracts = contract("owner", new Node()
                 .properties("timelineId", new Node().value("owner")));
@@ -90,21 +93,21 @@ class MustUnderstandContractsTest {
                 .properties("steps", new Node().items()));
         Node document = document(fixture.repository, contracts);
 
-        // When
+        // when
         DocumentProcessingResult result = initialize(fixture, document);
 
-        // Then
+        // then
         assertCapabilityFailure(result, "must declare a type");
     }
 
     @Test
     void shouldUseRegisteredSimpleTimelineProvider() {
-        // Given
+        // given
         Fixture fixture = configuredFixture(true);
         Node document = document(fixture.repository, contract("owner", TestTimelineProvider.channel("owner")));
         Node initialized = initialize(fixture, document).document();
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.blue.processDocument(initialized,
                 TestTimelineProvider.timelineEntry(fixture.blue,
                         fixture.repository,
@@ -112,7 +115,7 @@ class MustUnderstandContractsTest {
                         1,
                         TestTimelineProvider.chatMessage("hello")));
 
-        // Then
+        // then
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertNotNull(checkpointEvent(result.document(), "owner"));
     }
@@ -150,7 +153,7 @@ class MustUnderstandContractsTest {
 
     private static Node document(BlueRepository repository, Map<String, Node> contracts) {
         return new Node()
-                .blue(repository.typeAliasBlue())
+                .blue(repository.importsDirective())
                 .name("Must Understand Test")
                 .properties("contracts", new Node().properties(contracts));
     }
@@ -169,9 +172,9 @@ class MustUnderstandContractsTest {
     }
 
     private static Fixture configuredFixture(boolean simpleTimelineProvider) {
-        BlueRepository repository = BlueRepository.latest();
-        Blue blue = CoordinationTestResources.configuredBlue(repository);
-        CoordinationProcessors.registerWith(blue);
+        BlueRepository repository = BlueRepository.current();
+        CoordinationTestRuntime blue =
+                CoordinationTestResources.configuredBlue(repository);
         if (simpleTimelineProvider) {
             TestTimelineProvider.registerWith(blue);
         }
@@ -180,9 +183,11 @@ class MustUnderstandContractsTest {
 
     private static final class Fixture {
         private final BlueRepository repository;
-        private final Blue blue;
+        private final CoordinationTestRuntime blue;
 
-        private Fixture(BlueRepository repository, Blue blue) {
+        private Fixture(
+                BlueRepository repository,
+                CoordinationTestRuntime blue) {
             this.repository = repository;
             this.blue = blue;
         }

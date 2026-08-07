@@ -1,6 +1,5 @@
 package blue.coordination.processor;
 
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorStatus;
@@ -34,34 +33,34 @@ class PublishedTimelineChannelResolutionTest {
 
     @Test
     void shouldEnsureThatPublishedMaterializedTimelineChannelResolves() {
-        // Given
+        // given
         Fixture fixture = fixture(false);
 
-        // When
+        // when
         Node resolved = fixture.blue.resolve(fixture.blue.preprocess(
-                authoredChannel(fixture.blue).blue(fixture.repository.typeAliasBlue())));
+                authoredChannel(fixture.blue).blue(fixture.repository.importsDirective())));
 
-        // Then
+        // then
         assertResolvedBinding(fixture, resolved);
     }
 
     @Test
     void shouldEnsureThatPublishedMaterializedTimelineChannelInitializesAsContract() {
-        // Given
+        // given
         Fixture fixture = fixture(false);
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.blue.initializeDocument(
                 fixture.blue.preprocess(document(fixture)));
 
-        // Then
+        // then
         assertSuccessfulSnapshot(fixture, result);
         assertResolvedBinding(fixture, result.document().getAsNode("/contracts/timeline"));
     }
 
     @Test
     void shouldEnsureThatPublishedTimelineEntryRecursiveTypeResolvesFinitely() {
-        // Given
+        // given
         Fixture fixture = fixture(false);
         Node first = timelineEntry(
                 fixture.blue,
@@ -70,7 +69,7 @@ class PublishedTimelineChannelResolutionTest {
         String firstBlueId =
                 TimelineProviderSupport.eventId(first);
 
-        // When
+        // when
         Node resolved = fixture.blue.resolve(
                 timelineEntry(
                         fixture.blue,
@@ -81,13 +80,13 @@ class PublishedTimelineChannelResolutionTest {
                                 new Node().blueId(
                                         firstBlueId)));
 
-        // Then
+        // then
         assertFinitePrevEntryBoundary(resolved);
     }
 
     @Test
     void shouldEnsureThatPublishedCheckpointedTimelineEntrySurvivesClonedDocumentRebuild() {
-        // Given
+        // given
         Fixture fixture = fixture(true);
         Node initialized = fixture.blue.initializeDocument(
                 fixture.blue.preprocess(document(fixture))).document();
@@ -96,13 +95,13 @@ class PublishedTimelineChannelResolutionTest {
                 BigInteger.ONE,
                 "first");
 
-        // When
+        // when
         DocumentProcessingResult first =
                 fixture.blue.processDocument(
                         initialized,
                         firstEntry);
 
-        // Then
+        // then
         assertSuccessfulSnapshot(fixture, first);
         assertCheckpoint(first.document(), BigInteger.ONE);
 
@@ -128,31 +127,27 @@ class PublishedTimelineChannelResolutionTest {
     }
 
     private static Fixture fixture(boolean timelineProcessorOnly) {
-        BlueRepository repository = BlueRepository.latest();
-        Blue blue = repository.configure(new Blue());
-        if (timelineProcessorOnly) {
-            blue.registerContractProcessor(TimelineChannel.blueId(),
-                    new TimelineChannelProcessor());
-        } else {
-            CoordinationProcessors.registerWith(blue);
-        }
-        CoordinationDeliveryPlanning.currentRootCompatibility(
-                blue);
+        BlueRepository repository = BlueRepository.current();
+        CoordinationTestRuntime blue =
+                CoordinationTestResources.configuredBlue(repository);
         return new Fixture(repository, blue);
     }
 
     private static Node document(Fixture fixture) {
         return new Node()
-                .blue(fixture.repository.typeAliasBlue())
+                .blue(fixture.repository.importsDirective())
                 .properties("contracts", new Node().properties(Collections.singletonMap(
                         "timeline", authoredChannel(fixture.blue))));
     }
 
-    private static Node authoredChannel(Blue blue) {
+    private static Node authoredChannel(CoordinationTestRuntime blue) {
         return blue.parseSourceYaml(CHANNEL_YAML);
     }
 
-    private static Node timelineEntry(Blue blue, BigInteger timestamp, String message) {
+    private static Node timelineEntry(
+            CoordinationTestRuntime blue,
+            BigInteger timestamp,
+            String message) {
         TimelineEntry entry = new TimelineEntry()
                 .timeline(new Timeline().timelineId("timeline-1"))
                 .actor(new PrincipalActor().accountId("account-1"))
@@ -215,9 +210,11 @@ class PublishedTimelineChannelResolutionTest {
 
     private static final class Fixture {
         private final BlueRepository repository;
-        private final Blue blue;
+        private final CoordinationTestRuntime blue;
 
-        private Fixture(BlueRepository repository, Blue blue) {
+        private Fixture(
+                BlueRepository repository,
+                CoordinationTestRuntime blue) {
             this.repository = repository;
             this.blue = blue;
         }

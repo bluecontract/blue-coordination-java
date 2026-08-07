@@ -68,6 +68,14 @@ def releasePartitionEvidence =
 def releaseSameRunEvidence =
         layout.buildDirectory.file(
                 'reports/coordination-working/same-run-evidence.json')
+def releaseSiblingInputsEvidence =
+        layout.buildDirectory.file(
+                'reports/latest-language-embedded-collections/'
+                        + 'sibling-inputs.json')
+def releaseDependencyLockEvidence =
+        layout.buildDirectory.file(
+                'reports/latest-language-embedded-collections/'
+                        + 'resolved-dependency-lock.json')
 def releaseExternalBlockerCatalogFile =
         file('gradle/coordination-external-blockers.json')
 def releaseExternalBlockerCatalog =
@@ -76,25 +84,52 @@ def releaseExternalBlockerCatalog =
 def releaseExternalBlockers =
         releaseExternalBlockerCatalog.blockers as List
 if (releaseExternalBlockerCatalog.schema
-        != 'blue-coordination/external-blockers/1.1') {
+        != 'blue-coordination/external-blockers/1.2') {
     throw new GradleException(
             'Unsupported Coordination external-blocker catalog schema: '
                     + releaseExternalBlockerCatalog.schema)
 }
-def releaseFingerprintPrefixes =
-        releaseExternalBlockers.collect {
-            it.fingerprintPrefix
-        }
-if (releaseFingerprintPrefixes.any {
-    !(it instanceof String)
-            || it.trim().isEmpty()
-            || !it.endsWith(':')
+def releaseExpectedSuite =
+        releaseExternalBlockerCatalog.expectedSuite
+def releaseExpectedFull =
+        releaseExpectedSuite?.full
+def releaseExpectedWorking =
+        releaseExpectedSuite?.working
+def releaseExpectedProbes =
+        releaseExpectedSuite?.probes
+if (!(releaseExpectedFull instanceof Number)
+        || !(releaseExpectedWorking instanceof Number)
+        || !(releaseExpectedProbes instanceof Number)
+        || releaseExpectedFull.longValue() <= 0L
+        || releaseExpectedWorking.longValue() < 0L
+        || releaseExpectedProbes.longValue() < 0L
+        || releaseExpectedFull.longValue()
+        != releaseExpectedWorking.longValue()
+        + releaseExpectedProbes.longValue()) {
+    throw new GradleException(
+            'The external-blocker catalog must declare one exact '
+                    + 'full = working + probes suite partition.')
 }
-        || releaseFingerprintPrefixes.toSet().size()
-        != releaseFingerprintPrefixes.size()) {
+def releaseFingerprints =
+        releaseExternalBlockers.collect {
+            [
+                    failureType:
+                            it.failureType,
+                    logicalMessagePrefix:
+                            it.logicalMessagePrefix
+            ]
+        }
+if (releaseFingerprints.any {
+    !(it.failureType instanceof String)
+            || it.failureType.trim().isEmpty()
+            || !(it.logicalMessagePrefix instanceof String)
+            || it.logicalMessagePrefix.trim().isEmpty()
+}
+        || releaseFingerprints.toSet().size()
+        != releaseFingerprints.size()) {
     throw new GradleException(
             'Every external-blocker family must declare one unique, '
-                    + 'non-empty fingerprintPrefix ending in a colon.')
+                    + 'non-empty failureType/logicalMessagePrefix pair.')
 }
 def releaseExternalProbes =
         releaseExternalBlockers.collectMany {
@@ -108,15 +143,19 @@ def releaseExternalProbes =
                                         blocker.owner,
                                 test     :
                                         probe.test,
-                                fingerprintPrefix:
-                                        blocker.fingerprintPrefix
+                                failureType:
+                                        blocker.failureType,
+                                logicalMessagePrefix:
+                                        blocker.logicalMessagePrefix
                         ]
                 }
         }
-if (releaseExternalProbes.size() != 57
+if (releaseExternalProbes.size()
+        != releaseExpectedProbes.longValue()
         || releaseExternalProbes.collect {
             it.test
-        }.toSet().size() != 57
+        }.toSet().size()
+        != releaseExpectedProbes.longValue()
         || releaseExternalBlockers.any { blocker ->
             !(blocker.probes instanceof List)
                     || blocker.probes.isEmpty()
@@ -129,7 +168,8 @@ if (releaseExternalProbes.size() != 57
             }
         }) {
     throw new GradleException(
-            'The external-blocker catalog must contain exactly 57 '
+            'The external-blocker catalog must contain exactly '
+                    + releaseExpectedProbes + ' '
                     + 'unique, test-only probe declarations.')
 }
 def releasePublishedAlignmentEvidence =
@@ -143,6 +183,34 @@ def releaseSiblingSourceLock =
         file('gradle/blue-sibling-lock.properties')
 def releaseConformancePackage =
         file('src/test/resources/coordination/conformance')
+
+def releaseExternalBlockerLock = new Properties()
+releaseSiblingSourceLock.withInputStream {
+    releaseExternalBlockerLock.load(it)
+}
+if (releaseExternalBlockers.any { blocker ->
+    !(blocker.id instanceof String)
+            || blocker.id.trim().isEmpty()
+            || blocker.owner != 'blue-repository-java'
+            || blocker.status != 'open'
+            || !(blocker.category instanceof String)
+            || blocker.category.trim().isEmpty()
+            || !(blocker.reproductionCommand instanceof String)
+            || blocker.reproductionCommand.trim().isEmpty()
+            || !(blocker.notes instanceof String)
+            || blocker.notes.trim().isEmpty()
+            || !(blocker.firstObservedAgainst instanceof Map)
+            || blocker.firstObservedAgainst.commit
+            != releaseExternalBlockerLock.getProperty(
+            'blueRepositoryCommit')
+            || blocker.firstObservedAgainst.version
+            != releaseExternalBlockerLock.getProperty(
+            'blueRepositoryLocalVersion')
+}) {
+    throw new GradleException(
+            'Every open external blocker must be bound to the exact locked '
+                    + 'Repository commit and local version.')
+}
 
 def releaseFocusedTaskNames =
         new ArrayList<String>(
@@ -166,6 +234,8 @@ def releaseRequiredGateTaskNames =
                                 + [
                                 'coordinationReleaseEvidenceTest',
                                 'verifyCoordinationConformanceReceiptIdentities',
+                                'verifyLatestBlueSiblingInputs',
+                                'writeLatestBlueDependencyLock',
                                 'verifyExactCoordinationFlagshipEvidence',
                                 'verifyExactCoordinationLoopEvidence',
                                 'verifyNestedLocalCompositeDependencies',
@@ -576,8 +646,10 @@ def classifyReleaseFailure = {
     def exactExternalProbe =
             releaseExternalProbes.find {
                 it.test == testId
+                        && it.failureType
+                        == failureType
                         && logicalMessage.startsWith(
-                        it.fingerprintPrefix)
+                        it.logicalMessagePrefix)
             }
     if (exactExternalProbe != null) {
         return 'dependency-evidence-before-coordination'
@@ -1212,17 +1284,23 @@ def generateCoordinationReleaseFinalReport =
                         && partition
                         .multisetUnionMatches == true
                         && partition
-                        .observed?.full?.total == 899
+                        .observed?.full?.total
+                        == releaseExpectedFull.longValue()
                         && partition
-                        .observed?.full?.unique == 899
+                        .observed?.full?.unique
+                        == releaseExpectedFull.longValue()
                         && partition
-                        .observed?.working?.total == 842
+                        .observed?.working?.total
+                        == releaseExpectedWorking.longValue()
                         && partition
-                        .observed?.working?.unique == 842
+                        .observed?.working?.unique
+                        == releaseExpectedWorking.longValue()
                         && partition
-                        .observed?.probes?.total == 57
+                        .observed?.probes?.total
+                        == releaseExpectedProbes.longValue()
                         && partition
-                        .observed?.probes?.unique == 57
+                        .observed?.probes?.unique
+                        == releaseExpectedProbes.longValue()
                         && partition.overlap
                         instanceof Map
                         && partition.overlap.isEmpty()
@@ -1243,7 +1321,12 @@ def generateCoordinationReleaseFinalReport =
         if (!partitionVerified) {
             blockers.add(
                     'The same-run full-suite partition is not the exact '
-                            + '899 = 842 + 57 disjoint multiset union'
+                            + releaseExpectedFull
+                            + ' = '
+                            + releaseExpectedWorking
+                            + ' + '
+                            + releaseExpectedProbes
+                            + ' disjoint multiset union'
                             + (partitionParseError == null
                             ? '.'
                             : ': ' + partitionParseError + '.'))
@@ -2358,8 +2441,22 @@ def generateCoordinationReleaseFinalReport =
                 readReleaseProperties(
                         releasePublishedAlignmentEvidence
                                 .get().asFile)
-        String exactPublishedLanguageCoordinate =
-                "blue.language:blue-language-java:${coordinates.language.version}"
+        def exactPublishedLanguageCoordinates = [
+                releaseExternalBlockerLock.getProperty(
+                        'blueLanguageModelCoordinate'),
+                releaseExternalBlockerLock.getProperty(
+                        'blueLanguageCoreCoordinate'),
+                releaseExternalBlockerLock.getProperty(
+                        'blueLanguageMappingCoordinate'),
+                releaseExternalBlockerLock.getProperty(
+                        'blueContractsCoreCoordinate')
+        ].sort()
+        def requestedPublishedLanguageCoordinates =
+                publishedAlignmentProperties
+                        ?.get('requested.coordinates')
+                        ?.split(',')
+                        ?.findAll { !it.isEmpty() }
+                        ?.sort()
         boolean publishedAlignmentVerified =
                 publishedAlignmentProperties
                 instanceof Map
@@ -2368,20 +2465,28 @@ def generateCoordinationReleaseFinalReport =
                         == ([
                         'schema',
                         'status',
-                        'expected.coordinate',
-                        'requested.coordinate'
+                        'module.count',
+                        'expected.coordinates',
+                        'requested.coordinates',
+                        'bexReceipt.sha256'
                 ] as Set)
                         && publishedAlignmentProperties.schema
                         == ('blue.coordination/'
-                        + 'published-dependency-alignment/1.0')
+                        + 'published-dependency-alignment/2.0')
                         && publishedAlignmentProperties.status
                         == 'verified'
                         && publishedAlignmentProperties
-                        .get('expected.coordinate')
-                        == exactPublishedLanguageCoordinate
+                        .get('module.count') == '4'
                         && publishedAlignmentProperties
-                        .get('requested.coordinate')
-                        == exactPublishedLanguageCoordinate
+                        .get('expected.coordinates')
+                        ?.split(',')?.toList()?.sort()
+                        == exactPublishedLanguageCoordinates
+                        && requestedPublishedLanguageCoordinates
+                        == exactPublishedLanguageCoordinates
+                        && publishedAlignmentProperties
+                        .get('bexReceipt.sha256')
+                        == releaseExternalBlockerLock.getProperty(
+                        'blueBexWorkingReceiptSha256')
         def publishedAlignment = [
                 evidencePresent:
                         releasePublishedAlignmentEvidence
@@ -2390,14 +2495,14 @@ def generateCoordinationReleaseFinalReport =
                         sha256FileRelease(
                                 releasePublishedAlignmentEvidence
                                         .get().asFile),
-                expectedCoordinate:
+                expectedCoordinates:
                         publishedAlignmentProperties
                                 ?.get(
-                                'expected.coordinate'),
-                requestedCoordinate:
+                                'expected.coordinates'),
+                requestedCoordinates:
                         publishedAlignmentProperties
                                 ?.get(
-                                'requested.coordinate'),
+                                'requested.coordinates'),
                 status:
                         publishedAlignmentProperties
                                 ?.get('status')
@@ -2414,18 +2519,19 @@ def generateCoordinationReleaseFinalReport =
         def sourceLockProperties =
                 readReleaseProperties(
                         releaseSiblingSourceLock)
-        def expectedSourceLockKeys = [
-                'blueLanguageCommit',
-                'blueBexCommit',
-                'blueRepositoryCommit'
-        ] as Set
+        def expectedSourceLock =
+                project.ext.latestBlueDependencyTopology
+                        .lock as Properties
+        def expectedSourceLockKeys =
+                expectedSourceLock.keySet() as Set
         boolean sourceLockShapeValid =
                 sourceLockProperties instanceof Map
                         && (sourceLockProperties
                         .keySet() as Set)
                         == expectedSourceLockKeys
-                        && sourceLockProperties.values().every {
-                    it ==~ /[0-9a-f]{40}/
+                        && sourceLockProperties.every { key, value ->
+                    value == expectedSourceLock.getProperty(
+                            key.toString())
                 }
         def sourceLockComparisons =
                 new LinkedHashMap<String, Object>()
@@ -2476,6 +2582,147 @@ def generateCoordinationReleaseFinalReport =
                             + sourceLockComparisons + '.')
         }
 
+        File dependencyLockFile =
+                releaseDependencyLockEvidence.get().asFile
+        File siblingInputsFile =
+                releaseSiblingInputsEvidence.get().asFile
+        def dependencyLockValue = null
+        def siblingInputsValue = null
+        String dependencyEvidenceParseError = null
+        try {
+            dependencyLockValue =
+                    new JsonSlurper().parse(dependencyLockFile)
+            siblingInputsValue =
+                    new JsonSlurper().parse(siblingInputsFile)
+        } catch (Exception invalidDependencyEvidence) {
+            dependencyEvidenceParseError =
+                    invalidDependencyEvidence.message
+                            ?: invalidDependencyEvidence.class.name
+        }
+        def expectedDependencyArtifactHashes = [
+                'blue.language:blue-language-model':
+                        sourceLockProperties?.get(
+                                'blueLanguageModelJarSha256'),
+                'blue.language:blue-language-core':
+                        sourceLockProperties?.get(
+                                'blueLanguageCoreJarSha256'),
+                'blue.language:blue-language-mapping':
+                        sourceLockProperties?.get(
+                                'blueLanguageMappingJarSha256'),
+                'blue.language:blue-contracts-core':
+                        sourceLockProperties?.get(
+                                'blueContractsCoreJarSha256'),
+                'blue.bex:blue-bex-core':
+                        sourceLockProperties?.get(
+                                'blueBexCoreJarSha256'),
+                'blue.bex:blue-bex-contracts':
+                        sourceLockProperties?.get(
+                                'blueBexContractsJarSha256'),
+                'blue.repo:blue-repo-java':
+                        sourceLockProperties?.get(
+                                'blueRepositoryJarSha256')
+        ]
+        def expectedProjectComponents = [
+                'blue.language:blue-language-model':
+                        [build: ':blue-language-java', project: ':blue-language-model'],
+                'blue.language:blue-language-core':
+                        [build: ':blue-language-java', project: ':blue-language-core'],
+                'blue.language:blue-language-mapping':
+                        [build: ':blue-language-java', project: ':blue-language-mapping'],
+                'blue.language:blue-contracts-core':
+                        [build: ':blue-language-java', project: ':blue-contracts-core'],
+                'blue.bex:blue-bex-core':
+                        [build: ':blue-bex-java', project: ':blue-bex-core'],
+                'blue.bex:blue-bex-contracts':
+                        [build: ':blue-bex-java', project: ':blue-bex-contracts']
+        ]
+        boolean dependencyEvidenceVerified =
+                dependencyEvidenceParseError == null
+                        && dependencyLockValue?.schema
+                        == 'blue-coordination/latest-blue-dependency-lock/1.0'
+                        && dependencyLockValue?.status == 'verified'
+                        && dependencyLockValue?.mode == 'local-composite'
+                        && dependencyLockValue?.aggregateRetention
+                        == [language: 'not-selected', bex: 'not-selected']
+                        && (dependencyLockValue?.artifacts?.keySet() as Set)
+                        == (expectedDependencyArtifactHashes.keySet() as Set)
+                        && (dependencyLockValue?.resolvedComponents?.keySet() as Set)
+                        == (expectedDependencyArtifactHashes.keySet() as Set)
+                        && siblingInputsValue?.schema
+                        == 'blue-coordination/latest-blue-sibling-inputs/1.0'
+                        && siblingInputsValue?.status == 'verified'
+                        && siblingInputsValue?.language?.commit
+                        == sourceLockProperties?.get('blueLanguageCommit')
+                        && siblingInputsValue?.bex?.commit
+                        == sourceLockProperties?.get('blueBexCommit')
+                        && siblingInputsValue?.repository?.commit
+                        == sourceLockProperties?.get('blueRepositoryCommit')
+                        && siblingInputsValue?.packageIdentities
+                        ?.languageRegistry
+                        == sourceLockProperties?.get(
+                        'blueLanguageRegistrySha256')
+                        && siblingInputsValue?.packageIdentities
+                        ?.contractsRegistry
+                        == sourceLockProperties?.get(
+                        'blueContractsRegistrySha256')
+                        && siblingInputsValue?.failures == []
+                        && dependencyLockValue?.siblingInputReceipt?.sha256
+                        == sha256FileRelease(siblingInputsFile)
+                        && expectedDependencyArtifactHashes.every {
+                    coordinate, expectedHash ->
+                        def artifact = dependencyLockValue.artifacts
+                                .get(coordinate)
+                        File artifactFile = artifact?.file == null
+                                ? null
+                                : file(artifact.file.toString())
+                        expectedHash instanceof String
+                                && artifact?.sha256 == expectedHash
+                                && artifactFile?.isFile()
+                                && sha256FileRelease(artifactFile)
+                                == expectedHash
+                }
+                        && expectedProjectComponents.every {
+                    coordinate, expected ->
+                        def component = dependencyLockValue
+                                .resolvedComponents.get(coordinate)
+                        component?.componentType?.toString()
+                                ?.endsWith('ProjectComponentIdentifier')
+                                && component?.buildPath == expected.build
+                                && component?.projectPath == expected.project
+                }
+                        && dependencyLockValue?.resolvedComponents
+                        ?.get('blue.repo:blue-repo-java')
+                        ?.componentType?.toString()
+                        ?.endsWith('ModuleComponentIdentifier')
+                        && dependencyLockValue?.resolvedComponents
+                        ?.get('blue.repo:blue-repo-java')
+                        ?.selectedVersion
+                        == sourceLockProperties?.get(
+                        'blueRepositoryLocalVersion')
+        def dependencyTopologyEvidence = [
+                status              : dependencyEvidenceVerified
+                        ? 'verified'
+                        : 'invalid-or-missing',
+                dependencyLockSha256:
+                        sha256FileRelease(dependencyLockFile),
+                siblingInputsSha256 :
+                        sha256FileRelease(siblingInputsFile),
+                aggregateRetention  :
+                        dependencyLockValue?.aggregateRetention,
+                resolvedComponents  :
+                        dependencyLockValue?.resolvedComponents,
+                artifactSha256s     :
+                        expectedDependencyArtifactHashes,
+                parseError          : dependencyEvidenceParseError
+        ]
+        if (!dependencyEvidenceVerified) {
+            blockers.add(
+                    'The strict release is not bound to the verified six '
+                            + 'focused project modules and exact hash-locked '
+                            + 'Repository binary: '
+                            + dependencyTopologyEvidence + '.')
+        }
+
         def artifacts = [
                 coordinationJarSha256:
                         sha256FileRelease(currentJar),
@@ -2485,35 +2732,15 @@ def generateCoordinationReleaseFinalReport =
                         sha256FileRelease(javadocJar),
                 coordinationSourceArchiveSha256:
                         sha256FileRelease(sourceArchive),
-                languageJarSha256:
-                        sha256FileRelease(
-                                file('../blue-language-java/build/libs/'
-                                        + 'blue-language-java-'
-                                        + coordinates.language.version
-                                        + (System.getenv('CI')
-                                        ? ''
-                                        : '-SNAPSHOT')
-                                        + '.jar')),
-                bexJarSha256:
-                        sha256FileRelease(
-                                file('../blue-bex-java/build/libs/'
-                                        + 'blue-bex-java-'
-                                        + coordinates.bex.version
-                                        + (System.getenv('CI')
-                                        ? ''
-                                        : '-SNAPSHOT')
-                                        + '.jar')),
+                blueDependencyLockSha256:
+                        sha256FileRelease(dependencyLockFile),
+                blueSiblingInputsSha256:
+                        sha256FileRelease(siblingInputsFile),
+                focusedDependencyArtifactSha256s:
+                        expectedDependencyArtifactHashes,
                 repositoryJarSha256:
-                        sha256FileRelease(
-                                new File(
-                                        releaseBlueRepositoryComposite,
-                                        'build/libs/'
-                                        + 'blue-repo-java-'
-                                        + coordinates.repository.version
-                                        + (System.getenv('CI')
-                                        ? ''
-                                        : '-SNAPSHOT')
-                                        + '.jar')),
+                        expectedDependencyArtifactHashes
+                                .get('blue.repo:blue-repo-java'),
                 gasManifestSha256:
                         observedPortableGasRawSha256,
                 hostQuotaManifestSha256:
@@ -2539,11 +2766,8 @@ def generateCoordinationReleaseFinalReport =
                 fixedRepositoryBlueSourceSha256:
                         sha256FileRelease(fixedRepositoryBlueSource)
         ]
-        def dependencyArtifactSha256s = [
-                language  : artifacts.languageJarSha256,
-                bex       : artifacts.bexJarSha256,
-                repository: artifacts.repositoryJarSha256
-        ]
+        def dependencyArtifactSha256s =
+                expectedDependencyArtifactHashes
         dependencyArtifactSha256s.each { name, value ->
             if (!(value instanceof String)
                     || !(value ==~ /[0-9a-f]{64}/)) {
@@ -2556,12 +2780,12 @@ def generateCoordinationReleaseFinalReport =
         def expectedConformanceReceiptIdentities = [
                 blueLanguageCommit:
                         coordinates.language.commit,
-                blueLanguageJarSha256:
-                        artifacts.languageJarSha256,
                 blueBexCommit:
                         coordinates.bex.commit,
-                blueBexJarSha256:
-                        artifacts.bexJarSha256,
+                blueDependencyLockSha256:
+                        artifacts.blueDependencyLockSha256,
+                blueSiblingInputsSha256:
+                        artifacts.blueSiblingInputsSha256,
                 blueRepositoryCommit:
                         coordinates.repository.commit,
                 blueRepositoryJarSha256:
@@ -2846,6 +3070,12 @@ def generateCoordinationReleaseFinalReport =
                 blockerCatalog:
                         releaseEvidenceSource(
                                 releaseExternalBlockerCatalogFile),
+                siblingInputs:
+                        releaseEvidenceSource(
+                                siblingInputsFile),
+                resolvedDependencyLock:
+                        releaseEvidenceSource(
+                                dependencyLockFile),
                 fixedRepository:
                         releaseEvidenceSource(
                                 fixedCatalogReport),
@@ -2881,6 +3111,17 @@ def generateCoordinationReleaseFinalReport =
         long coordinationEvidenceFailures =
                 tests.failed - dependencyEvidenceFailures
 
+        def openExternalBlockers =
+                releaseExternalBlockers.findAll {
+                    it.status == 'open'
+                }
+        if (!openExternalBlockers.isEmpty()) {
+            blockers.add(
+                    'Strict release requires zero open external blockers; '
+                            + 'found '
+                            + openExternalBlockers.collect { it.id } + '.')
+        }
+
         boolean releaseEligible =
                 blockers.isEmpty()
         def report = [
@@ -2894,12 +3135,16 @@ def generateCoordinationReleaseFinalReport =
                         coordinates.coordination,
                 dependencies:
                         [
-                                language  :
-                                        coordinates.language,
-                                bex       :
-                                        coordinates.bex,
+                                focusedModules:
+                                        dependencyTopologyEvidence
+                                                .resolvedComponents,
                                 repository:
-                                        coordinates.repository
+                                        coordinates.repository,
+                                sourceCheckouts:
+                                        [
+                                                language: coordinates.language,
+                                                bex     : coordinates.bex
+                                        ]
                         ],
                 requiredReleaseGates:
                         releaseGates,
@@ -2931,12 +3176,16 @@ def generateCoordinationReleaseFinalReport =
                         siblingSourceLocks,
                 publishedDependencyAlignment:
                         publishedAlignment,
+                dependencyTopology:
+                        dependencyTopologyEvidence,
                 runtimeIdentities:
                         [
                                 languageCoreRegistry:
-                                        'sha256:b705171a6ca62c990792bcb78db9d921caf5b0ed06370648b9a81769d69dd71e',
+                                        'sha256:' + sourceLockProperties
+                                                .get('blueLanguageRegistrySha256'),
                                 contractsRuntimeRegistry:
-                                        'sha256:67ce3101449c5bca9e6093b081da239d5d699fdc02182a058d3ad795c6c6120b',
+                                        'sha256:' + sourceLockProperties
+                                                .get('blueContractsRegistrySha256'),
                                 coordinationRuntimeRegistry:
                                         coordinationRuntimeRegistryIdentity,
                                 coordinationRuntimeRegistrationInventorySha256:
@@ -3278,6 +3527,15 @@ generateCoordinationReleaseFinalReport.configure {
                 != 'verified'
                 || report.publishedDependencyAlignment
                 ?.verified != true
+                || report.dependencyTopology?.status != 'verified'
+                || report.dependencyTopology?.aggregateRetention
+                != [language: 'not-selected', bex: 'not-selected']
+                || report.runtimeIdentities?.languageCoreRegistry
+                != ('sha256:' + releaseExternalBlockerLock.getProperty(
+                'blueLanguageRegistrySha256'))
+                || report.runtimeIdentities?.contractsRuntimeRegistry
+                != ('sha256:' + releaseExternalBlockerLock.getProperty(
+                'blueContractsRegistrySha256'))
                 || report.tests?.executed
                 != report.tests?.required
                 || report.tests?.notExecuted != 0
@@ -3338,12 +3596,11 @@ generateCoordinationReleaseFinalReport.configure {
         }
     }
 }
-releaseRequiredGateTaskNames.each { taskName ->
-    tasks.named(taskName).configure {
-        finalizedBy(
-                generateCoordinationReleaseFinalReport)
-    }
-}
+/*
+ * The legacy publication report is intentionally not attached as a finalizer
+ * to ordinary compilation or local verification tasks.  The current local
+ * aggregate owns its own same-run receipt; publication remains opt-in.
+ */
 
 /*
  * When clean and any other task share a graph, every producer runs after
@@ -3360,7 +3617,7 @@ tasks.configureEach { candidate ->
 }
 
 ext.coordinationReleaseRegisterRequiredEvidenceGate = {
-    String taskName ->
+    String taskName, boolean attachStandaloneFinalizer = true ->
         if (releaseRequiredGateTaskNames
                 .contains(
                         taskName)) {
@@ -3377,10 +3634,7 @@ ext.coordinationReleaseRegisterRequiredEvidenceGate = {
         generateCoordinationReleaseFinalReport.configure {
             shouldRunAfter gate
         }
-        gate.configure {
-            finalizedBy(
-                    generateCoordinationReleaseFinalReport)
-        }
+        // Local gates never acquire the legacy publication finalizer.
 }
 
 ext.finalCoordinationVerificationTask =

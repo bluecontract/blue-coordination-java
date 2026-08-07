@@ -3,11 +3,14 @@ package blue.coordination.processor.bex;
 import blue.bex.api.BexDocumentView;
 import blue.bex.value.BexValue;
 import blue.bex.value.BexValues;
-import blue.coordination.processor.workflow.StepExecutionContext;
+import blue.language.model.Node;
 import blue.language.processor.ProcessorExecutionContext;
 import blue.language.snapshot.FrozenNode;
-import blue.language.utils.JsonPointer;
+import blue.language.model.wire.JsonPointer;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -17,12 +20,14 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
     private final FrozenAccess access;
     private final BexProcessingMetrics metrics;
 
-    ScopedProcessorExecutionContextBexDocumentView(StepExecutionContext context) {
+    ScopedProcessorExecutionContextBexDocumentView(
+            BexWorkflowStepContext context) {
         this(context, null);
     }
 
-    ScopedProcessorExecutionContextBexDocumentView(StepExecutionContext context,
-                                                   BexProcessingMetrics metrics) {
+    ScopedProcessorExecutionContextBexDocumentView(
+            BexWorkflowStepContext context,
+            BexProcessingMetrics metrics) {
         this(new StepContextFrozenAccess(context), metrics);
     }
 
@@ -42,19 +47,62 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
 
     @Override
     public BexValue canonicalAt(String pointer) {
-        return exactAt(
-                access.resolvePointer(pointer));
+        return cursorAt(access.resolvePointer(pointer));
     }
 
     @Override
     public BexValue resolvedAt(String pointer) {
-        return exactAt(
-                access.resolvePointer(pointer));
+        return cursorAt(access.resolvePointer(pointer));
     }
 
     @Override
     public String currentScopePath() {
         return access.currentScopePath();
+    }
+
+    private BexValue cursorAt(String absolutePointer) {
+        BexValue exact = exactAt(absolutePointer);
+        return cursorFor(absolutePointer, exact);
+    }
+
+    private BexValue cursorFor(
+            String absolutePointer,
+            BexValue value) {
+        if (value.isUndefined()
+                || hasTerminalSemanticContent(value)) {
+            return value;
+        }
+        return new ProcessorDocumentCursor(
+                absolutePointer,
+                value);
+    }
+
+    private boolean hasTerminalSemanticContent(
+            BexValue value) {
+        try {
+            return value.isNull()
+                    || value.isScalar();
+        } catch (RuntimeException failure) {
+            if (isUnavailableExactSemantic(failure)) {
+                return false;
+            }
+            throw failure;
+        }
+    }
+
+    private boolean isUnavailableExactSemantic(
+            RuntimeException failure) {
+        Throwable current = failure;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null
+                    && message.contains(
+                    "Semantic content is unavailable for exact Blue reference")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private BexValue exactAt(String absolutePointer) {
@@ -90,6 +138,28 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
                             : processorCanonical,
                     processorResolved);
         }
+        Node processorDocument = access.processorDocumentAt(
+                absolutePointer);
+        if (processorDocument != null
+                && !processorDocument.isReferenceOnly()) {
+            if (metrics != null) {
+                metrics.incrementBexDocumentViewFrozenDirectHits();
+            }
+            FrozenNode demanded = FrozenNode.fromNode(processorDocument);
+            return authoritativeExact(
+                    workingCanonical != null
+                            ? workingCanonical
+                            : processorCanonical,
+                    demanded);
+        }
+        BexValue scoped = resolvedFromCurrentScope(
+                absolutePointer);
+        if (scoped != null) {
+            if (metrics != null) {
+                metrics.incrementBexDocumentViewFrozenDirectHits();
+            }
+            return scoped;
+        }
         FrozenNode canonicalRoot =
                 access.workingCanonicalRoot();
         FrozenNode resolvedRoot =
@@ -122,7 +192,7 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
             if (metrics != null) {
                 metrics.incrementBexDocumentViewFrozenDirectHits();
             }
-            return BexValues.exact(
+            return authoritativeExact(
                     unresolvedCanonical,
                     unresolvedResolved);
         }
@@ -130,6 +200,52 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
             metrics.incrementBexDocumentViewUndefinedHits();
         }
         return BexValues.undefined();
+    }
+
+    private BexValue resolvedFromCurrentScope(
+            String absolutePointer) {
+        String scopePath = JsonPointer.canonicalize(
+                access.currentScopePath());
+        if (JsonPointer.ROOT.equals(scopePath)) {
+            return null;
+        }
+        List<String> scopeSegments = JsonPointer.split(
+                scopePath);
+        List<String> absoluteSegments = JsonPointer.split(
+                absolutePointer);
+        if (absoluteSegments.size() <= scopeSegments.size()
+                || !absoluteSegments.subList(
+                0, scopeSegments.size()).equals(scopeSegments)) {
+            return null;
+        }
+        FrozenNode resolvedScope = access.processorResolvedAt(
+                scopePath);
+        if (!hasResolvedSemantics(resolvedScope)) {
+            return null;
+        }
+        FrozenNode canonicalScope = access.processorCanonicalAt(
+                scopePath);
+        BexValue descendant = authoritativeExact(
+                canonicalScope,
+                resolvedScope).at(absoluteSegments.subList(
+                scopeSegments.size(), absoluteSegments.size()));
+        return !descendant.isUndefined()
+                && hasSemanticContent(descendant)
+                ? descendant
+                : null;
+    }
+
+    private boolean hasSemanticContent(
+            BexValue value) {
+        try {
+            value.isNull();
+            return true;
+        } catch (RuntimeException failure) {
+            if (isUnavailableExactSemantic(failure)) {
+                return false;
+            }
+            throw failure;
+        }
     }
 
     private static boolean hasResolvedSemantics(
@@ -143,8 +259,13 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
             FrozenNode resolved) {
         if (resolved == null
                 || resolved.isReferenceOnly()) {
+            FrozenNode identity = canonical != null
+                    ? canonical
+                    : resolved;
             return BexValues.exact(
-                    canonical, resolved);
+                    canonical,
+                    resolved,
+                    identity != null ? identity.blueId() : null);
         }
         FrozenNode identity =
                 canonical != null
@@ -167,6 +288,135 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
                 semantic);
     }
 
+    /**
+     * Keeps BEX pointer traversal on the invocation-owned processor view.
+     * A fragmented descendant is therefore demanded through the strict
+     * request-local provider instead of a BEX engine's construction provider.
+     */
+    private final class ProcessorDocumentCursor implements BexValue {
+        private final String absolutePointer;
+        private final BexValue delegate;
+
+        private ProcessorDocumentCursor(
+                String absolutePointer,
+                BexValue delegate) {
+            this.absolutePointer = Objects.requireNonNull(
+                    absolutePointer, "absolutePointer");
+            this.delegate = Objects.requireNonNull(delegate, "delegate");
+        }
+
+        @Override
+        public boolean isExact() {
+            return delegate.isExact();
+        }
+
+        @Override
+        public String exactBlueId() {
+            return delegate.exactBlueId();
+        }
+
+        @Override
+        public boolean isUndefined() {
+            return delegate.isUndefined();
+        }
+
+        @Override
+        public boolean isNull() {
+            return delegate.isNull();
+        }
+
+        @Override
+        public boolean isScalar() {
+            return delegate.isScalar();
+        }
+
+        @Override
+        public boolean isObject() {
+            return delegate.isObject();
+        }
+
+        @Override
+        public boolean isList() {
+            return delegate.isList();
+        }
+
+        @Override
+        public BexValue get(String key) {
+            String childPointer = JsonPointer.append(
+                    absolutePointer, key);
+            BexValue local = delegate.get(key);
+            if (local != null
+                    && !local.isUndefined()
+                    && hasSemanticContent(local)) {
+                return cursorFor(childPointer, local);
+            }
+            return cursorAt(childPointer);
+        }
+
+        private boolean hasSemanticContent(
+                BexValue value) {
+            return ScopedProcessorExecutionContextBexDocumentView.this
+                    .hasSemanticContent(value);
+        }
+
+        @Override
+        public BexValue at(List<String> pointerSegments) {
+            BexValue current = this;
+            for (String segment : pointerSegments) {
+                current = current.get(segment);
+                if (current.isUndefined()) {
+                    return current;
+                }
+            }
+            return current;
+        }
+
+        @Override
+        public BexValue at(String pointer) {
+            return at(JsonPointer.split(pointer));
+        }
+
+        @Override
+        public String asText() {
+            return delegate.asText();
+        }
+
+        @Override
+        public BigInteger asInteger() {
+            return delegate.asInteger();
+        }
+
+        @Override
+        public BigDecimal asNumber() {
+            return delegate.asNumber();
+        }
+
+        @Override
+        public boolean asBoolean() {
+            return delegate.asBoolean();
+        }
+
+        @Override
+        public List<String> keys() {
+            return delegate.keys();
+        }
+
+        @Override
+        public int size() {
+            return delegate.size();
+        }
+
+        @Override
+        public Node toNode() {
+            return delegate.toNode();
+        }
+
+        @Override
+        public Object toSimple() {
+            return delegate.toSimple();
+        }
+    }
+
     interface FrozenAccess {
         String resolvePointer(String authoredPointer);
 
@@ -180,6 +430,10 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
 
         FrozenNode processorResolvedAt(String absolutePointer);
 
+        default Node processorDocumentAt(String absolutePointer) {
+            return null;
+        }
+
         FrozenNode workingCanonicalRoot();
 
         FrozenNode workingResolvedRoot();
@@ -187,11 +441,11 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
 
     private static final class StepContextFrozenAccess
             implements FrozenAccess {
-        private final StepExecutionContext stepContext;
+        private final BexWorkflowStepContext stepContext;
         private final ProcessorExecutionContext processorContext;
 
         private StepContextFrozenAccess(
-                StepExecutionContext stepContext) {
+                BexWorkflowStepContext stepContext) {
             this.stepContext =
                     Objects.requireNonNull(
                             stepContext, "context");
@@ -236,6 +490,13 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
         public FrozenNode processorResolvedAt(
                 String absolutePointer) {
             return processorContext.resolvedFrozenAt(
+                    absolutePointer);
+        }
+
+        @Override
+        public Node processorDocumentAt(
+                String absolutePointer) {
+            return processorContext.documentAt(
                     absolutePointer);
         }
 

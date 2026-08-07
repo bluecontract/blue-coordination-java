@@ -1,7 +1,7 @@
 package blue.coordination.processor.workflow;
 
 import blue.language.model.Node;
-import blue.language.processor.model.FrozenJsonPatch;
+import blue.language.processor.FrozenJsonPatch;
 import blue.language.snapshot.FrozenNode;
 
 import java.util.ArrayList;

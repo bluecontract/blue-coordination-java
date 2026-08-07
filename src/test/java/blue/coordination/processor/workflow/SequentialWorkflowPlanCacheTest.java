@@ -5,6 +5,7 @@ import blue.language.model.Node;
 import blue.language.snapshot.FrozenNode;
 import blue.repo.coordination.SequentialWorkflowStep;
 import blue.repo.coordination.TriggerEvent;
+import blue.repo.coordination.UpdateDocument;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -26,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class SequentialWorkflowPlanCacheTest {
     @Test
     void shouldPublishAndReuseExecutorSelectionOnlyAfterStepAdmission() {
-        // Given
+        // given
         FrozenNode firstContract = contract("Same", "Run");
         FrozenNode equivalentContract = contract("Same", "Run");
         AtomicInteger supportsCalls = new AtomicInteger();
@@ -36,7 +37,7 @@ class SequentialWorkflowPlanCacheTest {
         SequentialWorkflowPlanCache cache = new SequentialWorkflowPlanCache(8, 1024L * 1024L, null);
         AtomicInteger builds = new AtomicInteger();
 
-        // When
+        // when
         SequentialWorkflowPlan first = cache.getOrBuild(firstContract.resolvedStructuralKey(),
                 planFactory(firstContract, executors, builds));
         SequentialWorkflowPlan reused = cache.getOrBuild(equivalentContract.resolvedStructuralKey(),
@@ -56,7 +57,7 @@ class SequentialWorkflowPlanCacheTest {
                         executors,
                         null);
 
-        // Then
+        // then
         assertSame(first, reused);
         assertEquals(1, builds.get());
         assertEquals(0, supportsCallsBeforeAdmission);
@@ -70,7 +71,7 @@ class SequentialWorkflowPlanCacheTest {
 
     @Test
     void shouldIncreaseRetainedWeightOnlyWhenAdmittedStepIsPublished() {
-        // Given
+        // given
         FrozenNode contract = contract("Lazy weight", "Run");
         AtomicInteger supportsCalls = new AtomicInteger();
         List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors =
@@ -90,7 +91,7 @@ class SequentialWorkflowPlanCacheTest {
                                 new AtomicInteger()));
         long shellWeight = cache.weightBytes();
 
-        // When
+        // when
         SequentialWorkflowPlan.PlannedStep admitted =
                 plan.planAdmittedStep(
                         new TriggerEvent(),
@@ -99,15 +100,130 @@ class SequentialWorkflowPlanCacheTest {
                         null);
         cache.refreshWeight(plan);
 
-        // Then
+        // then
         assertTrue(admitted.published());
         assertEquals(1, supportsCalls.get());
         assertTrue(cache.weightBytes() > shellWeight);
     }
 
     @Test
+    void shouldNotReuseExactStepOrStaticChangesetAcrossIdentityEquivalentProcessRepresentations() {
+        // given
+        FrozenNode firstChangeset = changeset(7);
+        FrozenNode secondChangeset = FrozenNode.fromNode(
+                firstChangeset.toNode());
+        FrozenNode firstExactStep = updateStep(firstChangeset);
+        FrozenNode secondExactStep = FrozenNode.fromNode(
+                firstExactStep.toNode());
+        FrozenNode inlineSelection = firstExactStep;
+        FrozenNode referenceSelection = FrozenNode.fromNode(
+                new Node().blueId(firstExactStep.blueId()));
+        AtomicInteger supportsCalls = new AtomicInteger();
+        List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors =
+                Collections.<WorkflowStepExecutor<? extends SequentialWorkflowStep>>singletonList(
+                        countingUpdateExecutor(supportsCalls));
+        SequentialWorkflowPlan plan = SequentialWorkflowPlan.build(
+                contract("Representation", "Update"),
+                Collections.<SequentialWorkflowStep>singletonList(
+                        new UpdateDocument()));
+
+        // when
+        SequentialWorkflowPlan.PlannedStep first =
+                plan.planAdmittedStep(
+                        new UpdateDocument(),
+                        firstExactStep,
+                        inlineSelection,
+                        0,
+                        executors,
+                        null,
+                        () -> firstChangeset);
+        SequentialWorkflowPlan.PlannedStep second =
+                plan.planAdmittedStep(
+                        new UpdateDocument(),
+                        secondExactStep,
+                        referenceSelection,
+                        0,
+                        executors,
+                        null,
+                        () -> secondChangeset);
+
+        // then
+        assertEquals(
+                firstExactStep.blueId(),
+                referenceSelection.getReferenceBlueId());
+        assertEquals(
+                firstExactStep.resolvedStructuralKey(),
+                secondExactStep.resolvedStructuralKey());
+        assertFalse(
+                inlineSelection.resolvedStructuralKey().equals(
+                        referenceSelection.resolvedStructuralKey()));
+        assertTrue(first.published());
+        assertFalse(second.published());
+        assertNotSame(first.step(), second.step());
+        assertNotSame(
+                first.step().staticUpdatePlan(),
+                second.step().staticUpdatePlan());
+        assertSame(secondExactStep, second.exactStep());
+        assertEquals(2, supportsCalls.get());
+    }
+
+    @Test
+    void shouldSkipChangesetMaterializationOnExactRepresentationHit() {
+        // given
+        FrozenNode materializedChangeset = changeset(11);
+        FrozenNode changesetReference = FrozenNode.fromNode(
+                new Node().blueId(materializedChangeset.blueId()));
+        FrozenNode firstExactStep = updateStep(changesetReference);
+        FrozenNode secondExactStep = FrozenNode.fromNode(
+                firstExactStep.toNode());
+        AtomicInteger materializations = new AtomicInteger();
+        AtomicInteger supportsCalls = new AtomicInteger();
+        List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors =
+                Collections.<WorkflowStepExecutor<? extends SequentialWorkflowStep>>singletonList(
+                        countingUpdateExecutor(supportsCalls));
+        SequentialWorkflowPlan plan = SequentialWorkflowPlan.build(
+                contract("Lazy changeset", "Update"),
+                Collections.<SequentialWorkflowStep>singletonList(
+                        new UpdateDocument()));
+
+        // when
+        SequentialWorkflowPlan.PlannedStep first =
+                plan.planAdmittedStep(
+                        new UpdateDocument(),
+                        firstExactStep,
+                        firstExactStep,
+                        0,
+                        executors,
+                        null,
+                        () -> {
+                            materializations.incrementAndGet();
+                            return materializedChangeset;
+                        });
+        SequentialWorkflowPlan.PlannedStep warmed =
+                plan.planAdmittedStep(
+                        new UpdateDocument(),
+                        secondExactStep,
+                        secondExactStep,
+                        0,
+                        executors,
+                        null,
+                        () -> {
+                            throw new AssertionError(
+                                    "cache hit materialized referenced changeset");
+                        });
+
+        // then
+        assertTrue(first.published());
+        assertFalse(warmed.published());
+        assertSame(first.step(), warmed.step());
+        assertSame(secondExactStep, warmed.exactStep());
+        assertEquals(1, materializations.get());
+        assertEquals(1, supportsCalls.get());
+    }
+
+    @Test
     void shouldBuildIndependentPlanForChangedContractIdentity() {
-        // Given
+        // given
         FrozenNode firstContract = contract("First", "Run");
         FrozenNode changedContract = contract("Changed", "Run");
         List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors =
@@ -116,13 +232,13 @@ class SequentialWorkflowPlanCacheTest {
         SequentialWorkflowPlanCache cache = new SequentialWorkflowPlanCache(8, 1024L * 1024L, null);
         AtomicInteger builds = new AtomicInteger();
 
-        // When
+        // when
         SequentialWorkflowPlan first = cache.getOrBuild(firstContract.resolvedStructuralKey(),
                 planFactory(firstContract, executors, builds));
         SequentialWorkflowPlan changed = cache.getOrBuild(changedContract.resolvedStructuralKey(),
                 planFactory(changedContract, executors, builds));
 
-        // Then
+        // then
         assertNotSame(first, changed);
         assertEquals(2, builds.get());
         assertEquals(2, cache.size());
@@ -130,7 +246,7 @@ class SequentialWorkflowPlanCacheTest {
 
     @Test
     void shouldUseAccessOrderForEntryBoundAndRebuildEvictedPlan() {
-        // Given
+        // given
         FrozenNode firstContract = contract("First", "One");
         FrozenNode secondContract = contract("Second", "Two");
         FrozenNode thirdContract = contract("Third", "Three");
@@ -140,7 +256,7 @@ class SequentialWorkflowPlanCacheTest {
         SequentialWorkflowPlanCache cache = new SequentialWorkflowPlanCache(2, Long.MAX_VALUE, null);
         AtomicInteger builds = new AtomicInteger();
 
-        // When
+        // when
         SequentialWorkflowPlan first = cache.getOrBuild(firstContract.resolvedStructuralKey(),
                 planFactory(firstContract, executors, builds));
         SequentialWorkflowPlan second = cache.getOrBuild(secondContract.resolvedStructuralKey(),
@@ -153,7 +269,7 @@ class SequentialWorkflowPlanCacheTest {
         SequentialWorkflowPlan rebuiltSecond = cache.getOrBuild(secondContract.resolvedStructuralKey(),
                 planFactory(secondContract, executors, builds));
 
-        // Then
+        // then
         assertSame(first, touchedFirst);
         assertNotSame(second, rebuiltSecond);
         assertEquals(4, builds.get());
@@ -162,7 +278,7 @@ class SequentialWorkflowPlanCacheTest {
 
     @Test
     void shouldEvictPlanWhenLiveWeightExceedsBound() {
-        // Given
+        // given
         FrozenNode contract = contract("Live weight", "One");
         List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors =
                 Collections.<WorkflowStepExecutor<? extends SequentialWorkflowStep>>singletonList(
@@ -181,7 +297,7 @@ class SequentialWorkflowPlanCacheTest {
                 () -> plan);
         int sizeBeforeAdmission = bounded.size();
 
-        // When
+        // when
         plan.planAdmittedStep(
                 new TriggerEvent(),
                 0,
@@ -189,7 +305,7 @@ class SequentialWorkflowPlanCacheTest {
                 null);
         bounded.refreshWeight(plan);
 
-        // Then
+        // then
         assertEquals(1, sizeBeforeAdmission);
         assertEquals(0, bounded.size());
         assertEquals(0L, bounded.weightBytes());
@@ -197,7 +313,7 @@ class SequentialWorkflowPlanCacheTest {
 
     @Test
     void shouldNotRetainPlanThatExceedsWeightBound() {
-        // Given
+        // given
         FrozenNode contract = contract("Oversized", "One");
         List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors =
                 Collections.<WorkflowStepExecutor<? extends SequentialWorkflowStep>>singletonList(
@@ -208,13 +324,13 @@ class SequentialWorkflowPlanCacheTest {
                 null);
         AtomicInteger builds = new AtomicInteger();
 
-        // When
+        // when
         oversized.getOrBuild(contract.resolvedStructuralKey(),
                 countingFactory(plan, builds));
         oversized.getOrBuild(contract.resolvedStructuralKey(),
                 countingFactory(plan, builds));
 
-        // Then
+        // then
         assertEquals(2, builds.get());
         assertEquals(0, oversized.size());
         assertEquals(0L, oversized.weightBytes());
@@ -222,7 +338,7 @@ class SequentialWorkflowPlanCacheTest {
 
     @Test
     void shouldEstimateRetainedStepWeightWithoutTraversingTriggerPayload() {
-        // Given
+        // given
         List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors =
                 Collections.<WorkflowStepExecutor<? extends SequentialWorkflowStep>>singletonList(
                         countingTriggerExecutor(new AtomicInteger()));
@@ -233,7 +349,7 @@ class SequentialWorkflowPlanCacheTest {
         }
         FrozenNode large = triggerContract(largeEvent);
 
-        // When
+        // when
         SequentialWorkflowPlan smallPlan =
                 buildPlan(small);
         SequentialWorkflowPlan largePlan =
@@ -255,7 +371,7 @@ class SequentialWorkflowPlanCacheTest {
         long largeWeight =
                 largePlan.approximateWeightBytes();
 
-        // Then
+        // then
         assertEquals(
                 smallWeight,
                 largeWeight);
@@ -263,7 +379,7 @@ class SequentialWorkflowPlanCacheTest {
 
     @Test
     void shouldCloseCacheReleaseRetainedWeightAndPreventRepopulation() {
-        // Given
+        // given
         FrozenNode contract = contract("Clear", "Run");
         List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors =
                 Collections.<WorkflowStepExecutor<? extends SequentialWorkflowStep>>singletonList(
@@ -273,13 +389,13 @@ class SequentialWorkflowPlanCacheTest {
                 planFactory(contract, executors, new AtomicInteger()));
         long weightBeforeClose = cache.weightBytes();
 
-        // When
+        // when
         cache.close();
         AtomicInteger buildsAfterClose = new AtomicInteger();
         SequentialWorkflowPlan uncached = cache.getOrBuild(contract.resolvedStructuralKey(),
                 planFactory(contract, executors, buildsAfterClose));
 
-        // Then
+        // then
         assertTrue(weightBeforeClose > 0L);
         assertTrue(cache.isClosed());
         assertEquals(contract.resolvedStructuralKey(), uncached.contractIdentity());
@@ -290,7 +406,7 @@ class SequentialWorkflowPlanCacheTest {
 
     @Test
     void shouldPublishCacheHitsMissesBuildsEvictionsLookupsAndCurrentWeight() {
-        // Given
+        // given
         FrozenNode firstContract = contract("First metrics", "One");
         FrozenNode secondContract = contract("Second metrics", "Two");
         BexProcessingMetrics metrics = new BexProcessingMetrics();
@@ -299,7 +415,7 @@ class SequentialWorkflowPlanCacheTest {
                         countingTriggerExecutor(new AtomicInteger()));
         SequentialWorkflowPlanCache cache = new SequentialWorkflowPlanCache(1, 1024L * 1024L, metrics);
 
-        // When
+        // when
         SequentialWorkflowPlan first =
                 cache.getOrBuild(
                         firstContract.resolvedStructuralKey(),
@@ -334,7 +450,7 @@ class SequentialWorkflowPlanCacheTest {
                 metrics);
         cache.refreshWeight(second);
 
-        // Then
+        // then
         assertEquals(2L, metrics.workflowPlansBuilt());
         assertEquals(1L, metrics.workflowPlanCacheHits());
         assertEquals(2L, metrics.workflowPlanCacheMisses());
@@ -347,7 +463,7 @@ class SequentialWorkflowPlanCacheTest {
 
     @Test
     void shouldBuildOnlyOnceForConcurrentMisses() throws Exception {
-        // Given
+        // given
         FrozenNode contract = contract("Concurrent", "Run");
         AtomicInteger supportsCalls = new AtomicInteger();
         List<WorkflowStepExecutor<? extends SequentialWorkflowStep>> executors =
@@ -359,7 +475,7 @@ class SequentialWorkflowPlanCacheTest {
         CountDownLatch start = new CountDownLatch(1);
         ExecutorService pool = Executors.newFixedThreadPool(8);
 
-        // When
+        // when
         try {
             @SuppressWarnings("unchecked")
             Future<SequentialWorkflowPlan>[] futures = new Future[8];
@@ -392,7 +508,7 @@ class SequentialWorkflowPlanCacheTest {
             pool.shutdownNow();
         }
 
-        // Then
+        // then
         assertEquals(1, builds.get());
         assertEquals(1, supportsCalls.get());
     }
@@ -441,6 +557,53 @@ class SequentialWorkflowPlanCacheTest {
                 return WorkflowStepResult.none();
             }
         };
+    }
+
+    private static WorkflowStepExecutor<UpdateDocument>
+    countingUpdateExecutor(AtomicInteger supportsCalls) {
+        return new WorkflowStepExecutor<UpdateDocument>() {
+            @Override
+            public boolean supports(SequentialWorkflowStep step) {
+                supportsCalls.incrementAndGet();
+                return step instanceof UpdateDocument;
+            }
+
+            @Override
+            public WorkflowStepResult execute(
+                    UpdateDocument step,
+                    StepExecutionContext context) {
+                return WorkflowStepResult.none();
+            }
+        };
+    }
+
+    private static FrozenNode changeset(int value) {
+        return FrozenNode.fromNode(
+                new Node().items(
+                        new Node()
+                                .properties(
+                                        "op",
+                                        new Node().value(
+                                                "replace"))
+                                .properties(
+                                        "path",
+                                        new Node().value(
+                                                "/counter"))
+                                .properties(
+                                        "val",
+                                        new Node().value(
+                                                value))));
+    }
+
+    private static FrozenNode updateStep(
+            FrozenNode changeset) {
+        return FrozenNode.fromNode(
+                new Node()
+                        .type(new Node().blueId(
+                                UpdateDocument.blueId()))
+                        .properties(
+                                "changeset",
+                                changeset.toNode()));
     }
 
     private static FrozenNode contract(String description, String stepName) {

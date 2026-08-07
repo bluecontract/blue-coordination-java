@@ -1,27 +1,33 @@
 package blue.coordination.processor;
 
-import blue.language.NodeProvider;
+import blue.coordination.processor.fragmentation.EffectiveCutCatalogReader;
+import blue.language.api.BlueOperationOutcome;
+import blue.language.api.BlueOperationResult;
+import blue.language.api.NodeProviderOutcome;
+import blue.language.identity.BlueIds;
+import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.model.Node;
-import blue.language.processor.CoordinationProcessHeaderBridge;
-import blue.language.processor.DocumentProcessor;
+import blue.language.model.NodePathEditor;
+import blue.language.model.Schema;
+import blue.language.model.NodeWireForm;
+import blue.language.model.wire.JsonPointer;
+import blue.language.processor.BlueContracts;
 import blue.language.processor.EffectiveContractSnapshot;
 import blue.language.processor.EffectiveContractSnapshotConstants;
 import blue.language.processor.EffectiveFragmentationCatalog;
+import blue.language.processor.EmbeddedScopePlanView;
 import blue.language.processor.ExecutableBodySourceDescriptor;
+import blue.language.processor.ProcessorRuntimeAccess;
 import blue.language.processor.VerifiedExecutionEvidence;
 import blue.language.processor.util.ProcessorContractConstants;
 import blue.language.processor.util.PointerUtils;
 import blue.language.provider.ExactNodeGraphFragments;
-import blue.language.provider.NodeProviderOutcome;
+import blue.language.provider.NodeProvider;
 import blue.language.provider.NodeProviderResult;
 import blue.language.provider.SequentialNodeProvider;
 import blue.language.provider.VerifyingNodeProvider;
-import blue.language.utils.BlueIdCalculator;
-import blue.language.utils.BlueIds;
-import blue.language.utils.JsonPointer;
-import blue.language.utils.NodeProviderWrapper;
-import blue.language.utils.NodePathEditor;
-import blue.language.utils.NodeToMapListOrValue;
+import blue.language.registry.NodeProviderWrapper;
+import blue.language.snapshot.FrozenNode;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -38,6 +44,7 @@ import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.function.Function;
 
 /**
  * Coordination-specific physical fragmentation for the two semantic PROCESS
@@ -75,9 +82,10 @@ public final class CoordinationDocumentSplitter {
      * contracts-map view so Language can walk a fragmented Process Embedded
      * route one scope at a time without opening executable bodies. When an
      * admitted executable body is demanded, its ephemeral view inlines each
-     * exact authored list item so Language can select the concrete
-     * workflow-step type and execute that step's literal payload. Authored
-     * pure references inside a selected step remain references.</p>
+     * exact authored direct child so Language can select the concrete
+     * workflow-step type and execute either list- or object-shaped literal
+     * payloads. Authored pure references inside a selected body remain
+     * references.</p>
      */
     public static final String PROCESS_HEADER_VIEW_PROFILE_ID =
             "blue.coordination/process-header-view/1.0";
@@ -86,21 +94,32 @@ public final class CoordinationDocumentSplitter {
      * Stable schema/version for {@link EdgeOccurrence} values.
      */
     public static final String EDGE_METADATA_SCHEMA_ID =
-            "blue.coordination/fragment-edge-occurrence/1.0";
+            "blue.coordination/fragment-edge-occurrence/2.0";
 
-    private final DocumentProcessor documentProcessor;
+    private final Function<Node, EffectiveFragmentationCatalog>
+            fragmentationCatalog;
     private final NodeProvider localProvider;
 
     private CoordinationDocumentSplitter() {
-        this.documentProcessor = null;
+        this.fragmentationCatalog = null;
         this.localProvider = null;
+    }
+
+    private CoordinationDocumentSplitter(
+            Function<Node, EffectiveFragmentationCatalog> catalog,
+            NodeProvider localProvider) {
+        this.fragmentationCatalog = Objects.requireNonNull(
+                catalog, "catalog");
+        this.localProvider = localProvider != null
+                ? NodeProviderWrapper.wrap(localProvider)
+                : null;
     }
 
     /**
      * Creates a splitter for the exact Event input only.
      *
      * <p>Document splitting requires the effective, inheritance-aware catalog
-     * exposed by a {@link DocumentProcessor}; this explicit factory cannot be
+     * exposed by {@link BlueContracts}; this explicit factory cannot be
      * used for {@link #splitDocument(Node)}.</p>
      *
      * @return splitter configured for Event inputs only
@@ -110,38 +129,95 @@ public final class CoordinationDocumentSplitter {
     }
 
     /**
-     * Creates a splitter that derives every scope and executable-body boundary
-     * from the processor's effective, inheritance-aware catalog.
+     * Creates an offline splitter from an already established effective
+     * catalog boundary.
      *
-     * @param documentProcessor processor whose verified provider and runtime
-     *                          registry admit the corresponding document
+     * <p>This entry point is intended for deterministic replay, conformance
+     * fixtures, and hosts that persist the public Language catalog as exact
+     * evidence. The supplied function must bind the returned catalog to the
+     * exact admitted Root; the splitter independently verifies the Root
+     * BlueId before producing a fragment.</p>
+     *
+     * @param catalog exact effective-catalog lookup
+     * @param localProvider optional exact provider for reference-backed input
+     * @return splitter using only the supplied public catalog evidence
      */
-    public CoordinationDocumentSplitter(
-            DocumentProcessor documentProcessor) {
-        this(documentProcessor, null);
+    public static CoordinationDocumentSplitter fromEffectiveCatalog(
+            Function<Node, EffectiveFragmentationCatalog> catalog,
+            NodeProvider localProvider) {
+        return new CoordinationDocumentSplitter(catalog, localProvider);
     }
 
     /**
-     * Creates a production splitter backed by the generic effective catalog
-     * and an exact local provider.
+     * Creates a splitter using the current focused Contracts facade.
      *
-     * <p>The provider is used only to open a pure-reference Root, a
-     * provider-backed participating scope, or a reference-backed contract
-     * header needed to locate a catalog-declared boundary. It is wrapped by
-     * Language's verified provider composition before first use. Executable
-     * body references are never fetched while constructing the split.</p>
+     * @param contracts borrowed Contracts service
+     */
+    public CoordinationDocumentSplitter(BlueContracts contracts) {
+        this(contracts, null);
+    }
+
+    /**
+     * Creates a splitter using the current focused Contracts facade and an
+     * explicit exact provider for authored reference-backed headers.
      *
-     * @param documentProcessor processor that owns effective resolution
-     * @param localProvider exact provider corresponding to that processor
+     * @param contracts borrowed Contracts service
+     * @param localProvider exact provider, or {@code null} when all required
+     *                      headers are inline
      */
     public CoordinationDocumentSplitter(
-            DocumentProcessor documentProcessor,
+            BlueContracts contracts,
             NodeProvider localProvider) {
-        this.documentProcessor = Objects.requireNonNull(
-                documentProcessor, "documentProcessor");
-        this.localProvider = localProvider != null
-                ? NodeProviderWrapper.wrap(localProvider)
-                : null;
+        BlueContracts checkedContracts = Objects.requireNonNull(
+                contracts, "contracts");
+        this.fragmentationCatalog =
+                checkedContracts::effectiveFragmentationCatalog;
+        NodeProvider runtimeProvider = runtimeProvider(
+                checkedContracts.runtimeAccess());
+        this.localProvider = NodeProviderWrapper.wrap(
+                localProvider != null
+                        ? new SequentialNodeProvider(
+                                localProvider,
+                                runtimeProvider)
+                        : runtimeProvider);
+    }
+
+    private static NodeProvider runtimeProvider(
+            ProcessorRuntimeAccess runtimeAccess) {
+        ProcessorRuntimeAccess access = Objects.requireNonNull(
+                runtimeAccess, "runtimeAccess");
+        return new NodeProvider() {
+            @Override
+            public List<Node> fetchByBlueId(String blueId) {
+                return fetchResultByBlueId(blueId).nodes();
+            }
+
+            @Override
+            public NodeProviderResult fetchResultByBlueId(
+                    String blueId) {
+                BlueOperationResult<FrozenNode> result = access
+                        .materializeVerifiedExactReference(
+                                FrozenNode.fromNode(
+                                        new Node().blueId(
+                                                Objects.requireNonNull(
+                                                        blueId,
+                                                        "blueId"))));
+                if (result.isEstablished()) {
+                    return NodeProviderResult.found(
+                            Collections.singletonList(
+                                    result.requireEstablished().toNode()));
+                }
+                if (result.isAbsent()) {
+                    return NodeProviderResult.notFound();
+                }
+                String reason = result.reason().orElse(
+                        "Contracts runtime could not materialize exact "
+                                + "content for " + blueId);
+                return result.outcome() == BlueOperationOutcome.INCOMPLETE
+                        ? NodeProviderResult.unavailable(reason)
+                        : NodeProviderResult.invalidEvidence(reason);
+            }
+        };
     }
 
     /**
@@ -171,29 +247,140 @@ public final class CoordinationDocumentSplitter {
         CoordinationHostQuotaSession quotas =
                 Objects.requireNonNull(
                         hostQuotas, "hostQuotas");
-        if (documentProcessor == null) {
-            throw new IllegalStateException(
-                    "Document splitting requires a DocumentProcessor-backed "
-                            + "effective fragmentation catalog");
-        }
-        Node suppliedRoot =
-                Objects.requireNonNull(
+        DocumentFragmentationBlueprint blueprint =
+                documentFragmentationBlueprint(
                         admittedRoot,
-                        "admittedRoot")
-                        .clone();
-        EffectiveFragmentationCatalog catalog =
-                documentProcessor.effectiveFragmentationCatalog(
-                        suppliedRoot);
+                        quotas,
+                        null);
+        List<Node> canonicalRoots = new ArrayList<>();
+        for (PhysicalFragmentRoot root
+                : blueprint.physicalRoots) {
+            canonicalRoots.add(root.exactRoot);
+        }
+        ExactNodeGraphFragments canonicalGraph =
+                new ExactNodeGraphFragments(
+                        canonicalRoots);
+        Map<String, Node> canonicalFragments = immutableFragments(
+                canonicalGraph.fragments());
+        Node fragmentedRoot =
+                canonicalGraph.roots().get(0)
+                        .directFragment();
+        requireIdentity(
+                blueprint.rootBlueId,
+                fragmentedRoot,
+                "Coordination Root");
+        for (String blueId : canonicalGraph.blueIds()) {
+            boolean documentRoot =
+                    blueprint.rootBlueId.equals(
+                            blueId);
+            quotas.recordSplitterFragment(
+                    CoordinationHostQuotaSession.SPLIT_DOCUMENT,
+                    documentRoot
+                            ? "/"
+                            : "/fragments/" + blueId,
+                    documentRoot
+                            ? "document-root"
+                            : "canonical-direct-node");
+        }
+        return new SplitGraph(
+                blueprint.rootBlueId,
+                blueprint.exactRoot,
+                fragmentedRoot,
+                canonicalFragments,
+                blueprint.metadata,
+                directEdges(
+                        blueprint.physicalRootsInternal(),
+                        blueprint.rootBlueId,
+                        blueprint.cuts,
+                        blueprint.scopePaths,
+                        canonicalFragments,
+                        new EdgeQuota(
+                                quotas,
+                                CoordinationHostQuotaSession
+                                        .SPLIT_DOCUMENT)),
+                blueprint.fragmentRoots,
+                composedProvider(
+                        canonicalFragments,
+                        blueprint.processHeaderViews));
+    }
+
+    /**
+     * Discovers the exact physical roots, cut provenance, and PROCESS views
+     * needed to incrementally assemble one document graph.
+     *
+     * <p>This operation deliberately does not construct the canonical
+     * direct-node fragment graph. Callers may inspect exact identities and
+     * ask {@link #inspectDirectNode(DocumentFragmentationBlueprint,
+     * FragmentRootKind, Node, String, boolean)} to assemble only bodies that
+     * are absent from a prior immutable inventory. {@link #splitDocument(Node)}
+     * remains the explicit full-graph oracle.</p>
+     *
+     * @param admittedRoot exact Coordination Root
+     * @return immutable document fragmentation blueprint
+     */
+    public DocumentFragmentationBlueprint documentFragmentationBlueprint(
+            Node admittedRoot) {
+        return documentFragmentationBlueprint(
+                admittedRoot,
+                CoordinationHostQuotaSession.disabled(),
+                null);
+    }
+
+    /**
+     * Discovers a fragmentation blueprint using an already established
+     * immutable effective catalog for the same exact Root.
+     *
+     * <p>The supplied catalog is an optimization input rather than trusted
+     * identity evidence. This splitter independently canonicalizes and hashes
+     * the admitted Root and rejects a catalog bound to any other identity.</p>
+     *
+     * @param admittedRoot exact Coordination Root
+     * @param effectiveCatalog immutable effective catalog for that Root
+     * @return immutable document fragmentation blueprint
+     */
+    public DocumentFragmentationBlueprint documentFragmentationBlueprint(
+            Node admittedRoot,
+            EffectiveFragmentationCatalog effectiveCatalog) {
+        return documentFragmentationBlueprint(
+                admittedRoot,
+                CoordinationHostQuotaSession.disabled(),
+                Objects.requireNonNull(
+                        effectiveCatalog,
+                        "effectiveCatalog"));
+    }
+
+    private DocumentFragmentationBlueprint documentFragmentationBlueprint(
+            Node admittedRoot,
+            CoordinationHostQuotaSession quotas,
+            EffectiveFragmentationCatalog suppliedCatalog) {
+        if (fragmentationCatalog == null && suppliedCatalog == null) {
+            throw new IllegalStateException(
+                    "Document splitting requires a BlueContracts-backed or "
+                            + "explicit effective fragmentation catalog");
+        }
+        /* The ordinary catalog lookup admits its Root into a transient
+         * snapshot, while a supplied catalog is already immutable.
+         * canonicalExactCopy independently owns the splitter's mutable working
+         * graph, so an additional eager complete-Root clone would duplicate
+         * linear work on both paths. */
+        Node suppliedRoot = Objects.requireNonNull(
+                admittedRoot,
+                "admittedRoot");
+        EffectiveFragmentationCatalog catalog = suppliedCatalog != null
+                ? suppliedCatalog
+                : fragmentationCatalog.apply(suppliedRoot);
         Node exactRoot =
                 CoordinationProcessHeaderBridge
                         .canonicalExactCopy(
-                                exactContent(
-                                        suppliedRoot,
-                                        "admittedRoot",
-                                        true));
-        String rootBlueId =
-                BlueIdCalculator.calculateBlueId(
-                        exactRoot);
+                                suppliedRoot.isReferenceOnly()
+                                        ? exactContent(
+                                                suppliedRoot,
+                                                "admittedRoot",
+                                                true)
+                                        : suppliedRoot);
+        CoordinationExactNodeIndex exactNodeIndex =
+                new CoordinationExactNodeIndex();
+        String rootBlueId = exactNodeIndex.blueId(exactRoot);
         if (!rootBlueId.equals(catalog.rootBlueId())) {
             throw new IllegalStateException(
                     "Effective fragmentation catalog changed Root BlueId from "
@@ -206,9 +393,13 @@ public final class CoordinationDocumentSplitter {
                 catalog,
                 quotas);
         List<FragmentMetadata> metadata = new ArrayList<>();
-        List<Node> canonicalRoots = new ArrayList<>();
+        List<PhysicalFragmentRoot> physicalRoots = new ArrayList<>();
         List<FragmentRoot> fragmentRoots = new ArrayList<>();
-        canonicalRoots.add(exactRoot);
+        physicalRoots.add(new PhysicalFragmentRoot(
+                exactRoot,
+                rootBlueId,
+                FragmentRootKind.DOCUMENT,
+                "/"));
         fragmentRoots.add(new FragmentRoot(
                 rootBlueId,
                 FragmentRootKind.DOCUMENT,
@@ -216,7 +407,7 @@ public final class CoordinationDocumentSplitter {
 
         for (ScopePlan scope : plan.scopes.values()) {
             String scopeBlueId =
-                    BlueIdCalculator.calculateBlueId(scope.exactScope);
+                    exactNodeIndex.blueId(scope.exactScope);
             metadata.add(new FragmentMetadata(
                     scopeBlueId,
                     "/".equals(scope.scopePath)
@@ -225,9 +416,13 @@ public final class CoordinationDocumentSplitter {
                     scope.scopePath,
                     scope.scopePath,
                     null,
-                    null));
+                            null));
             if (!"/".equals(scope.scopePath)) {
-                canonicalRoots.add(scope.exactScope);
+                physicalRoots.add(new PhysicalFragmentRoot(
+                        scope.exactScope,
+                        scopeBlueId,
+                        FragmentRootKind.DOCUMENT_SCOPE,
+                        scope.scopePath));
                 fragmentRoots.add(new FragmentRoot(
                         scopeBlueId,
                         FragmentRootKind.DOCUMENT_SCOPE,
@@ -244,8 +439,12 @@ public final class CoordinationDocumentSplitter {
                     null,
                     null,
                     null));
-            canonicalRoots.add(
-                    sourceContribution.exactContribution);
+            physicalRoots.add(new PhysicalFragmentRoot(
+                    sourceContribution.exactContribution,
+                    sourceContribution.blueId,
+                    FragmentRootKind.SOURCE_CONTRIBUTION,
+                    sourceContributionBasePath(
+                            sourceContribution.blueId)));
             fragmentRoots.add(new FragmentRoot(
                     sourceContribution.blueId,
                     FragmentRootKind.SOURCE_CONTRIBUTION,
@@ -259,7 +458,7 @@ public final class CoordinationDocumentSplitter {
                 continue;
             }
             String bodyBlueId =
-                    BlueIdCalculator.calculateBlueId(body.exactBody);
+                    exactNodeIndex.blueId(body.exactBody);
             metadata.add(new FragmentMetadata(
                     bodyBlueId,
                     FragmentKind.EXECUTABLE_BODY,
@@ -268,49 +467,370 @@ public final class CoordinationDocumentSplitter {
                     body.handlerTypeBlueId,
                     body.field));
         }
-
-        ExactNodeGraphFragments canonicalGraph =
-                new ExactNodeGraphFragments(
-                        canonicalRoots);
+        List<Node> exactRoots = new ArrayList<>();
+        for (PhysicalFragmentRoot root : physicalRoots) {
+            exactRoots.add(root.exactRoot);
+        }
         Map<String, Node> processHeaderViews =
                 processHeaderViews(
                         plan,
-                        canonicalRoots);
-        Node fragmentedRoot =
-                canonicalGraph.roots().get(0)
-                        .directFragment();
-        requireIdentity(
-                rootBlueId,
-                fragmentedRoot,
-                "Coordination Root");
-        for (String blueId : canonicalGraph.blueIds()) {
-            boolean documentRoot =
-                    rootBlueId.equals(
-                            blueId);
-            quotas.recordSplitterFragment(
-                    CoordinationHostQuotaSession.SPLIT_DOCUMENT,
-                    documentRoot
-                            ? "/"
-                            : "/fragments/" + blueId,
-                    documentRoot
-                            ? "document-root"
-                            : "canonical-direct-node");
-        }
-        return new SplitGraph(
+                        exactRoots,
+                        exactNodeIndex);
+        return new DocumentFragmentationBlueprint(
                 rootBlueId,
                 exactRoot,
-                fragmentedRoot,
-                canonicalGraph.fragments(),
+                physicalRoots,
                 metadata,
-                documentEdges(
-                        exactRoot,
-                        plan,
-                        rootBlueId,
-                        quotas),
                 fragmentRoots,
-                composedProvider(
-                        canonicalGraph.fragments(),
-                        processHeaderViews));
+                documentCutDescriptors(plan),
+                new ArrayList<String>(plan.scopes.keySet()),
+                processHeaderViews,
+                exactNodeIndex);
+    }
+
+    /**
+     * Inspects one exact physical node under a document blueprint.
+     *
+     * <p>Direct child occurrences are always returned. The shallow canonical
+     * body is assembled only when {@code assembleFragment} is true, allowing
+     * an incremental host to retain a prior body without rebuilding it. The
+     * returned child values are exact defensive copies and identify the
+     * recursion frontier for splitter-created edges.</p>
+     */
+    public DirectNodeInspection inspectDirectNode(
+            DocumentFragmentationBlueprint blueprint,
+            FragmentRootKind rootKind,
+            Node exactOwner,
+            String ownerAbsolutePath,
+            boolean assembleFragment) {
+        DocumentFragmentationBlueprint checkedBlueprint =
+                Objects.requireNonNull(
+                        blueprint, "blueprint");
+        FragmentRootKind checkedRootKind =
+                Objects.requireNonNull(
+                        rootKind, "rootKind");
+        Node owner = Objects.requireNonNull(
+                exactOwner, "exactOwner");
+        if (owner.isReferenceOnly()) {
+            throw new IllegalArgumentException(
+                    "A physical fragment owner requires exact inline content");
+        }
+        String absolutePath = JsonPointer.canonicalize(
+                Objects.requireNonNull(
+                        ownerAbsolutePath,
+                        "ownerAbsolutePath"));
+        String ownerBlueId = checkedBlueprint.blueId(owner);
+        List<DirectChildSpec> children =
+                directChildSpecs(owner);
+        Node directFragment = null;
+        if (assembleFragment) {
+            directFragment = checkedBlueprint.directFragment(owner);
+            requireIdentity(
+                    ownerBlueId,
+                    directFragment,
+                    "Incremental direct fragment");
+        }
+
+        List<DirectChildOccurrence> occurrences =
+                new ArrayList<>();
+        for (DirectChildSpec child : children) {
+            String childBlueId = checkedBlueprint.blueId(
+                    child.exactChild);
+            EdgeOccurrence edge = describeDirectEdge(
+                    checkedBlueprint,
+                    checkedRootKind,
+                    ownerBlueId,
+                    absolutePath,
+                    child.relativePointer,
+                    childBlueId,
+                    child.exactChild.isReferenceOnly(),
+                    !child.exactChild.isReferenceOnly());
+            occurrences.add(new DirectChildOccurrence(
+                    child.exactChild,
+                    edge));
+        }
+        return new DirectNodeInspection(
+                ownerBlueId,
+                directFragment,
+                occurrences);
+    }
+
+    /**
+     * Continues an incremental inspection through one splitter-created child
+     * without cloning its unchanged descendant subtree.
+     */
+    public DirectNodeInspection inspectDirectChild(
+            DocumentFragmentationBlueprint blueprint,
+            FragmentRootKind rootKind,
+            DirectChildOccurrence child,
+            boolean assembleFragment) {
+        DirectChildOccurrence checked = Objects.requireNonNull(
+                child, "child");
+        if (!Objects.requireNonNull(
+                blueprint, "blueprint").rootBlueId.equals(
+                checked.edge.rootBlueId())) {
+            throw new IllegalArgumentException(
+                    "Direct child belongs to another document blueprint");
+        }
+        if (!checked.edge.splitterCreated()) {
+            throw new IllegalArgumentException(
+                    "An authored pure reference has no local child body");
+        }
+        return inspectDirectNode(
+                blueprint,
+                rootKind,
+                checked.exactChild,
+                checked.edge.absolutePointer(),
+                assembleFragment);
+    }
+
+    /** Inspects one retained blueprint root without copying its subtree. */
+    public DirectNodeInspection inspectPhysicalRoot(
+            DocumentFragmentationBlueprint blueprint,
+            PhysicalFragmentRoot root,
+            boolean assembleFragment) {
+        PhysicalFragmentRoot checked = Objects.requireNonNull(
+                root, "root");
+        DocumentFragmentationBlueprint checkedBlueprint =
+                Objects.requireNonNull(blueprint, "blueprint");
+        if (!checkedBlueprint.physicalRoots.contains(checked)) {
+            throw new IllegalArgumentException(
+                    "Physical root belongs to another document blueprint");
+        }
+        return inspectDirectNode(
+                checkedBlueprint,
+                checked.rootKind,
+                checked.exactRoot,
+                checked.basePath,
+                assembleFragment);
+    }
+
+    /**
+     * Rebinds a retained canonical reference shape to a current occurrence.
+     * This keeps an immutable prior body authoritative when the exact result
+     * contains a representation-equivalent expanded or implicit form.
+     */
+    public EdgeOccurrence describeRetainedDirectEdge(
+            DocumentFragmentationBlueprint blueprint,
+            FragmentRootKind rootKind,
+            String ownerBlueId,
+            String ownerAbsolutePath,
+            String ownerRelativePointer,
+            String childBlueId,
+            boolean originalPureReference,
+            boolean splitterCreated) {
+        return describeDirectEdge(
+                Objects.requireNonNull(blueprint, "blueprint"),
+                Objects.requireNonNull(rootKind, "rootKind"),
+                BlueIds.requirePlainBlueId(
+                        ownerBlueId, "ownerBlueId"),
+                JsonPointer.canonicalize(
+                        Objects.requireNonNull(
+                                ownerAbsolutePath,
+                                "ownerAbsolutePath")),
+                JsonPointer.canonicalize(
+                        Objects.requireNonNull(
+                                ownerRelativePointer,
+                                "ownerRelativePointer")),
+                requireText(childBlueId, "childBlueId"),
+                originalPureReference,
+                splitterCreated);
+    }
+
+    private static EdgeOccurrence describeDirectEdge(
+            DocumentFragmentationBlueprint blueprint,
+            FragmentRootKind rootKind,
+            String ownerBlueId,
+            String ownerAbsolutePath,
+            String ownerRelativePointer,
+            String childBlueId,
+            boolean originalPureReference,
+            boolean splitterCreated) {
+        String absolutePointer = appendRelativePointer(
+                ownerAbsolutePath,
+                ownerRelativePointer);
+        CutDescriptor cut = blueprint.cuts.get(
+                absolutePointer);
+        EdgeKind edgeKind = cut != null
+                ? cut.kind
+                : rootKind == FragmentRootKind.EVENT
+                ? EdgeKind.EVENT_DIRECT_CHILD
+                : EdgeKind.DOCUMENT_DIRECT_CHILD;
+        String ownerScopePath = cut != null
+                ? cut.ownerScopePath
+                : nearestScopePath(
+                        blueprint.scopePaths,
+                        ownerAbsolutePath);
+        return new EdgeOccurrence(
+                FRAGMENTATION_PROFILE_ID,
+                EDGE_METADATA_SCHEMA_ID,
+                rootKind,
+                blueprint.rootBlueId,
+                ownerBlueId,
+                ownerScopePath,
+                absolutePointer,
+                ownerRelativePointer,
+                childBlueId,
+                edgeKind,
+                originalPureReference,
+                splitterCreated,
+                cut != null ? cut.declaringScopePath : null,
+                cut != null
+                        ? cut.embeddedOrigin
+                        : EmbeddedEdgeOrigin.NONE,
+                cut != null
+                        ? cut.explicitDeclarationPath
+                        : null,
+                cut != null
+                        ? cut.collectionDeclarationPath
+                        : null,
+                cut != null ? cut.collectionMemberKey : null,
+                cut != null ? cut.handlerTypeBlueId : null,
+                cut != null ? cut.executableBodyField : null,
+                cut != null
+                        ? cut.sourceContributionBlueIds
+                        : Collections.<String>emptyList());
+    }
+
+    private static List<DirectChildSpec> directChildSpecs(
+            Node owner) {
+        List<DirectChildSpec> result = new ArrayList<>();
+        if (!isImplicitScalarRepresentation(owner)) {
+            addDirectChild(result, "/type", owner.getType());
+        }
+        addDirectChild(result, "/itemType", owner.getItemType());
+        addDirectChild(result, "/keyType", owner.getKeyType());
+        addDirectChild(result, "/valueType", owner.getValueType());
+        addDirectChild(result, "/contracts", owner.getContracts());
+        addDirectChild(result, "/blue", owner.getBlue());
+        if (owner.getItems() != null) {
+            for (int index = 0;
+                    index < owner.getItems().size();
+                    index++) {
+                addDirectChild(
+                        result,
+                        JsonPointer.toPointer(
+                                Arrays.asList(
+                                        "items",
+                                        String.valueOf(index))),
+                        owner.getItems().get(index));
+            }
+        }
+        if (owner.getProperties() != null) {
+            SortedMap<String, Node> ordered = new TreeMap<>(
+                    owner.getProperties());
+            for (Map.Entry<String, Node> entry
+                    : ordered.entrySet()) {
+                addDirectChild(
+                        result,
+                        JsonPointer.toPointer(
+                                Collections.singletonList(
+                                        entry.getKey())),
+                        entry.getValue());
+            }
+        }
+        Schema schema = owner.getSchema();
+        if (schema != null && !schema.isReferenceOnly()) {
+            addSchemaChild(
+                    result,
+                    "/schema/minimum",
+                    schema.getMinimum());
+            addSchemaChild(
+                    result,
+                    "/schema/maximum",
+                    schema.getMaximum());
+            addSchemaChild(
+                    result,
+                    "/schema/exclusiveMinimum",
+                    schema.getExclusiveMinimum());
+            addSchemaChild(
+                    result,
+                    "/schema/exclusiveMaximum",
+                    schema.getExclusiveMaximum());
+            addSchemaChild(
+                    result,
+                    "/schema/multipleOf",
+                    schema.getMultipleOf());
+            if (schema.getEnum() != null) {
+                for (int index = 0;
+                        index < schema.getEnum().size();
+                        index++) {
+                    addSchemaChild(
+                            result,
+                            JsonPointer.toPointer(
+                                    Arrays.asList(
+                                            "schema",
+                                            "enum",
+                                            String.valueOf(index))),
+                            schema.getEnum().get(index));
+                }
+            }
+        }
+        return result;
+    }
+
+    private static boolean isImplicitScalarRepresentation(Node node) {
+        if (node.getRawValue() == null
+                || node.getName() != null
+                || node.getDescription() != null
+                || node.getItemType() != null
+                || node.getKeyType() != null
+                || node.getValueType() != null
+                || node.getItems() != null
+                || node.getProperties() != null
+                || node.getContracts() != null
+                || node.getBlueId() != null
+                || node.getSchema() != null
+                || node.getMergePolicy() != null
+                || node.getPreviousBlueId() != null
+                || node.getPosition() != null
+                || node.getBlue() != null) {
+            return false;
+        }
+        return DirectBlueIdCalculator.calculateBlueId(node)
+                .equals(DirectBlueIdCalculator.calculateBlueId(
+                        new Node().value(node.getRawValue())));
+    }
+
+    private static void addDirectChild(
+            List<DirectChildSpec> result,
+            String relativePointer,
+            Node child) {
+        if (child != null) {
+            result.add(new DirectChildSpec(
+                    relativePointer,
+                    child));
+        }
+    }
+
+    private static void addSchemaChild(
+            List<DirectChildSpec> result,
+            String relativePointer,
+            Node child) {
+        if (child != null && !isPlainSchemaScalar(child)) {
+            addDirectChild(result, relativePointer, child);
+        }
+    }
+
+    static boolean isPlainSchemaScalar(
+            Node node) {
+        return node != null
+                && node.getRawValue() != null
+                && node.getName() == null
+                && node.getDescription() == null
+                && node.getType() == null
+                && node.getItemType() == null
+                && node.getKeyType() == null
+                && node.getValueType() == null
+                && node.getItems() == null
+                && node.getProperties() == null
+                && node.getContracts() == null
+                && node.getBlueId() == null
+                && node.getSchema() == null
+                && node.getMergePolicy() == null
+                && node.getPreviousBlueId() == null
+                && node.getPosition() == null
+                && node.getBlue() == null;
     }
 
     /**
@@ -343,8 +863,15 @@ public final class CoordinationDocumentSplitter {
                 admittedEvent, "admittedEvent");
         ExactNodeGraphFragments exactGraph =
                 new ExactNodeGraphFragments(exactEvent);
+        /* ExactNodeGraphFragments already returns a private defensive
+         * snapshot.  This method is its sole owner, so hashing and cloning
+         * every shallow fragment again before the SplitGraph takes ownership
+         * would establish no additional boundary. */
+        Map<String, Node> canonicalFragments = exactGraph.fragments();
         ExactNodeGraphFragments.RootRepresentation root =
                 exactGraph.roots().get(0);
+        Node originalEvent = root.original();
+        Node directEvent = root.directFragment();
         List<FragmentMetadata> metadata = new ArrayList<>();
         for (String blueId : exactGraph.blueIds()) {
             boolean eventRoot = root.blueId().equals(blueId);
@@ -372,24 +899,26 @@ public final class CoordinationDocumentSplitter {
         }
         return new SplitGraph(
                 root.blueId(),
-                root.original(),
-                root.directFragment(),
-                exactGraph.fragments(),
+                originalEvent,
+                directEvent,
+                canonicalFragments,
                 metadata,
                 directEdges(
-                        root.original(),
+                        originalEvent,
                         root.blueId(),
                         FragmentRootKind.EVENT,
                         "/",
                         Collections.<String, CutDescriptor>
                                 emptyMap(),
+                        canonicalFragments,
                         quotas),
                 Collections.singletonList(
                         new FragmentRoot(
                                 root.blueId(),
                                 FragmentRootKind.EVENT,
                                 "/")),
-                exactGraph.provider());
+                exactGraph.provider(),
+                true);
     }
 
     /**
@@ -434,16 +963,11 @@ public final class CoordinationDocumentSplitter {
                 verifiedProvider);
     }
 
-    private List<EdgeOccurrence> documentEdges(
-            Node exactRoot,
-            DocumentPlan plan,
-            String rootBlueId,
-            CoordinationHostQuotaSession hostQuotas) {
+    private static SortedMap<String, CutDescriptor>
+    documentCutDescriptors(
+            DocumentPlan plan) {
         SortedMap<String, CutDescriptor> cuts =
                 new TreeMap<>();
-        List<String> scopePaths =
-                new ArrayList<>(
-                        plan.scopes.keySet());
         for (ScopePlan scope : plan.scopes.values()) {
             for (EmbeddedCut embedded
                     : scope.embeddedCuts) {
@@ -452,6 +976,11 @@ public final class CoordinationDocumentSplitter {
                         new CutDescriptor(
                                 EdgeKind.EMBEDDED_ROOT,
                                 embedded.ownerScopePath,
+                                embedded.declaringScopePath,
+                                embedded.origin,
+                                embedded.explicitDeclarationPath,
+                                embedded.collectionDeclarationPath,
+                                embedded.collectionMemberKey,
                                 null,
                                 null,
                                 Collections.<String>emptyList()));
@@ -473,42 +1002,16 @@ public final class CoordinationDocumentSplitter {
                                     : EdgeKind
                                     .EXECUTABLE_BODY,
                             body.scopePath,
+                            null,
+                            EmbeddedEdgeOrigin.NONE,
+                            null,
+                            null,
+                            null,
                             body.handlerTypeBlueId,
                             body.field,
                             body.sourceContributionBlueIds));
         }
-
-        List<PhysicalRoot> roots =
-                new ArrayList<>();
-        roots.add(new PhysicalRoot(
-                exactRoot,
-                FragmentRootKind.DOCUMENT,
-                "/"));
-        for (ScopePlan scope : plan.scopes.values()) {
-            if (!"/".equals(scope.scopePath)) {
-                roots.add(new PhysicalRoot(
-                        scope.exactScope,
-                        FragmentRootKind.DOCUMENT_SCOPE,
-                        scope.scopePath));
-            }
-        }
-        for (SourceContributionPlan source
-                : plan.sourceContributions.values()) {
-            roots.add(new PhysicalRoot(
-                    source.exactContribution,
-                    FragmentRootKind.SOURCE_CONTRIBUTION,
-                    sourceContributionBasePath(
-                            source.blueId)));
-        }
-        return directEdges(
-                roots,
-                rootBlueId,
-                cuts,
-                scopePaths,
-                new EdgeQuota(
-                        hostQuotas,
-                        CoordinationHostQuotaSession
-                                .SPLIT_DOCUMENT));
+        return Collections.unmodifiableSortedMap(cuts);
     }
 
     private static List<EdgeOccurrence> directEdges(
@@ -517,16 +1020,19 @@ public final class CoordinationDocumentSplitter {
             FragmentRootKind rootKind,
             String basePath,
             Map<String, CutDescriptor> cuts,
+            Map<String, Node> canonicalFragments,
             CoordinationHostQuotaSession hostQuotas) {
         return directEdges(
                 Collections.singletonList(
-                        new PhysicalRoot(
+                        new PhysicalFragmentRoot(
                                 exactRoot,
+                                rootBlueId,
                                 rootKind,
                                 basePath)),
                 rootBlueId,
                 cuts,
                 Collections.<String>emptyList(),
+                canonicalFragments,
                 new EdgeQuota(
                         hostQuotas,
                         rootKind == FragmentRootKind.EVENT
@@ -537,32 +1043,26 @@ public final class CoordinationDocumentSplitter {
     }
 
     private static List<EdgeOccurrence> directEdges(
-            List<PhysicalRoot> roots,
+            List<PhysicalFragmentRoot> roots,
             String rootBlueId,
             Map<String, CutDescriptor> cuts,
             List<String> scopePaths,
+            Map<String, Node> canonicalFragments,
             EdgeQuota edgeQuota) {
-        List<Node> exactRoots =
-                new ArrayList<>();
-        for (PhysicalRoot root : roots) {
-            exactRoots.add(root.exactRoot);
-        }
-        ExactNodeGraphFragments graph =
-                new ExactNodeGraphFragments(
-                        exactRoots);
-        Map<String, Node> canonicalFragments =
-                graph.fragments();
+        Map<String, Node> fragments = Objects.requireNonNull(
+                canonicalFragments, "canonicalFragments");
         SortedMap<String, EdgeOccurrence> occurrences =
                 new TreeMap<>();
-        for (PhysicalRoot root : roots) {
+        for (PhysicalFragmentRoot root : roots) {
             collectDirectEdges(
                     root.exactRoot,
+                    root.blueId,
                     rootBlueId,
                     root.rootKind,
                     root.basePath,
                     cuts,
                     scopePaths,
-                    canonicalFragments,
+                    fragments,
                     occurrences,
                     Collections.newSetFromMap(
                             new IdentityHashMap<Node, Boolean>()),
@@ -573,8 +1073,15 @@ public final class CoordinationDocumentSplitter {
                         occurrences.values()));
     }
 
+    /**
+     * Walks an owner whose canonical identity was already established by the
+     * direct-fragment edge that led to it.  ExactNodeGraphFragments creates
+     * that edge and the matching fragment in one pass, so re-hashing every
+     * descendant during metadata collection is redundant.
+     */
     private static void collectDirectEdges(
             Node owner,
+            String ownerBlueId,
             String rootBlueId,
             FragmentRootKind rootKind,
             String ownerAbsolutePath,
@@ -590,9 +1097,6 @@ public final class CoordinationDocumentSplitter {
                             + "Coordination fragmentation profile");
         }
         try {
-            String ownerBlueId =
-                    BlueIdCalculator.calculateBlueId(
-                            owner);
             Node directOwner =
                     canonicalFragments.get(
                             ownerBlueId);
@@ -601,22 +1105,24 @@ public final class CoordinationDocumentSplitter {
                         "Canonical direct fragment is missing owner "
                                 + ownerBlueId);
             }
+            if (!isImplicitScalarRepresentation(owner)) {
+                collectNodeEdge(
+                        ownerBlueId,
+                        owner.getType(),
+                        directOwner.getType(),
+                        "/type",
+                        ownerAbsolutePath,
+                        rootBlueId,
+                        rootKind,
+                        cuts,
+                        scopePaths,
+                        canonicalFragments,
+                        occurrences,
+                        active,
+                        edgeQuota);
+            }
             collectNodeEdge(
-                    owner,
-                    owner.getType(),
-                    directOwner.getType(),
-                    "/type",
-                    ownerAbsolutePath,
-                    rootBlueId,
-                    rootKind,
-                    cuts,
-                    scopePaths,
-                    canonicalFragments,
-                    occurrences,
-                    active,
-                    edgeQuota);
-            collectNodeEdge(
-                    owner,
+                    ownerBlueId,
                     owner.getItemType(),
                     directOwner.getItemType(),
                     "/itemType",
@@ -630,7 +1136,7 @@ public final class CoordinationDocumentSplitter {
                     active,
                     edgeQuota);
             collectNodeEdge(
-                    owner,
+                    ownerBlueId,
                     owner.getKeyType(),
                     directOwner.getKeyType(),
                     "/keyType",
@@ -644,7 +1150,7 @@ public final class CoordinationDocumentSplitter {
                     active,
                     edgeQuota);
             collectNodeEdge(
-                    owner,
+                    ownerBlueId,
                     owner.getValueType(),
                     directOwner.getValueType(),
                     "/valueType",
@@ -658,7 +1164,7 @@ public final class CoordinationDocumentSplitter {
                     active,
                     edgeQuota);
             collectNodeEdge(
-                    owner,
+                    ownerBlueId,
                     owner.getContracts(),
                     directOwner.getContracts(),
                     "/contracts",
@@ -672,7 +1178,7 @@ public final class CoordinationDocumentSplitter {
                     active,
                     edgeQuota);
             collectNodeEdge(
-                    owner,
+                    ownerBlueId,
                     owner.getBlue(),
                     directOwner.getBlue(),
                     "/blue",
@@ -690,7 +1196,7 @@ public final class CoordinationDocumentSplitter {
                         index < owner.getItems().size();
                         index++) {
                     collectNodeEdge(
-                            owner,
+                            ownerBlueId,
                             owner.getItems().get(index),
                             directOwner.getItems().get(index),
                             JsonPointer.toPointer(
@@ -718,7 +1224,7 @@ public final class CoordinationDocumentSplitter {
                             directOwner.getProperties()
                                     .get(property.getKey());
                     collectNodeEdge(
-                            owner,
+                            ownerBlueId,
                             property.getValue(),
                             directChild,
                             JsonPointer.toPointer(
@@ -737,6 +1243,7 @@ public final class CoordinationDocumentSplitter {
             }
             collectSchemaEdges(
                     owner,
+                    ownerBlueId,
                     directOwner,
                     ownerAbsolutePath,
                     rootBlueId,
@@ -754,6 +1261,7 @@ public final class CoordinationDocumentSplitter {
 
     private static void collectSchemaEdges(
             Node owner,
+            String ownerBlueId,
             Node directOwner,
             String ownerAbsolutePath,
             String rootBlueId,
@@ -798,7 +1306,7 @@ public final class CoordinationDocumentSplitter {
                                         .getMultipleOf()));
         for (SchemaChild child : children) {
             collectNodeEdge(
-                    owner,
+                    ownerBlueId,
                     child.original,
                     child.direct,
                     JsonPointer.toPointer(
@@ -821,7 +1329,7 @@ public final class CoordinationDocumentSplitter {
                     .getEnum().size();
                     index++) {
                 collectNodeEdge(
-                        owner,
+                        ownerBlueId,
                         owner.getSchema().getEnum()
                                 .get(index),
                         directOwner.getSchema().getEnum()
@@ -845,7 +1353,7 @@ public final class CoordinationDocumentSplitter {
     }
 
     private static void collectNodeEdge(
-            Node owner,
+            String ownerBlueId,
             Node originalChild,
             Node directChild,
             String ownerRelativePointer,
@@ -858,22 +1366,49 @@ public final class CoordinationDocumentSplitter {
             SortedMap<String, EdgeOccurrence> occurrences,
             Set<Node> active,
             EdgeQuota edgeQuota) {
-        if (originalChild == null
-                || directChild == null
-                || !directChild.isReferenceOnly()) {
+        if (directChild == null) {
             return;
         }
-        String childBlueId =
-                exactIdentity(
-                        originalChild);
-        if (!childBlueId.equals(
-                directChild.getBlueId())) {
-            throw new IllegalStateException(
-                    "Canonical direct fragment changed child identity from "
-                            + childBlueId
-                            + " to "
-                            + directChild.getBlueId());
+        if (!directChild.isReferenceOnly()) {
+            /* ExactNodeGraphFragments may keep a small child inline in one
+             * occurrence while retaining that same identity as a canonical
+             * fragment because another occurrence is cut. Walk the inline
+             * occurrence as provenance for the retained child's own direct
+             * reference shape; there is deliberately no physical edge from
+             * this owner to the inline child. */
+            String inlineBlueId = originalChild != null
+                    && !originalChild.isReferenceOnly()
+                    ? exactIdentity(originalChild)
+                    : null;
+            if (inlineBlueId != null
+                    && canonicalFragments.containsKey(inlineBlueId)) {
+                collectDirectEdges(
+                        originalChild,
+                        inlineBlueId,
+                        rootBlueId,
+                        rootKind,
+                        appendRelativePointer(
+                                ownerAbsolutePath,
+                                ownerRelativePointer),
+                        cuts,
+                        scopePaths,
+                        canonicalFragments,
+                        occurrences,
+                        active,
+                        edgeQuota);
+            }
+            return;
         }
+        /* Canonical graph fragments may make an implicit scalar type explicit.
+         * Such a physical reference has no original structural child. It is
+         * complete identity evidence in its own right and remains opaque just
+         * like an authored pure reference. */
+        /* The direct reference and the matching fragment were emitted by the
+         * same ExactNodeGraphFragments pass.  Its reference identity is the
+         * established child identity; hashing the complete original child a
+         * second time here used to make this metadata walk unnecessarily
+         * expensive. */
+        String childBlueId = directChild.getBlueId();
         String absolutePointer =
                 appendRelativePointer(
                         ownerAbsolutePath,
@@ -897,15 +1432,31 @@ public final class CoordinationDocumentSplitter {
                         EDGE_METADATA_SCHEMA_ID,
                         rootKind,
                         rootBlueId,
-                        BlueIdCalculator.calculateBlueId(
-                                owner),
+                        ownerBlueId,
                         ownerScopePath,
                         absolutePointer,
                         ownerRelativePointer,
                         childBlueId,
                         edgeKind,
-                        originalChild.isReferenceOnly(),
-                        !originalChild.isReferenceOnly(),
+                        originalChild == null
+                                || originalChild.isReferenceOnly(),
+                        originalChild != null
+                                && !originalChild.isReferenceOnly(),
+                        cut != null
+                                ? cut.declaringScopePath
+                                : null,
+                        cut != null
+                                ? cut.embeddedOrigin
+                                : EmbeddedEdgeOrigin.NONE,
+                        cut != null
+                                ? cut.explicitDeclarationPath
+                                : null,
+                        cut != null
+                                ? cut.collectionDeclarationPath
+                                : null,
+                        cut != null
+                                ? cut.collectionMemberKey
+                                : null,
                         cut != null
                                 ? cut.handlerTypeBlueId
                                 : null,
@@ -944,9 +1495,11 @@ public final class CoordinationDocumentSplitter {
                             + "metadata at "
                             + absolutePointer);
         }
-        if (!originalChild.isReferenceOnly()) {
+        if (originalChild != null
+                && !originalChild.isReferenceOnly()) {
             collectDirectEdges(
                     originalChild,
+                    childBlueId,
                     rootBlueId,
                     rootKind,
                     absolutePointer,
@@ -1008,20 +1561,13 @@ public final class CoordinationDocumentSplitter {
             CoordinationHostQuotaSession hostQuotas) {
         SortedMap<String, ScopePlan> scopes =
                 new TreeMap<>();
-        List<String> scopePaths = new ArrayList<>(
-                catalog
-                        .effectiveProcessEmbeddedPathsByScope()
-                        .keySet());
-        Collections.sort(
-                scopePaths,
-                (left, right) -> {
-                    int depth = Integer.compare(
-                            JsonPointer.split(left).size(),
-                            JsonPointer.split(right).size());
-                    return depth != 0
-                            ? depth
-                            : left.compareTo(right);
-                });
+        List<EffectiveCutCatalogReader.ScopePlan> catalogScopes =
+                EffectiveCutCatalogReader.read(catalog);
+        List<String> scopePaths = new ArrayList<>();
+        for (EffectiveCutCatalogReader.ScopePlan catalogScope
+                : catalogScopes) {
+            scopePaths.add(catalogScope.scopePath());
+        }
         for (String scopePath : scopePaths) {
             hostQuotas.recordSplitterCatalogEntry(
                     scopePath,
@@ -1064,16 +1610,11 @@ public final class CoordinationDocumentSplitter {
                     "Effective fragmentation catalog did not retain the exact Root scope");
         }
 
-        for (String declaringScopePath : scopePaths) {
-            List<String> declaredPaths =
-                    catalog
-                            .effectiveProcessEmbeddedPathsByScope()
-                            .get(declaringScopePath);
-            for (String relativePath : declaredPaths) {
-                String absolutePath =
-                        PointerUtils.resolvePointer(
-                                declaringScopePath,
-                                relativePath);
+        for (EffectiveCutCatalogReader.ScopePlan catalogScope
+                : catalogScopes) {
+            for (EffectiveCutCatalogReader.EmbeddedOccurrence occurrence
+                    : catalogScope.occurrences()) {
+                String absolutePath = occurrence.concretePath();
                 hostQuotas.recordSplitterCatalogEntry(
                         absolutePath,
                         "embedded-path");
@@ -1089,7 +1630,12 @@ public final class CoordinationDocumentSplitter {
                 EmbeddedCut cut =
                         new EmbeddedCut(
                                 containingScope.scopePath,
-                                absolutePath);
+                                absolutePath,
+                                occurrence.declaringScopePath(),
+                                occurrence.origin(),
+                                occurrence.explicitDeclarationPath(),
+                                occurrence.collectionDeclarationPath(),
+                                occurrence.collectionMemberKey());
                 hostQuotas.recordSplitterCut(
                         absolutePath,
                         "embedded-root");
@@ -1403,10 +1949,13 @@ public final class CoordinationDocumentSplitter {
                                 + "' executable-body owning Source contribution "
                                 + ownerBlueId,
                         true);
-        Node exactBody =
-                NodePathEditor.getOrNull(
-                        owner,
-                        descriptor.sourcePointer());
+        Node exactBody = nodeAt(
+                owner,
+                descriptor.sourcePointer(),
+                true,
+                "Effective contract '" + contract.key()
+                        + "' executable-body Source contribution "
+                        + ownerBlueId);
         if (exactBody == null) {
             throw new IllegalStateException(
                     "Effective executable-body Source descriptor for contract '"
@@ -1450,11 +1999,20 @@ public final class CoordinationDocumentSplitter {
             return ResolvedEffectiveBody.inScope(
                     exactBody);
         }
+        Node exactOwner = owner.clone();
+        NodePathEditor.put(
+                exactOwner,
+                descriptor.sourcePointer(),
+                exactBody.clone());
+        requireIdentity(
+                ownerBlueId,
+                exactOwner,
+                "Materialized executable-body Source contribution");
         return ResolvedEffectiveBody.inSourceContribution(
                 exactBody,
                 new SourceContributionCut(
                         ownerBlueId,
-                        owner,
+                        exactOwner,
                         descriptor.sourcePointer()));
     }
 
@@ -1507,7 +2065,7 @@ public final class CoordinationDocumentSplitter {
             Node node) {
         return node.isReferenceOnly()
                 ? node.getBlueId()
-                : BlueIdCalculator.calculateBlueId(
+                : DirectBlueIdCalculator.calculateBlueId(
                         node);
     }
 
@@ -1570,6 +2128,15 @@ public final class CoordinationDocumentSplitter {
                 expectedBlueId,
                 result,
                 label);
+    }
+
+    private NodeProvider requiredLocalProvider(String label) {
+        if (localProvider == null) {
+            throw new IllegalStateException(
+                    "Exact local provider is required to materialize "
+                            + label);
+        }
+        return localProvider;
     }
 
     private static Node exactProviderContent(
@@ -1657,16 +2224,21 @@ public final class CoordinationDocumentSplitter {
             boolean materializeFinalReference,
             String label) {
         Node current =
-                Objects.requireNonNull(root, "root")
-                        .clone();
+                Objects.requireNonNull(root, "root");
         List<String> segments =
                 JsonPointer.split(pointer);
         String traversed = "/";
         for (String segment : segments) {
-            current = exactContent(
-                    current,
-                    label + " at " + traversed,
-                    true);
+            /* Traversal is read-only. Cloning each ancestor duplicates its
+             * complete remaining subtree at every path segment and makes
+             * scope discovery quadratic in depth. Only provider-backed
+             * references and the final returned selection require copies. */
+            if (current.isReferenceOnly()) {
+                current = exactContent(
+                        current,
+                        label + " at " + traversed,
+                        true);
+            }
             current = NodePathEditor.getOrNull(
                     current,
                     JsonPointer.toPointer(
@@ -1715,18 +2287,14 @@ public final class CoordinationDocumentSplitter {
 
     private Map<String, Node> processHeaderViews(
             DocumentPlan plan,
-            Collection<? extends Node> exactRoots) {
-        Map<String, Node> exactNodes =
-                new LinkedHashMap<String, Node>();
-        Set<Node> visited =
-                Collections.newSetFromMap(
-                        new IdentityHashMap<Node, Boolean>());
+            Collection<? extends Node> exactRoots,
+            CoordinationExactNodeIndex exactNodeIndex) {
+        CoordinationExactNodeIndex index = Objects.requireNonNull(
+                exactNodeIndex, "exactNodeIndex");
         for (Node exactRoot : exactRoots) {
-            indexExactNodes(
-                    exactRoot,
-                    exactNodes,
-                    visited);
+            index.blueId(exactRoot);
         }
+        Map<String, Node> exactNodes = index.nodesByBlueId();
 
         SortedMap<String, Set<String>>
                 executableFieldsByContribution =
@@ -1782,8 +2350,8 @@ public final class CoordinationDocumentSplitter {
         indexProviderBackedContractContributions(
                 exactRoots,
                 executableFieldsByContribution.keySet(),
-                exactNodes,
-                visited);
+                index);
+        exactNodes = index.nodesByBlueId();
 
         SortedMap<String, Node> result =
                 new TreeMap<String, Node>();
@@ -1821,7 +2389,7 @@ public final class CoordinationDocumentSplitter {
                 header.getProperties().put(
                         field,
                         new Node().blueId(
-                                BlueIdCalculator
+                                DirectBlueIdCalculator
                                         .calculateBlueId(
                                                 body)));
             }
@@ -1839,13 +2407,16 @@ public final class CoordinationDocumentSplitter {
         }
         addProcessContractsViews(
                 plan,
-                result);
+                result,
+                index);
         addProcessScopeViews(
                 plan,
-                result);
+                result,
+                index);
         addProcessExecutableBodyViews(
                 plan,
-                result);
+                result,
+                index);
         return Collections.unmodifiableSortedMap(
                 result);
     }
@@ -1879,7 +2450,8 @@ public final class CoordinationDocumentSplitter {
 
     private void addProcessContractsViews(
             DocumentPlan plan,
-            SortedMap<String, Node> processViews) {
+            SortedMap<String, Node> processViews,
+            CoordinationExactNodeIndex exactNodeIndex) {
         for (ScopePlan scope : plan.scopes.values()) {
             Node suppliedContracts =
                     scope.exactScope.getContracts();
@@ -1893,7 +2465,9 @@ public final class CoordinationDocumentSplitter {
                     suppliedContracts.isReferenceOnly()
                             ? CoordinationProcessHeaderBridge
                             .materializeVerifiedExactReference(
-                                    documentProcessor,
+                                    requiredLocalProvider(
+                                            "contracts map at "
+                                                    + scope.scopePath),
                                     suppliedContracts)
                             : suppliedContracts.clone();
             if (exactContracts.getBlueId() != null) {
@@ -1913,13 +2487,8 @@ public final class CoordinationDocumentSplitter {
                     "Verified PROCESS contracts map at "
                             + scope.scopePath);
 
-            ExactNodeGraphFragments contractsGraph =
-                    new ExactNodeGraphFragments(
-                            exactContracts);
             Node contractsView =
-                    contractsGraph.roots()
-                            .get(0)
-                            .directFragment();
+                    exactNodeIndex.directFragment(exactContracts);
             if (exactContracts.getProperties() != null) {
                 for (Map.Entry<String, Node> contract
                         : exactContracts
@@ -1947,7 +2516,11 @@ public final class CoordinationDocumentSplitter {
                                         .isReferenceOnly()
                                         ? CoordinationProcessHeaderBridge
                                         .materializeVerifiedExactReference(
-                                                documentProcessor,
+                                                requiredLocalProvider(
+                                                        "contract contribution at "
+                                                                + scope.scopePath
+                                                                + "/"
+                                                                + contract.getKey()),
                                                 contract.getValue())
                                         : contract.getValue()
                                         .clone();
@@ -1990,9 +2563,9 @@ public final class CoordinationDocumentSplitter {
                             contractsView);
             if (previous != null
                     && !Objects.equals(
-                            NodeToMapListOrValue.get(
+                            NodeWireForm.get(
                                     previous),
-                            NodeToMapListOrValue.get(
+                            NodeWireForm.get(
                                     contractsView))) {
                 throw new IllegalStateException(
                         "One PROCESS contracts-map identity has "
@@ -2062,7 +2635,7 @@ public final class CoordinationDocumentSplitter {
             header.getProperties().put(
                     field,
                     new Node().blueId(
-                            BlueIdCalculator
+                            DirectBlueIdCalculator
                                     .calculateBlueId(
                                             body)));
         }
@@ -2083,19 +2656,15 @@ public final class CoordinationDocumentSplitter {
 
     private void addProcessScopeViews(
             DocumentPlan plan,
-            SortedMap<String, Node> processViews) {
+            SortedMap<String, Node> processViews,
+            CoordinationExactNodeIndex exactNodeIndex) {
         SortedMap<String, Node> standaloneByPath =
                 new TreeMap<String, Node>();
         for (ScopePlan scope : plan.scopes.values()) {
             String scopeBlueId =
-                    exactIdentity(scope.exactScope);
-            ExactNodeGraphFragments scopeGraph =
-                    new ExactNodeGraphFragments(
-                            scope.exactScope);
+                    exactNodeIndex.blueId(scope.exactScope);
             Node scopeView =
-                    scopeGraph.roots()
-                            .get(0)
-                            .directFragment();
+                    exactNodeIndex.directFragment(scope.exactScope);
             Node suppliedContracts =
                     scope.exactScope.getContracts();
             if (suppliedContracts != null) {
@@ -2128,9 +2697,9 @@ public final class CoordinationDocumentSplitter {
                             scopeView);
             if (previous != null
                     && !Objects.equals(
-                            NodeToMapListOrValue.get(
+                            NodeWireForm.get(
                                     previous),
-                            NodeToMapListOrValue.get(
+                            NodeWireForm.get(
                                     scopeView))) {
                 throw new IllegalStateException(
                         "One PROCESS scope identity has inconsistent "
@@ -2182,7 +2751,8 @@ public final class CoordinationDocumentSplitter {
                                 scope.scopePath,
                                 cut.absolutePointer),
                         child,
-                        scope.scopePath);
+                        scope.scopePath,
+                        exactNodeIndex);
             }
             requireIdentity(
                     exactIdentity(
@@ -2207,6 +2777,31 @@ public final class CoordinationDocumentSplitter {
         processViews.put(
                 exactIdentity(root.exactScope),
                 processingRoot);
+        addExpandedStructuralViews(
+                processingRoot,
+                processViews);
+    }
+
+    /**
+     * Retains identity-equivalent body-free views for intermediate collection
+     * and object containers on the expanded selector-catalog spine.
+     *
+     * <p>Language may verify an indexed plan by demanding one of these direct
+     * container identities. Returning the expanded header view lets that
+     * verification observe member headers without separately opening every
+     * unselected embedded Root. Existing specialized contract/body views win
+     * over this general structural projection.</p>
+     */
+    private static void addExpandedStructuralViews(
+            Node expandedRoot,
+            SortedMap<String, Node> processViews) {
+        CoordinationExactNodeIndex expandedIndex =
+                new CoordinationExactNodeIndex();
+        expandedIndex.blueId(expandedRoot);
+        Map<String, Node> expanded = expandedIndex.nodesByBlueId();
+        for (Map.Entry<String, Node> entry : expanded.entrySet()) {
+            processViews.putIfAbsent(entry.getKey(), entry.getValue());
+        }
     }
 
     private void inlineProcessScopePath(
@@ -2214,7 +2809,8 @@ public final class CoordinationDocumentSplitter {
             Node exactOwner,
             String relativePointer,
             Node childView,
-            String ownerScopePath) {
+            String ownerScopePath,
+            CoordinationExactNodeIndex exactNodeIndex) {
         List<String> segments =
                 JsonPointer.split(
                         relativePointer);
@@ -2268,12 +2864,8 @@ public final class CoordinationDocumentSplitter {
                                     ownerScopePath,
                                     prefix));
                 }
-                nextView =
-                        new ExactNodeGraphFragments(
-                                exactIntermediate)
-                                .roots()
-                                .get(0)
-                                .directFragment();
+                nextView = exactNodeIndex.directFragment(
+                        exactIntermediate);
                 requireIdentity(
                         exactIdentity(
                                 exactIntermediate),
@@ -2293,14 +2885,15 @@ public final class CoordinationDocumentSplitter {
 
     private static void addProcessExecutableBodyViews(
             DocumentPlan plan,
-            SortedMap<String, Node> processViews) {
+            SortedMap<String, Node> processViews,
+            CoordinationExactNodeIndex exactNodeIndex) {
         for (BodyCut body : plan.bodies) {
             if (body.exactBody == null
                     || body.exactBody.isReferenceOnly()) {
                 continue;
             }
             String bodyBlueId =
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             body.exactBody);
             Node canonicalExactBody =
                     CoordinationProcessHeaderBridge
@@ -2311,13 +2904,21 @@ public final class CoordinationDocumentSplitter {
                     canonicalExactBody,
                     "canonical PROCESS executable-body view at "
                             + body.absolutePointer);
-            ExactNodeGraphFragments graph =
-                    new ExactNodeGraphFragments(
-                            canonicalExactBody);
             Node bodyView =
-                    graph.roots()
-                            .get(0)
-                            .directFragment();
+                    exactNodeIndex.directFragment(canonicalExactBody);
+            if (canonicalExactBody.getProperties() != null) {
+                Map<String, Node> properties =
+                        new LinkedHashMap<String, Node>();
+                for (Map.Entry<String, Node> property
+                        : canonicalExactBody.getProperties().entrySet()) {
+                    properties.put(
+                            property.getKey(),
+                            property.getValue() != null
+                                    ? property.getValue().clone()
+                                    : null);
+                }
+                bodyView.properties(properties);
+            }
             if (canonicalExactBody.getItems() != null) {
                 List<Node> items =
                         new ArrayList<Node>();
@@ -2349,9 +2950,9 @@ public final class CoordinationDocumentSplitter {
                             bodyView);
             if (previous != null
                     && !Objects.equals(
-                            NodeToMapListOrValue.get(
+                            NodeWireForm.get(
                                     previous),
-                            NodeToMapListOrValue.get(
+                            NodeWireForm.get(
                                     bodyView))) {
                 throw new IllegalStateException(
                         "One PROCESS executable-body identity has "
@@ -2420,7 +3021,7 @@ public final class CoordinationDocumentSplitter {
             exact =
                     CoordinationProcessHeaderBridge
                             .materializeVerifiedExactReference(
-                                    documentProcessor,
+                                    requiredLocalProvider(label),
                                     exact);
             if (exact.getBlueId() != null) {
                 if (!demandedBlueId.equals(
@@ -2488,8 +3089,7 @@ public final class CoordinationDocumentSplitter {
     private void indexProviderBackedContractContributions(
             Collection<? extends Node> exactRoots,
             Collection<String> requiredContributionBlueIds,
-            Map<String, Node> exactNodes,
-            Set<Node> indexedNodes) {
+            CoordinationExactNodeIndex exactNodeIndex) {
         if (localProvider == null
                 || requiredContributionBlueIds.isEmpty()) {
             return;
@@ -2498,7 +3098,7 @@ public final class CoordinationDocumentSplitter {
                 new TreeSet<String>(
                         requiredContributionBlueIds);
         missing.removeAll(
-                exactNodes.keySet());
+                exactNodeIndex.nodesByBlueId().keySet());
         for (String blueId
                 : new ArrayList<String>(missing)) {
             Node exact =
@@ -2509,13 +3109,10 @@ public final class CoordinationDocumentSplitter {
             if (exact == null) {
                 continue;
             }
-            indexExactNodes(
-                    exact,
-                    exactNodes,
-                    indexedNodes);
+            exactNodeIndex.blueId(exact);
         }
         missing.removeAll(
-                exactNodes.keySet());
+                exactNodeIndex.nodesByBlueId().keySet());
         if (missing.isEmpty()) {
             return;
         }
@@ -2529,8 +3126,7 @@ public final class CoordinationDocumentSplitter {
             indexContractDefinitionChain(
                     exactRoot,
                     missing,
-                    exactNodes,
-                    indexedNodes,
+                    exactNodeIndex,
                     openedReferences,
                     visitedDefinitions);
             if (missing.isEmpty()) {
@@ -2542,8 +3138,7 @@ public final class CoordinationDocumentSplitter {
     private void indexContractDefinitionChain(
             Node suppliedDefinition,
             Set<String> missing,
-            Map<String, Node> exactNodes,
-            Set<Node> indexedNodes,
+            CoordinationExactNodeIndex exactNodeIndex,
             Set<String> openedReferences,
             Set<Node> visitedDefinitions) {
         Node definition = suppliedDefinition;
@@ -2569,25 +3164,20 @@ public final class CoordinationDocumentSplitter {
                 return;
             }
 
-            indexExactNodes(
-                    definition,
-                    exactNodes,
-                    indexedNodes);
+            exactNodeIndex.blueId(definition);
             indexReferencedContractsMap(
                     definition.getContracts(),
-                    exactNodes,
-                    indexedNodes,
+                    exactNodeIndex,
                     openedReferences);
             missing.removeAll(
-                    exactNodes.keySet());
+                    exactNodeIndex.nodesByBlueId().keySet());
             definition = definition.getType();
         }
     }
 
     private void indexReferencedContractsMap(
             Node contracts,
-            Map<String, Node> exactNodes,
-            Set<Node> indexedNodes,
+            CoordinationExactNodeIndex exactNodeIndex,
             Set<String> openedReferences) {
         if (contracts == null
                 || !contracts.isReferenceOnly()) {
@@ -2605,68 +3195,7 @@ public final class CoordinationDocumentSplitter {
                         contracts,
                         "Contracts map " + blueId);
         if (exact != null) {
-            indexExactNodes(
-                    exact,
-                    exactNodes,
-                    indexedNodes);
-        }
-    }
-
-    private static void indexExactNodes(
-            Node node,
-            Map<String, Node> exactNodes,
-            Set<Node> visited) {
-        if (node == null
-                || node.isReferenceOnly()
-                || !visited.add(node)) {
-            return;
-        }
-        String blueId =
-                BlueIdCalculator.calculateBlueId(
-                        node);
-        exactNodes.putIfAbsent(
-                blueId,
-                node.clone());
-        indexExactNodes(
-                node.getType(),
-                exactNodes,
-                visited);
-        indexExactNodes(
-                node.getItemType(),
-                exactNodes,
-                visited);
-        indexExactNodes(
-                node.getKeyType(),
-                exactNodes,
-                visited);
-        indexExactNodes(
-                node.getValueType(),
-                exactNodes,
-                visited);
-        indexExactNodes(
-                node.getContracts(),
-                exactNodes,
-                visited);
-        indexExactNodes(
-                node.getBlue(),
-                exactNodes,
-                visited);
-        if (node.getProperties() != null) {
-            for (Node property
-                    : node.getProperties().values()) {
-                indexExactNodes(
-                        property,
-                        exactNodes,
-                        visited);
-            }
-        }
-        if (node.getItems() != null) {
-            for (Node item : node.getItems()) {
-                indexExactNodes(
-                        item,
-                        exactNodes,
-                        visited);
-            }
+            exactNodeIndex.blueId(exact);
         }
     }
 
@@ -2687,7 +3216,7 @@ public final class CoordinationDocumentSplitter {
             Node fragment,
             String label) {
         String actualBlueId =
-                BlueIdCalculator.calculateBlueId(fragment);
+                DirectBlueIdCalculator.calculateBlueId(fragment.clone());
         if (!expectedBlueId.equals(actualBlueId)) {
             throw new IllegalStateException(
                     label
@@ -2695,6 +3224,223 @@ public final class CoordinationDocumentSplitter {
                             + expectedBlueId
                             + " to "
                             + actualBlueId);
+        }
+    }
+
+    /**
+     * Immutable semantic/cut blueprint used by the incremental engine path.
+     * No canonical direct fragment bodies are retained by this value.
+     */
+    public static final class DocumentFragmentationBlueprint {
+
+        private final String rootBlueId;
+        private final Node exactRoot;
+        private final List<PhysicalFragmentRoot> physicalRoots;
+        private final List<FragmentMetadata> metadata;
+        private final List<FragmentRoot> fragmentRoots;
+        private final SortedMap<String, CutDescriptor> cuts;
+        private final List<String> scopePaths;
+        private final SortedMap<String, Node> processHeaderViews;
+        private final CoordinationExactNodeIndex exactNodeIndex;
+
+        private DocumentFragmentationBlueprint(
+                String rootBlueId,
+                Node exactRoot,
+                Collection<PhysicalFragmentRoot> physicalRoots,
+                Collection<FragmentMetadata> metadata,
+                Collection<FragmentRoot> fragmentRoots,
+                Map<String, CutDescriptor> cuts,
+                Collection<String> scopePaths,
+                Map<String, Node> processHeaderViews,
+                CoordinationExactNodeIndex exactNodeIndex) {
+            this.rootBlueId = Objects.requireNonNull(
+                    rootBlueId, "rootBlueId");
+            this.exactRoot = Objects.requireNonNull(
+                    exactRoot, "exactRoot");
+            this.physicalRoots = Collections.unmodifiableList(
+                    new ArrayList<PhysicalFragmentRoot>(
+                            Objects.requireNonNull(
+                                    physicalRoots,
+                                    "physicalRoots")));
+            this.metadata = Collections.unmodifiableList(
+                    new ArrayList<FragmentMetadata>(
+                            Objects.requireNonNull(
+                                    metadata,
+                                    "metadata")));
+            this.fragmentRoots = Collections.unmodifiableList(
+                    new ArrayList<FragmentRoot>(
+                            Objects.requireNonNull(
+                                    fragmentRoots,
+                                    "fragmentRoots")));
+            this.cuts = Collections.unmodifiableSortedMap(
+                    new TreeMap<String, CutDescriptor>(
+                            Objects.requireNonNull(cuts, "cuts")));
+            this.scopePaths = Collections.unmodifiableList(
+                    new ArrayList<String>(
+                            Objects.requireNonNull(
+                                    scopePaths,
+                                    "scopePaths")));
+            this.processHeaderViews = immutableFragments(
+                    processHeaderViews);
+            this.exactNodeIndex = Objects.requireNonNull(
+                    exactNodeIndex, "exactNodeIndex");
+        }
+
+        public String rootBlueId() {
+            return rootBlueId;
+        }
+
+        public Node exactRoot() {
+            return exactRoot.clone();
+        }
+
+        public List<PhysicalFragmentRoot> physicalRoots() {
+            return physicalRoots;
+        }
+
+        public List<FragmentMetadata> metadata() {
+            return metadata;
+        }
+
+        public List<FragmentRoot> fragmentRoots() {
+            return fragmentRoots;
+        }
+
+        /**
+         * Returns exact identity-equivalent PROCESS representations keyed by
+         * their physical fragment identity.
+         */
+        public Map<String, Node> processHeaderViews() {
+            return immutableFragments(processHeaderViews);
+        }
+
+        private List<PhysicalFragmentRoot> physicalRootsInternal() {
+            return physicalRoots;
+        }
+
+        private String blueId(Node exactNode) {
+            return exactNodeIndex.blueId(exactNode);
+        }
+
+        private Node directFragment(Node exactNode) {
+            return exactNodeIndex.directFragment(exactNode);
+        }
+    }
+
+    /** One independently retained exact root in a document blueprint. */
+    public static final class PhysicalFragmentRoot {
+
+        private final Node exactRoot;
+        private final String blueId;
+        private final FragmentRootKind rootKind;
+        private final String basePath;
+
+        private PhysicalFragmentRoot(
+                Node exactRoot,
+                FragmentRootKind rootKind,
+                String basePath) {
+            this(
+                    exactRoot,
+                    DirectBlueIdCalculator.calculateBlueId(exactRoot),
+                    rootKind,
+                    basePath);
+        }
+
+        private PhysicalFragmentRoot(
+                Node exactRoot,
+                String blueId,
+                FragmentRootKind rootKind,
+                String basePath) {
+            this.exactRoot = Objects.requireNonNull(
+                    exactRoot, "exactRoot");
+            this.blueId = Objects.requireNonNull(blueId, "blueId");
+            this.rootKind = Objects.requireNonNull(
+                    rootKind, "rootKind");
+            this.basePath = JsonPointer.canonicalize(
+                    Objects.requireNonNull(
+                            basePath, "basePath"));
+        }
+
+        public Node exactRoot() {
+            return exactRoot.clone();
+        }
+
+        public FragmentRootKind rootKind() {
+            return rootKind;
+        }
+
+        public String blueId() {
+            return blueId;
+        }
+
+        public String basePath() {
+            return basePath;
+        }
+    }
+
+    /** Direct-node identity, optional new body, and exact child frontier. */
+    public static final class DirectNodeInspection {
+
+        private final String ownerBlueId;
+        private final Node directFragment;
+        private final List<DirectChildOccurrence> children;
+
+        private DirectNodeInspection(
+                String ownerBlueId,
+                Node directFragment,
+                Collection<DirectChildOccurrence> children) {
+            this.ownerBlueId = Objects.requireNonNull(
+                    ownerBlueId, "ownerBlueId");
+            this.directFragment = directFragment != null
+                    ? directFragment.clone()
+                    : null;
+            this.children = Collections.unmodifiableList(
+                    new ArrayList<DirectChildOccurrence>(
+                            Objects.requireNonNull(
+                                    children, "children")));
+        }
+
+        public String ownerBlueId() {
+            return ownerBlueId;
+        }
+
+        public boolean assembledFragment() {
+            return directFragment != null;
+        }
+
+        public Node directFragment() {
+            if (directFragment == null) {
+                throw new IllegalStateException(
+                        "This inspection did not assemble a fragment body");
+            }
+            return directFragment.clone();
+        }
+
+        public List<DirectChildOccurrence> children() {
+            return children;
+        }
+    }
+
+    /** One canonical direct child occurrence and its exact recursion value. */
+    public static final class DirectChildOccurrence {
+
+        private final Node exactChild;
+        private final EdgeOccurrence edge;
+
+        private DirectChildOccurrence(
+                Node exactChild,
+                EdgeOccurrence edge) {
+            this.exactChild = Objects.requireNonNull(
+                    exactChild, "exactChild");
+            this.edge = Objects.requireNonNull(edge, "edge");
+        }
+
+        public Node exactChild() {
+            return exactChild.clone();
+        }
+
+        public EdgeOccurrence edge() {
+            return edge;
         }
     }
 
@@ -2714,6 +3460,7 @@ public final class CoordinationDocumentSplitter {
         private final Node originalRoot;
         private final Node fragmentedRoot;
         private final SortedMap<String, Node> fragments;
+        private final List<String> fragmentBlueIds;
         private final List<FragmentMetadata> metadata;
         private final List<EdgeOccurrence> edgeOccurrences;
         private final List<FragmentRoot> fragmentRoots;
@@ -2728,20 +3475,46 @@ public final class CoordinationDocumentSplitter {
                 Collection<EdgeOccurrence> edgeOccurrences,
                 Collection<FragmentRoot> fragmentRoots,
                 NodeProvider provider) {
+            this(
+                    rootBlueId,
+                    originalRoot,
+                    fragmentedRoot,
+                    fragments,
+                    metadata,
+                    edgeOccurrences,
+                    fragmentRoots,
+                    provider,
+                    false);
+        }
+
+        private SplitGraph(
+                String rootBlueId,
+                Node originalRoot,
+                Node fragmentedRoot,
+                Map<String, Node> fragments,
+                Collection<FragmentMetadata> metadata,
+                Collection<EdgeOccurrence> edgeOccurrences,
+                Collection<FragmentRoot> fragmentRoots,
+                NodeProvider provider,
+                boolean ownsCanonicalInputs) {
             this.rootBlueId =
                     Objects.requireNonNull(
                             rootBlueId, "rootBlueId");
-            this.originalRoot =
-                    Objects.requireNonNull(
-                            originalRoot, "originalRoot")
-                            .clone();
-            this.fragmentedRoot =
-                    Objects.requireNonNull(
-                            fragmentedRoot,
-                            "fragmentedRoot")
-                            .clone();
-            this.fragments =
-                    immutableFragments(fragments);
+            Node checkedOriginalRoot = Objects.requireNonNull(
+                    originalRoot, "originalRoot");
+            Node checkedFragmentedRoot = Objects.requireNonNull(
+                    fragmentedRoot, "fragmentedRoot");
+            this.originalRoot = ownsCanonicalInputs
+                    ? checkedOriginalRoot
+                    : checkedOriginalRoot.clone();
+            this.fragmentedRoot = ownsCanonicalInputs
+                    ? checkedFragmentedRoot
+                    : checkedFragmentedRoot.clone();
+            this.fragments = ownsCanonicalInputs
+                    ? ownedCanonicalFragments(fragments)
+                    : immutableFragments(fragments);
+            this.fragmentBlueIds = Collections.unmodifiableList(
+                    new ArrayList<String>(this.fragments.keySet()));
             List<FragmentMetadata> ordered =
                     new ArrayList<>(metadata);
             Collections.sort(
@@ -2790,9 +3563,9 @@ public final class CoordinationDocumentSplitter {
                     this.fragments.get(
                             rootBlueId);
             if (storedRoot == null
-                    || !NodeToMapListOrValue.get(
+                    || !NodeWireForm.get(
                     storedRoot).equals(
-                    NodeToMapListOrValue.get(
+                    NodeWireForm.get(
                             this.fragmentedRoot))) {
                 throw new IllegalStateException(
                         "Split Root is not its canonical stored direct fragment");
@@ -2805,6 +3578,14 @@ public final class CoordinationDocumentSplitter {
 
         public Node originalRoot() {
             return originalRoot.clone();
+        }
+
+        /**
+         * Freezes the splitter-owned exact Root without first creating an
+         * intermediate mutable full-graph copy.
+         */
+        public FrozenNode frozenOriginalRoot() {
+            return FrozenNode.fromNode(originalRoot);
         }
 
         public Node fragmentedRoot() {
@@ -2851,6 +3632,21 @@ public final class CoordinationDocumentSplitter {
         public Map<String, Node> fragments() {
             return immutableFragments(
                     fragments);
+        }
+
+        /**
+         * Returns the already verified canonical fragment identities without
+         * materializing their bodies.
+         */
+        public List<String> fragmentBlueIds() {
+            return fragmentBlueIds;
+        }
+
+        /** Materializes one verified fragment body on demand. */
+        public Node fragment(String blueId) {
+            Node fragment = fragments.get(Objects.requireNonNull(
+                    blueId, "blueId"));
+            return fragment == null ? null : fragment.clone();
         }
 
         /**
@@ -2971,6 +3767,16 @@ public final class CoordinationDocumentSplitter {
         EVENT_DIRECT_CHILD
     }
 
+    /** Declaration provenance for a concrete embedded edge occurrence. */
+    public enum EmbeddedEdgeOrigin {
+        /** The physical edge is not a Process Embedded child cut. */
+        NONE,
+        /** The child came from an exact {@code paths} declaration. */
+        EXPLICIT,
+        /** The child came from a stable-key {@code collectionPaths} member. */
+        COLLECTION_MEMBER
+    }
+
     /**
      * Immutable descriptor of one exact root admitted to the fragment graph.
      */
@@ -3076,6 +3882,20 @@ public final class CoordinationDocumentSplitter {
                         .thenComparing(
                                 EdgeOccurrence::originalPureReference)
                         .thenComparing(
+                                value -> value.embeddedOrigin().name())
+                        .thenComparing(
+                                value -> nullToEmpty(
+                                        value.declaringScopePath()))
+                        .thenComparing(
+                                value -> nullToEmpty(
+                                        value.explicitDeclarationPath()))
+                        .thenComparing(
+                                value -> nullToEmpty(
+                                        value.collectionDeclarationPath()))
+                        .thenComparing(
+                                value -> nullToEmpty(
+                                        value.collectionMemberKey()))
+                        .thenComparing(
                                 value -> nullToEmpty(
                                         value.handlerEffectiveTypeBlueId()))
                         .thenComparing(
@@ -3098,6 +3918,11 @@ public final class CoordinationDocumentSplitter {
         private final EdgeKind edgeKind;
         private final boolean originalPureReference;
         private final boolean splitterCreated;
+        private final String declaringScopePath;
+        private final EmbeddedEdgeOrigin embeddedOrigin;
+        private final String explicitDeclarationPath;
+        private final String collectionDeclarationPath;
+        private final String collectionMemberKey;
         private final String handlerEffectiveTypeBlueId;
         private final String executableBodyField;
         private final List<String> sourceContributionBlueIds;
@@ -3115,6 +3940,50 @@ public final class CoordinationDocumentSplitter {
                 EdgeKind edgeKind,
                 boolean originalPureReference,
                 boolean splitterCreated,
+                String handlerEffectiveTypeBlueId,
+                String executableBodyField,
+                Collection<String> sourceContributionBlueIds) {
+            this(
+                    fragmentationProfileIdentity,
+                    schemaIdentity,
+                    rootKind,
+                    rootBlueId,
+                    ownerNodeBlueId,
+                    ownerScopePath,
+                    absolutePointer,
+                    ownerRelativePointer,
+                    childBlueId,
+                    edgeKind,
+                    originalPureReference,
+                    splitterCreated,
+                    null,
+                    EmbeddedEdgeOrigin.NONE,
+                    null,
+                    null,
+                    null,
+                    handlerEffectiveTypeBlueId,
+                    executableBodyField,
+                    sourceContributionBlueIds);
+        }
+
+        public EdgeOccurrence(
+                String fragmentationProfileIdentity,
+                String schemaIdentity,
+                FragmentRootKind rootKind,
+                String rootBlueId,
+                String ownerNodeBlueId,
+                String ownerScopePath,
+                String absolutePointer,
+                String ownerRelativePointer,
+                String childBlueId,
+                EdgeKind edgeKind,
+                boolean originalPureReference,
+                boolean splitterCreated,
+                String declaringScopePath,
+                EmbeddedEdgeOrigin embeddedOrigin,
+                String explicitDeclarationPath,
+                String collectionDeclarationPath,
+                String collectionMemberKey,
                 String handlerEffectiveTypeBlueId,
                 String executableBodyField,
                 Collection<String> sourceContributionBlueIds) {
@@ -3168,6 +4037,27 @@ public final class CoordinationDocumentSplitter {
                     originalPureReference;
             this.splitterCreated =
                     splitterCreated;
+            this.declaringScopePath =
+                    declaringScopePath != null
+                            ? JsonPointer.canonicalize(
+                            declaringScopePath)
+                            : null;
+            this.embeddedOrigin =
+                    Objects.requireNonNull(
+                            embeddedOrigin,
+                            "embeddedOrigin");
+            this.explicitDeclarationPath =
+                    explicitDeclarationPath != null
+                            ? JsonPointer.canonicalize(
+                            explicitDeclarationPath)
+                            : null;
+            this.collectionDeclarationPath =
+                    collectionDeclarationPath != null
+                            ? JsonPointer.canonicalize(
+                            collectionDeclarationPath)
+                            : null;
+            this.collectionMemberKey = collectionMemberKey;
+            validateEmbeddedProvenance();
             this.handlerEffectiveTypeBlueId =
                     handlerEffectiveTypeBlueId;
             this.executableBodyField =
@@ -3235,6 +4125,27 @@ public final class CoordinationDocumentSplitter {
             return splitterCreated;
         }
 
+        public String declaringScopePath() {
+            return declaringScopePath;
+        }
+
+        public EmbeddedEdgeOrigin embeddedOrigin() {
+            return embeddedOrigin;
+        }
+
+        public String explicitDeclarationPath() {
+            return explicitDeclarationPath;
+        }
+
+        public String collectionDeclarationPath() {
+            return collectionDeclarationPath;
+        }
+
+        /** Returns the exact decoded stable collection key. */
+        public String collectionMemberKey() {
+            return collectionMemberKey;
+        }
+
         public String handlerEffectiveTypeBlueId() {
             return handlerEffectiveTypeBlueId;
         }
@@ -3271,6 +4182,19 @@ public final class CoordinationDocumentSplitter {
                     == other.originalPureReference
                     && splitterCreated
                     == other.splitterCreated
+                    && Objects.equals(
+                    declaringScopePath,
+                    other.declaringScopePath)
+                    && embeddedOrigin == other.embeddedOrigin
+                    && Objects.equals(
+                    explicitDeclarationPath,
+                    other.explicitDeclarationPath)
+                    && Objects.equals(
+                    collectionDeclarationPath,
+                    other.collectionDeclarationPath)
+                    && Objects.equals(
+                    collectionMemberKey,
+                    other.collectionMemberKey)
                     && Objects.equals(
                     handlerEffectiveTypeBlueId,
                     other.handlerEffectiveTypeBlueId)
@@ -3310,9 +4234,65 @@ public final class CoordinationDocumentSplitter {
                     edgeKind,
                     originalPureReference,
                     splitterCreated,
+                    declaringScopePath,
+                    embeddedOrigin,
+                    explicitDeclarationPath,
+                    collectionDeclarationPath,
+                    collectionMemberKey,
                     handlerEffectiveTypeBlueId,
                     executableBodyField,
                     sourceContributionBlueIds);
+        }
+
+        private void validateEmbeddedProvenance() {
+            if (edgeKind != EdgeKind.EMBEDDED_ROOT) {
+                if (embeddedOrigin != EmbeddedEdgeOrigin.NONE
+                        || declaringScopePath != null
+                        || explicitDeclarationPath != null
+                        || collectionDeclarationPath != null
+                        || collectionMemberKey != null) {
+                    throw new IllegalArgumentException(
+                            "Only an embedded-root edge may carry embedded provenance");
+                }
+                return;
+            }
+            if (declaringScopePath == null
+                    || embeddedOrigin == EmbeddedEdgeOrigin.NONE) {
+                throw new IllegalArgumentException(
+                        "Embedded-root edge requires declaration provenance");
+            }
+            if (embeddedOrigin == EmbeddedEdgeOrigin.EXPLICIT) {
+                if (explicitDeclarationPath == null
+                        || collectionDeclarationPath != null
+                        || collectionMemberKey != null) {
+                    throw new IllegalArgumentException(
+                            "Explicit embedded edge has inconsistent declaration provenance");
+                }
+                String expected = PointerUtils.resolvePointer(
+                        declaringScopePath,
+                        explicitDeclarationPath);
+                if (!absolutePointer.equals(expected)) {
+                    throw new IllegalArgumentException(
+                            "Explicit embedded edge pointer does not match its declaration");
+                }
+                return;
+            }
+            if (explicitDeclarationPath != null
+                    || collectionDeclarationPath == null
+                    || collectionMemberKey == null) {
+                throw new IllegalArgumentException(
+                        "Collection-member edge has inconsistent declaration provenance");
+            }
+            String collection = PointerUtils.resolvePointer(
+                    declaringScopePath,
+                    collectionDeclarationPath);
+            String expected = JsonPointer.append(
+                    collection,
+                    collectionMemberKey);
+            if (!absolutePointer.equals(expected)) {
+                throw new IllegalArgumentException(
+                        "Collection-member edge pointer does not match its exact member key");
+            }
         }
     }
 
@@ -3437,6 +4417,25 @@ public final class CoordinationDocumentSplitter {
                 result);
     }
 
+    /**
+     * Retains a canonical fragment snapshot exclusively owned by this
+     * splitter invocation.  Values are never exposed directly by SplitGraph;
+     * its public body accessors remain defensive.
+     */
+    private static SortedMap<String, Node> ownedCanonicalFragments(
+            Map<String, Node> source) {
+        SortedMap<String, Node> result = new TreeMap<>();
+        for (Map.Entry<String, Node> entry : Objects.requireNonNull(
+                source, "source").entrySet()) {
+            String blueId = requireText(entry.getKey(), "fragmentBlueId");
+            result.put(
+                    blueId,
+                    Objects.requireNonNull(
+                            entry.getValue(), "fragment"));
+        }
+        return Collections.unmodifiableSortedMap(result);
+    }
+
     private static NodeProvider verifiedProvider(
             Map<String, Node> fragments) {
         final SortedMap<String, Node> retained =
@@ -3467,29 +4466,6 @@ public final class CoordinationDocumentSplitter {
                     label + " must not be blank");
         }
         return checked;
-    }
-
-    private static final class PhysicalRoot {
-
-        private final Node exactRoot;
-        private final FragmentRootKind rootKind;
-        private final String basePath;
-
-        private PhysicalRoot(
-                Node exactRoot,
-                FragmentRootKind rootKind,
-                String basePath) {
-            this.exactRoot =
-                    Objects.requireNonNull(
-                            exactRoot, "exactRoot");
-            this.rootKind =
-                    Objects.requireNonNull(
-                            rootKind, "rootKind");
-            this.basePath =
-                    JsonPointer.canonicalize(
-                            Objects.requireNonNull(
-                                    basePath, "basePath"));
-        }
     }
 
     private static final class EdgeQuota {
@@ -3541,6 +4517,11 @@ public final class CoordinationDocumentSplitter {
 
         private final EdgeKind kind;
         private final String ownerScopePath;
+        private final String declaringScopePath;
+        private final EmbeddedEdgeOrigin embeddedOrigin;
+        private final String explicitDeclarationPath;
+        private final String collectionDeclarationPath;
+        private final String collectionMemberKey;
         private final String handlerTypeBlueId;
         private final String executableBodyField;
         private final List<String> sourceContributionBlueIds;
@@ -3548,6 +4529,11 @@ public final class CoordinationDocumentSplitter {
         private CutDescriptor(
                 EdgeKind kind,
                 String ownerScopePath,
+                String declaringScopePath,
+                EmbeddedEdgeOrigin embeddedOrigin,
+                String explicitDeclarationPath,
+                String collectionDeclarationPath,
+                String collectionMemberKey,
                 String handlerTypeBlueId,
                 String executableBodyField,
                 Collection<String> sourceContributionBlueIds) {
@@ -3556,6 +4542,13 @@ public final class CoordinationDocumentSplitter {
                             kind, "kind");
             this.ownerScopePath =
                     ownerScopePath;
+            this.declaringScopePath = declaringScopePath;
+            this.embeddedOrigin = Objects.requireNonNull(
+                    embeddedOrigin,
+                    "embeddedOrigin");
+            this.explicitDeclarationPath = explicitDeclarationPath;
+            this.collectionDeclarationPath = collectionDeclarationPath;
+            this.collectionMemberKey = collectionMemberKey;
             this.handlerTypeBlueId =
                     handlerTypeBlueId;
             this.executableBodyField =
@@ -3580,6 +4573,23 @@ public final class CoordinationDocumentSplitter {
             this.key = key;
             this.original = original;
             this.direct = direct;
+        }
+    }
+
+    private static final class DirectChildSpec {
+
+        private final String relativePointer;
+        private final Node exactChild;
+
+        private DirectChildSpec(
+                String relativePointer,
+                Node exactChild) {
+            this.relativePointer = JsonPointer.canonicalize(
+                    Objects.requireNonNull(
+                            relativePointer,
+                            "relativePointer"));
+            this.exactChild = Objects.requireNonNull(
+                    exactChild, "exactChild");
         }
     }
 
@@ -3629,14 +4639,31 @@ public final class CoordinationDocumentSplitter {
 
         private final String ownerScopePath;
         private final String absolutePointer;
+        private final String declaringScopePath;
+        private final EmbeddedEdgeOrigin origin;
+        private final String explicitDeclarationPath;
+        private final String collectionDeclarationPath;
+        private final String collectionMemberKey;
 
         private EmbeddedCut(
                 String ownerScopePath,
-                String absolutePointer) {
+                String absolutePointer,
+                String declaringScopePath,
+                EmbeddedScopePlanView.Origin origin,
+                String explicitDeclarationPath,
+                String collectionDeclarationPath,
+                String collectionMemberKey) {
             this.ownerScopePath =
                     ownerScopePath;
             this.absolutePointer =
                     absolutePointer;
+            this.declaringScopePath = declaringScopePath;
+            this.origin = origin == EmbeddedScopePlanView.Origin.EXPLICIT
+                    ? EmbeddedEdgeOrigin.EXPLICIT
+                    : EmbeddedEdgeOrigin.COLLECTION_MEMBER;
+            this.explicitDeclarationPath = explicitDeclarationPath;
+            this.collectionDeclarationPath = collectionDeclarationPath;
+            this.collectionMemberKey = collectionMemberKey;
         }
     }
 

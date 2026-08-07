@@ -1,6 +1,5 @@
 package blue.coordination.processor;
 
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessingDebugResult;
@@ -25,7 +24,7 @@ class RuntimeChannelsTest {
 
     @Test
     void shouldEnsureThatRuntimeDocumentUpdateChannelReceivesUpdateEvents() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = ownerChannelContracts();
         contracts.put("updates", documentUpdateChannel("/counter"));
@@ -35,27 +34,20 @@ class RuntimeChannelsTest {
                 computeAppendChatMessageStep(documentUpdateMessage())));
         Node document = initializedDocument(fixture, document(fixture.repository, 0, contracts));
 
-        // When
+        // when
         DocumentProcessingResult result = processChat(fixture, document, 1);
 
-        // Then
-        ExternalBlockerProbeAssertions
-                .classifyHostedSemanticOutput(
-                        result,
-                        document,
-                        "runtime Document Update observer");
+        // then
         assertEquals(ProcessorStatus.SUCCESS,
                 result.status(),
-                "Language hosted BEX semantic-output provenance defect: "
-                        + ProcessingResultTestSupport
-                        .diagnosticMessage(result));
+                ProcessingResultTestSupport.diagnosticMessage(result));
         assertEquals(BigInteger.valueOf(5), result.document().get("/counter"));
         assertContainsChatMessage(result.events(), "updated /counter from 0 to 5");
     }
 
     @Test
     void shouldEnsureThatDocumentUpdateChannelPathFilteringUsesRepositoryTypes() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = ownerChannelContracts();
         contracts.put("counterUpdates", documentUpdateChannel("/counter"));
@@ -69,17 +61,17 @@ class RuntimeChannelsTest {
                 triggerEventStep(chatMessageEvent("name updated"))));
         Node document = initializedDocument(fixture, document(fixture.repository, 0, contracts));
 
-        // When
+        // when
         DocumentProcessingResult result = processChat(fixture, document, 1);
 
-        // Then
+        // then
         assertContainsChatMessage(result.events(), "counter updated");
         assertNoChatMessage(result.events(), "name updated");
     }
 
     @Test
     void shouldEnsureThatNestedUpdatesPropagateToParentWatchers() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = ownerChannelContracts();
         contracts.put("profileUpdates", documentUpdateChannel("/profile"));
@@ -93,20 +85,13 @@ class RuntimeChannelsTest {
                         .properties("name", new Node().value("Grace")));
         Node initialized = initializedDocument(fixture, document);
 
-        // When
+        // when
         DocumentProcessingResult result = processChat(fixture, initialized, 1);
 
-        // Then
-        ExternalBlockerProbeAssertions
-                .classifyHostedSemanticOutput(
-                        result,
-                        initialized,
-                        "nested Document Update observer");
+        // then
         assertEquals(ProcessorStatus.SUCCESS,
                 result.status(),
-                "Language hosted BEX semantic-output provenance defect: "
-                        + ProcessingResultTestSupport
-                        .diagnosticMessage(result));
+                ProcessingResultTestSupport.diagnosticMessage(result));
         assertEquals("Ada", result.document()
                 .getProperties().get("profile")
                 .getProperties().get("name")
@@ -116,7 +101,7 @@ class RuntimeChannelsTest {
 
     @Test
     void shouldEnsureThatUpdateEventCanBeMatchedMoreSpecifically() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = ownerChannelContracts();
         contracts.put("allUpdates", documentUpdateChannel("/"));
@@ -131,10 +116,10 @@ class RuntimeChannelsTest {
                 triggerEventStep(chatMessageEvent("specific replace"))));
         Node document = initializedDocument(fixture, document(fixture.repository, 0, contracts));
 
-        // When
+        // when
         DocumentProcessingResult result = processChat(fixture, document, 1);
 
-        // Then
+        // then
         assertEquals(BigInteger.valueOf(5), result.document().get("/counter"));
         assertEquals(BigInteger.valueOf(9), result.document().get("/other"));
         assertSingleChatMessage(result.events(), "specific replace");
@@ -142,15 +127,15 @@ class RuntimeChannelsTest {
 
     @Test
     void shouldEnsureThatEmbeddedChildProcessesExternalEventWithRealProcessEmbeddedType() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, embeddedOperationDocument(fixture.repository));
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.blue.processDocument(document,
                 operationRequestEvent(fixture, 1, "increment", new Node().value(7)));
 
-        // Then
+        // then
         assertEquals(ProcessorStatus.SUCCESS,
                 result.status(),
                 ProcessingResultTestSupport.diagnosticMessage(result));
@@ -160,7 +145,7 @@ class RuntimeChannelsTest {
 
     @Test
     void shouldEnsureThatParentCannotPatchIntoEmbeddedScope() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = ownerChannelContracts();
         contracts.put("embedded", processEmbedded("/child"));
@@ -170,10 +155,10 @@ class RuntimeChannelsTest {
                 .properties("child", childDocument(1, new LinkedHashMap<String, Node>())));
         String inputJson = fixture.blue.nodeToJson(document);
 
-        // When
+        // when
         DocumentProcessingResult result = processChat(fixture, document, 1);
 
-        // Then
+        // then
         assertEquals(ProcessorStatus.RUNTIME_FATAL,
                 result.status(),
                 ProcessingResultTestSupport.diagnosticMessage(result));
@@ -186,7 +171,7 @@ class RuntimeChannelsTest {
 
     @Test
     void shouldEnsureThatReplacingEmbeddedNodeCutsOffChildScopeWithinRun() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Map<String, Node> childContracts = ownerChannelContracts();
         childContracts.put("probe", directWorkflow("owner",
@@ -205,10 +190,10 @@ class RuntimeChannelsTest {
         Node document = initializedDocument(fixture, document(fixture.repository, 0, rootContracts)
                 .properties("child", childDocument(0, childContracts)));
 
-        // When
+        // when
         DocumentProcessingResult result = processChat(fixture, document, 1);
 
-        // Then
+        // then
         assertEquals("Replacement Child", nodeAt(result.document(), "/child").getName());
         assertNull(nodeAt(result.document(), "/child/marker"));
         assertNoChatMessage(result.events(), "post-cutoff");
@@ -216,18 +201,18 @@ class RuntimeChannelsTest {
 
     @Test
     void shouldEnsureThatEmbeddedNodeChannelBridgesConfiguredChildEmissions() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, embeddedBridgeDocument(fixture.repository, "/child"));
 
-        // When
+        // when
         ProcessingDebugResult debug =
                 processChatWithTrace(
                         fixture, document, 1);
         DocumentProcessingResult result =
                 debug.processResult();
 
-        // Then
+        // then
         boolean childHandlerExecuted = false;
         boolean childEventEnqueued = false;
         boolean rootObserverExecuted = false;
@@ -295,21 +280,21 @@ class RuntimeChannelsTest {
 
     @Test
     void shouldEnsureThatEmbeddedNodeChannelDoesNotBridgeWrongChildPath() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, embeddedBridgeDocument(fixture.repository, "/missingChild"));
 
-        // When
+        // when
         DocumentProcessingResult result = processChat(fixture, document, 1);
 
-        // Then
+        // then
         assertNoChatMessage(result.events(), "parent saw child emitted");
         assertNoChatMessage(result.events(), "parent saw other child emitted");
     }
 
     @Test
     void shouldEnsureThatDuplicateExternalEventsAreSkippedWithRealRepositoryChannelCheckpointShape() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = ownerChannelContracts();
         contracts.put("writer", directWorkflow("owner",
@@ -318,10 +303,10 @@ class RuntimeChannelsTest {
         Node event = chatTimelineEntry(fixture, 1);
 
         Node afterFirst = fixture.blue.processDocument(initialized, event).document();
-        // When
+        // when
         Node afterSecond = fixture.blue.processDocument(afterFirst, event).document();
 
-        // Then
+        // then
         assertEquals(BigInteger.ONE, afterSecond.get("/counter"));
         Node checkpoint = nodeAt(afterSecond, "/contracts/checkpoint");
         assertNotNull(checkpoint);
@@ -330,13 +315,13 @@ class RuntimeChannelsTest {
 
     @Test
     void shouldEnsureThatCheckpointDeclaredUnderWrongKeyFails() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = ownerChannelContracts();
-        // When
+        // when
         contracts.put("wrongCheckpoint", new Node().type("Channel Event Checkpoint"));
 
-        // Then
+        // then
         IllegalStateException ex = assertThrows(IllegalStateException.class,
                 () -> fixture.blue.initializeDocument(fixture.blue.preprocess(document(fixture.repository, 0, contracts))));
 
@@ -345,7 +330,7 @@ class RuntimeChannelsTest {
 
     @Test
     void shouldEnsureThatMultipleCheckpointMarkersInOneScopeFail() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = ownerChannelContracts();
         Node initialized = initializedDocument(fixture, document(fixture.repository, 0, contracts));
@@ -355,13 +340,13 @@ class RuntimeChannelsTest {
         initialized.getContracts().properties("extraCheckpoint", new Node()
                 .type(new Node().blueId(RuntimeBlueIds.CHANNEL_EVENT_CHECKPOINT)));
 
-        // When
+        // when
         DocumentProcessingResult result =
                 fixture.blue.processDocument(
                         fixture.blue.preprocess(initialized),
                         chatTimelineEntry(fixture, 1));
 
-        // Then
+        // then
         assertEquals(
                 ProcessorStatus.INVALID_PROCESSING_DOCUMENT,
                 result.status(),
@@ -549,7 +534,7 @@ class RuntimeChannelsTest {
 
     private static Node document(BlueRepository repository, int counter, Map<String, Node> contracts) {
         return new Node()
-                .blue(repository.typeAliasBlue())
+                .blue(repository.importsDirective())
                 .name("Runtime Channel Test")
                 .properties("counter", new Node().value(counter))
                 .properties("contracts", new Node().properties(contracts));
@@ -573,7 +558,7 @@ class RuntimeChannelsTest {
             Fixture fixture,
             Node document,
             int timestamp) {
-        return fixture.blue.getDocumentProcessor()
+        return fixture.blue.processor()
                 .processDocumentWithTrace(
                         document,
                         chatTimelineEntry(
@@ -620,9 +605,9 @@ class RuntimeChannelsTest {
     }
 
     private static Fixture configuredFixture() {
-        BlueRepository repository = BlueRepository.latest();
-        Blue blue = CoordinationTestResources.configuredBlue(repository);
-        CoordinationProcessors.registerWith(blue);
+        BlueRepository repository = BlueRepository.current();
+        CoordinationTestRuntime blue =
+                CoordinationTestResources.configuredBlue(repository);
         return new Fixture(repository, blue);
     }
 
@@ -670,9 +655,11 @@ class RuntimeChannelsTest {
 
     private static final class Fixture {
         private final BlueRepository repository;
-        private final Blue blue;
+        private final CoordinationTestRuntime blue;
 
-        private Fixture(BlueRepository repository, Blue blue) {
+        private Fixture(
+                BlueRepository repository,
+                CoordinationTestRuntime blue) {
             this.repository = repository;
             this.blue = blue;
         }

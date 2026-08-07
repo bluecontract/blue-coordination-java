@@ -2,7 +2,6 @@ package blue.coordination.processor;
 
 import blue.language.model.Node;
 import blue.language.processor.CoordinationFragmentationCatalogHarness;
-import blue.language.processor.DocumentProcessor;
 
 import java.util.Collections;
 import java.util.List;
@@ -15,11 +14,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class CoordinationHostQuotaRuntimeTest {
     @Test
     void shouldTraceSplitterWorkInExactDeterministicOrder() {
-        // Given
+        // given
         Node root =
                 CoordinationHostQuotaTestSupport.embeddedRoot(1);
-        DocumentProcessor processor =
-                CoordinationFragmentationCatalogHarness.processor(
+        CoordinationDocumentSplitter splitter =
+                CoordinationFragmentationCatalogHarness.splitter(
                         root,
                         Collections.emptyMap());
         CoordinationHostQuotaSession session =
@@ -27,21 +26,13 @@ class CoordinationHostQuotaRuntimeTest {
         CoordinationHostQuotaSession repeatedSession =
                 CoordinationHostQuotaSession.observing();
 
-        // When
+        // when
         CoordinationDocumentSplitter.SplitGraph split;
         CoordinationDocumentSplitter.SplitGraph repeated;
-        try {
-            split = new CoordinationDocumentSplitter(
-                    processor)
-                    .splitDocument(root, session);
-            repeated = new CoordinationDocumentSplitter(
-                    processor)
-                    .splitDocument(root, repeatedSession);
-        } finally {
-            processor.close();
-        }
+        split = splitter.splitDocument(root, session);
+        repeated = splitter.splitDocument(root, repeatedSession);
 
-        // Then
+        // then
         List<CoordinationHostQuotaTraceEntry> trace =
                 session.trace();
         assertEquals(
@@ -92,11 +83,11 @@ class CoordinationHostQuotaRuntimeTest {
 
     @Test
     void shouldExposeOnlyTheAdmittedSplitterPrefixAtTheCutLimit() {
-        // Given
+        // given
         Node root =
                 CoordinationHostQuotaTestSupport.embeddedRoot(3);
-        DocumentProcessor processor =
-                CoordinationFragmentationCatalogHarness.processor(
+        CoordinationDocumentSplitter splitter =
+                CoordinationFragmentationCatalogHarness.splitter(
                         root,
                         Collections.emptyMap());
         CoordinationHostQuotaSession session =
@@ -104,19 +95,13 @@ class CoordinationHostQuotaRuntimeTest {
                         CoordinationHostQuotaTestSupport
                                 .schedule(2, 4));
 
-        // When
+        // when
         CoordinationHostQuotaExceededException failure;
-        try {
-            failure = assertThrows(
-                    CoordinationHostQuotaExceededException.class,
-                    () -> new CoordinationDocumentSplitter(
-                            processor)
-                            .splitDocument(root, session));
-        } finally {
-            processor.close();
-        }
+        failure = assertThrows(
+                CoordinationHostQuotaExceededException.class,
+                () -> splitter.splitDocument(root, session));
 
-        // Then
+        // then
         assertEquals("maxSplitterCuts", failure.limitName());
         assertEquals(2L, failure.limit());
         assertEquals(3L, failure.attemptedQuantity());
@@ -153,11 +138,11 @@ class CoordinationHostQuotaRuntimeTest {
 
     @Test
     void shouldRejectSplitterDiscoveryBeforeOverLimitCatalogEntryIsAdmitted() {
-        // Given
+        // given
         Node root =
                 CoordinationHostQuotaTestSupport.embeddedRoot(1);
-        DocumentProcessor processor =
-                CoordinationFragmentationCatalogHarness.processor(
+        CoordinationDocumentSplitter splitter =
+                CoordinationFragmentationCatalogHarness.splitter(
                         root,
                         Collections.emptyMap());
         CoordinationHostQuotaSession session =
@@ -165,19 +150,13 @@ class CoordinationHostQuotaRuntimeTest {
                         CoordinationHostQuotaTestSupport
                                 .limitedCatalogEntries(1));
 
-        // When
+        // when
         CoordinationHostQuotaExceededException failure;
-        try {
-            failure = assertThrows(
-                    CoordinationHostQuotaExceededException.class,
-                    () -> new CoordinationDocumentSplitter(
-                            processor)
-                            .splitDocument(root, session));
-        } finally {
-            processor.close();
-        }
+        failure = assertThrows(
+                CoordinationHostQuotaExceededException.class,
+                () -> splitter.splitDocument(root, session));
 
-        // Then
+        // then
         assertEquals(
                 "maxSplitterCatalogEntriesPerSplit",
                 failure.limitName());
@@ -194,14 +173,14 @@ class CoordinationHostQuotaRuntimeTest {
 
     @Test
     void shouldRejectPhysicalFragmentAdmissionBeforeTheOverLimitFragment() {
-        // Given
+        // given
         Node event = eventWithTwoChildren();
         CoordinationHostQuotaSession session =
                 CoordinationHostQuotaSession.observing(
                         CoordinationHostQuotaTestSupport
                                 .limitedSplitterFragments(1));
 
-        // When
+        // when
         CoordinationHostQuotaExceededException failure =
                 assertThrows(
                         CoordinationHostQuotaExceededException.class,
@@ -209,7 +188,7 @@ class CoordinationHostQuotaRuntimeTest {
                                 .forEventSplitting()
                                 .splitEvent(event, session));
 
-        // Then
+        // then
         assertEquals(
                 "maxSplitterFragmentsPerSplit",
                 failure.limitName());
@@ -229,14 +208,14 @@ class CoordinationHostQuotaRuntimeTest {
 
     @Test
     void shouldRejectFragmentMetadataBeforeTheOverLimitEdgeIsAdmitted() {
-        // Given
+        // given
         Node event = eventWithTwoChildren();
         CoordinationHostQuotaSession session =
                 CoordinationHostQuotaSession.observing(
                         CoordinationHostQuotaTestSupport
                                 .limitedFragmentEdges(1));
 
-        // When
+        // when
         CoordinationHostQuotaExceededException failure =
                 assertThrows(
                         CoordinationHostQuotaExceededException.class,
@@ -244,7 +223,7 @@ class CoordinationHostQuotaRuntimeTest {
                                 .forEventSplitting()
                                 .splitEvent(event, session));
 
-        // Then
+        // then
         assertEquals(
                 "maxFragmentEdgeOccurrencesPerSplit",
                 failure.limitName());
@@ -266,20 +245,20 @@ class CoordinationHostQuotaRuntimeTest {
 
     @Test
     void shouldRejectPrefetchConstructionBeforeTheOverLimitIdentityIsAdmitted() {
-        // Given
+        // given
         CoordinationHostQuotaSession session =
                 CoordinationHostQuotaSession.observing(
                         CoordinationHostQuotaTestSupport
                                 .limitedPrefetchIdentities(1));
 
-        // When
+        // when
         session.recordPrefetchIdentity(0);
         CoordinationHostQuotaExceededException failure =
                 assertThrows(
                         CoordinationHostQuotaExceededException.class,
                         () -> session.recordPrefetchIdentity(1));
 
-        // Then
+        // then
         assertEquals(
                 "maxPrefetchIdentitiesPerPlan",
                 failure.limitName());

@@ -1,17 +1,13 @@
 package blue.coordination.processor.mandate;
 
-import blue.language.Blue;
-import blue.language.BlueLanguageErrorCategory;
-import blue.language.BlueLanguageErrorClassifier;
+import blue.language.api.BlueLanguageErrorCategory;
+import blue.language.api.BlueLanguageErrorClassifier;
 import blue.language.model.Node;
 import blue.language.processor.ContractMatchingService;
-import blue.language.processor.GasSchedule;
-import blue.language.processor.GasScheduleConstants;
-import blue.language.snapshot.FrozenNode;
-import blue.language.utils.BlueIdCalculator;
-import blue.language.utils.FrozenTypeMatcher;
-import blue.language.utils.NodeToBlueIdInput;
-import blue.repo.BlueRepository;
+import blue.language.identity.DirectBlueIdCalculator;
+import blue.language.identity.BlueIds;
+import blue.language.identity.NodeToBlueIdInput;
+import blue.language.mapping.TypeClassResolver;
 import blue.repo.mandate.DocumentResponderMandate;
 import blue.repo.mandate.MandateAuthority;
 import blue.repo.mandate.OperationMandate;
@@ -30,8 +26,8 @@ import java.math.BigInteger;
  * ordinary non-matching evidence.</p>
  */
 final class MandateEligibilityNodes {
-    private static final BlueRepository REPOSITORY =
-            BlueRepository.latest();
+    private static final TypeClassResolver REPOSITORY_TYPES =
+            new TypeClassResolver("blue.repo");
 
     /** Outcome vocabulary used to preserve evidence failure semantics. */
     enum Match {
@@ -45,8 +41,7 @@ final class MandateEligibilityNodes {
     }
 
     static MatchingContext fixedRepositoryMatchingContext() {
-        return new MatchingContext(
-                REPOSITORY.configure(new Blue()));
+        return new MatchingContext();
     }
 
     static Node property(Node node, String key) {
@@ -89,10 +84,13 @@ final class MandateEligibilityNodes {
         }
         try {
             if (node.isReferenceOnly()) {
-                return BlueIdCalculator.calculateBlueId(node);
+                return BlueIds.requireBlueIdOrCyclicMember(
+                        node.getBlueId(), role);
             }
-            return BlueIdCalculator.INSTANCE.calculate(
-                    NodeToBlueIdInput.getWithResolvedBlueIdMetadata(node));
+            return DirectBlueIdCalculator.INSTANCE
+                    .directBlueIdFromCanonicalInput(
+                            NodeToBlueIdInput
+                                    .getWithResolvedBlueIdMetadata(node));
         } catch (RuntimeException invalidExactNode) {
             throw new IllegalArgumentException(
                     role + " must be an exact alias-free Blue node",
@@ -139,61 +137,38 @@ final class MandateEligibilityNodes {
      * Closing it releases all provider-backed caches after one decision.
      */
     static final class MatchingContext implements AutoCloseable {
-        private final Blue blue;
         private final ContractMatchingService matchingService;
-        private final FrozenTypeMatcher fixedTypeMatcher;
-        private final long maximumTypeChainEdges;
 
-        private MatchingContext(Blue blue) {
-            this.blue = blue;
-            this.matchingService =
-                    new ContractMatchingService(blue);
-            this.fixedTypeMatcher =
-                    FrozenTypeMatcher
-                            .withVerifiedReferenceMaterializer(
-                                    reference ->
-                                            blue.loadSnapshot(
-                                                    reference
-                                                            .getReferenceBlueId())
-                                                    .frozenCanonicalRoot());
-            this.maximumTypeChainEdges =
-                    GasSchedule.contracts10()
-                            .portableLimit(
-                                    GasScheduleConstants
-                                            .PortableLimit
-                                            .TYPE_CHAIN_EDGES);
+        private MatchingContext() {
+            this.matchingService = new ContractMatchingService();
         }
 
         Match operationMandateType(Node value) {
             return fixedType(
                     value,
-                    OperationMandate
-                            .repositoryType()
-                            .reference());
+                    OperationMandate.blueId(),
+                    OperationMandate.class);
         }
 
         Match documentResponderMandateType(Node value) {
             return fixedType(
                     value,
-                    DocumentResponderMandate
-                            .repositoryType()
-                            .reference());
+                    DocumentResponderMandate.blueId(),
+                    DocumentResponderMandate.class);
         }
 
         Match activeStatusType(Node value) {
             return fixedType(
                     value,
-                    StatusActive
-                            .repositoryType()
-                            .reference());
+                    StatusActive.blueId(),
+                    StatusActive.class);
         }
 
         Match mandateAuthorityType(Node value) {
             return fixedType(
                     value,
-                    MandateAuthority
-                            .repositoryType()
-                            .reference());
+                    MandateAuthority.blueId(),
+                    MandateAuthority.class);
         }
 
         boolean matches(Node candidate, Node pattern) {
@@ -203,19 +178,22 @@ final class MandateEligibilityNodes {
 
         private Match fixedType(
                 Node value,
-                Node fixedType) {
+                String fixedTypeBlueId,
+                Class<?> fixedTypeClass) {
             if (value == null || value.getType() == null) {
                 return Match.NO_MATCH;
             }
             try {
-                if (sameExact(value.getType(), fixedType)) {
+                String candidateTypeBlueId =
+                        exactBlueId(value.getType(), "mandate type");
+                if (fixedTypeBlueId.equals(candidateTypeBlueId)) {
                     return Match.MATCH;
                 }
-                return fixedTypeMatcher.isSubtypeOrSame(
-                        FrozenNode.fromNode(
-                                value.getType().clone()),
-                        FrozenNode.fromNode(fixedType),
-                        maximumTypeChainEdges)
+                Class<?> candidateType =
+                        REPOSITORY_TYPES.resolveClass(
+                                candidateTypeBlueId);
+                return candidateType != null
+                        && fixedTypeClass.isAssignableFrom(candidateType)
                         ? Match.MATCH
                         : Match.NO_MATCH;
             } catch (RuntimeException failure) {
@@ -231,8 +209,6 @@ final class MandateEligibilityNodes {
         @Override
         public void close() {
             matchingService.clearCaches();
-            fixedTypeMatcher.clearCaches();
-            blue.close();
         }
     }
 }

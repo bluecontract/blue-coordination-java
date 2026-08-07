@@ -13,15 +13,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class CoordinationHostQuotaScheduleTest {
     @Test
     void shouldLoadEverySupportedCounterAndLimitFromTheManifest() {
-        // Given
+        // given
         CoordinationHostQuotaSchedule schedule =
                 CoordinationHostQuotaSchedule.defaults();
 
-        // When
+        // when
         String rawManifestIdentity =
                 schedule.manifestSha256();
 
-        // Then
+        // then
         assertEquals(
                 Arrays.asList(
                         "splitterCatalogEntryVisited",
@@ -63,7 +63,7 @@ class CoordinationHostQuotaScheduleTest {
 
     @Test
     void shouldRejectUnknownManifestFields() {
-        // Given
+        // given
         String manifest =
                 CoordinationHostQuotaTestSupport
                         .manifest(2, 3)
@@ -71,13 +71,13 @@ class CoordinationHostQuotaScheduleTest {
                                 "description: Exact test host quota schedule.",
                                 "unknownHeader: true");
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
                         () -> load(manifest));
 
-        // Then
+        // then
         assertTrue(
                 failure.getMessage().contains(
                         "unknown header unknownHeader"));
@@ -85,7 +85,7 @@ class CoordinationHostQuotaScheduleTest {
 
     @Test
     void shouldRejectUnsupportedCounters() {
-        // Given
+        // given
         String manifest =
                 CoordinationHostQuotaTestSupport
                         .manifest(2, 3)
@@ -93,13 +93,13 @@ class CoordinationHostQuotaScheduleTest {
                                 "splitterCutValidated",
                                 "unsupportedCounter");
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
                         () -> load(manifest));
 
-        // Then
+        // then
         assertTrue(
                 failure.getMessage().contains(
                         "counters must be exactly"));
@@ -107,18 +107,18 @@ class CoordinationHostQuotaScheduleTest {
 
     @Test
     void shouldRejectNonPositiveManifestLimits() {
-        // Given
+        // given
         String manifest =
                 CoordinationHostQuotaTestSupport
                         .manifest(0, 3);
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
                         () -> load(manifest));
 
-        // Then
+        // then
         assertTrue(
                 failure.getMessage().contains(
                         "maxSplitterCuts must be positive"));

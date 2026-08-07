@@ -6,7 +6,7 @@ import blue.language.processor.ChannelMemberSnapshot;
 import blue.language.processor.ExternalChannelFunctionContext;
 import blue.language.processor.GasChargeContext;
 import blue.language.processor.model.ChannelContract;
-import blue.language.utils.BlueIdCalculator;
+import blue.language.identity.DirectBlueIdCalculator;
 
 /**
  * Shared immutable routing projection for Coordination Operation Requests.
@@ -28,10 +28,25 @@ final class OperationRequestRoutingFunctions {
             Node exactEvent,
             Node exactPayload,
             ExternalChannelFunctionContext context) {
+        return handlerChannelKey(
+                immutableContractSnapshot,
+                exactEvent,
+                exactPayload,
+                context,
+                CoordinationSemanticTypeIdentities.publishedDefaults());
+    }
+
+    static String handlerChannelKey(
+            ChannelContract immutableContractSnapshot,
+            Node exactEvent,
+            Node exactPayload,
+            ExternalChannelFunctionContext context,
+            CoordinationSemanticTypeIdentities identities) {
         Route route = route(
                 exactPayload,
                 context,
-                true);
+                true,
+                identities);
         return route != null
                 ? route.channel
                 : context.channelKey();
@@ -40,9 +55,19 @@ final class OperationRequestRoutingFunctions {
     static Node payload(
             Node exactEvent,
             ExternalChannelFunctionContext context) {
+        return payload(
+                exactEvent,
+                context,
+                CoordinationSemanticTypeIdentities.publishedDefaults());
+    }
+
+    static Node payload(
+            Node exactEvent,
+            ExternalChannelFunctionContext context,
+            CoordinationSemanticTypeIdentities identities) {
         return CoordinationEventNodes
                 .operationRequestRoutingPayload(
-                        exactEvent, context);
+                        exactEvent, context, identities);
     }
 
     static String logicalDeliveryKey(
@@ -50,10 +75,25 @@ final class OperationRequestRoutingFunctions {
             Node exactEvent,
             Node exactPayload,
             ExternalChannelFunctionContext context) {
+        return logicalDeliveryKey(
+                immutableContractSnapshot,
+                exactEvent,
+                exactPayload,
+                context,
+                CoordinationSemanticTypeIdentities.publishedDefaults());
+    }
+
+    static String logicalDeliveryKey(
+            ChannelContract immutableContractSnapshot,
+            Node exactEvent,
+            Node exactPayload,
+            ExternalChannelFunctionContext context,
+            CoordinationSemanticTypeIdentities identities) {
         Route route = route(
                 exactPayload,
                 context,
-                false);
+                false,
+                identities);
         if (route == null) {
             return context.channelKey();
         }
@@ -67,18 +107,20 @@ final class OperationRequestRoutingFunctions {
                         new Node().value(
                                 route.channel));
         return LOGICAL_DELIVERY_PREFIX
-                + BlueIdCalculator.calculateBlueId(identity);
+                + DirectBlueIdCalculator.calculateBlueId(identity);
     }
 
     private static Route route(
             Node exactPayload,
             ExternalChannelFunctionContext context,
-            boolean chargeTargetLookup) {
+            boolean chargeTargetLookup,
+            CoordinationSemanticTypeIdentities identities) {
         CoordinationEventNodes.OperationRequestView request =
                 CoordinationEventNodes
                         .operationRequestFromRoutingPayload(
                                 exactPayload,
-                                context);
+                                context,
+                                identities);
         if (request == null
                 || !request.routable()) {
             return null;

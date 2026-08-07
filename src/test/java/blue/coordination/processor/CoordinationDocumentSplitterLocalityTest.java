@@ -1,12 +1,12 @@
 package blue.coordination.processor;
 
-import blue.language.NodeProvider;
+import blue.language.provider.NodeProvider;
+import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.model.Node;
+import blue.language.model.NodePathEditor;
+import blue.language.model.NodeWireForm;
 import blue.language.processor.registry.RuntimeBlueIds;
-import blue.language.utils.BlueIdCalculator;
-import blue.language.utils.NodePathEditor;
-import blue.language.utils.NodeToMapListOrValue;
-import blue.language.utils.UncheckedObjectMapper;
+import blue.language.codec.jackson.UncheckedObjectMapper;
 import blue.repo.coordination.ChatWorkflowOperation;
 import blue.repo.coordination.SequentialWorkflow;
 import blue.repo.coordination.SequentialWorkflowOperation;
@@ -42,10 +42,10 @@ class CoordinationDocumentSplitterLocalityTest {
 
     @Test
     void shouldDemandOnlySelectedSpineAndBodiesFromProvider() {
-        // Given
+        // given
         Node root = selectedSpine(0);
 
-        // When
+        // when
         CoordinationDocumentSplitter.SplitGraph split =
                 CoordinationDocumentSplitterTestSupport
                         .splitDocument(root);
@@ -94,7 +94,7 @@ class CoordinationDocumentSplitterLocalityTest {
             }
         }
 
-        // Then
+        // then
         assertEquals(expectedDemands, provider.demandedBlueIds());
         assertEquals(
                 (DEPTH + 1) * 4,
@@ -139,10 +139,10 @@ class CoordinationDocumentSplitterLocalityTest {
 
     @Test
     void shouldNotReadEmbeddedRootsForRootOnlyPreparation() {
-        // Given
+        // given
         Node root = selectedSpine(0);
 
-        // When
+        // when
         CoordinationDocumentSplitter.SplitGraph split =
                 CoordinationDocumentSplitterTestSupport
                         .splitDocument(root);
@@ -169,7 +169,7 @@ class CoordinationDocumentSplitterLocalityTest {
                         .get("steps");
         fetch(provider, rootBody.getBlueId());
 
-        // Then
+        // then
         Set<String> embeddedRootBlueIds =
                 blueIdsOfKind(
                         split.metadata(),
@@ -193,7 +193,7 @@ class CoordinationDocumentSplitterLocalityTest {
 
     @Test
     void shouldReconstructExactGraphAndDeduplicateSharedBodies() {
-        // Given
+        // given
         Node sharedBody = body("shared", BODY_BYTES);
         Node root = new Node()
                 .properties("state", scalar("root"))
@@ -211,7 +211,7 @@ class CoordinationDocumentSplitterLocalityTest {
                                 SequentialWorkflow.blueId(),
                                 body("reactive", 128))));
 
-        // When
+        // when
         CoordinationDocumentSplitter.SplitGraph split =
                 CoordinationDocumentSplitterTestSupport
                         .splitDocument(root);
@@ -220,16 +220,16 @@ class CoordinationDocumentSplitterLocalityTest {
                 split.fragments(),
                 new LinkedHashSet<String>());
 
-        // Then
+        // then
         assertEquals(
-                NodeToMapListOrValue.get(root),
-                NodeToMapListOrValue.get(reconstructed));
+                NodeWireForm.get(root),
+                NodeWireForm.get(reconstructed));
         assertEquals(
-                BlueIdCalculator.calculateBlueId(root),
-                BlueIdCalculator.calculateBlueId(reconstructed));
+                DirectBlueIdCalculator.calculateBlueId(root),
+                DirectBlueIdCalculator.calculateBlueId(reconstructed));
 
         String sharedBodyBlueId =
-                BlueIdCalculator.calculateBlueId(sharedBody);
+                DirectBlueIdCalculator.calculateBlueId(sharedBody);
         assertTrue(split.fragments().containsKey(sharedBodyBlueId));
         int sharedOccurrences = 0;
         for (CoordinationDocumentSplitter.FragmentMetadata metadata

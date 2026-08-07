@@ -15,16 +15,27 @@ import java.util.List;
  */
 public final class SequentialWorkflowProcessor implements HandlerProcessor<SequentialWorkflow> {
     private final SequentialWorkflowRunner runner;
+    private final CoordinationSemanticTypeIdentities identities;
 
     public SequentialWorkflowProcessor() {
-        this(new SequentialWorkflowRunner());
+        this(new SequentialWorkflowRunner(),
+                CoordinationSemanticTypeIdentities.publishedDefaults());
     }
 
     public SequentialWorkflowProcessor(SequentialWorkflowRunner runner) {
+        this(runner,
+                CoordinationSemanticTypeIdentities.publishedDefaults());
+    }
+
+    public SequentialWorkflowProcessor(
+            SequentialWorkflowRunner runner,
+            CoordinationSemanticTypeIdentities identities) {
         if (runner == null) {
             throw new IllegalArgumentException("runner must not be null");
         }
         this.runner = runner;
+        this.identities = java.util.Objects.requireNonNull(
+                identities, "identities");
     }
 
     @Override
@@ -52,7 +63,8 @@ public final class SequentialWorkflowProcessor implements HandlerProcessor<Seque
                 .isRoutableOperationRequestForChannel(
                         context.occurrenceEvent(),
                         context.channelKey(),
-                        context)
+                        context,
+                        identities)
                 && SequentialWorkflowEventMatcher.matches(
                         contract.getEvent(), context);
     }

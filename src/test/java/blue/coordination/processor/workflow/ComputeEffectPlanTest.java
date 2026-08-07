@@ -2,6 +2,7 @@ package blue.coordination.processor.workflow;
 
 import blue.bex.BexException;
 import blue.bex.gas.BexGasCounter;
+import blue.bex.gas.BexGasLedgerCapability;
 import blue.bex.gas.BexGasLedger;
 import blue.bex.gas.BexGasLimitExceededException;
 import blue.bex.gas.BexGasMeter;
@@ -9,11 +10,11 @@ import blue.bex.gas.BexGasSchedule;
 import blue.bex.result.BexChangeset;
 import blue.bex.result.BexEvents;
 import blue.bex.result.BexExecutionResult;
-import blue.bex.result.BexMetrics;
 import blue.bex.result.BexPatchEntry;
 import blue.bex.value.BexValue;
 import blue.bex.value.BexValues;
 import blue.coordination.processor.bex.BexProcessingMetrics;
+import blue.bex.contracts.ProcessorExecutionContextBexGasLedgerHost;
 import blue.language.model.Node;
 import blue.language.processor.ExecutionEvidenceUnavailableException;
 import blue.language.processor.GasLimitExceededException;
@@ -23,7 +24,9 @@ import blue.language.processor.InvalidExecutionEvidenceException;
 import blue.language.processor.PortableLimitExceededException;
 import blue.language.processor.ProcessorErrorCategory;
 import blue.language.processor.ProcessorFailureException;
-import blue.language.processor.model.FrozenJsonPatch;
+import blue.language.processor.RuntimeWorkSession;
+import blue.language.processor.RuntimeWorkSessionTestSupport;
+import blue.language.processor.FrozenJsonPatch;
 import blue.language.snapshot.FrozenNode;
 import blue.repo.coordination.TerminateProcessing;
 
@@ -49,19 +52,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ComputeEffectPlanTest {
     @Test
     void shouldCopyAndFreezeEventContentInEffectPlan() {
-        // Given
+        // given
         Node event = new Node().properties("kind", new Node().value("original"));
         List<Node> events = new ArrayList<Node>();
         events.add(event);
 
-        // When
+        // when
         ComputeEffectPlan plan = new ComputeEffectPlan(
                 Collections.emptyList(), events, true,
                 "completed", "done", true);
         event.getProperties().get("kind").value("mutated");
         events.clear();
 
-        // Then
+        // then
         assertTrue(plan.patches().isEmpty());
         assertEquals(1, plan.events().size());
         assertEquals("original", plan.events().get(0).toNode().get("/kind"));
@@ -75,14 +78,14 @@ class ComputeEffectPlanTest {
 
     @Test
     void shouldDefensivelyCopyPatchListAndRetainImmutableFrozenPatches() {
-        // Given
+        // given
         Node value = new Node().properties("status", new Node().value("original"));
         FrozenNode frozenValue = FrozenNode.fromNode(value);
         FrozenJsonPatch patch = FrozenJsonPatch.replace("/target", frozenValue);
         List<FrozenJsonPatch> patches = new ArrayList<FrozenJsonPatch>();
         patches.add(patch);
 
-        // When
+        // when
         ComputeEffectPlan plan = new ComputeEffectPlan(
                 patches, Collections.emptyList(), false,
                 null, null, true);
@@ -91,7 +94,7 @@ class ComputeEffectPlanTest {
         patches.clear();
         List<FrozenJsonPatch> firstRead = plan.patches();
 
-        // Then
+        // then
         assertEquals(1, plan.patches().size());
         assertSame(patch, plan.patches().get(0),
                 "immutable patches should be retained without rematerialization");
@@ -103,19 +106,19 @@ class ComputeEffectPlanTest {
 
     @Test
     void shouldPreserveEverySupportedPatchOperation() {
-        // Given
+        // given
         FrozenNode value = FrozenNode.fromNode(new Node().value("value"));
         List<FrozenJsonPatch> patches = new ArrayList<FrozenJsonPatch>();
         patches.add(FrozenJsonPatch.add("/added", value));
         patches.add(FrozenJsonPatch.replace("/replaced", value));
         patches.add(FrozenJsonPatch.remove("/removed"));
 
-        // When
+        // when
         ComputeEffectPlan plan = new ComputeEffectPlan(
                 patches, Collections.emptyList(), false,
                 null, null, true);
 
-        // Then
+        // then
         assertEquals(blue.language.processor.model.JsonPatch.Op.ADD,
                 plan.patches().get(0).getOp());
         assertEquals(blue.language.processor.model.JsonPatch.Op.REPLACE,
@@ -126,78 +129,78 @@ class ComputeEffectPlanTest {
 
     @Test
     void shouldRejectNullPatchInEffectPlan() {
-        // Given
+        // given
         List<FrozenJsonPatch> patches = Collections.singletonList(null);
 
-        // When
+        // when
         Runnable construction = () -> new ComputeEffectPlan(
                 patches, Collections.emptyList(), false,
                 null, null, false);
 
-        // Then
+        // then
         assertThrows(IllegalArgumentException.class,
                 construction::run);
     }
 
     @Test
     void shouldRejectBufferingSameEffectPlanTwice() {
-        // Given
+        // given
         ComputeEffectPlan plan = new ComputeEffectPlan(
                 Collections.emptyList(), Collections.emptyList(), false,
                 null, null, false);
         ComputeResultEmitter emitter = new ComputeResultEmitter();
 
-        // When
+        // when
         emitter.buffer(plan, null);
         IllegalStateException failure = assertThrows(IllegalStateException.class,
                 () -> emitter.buffer(plan, null));
 
-        // Then
+        // then
         assertEquals("Compute effect plan has already been buffered", failure.getMessage());
     }
 
     @Test
     void shouldRejectMissingComputeExecutionResult() {
-        // Given
+        // given
         ComputeResultEmitter emitter = new ComputeResultEmitter();
 
-        // When
+        // when
         ComputeResultValidationException missingResult = assertThrows(
                 ComputeResultValidationException.class,
                 () -> emitter.plan(null, null, true));
 
-        // Then
+        // then
         assertEquals("Compute execution result is required", missingResult.getMessage());
     }
 
     @Test
     void shouldRejectMissingEffectPlanDuringBuffering() {
-        // Given
+        // given
         ComputeResultEmitter emitter = new ComputeResultEmitter();
 
-        // When
+        // when
         IllegalArgumentException missingPlan = assertThrows(
                 IllegalArgumentException.class,
                 () -> emitter.buffer(null, null));
 
-        // Then
+        // then
         assertEquals("plan must not be null", missingPlan.getMessage());
     }
 
     @Test
     void shouldRetainFrozenBexValuesAndMaterializeComputedValuesOnce() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeResultEmitter emitter = new ComputeResultEmitter(metrics);
         FrozenNode retained = FrozenNode.fromNode(new Node()
                 .properties("kind", new Node().value("retained")));
 
-        // When
+        // when
         FrozenNode direct = emitter.freezePatchValue(BexValues.frozen(retained));
         FrozenNode computed = emitter.freezePatchValue(BexValues.map(
                 Collections.singletonMap("kind", BexValues.scalar("computed"))));
 
-        // Then
+        // then
         assertSame(retained, direct,
                 "strict BEX frozen values must cross the boundary by identity");
         assertTrue(computed.isStrictCanonical());
@@ -208,7 +211,7 @@ class ComputeEffectPlanTest {
 
     @Test
     void shouldPreserveSemanticContentForAdmittedExactPatchValues() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeResultEmitter emitter = new ComputeResultEmitter(metrics);
         FrozenNode admittedContent = FrozenNode.fromNode(
@@ -218,10 +221,10 @@ class ComputeEffectPlanTest {
                 admittedContent.blueId(),
                 BexValues.scalar("admitted"));
 
-        // When
+        // when
         FrozenNode frozenPatchValue = emitter.freezePatchValue(admitted);
 
-        // Then
+        // then
         assertTrue(frozenPatchValue.isStrictCanonical());
         assertFalse(frozenPatchValue.isReferenceOnly());
         assertEquals("admitted", frozenPatchValue.getValue());
@@ -232,13 +235,13 @@ class ComputeEffectPlanTest {
 
     @Test
     void shouldTreatMissingReturnedValueAsNoActiveEffects() {
-        // Given
+        // given
         ComputeResultEmitter emitter = new ComputeResultEmitter();
 
-        // When
+        // when
         ComputeEffectPlan plan = emitter.plan(executionResult(null), null, true);
 
-        // Then
+        // then
         assertTrue(plan.patches().isEmpty());
         assertTrue(plan.events().isEmpty());
         assertFalse(plan.terminationRequested());
@@ -247,7 +250,7 @@ class ComputeEffectPlanTest {
 
     @Test
     void shouldPreserveComputeTerminationCauseAndOptionalReason() {
-        // Given
+        // given
         ComputeResultEmitter emitter = new ComputeResultEmitter();
         Map<String, BexValue> termination = new LinkedHashMap<String, BexValue>();
         termination.put("cause", BexValues.scalar("completed"));
@@ -255,11 +258,11 @@ class ComputeEffectPlanTest {
         Map<String, BexValue> resultValue = new LinkedHashMap<String, BexValue>();
         resultValue.put("termination", BexValues.map(termination));
 
-        // When
+        // when
         ComputeEffectPlan plan = emitter.plan(
                 executionResult(BexValues.map(resultValue)), null, true);
 
-        // Then
+        // then
         assertTrue(plan.terminationRequested());
         assertEquals("completed", plan.terminationCause());
         assertEquals("all work applied", plan.terminationReason());
@@ -267,7 +270,7 @@ class ComputeEffectPlanTest {
 
     @Test
     void shouldRejectMissingEmptyOrModeStyleComputeTerminationCause() {
-        // Given
+        // given
         ComputeResultEmitter emitter = new ComputeResultEmitter();
         Map<String, BexValue> reasonOnly = new LinkedHashMap<String, BexValue>();
         reasonOnly.put("reason", BexValues.scalar("legacy"));
@@ -277,13 +280,13 @@ class ComputeEffectPlanTest {
         unknownField.put("cause", BexValues.scalar("completed"));
         unknownField.put("mode", BexValues.scalar("legacy-mode"));
 
-        // When
+        // when
         List<String> messages = Arrays.asList(
                 terminationFailure(emitter, reasonOnly),
                 terminationFailure(emitter, emptyCause),
                 terminationFailure(emitter, unknownField));
 
-        // Then
+        // then
         assertEquals(Arrays.asList(
                         "Compute result termination cause must be non-empty Text",
                         "Compute result termination cause must be non-empty Text",
@@ -293,18 +296,18 @@ class ComputeEffectPlanTest {
 
     @Test
     void shouldBoundUnexpectedChangesetConversionDiagnostic() {
-        // Given
+        // given
         ComputeResultEmitter emitter = new ComputeResultEmitter();
         String longMessage = repeat('x', 200) + "\nnot-exposed";
         Map<String, BexValue> changesetResult = new LinkedHashMap<String, BexValue>();
         changesetResult.put("changeset", listThrowingOnSize(new IllegalStateException(longMessage)));
 
-        // When
+        // when
         ComputeResultValidationException changesetFailure = assertThrows(
                 ComputeResultValidationException.class,
                 () -> emitter.plan(executionResult(BexValues.map(changesetResult)), null, false));
 
-        // Then
+        // then
         assertTrue(changesetFailure.getMessage().startsWith(
                 "Compute result changeset could not be converted: "));
         assertFalse(changesetFailure.getMessage().contains("not-exposed"));
@@ -313,40 +316,40 @@ class ComputeEffectPlanTest {
 
     @Test
     void shouldReportUnexpectedEventConversionDiagnosticByActiveField() {
-        // Given
+        // given
         ComputeResultEmitter emitter = new ComputeResultEmitter();
         Map<String, BexValue> eventResult = new LinkedHashMap<String, BexValue>();
         eventResult.put("events", listThrowingOnSize(new IllegalStateException("event failure")));
 
-        // When
+        // when
         ComputeResultValidationException eventFailure = assertThrows(
                 ComputeResultValidationException.class,
                 () -> emitter.plan(executionResult(BexValues.map(eventResult)), null, true));
 
-        // Then
+        // then
         assertEquals("Compute result events could not be converted: event failure",
                 eventFailure.getMessage());
     }
 
     @Test
     void shouldReportUnexpectedEffectConversionDiagnosticByActiveField() {
-        // Given
+        // given
         ComputeResultEmitter emitter = new ComputeResultEmitter();
 
-        // When
+        // when
         ComputeResultValidationException effectFailure = assertThrows(
                 ComputeResultValidationException.class,
                 () -> emitter.plan(executionResult(valueThrowingOnGet(
                         new IllegalStateException())), null, true));
 
-        // Then
+        // then
         assertEquals("Compute result effects could not be converted: IllegalStateException",
                 effectFailure.getMessage());
     }
 
     @Test
     void shouldPreserveInvalidExecutionEvidenceFromNestedResultConversion() {
-        // Given
+        // given
         ComputeResultEmitter emitter = new ComputeResultEmitter();
         InvalidExecutionEvidenceException invalidEvidence =
                 new InvalidExecutionEvidenceException(
@@ -357,7 +360,7 @@ class ComputeEffectPlanTest {
                 "changeset",
                 listThrowingOnSize(invalidEvidence));
 
-        // When
+        // when
         InvalidExecutionEvidenceException failure = assertThrows(
                 InvalidExecutionEvidenceException.class,
                 () -> emitter.plan(
@@ -366,13 +369,13 @@ class ComputeEffectPlanTest {
                         null,
                         false));
 
-        // Then
+        // then
         assertSame(invalidEvidence, failure);
     }
 
     @Test
     void shouldPreserveUnavailableEvidenceFromLazyResultConversion() {
-        // Given
+        // given
         ComputeResultEmitter emitter = new ComputeResultEmitter();
         ExecutionEvidenceUnavailableException unavailable =
                 new ExecutionEvidenceUnavailableException(
@@ -380,7 +383,7 @@ class ComputeEffectPlanTest {
         Map<String, BexValue> resultValue =
                 resultWithChangesetThrowing(unavailable);
 
-        // When
+        // when
         ExecutionEvidenceUnavailableException failure = assertThrows(
                 ExecutionEvidenceUnavailableException.class,
                 () -> emitter.plan(
@@ -388,13 +391,13 @@ class ComputeEffectPlanTest {
                         null,
                         false));
 
-        // Then
+        // then
         assertSame(unavailable, failure);
     }
 
     @Test
     void shouldPreservePortableLimitFromLazyResultConversion() {
-        // Given
+        // given
         ComputeResultEmitter emitter = new ComputeResultEmitter();
         PortableLimitExceededException portableLimit =
                 new PortableLimitExceededException(
@@ -404,7 +407,7 @@ class ComputeEffectPlanTest {
         Map<String, BexValue> resultValue =
                 resultWithChangesetThrowing(portableLimit);
 
-        // When
+        // when
         PortableLimitExceededException failure = assertThrows(
                 PortableLimitExceededException.class,
                 () -> emitter.plan(
@@ -412,13 +415,13 @@ class ComputeEffectPlanTest {
                         null,
                         false));
 
-        // Then
+        // then
         assertSame(portableLimit, failure);
     }
 
     @Test
     void shouldLetOuterProcessorFailureWinOverNestedInvalidEvidence() {
-        // Given
+        // given
         ComputeResultEmitter emitter = new ComputeResultEmitter();
         InvalidExecutionEvidenceException invalidEvidence =
                 new InvalidExecutionEvidenceException(
@@ -431,7 +434,7 @@ class ComputeEffectPlanTest {
         Map<String, BexValue> resultValue =
                 resultWithChangesetThrowing(processorFailure);
 
-        // When
+        // when
         ProcessorFailureException failure = assertThrows(
                 ProcessorFailureException.class,
                 () -> emitter.plan(
@@ -439,13 +442,13 @@ class ComputeEffectPlanTest {
                         null,
                         false));
 
-        // Then
+        // then
         assertSame(processorFailure, failure);
     }
 
     @Test
     void shouldLookThroughGenericBexWrapperForUnavailableEvidence() {
-        // Given
+        // given
         ComputeResultEmitter emitter = new ComputeResultEmitter();
         ExecutionEvidenceUnavailableException unavailable =
                 new ExecutionEvidenceUnavailableException(
@@ -455,7 +458,7 @@ class ComputeEffectPlanTest {
         Map<String, BexValue> resultValue =
                 resultWithChangesetThrowing(wrapper);
 
-        // When
+        // when
         ExecutionEvidenceUnavailableException failure = assertThrows(
                 ExecutionEvidenceUnavailableException.class,
                 () -> emitter.plan(
@@ -463,13 +466,13 @@ class ComputeEffectPlanTest {
                         null,
                         false));
 
-        // Then
+        // then
         assertSame(unavailable, failure);
     }
 
     @Test
     void shouldRecoverInvalidExecutionEvidenceWrappedForExecutorHandling() {
-        // Given
+        // given
         InvalidExecutionEvidenceException invalidEvidence =
                 new InvalidExecutionEvidenceException(
                         "invalid verified provider result");
@@ -480,43 +483,48 @@ class ComputeEffectPlanTest {
                                 "writer boundary",
                                 invalidEvidence));
 
-        // When
+        // when
         RuntimeException recovered =
                 ComputeStepExecutor.classifiedBoundaryFailure(converted);
 
-        // Then
+        // then
         assertSame(invalidEvidence, recovered);
     }
 
     @Test
     void shouldPreserveDirectLanguageGasExhaustion() {
-        // Given
+        // given
         Map<String, Long> weights =
                 Collections.singletonMap("unit", 1L);
         GasMeter.ChildGasLedger ledger =
                 new GasMeter(GasSchedule.contracts10(), 0L)
                         .childLedger("compute-test", weights);
 
-        // When
+        // when
         GasLimitExceededException exhaustion = assertThrows(
                 GasLimitExceededException.class,
                 () -> ledger.charge("unit", 1L));
         RuntimeException classified =
                 ComputeStepExecutor.classifiedBoundaryFailure(exhaustion);
 
-        // Then
+        // then
         assertSame(exhaustion, classified);
     }
 
     @Test
     void shouldPreserveHostedBexGasExhaustionAsLanguageBoundary() {
-        // Given
+        // given
         BexGasSchedule schedule = BexGasSchedule.defaults();
         long hostBudget =
                 schedule.weight(BexGasCounter.EXPRESSION_EVALUATED);
-        GasMeter.ChildGasLedger hostLedger =
-                new GasMeter(GasSchedule.contracts10(), hostBudget)
-                        .childLedger(
+        GasMeter parent = new GasMeter(
+                GasSchedule.contracts10(), hostBudget);
+        RuntimeWorkSession session =
+                RuntimeWorkSessionTestSupport.processing(parent);
+        BexGasLedgerCapability hostLedger =
+                new ProcessorExecutionContextBexGasLedgerHost(
+                        session, "compute-test")
+                        .open(
                                 BexGasCounter.NAMESPACE,
                                 BexGasMeter.childLedgerWeights(
                                         schedule,
@@ -526,7 +534,7 @@ class ComputeEffectPlanTest {
                 BexGasCounter.EXPRESSION_EVALUATED.canonicalName(),
                 1L);
 
-        // When
+        // when
         BexGasLimitExceededException exhaustion = assertThrows(
                 BexGasLimitExceededException.class,
                 () -> meter.charge(
@@ -535,17 +543,19 @@ class ComputeEffectPlanTest {
         RuntimeException classified =
                 ComputeStepExecutor.classifiedBoundaryFailure(exhaustion);
 
-        // Then
-        assertSame(exhaustion.hostGasLimitExceeded(), classified);
+        // then
+        assertSame(
+                exhaustion.hostGasExhaustion().hostFailure(),
+                classified);
     }
 
     @Test
     void shouldMapLocalBexGasExhaustionToProcessorFailure() {
-        // Given
+        // given
         BexGasMeter meter =
                 new BexGasMeter(BexGasSchedule.defaults(), 0L);
 
-        // When
+        // when
         BexGasLimitExceededException exhaustion = assertThrows(
                 BexGasLimitExceededException.class,
                 () -> meter.charge(
@@ -554,7 +564,7 @@ class ComputeEffectPlanTest {
         RuntimeException classified =
                 ComputeStepExecutor.classifiedBoundaryFailure(exhaustion);
 
-        // Then
+        // then
         assertTrue(classified instanceof ProcessorFailureException);
         ProcessorFailureException processorFailure =
                 (ProcessorFailureException) classified;
@@ -566,7 +576,7 @@ class ComputeEffectPlanTest {
 
     @Test
     void shouldReportEventNodeConversionFailureWithoutBuffering() {
-        // Given
+        // given
         ComputeResultEmitter emitter = new ComputeResultEmitter();
         Map<String, BexValue> malformedEvent = new LinkedHashMap<String, BexValue>();
         malformedEvent.put("properties", BexValues.scalar("internal"));
@@ -574,19 +584,19 @@ class ComputeEffectPlanTest {
         resultValue.put("events", BexValues.list(Collections.singletonList(
                 BexValues.map(malformedEvent))));
 
-        // When
+        // when
         ComputeResultValidationException failure = assertThrows(
                 ComputeResultValidationException.class,
                 () -> emitter.plan(executionResult(BexValues.map(resultValue)), null, true));
 
-        // Then
+        // then
         assertEquals("Compute result event entry could not be converted", failure.getMessage());
         assertTrue(failure.getCause() instanceof RuntimeException);
     }
 
     @Test
     void shouldPreserveScalarAndListEventNodes() {
-        // Given
+        // given
         ComputeResultEmitter emitter = new ComputeResultEmitter();
         List<BexValue> events = Arrays.asList(
                 BexValues.scalar("scalar-event"),
@@ -597,13 +607,13 @@ class ComputeEffectPlanTest {
                 new LinkedHashMap<String, BexValue>();
         resultValue.put("events", BexValues.list(events));
 
-        // When
+        // when
         ComputeEffectPlan plan = emitter.plan(
                 executionResult(BexValues.map(resultValue)),
                 null,
                 true);
 
-        // Then
+        // then
         assertEquals("scalar-event", plan.events().get(0).getValue());
         assertEquals("first",
                 plan.events().get(1).getItems().get(0).getValue());
@@ -613,7 +623,7 @@ class ComputeEffectPlanTest {
 
     @Test
     void shouldRetainLocallyVerifiedExactEventContentForSameInvocationRouting() {
-        // Given
+        // given
         ComputeResultEmitter emitter =
                 new ComputeResultEmitter();
         FrozenNode exactEvent =
@@ -631,7 +641,7 @@ class ComputeEffectPlanTest {
                                 BexValues.frozen(
                                         exactEvent))));
 
-        // When
+        // when
         ComputeEffectPlan plan = emitter.plan(
                 executionResult(
                         BexValues.map(
@@ -639,7 +649,7 @@ class ComputeEffectPlanTest {
                 null,
                 true);
 
-        // Then
+        // then
         assertFalse(
                 plan.events().get(0).isReferenceOnly(),
                 "same-invocation routing needs the locally verified event body");
@@ -652,7 +662,7 @@ class ComputeEffectPlanTest {
 
     @Test
     void shouldRejectMalformedAccumulatedPatchesBeforePointerResolution() {
-        // Given
+        // given
         ComputeResultEmitter emitter = new ComputeResultEmitter();
         List<BexPatchEntry> malformed = new ArrayList<BexPatchEntry>();
         malformed.add(null);
@@ -662,7 +672,7 @@ class ComputeEffectPlanTest {
                 "Compute result patch value is required"
         };
 
-        // When
+        // when
         List<String> messages = new ArrayList<String>();
         for (int i = 0; i < malformed.size(); i++) {
             BexExecutionResult result = executionResult(null,
@@ -673,13 +683,13 @@ class ComputeEffectPlanTest {
             messages.add(failure.getMessage());
         }
 
-        // Then
+        // then
         assertEquals(Arrays.asList(expected), messages);
     }
 
     @Test
     void shouldRejectNonTextPatchFieldsAndRemoveValuesBeforeBuffering() {
-        // Given
+        // given
         ComputeResultEmitter emitter = new ComputeResultEmitter();
         Map<String, BexValue> nonTextOp = patchValue(
                 BexValues.scalar(7), BexValues.scalar("/target"),
@@ -691,13 +701,13 @@ class ComputeEffectPlanTest {
                 BexValues.scalar("remove"), BexValues.scalar("/target"),
                 BexValues.scalar("forbidden"));
 
-        // When
+        // when
         List<String> messages = Arrays.asList(
                 changesetFailure(emitter, nonTextOp),
                 changesetFailure(emitter, nonTextPath),
                 changesetFailure(emitter, removeWithValue));
 
-        // Then
+        // then
         assertEquals(Arrays.asList(
                         "Compute result changeset entry 0 field 'op' must be Text",
                         "Compute result changeset entry 0 field 'path' must be Text",
@@ -707,7 +717,7 @@ class ComputeEffectPlanTest {
 
     @Test
     void shouldNotTreatExplicitNullRemoveValueAsAccumulatedChangeset() {
-        // Given
+        // given
         ComputeResultEmitter emitter = new ComputeResultEmitter();
         Map<String, BexValue> returnedRemove = patchValue(
                 BexValues.scalar("remove"),
@@ -726,7 +736,7 @@ class ComputeEffectPlanTest {
                                 "/target",
                                 BexValues.undefined())));
 
-        // When
+        // when
         ComputeResultValidationException failure = assertThrows(
                 ComputeResultValidationException.class,
                 () -> emitter.plan(
@@ -736,7 +746,7 @@ class ComputeEffectPlanTest {
                         null,
                         false));
 
-        // Then
+        // then
         assertEquals(
                 "Compute result changeset entry 0 val must be absent for remove",
                 failure.getMessage());
@@ -744,7 +754,7 @@ class ComputeEffectPlanTest {
 
     @Test
     void shouldWrapPatchPointerResolutionFailure() {
-        // Given
+        // given
         ComputeResultEmitter emitter = new ComputeResultEmitter();
         Map<String, BexValue> patch = new LinkedHashMap<String, BexValue>();
         patch.put("op", BexValues.scalar("replace"));
@@ -754,25 +764,25 @@ class ComputeEffectPlanTest {
         resultValue.put("changeset", BexValues.list(Collections.singletonList(
                 BexValues.map(patch))));
 
-        // When
+        // when
         ComputeResultValidationException failure = assertThrows(
                 ComputeResultValidationException.class,
                 () -> emitter.plan(executionResult(BexValues.map(resultValue)), null, false));
 
-        // Then
+        // then
         assertEquals("Compute result patch path is invalid", failure.getMessage());
         assertTrue(failure.getCause() instanceof NullPointerException);
     }
 
     @Test
     void shouldCreateEmptyNonTerminalWorkflowStepResult() {
-        // Given
+        // given
         WorkflowStepResult none = WorkflowStepResult.none();
 
-        // When
+        // when
         Object value = none.value();
 
-        // Then
+        // then
         assertFalse(none.hasValue());
         assertFalse(none.changesetHandled());
         assertFalse(none.isTerminal());
@@ -781,13 +791,13 @@ class ComputeEffectPlanTest {
 
     @Test
     void shouldPreserveValueMetadataInWorkflowStepResult() {
-        // Given
+        // given
         WorkflowStepResult result = WorkflowStepResult.value(null, true);
 
-        // When
+        // when
         Object value = result.value();
 
-        // Then
+        // then
         assertTrue(result.hasValue());
         assertNull(value);
         assertTrue(result.changesetHandled());
@@ -796,18 +806,18 @@ class ComputeEffectPlanTest {
 
     @Test
     void shouldCreateTerminalWorkflowStepResultsWithOptionalValues() {
-        // Given
+        // given
         WorkflowStepResult terminal = WorkflowStepResult.terminal();
         WorkflowStepResult terminalValueWithoutChangeset = WorkflowStepResult.terminalValue("plain");
         WorkflowStepResult terminalValue = WorkflowStepResult.terminalValue("result", true);
 
-        // When
+        // when
         List<Boolean> terminalFlags = Arrays.asList(
                 terminal.isTerminal(),
                 terminalValueWithoutChangeset.isTerminal(),
                 terminalValue.isTerminal());
 
-        // Then
+        // then
         assertEquals(Arrays.asList(true, true, true), terminalFlags);
         assertFalse(terminal.hasValue());
         assertFalse(terminal.changesetHandled());
@@ -822,27 +832,27 @@ class ComputeEffectPlanTest {
 
     @Test
     void shouldPreserveValidationExceptionMessageAndCause() {
-        // Given
+        // given
         IllegalStateException cause = new IllegalStateException("cause");
 
-        // When
+        // when
         ComputeResultValidationException failure =
                 new ComputeResultValidationException("invalid", cause);
 
-        // Then
+        // then
         assertEquals("invalid", failure.getMessage());
         assertEquals(cause, failure.getCause());
     }
 
     @Test
     void shouldSupportTerminateProcessingWithDefaultExecutor() {
-        // Given
+        // given
         TerminateProcessingStepExecutor executor = new TerminateProcessingStepExecutor();
 
-        // When
+        // when
         boolean supported = executor.supports(new TerminateProcessing());
 
-        // Then
+        // then
         assertTrue(supported);
     }
 
@@ -855,7 +865,7 @@ class ComputeEffectPlanTest {
                 changeset,
                 new BexEvents(Collections.emptyList()),
                 BexGasLedger.empty(),
-                new BexMetrics());
+                null);
     }
 
     private static String terminationFailure(

@@ -1,7 +1,7 @@
 package blue.coordination.processor;
 
 import blue.bex.api.BexEngine;
-import blue.language.Blue;
+import blue.language.runtime.BlueLanguage;
 import blue.repo.BlueRepository;
 
 import org.junit.jupiter.api.Test;
@@ -18,10 +18,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LocalCompositeDependencyTest {
     @Test
-    void shouldLoadEveryBlueDependencyFromItsSiblingCompositeBuild()
+    void shouldUsePublishedLanguageWithLocalBexAndRepository()
             throws IOException, URISyntaxException {
         // given
-        Class<?> languageType = Blue.class;
+        Class<?> languageType = BlueLanguage.class;
         Class<?> bexType = BexEngine.class;
         Class<?> repositoryType = BlueRepository.class;
 
@@ -31,31 +31,44 @@ class LocalCompositeDependencyTest {
         Path repositoryLocation = codeSourceLocation(repositoryType);
 
         // then
-        assertLocalBuild(
-                languageType,
-                languageLocation,
-                "blue-language-java");
+        assertPublishedLanguage(languageType, languageLocation);
         assertLocalBuild(
                 bexType,
                 bexLocation,
                 "blue-bex-java");
-        Path immutableLocalRepository =
+        Path lockedLocalRepositoryArtifacts =
                 Paths.get(
                                 System.getProperty(
                                         "user.dir"))
                         .toAbsolutePath()
                         .normalize()
                         .resolve(
-                                ".gradle/immutable-local-repository/"
-                                        + CoordinationRequiredRepositoryClosure
-                                        .REPOSITORY_HEAD_COMMIT)
-                        .normalize()
-                        .toRealPath();
+                                ".gradle/current-local-artifacts")
+                        .normalize();
         assertLocalBuildRoot(
                 repositoryType,
                 repositoryLocation,
-                immutableLocalRepository,
-                "the exact immutable local blue-repository-java HEAD");
+                lockedLocalRepositoryArtifacts,
+                "the exact digest-locked JAR materialized from the local "
+                        + "blue-repository-java HEAD");
+    }
+
+    private static void assertPublishedLanguage(
+            Class<?> type,
+            Path actual) {
+        String normalized = actual.toString().replace('\\', '/');
+        assertTrue(
+                normalized.contains(
+                        "/caches/modules-2/files-2.1/blue.language/"
+                                + "blue-language-core/3.1.0-rc.20/"),
+                type.getName()
+                        + " did not load from published Language 3.1.0-rc.20: "
+                        + actual);
+        assertTrue(
+                !normalized.contains("/blue-language-java/blue-language-core/"),
+                type.getName()
+                        + " unexpectedly loaded from the adjacent Language checkout: "
+                        + actual);
     }
 
     private static Path codeSourceLocation(

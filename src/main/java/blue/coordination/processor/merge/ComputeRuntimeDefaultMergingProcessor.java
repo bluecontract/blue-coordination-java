@@ -1,11 +1,11 @@
 package blue.coordination.processor.merge;
 
-import blue.language.NodeProvider;
+import blue.language.provider.NodeProvider;
 import blue.language.merge.MergingProcessor;
 import blue.language.merge.NodeResolver;
 import blue.language.model.Node;
-import blue.language.utils.NodePathAccessor;
-import blue.language.utils.NodePathEditor;
+import blue.language.model.NodePath;
+import blue.language.model.NodePathEditor;
 import blue.repo.coordination.Compute;
 import blue.repo.coordination.ComputeDefinition;
 
@@ -167,7 +167,7 @@ final class ComputeRuntimeDefaultMergingProcessor
         }
         for (String path : paths) {
             Node preserved =
-                    NodePathAccessor.getNode(source, path);
+                    NodePath.getNode(source, path);
             if (preserved != null) {
                 preserveComputeField(
                         target,

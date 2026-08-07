@@ -2,7 +2,7 @@ package blue.coordination.processor;
 
 import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.util.PointerUtils;
-import blue.language.utils.JsonPointer;
+import blue.language.model.wire.JsonPointer;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -142,7 +142,7 @@ public final class CoordinationSemanticDemandBoundary {
             case REACTIVE_BODY:
             case SCOPE_VALUE:
                 return checked.runtimeSelected()
-                        && isSelectedScope(checked.scopePath());
+                        && onSelectedScopeChain(checked.scopePath());
             default:
                 return false;
         }

@@ -32,11 +32,11 @@ class SelectiveProcessingReportWriterTest {
     @Test
     void shouldWriteDeterministicSortedEvidenceAndPreserveNativeStreamOrder()
             throws Exception {
-        // Given
+        // given
         Path firstDirectory = temporaryDirectory.resolve("first");
         Path secondDirectory = temporaryDirectory.resolve("second");
 
-        // When
+        // when
         SelectiveProcessingReportWriter.write(
                 firstDirectory, report(false));
         SelectiveProcessingReportWriter.write(
@@ -49,7 +49,7 @@ class SelectiveProcessingReportWriterTest {
                 secondDirectory.resolve(
                         SelectiveProcessingReportWriter.FILE_NAME));
 
-        // Then
+        // then
         assertArrayEquals(first, second);
         assertTrue(
                 new String(first, StandardCharsets.UTF_8)
@@ -100,14 +100,14 @@ class SelectiveProcessingReportWriterTest {
     @Test
     void shouldMatchSchemaResourceToWriterIdentity()
             throws Exception {
-        // Given
+        // given
         InputStream stream = getClass().getResourceAsStream(
                 "/coordination/selective-processing-report.schema.json");
 
-        // When
+        // when
         assertNotNull(stream);
 
-        // Then
+        // then
         try {
             JsonNode schema = new ObjectMapper().readTree(stream);
             assertEquals(
@@ -132,18 +132,18 @@ class SelectiveProcessingReportWriterTest {
 
     @Test
     void shouldRejectInconsistentTestCounts() {
-        // Given
+        // given
         int total = 2;
         int passed = 1;
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
                         () -> new SelectiveProcessingReportWriter.TestCounts(
                                 total, passed, 0, 0));
 
-        // Then
+        // then
         assertEquals(
                 "total must equal passed + failed + skipped",
                 failure.getMessage());
@@ -151,11 +151,11 @@ class SelectiveProcessingReportWriterTest {
 
     @Test
     void shouldRejectDuplicateReportSections() {
-        // Given
+        // given
         final SelectiveProcessingReportWriter.Section routing =
                 section("routing");
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
@@ -169,7 +169,7 @@ class SelectiveProcessingReportWriterTest {
                                 Collections.<SelectiveProcessingReportWriter
                                         .UnavailableSuite>emptyList()));
 
-        // Then
+        // then
         assertEquals(
                 "Duplicate section id: routing",
                 failure.getMessage());
@@ -177,13 +177,13 @@ class SelectiveProcessingReportWriterTest {
 
     @Test
     void shouldRejectUnavailableSuitesFromACompleteReport() {
-        // Given
+        // given
         SelectiveProcessingReportWriter.UnavailableSuite unavailable =
                 new SelectiveProcessingReportWriter.UnavailableSuite(
                         "final-registry",
                         "Final Coordination registry absent");
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
@@ -194,7 +194,7 @@ class SelectiveProcessingReportWriterTest {
                                         section("routing")),
                                 Collections.singletonList(unavailable)));
 
-        // Then
+        // then
         assertEquals(
                 "A complete report cannot name unavailable suites",
                 failure.getMessage());
@@ -202,12 +202,12 @@ class SelectiveProcessingReportWriterTest {
 
     @Test
     void shouldRejectFailedTestsFromACompleteReport() {
-        // Given
+        // given
         SelectiveProcessingReportWriter.TestCounts counts =
                 new SelectiveProcessingReportWriter.TestCounts(
                         1, 0, 1, 0);
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
@@ -218,7 +218,7 @@ class SelectiveProcessingReportWriterTest {
                                 Collections.<SelectiveProcessingReportWriter
                                         .UnavailableSuite>emptyList()));
 
-        // Then
+        // then
         assertEquals(
                 "A complete report cannot contain failed or skipped tests",
                 failure.getMessage());
@@ -226,12 +226,12 @@ class SelectiveProcessingReportWriterTest {
 
     @Test
     void shouldRejectSkippedTestsFromACompleteReport() {
-        // Given
+        // given
         SelectiveProcessingReportWriter.TestCounts counts =
                 new SelectiveProcessingReportWriter.TestCounts(
                         1, 0, 0, 1);
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
@@ -242,7 +242,7 @@ class SelectiveProcessingReportWriterTest {
                                 Collections.<SelectiveProcessingReportWriter
                                         .UnavailableSuite>emptyList()));
 
-        // Then
+        // then
         assertEquals(
                 "A complete report cannot contain failed or skipped tests",
                 failure.getMessage());
@@ -250,12 +250,12 @@ class SelectiveProcessingReportWriterTest {
 
     @Test
     void shouldRejectZeroExecutedTestsFromACompleteReport() {
-        // Given
+        // given
         SelectiveProcessingReportWriter.TestCounts counts =
                 new SelectiveProcessingReportWriter.TestCounts(
                         0, 0, 0, 0);
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
@@ -266,7 +266,7 @@ class SelectiveProcessingReportWriterTest {
                                 Collections.<SelectiveProcessingReportWriter
                                         .UnavailableSuite>emptyList()));
 
-        // Then
+        // then
         assertEquals(
                 "A complete report must contain executed tests",
                 failure.getMessage());
@@ -274,7 +274,7 @@ class SelectiveProcessingReportWriterTest {
 
     @Test
     void shouldRejectANonPassedSectionFromACompleteReport() {
-        // Given
+        // given
         SelectiveProcessingReportWriter.Section notRun =
                 new SelectiveProcessingReportWriter.Section(
                         "routing",
@@ -285,7 +285,7 @@ class SelectiveProcessingReportWriterTest {
                         Collections.<String, List<String>>emptyMap(),
                         Collections.<String, List<String>>emptyMap());
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
@@ -296,7 +296,7 @@ class SelectiveProcessingReportWriterTest {
                                 Collections.<SelectiveProcessingReportWriter
                                         .UnavailableSuite>emptyList()));
 
-        // Then
+        // then
         assertEquals(
                 "A complete report cannot contain a not-run section: routing",
                 failure.getMessage());
@@ -304,7 +304,7 @@ class SelectiveProcessingReportWriterTest {
 
     @Test
     void shouldRejectAnEmptyPassedSectionFromACompleteReport() {
-        // Given
+        // given
         SelectiveProcessingReportWriter.Section empty =
                 new SelectiveProcessingReportWriter.Section(
                         "routing",
@@ -315,7 +315,7 @@ class SelectiveProcessingReportWriterTest {
                         Collections.<String, List<String>>emptyMap(),
                         Collections.<String, List<String>>emptyMap());
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
@@ -326,7 +326,7 @@ class SelectiveProcessingReportWriterTest {
                                 Collections.<SelectiveProcessingReportWriter
                                         .UnavailableSuite>emptyList()));
 
-        // Then
+        // then
         assertEquals(
                 "A complete report cannot contain an empty passed section: routing",
                 failure.getMessage());
@@ -452,6 +452,6 @@ class SelectiveProcessingReportWriterTest {
     private static Map<String, String> identities() {
         return Collections.singletonMap(
                 "languageGitCommit",
-                "9706b604d54d59e843f2d0540c1a892470d1aa5c");
+                "a3b38ca9a1d0b9ca8527b26d23b05cfdbc6af7d9");
     }
 }

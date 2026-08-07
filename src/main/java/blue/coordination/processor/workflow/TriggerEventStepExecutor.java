@@ -2,9 +2,9 @@ package blue.coordination.processor.workflow;
 
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.model.Node;
-import blue.language.processor.CoordinationProcessHeaderBridge;
+import blue.coordination.processor.support.CoordinationProcessHeaderSupport;
 import blue.language.snapshot.FrozenNode;
-import blue.language.utils.BlueIdCalculator;
+import blue.language.identity.DirectBlueIdCalculator;
 import blue.repo.coordination.SequentialWorkflowStep;
 import blue.repo.coordination.TriggerEvent;
 
@@ -92,10 +92,10 @@ public final class TriggerEventStepExecutor implements WorkflowStepExecutor<Trig
             return authored;
         }
         Node exactResolved =
-                CoordinationProcessHeaderBridge
+                CoordinationProcessHeaderSupport
                         .canonicalExactCopy(resolved);
         String calculated =
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         exactResolved);
         if (!authored.getBlueId().equals(calculated)) {
             context.throwFatal(

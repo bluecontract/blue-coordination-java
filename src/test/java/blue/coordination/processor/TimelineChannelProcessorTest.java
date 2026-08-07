@@ -1,6 +1,5 @@
 package blue.coordination.processor;
 
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorStatus;
@@ -32,32 +31,32 @@ class TimelineChannelProcessorTest {
 
     @Test
     void shouldEnsureThatMatchingTimelineAndActorAccept() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture);
 
-        // When
+        // when
         Node processed = process(fixture, document,
                 event(fixture, TIMELINE, ACTOR, 100, "hello")).document();
 
-        // Then
+        // then
         assertDirectCheckpointSubject(
                 checkpointEvent(processed), BigInteger.valueOf(100));
     }
 
     @Test
     void shouldEnsureThatRecognizedTimelineEntriesUseTheConservativePreselectionKey() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         TimelineChannel contract = fixture.blue.nodeToObject(
                 TestTimelineProvider.channel(TIMELINE, ACTOR),
                 TimelineChannel.class);
         Node accepted = event(fixture, TIMELINE, ACTOR, 100, "accepted");
-        // When
+        // when
         Node rejected = event(
                 fixture, "different-timeline", ACTOR, 100, "rejected");
 
-        // Then
+        // then
         assertTrue(TimelineExternalSubscriptionFunctions.INSTANCE
                 .channelKeys(contract).containsAll(
                         TimelineExternalSubscriptionFunctions.INSTANCE
@@ -71,7 +70,7 @@ class TimelineChannelProcessorTest {
 
     @Test
     void shouldEnsureThatUnrelatedTypedLookalikeRejectsWithoutCheckpoint() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture);
         Node event = new Node()
@@ -81,17 +80,17 @@ class TimelineChannelProcessorTest {
                 .properties("timestamp", new Node().value(1))
                 .properties("message", TestTimelineProvider.chatMessage("lookalike"));
 
-        // When
+        // when
         DocumentProcessingResult result = process(fixture, document, event);
 
-        // Then
+        // then
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertNull(checkpointEvent(result.document()));
     }
 
     @Test
     void shouldEnsureThatUntypedTimelineLookalikeRejectsWithoutCheckpoint() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture);
         Node event = new Node()
@@ -100,17 +99,17 @@ class TimelineChannelProcessorTest {
                 .properties("timestamp", new Node().value(1))
                 .properties("message", TestTimelineProvider.chatMessage("lookalike"));
 
-        // When
+        // when
         DocumentProcessingResult result = process(fixture, document, event);
 
-        // Then
+        // then
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport.isCapabilityFailure(result), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertNull(checkpointEvent(result.document()));
     }
 
     @Test
     void shouldEnsureThatInvalidTimelineEntryReferenceFailsDeterministically() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node invalid = event(fixture, TIMELINE, ACTOR, 1, "invalid");
         invalid.getProperties().put("timeline", new Node().blueId("not-a-blue-id"));
@@ -118,66 +117,70 @@ class TimelineChannelProcessorTest {
                 TestTimelineProvider.channel(TIMELINE, ACTOR),
                 TimelineChannel.class);
 
-        // When
+        // when
         IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
                 () -> TimelineExternalSubscriptionFunctions.INSTANCE
                         .accepts(contract, invalid));
 
-        // Then
+        // then
         assertTrue(failure.getMessage().contains("Semantic identity reference"), failure.getMessage());
     }
 
     @Test
     void shouldEnsureThatSameTimelineDifferentActorRejectsWithoutCheckpoint() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
 
-        // When
+        // when
         Node processed = process(fixture, initializedDocument(fixture),
                 event(fixture, TIMELINE, "different-account", 1, "wrong actor")).document();
 
-        // Then
+        // then
         assertNull(checkpointEvent(processed));
     }
 
     @Test
     void shouldEnsureThatSameActorDifferentTimelineRejectsWithoutCheckpoint() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
 
-        // When
+        // when
         Node processed = process(fixture, initializedDocument(fixture),
                 event(fixture, "different-timeline", ACTOR, 1, "wrong timeline")).document();
 
-        // Then
+        // then
         assertNull(checkpointEvent(processed));
     }
 
     @Test
     void shouldEnsureThatPureReferenceEqualsEquivalentMaterializedBinding() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node timeline = fixture.blue.objectToNode(new Timeline().timelineId(TIMELINE));
         Node actor = fixture.blue.objectToNode(new PrincipalActor().accountId(ACTOR));
 
-        Node timelineReference = new Node().blueId(fixture.blue.calculateSemanticBlueId(timeline));
-        // When
-        Node actorReference = new Node().blueId(fixture.blue.calculateSemanticBlueId(actor));
+        Node timelineReference =
+                new Node().blueId(
+                        fixture.blue.calculateBlueId(timeline));
+        // when
+        Node actorReference =
+                new Node().blueId(
+                        fixture.blue.calculateBlueId(actor));
 
-        // Then
+        // then
         assertTrue(BlueSemanticIdentity.equals(timelineReference, timeline));
         assertTrue(BlueSemanticIdentity.equals(actorReference, actor));
     }
 
     @Test
     void shouldEnsureThatCompletedAndMinimalMaterializedBindingsAreEqual() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node minimalEntry = event(fixture, TIMELINE, ACTOR, 1, "entry");
-        // When
+        // when
         Node completedEntry = fixture.blue.resolve(minimalEntry.clone());
 
-        // Then
+        // then
         assertTrue(BlueSemanticIdentity.equals(
                 minimalEntry.getAsNode("/timeline"), completedEntry.getAsNode("/timeline")));
         assertTrue(BlueSemanticIdentity.equals(
@@ -186,26 +189,26 @@ class TimelineChannelProcessorTest {
 
     @Test
     void shouldEnsureThatSameTypeDifferentContentDoesNotEqual() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node first = fixture.blue.objectToNode(new Timeline().timelineId("first"));
-        // When
+        // when
         Node second = fixture.blue.objectToNode(new Timeline().timelineId("second"));
 
-        // Then
+        // then
         assertFalse(BlueSemanticIdentity.equals(first, second));
     }
 
     @Test
     void shouldAcceptFixedTimelineEntryWithoutInventedSequence() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node entry = event(fixture, TIMELINE, ACTOR, 100, "fixed-shape");
 
-        // When
+        // when
         DocumentProcessingResult result = process(fixture, initializedDocument(fixture), entry);
 
-        // Then
+        // then
         assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertDirectCheckpointSubject(
                 checkpointEvent(result.document()), BigInteger.valueOf(100));
@@ -213,15 +216,15 @@ class TimelineChannelProcessorTest {
 
     @Test
     void shouldEnsureThatFirstValidTimestampIsAccepted() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         BigInteger firstTimestamp = new BigInteger("-92233720368547758081234567890");
 
-        // When
+        // when
         DocumentProcessingResult result = process(fixture, observingDocument(fixture),
                 event(fixture, TIMELINE, ACTOR, firstTimestamp, "first"));
 
-        // Then
+        // then
         assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertEquals(1, result.events().size());
         assertEquals(firstTimestamp, checkpointEvent(result.document()).get("/timestamp"));
@@ -229,33 +232,33 @@ class TimelineChannelProcessorTest {
 
     @Test
     void shouldEnsureThatHigherTimestampAcceptsWithGaps() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node first = process(fixture, initializedDocument(fixture),
                 event(fixture, TIMELINE, ACTOR, 100, "first")).document();
 
-        // When
+        // when
         Node second = process(fixture, first,
                 event(fixture, TIMELINE, ACTOR, 1_000_000, "second")).document();
 
-        // Then
+        // then
         assertDirectCheckpointSubject(
                 checkpointEvent(second), BigInteger.valueOf(1_000_000));
     }
 
     @Test
     void shouldEnsureThatLowerTimestampRejectsWithoutEffectsOrCheckpointMutation() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node first = process(fixture, observingDocument(fixture),
                 event(fixture, TIMELINE, ACTOR, 100, "first")).document();
         Node checkpointBefore = checkpointEvent(first).clone();
 
-        // When
+        // when
         DocumentProcessingResult stale = process(fixture, first,
                 event(fixture, TIMELINE, ACTOR, 99, "stale"));
 
-        // Then
+        // then
         assertTrue(stale.events().isEmpty());
         assertEquals(fixture.blue.calculateBlueId(checkpointBefore),
                 fixture.blue.calculateBlueId(checkpointEvent(stale.document())));
@@ -263,19 +266,20 @@ class TimelineChannelProcessorTest {
 
     @Test
     void shouldEnsureThatSameTimelineReferenceAndMaterializedFormsAcceptTogether() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node referenced = event(fixture, TIMELINE, ACTOR, 100, "first");
         Node timeline = referenced.getAsNode("/timeline");
         referenced.getProperties().put("timeline",
-                new Node().blueId(fixture.blue.calculateSemanticBlueId(timeline)));
+                new Node().blueId(
+                        fixture.blue.calculateBlueId(timeline)));
         Node materialized = event(fixture, TIMELINE, ACTOR, 101, "next");
-        // When
+        // when
         TimelineChannel contract = fixture.blue.nodeToObject(
                 TestTimelineProvider.channel(TIMELINE, ACTOR),
                 TimelineChannel.class);
 
-        // Then
+        // then
         assertTrue(TimelineExternalSubscriptionFunctions.INSTANCE
                 .accepts(contract, referenced));
         assertTrue(TimelineExternalSubscriptionFunctions.INSTANCE
@@ -284,23 +288,23 @@ class TimelineChannelProcessorTest {
 
     @Test
     void shouldEnsureThatUnrelatedValidPureReferencesDoNotCompareEqual() {
-        // Given
+        // given
         Node expected = new Node().blueId(
-                blue.language.utils.BlueIdCalculator.calculateBlueId(
+                blue.language.identity.DirectBlueIdCalculator.calculateBlueId(
                         new Node().value("expected-timeline")));
-        // When
+        // when
         Node unrelated = new Node().blueId(
-                blue.language.utils.BlueIdCalculator.calculateBlueId(
+                blue.language.identity.DirectBlueIdCalculator.calculateBlueId(
                         new Node().value("unrelated-timeline")));
 
-        // Then
+        // then
         assertFalse(BlueSemanticIdentity.equals(
                 unrelated, expected));
     }
 
     @Test
     void shouldEnsureThatExactEventReplayDoesNotRunHandlersAgain() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = new LinkedHashMap<String, Node>();
         contracts.put("ownerChannel", TestTimelineProvider.channel(TIMELINE, ACTOR));
@@ -309,10 +313,10 @@ class TimelineChannelProcessorTest {
         DocumentProcessingResult first = process(fixture, initializedDocument(fixture, contracts), event);
         Node checkpointBefore = checkpointEvent(first.document()).clone();
 
-        // When
+        // when
         DocumentProcessingResult replay = process(fixture, first.document(), event.clone());
 
-        // Then
+        // then
         assertEquals(1, first.events().size());
         assertEquals("handled once", first.events().get(0).getAsText("/message"));
         assertTrue(replay.events().isEmpty());
@@ -322,7 +326,7 @@ class TimelineChannelProcessorTest {
 
     @Test
     void shouldRejectDistinctEntryAtEqualTimestampWithoutCheckpointMutation() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node firstEvent =
                 event(fixture, TIMELINE, ACTOR, 100, "first");
@@ -333,11 +337,11 @@ class TimelineChannelProcessorTest {
                 firstEvent).document();
         Node checkpointBefore = checkpointEvent(first).clone();
 
-        // When
+        // when
         DocumentProcessingResult result =
                 process(fixture, first, equalTimestampEvent);
 
-        // Then
+        // then
         assertTrue(result.events().isEmpty());
         assertEquals(
                 fixture.blue.calculateBlueId(checkpointBefore),
@@ -347,13 +351,13 @@ class TimelineChannelProcessorTest {
 
     @Test
     void shouldEnsureThatTimestampBeyondLongRangeRemainsExact() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         BigInteger firstTimestamp = new BigInteger("9223372036854775808123456789");
         BigInteger secondTimestamp = firstTimestamp.add(BigInteger.ONE);
-        // When
+        // when
         Node firstEvent = event(fixture, TIMELINE, ACTOR, firstTimestamp, "first");
-        // Then
+        // then
         assertEquals(firstTimestamp, firstEvent.get("/timestamp"));
         assertNotNull(CoordinationEventNodes.timelineEntry(firstEvent));
         DocumentProcessingResult firstResult = process(fixture, initializedDocument(fixture),
@@ -369,84 +373,84 @@ class TimelineChannelProcessorTest {
 
     @Test
     void shouldEnsureThatMissingTimelineRejectsWithoutCheckpoint() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node invalid = event(
                 fixture, TIMELINE, ACTOR, 1, "invalid");
 
-        // When
+        // when
         invalid.getProperties().remove("timeline");
 
-        // Then
+        // then
         assertRejected(fixture, invalid);
     }
 
     @Test
     void shouldEnsureThatMissingActorRejectsWithoutCheckpoint() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node invalid = event(
                 fixture, TIMELINE, ACTOR, 1, "invalid");
 
-        // When
+        // when
         invalid.getProperties().remove("actor");
 
-        // Then
+        // then
         assertRejected(fixture, invalid);
     }
 
     @Test
     void shouldEnsureThatMissingTimestampRejectsWithoutCheckpoint() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node invalid = event(
                 fixture, TIMELINE, ACTOR, 1, "invalid");
 
-        // When
+        // when
         invalid.getProperties().remove("timestamp");
 
-        // Then
+        // then
         assertRejected(fixture, invalid);
     }
 
     @Test
     void shouldEnsureThatInvalidTimestampRejectsWithoutCheckpoint() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node invalid = event(fixture, TIMELINE, ACTOR, 1, "invalid");
-        // When
+        // when
         invalid.getProperties().put("timestamp", new Node().value("1"));
 
-        // Then
+        // then
         assertRejected(fixture, invalid);
     }
 
     @Test
     void shouldEnsureThatDecimalTimestampRejectsWithoutTruncation() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node invalid = event(fixture, TIMELINE, ACTOR, 1, "invalid");
-        // When
+        // when
         invalid.getProperties().put("timestamp", new Node().value(new BigDecimal("1.5")));
 
-        // Then
+        // then
         assertRejected(fixture, invalid);
     }
 
     @Test
     void shouldEnsureThatMalformedPreviousCheckpointFailsClosedWithoutEffectsOrMutation() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node malformed = process(fixture, observingDocument(fixture),
                 event(fixture, TIMELINE, ACTOR, 100, "first")).document().clone();
         checkpointEvent(malformed).getProperties().remove("timestamp");
         Node checkpointBefore = checkpointEvent(malformed).clone();
 
-        // When
+        // when
         DocumentProcessingResult result = process(fixture, malformed,
                 event(fixture, TIMELINE, ACTOR, 101, "next"));
 
-        // Then
+        // then
         assertTrue(result.events().isEmpty());
         assertEquals(fixture.blue.calculateBlueId(checkpointBefore),
                 fixture.blue.calculateBlueId(checkpointEvent(result.document())));
@@ -454,30 +458,30 @@ class TimelineChannelProcessorTest {
 
     @Test
     void shouldEnsureThatMissingMessageRejectsWithoutCheckpoint() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node invalid = event(
                 fixture, TIMELINE, ACTOR, 1, "invalid");
 
-        // When
+        // when
         invalid.getProperties().remove("message");
 
-        // Then
+        // then
         assertRejected(fixture, invalid);
     }
 
     @Test
     void shouldEnsureThatOptionalSourceDoesNotExpandCheckpointSubject() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         TimelineEntry attributed = baseEntry(fixture, BigInteger.ONE, "source")
                 .source(new APICall().apiKeyId("api-key-7"));
 
         Node event = fixture.blue.preprocess(fixture.blue.objectToNode(attributed)
-                .blue(fixture.repository.typeAliasBlue())).blue(null);
-        // When
+                .blue(fixture.repository.importsDirective())).blue(null);
+        // when
         DocumentProcessingResult result = process(fixture, initializedDocument(fixture), event);
-        // Then
+        // then
         assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertDirectCheckpointSubject(
                 checkpointEvent(result.document()), BigInteger.ONE);
@@ -485,7 +489,7 @@ class TimelineChannelProcessorTest {
 
     @Test
     void shouldEnsureThatOptionalOnBehalfOfDoesNotExpandCheckpointSubject() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node authority = new Node()
                 .type(MandateAuthority.qualifiedName())
@@ -496,10 +500,10 @@ class TimelineChannelProcessorTest {
         Node event = fixture.blue.preprocess(fixture.blue.objectToNode(
                         baseEntry(fixture, BigInteger.ONE, "authority"))
                 .properties("onBehalfOf", authority)
-                .blue(fixture.repository.typeAliasBlue())).blue(null);
-        // When
+                .blue(fixture.repository.importsDirective())).blue(null);
+        // when
         DocumentProcessingResult result = process(fixture, initializedDocument(fixture), event);
-        // Then
+        // then
         assertEquals(ProcessorStatus.SUCCESS, result.status(), blue.coordination.processor.ProcessingResultTestSupport.diagnosticMessage(result));
         assertDirectCheckpointSubject(
                 checkpointEvent(result.document()), BigInteger.ONE);
@@ -526,7 +530,7 @@ class TimelineChannelProcessorTest {
 
     private static Node initializedDocument(Fixture fixture, Map<String, Node> contracts) {
         Node document = new Node()
-                .blue(fixture.repository.typeAliasBlue())
+                .blue(fixture.repository.importsDirective())
                 .name("Timeline V2 Test")
                 .properties("contracts", new Node().properties(contracts));
         DocumentProcessingResult result = fixture.blue.initializeDocument(fixture.blue.preprocess(document));
@@ -545,9 +549,9 @@ class TimelineChannelProcessorTest {
     }
 
     private static Fixture configuredFixture() {
-        BlueRepository repository = BlueRepository.latest();
-        Blue blue = CoordinationTestResources.configuredBlue(repository);
-        CoordinationProcessors.registerWith(blue);
+        BlueRepository repository = BlueRepository.current();
+        CoordinationTestRuntime blue =
+                CoordinationTestResources.configuredBlue(repository);
         return new Fixture(repository, blue);
     }
 
@@ -637,9 +641,11 @@ class TimelineChannelProcessorTest {
 
     private static final class Fixture {
         private final BlueRepository repository;
-        private final Blue blue;
+        private final CoordinationTestRuntime blue;
 
-        private Fixture(BlueRepository repository, Blue blue) {
+        private Fixture(
+                BlueRepository repository,
+                CoordinationTestRuntime blue) {
             this.repository = repository;
             this.blue = blue;
         }

@@ -1,6 +1,5 @@
 package blue.coordination.processor;
 
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.Timeline;
@@ -28,7 +27,7 @@ class TimelineProviderSupportFinalSemanticsTest {
 
     @Test
     void shouldEnsureThatLegacyFilterValidatesOnlyExactImmutableTimelineHeaders() {
-        // Given
+        // given
         Timeline timeline =
                 new Timeline().timelineId("timeline-a");
         PrincipalActor actor =
@@ -36,10 +35,10 @@ class TimelineProviderSupportFinalSemanticsTest {
         TimelineChannel contract = new TimelineChannel()
                 .timeline(timeline)
                 .actor(actor);
-        // When
-        try (Blue blue =
-                     BlueRepository.latest()
-                             .configure(new Blue())) {
+        // when
+        try (CoordinationTestRuntime blue =
+                     CoordinationTestResources.configuredBlue(
+                             BlueRepository.current())) {
             Node matching = entry(
                     blue.objectToNode(timeline),
                     10,
@@ -62,7 +61,7 @@ class TimelineProviderSupportFinalSemanticsTest {
                                     new PrincipalActor()
                                             .accountId("other actor")));
 
-            // Then
+            // then
             assertTrue(TimelineExternalSubscriptionFunctions.INSTANCE.accepts(
                     contract, matching));
             assertFalse(TimelineExternalSubscriptionFunctions.INSTANCE.accepts(
@@ -81,7 +80,7 @@ class TimelineProviderSupportFinalSemanticsTest {
 
     @Test
     void shouldRetainTheExactFixedTimelineCheckpointKey() {
-        // Given
+        // given
         Node exactEntry = entry(
                 "timeline-a",
                 10,
@@ -89,11 +88,11 @@ class TimelineProviderSupportFinalSemanticsTest {
         CoordinationEventNodes.TimelineEntryView view =
                 CoordinationEventNodes.timelineEntry(exactEntry);
 
-        // When
+        // when
         Node subject =
                 TimelineProviderSupport.timelineOrderSubject(view);
 
-        // Then
+        // then
         assertEquals(
                 TimelineExternalSubscriptionFunctions
                         .TIMELINE_ORDER_SUBJECT_VERSION,
@@ -111,27 +110,27 @@ class TimelineProviderSupportFinalSemanticsTest {
 
     @Test
     void shouldNotInventSequenceInCheckpointSubject() {
-        // Given
+        // given
         Node exactEntry =
                 entry("timeline-a", 11,
                         "fixed-shape");
 
-        // When
+        // when
         Node subject =
                 TimelineProviderSupport.timelineOrderSubject(
                         CoordinationEventNodes.timelineEntry(
                                 exactEntry));
 
-        // Then
+        // then
         assertNull(TimelineProviderSupport.property(
                 subject, "sequence"));
     }
 
     @Test
     void shouldEnsureThatCheckpointSubjectSemanticsAreRotatedTogether() {
-        // Given
-        // When
-        // Then
+        // given
+        // when
+        // then
         assertTrue(TimelineExternalSubscriptionFunctions
                 .TIMELINE_ORDER_SUBJECT_VERSION.endsWith("-v3"));
         assertTrue(CompositeTimelineExternalSubscriptionFunctions
@@ -142,18 +141,18 @@ class TimelineProviderSupportFinalSemanticsTest {
 
     @Test
     void shouldPreserveEveryImmutableTimelineEntryHeader() {
-        // Given
+        // given
         Node previous = entry("timeline-a", 9, "previous");
         Node event = entry("timeline-a", 10, "message")
                 .properties("prevEntry", new Node().blueId(
                         TimelineProviderSupport.eventId(previous)))
                 .properties("source", exactReference("source"))
                 .properties("onBehalfOf", exactReference("authority"));
-        // When
+        // when
         CoordinationEventNodes.TimelineEntryView view =
                 CoordinationEventNodes.timelineEntry(event);
 
-        // Then
+        // then
         assertNotNull(view);
         assertEquals(exactBlueId("timeline-a"),
                 view.timeline().getBlueId());
@@ -176,7 +175,7 @@ class TimelineProviderSupportFinalSemanticsTest {
 
     @Test
     void shouldDefensivelyCopyTimelineEntryHeaders() {
-        // Given
+        // given
         Node event = entry(
                 "timeline-a", 10,
                 "message")
@@ -186,12 +185,12 @@ class TimelineProviderSupportFinalSemanticsTest {
         CoordinationEventNodes.TimelineEntryView view =
                 CoordinationEventNodes.timelineEntry(event);
 
-        // When
+        // when
         event.getProperties().remove("source");
         view.timeline().blueId("mutated");
         view.message().value("mutated");
 
-        // Then
+        // then
         assertEquals(exactBlueId("timeline-a"),
                 view.timeline().getBlueId());
         assertEquals(exactBlueId("source"),
@@ -202,13 +201,13 @@ class TimelineProviderSupportFinalSemanticsTest {
 
     @Test
     void shouldEnsureThatCommittedFrontierIsExclusiveAndExactTimelineBound() {
-        // Given
+        // given
         Node timeline = exactReference("timeline-a");
         Node before = entry("timeline-a", 99, "before");
-        // When
+        // when
         Node at = entry("timeline-a", 100, "at");
 
-        // Then
+        // then
         assertTrue(TimelineProviderSupport.isBehindCommittedFrontier(
                 before, timeline, BigInteger.valueOf(100)));
         assertFalse(TimelineProviderSupport.isBehindCommittedFrontier(
@@ -225,14 +224,14 @@ class TimelineProviderSupportFinalSemanticsTest {
 
     @Test
     void shouldEnsureThatPredecessorMustBindExactEntryTimelineAndDefaultOrder() {
-        // Given
+        // given
         Node previous = entry("timeline-a", 10, "previous");
-        // When
+        // when
         Node current = entry("timeline-a", 11, "current")
                 .properties("prevEntry", new Node().blueId(
                         TimelineProviderSupport.eventId(previous)));
 
-        // Then
+        // then
         assertTrue(TimelineProviderSupport.followsExactPredecessor(
                 current, previous));
 
@@ -256,21 +255,21 @@ class TimelineProviderSupportFinalSemanticsTest {
 
     @Test
     void shouldRejectAnEqualTimestampPredecessorEdge() {
-        // Given
+        // given
         Node previous = entry("timeline-a", 10, "previous");
-        // When
+        // when
         Node equalTimestamp = withPredecessor(
                 entry("timeline-a", 10, "equal"),
                 previous);
 
-        // Then
+        // then
         assertFalse(TimelineProviderSupport.followsExactPredecessor(
                 equalTimestamp, previous));
     }
 
     @Test
     void shouldPreserveVerifiedPlatformOrderAcrossTimelines() {
-        // Given
+        // given
         Node timelineA = exactReference("timeline-a");
         Node timelineB = exactReference("timeline-b");
         Node a1 = entry("timeline-a", 100, "A1");
@@ -285,14 +284,14 @@ class TimelineProviderSupportFinalSemanticsTest {
                 timelineB.getBlueId(),
                 BigInteger.valueOf(120));
 
-        // When
+        // when
         TimelineProviderSupport.CompletenessWindow window =
                 TimelineProviderSupport.evaluateCompletenessWindow(
                         Arrays.asList(a1, b1, a2),
                         Arrays.asList(timelineB, timelineA),
                         frontiers);
 
-        // Then
+        // then
         assertTrue(window.ready());
         assertEquals(BigInteger.valueOf(110),
                 window.maximumTimestamp());
@@ -313,7 +312,7 @@ class TimelineProviderSupportFinalSemanticsTest {
 
     @Test
     void shouldRejectEqualTimestampsWithinOneTimelineWindow() {
-        // Given
+        // given
         Node timelineA = exactReference("timeline-a");
         Node first = entry("timeline-a", 100, "first");
         Node second = entry("timeline-a", 100, "second");
@@ -322,7 +321,7 @@ class TimelineProviderSupportFinalSemanticsTest {
                         timelineA.getBlueId(),
                         BigInteger.valueOf(101));
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
@@ -332,14 +331,14 @@ class TimelineProviderSupportFinalSemanticsTest {
                                         Collections.singletonList(timelineA),
                                         frontiers));
 
-        // Then
+        // then
         assertTrue(failure.getMessage().contains(
                 "timestamps must be strictly increasing"));
     }
 
     @Test
     void shouldRejectDecreasingTimestampsWithinOneTimelineWindow() {
-        // Given
+        // given
         Node timelineA = exactReference("timeline-a");
         Node later = entry("timeline-a", 101, "later");
         Node earlier = entry("timeline-a", 100, "earlier");
@@ -348,7 +347,7 @@ class TimelineProviderSupportFinalSemanticsTest {
                         timelineA.getBlueId(),
                         BigInteger.valueOf(102));
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
@@ -358,14 +357,14 @@ class TimelineProviderSupportFinalSemanticsTest {
                                         Collections.singletonList(timelineA),
                                         frontiers));
 
-        // Then
+        // then
         assertTrue(failure.getMessage().contains(
                 "timestamps must be strictly increasing"));
     }
 
     @Test
     void shouldFailClosedForInsufficientCompleteness() {
-        // Given
+        // given
         Node timelineA = exactReference("timeline-a");
         Node timelineB = exactReference("timeline-b");
         Node a1 = entry("timeline-a", 100, "A1");
@@ -379,14 +378,14 @@ class TimelineProviderSupportFinalSemanticsTest {
                 timelineB.getBlueId(),
                 BigInteger.valueOf(80));
 
-        // When
+        // when
         TimelineProviderSupport.CompletenessWindow window =
                 TimelineProviderSupport.evaluateCompletenessWindow(
                         Arrays.asList(a1, b1),
                         Arrays.asList(timelineA, timelineB),
                         frontiers);
 
-        // Then
+        // then
         assertFalse(window.ready());
         assertTrue(window.orderedEntries().isEmpty());
         assertEquals(
@@ -396,7 +395,7 @@ class TimelineProviderSupportFinalSemanticsTest {
 
     @Test
     void shouldRejectInconsistentCompletenessInputs() {
-        // Given
+        // given
         Node timelineA = exactReference("timeline-a");
         Node timelineB = exactReference("timeline-b");
         Node a1 = entry("timeline-a", 100, "A1");
@@ -416,8 +415,8 @@ class TimelineProviderSupportFinalSemanticsTest {
                 exactBlueId("inactive"),
                 BigInteger.valueOf(120));
 
-        // When
-        // Then
+        // when
+        // then
         assertThrows(IllegalArgumentException.class,
                 () -> TimelineProviderSupport
                         .evaluateCompletenessWindow(

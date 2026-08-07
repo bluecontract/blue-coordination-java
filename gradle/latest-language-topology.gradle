@@ -1,0 +1,329 @@
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+
+def topology = project.ext.latestBlueDependencyTopology
+def lock = topology.lock as Properties
+
+def sha256TopologyFile = { File input ->
+    if (input == null || !input.isFile()) {
+        return null
+    }
+    def digest = java.security.MessageDigest.getInstance('SHA-256')
+    input.withInputStream { stream ->
+        byte[] buffer = new byte[8192]
+        int read
+        while ((read = stream.read(buffer)) >= 0) {
+            if (read > 0) {
+                digest.update(buffer, 0, read)
+            }
+        }
+    }
+    digest.digest().encodeHex().toString()
+}
+
+def topologyGit = { File directory, String... arguments ->
+    def command = ['git']
+    command.addAll(arguments as List)
+    def process = new ProcessBuilder(command)
+            .directory(directory)
+            .redirectErrorStream(true)
+            .start()
+    String output = process.inputStream.getText('UTF-8').trim()
+    int exitCode = process.waitFor()
+    if (exitCode != 0) {
+        throw new GradleException(
+                "Git command failed in ${directory}: ${command}\n${output}")
+    }
+    output
+}
+
+def writeTopologyJson = { File target, Object value ->
+    target.parentFile.mkdirs()
+    target.setText(
+            JsonOutput.prettyPrint(JsonOutput.toJson(value)) + '\n',
+            'UTF-8')
+}
+
+def siblingInputReport = layout.buildDirectory.file(
+        'reports/latest-language-embedded-collections/sibling-inputs.json')
+def dependencyLockReport = layout.buildDirectory.file(
+        'reports/latest-language-embedded-collections/'
+                + 'resolved-dependency-lock.json')
+
+def verifyLatestBlueSiblingInputs =
+        tasks.register('verifyLatestBlueSiblingInputs') {
+    group = 'verification'
+    description = 'Verifies published Language 3.1.0-rc.20 and exact local BEX/Repository inputs.'
+    dependsOn tasks.named('verifyLocalRepositoryReceipt')
+    inputs.files(topology.lockFile)
+    inputs.file(System.getProperty(
+            'org.gradle.project.blueRepositoryConsumerReceiptPath'))
+    outputs.file(siblingInputReport)
+    outputs.upToDateWhen { false }
+    doLast {
+        def failures = []
+        File bexRoot = topology.bexRoot as File
+        File repositoryRoot = topology.repositorySourceRoot as File
+        String bexHead = topologyGit(bexRoot, 'rev-parse', 'HEAD')
+        String repositoryHead = topologyGit(
+                repositoryRoot, 'rev-parse', 'HEAD')
+        if (bexHead != lock.blueBexCommit) {
+            failures.add('BEX HEAD differs from the lock')
+        }
+        if (topologyGit(
+                bexRoot,
+                'status',
+                '--porcelain',
+                '--untracked-files=no')) {
+            failures.add('BEX working tree is not clean')
+        }
+        if (repositoryHead != lock.blueRepositoryCommit) {
+            failures.add('Repository HEAD differs from the lock')
+        }
+        File repositoryReceiptFile = file(System.getProperty(
+                'org.gradle.project.blueRepositoryConsumerReceiptPath'))
+        def repositoryReceipt = new JsonSlurper().parse(
+                repositoryReceiptFile)
+        if (repositoryReceipt.workingReady != true
+                || repositoryReceipt.repositoryBlueId
+                != lock.blueRepositoryBlueId
+                || repositoryReceipt.relevantSourceTreeSha256
+                != lock.blueRepositoryRelevantSourceTreeSha256
+                || repositoryReceipt.sourceSha256
+                != lock.blueRepositorySourceSha256
+                || repositoryReceipt.manifestSha256
+                != lock.blueRepositoryManifestSha256
+                || sha256TopologyFile(repositoryReceiptFile)
+                != lock.blueRepositoryConsumerReceiptSha256
+                || repositoryReceipt.failures != []) {
+            failures.add('Repository consumer receipt differs from the lock')
+        }
+        def languageCoordinates = [
+                lock.blueLanguageModelCoordinate,
+                lock.blueLanguageCoreCoordinate,
+                lock.blueLanguageMappingCoordinate,
+                lock.blueLanguageIpfsCoordinate,
+                lock.blueContractsCoreCoordinate,
+                lock.blueLanguageAggregateCoordinate,
+                "blue.language:blue-conformance:${lock.blueLanguageVersion}"
+        ]
+        if (lock.blueLanguageVersion != '3.1.0-rc.20'
+                || languageCoordinates.any {
+            !it.toString().endsWith(':3.1.0-rc.20')
+        }) {
+            failures.add('Language coordinates are not exactly 3.1.0-rc.20')
+        }
+        def report = [
+                schema            :
+                        'blue-coordination/latest-blue-sibling-inputs/1.0',
+                status            : failures.isEmpty()
+                        ? 'verified' : 'failed',
+                dependencyMode    : 'published-language-local-bex-repository',
+                language          : [
+                        source               : 'published-artifact',
+                        version              : lock.blueLanguageVersion,
+                        coordinates          : languageCoordinates,
+                        adjacentCheckoutUsed : false
+                ],
+                bex               : [
+                        source      : 'local-composite',
+                        commit      : bexHead,
+                        version     : lock.blueBexVersion,
+                        dirty       : false,
+                        workingReady: true
+                ],
+                repository        : [
+                        source                  : 'local-verified-artifact',
+                        commit                  : repositoryHead,
+                        repositoryBlueId        :
+                                repositoryReceipt.repositoryBlueId,
+                        relevantSourceTreeSha256:
+                                repositoryReceipt.relevantSourceTreeSha256,
+                        sourceSha256            :
+                                repositoryReceipt.sourceSha256,
+                        manifestSha256          :
+                                repositoryReceipt.manifestSha256,
+                        consumerReceiptSha256   :
+                                sha256TopologyFile(repositoryReceiptFile),
+                        jarSha256               : lock.blueRepositoryJarSha256,
+                        workingReady            : true
+                ],
+                packageIdentities : [
+                        languageRegistry : lock.blueLanguageRegistrySha256,
+                        languageFixtures : lock.blueLanguageFixturesSha256,
+                        contractsRegistry: lock.blueContractsRegistrySha256,
+                        contractsFixtures: lock.blueContractsFixturesSha256,
+                        contractsGas     : lock.blueContractsGasSha256,
+                        bexRuntimeRegistry:
+                                lock.blueBexRuntimeRegistrySha256,
+                        bexGasManifest   : lock.blueBexGasManifestSha256,
+                        bexFixtures      : lock.blueBexFixturePackageSha256
+                ],
+                failures          : failures
+        ]
+        writeTopologyJson(siblingInputReport.get().asFile, report)
+        if (!failures.isEmpty()) {
+            throw new GradleException(
+                    "Blue input verification failed: ${failures}")
+        }
+    }
+}
+
+def writeLatestBlueDependencyLock =
+        tasks.register('writeLatestBlueDependencyLock') {
+    group = 'verification'
+    description = 'Resolves and verifies the focused published-Language/local-BEX/local-Repository runtime graph.'
+    dependsOn verifyLatestBlueSiblingInputs,
+            configurations.runtimeClasspath
+    inputs.file(siblingInputReport)
+    outputs.file(dependencyLockReport)
+    outputs.upToDateWhen { false }
+    doLast {
+        def expected = [
+                'blue.language:blue-language-model': [
+                        version: lock.blueLanguageVersion,
+                        kind   : 'module',
+                        hash   : lock.blueLanguageModelJarSha256],
+                'blue.language:blue-language-core': [
+                        version: lock.blueLanguageVersion,
+                        kind   : 'module',
+                        hash   : lock.blueLanguageCoreJarSha256],
+                'blue.language:blue-language-mapping': [
+                        version: lock.blueLanguageVersion,
+                        kind   : 'module',
+                        hash   : lock.blueLanguageMappingJarSha256],
+                'blue.language:blue-contracts-core': [
+                        version: lock.blueLanguageVersion,
+                        kind   : 'module',
+                        hash   : lock.blueContractsCoreJarSha256],
+                'blue.bex:blue-bex-core': [
+                        version: lock.blueBexLocalVersion,
+                        kind   : 'project',
+                        project: ':blue-bex-core',
+                        hash   : lock.blueBexCoreJarSha256],
+                'blue.bex:blue-bex-contracts': [
+                        version: lock.blueBexLocalVersion,
+                        kind   : 'project',
+                        project: ':blue-bex-contracts',
+                        hash   : lock.blueBexContractsJarSha256],
+                'blue.repo:blue-repo-java': [
+                        version: lock.blueRepositoryLocalVersion,
+                        kind   : 'module',
+                        hash   : lock.blueRepositoryJarSha256]
+        ]
+        def components = new TreeMap<String, Object>()
+        configurations.runtimeClasspath.incoming.resolutionResult
+                .allComponents.each { component ->
+            def id = component.id
+            String coordinate = null
+            def details = [:]
+            if (id instanceof ModuleComponentIdentifier
+                    && ['blue.language', 'blue.repo', 'blue.bex']
+                    .contains(id.group)) {
+                coordinate = "${id.group}:${id.module}"
+                details = [
+                        componentType : id.class.name,
+                        selectedVersion: id.version,
+                        source        : id.group == 'blue.language'
+                                ? 'published-artifact'
+                                : 'local-artifact'
+                ]
+            } else if (id instanceof ProjectComponentIdentifier
+                    && id.projectPath in [
+                    ':blue-bex-core', ':blue-bex-contracts']) {
+                coordinate = 'blue.bex:' + id.projectName
+                details = [
+                        componentType : id.class.name,
+                        selectedVersion: lock.blueBexLocalVersion,
+                        buildPath     : ':blue-bex-java',
+                        projectPath   : id.projectPath,
+                        source        : 'local-composite'
+                ]
+            }
+            if (coordinate != null) {
+                components[coordinate] = details
+            }
+        }
+        def artifacts = new TreeMap<String, Object>()
+        configurations.runtimeClasspath.incoming.artifactView { }.artifacts
+                .artifacts.each { artifact ->
+            def id = artifact.id.componentIdentifier
+            String coordinate = null
+            if (id instanceof ModuleComponentIdentifier
+                    && ['blue.language', 'blue.repo', 'blue.bex']
+                    .contains(id.group)) {
+                coordinate = "${id.group}:${id.module}"
+            } else if (id instanceof ProjectComponentIdentifier
+                    && id.projectPath in [
+                    ':blue-bex-core', ':blue-bex-contracts']) {
+                coordinate = 'blue.bex:' + id.projectName
+            }
+            if (coordinate != null) {
+                artifacts[coordinate] = [
+                        fileName: artifact.file.name,
+                        sha256  : sha256TopologyFile(artifact.file)
+                ]
+            }
+        }
+        def failures = []
+        if ((components.keySet() as Set) != (expected.keySet() as Set)) {
+            failures.add('Resolved Blue components differ from the focused seven-component graph')
+        }
+        if ((artifacts.keySet() as Set) != (expected.keySet() as Set)) {
+            failures.add('Resolved Blue artifacts differ from the focused seven-component graph')
+        }
+        expected.each { coordinate, requirement ->
+            def component = components[coordinate]
+            def artifact = artifacts[coordinate]
+            if (component == null || artifact == null) {
+                return
+            }
+            if (component.selectedVersion != requirement.version) {
+                failures.add("${coordinate} selected ${component.selectedVersion}; expected ${requirement.version}")
+            }
+            if (requirement.kind == 'module'
+                    && !component.componentType.toString()
+                    .endsWith('ModuleComponentIdentifier')) {
+                failures.add("${coordinate} was not a module component")
+            }
+            if (requirement.kind == 'project'
+                    && (!component.componentType.toString()
+                    .endsWith('ProjectComponentIdentifier')
+                    || component.projectPath != requirement.project)) {
+                failures.add("${coordinate} was not the required local BEX project")
+            }
+            if (artifact.sha256 != requirement.hash) {
+                failures.add("${coordinate} artifact digest differs from the lock")
+            }
+        }
+        def report = [
+                schema              :
+                        'blue-coordination/latest-blue-dependency-lock/1.0',
+                status              : failures.isEmpty()
+                        ? 'verified' : 'failed',
+                mode                :
+                        'published-language-local-bex-repository',
+                configuration       : 'runtimeClasspath',
+                resolvedComponents  : components,
+                artifacts           : artifacts,
+                aggregateRetention  : [
+                        language: 'not-selected',
+                        bex     : 'not-selected'],
+                siblingInputReceipt : [
+                        sha256: sha256TopologyFile(
+                                siblingInputReport.get().asFile)],
+                failures            : failures
+        ]
+        writeTopologyJson(dependencyLockReport.get().asFile, report)
+        if (!failures.isEmpty()) {
+            throw new GradleException(
+                    "Blue dependency topology failed: ${failures}")
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn writeLatestBlueDependencyLock
+}

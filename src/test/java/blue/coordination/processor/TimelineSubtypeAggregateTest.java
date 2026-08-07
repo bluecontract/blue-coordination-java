@@ -1,6 +1,5 @@
 package blue.coordination.processor;
 
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorStatus;
@@ -30,7 +29,7 @@ class TimelineSubtypeAggregateTest {
 
     @Test
     void shouldIncludeGeneratedMyosMembersInCompositeAndCoalesceTheirDelivery() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = subtypeCatalog(fixture);
         contracts.put(
@@ -47,12 +46,12 @@ class TimelineSubtypeAggregateTest {
                 fixedHandler("aggregate", "composite-delivery"));
         Node initialized = initializedDocument(fixture, contracts);
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.blue.processDocument(
                 initialized,
                 myosEntry(fixture, BigInteger.TEN));
 
-        // Then
+        // then
         assertEquals(
                 ProcessorStatus.SUCCESS,
                 result.status(),
@@ -81,7 +80,7 @@ class TimelineSubtypeAggregateTest {
 
     @Test
     void shouldIncludeGeneratedMyosMembersInAllTimelinesAndExcludeUnrelatedChannels() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Map<String, Node> contracts = subtypeCatalog(fixture);
         contracts.put(
@@ -93,12 +92,12 @@ class TimelineSubtypeAggregateTest {
                 fixedHandler("aggregate", "all-delivery"));
         Node initialized = initializedDocument(fixture, contracts);
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.blue.processDocument(
                 initialized,
                 myosEntry(fixture, BigInteger.ONE));
 
-        // Then
+        // then
         assertEquals(
                 ProcessorStatus.SUCCESS,
                 result.status(),
@@ -188,7 +187,7 @@ class TimelineSubtypeAggregateTest {
                         "message",
                         TestTimelineProvider.chatMessage(
                                 "source"))
-                .blue(fixture.repository.typeAliasBlue());
+                .blue(fixture.repository.importsDirective());
         return fixture.blue.preprocess(event).blue(null);
     }
 
@@ -217,7 +216,7 @@ class TimelineSubtypeAggregateTest {
             Fixture fixture,
             Map<String, Node> contracts) {
         Node document = new Node()
-                .blue(fixture.repository.typeAliasBlue())
+                .blue(fixture.repository.importsDirective())
                 .name("Timeline subtype aggregate test")
                 .properties(
                         "contracts",
@@ -293,24 +292,21 @@ class TimelineSubtypeAggregateTest {
 
     private static Fixture configuredFixture() {
         BlueRepository repository =
-                BlueRepository.latest();
-        Blue blue =
+                BlueRepository.current();
+        CoordinationTestRuntime blue =
                 CoordinationTestResources
                         .configuredBlue(repository);
-        CoordinationProcessors.registerWith(blue);
-        CoordinationProcessors.registerTimelineSubtype(
-                blue,
-                MyOSTimelineChannel.class);
+        blue.registerTimelineSubtype(MyOSTimelineChannel.class);
         return new Fixture(repository, blue);
     }
 
     private static final class Fixture {
         private final BlueRepository repository;
-        private final Blue blue;
+        private final CoordinationTestRuntime blue;
 
         private Fixture(
                 BlueRepository repository,
-                Blue blue) {
+                CoordinationTestRuntime blue) {
             this.repository = repository;
             this.blue = blue;
         }

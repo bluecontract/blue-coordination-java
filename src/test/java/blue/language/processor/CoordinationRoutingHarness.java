@@ -1,13 +1,12 @@
 package blue.language.processor;
 
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.util.PointerUtils;
 import blue.language.processor.util.ProcessorContractConstants;
 import blue.language.snapshot.FrozenNode;
-import blue.language.snapshot.ResolvedSnapshot;
-import blue.language.utils.BlueIdCalculator;
-import blue.language.utils.JsonPointer;
+import blue.language.merge.ResolvedSnapshot;
+import blue.language.identity.DirectBlueIdCalculator;
+import blue.language.model.wire.JsonPointer;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -33,12 +32,6 @@ public final class CoordinationRoutingHarness {
                             1));
 
     private CoordinationRoutingHarness() {
-    }
-
-    public static ProcessingSnapshotManager snapshotManager(
-            Blue language) {
-        return language.getDocumentProcessor()
-                .snapshotManager();
     }
 
     public static DocumentProcessingResult process(
@@ -172,6 +165,8 @@ public final class CoordinationRoutingHarness {
                 contractSurfaceEvent,
                 "contractSurfaceEvent");
         Objects.requireNonNull(boundEvent, "boundEvent");
+        ProcessingSnapshotManager snapshotManager =
+                processor.snapshotManager();
         ResolvedSnapshot snapshot =
                 snapshotPreservingExecutableBodies(
                         processor,
@@ -218,8 +213,7 @@ public final class CoordinationRoutingHarness {
                                                 .contractConverter(),
                                         ExternalChannelFunctionEvaluation
                                                 .verifiedMatcherSessions(
-                                                        processor
-                                                                .snapshotManager()),
+                                                snapshotManager),
                                         bundle,
                                         contract,
                                         contractSurfaceEvent,
@@ -452,8 +446,12 @@ public final class CoordinationRoutingHarness {
             Node document,
             Node event,
             String sourceKey) {
+        ProcessingSnapshotManager snapshotManager =
+                Objects.requireNonNull(
+                        processor.snapshotManager(),
+                        "routing projection snapshot manager");
         ResolvedSnapshot snapshot =
-                processor.snapshotManager()
+                snapshotManager
                         .fromDocumentTransient(document);
         ContractBundle bundle =
                 processor.contractLoader()
@@ -679,7 +677,7 @@ public final class CoordinationRoutingHarness {
                             + "contract-surface content");
         }
         try {
-            BlueIdCalculator.calculateBlueId(
+            DirectBlueIdCalculator.calculateBlueId(
                     exactContractSurface);
         } catch (IllegalArgumentException mixedForm) {
             throw new IllegalArgumentException(
@@ -689,7 +687,7 @@ public final class CoordinationRoutingHarness {
                     mixedForm);
         }
         EffectiveFragmentationCatalog catalog =
-                processor.effectiveFragmentationCatalog(
+                processor.administration().effectiveFragmentationCatalog(
                         exactContractSurface);
         Set<String> executableBodyPaths =
                 new LinkedHashSet<String>();
@@ -793,9 +791,8 @@ public final class CoordinationRoutingHarness {
         result.put(
                 "processorManaged",
                 Boolean.valueOf(
-                        ProcessorContractConstants
-                                .isProcessorManagedChannel(
-                                        binding.contract())));
+                        ProcessorManagedChannelTypes.contains(
+                                binding.contract())));
         result.put(
                 "order",
                 Integer.valueOf(binding.order()));

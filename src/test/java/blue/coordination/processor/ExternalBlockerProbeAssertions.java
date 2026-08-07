@@ -9,7 +9,7 @@ import blue.language.processor.ProcessingTraceConstants;
 import blue.language.processor.ProcessingTraceRecord;
 import blue.language.processor.ProcessorErrorCategory;
 import blue.language.processor.ProcessorStatus;
-import blue.language.utils.BlueIdCalculator;
+import blue.language.identity.DirectBlueIdCalculator;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -100,40 +100,6 @@ public final class ExternalBlockerProbeAssertions {
                 : null)
                 + ", events=" + result.events().size()
                 + ", gas=" + result.totalGas();
-    }
-
-    public static void classifyHostedSemanticOutput(
-            DocumentProcessingResult result,
-            Node invocationInput,
-            String context) {
-        boolean exactRollback =
-                result != null
-                        && invocationInput != null
-                        && result.document() != null
-                        && BlueIdCalculator.calculateBlueId(
-                        invocationInput)
-                        .equals(
-                                BlueIdCalculator.calculateBlueId(
-                                        result.document()));
-        boolean exactDefect =
-                exactDiagnostic(
-                        result,
-                        ProcessorStatus.RUNTIME_FATAL,
-                        ProcessorErrorCategory
-                                .InvalidProcessingDocument,
-                        "Hosted runtime output is not valid exact Blue content")
-                        && result.events().isEmpty()
-                        && exactRollback;
-        classify(
-                "hosted-bex-semantic-output-provenance",
-                "Language hosted BEX semantic-output provenance defect:",
-                exactDefect,
-                result != null
-                        && result.status()
-                        == ProcessorStatus.SUCCESS,
-                context + ": " + resultTuple(result)
-                        + ", rolledBackToInput="
-                        + exactRollback);
     }
 
     public static void classifyImplicitInitializationFailure(
@@ -256,7 +222,7 @@ public final class ExternalBlockerProbeAssertions {
                                 + sourceKey + "/subject");
         String persistedSubjectBlueId =
                 persistedSubject != null
-                        ? BlueIdCalculator.calculateBlueId(
+                        ? DirectBlueIdCalculator.calculateBlueId(
                         persistedSubject)
                         : null;
         boolean repairedPath =

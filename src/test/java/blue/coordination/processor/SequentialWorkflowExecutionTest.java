@@ -1,5 +1,7 @@
 package blue.coordination.processor;
 
+import blue.language.processor.CoordinationRoutingHarness;
+
 import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationProcessors;
 import blue.coordination.processor.bex.BexProcessingMetrics;
@@ -8,18 +10,15 @@ import blue.coordination.processor.workflow.StepExecutionContext;
 import blue.coordination.processor.workflow.UpdateDocumentStepExecutor;
 import blue.coordination.processor.workflow.WorkflowStepExecutor;
 import blue.coordination.processor.workflow.WorkflowStepResult;
-import blue.language.Blue;
 import blue.language.model.Node;
-import blue.language.processor.CoordinationConfiguredProcessorFactory;
-import blue.language.processor.CoordinationRoutingHarness;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.DocumentProcessor;
 import blue.language.processor.ProcessingDebugResult;
 import blue.language.processor.ProcessorStatus;
 import blue.language.processor.VerifiedExecutionEvidence;
 import blue.language.snapshot.FrozenNode;
-import blue.language.snapshot.ResolvedSnapshot;
-import blue.language.utils.BlueIdCalculator;
+import blue.language.merge.ResolvedSnapshot;
+import blue.language.identity.DirectBlueIdCalculator;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.ChatMessage;
 import blue.repo.coordination.SequentialWorkflowStep;
@@ -43,7 +42,7 @@ class SequentialWorkflowExecutionTest {
 
     @Test
     void shouldExecuteNamedOperationRequestHandlerAndWorkflowStep() {
-        // Given
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         CoordinationProcessorOptions options =
                 CoordinationProcessorOptions.builder()
@@ -61,12 +60,12 @@ class SequentialWorkflowExecutionTest {
                 "increment",
                 new Node().value(7));
 
-        // When
+        // when
         DocumentProcessingResult result =
                 fixture.blue.processDocument(
                         document, event);
 
-        // Then
+        // then
         assertEquals(
                 ProcessorStatus.SUCCESS,
                 result.status(),
@@ -86,63 +85,63 @@ class SequentialWorkflowExecutionTest {
 
     @Test
     void shouldDeriveAndMatchOperationRequestForWorkflowOperation() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, counterDocument(fixture.repository, 0, true));
 
-        // When
+        // when
         Node processed = processOperationRequest(fixture, document, "owner", 1, "increment", 7);
 
-        // Then
+        // then
         assertCounter(processed, 7);
     }
 
     @Test
     void shouldNotRunForWrongOperation() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, counterDocument(fixture.repository, 0, false));
 
-        // When
+        // when
         Node processed = processOperationRequest(fixture, document, "owner", 1, "decrement", 7);
 
-        // Then
+        // then
         assertCounter(processed, 0);
     }
 
     @Test
     void shouldNotRunForWrongRequestType() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, counterDocument(fixture.repository, 0, true));
 
         Node event = operationRequestEvent(fixture, "owner", 1, "increment", new Node().value("text"));
 
-        // When
+        // when
         Node processed = fixture.blue.processDocument(document, event).document();
 
-        // Then
+        // then
         assertCounter(processed, 0);
     }
 
     @Test
     void shouldNotRunDuplicateRequestTwice() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, counterDocument(fixture.repository, 0, true));
         Node event = operationRequestEvent(fixture, "owner", 1, "increment", new Node().value(7));
 
-        // When
+        // when
         Node afterFirst = fixture.blue.processDocument(document, event).document();
         Node afterSecond = fixture.blue.processDocument(afterFirst, event).document();
 
-        // Then
+        // then
         assertCounter(afterSecond, 7);
     }
 
     @Test
     void shouldRunNewerRequestAfterPreviousRequest() {
-        // Given
+        // given
         Node firstIncrement = new Node().value(7);
         BexProcessingMetrics metrics =
                 new BexProcessingMetrics();
@@ -161,7 +160,7 @@ class SequentialWorkflowExecutionTest {
                 fixture,
                 contractSurface);
         ProcessingDebugResult firstExecution =
-                fixture.blue.getDocumentProcessor()
+                fixture.blue.processor()
                         .processDocumentWithTrace(
                                 document,
                                 operationRequestEvent(
@@ -196,7 +195,7 @@ class SequentialWorkflowExecutionTest {
                 resolvedCounter,
                 "resulting snapshot must retain resolved /counter");
         assertEquals(
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         firstIncrement),
                 canonicalCounter.blueId(),
                 "canonical /counter must retain the first result identity");
@@ -218,7 +217,7 @@ class SequentialWorkflowExecutionTest {
                 new Node().value(5));
         VerifiedExecutionEvidence secondEvidence =
                 CoordinationRoutingHarness.evidence(
-                        fixture.blue.getDocumentProcessor(),
+                        fixture.blue.processor(),
                         afterFirstSnapshot.canonicalRoot(),
                         afterFirstSnapshot.canonicalRoot(),
                         secondEvent,
@@ -228,7 +227,7 @@ class SequentialWorkflowExecutionTest {
         BexProcessingMetrics.Snapshot beforeSecond =
                 metrics.snapshot();
 
-        // When
+        // when
         DocumentProcessingResult secondResult;
         try (DocumentProcessor secondProcessor =
                      CoordinationConfiguredProcessorFactory
@@ -245,7 +244,7 @@ class SequentialWorkflowExecutionTest {
         }
         Node afterSecond = secondResult.document();
 
-        // Then
+        // then
         assertEquals(
                 ProcessorStatus.SUCCESS,
                 secondResult.status(),
@@ -296,61 +295,61 @@ class SequentialWorkflowExecutionTest {
 
     @Test
     void shouldDecrementCounterWithCompute() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, counterDocument(fixture.repository, 10, true));
 
-        // When
+        // when
         Node processed = processOperationRequest(fixture, document, "owner", 1, "decrement", 3);
 
-        // Then
+        // then
         assertCounter(processed, 7);
     }
 
     @Test
     void shouldExposePreviousStateToLaterComputeSteps() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, doubleIncrementDocument(fixture.repository));
 
-        // When
+        // when
         Node processed = processOperationRequest(fixture, document, "owner", 1, "increment", 2);
 
-        // Then
+        // then
         assertCounter(processed, 4);
     }
 
     @Test
     void shouldExecuteUpdateDocumentInDirectWorkflow() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, directWorkflowDocument(fixture.repository));
         Node event = chatTimelineEntry(fixture, "owner", 1, "run");
 
-        // When
+        // when
         Node processed = fixture.blue.processDocument(document, event).document();
 
-        // Then
+        // then
         assertCounter(processed, 5);
     }
 
     @Test
     void shouldFailExplicitlyForUnsupportedStep() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, unsupportedStepDocument(fixture.repository));
         Node event = chatTimelineEntry(fixture, "owner", 1, "run");
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.blue.processDocument(document, event);
 
-        // Then
+        // then
         assertRuntimeFatal(result, "Unsupported sequential workflow step");
     }
 
     @Test
     void shouldInjectWorkflowRunnerFromProcessorOptions() {
-        // Given
+        // given
         WorkflowStepExecutor<UpdateDocument> injectedExecutor = new WorkflowStepExecutor<UpdateDocument>() {
             @Override
             public boolean supports(SequentialWorkflowStep step) {
@@ -374,7 +373,7 @@ class SequentialWorkflowExecutionTest {
                 0,
                 new Node().value(1)));
 
-        // When
+        // when
         DocumentProcessingResult result = processOperationRequestResult(fixture,
                 document,
                 "owner",
@@ -382,28 +381,28 @@ class SequentialWorkflowExecutionTest {
                 "increment",
                 new Node().value(7));
 
-        // Then
+        // then
         assertRuntimeFatal(result, "injected runner");
     }
 
     @Test
     void shouldPassThroughLiteralUpdateValues() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, staticUpdateDocument(fixture.repository,
                 0,
                 new Node().properties("nested", new Node().value(true))));
 
-        // When
+        // when
         Node processed = processOperationRequest(fixture, document, "owner", 1, "increment", 7);
 
-        // Then
+        // then
         assertEquals(Boolean.TRUE, processed.get("/counter/nested"));
     }
 
     @Test
     void shouldCollectStepResults() {
-        // Given
+        // given
         final AtomicReference<Map<String, Object>> seenResults = new AtomicReference<Map<String, Object>>();
         WorkflowStepExecutor<UpdateDocument> first = new WorkflowStepExecutor<UpdateDocument>() {
             @Override
@@ -434,27 +433,27 @@ class SequentialWorkflowExecutionTest {
         Node document = initializedDocument(fixture, stepResultsDocument(fixture.repository));
         Node event = chatTimelineEntry(fixture, "owner", 1, "run");
 
-        // When
+        // when
         fixture.blue.processDocument(document, event);
 
-        // Then
+        // then
         assertEquals(1, seenResults.get().size());
         assertEquals("a", seenResults.get().get("Step1"));
     }
 
     @Test
     void shouldResolvePatchPathAgainstEmbeddedScope() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, embeddedScopeDocument(fixture.repository));
         Node event = operationRequestEvent(fixture, "owner", 1, "increment", new Node().value(7));
 
-        // When
+        // when
         DocumentProcessingResult result =
                 fixture.blue.processDocument(document, event);
         Node processed = result.document();
 
-        // Then
+        // then
         assertEquals(ProcessorStatus.SUCCESS,
                 result.status(),
                 blue.coordination.processor.ProcessingResultTestSupport
@@ -471,27 +470,21 @@ class SequentialWorkflowExecutionTest {
 
     @Test
     void shouldExposeUpdatedDocumentToComputeEventStep() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, directWorkflowStepsDocument(fixture.repository,
                 0,
                 updateDocumentStep("replace", "/counter", new Node().value(5)),
                 computeAppendChatMessageStep(bexConcat(new Node().value("counter is "), bexText(bexDocument("/counter"))))));
 
-        // When
+        // when
         DocumentProcessingResult result = processChat(fixture, document, "owner", 1, "run");
 
-        // Then
-        ExternalBlockerProbeAssertions
-                .classifyHostedSemanticOutput(
-                        result,
-                        document,
-                        "Compute event after Update Document");
+        // then
         assertEquals(
                 ProcessorStatus.SUCCESS,
                 result.status(),
-                "Language hosted BEX semantic-output provenance defect: "
-                        + blue.coordination.processor
+                blue.coordination.processor
                         .ProcessingResultTestSupport
                         .diagnosticMessage(result));
         assertCounter(result.document(), 5);
@@ -500,22 +493,22 @@ class SequentialWorkflowExecutionTest {
 
     @Test
     void shouldEmitEventFromTriggerEventStep() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, directWorkflowStepsDocument(fixture.repository,
                 0,
                 triggerEventStep("Workflow finished")));
 
-        // When
+        // when
         DocumentProcessingResult result = processChat(fixture, document, "owner", 1, "run");
 
-        // Then
+        // then
         assertTriggeredChatMessage(result, "Workflow finished");
     }
 
     @Test
     void shouldEmitChatMessageFromFullCounterWorkflow() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, counterWorkflowDocument(fixture.repository,
                 0,
@@ -526,7 +519,7 @@ class SequentialWorkflowExecutionTest {
                         new Node().value(" and is now "),
                         bexText(bexDocument("/counter"))))));
 
-        // When
+        // when
         DocumentProcessingResult result = processOperationRequestResult(fixture,
                 document,
                 "owner",
@@ -534,17 +527,11 @@ class SequentialWorkflowExecutionTest {
                 "increment",
                 new Node().value(7));
 
-        // Then
-        ExternalBlockerProbeAssertions
-                .classifyHostedSemanticOutput(
-                        result,
-                        document,
-                        "full counter workflow event");
+        // then
         assertEquals(
                 ProcessorStatus.SUCCESS,
                 result.status(),
-                "Language hosted BEX semantic-output provenance defect: "
-                        + blue.coordination.processor
+                blue.coordination.processor
                         .ProcessingResultTestSupport
                         .diagnosticMessage(result));
         assertCounter(result.document(), 7);
@@ -553,7 +540,7 @@ class SequentialWorkflowExecutionTest {
 
     @Test
     void shouldNotCreateStepResultForUpdateDocument() {
-        // Given
+        // given
         final AtomicReference<Integer> seenResultCount = new AtomicReference<Integer>();
         WorkflowStepExecutor<TriggerEvent> inspectStep = new WorkflowStepExecutor<TriggerEvent>() {
             @Override
@@ -577,17 +564,17 @@ class SequentialWorkflowExecutionTest {
                 updateDocumentStep("replace", "/counter", new Node().value(3)),
                 triggerEventStep("ignored").name("Inspect")));
 
-        // When
+        // when
         Node processed = processChat(fixture, document, "owner", 1, "run").document();
 
-        // Then
+        // then
         assertCounter(processed, 3);
         assertEquals(Integer.valueOf(0), seenResultCount.get());
     }
 
     @Test
     void shouldPreserveNullStepResult() {
-        // Given
+        // given
         final AtomicReference<Boolean> sawNullResult = new AtomicReference<Boolean>();
         final AtomicReference<Boolean> firstCall = new AtomicReference<Boolean>(Boolean.TRUE);
         WorkflowStepExecutor<TriggerEvent> executor = new WorkflowStepExecutor<TriggerEvent>() {
@@ -616,17 +603,17 @@ class SequentialWorkflowExecutionTest {
                 triggerEventStep("ignored").name("MaybeNull"),
                 triggerEventStep("inspect").name("Inspect")));
 
-        // When
+        // when
         Node processed = processChat(fixture, document, "owner", 1, "run").document();
 
-        // Then
+        // then
         assertCounter(processed, 0);
         assertEquals(Boolean.TRUE, sawNullResult.get());
     }
 
     @Test
     void shouldReuseExactWorkflowPlanAndReplanChangedContract() {
-        // Given
+        // given
         AtomicInteger supportsCalls = new AtomicInteger();
         WorkflowStepExecutor<TriggerEvent> executor = new WorkflowStepExecutor<TriggerEvent>() {
             @Override
@@ -644,7 +631,7 @@ class SequentialWorkflowExecutionTest {
                 Arrays.<WorkflowStepExecutor<? extends SequentialWorkflowStep>>asList(executor));
         Fixture fixture = configuredFixture(null, runner);
 
-        // When
+        // when
         Node first = initializedDocument(fixture, directWorkflowStepsDocument(fixture.repository,
                 0,
                 "same contract",
@@ -662,7 +649,7 @@ class SequentialWorkflowExecutionTest {
                 triggerEventStep("ignored")));
         processChat(fixture, changed, "owner", 1, "run");
 
-        // Then
+        // then
         assertEquals(2, supportsCalls.get());
         assertEquals(2, runner.workflowPlanCacheSize());
         assertTrue(runner.workflowPlanCacheWeightBytes() > 0L);
@@ -805,7 +792,7 @@ class SequentialWorkflowExecutionTest {
                 .properties("paths", new Node().items(new Node().value("/child"))));
 
         return new Node()
-                .blue(repository.typeAliasBlue())
+                .blue(repository.importsDirective())
                 .name("Root")
                 .properties("counter", new Node().value(100))
                 .properties("child", new Node()
@@ -905,7 +892,7 @@ class SequentialWorkflowExecutionTest {
 
     private static Node document(BlueRepository repository, Node counter, Map<String, Node> contracts) {
         return new Node()
-                .blue(repository.typeAliasBlue())
+                .blue(repository.importsDirective())
                 .name("Counter")
                 .properties("counter", counter)
                 .properties("contracts", new Node().properties(contracts));
@@ -943,36 +930,41 @@ class SequentialWorkflowExecutionTest {
     }
 
     private static Fixture configuredFixture() {
-        BlueRepository repository = BlueRepository.latest();
-        Blue blue = CoordinationTestResources.configuredBlue(repository);
-        CoordinationProcessors.registerWith(blue);
+        BlueRepository repository = BlueRepository.current();
+        CoordinationTestRuntime blue =
+                CoordinationTestResources.configuredBlue(repository);
         return new Fixture(repository, blue);
     }
 
     private static Fixture configuredFixture(CoordinationProcessorOptions options) {
-        BlueRepository repository = BlueRepository.latest();
-        Blue blue = CoordinationTestResources.configuredBlue(repository);
-        CoordinationProcessors.registerWith(blue, options);
+        BlueRepository repository = BlueRepository.current();
+        CoordinationTestRuntime blue =
+                CoordinationTestResources.configuredBlue(repository);
+        blue.configure(options);
         return new Fixture(repository, blue);
     }
 
     private static Fixture configuredCoordinationFixture(CoordinationProcessorOptions options) {
-        BlueRepository repository = BlueRepository.latest();
-        Blue blue = CoordinationTestResources.configuredBlue(repository);
-        CoordinationProcessors.registerWith(blue, options);
+        BlueRepository repository = BlueRepository.current();
+        CoordinationTestRuntime blue =
+                CoordinationTestResources.configuredBlue(repository);
+        blue.configure(options);
         return new Fixture(repository, blue);
     }
 
     private static Fixture configuredFixture(SequentialWorkflowRunner operationRunner,
                                              SequentialWorkflowRunner directRunner) {
-        Fixture fixture = configuredFixture();
-        if (operationRunner != null) {
-            fixture.blue.registerContractProcessor(new SequentialWorkflowOperationProcessor(operationRunner));
+        SequentialWorkflowRunner runner =
+                directRunner != null
+                        ? directRunner
+                        : operationRunner;
+        if (runner == null) {
+            return configuredFixture();
         }
-        if (directRunner != null) {
-            fixture.blue.registerContractProcessor(new SequentialWorkflowProcessor(directRunner));
-        }
-        return fixture;
+        return configuredFixture(
+                CoordinationProcessorOptions.builder()
+                        .sequentialWorkflowRunner(runner)
+                        .build());
     }
 
     private static void assertCounter(Node document, int expected) {
@@ -993,16 +985,16 @@ class SequentialWorkflowExecutionTest {
                 actual,
                 path + " must be present");
         assertEquals(
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         new Node().value(
                                 BigInteger.valueOf(
                                         expected))),
                 actual instanceof Node
                         ? ((Node) actual).isReferenceOnly()
                                 ? ((Node) actual).getBlueId()
-                                : BlueIdCalculator.calculateBlueId(
+                                : DirectBlueIdCalculator.calculateBlueId(
                                         (Node) actual)
-                        : BlueIdCalculator.calculateBlueId(
+                        : DirectBlueIdCalculator.calculateBlueId(
                                 new Node().value(actual)),
                 path + " must preserve the exact canonical value identity");
     }
@@ -1043,9 +1035,11 @@ class SequentialWorkflowExecutionTest {
 
     private static final class Fixture {
         private final BlueRepository repository;
-        private final Blue blue;
+        private final CoordinationTestRuntime blue;
 
-        private Fixture(BlueRepository repository, Blue blue) {
+        private Fixture(
+                BlueRepository repository,
+                CoordinationTestRuntime blue) {
             this.repository = repository;
             this.blue = blue;
         }

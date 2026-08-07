@@ -21,7 +21,7 @@ class CoordinationConformanceManifestBindingTest {
     @Test
     void shouldBindConformancePackageToExactPortableGasManifestBytes()
             throws Exception {
-        // Given
+        // given
         String manifest =
                 read(
                         "src/test/resources/coordination/conformance/"
@@ -31,7 +31,7 @@ class CoordinationConformanceManifestBindingTest {
                         "src/main/resources/blue/coordination/processor/"
                                 + "coordination-gas-1.0.yaml");
 
-        // When
+        // when
         String declared =
                 scalar(
                         manifest,
@@ -39,14 +39,14 @@ class CoordinationConformanceManifestBindingTest {
         String observed =
                 sha256(Files.readAllBytes(portableGas));
 
-        // Then
+        // then
         assertEquals(declared, observed);
     }
 
     @Test
     void shouldBindConformancePackageToExactHostQuotaManifestBytes()
             throws Exception {
-        // Given
+        // given
         String manifest =
                 read(
                         "src/test/resources/coordination/conformance/"
@@ -56,7 +56,7 @@ class CoordinationConformanceManifestBindingTest {
                         "src/main/resources/blue/coordination/processor/"
                                 + "coordination-host-quotas-1.0.yaml");
 
-        // When
+        // when
         String declared =
                 scalar(
                         manifest,
@@ -64,7 +64,7 @@ class CoordinationConformanceManifestBindingTest {
         String observed =
                 sha256(Files.readAllBytes(hostQuota));
 
-        // Then
+        // then
         assertEquals(declared, observed);
     }
 

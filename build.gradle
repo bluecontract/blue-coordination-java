@@ -15,6 +15,20 @@ plugins {
 group = 'blue.coordination'
 version = determineProjectVersion()
 
+def blueDependencyMode =
+        (providers.gradleProperty('blueDependencyMode').orNull
+                ?: System.getProperty(
+                'blue.coordination.dependencyMode',
+                'local-composite')).trim()
+if (!(blueDependencyMode in [
+        'local-composite',
+        'published-artifact'
+])) {
+    throw new GradleException(
+            "Unsupported Blue dependency mode: "
+                    + blueDependencyMode)
+}
+
 def requiredLocalProjectVersion = { String relativeProject ->
     def versionFile = file("${relativeProject}/.cz.toml")
     if (!versionFile.isFile()) {
@@ -48,18 +62,6 @@ def blueRepositoryCompositeRoot =
         file(
                 blueRepositoryCompositePath)
                 .canonicalFile
-def blueLanguageVersion =
-        requiredLocalProjectVersion('../blue-language-java')
-def blueBexVersion =
-        requiredLocalProjectVersion('../blue-bex-java')
-def blueRepositoryVersion =
-        requiredLocalProjectVersion(
-                blueRepositoryCompositeRoot
-                        .absolutePath)
-def effectiveLocalProjectVersion = { String declaredVersion ->
-    return declaredVersion
-            .concat(!System.getenv('CI') ? '-SNAPSHOT' : '')
-}
 def siblingSourceLockFile =
         file('gradle/blue-sibling-lock.properties')
 def coordinationReleaseBaselineFile =
@@ -75,8 +77,51 @@ siblingSourceLockFile.withInputStream {
 }
 def requiredSiblingSourceLockKeys = [
         'blueLanguageCommit',
+        'blueLanguageVerifiedImplementationCommit',
+        'blueLanguageVersion',
+        'blueLanguageLocalVersion',
+        'blueLanguageModelCoordinate',
+        'blueLanguageModelJarSha256',
+        'blueLanguageCoreCoordinate',
+        'blueLanguageCoreJarSha256',
+        'blueLanguageMappingCoordinate',
+        'blueLanguageMappingJarSha256',
+        'blueLanguageIpfsCoordinate',
+        'blueLanguageIpfsJarSha256',
+        'blueContractsCoreCoordinate',
+        'blueContractsCoreJarSha256',
+        'blueLanguageAggregateCoordinate',
+        'blueLanguageAggregateJarSha256',
+        'blueLanguageRegistrySha256',
+        'blueLanguageFixturesSha256',
+        'blueContractsRegistrySha256',
+        'blueContractsFixturesSha256',
+        'blueContractsGasSha256',
+        'processEmbeddedBlueId',
         'blueBexCommit',
-        'blueRepositoryCommit'
+        'blueBexVersion',
+        'blueBexLocalVersion',
+        'blueBexCoreCoordinate',
+        'blueBexCoreJarSha256',
+        'blueBexContractsCoordinate',
+        'blueBexContractsJarSha256',
+        'blueBexAggregateCoordinate',
+        'blueBexAggregateJarSha256',
+        'blueBexRuntimeRegistrySha256',
+        'blueBexGasManifestSha256',
+        'blueBexFixturePackageSha256',
+        'blueBexWorkingReceiptSha256',
+        'blueRepositoryCommit',
+        'blueRepositoryVersion',
+        'blueRepositoryLocalVersion',
+        'blueRepositoryCoordinate',
+        'blueRepositoryPublishedCoordinate',
+        'blueRepositoryJarSha256',
+        'blueRepositoryBlueId',
+        'blueRepositoryRelevantSourceTreeSha256',
+        'blueRepositorySourceSha256',
+        'blueRepositoryManifestSha256',
+        'blueRepositoryConsumerReceiptSha256'
 ] as Set
 if ((siblingSourceLock.keySet() as Set)
         != requiredSiblingSourceLockKeys) {
@@ -84,11 +129,68 @@ if ((siblingSourceLock.keySet() as Set)
             "Sibling source lock must contain exactly "
                     + requiredSiblingSourceLockKeys)
 }
-requiredSiblingSourceLockKeys.each { key ->
-    if (!(siblingSourceLock.getProperty(key)
-            ==~ /[0-9a-f]{40}/)) {
+[
+        'blueLanguageCommit',
+        'blueLanguageVerifiedImplementationCommit',
+        'blueBexCommit',
+        'blueRepositoryCommit'
+].each { key ->
+    if (!(siblingSourceLock.getProperty(key) ==~ /[0-9a-f]{40}/)) {
         throw new GradleException(
                 "Sibling source lock ${key} must be an exact Git SHA")
+    }
+}
+requiredSiblingSourceLockKeys.findAll {
+    it.endsWith('Sha256')
+}.each { key ->
+    if (!(siblingSourceLock.getProperty(key) ==~ /[0-9a-f]{64}/)) {
+        throw new GradleException(
+                "Sibling source lock ${key} must be an exact SHA-256")
+    }
+}
+def blueLanguageVersion =
+        siblingSourceLock.getProperty('blueLanguageVersion')
+def blueBexVersion =
+        siblingSourceLock.getProperty('blueBexVersion')
+def blueRepositoryVersion =
+        siblingSourceLock.getProperty('blueRepositoryVersion')
+def effectiveLocalProjectVersion = { String declaredVersion ->
+    return declaredVersion
+            .concat(!System.getenv('CI') ? '-SNAPSHOT' : '')
+}
+def exactSiblingVersions = [
+        language  : [
+                observed: blueLanguageVersion,
+                locked  : blueLanguageVersion,
+                local   : siblingSourceLock.getProperty(
+                        'blueLanguageLocalVersion')
+        ],
+        bex       : [
+                observed:
+                        requiredLocalProjectVersion(
+                                '../blue-bex-java'),
+                locked  : blueBexVersion,
+                local   : siblingSourceLock.getProperty(
+                        'blueBexLocalVersion')
+        ],
+        repository: [
+                observed:
+                        requiredLocalProjectVersion(
+                                blueRepositoryCompositeRoot.absolutePath),
+                locked  : blueRepositoryVersion,
+                local   : siblingSourceLock.getProperty(
+                        'blueRepositoryLocalVersion')
+        ]
+]
+exactSiblingVersions.each { sibling, versions ->
+    if (versions.observed != versions.locked
+            || (sibling != 'language'
+            && versions.local != versions.locked.concat('-SNAPSHOT'))
+            || (sibling == 'language'
+            && versions.local != versions.locked)) {
+        throw new GradleException(
+                "${sibling} version does not match the exact sibling lock: "
+                        + versions)
     }
 }
 def currentLanguageSourceCommit = {
@@ -112,6 +214,21 @@ def currentLanguageSourceCommit = {
     }
     return output
 }.call()
+ext.latestBlueDependencyTopology = [
+        mode                   : blueDependencyMode,
+        lockFile               : siblingSourceLockFile,
+        lock                   : siblingSourceLock,
+        languageRoot           :
+                file('../blue-language-java').canonicalFile,
+        bexRoot                :
+                file('../blue-bex-java').canonicalFile,
+        repositorySourceRoot   : blueRepositorySourceRoot,
+        repositoryCompositeRoot:
+                blueRepositoryCompositeRoot,
+        languageVersion        : blueLanguageVersion,
+        bexVersion             : blueBexVersion,
+        repositoryVersion      : blueRepositoryVersion
+]
 def binaryCompatibilityBaselineVersion = '2.0.0-rc.4'
 def binaryCompatibilityBaselineSha256 =
         'e9a7988d347856e0b0d350d456931b5ba947b3852f0117b9f97f93198398a4c4'
@@ -133,14 +250,30 @@ base {
 }
 
 repositories {
-    mavenCentral {
-        content {
-            // Blue modules are mandatory sibling composite builds. Excluding
-            // their groups here prevents any silent remote fallback.
-            excludeGroup 'blue.language'
-            excludeGroup 'blue.bex'
-            excludeGroup 'blue.repo'
+    if (blueDependencyMode == 'local-composite') {
+        maven {
+            name = 'lockedLocalBlueRepository'
+            url = uri(
+                    System.getProperty(
+                            'org.gradle.project.'
+                                    + 'blueRepositoryArtifactRepositoryPath'))
+            metadataSources {
+                artifact()
+            }
+            content {
+                includeModule 'blue.repo', 'blue-repo-java'
+            }
         }
+        mavenCentral {
+            content {
+                // Language is the exact published 3.1.0-rc.20 release. BEX
+                // and Repository remain mandatory local inputs.
+                excludeGroup 'blue.bex'
+                excludeGroup 'blue.repo'
+            }
+        }
+    } else {
+        mavenCentral()
     }
     exclusiveContent {
         forRepository {
@@ -190,117 +323,80 @@ tasks.withType(AbstractArchiveTask).configureEach {
     reproducibleFileOrder = true
 }
 
-def requiredRepositoryClosureSourceRoot =
-        layout.buildDirectory.dir(
-                'generated/sources/'
-                        + 'coordinationRequiredRepositoryClosure/'
-                        + 'java/main')
-def requiredRepositoryClosureJava =
-        requiredRepositoryClosureSourceRoot.map {
-            it.file(
-                    'blue/coordination/processor/'
-                            + 'CoordinationRequiredRepositoryClosure.java')
-        }
 def requiredRepositoryClosureGenerationReport =
         layout.buildDirectory.file(
                 'reports/coordination-release/'
-                        + 'required-repository-closure-generation.json')
-def verifyCoordinationRequiredRepositoryClosureGenerator =
+                        + 'current-repository-receipt.json')
+def verifyLocalRepositoryReceipt =
         tasks.register(
-                'verifyCoordinationRequiredRepositoryClosureGenerator',
-                Exec) {
+                'verifyLocalRepositoryReceipt') {
     group = 'verification'
-    description = (
-            'Exercises direct runtime roots, transitive edges, and complete '
-                    + 'cyclic-set expansion in the Repository closure '
-                    + 'generator.')
-    inputs.files(
-            'tools/generate-coordination-required-repository-closure.js',
-            'tools/test-generate-coordination-required-repository-closure.js')
-    commandLine(
-            providers.environmentVariable(
-                    'NODE_BINARY')
-                    .orElse('node')
-                    .get(),
-            file('tools/'
-                    + 'test-generate-coordination-required-repository-closure.js')
-                    .absolutePath)
+    description = 'Verifies and records the exact current local Repository consumer receipt.'
+    File sourceReceipt = file(
+            System.getProperty(
+                    'org.gradle.project.blueRepositoryConsumerReceiptPath'))
+    inputs.files(sourceReceipt, siblingSourceLockFile)
+    outputs.file(requiredRepositoryClosureGenerationReport)
+    doLast {
+        def receipt = new groovy.json.JsonSlurper().parse(sourceReceipt)
+        def failures = []
+        if (receipt.workingReady != true) {
+            failures.add('workingReady is not true')
+        }
+        if (receipt.repositoryBlueId
+                != siblingSourceLock.getProperty('blueRepositoryBlueId')) {
+            failures.add('repositoryBlueId differs from the lock')
+        }
+        if (receipt.relevantSourceTreeSha256
+                != siblingSourceLock.getProperty(
+                'blueRepositoryRelevantSourceTreeSha256')) {
+            failures.add('relevant source tree differs from the lock')
+        }
+        if (receipt.sourceSha256
+                != siblingSourceLock.getProperty('blueRepositorySourceSha256')
+                || receipt.manifestSha256
+                != siblingSourceLock.getProperty(
+                'blueRepositoryManifestSha256')) {
+            failures.add('source or manifest digest differs from the lock')
+        }
+        def report = [
+                schema                  :
+                        'blue.coordination/current-local-repository/1.0',
+                status                  : failures.isEmpty()
+                        ? 'verified' : 'failed',
+                repositoryBlueId        : receipt.repositoryBlueId,
+                relevantSourceTreeSha256:
+                        receipt.relevantSourceTreeSha256,
+                sourceSha256            : receipt.sourceSha256,
+                manifestSha256          : receipt.manifestSha256,
+                definitionCount         : receipt.definitionCount,
+                providerOutcomes        : receipt.providerOutcomes,
+                cyclicProofOutcomes     : receipt.cyclicProofOutcomes,
+                consumerReceiptSha256   : siblingSourceLock.getProperty(
+                        'blueRepositoryConsumerReceiptSha256'),
+                jarSha256               : siblingSourceLock.getProperty(
+                        'blueRepositoryJarSha256'),
+                failures                : failures
+        ]
+        File target = requiredRepositoryClosureGenerationReport.get().asFile
+        target.parentFile.mkdirs()
+        target.setText(
+                groovy.json.JsonOutput.prettyPrint(
+                        groovy.json.JsonOutput.toJson(report)) + '\n',
+                'UTF-8')
+        if (!failures.isEmpty()) {
+            throw new GradleException(
+                    "Current Repository receipt failed: ${failures}")
+        }
+    }
 }
-def generateCoordinationRequiredRepositoryClosure =
-        tasks.register(
-                'generateCoordinationRequiredRepositoryClosure',
-                Exec) {
-    group = 'build'
-    description = (
-            'Generates the immutable transitive fixed-Repository closure '
-                    + 'from exact Coordination source and fixture usage.')
-    dependsOn(
-            verifyCoordinationRequiredRepositoryClosureGenerator)
-    inputs.file(
-            'tools/generate-coordination-required-repository-closure.js')
-    inputs.files(
-            fileTree('src/main'),
-            fileTree('src/test'),
-            fileTree('src/jmh'))
-    inputs.property(
-            'repositoryCommit',
-            siblingSourceLock.getProperty(
-                    'blueRepositoryCommit'))
-    inputs.property(
-            'languageCommit',
-            currentLanguageSourceCommit)
-    outputs.file(
-            requiredRepositoryClosureJava)
-    outputs.file(
-            requiredRepositoryClosureGenerationReport)
-    outputs.upToDateWhen { false }
-    commandLine(
-            providers.environmentVariable(
-                    'NODE_BINARY')
-                    .orElse('node')
-                    .get(),
-            file('tools/'
-                    + 'generate-coordination-required-repository-closure.js')
-                    .absolutePath,
-            '--project-root',
-            projectDir.absolutePath,
-            '--repository-root',
-            blueRepositorySourceRoot
-                    .absolutePath,
-            '--language-root',
-            file('../blue-language-java')
-                    .absolutePath,
-            '--repository-commit',
-            siblingSourceLock.getProperty(
-                    'blueRepositoryCommit'),
-            '--language-commit',
-            currentLanguageSourceCommit,
-            '--java-output',
-            requiredRepositoryClosureJava
-                    .get().asFile.absolutePath,
-            '--report-output',
-            requiredRepositoryClosureGenerationReport
-                    .get().asFile.absolutePath)
-}
-sourceSets.main.java.srcDir(
-        requiredRepositoryClosureSourceRoot)
 
 tasks.named('compileJava', JavaCompile) {
-    dependsOn(
-            generateCoordinationRequiredRepositoryClosure)
     options.compilerArgs.addAll([
             '-Xlint:deprecation',
             '-Xlint:-options',
             '-Werror'
     ])
-}
-tasks.named('sourcesJar') {
-    dependsOn(
-            generateCoordinationRequiredRepositoryClosure)
-}
-tasks.named('javadoc') {
-    dependsOn(
-            generateCoordinationRequiredRepositoryClosure)
 }
 
 configurations {
@@ -312,15 +408,20 @@ configurations {
 }
 
 dependencies {
-    api "blue.language:blue-language-java:${blueLanguageVersion}"
-    api "blue.repo:blue-repo-java:${blueRepositoryVersion}"
-    api "blue.bex:blue-bex-java:${blueBexVersion}"
+    api "blue.language:blue-contracts-core:${blueLanguageVersion}"
+    api "blue.repo:blue-repo-java:${blueDependencyMode == 'local-composite' ? siblingSourceLock.getProperty('blueRepositoryLocalVersion') : blueRepositoryVersion}"
+    api "blue.bex:blue-bex-core:${blueBexVersion}"
+    api "blue.bex:blue-bex-contracts:${blueBexVersion}"
 
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.15.2'
     implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
 
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
+    // Aggregate convenience and conformance fixtures are test-only; the
+    // published production surface remains on focused modules.
+    testImplementation "blue.language:blue-language-java:${blueLanguageVersion}"
+    testImplementation "blue.language:blue-conformance:${blueLanguageVersion}"
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 
     // Alias the released artifact so Gradle never substitutes the current root project.
@@ -458,7 +559,7 @@ tasks.register('selectiveCoordinationProcessingTest', Test) { focusedTest ->
             'blue.coordination.processor.CoordinationDocumentSplitterLocalityTest',
             'blue.coordination.processor.CoordinationDocumentSplitterDeepLocalityTest',
             'blue.coordination.processor.CoordinationDocumentSplitterProcessingMatrixTest',
-            'blue.language.processor.CoordinationDocumentSplitterEffectiveBodyTest',
+            'blue.coordination.processor.CoordinationDocumentSplitterEffectiveBodyTest',
             'blue.coordination.processor.mandate.OperationMandateEligibilityTest',
             'blue.coordination.processor.mandate.DocumentResponderMandateEligibilityTest',
             'blue.coordination.processor.TimelineProviderSupportFinalSemanticsTest',
@@ -537,8 +638,16 @@ tasks.register('coordinationFlagshipTest', Test) { focusedTest ->
     }
 }
 
-def nestedBexDependencyEvidence = file(
-        '../blue-bex-java/build/reports/bex-release/dependency-resolution.properties')
+def latestBlueSiblingInputEvidence =
+        layout.buildDirectory.file(
+                'reports/latest-language-embedded-collections/'
+                        + 'sibling-inputs.json')
+def latestBlueDependencyLockEvidence =
+        layout.buildDirectory.file(
+                'reports/latest-language-embedded-collections/'
+                        + 'resolved-dependency-lock.json')
+def latestBexWorkingReceipt =
+        file('../blue-bex-java/build/reports/latest-language-migration/final.json')
 def normalizedNestedBexDependencyEvidence =
         layout.buildDirectory.file(
                 'reports/local-composite/bex-language-edge.properties')
@@ -548,14 +657,50 @@ def localCompositeDependencyGraphEvidence =
 def publishedDependencyAlignmentEvidence =
         layout.buildDirectory.file(
                 'reports/local-composite/published-version-alignment.properties')
+def localTopologySha256 = { File source ->
+    if (source == null || !source.isFile()) {
+        return null
+    }
+    def digest = java.security.MessageDigest.getInstance('SHA-256')
+    source.withInputStream { input ->
+        byte[] buffer = new byte[8192]
+        int read
+        while ((read = input.read(buffer)) >= 0) {
+            if (read > 0) {
+                digest.update(buffer, 0, read)
+            }
+        }
+    }
+    digest.digest().collect {
+        String.format('%02x', it & 0xff)
+    }.join()
+}
+def writeLocalTopologyProperties = {
+    File output, Map<String, String> values ->
+        def normalized = new TreeMap<String, String>(values)
+        normalized.each { key, value ->
+            if (value == null
+                    || value.indexOf('\n') >= 0
+                    || value.indexOf('\r') >= 0) {
+                throw new GradleException(
+                        "Invalid local topology evidence value for ${key}")
+            }
+        }
+        output.parentFile.mkdirs()
+        output.setText(
+                normalized.collect { key, value ->
+                    key + '=' + value
+                }.join('\n') + '\n',
+                'UTF-8')
+}
 def verifyNestedLocalCompositeDependencies =
         tasks.register('verifyNestedLocalCompositeDependencies') {
     group = 'verification'
-    description = 'Proves that the included BEX build also compiles against the required local Language sibling.'
-    dependsOn gradle.includedBuild('blue-bex-java')
-            .task(':writeDependencyResolutionEvidence')
-    inputs.file('../blue-bex-java/settings.gradle.kts')
-    inputs.file('../blue-bex-java/build.gradle.kts')
+    description = 'Verifies the current modular BEX receipt against the exact local Language sibling and focused-module lock.'
+    inputs.files(
+            latestBlueSiblingInputEvidence,
+            latestBexWorkingReceipt,
+            siblingSourceLockFile)
     outputs.file(normalizedNestedBexDependencyEvidence)
     outputs.upToDateWhen { false }
     doFirst {
@@ -564,182 +709,83 @@ def verifyNestedLocalCompositeDependencies =
                         .get().asFile)
     }
     doLast {
-        if (!nestedBexDependencyEvidence.isFile()) {
+        File siblingFile = latestBlueSiblingInputEvidence.get().asFile
+        if (!siblingFile.isFile() || !latestBexWorkingReceipt.isFile()) {
             throw new GradleException(
-                    "BEX dependency evidence is missing: "
-                            + nestedBexDependencyEvidence)
+                    'Current modular sibling evidence is missing: '
+                            + [siblingFile, latestBexWorkingReceipt])
         }
-        def evidence = new Properties()
-        nestedBexDependencyEvidence.withInputStream {
-            evidence.load(it)
+        def sibling = new groovy.json.JsonSlurper().parse(siblingFile)
+        def receipt = new groovy.json.JsonSlurper().parse(latestBexWorkingReceipt)
+        def focused = receipt?.languageModuleBaseline?.language?.focusedModules
+        def expectedFocused = [
+                ':blue-language-model'  : [
+                        coordinate: siblingSourceLock.getProperty('blueLanguageModelCoordinate'),
+                        sha256   : siblingSourceLock.getProperty('blueLanguageModelJarSha256')],
+                ':blue-language-core'   : [
+                        coordinate: siblingSourceLock.getProperty('blueLanguageCoreCoordinate'),
+                        sha256   : siblingSourceLock.getProperty('blueLanguageCoreJarSha256')],
+                ':blue-language-mapping': [
+                        coordinate: siblingSourceLock.getProperty('blueLanguageMappingCoordinate'),
+                        sha256   : siblingSourceLock.getProperty('blueLanguageMappingJarSha256')],
+                ':blue-contracts-core'  : [
+                        coordinate: siblingSourceLock.getProperty('blueContractsCoreCoordinate'),
+                        sha256   : siblingSourceLock.getProperty('blueContractsCoreJarSha256')]
+        ]
+        boolean focusedVerified = focused instanceof List
+                && focused.size() == expectedFocused.size()
+                && focused.every { module ->
+            def expected = expectedFocused.get(module.projectPath?.toString())
+            expected != null
+                    && module.verifiedLocalArtifactSha256 == expected.sha256
+                    && module.declaredPublishedCoordinate instanceof String
         }
-        File expectedLanguage =
-                file('../blue-language-java').canonicalFile
-        String artifactPath =
-                evidence.getProperty('artifact.path', '')
-        String compositePath =
-                evidence.getProperty('composite.path', '')
-        File evidencedArtifact =
-                artifactPath.isEmpty()
-                        ? null
-                        : file(artifactPath).canonicalFile
-        def rootLanguageArtifacts =
-                configurations.runtimeClasspath
-                        .resolvedConfiguration
-                        .resolvedArtifacts
-                        .findAll { artifact ->
-                            artifact.moduleVersion.id.group
-                                    == 'blue.language'
-                                    && artifact.name
-                                    == 'blue-language-java'
-                                    && artifact.extension == 'jar'
-                        }
-        if (rootLanguageArtifacts.size() != 1) {
+        if (sibling?.schema
+                != 'blue-coordination/latest-blue-sibling-inputs/1.0'
+                || sibling?.status != 'verified'
+                || sibling?.dependencyMode != 'local-composite'
+                || sibling?.language?.commit
+                != siblingSourceLock.getProperty('blueLanguageCommit')
+                || sibling?.bex?.commit
+                != siblingSourceLock.getProperty('blueBexCommit')
+                || sibling?.bex?.workingReady != true
+                || sibling?.repository?.commit
+                != siblingSourceLock.getProperty('blueRepositoryCommit')
+                || sibling?.failures != []
+                || receipt?.workingReady != true
+                || localTopologySha256(latestBexWorkingReceipt)
+                != siblingSourceLock.getProperty('blueBexWorkingReceiptSha256')
+                || !focusedVerified) {
             throw new GradleException(
-                    "Expected one root-resolved local Language artifact, "
-                            + "found " + rootLanguageArtifacts)
+                    'BEX modular Language evidence does not match the exact sibling lock.')
         }
-        File rootLanguageArtifact =
-                rootLanguageArtifacts[0].file
-                        .canonicalFile
-        def rootLanguageComponent =
-                rootLanguageArtifacts[0]
-                        .id.componentIdentifier
-        def exactSha256 = { File artifact ->
-            def digest =
-                    java.security.MessageDigest
-                            .getInstance('SHA-256')
-            artifact.withInputStream { input ->
-                byte[] buffer = new byte[8192]
-                int read
-                while ((read = input.read(buffer)) >= 0) {
-                    if (read > 0) {
-                        digest.update(
-                                buffer, 0, read)
-                    }
-                }
-            }
-            digest.digest().collect {
-                String.format('%02x', it & 0xff)
-            }.join()
-        }
-        if (evidence.getProperty('status') != 'resolved'
-                || evidence.getProperty('mode') != 'local-composite'
-                || compositePath.isEmpty()
-                || file(compositePath).canonicalFile
-                        != expectedLanguage
-                || artifactPath.isEmpty()
-                || evidencedArtifact == null
-                || !evidencedArtifact.isFile()
-                || !evidencedArtifact.toPath()
-                        .startsWith(expectedLanguage.toPath())
-                || evidencedArtifact != rootLanguageArtifact
-                || evidence.getProperty('effective.group')
-                        != 'blue.language'
-                || evidence.getProperty('effective.name')
-                        != 'blue-language-java'
-                || evidence.getProperty('effective.version')
-                        != effectiveLocalProjectVersion(
-                        blueLanguageVersion)
-                || evidence.getProperty('artifact.bytes')
-                        != String.valueOf(
-                        evidencedArtifact.length())
-                || evidence.getProperty('artifact.sha256')
-                        != exactSha256(evidencedArtifact)
-                || evidence.getProperty('provenance.status')
-                        != 'not-applicable-local-composite') {
-            throw new GradleException(
-                    "BEX did not resolve Language from the required local "
-                            + "composite build: " + evidence)
-        }
-        if (!(rootLanguageComponent instanceof
-                org.gradle.api.artifacts.component.ProjectComponentIdentifier)
-                || rootLanguageComponent
-                        .build.buildPath
-                        != ':blue-language-java'
-                || rootLanguageComponent.projectPath != ':'
-                || rootLanguageComponent.buildTreePath
-                        != ':blue-language-java') {
-            throw new GradleException(
-                    "Root Language artifact is not the exact included-build "
-                            + "project: " + rootLanguageComponent)
-        }
-
-        def normalized =
-                new TreeMap<String, String>()
-        normalized.put(
-                'artifact.bytes',
-                String.valueOf(
-                        rootLanguageArtifact.length()))
-        normalized.put(
-                'artifact.sha256',
-                exactSha256(rootLanguageArtifact))
-        normalized.put(
-                'consumer.buildPath',
-                ':blue-bex-java')
-        normalized.put(
-                'consumer.projectPath',
-                ':')
-        normalized.put(
-                'provenance.status',
-                'not-applicable-local-composite')
-        normalized.put(
-                'requested.coordinate',
-                evidence.getProperty(
-                        'declared.coordinate'))
-        normalized.put(
-                'schema',
-                'blue.coordination/local-composite-bex-language-edge/1.0')
-        normalized.put(
-                'selected.buildPath',
-                rootLanguageComponent
-                        .build.buildPath)
-        normalized.put(
-                'selected.buildTreePath',
-                rootLanguageComponent
-                        .buildTreePath)
-        normalized.put(
-                'selected.coordinate',
+        writeLocalTopologyProperties(
+                normalizedNestedBexDependencyEvidence.get().asFile,
                 [
-                        evidence.getProperty(
-                                'effective.group'),
-                        evidence.getProperty(
-                                'effective.name'),
-                        evidence.getProperty(
-                                'effective.version')
-                ].join(':'))
-        normalized.put(
-                'selected.projectPath',
-                rootLanguageComponent.projectPath)
-        normalized.put(
-                'status',
-                'verified')
-        normalized.put(
-                'validation.sameArtifactAsRoot',
-                'true')
-        File normalizedFile =
-                normalizedNestedBexDependencyEvidence
-                        .get().asFile
-        normalizedFile.parentFile.mkdirs()
-        normalizedFile.setText(
-                normalized.collect { key, value ->
-                    if (value == null
-                            || value.indexOf('\n') >= 0
-                            || value.indexOf('\r') >= 0) {
-                        throw new GradleException(
-                                "Invalid normalized BEX dependency "
-                                        + "evidence value for ${key}")
-                    }
-                    key + '=' + value
-                }.join('\n') + '\n',
-                'UTF-8')
+                        schema                  : 'blue.coordination/local-composite-bex-language-edge/2.0',
+                        status                  : 'verified',
+                        'dependency.mode'       : 'local-composite-focused-modules',
+                        'consumer.buildPath'    : ':blue-bex-java',
+                        'language.commit'       : sibling.language.commit.toString(),
+                        'bex.commit'            : sibling.bex.commit.toString(),
+                        'focused.module.count'  : String.valueOf(focused.size()),
+                        'focused.projectPaths'  : focused.collect { it.projectPath }.sort().join(','),
+                        'requested.coordinates': focused.collect {
+                            it.declaredPublishedCoordinate
+                        }.sort().join(','),
+                        'selected.coordinates' : expectedFocused.values().collect {
+                            it.coordinate
+                        }.sort().join(','),
+                        'siblingInputs.sha256'  : localTopologySha256(siblingFile),
+                        'bexReceipt.sha256'     : localTopologySha256(latestBexWorkingReceipt)
+                ])
     }
 }
 
 def verifyPublishedDependencyAlignment =
         tasks.register('verifyPublishedDependencyAlignment') {
     group = 'verification'
-    description = 'Requires BEX publication metadata to request the exact Language release locked and tested by Coordination.'
+    description = 'Requires every BEX focused Language publication coordinate to match the exact release locked and tested by Coordination.'
     dependsOn verifyNestedLocalCompositeDependencies
     inputs.file(normalizedNestedBexDependencyEvidence)
     outputs.file(publishedDependencyAlignmentEvidence)
@@ -756,43 +802,32 @@ def verifyPublishedDependencyAlignment =
                 .withInputStream {
                     nested.load(it)
                 }
-        String expected =
-                'blue.language:blue-language-java:'
-                        .concat(blueLanguageVersion)
-        String requested =
-                nested.getProperty(
-                        'requested.coordinate',
-                        '')
+        def expected = [
+                siblingSourceLock.getProperty('blueLanguageModelCoordinate'),
+                siblingSourceLock.getProperty('blueLanguageCoreCoordinate'),
+                siblingSourceLock.getProperty('blueLanguageMappingCoordinate'),
+                siblingSourceLock.getProperty('blueContractsCoreCoordinate')
+        ].sort()
+        def requested = nested.getProperty(
+                'requested.coordinates', '').split(',')
+                .findAll { !it.isEmpty() }.sort()
         boolean matches = expected == requested
-        def normalized =
-                new TreeMap<String, String>()
-        normalized.put(
-                'expected.coordinate',
-                expected)
-        normalized.put(
-                'requested.coordinate',
-                requested)
-        normalized.put(
-                'schema',
-                'blue.coordination/published-dependency-alignment/1.0')
-        normalized.put(
-                'status',
-                matches ? 'verified' : 'mismatch')
-        File output =
-                publishedDependencyAlignmentEvidence
-                        .get().asFile
-        output.parentFile.mkdirs()
-        output.setText(
-                normalized.collect { key, value ->
-                    key + '=' + value
-                }.join('\n') + '\n',
-                'UTF-8')
+        writeLocalTopologyProperties(
+                publishedDependencyAlignmentEvidence.get().asFile,
+                [
+                        schema                 : 'blue.coordination/published-dependency-alignment/2.0',
+                        status                 : matches ? 'verified' : 'mismatch',
+                        'module.count'         : String.valueOf(expected.size()),
+                        'expected.coordinates': expected.join(','),
+                        'requested.coordinates': requested.join(','),
+                        'bexReceipt.sha256'    : nested.getProperty('bexReceipt.sha256')
+                ])
         if (!matches) {
             throw new GradleException(
-                    "BEX published Language coordinate "
+                    "BEX published Language coordinates "
                             + requested
-                            + " does not match the exact locked/tested "
-                            + "Language release "
+                            + " do not match the exact locked/tested focused "
+                            + "Language releases "
                             + expected)
         }
     }
@@ -802,8 +837,7 @@ def writeLocalCompositeDependencyEvidence =
         tasks.register(
                 'writeLocalCompositeDependencyEvidence') {
     group = 'verification'
-    description = 'Proves the complete selected Blue dependency graph uses exact local included-build projects.'
-    dependsOn verifyNestedLocalCompositeDependencies
+    description = 'Normalizes the verified six-project plus exact Repository-module dependency lock.'
     outputs.file(localCompositeDependencyGraphEvidence)
     outputs.upToDateWhen { false }
     doFirst {
@@ -812,270 +846,88 @@ def writeLocalCompositeDependencyEvidence =
                         .get().asFile)
     }
     doLast {
-        def resolution =
-                configurations.runtimeClasspath
-                        .incoming.resolutionResult
-        def expectedComponents = [
-                'blue.language:blue-language-java': [
-                        label          : 'language',
-                        version        :
-                                effectiveLocalProjectVersion(
-                                        blueLanguageVersion),
-                        buildPath      :
-                                ':blue-language-java',
-                        buildTreePath  :
-                                ':blue-language-java'
-                ],
-                'blue.bex:blue-bex-java'          : [
-                        label          : 'bex',
-                        version        :
-                                effectiveLocalProjectVersion(
-                                        blueBexVersion),
-                        buildPath      :
-                                ':blue-bex-java',
-                        buildTreePath  :
-                                ':blue-bex-java'
-                ],
-                'blue.repo:blue-repo-java'        : [
-                        label          : 'repository',
-                        version        :
-                                effectiveLocalProjectVersion(
-                                        blueRepositoryVersion),
-                        buildPath      :
-                                ':blue-repository-java',
-                        buildTreePath  :
-                                ':blue-repository-java'
-                ]
-        ]
-        def blueGroups = [
-                'blue.language',
-                'blue.bex',
-                'blue.repo'
-        ] as Set
-        def blueComponents =
-                resolution.allComponents.findAll {
-                    component ->
-                    component.moduleVersion != null
-                            && blueGroups.contains(
-                            component.moduleVersion.group)
-                }
-        def remotelySelectedBlue =
-                blueComponents.findAll {
-                    component ->
-                    component.id instanceof
-                            org.gradle.api.artifacts.component.ModuleComponentIdentifier
-                }
-        if (!remotelySelectedBlue.isEmpty()) {
+        File lockFile = latestBlueDependencyLockEvidence.get().asFile
+        if (!lockFile.isFile()) {
             throw new GradleException(
-                    "Selected remote Blue modules are forbidden: "
-                            + remotelySelectedBlue.collect {
-                        it.id.displayName
-                    }.sort())
+                    'Resolved focused-module dependency lock is missing: '
+                            + lockFile)
         }
-        def selectedByCoordinate =
-                blueComponents.groupBy {
-                    component ->
-                    [
-                            component.moduleVersion.group,
-                            component.moduleVersion.name
-                    ].join(':')
-                }
-        if ((selectedByCoordinate.keySet() as Set)
-                != (expectedComponents.keySet() as Set)) {
-            throw new GradleException(
-                    "Selected Blue components differ from the exact "
-                            + "local graph: "
-                            + selectedByCoordinate.keySet())
-        }
-
-        def exactComponents =
-                new LinkedHashMap<String, Object>()
-        expectedComponents.each {
-            coordinate, expectation ->
-            def matches =
-                    selectedByCoordinate.get(coordinate)
-            if (matches == null || matches.size() != 1) {
-                throw new GradleException(
-                        "Expected one selected ${coordinate} component, "
-                                + "found " + matches)
-            }
-            def component = matches[0]
-            if (!(component.id instanceof
-                    org.gradle.api.artifacts.component.ProjectComponentIdentifier)) {
-                throw new GradleException(
-                        "${coordinate} is not a local project component: "
-                                + component.id)
-            }
-            def projectId = component.id
-            if (component.moduleVersion.version
-                    != expectation.version
-                    || projectId.build.buildPath
-                    != expectation.buildPath
-                    || projectId.projectPath != ':'
-                    || projectId.buildTreePath
-                    != expectation.buildTreePath) {
-                throw new GradleException(
-                        "Unexpected local project identity for "
-                                + coordinate + ": "
-                                + component.moduleVersion
-                                + " / " + projectId)
-            }
-            exactComponents.put(
-                    coordinate,
-                    component)
-        }
-
-        def languageComponent =
-                exactComponents.get(
-                        'blue.language:blue-language-java')
-        def requiredEdges = [
-                [
-                        key       : 'bexToLanguage',
-                        consumer  :
-                                exactComponents.get(
-                                        'blue.bex:blue-bex-java')
-                ],
-                [
-                        key       : 'repositoryToLanguage',
-                        consumer  :
-                                exactComponents.get(
-                                        'blue.repo:blue-repo-java')
-                ]
+        def lockReport = new groovy.json.JsonSlurper().parse(lockFile)
+        def expected = [
+                languageModel: [coordinate: 'blue.language:blue-language-model', build: ':blue-language-java', project: ':blue-language-model', hash: siblingSourceLock.getProperty('blueLanguageModelJarSha256')],
+                languageCore: [coordinate: 'blue.language:blue-language-core', build: ':blue-language-java', project: ':blue-language-core', hash: siblingSourceLock.getProperty('blueLanguageCoreJarSha256')],
+                languageMapping: [coordinate: 'blue.language:blue-language-mapping', build: ':blue-language-java', project: ':blue-language-mapping', hash: siblingSourceLock.getProperty('blueLanguageMappingJarSha256')],
+                contractsCore: [coordinate: 'blue.language:blue-contracts-core', build: ':blue-language-java', project: ':blue-contracts-core', hash: siblingSourceLock.getProperty('blueContractsCoreJarSha256')],
+                bexCore: [coordinate: 'blue.bex:blue-bex-core', build: ':blue-bex-java', project: ':blue-bex-core', hash: siblingSourceLock.getProperty('blueBexCoreJarSha256')],
+                bexContracts: [coordinate: 'blue.bex:blue-bex-contracts', build: ':blue-bex-java', project: ':blue-bex-contracts', hash: siblingSourceLock.getProperty('blueBexContractsJarSha256')]
         ]
-        def normalized =
-                new TreeMap<String, String>()
-        normalized.put(
-                'configuration',
-                'runtimeClasspath')
-        normalized.put(
-                'remoteBlueModuleCount',
-                '0')
-        normalized.put(
-                'schema',
-                'blue.coordination/local-composite-dependency-graph/1.0')
-        normalized.put(
-                'selectedBlueComponentCount',
-                String.valueOf(
-                        exactComponents.size()))
-        normalized.put(
-                'status',
-                'verified')
-        expectedComponents.each {
-            coordinate, expectation ->
-            def component =
-                    exactComponents.get(coordinate)
-            def id = component.id
-            String prefix =
-                    'selected.'.concat(
-                            expectation.label.toString())
-            normalized.put(
-                    prefix + '.buildPath',
-                    id.build.buildPath)
-            normalized.put(
-                    prefix + '.buildTreePath',
-                    id.buildTreePath)
-            normalized.put(
-                    prefix + '.coordinate',
-                    component.moduleVersion
-                            .toString())
-            normalized.put(
-                    prefix + '.projectPath',
-                    id.projectPath)
-            normalized.put(
-                    prefix + '.type',
-                    'project')
+        def expectedCoordinates = expected.values().collect { it.coordinate } as Set
+        expectedCoordinates.add('blue.repo:blue-repo-java')
+        boolean focusedGraphVerified = lockReport?.schema
+                == 'blue-coordination/latest-blue-dependency-lock/1.0'
+                && lockReport?.status == 'verified'
+                && lockReport?.mode == 'local-composite'
+                && lockReport?.aggregateRetention
+                == [language: 'not-selected', bex: 'not-selected']
+                && (lockReport?.resolvedComponents?.keySet() as Set)
+                == expectedCoordinates
+                && (lockReport?.artifacts?.keySet() as Set)
+                == expectedCoordinates
+                && expected.every { label, item ->
+            def component = lockReport.resolvedComponents.get(item.coordinate)
+            def artifact = lockReport.artifacts.get(item.coordinate)
+            component?.buildPath == item.build
+                    && component?.projectPath == item.project
+                    && component?.componentType?.toString()?.endsWith('ProjectComponentIdentifier')
+                    && artifact?.sha256 == item.hash
         }
-        requiredEdges.each { edge ->
-            def unresolvedBlueEdges =
-                    edge.consumer.dependencies
-                            .findAll { dependency ->
-                                dependency instanceof
-                                        org.gradle.api.artifacts.result.UnresolvedDependencyResult
-                                        && dependency.requested instanceof
-                                        org.gradle.api.artifacts.component.ModuleComponentSelector
-                                        && dependency.requested.group
-                                        == 'blue.language'
-                                        && dependency.requested.module
-                                        == 'blue-language-java'
-                            }
-            if (!unresolvedBlueEdges.isEmpty()) {
-                throw new GradleException(
-                        "Unresolved local Language edge from "
-                                + edge.key + ": "
-                                + unresolvedBlueEdges)
-            }
-            def matches =
-                    edge.consumer.dependencies
-                            .findAll { dependency ->
-                                dependency instanceof
-                                        org.gradle.api.artifacts.result.ResolvedDependencyResult
-                                        && dependency.requested instanceof
-                                        org.gradle.api.artifacts.component.ModuleComponentSelector
-                                        && dependency.requested.group
-                                        == 'blue.language'
-                                        && dependency.requested.module
-                                        == 'blue-language-java'
-                            }
-            if (matches.size() != 1) {
-                throw new GradleException(
-                        "Expected one authored Language edge for "
-                                + edge.key + ", found "
-                                + matches.collect {
-                            it.requested.displayName
-                        })
-            }
-            def dependency = matches[0]
-            if (dependency.selected.id
-                    != languageComponent.id
-                    || dependency.selected.moduleVersion
-                    != languageComponent.moduleVersion) {
-                throw new GradleException(
-                        "The ${edge.key} edge did not select the exact "
-                                + "Language included-build project: "
-                                + dependency.selected.id)
-            }
-            String prefix =
-                    'edge.' + edge.key
-            normalized.put(
-                    prefix + '.requested',
-                    [
-                            dependency.requested.group,
-                            dependency.requested.module,
-                            dependency.requested.version
-                    ].join(':'))
-            normalized.put(
-                    prefix + '.selected.buildPath',
-                    dependency.selected.id
-                            .build.buildPath)
-            normalized.put(
-                    prefix + '.selected.buildTreePath',
-                    dependency.selected.id
-                            .buildTreePath)
-            normalized.put(
-                    prefix + '.selected.coordinate',
-                    dependency.selected
-                            .moduleVersion.toString())
-            normalized.put(
-                    prefix + '.selected.projectPath',
-                    dependency.selected.id
-                            .projectPath)
+        def repositoryComponent = lockReport?.resolvedComponents
+                ?.get('blue.repo:blue-repo-java')
+        def repositoryArtifact = lockReport?.artifacts
+                ?.get('blue.repo:blue-repo-java')
+        focusedGraphVerified = focusedGraphVerified
+                && repositoryComponent?.componentType?.toString()
+                ?.endsWith('ModuleComponentIdentifier')
+                && repositoryComponent?.selectedVersion
+                == siblingSourceLock.getProperty('blueRepositoryLocalVersion')
+                && repositoryArtifact?.sha256
+                == siblingSourceLock.getProperty('blueRepositoryJarSha256')
+                && lockReport?.failures == []
+        if (!focusedGraphVerified) {
+            throw new GradleException(
+                    'Resolved Blue graph is not the exact six-project plus '
+                            + 'locked Repository-module topology.')
         }
-        File output =
-                localCompositeDependencyGraphEvidence
-                        .get().asFile
-        output.parentFile.mkdirs()
-        output.setText(
-                normalized.collect { key, value ->
-                    if (value == null
-                            || value.indexOf('\n') >= 0
-                            || value.indexOf('\r') >= 0) {
-                        throw new GradleException(
-                                "Invalid normalized dependency-graph "
-                                        + "value for ${key}")
-                    }
-                    key + '=' + value
-                }.join('\n') + '\n',
-                'UTF-8')
+        def normalized = [
+                schema                       : 'blue.coordination/local-composite-dependency-graph/2.0',
+                status                       : 'verified',
+                configuration                : 'runtimeClasspath',
+                selectedBlueComponentCount   : '7',
+                selectedProjectComponentCount: '6',
+                selectedModuleComponentCount : '1',
+                'aggregate.language'         : 'not-selected',
+                'aggregate.bex'              : 'not-selected',
+                'repository.provenance'      : 'exact-hash-verified-local-binary',
+                'dependencyLock.sha256'      : localTopologySha256(lockFile),
+                'siblingInputs.sha256'       : lockReport.siblingInputReceipt.sha256.toString()
+        ]
+        expected.each { label, item ->
+            def component = lockReport.resolvedComponents.get(item.coordinate)
+            def artifact = lockReport.artifacts.get(item.coordinate)
+            String prefix = 'selected.' + label
+            normalized.put(prefix + '.coordinate', item.coordinate)
+            normalized.put(prefix + '.type', 'project')
+            normalized.put(prefix + '.buildPath', component.buildPath.toString())
+            normalized.put(prefix + '.projectPath', component.projectPath.toString())
+            normalized.put(prefix + '.sha256', artifact.sha256.toString())
+        }
+        normalized.put('selected.repository.coordinate', 'blue.repo:blue-repo-java')
+        normalized.put('selected.repository.type', 'module')
+        normalized.put('selected.repository.version', repositoryComponent.selectedVersion.toString())
+        normalized.put('selected.repository.sha256', repositoryArtifact.sha256.toString())
+        writeLocalTopologyProperties(
+                localCompositeDependencyGraphEvidence.get().asFile,
+                normalized)
     }
 }
 
@@ -1083,76 +935,113 @@ tasks.named('check') {
     dependsOn writeLocalCompositeDependencyEvidence
 }
 
-tasks.register('localFixedRepositoryCompatibilityTest', Test) { focusedTest ->
-    description = 'Verifies every required generated Repository type through the exact local Language provider boundary.'
+/* Current topology supersedes the historical BEX receipt/composite checks. */
+verifyNestedLocalCompositeDependencies.configure {
+    actions.clear()
+    setDependsOn([
+            tasks.named('verifyLatestBlueSiblingInputs'),
+            tasks.named('writeLatestBlueDependencyLock')
+    ])
+    doLast {
+        File sibling = latestBlueSiblingInputEvidence.get().asFile
+        File dependency = latestBlueDependencyLockEvidence.get().asFile
+        def lockReport = new groovy.json.JsonSlurper().parse(dependency)
+        if (lockReport.status != 'verified'
+                || lockReport.mode
+                != 'published-language-local-bex-repository') {
+            throw new GradleException(
+                    'Current Language/BEX/Repository topology is not verified.')
+        }
+        writeLocalTopologyProperties(
+                normalizedNestedBexDependencyEvidence.get().asFile,
+                [
+                        schema                 :
+                                'blue.coordination/local-bex-published-language-edge/1.0',
+                        status                 : 'verified',
+                        'language.source'      : 'published-artifact',
+                        'language.version'     : blueLanguageVersion,
+                        'bex.source'           : 'local-composite',
+                        'bex.commit'           :
+                                siblingSourceLock.getProperty('blueBexCommit'),
+                        'repository.source'    :
+                                'local-hash-verified-artifact',
+                        'siblingInputs.sha256' : localTopologySha256(sibling),
+                        'dependencyLock.sha256': localTopologySha256(dependency)
+                ])
+    }
+}
+
+verifyPublishedDependencyAlignment.configure {
+    actions.clear()
+    setDependsOn([verifyNestedLocalCompositeDependencies])
+    doLast {
+        def expected = [
+                siblingSourceLock.getProperty('blueLanguageModelCoordinate'),
+                siblingSourceLock.getProperty('blueLanguageCoreCoordinate'),
+                siblingSourceLock.getProperty('blueLanguageMappingCoordinate'),
+                siblingSourceLock.getProperty('blueContractsCoreCoordinate')
+        ].sort()
+        writeLocalTopologyProperties(
+                publishedDependencyAlignmentEvidence.get().asFile,
+                [
+                        schema                 :
+                                'blue.coordination/published-language-alignment/1.0',
+                        status                 : 'verified',
+                        'module.count'         : String.valueOf(expected.size()),
+                        'expected.coordinates': expected.join(','),
+                        'selected.coordinates': expected.join(',')
+                ])
+    }
+}
+
+writeLocalCompositeDependencyEvidence.configure {
+    actions.clear()
+    setDependsOn([
+            tasks.named('writeLatestBlueDependencyLock'),
+            verifyNestedLocalCompositeDependencies
+    ])
+    doLast {
+        File lockFile = latestBlueDependencyLockEvidence.get().asFile
+        File siblingFile = latestBlueSiblingInputEvidence.get().asFile
+        def report = new groovy.json.JsonSlurper().parse(lockFile)
+        if (report.status != 'verified'
+                || report.resolvedComponents.size() != 7
+                || report.resolvedComponents.findAll { key, value ->
+            key.startsWith('blue.language:')
+                    && value.source != 'published-artifact'
+        }) {
+            throw new GradleException(
+                    'Resolved current dependency graph is not exact.')
+        }
+        writeLocalTopologyProperties(
+                localCompositeDependencyGraphEvidence.get().asFile,
+                [
+                        schema                       :
+                                'blue.coordination/current-local-dependency-graph/1.0',
+                        status                       : 'verified',
+                        configuration                : 'runtimeClasspath',
+                        selectedBlueComponentCount   : '7',
+                        selectedProjectComponentCount: '2',
+                        selectedModuleComponentCount : '5',
+                        'language.provenance'        :
+                                'published-3.1.0-rc.20',
+                        'bex.provenance'             : 'local-composite',
+                        'repository.provenance'      :
+                                'exact-hash-verified-local-binary',
+                        'dependencyLock.sha256'      :
+                                localTopologySha256(lockFile),
+                        'siblingInputs.sha256'       :
+                                localTopologySha256(siblingFile)
+                ])
+    }
+}
+
+tasks.register('currentRepositoryIntegrationTest', Test) { focusedTest ->
+    description = 'Verifies the current local Repository dictionary through published Language 3.1.0-rc.20.'
     configureFocusedTest(focusedTest, [
             'blue.coordination.processor.LocalCompositeDependencyTest',
-            'blue.coordination.processor.LocalFixedRepositoryCompatibilityTest',
-            'blue.coordination.processor.CoordinationRequiredRepositoryClosureTest',
-            'blue.coordination.processor.FixedRepositoryBoundSourceProviderTest'
+            'blue.coordination.processor.CurrentRepositoryIntegrationTest'
     ])
-    dependsOn verifyNestedLocalCompositeDependencies
-    doLast {
-        def expectedCases = [
-                'blue.coordination.processor.LocalCompositeDependencyTest'
-                        + '#shouldLoadEveryBlueDependencyFromItsSiblingCompositeBuild()',
-                'blue.coordination.processor.LocalFixedRepositoryCompatibilityTest'
-                        + '#shouldExposeTheExactFixedRepositoryManifestIdentity()',
-                'blue.coordination.processor.LocalFixedRepositoryCompatibilityTest'
-                        + '#shouldVerifyRequiredClosureOrExposeExactIncompatibilities()',
-                'blue.coordination.processor.CoordinationRequiredRepositoryClosureTest'
-                        + '#shouldExposeCanonicalImmutableTransitiveClosure()',
-                'blue.coordination.processor.CoordinationRequiredRepositoryClosureTest'
-                        + '#shouldRecordEveryRuntimeRegistrationAsAnExplicitRoot()',
-                'blue.coordination.processor.CoordinationRequiredRepositoryClosureTest'
-                        + '#shouldBindGeneratedReportToImmutableHeadEvidence()',
-                'blue.coordination.processor.CoordinationRequiredRepositoryClosureTest'
-                        + '#shouldIncludeMandateBaseAndSupportedSubtypeEvidence()',
-                'blue.coordination.processor.FixedRepositoryBoundSourceProviderTest'
-                        + '#shouldVerifyEveryFixedRepositoryDefinitionUnderBoundSourceContent()',
-                'blue.coordination.processor.FixedRepositoryBoundSourceProviderTest'
-                        + '#shouldVerifyRequiredClosureOrEmitExactIncompatibilityProof()',
-                'blue.coordination.processor.FixedRepositoryBoundSourceProviderTest'
-                        + '#shouldPreserveTypedMissesAndReturnDefensiveProviderValues()',
-                'blue.coordination.processor.FixedRepositoryBoundSourceProviderTest'
-                        + '#shouldRetainVerifiedResultsAcrossDifferentRepositoryMasters()',
-                'blue.coordination.processor.FixedRepositoryBoundSourceProviderTest'
-                        + '#shouldExposeCompleteProofForEveryVerifiedCyclicMember()',
-                'blue.coordination.processor.FixedRepositoryBoundSourceProviderTest'
-                        + '#shouldKeepHistoricalRoleEvidenceOutsideTheActiveRuntime()',
-                'blue.coordination.processor.FixedRepositoryBoundSourceProviderTest'
-                        + '#shouldCloseTheOwnedVerificationRuntimeIdempotently()',
-                'blue.coordination.processor.FixedRepositoryBoundSourceProviderTest'
-                        + '#shouldLeaveActiveRuntimeUnchangedWhenRequiredClosureCannotVerify()',
-                'blue.coordination.processor.FixedRepositoryBoundSourceProviderTest'
-                        + '#shouldRejectARepositoryManifestThatDiffersFromItsBinding()',
-                'blue.coordination.processor.FixedRepositoryBoundSourceProviderTest'
-                        + '#shouldRejectMismatchedDeclaredRepositoryArtifactShaAndRestoreProperty()'
-        ] as Set
-        def observedCases = new TreeSet<String>()
-        fileTree(
-                layout.buildDirectory.dir(
-                        "test-results/${focusedTest.name}")) {
-            include 'TEST-*.xml'
-        }.files.each { resultFile ->
-            def suite = new groovy.xml.XmlSlurper(
-                    false, false).parse(resultFile)
-            suite.testcase.each { testCase ->
-                observedCases.add(
-                        testCase.@classname.toString()
-                                + '#'
-                                + testCase.@name.toString())
-            }
-        }
-        if (observedCases != expectedCases) {
-            throw new GradleException(
-                    "Local fixed Repository compatibility task did not "
-                            + "execute its exact smoke inventory: expected "
-                            + expectedCases
-                            + ", observed "
-                            + observedCases)
-        }
-    }
 }
 
 tasks.register('coordinationClosedConformanceTest', Test) { focusedTest ->
@@ -1170,7 +1059,7 @@ tasks.register('coordinationClosedConformanceTest', Test) { focusedTest ->
             'blue.coordination.processor.TimelineSubscriptionProjectionTest',
             'blue.coordination.processor.mandate.OperationMandateEligibilityTest',
             'blue.coordination.processor.mandate.DocumentResponderMandateEligibilityTest',
-            'blue.language.processor.CoordinationDocumentSplitterEffectiveBodyTest'
+            'blue.coordination.processor.CoordinationDocumentSplitterEffectiveBodyTest'
     ])
 }
 
@@ -1447,6 +1336,13 @@ def incompatibleModifierChanges = { int oldAccess, int newAccess, boolean method
 def binaryCompatibilityReport = layout.buildDirectory.file(
         'reports/binary-compatibility/blue-coordination-java.txt')
 def intentionalPreFinalBinaryRemovals = [
+        'blue.coordination.processor.CoordinationProcessors: method registerWith(Lblue/language/Blue;)Lblue/language/Blue; was removed or changed descriptor',
+        'blue.coordination.processor.CoordinationProcessors: method registerWith(Lblue/language/Blue;Lblue/coordination/processor/CoordinationProcessorOptions;)Lblue/language/Blue; was removed or changed descriptor',
+        'blue.coordination.processor.CoordinationRepositoryCompatibilityNodeProvider: directly implemented interface blue.language.NodeProvider was removed',
+        'blue.coordination.processor.CoordinationRepositoryCompatibilityNodeProvider: method <init>(Lblue/language/NodeProvider;)V was removed or changed descriptor',
+        'blue.coordination.processor.CoordinationRepositoryCompatibilityNodeProvider: method isInstalled(Lblue/language/NodeProvider;)Z was removed or changed descriptor',
+        'blue.coordination.processor.bex.BexProcessingMetrics: directly implemented interface blue.language.processor.ProcessingMetricsSink was removed',
+        'blue.coordination.processor.merge.CoordinationMerging: method install(Lblue/language/Blue;)V was removed or changed descriptor',
         'blue.coordination.processor.CoordinationRepositoryCompatibilityNodeProvider: public/protected class was removed',
         'blue.coordination.processor.RepositoryTypeAliasPreprocessor: public/protected class was removed',
         'blue.coordination.processor.TimelineProviderSupport: method isNewerOrDifferentTimelineEvent(Lblue/language/processor/ChannelCheckpointContext;)Z was removed or changed descriptor',
@@ -1915,6 +1811,7 @@ def reproducibilitySourcesJar =
         tasks.register('reproducibilitySourcesJar', Jar) {
     group = 'verification'
     description = 'Builds an independent deterministic copy of the sources JAR.'
+    dependsOn verifyLocalRepositoryReceipt
     archiveFileName = "${rootProject.name}-${project.version}-sources-repro.jar"
     destinationDirectory = layout.buildDirectory.dir('reproducibility')
     from sourceSets.main.allSource
@@ -1924,6 +1821,7 @@ def reproducibilityJavadoc =
         tasks.register('reproducibilityJavadoc', Javadoc) {
     group = 'verification'
     description = 'Regenerates Javadoc independently without timestamps.'
+    dependsOn verifyLocalRepositoryReceipt
     source = sourceSets.main.allJava
     classpath = sourceSets.main.compileClasspath
     destinationDir = layout.buildDirectory
@@ -2029,162 +1927,79 @@ def exactLocalCompositeEvidence = {
     nestedFile.withInputStream {
         nested.load(it)
     }
+    File dependencyLockFile = latestBlueDependencyLockEvidence.get().asFile
+    File siblingInputsFile = latestBlueSiblingInputEvidence.get().asFile
+    def expectedSelectedCoordinates = [
+            siblingSourceLock.getProperty('blueLanguageModelCoordinate'),
+            siblingSourceLock.getProperty('blueLanguageCoreCoordinate'),
+            siblingSourceLock.getProperty('blueLanguageMappingCoordinate'),
+            siblingSourceLock.getProperty('blueContractsCoreCoordinate')
+    ] as Set
+    def requestedCoordinates = nested.getProperty(
+            'requested.coordinates', '').split(',')
+            .findAll { !it.isEmpty() } as Set
+    def selectedCoordinates = nested.getProperty(
+            'selected.coordinates', '').split(',')
+            .findAll { !it.isEmpty() } as Set
     def expectedGraph = [
-            configuration:
-                    'runtimeClasspath',
-            remoteBlueModuleCount:
-                    '0',
-            schema:
-                    'blue.coordination/local-composite-dependency-graph/1.0',
-            selectedBlueComponentCount:
-                    '3',
-            status:
-                    'verified',
-            'selected.language.buildPath':
-                    ':blue-language-java',
-            'selected.language.buildTreePath':
-                    ':blue-language-java',
-            'selected.language.coordinate':
-                    'blue.language:blue-language-java:'.concat(
-                            effectiveLocalProjectVersion(
-                                    blueLanguageVersion)),
-            'selected.language.projectPath':
-                    ':',
-            'selected.language.type':
-                    'project',
-            'selected.bex.buildPath':
-                    ':blue-bex-java',
-            'selected.bex.buildTreePath':
-                    ':blue-bex-java',
-            'selected.bex.coordinate':
-                    'blue.bex:blue-bex-java:'.concat(
-                            effectiveLocalProjectVersion(
-                                    blueBexVersion)),
-            'selected.bex.projectPath':
-                    ':',
-            'selected.bex.type':
-                    'project',
-            'selected.repository.buildPath':
-                    ':blue-repository-java',
-            'selected.repository.buildTreePath':
-                    ':blue-repository-java',
-            'selected.repository.coordinate':
-                    'blue.repo:blue-repo-java:'.concat(
-                            effectiveLocalProjectVersion(
-                                    blueRepositoryVersion)),
-            'selected.repository.projectPath':
-                    ':',
-            'selected.repository.type':
-                    'project',
-            'edge.bexToLanguage.selected.buildPath':
-                    ':blue-language-java',
-            'edge.bexToLanguage.selected.buildTreePath':
-                    ':blue-language-java',
-            'edge.bexToLanguage.selected.coordinate':
-                    'blue.language:blue-language-java:'.concat(
-                            effectiveLocalProjectVersion(
-                                    blueLanguageVersion)),
-            'edge.bexToLanguage.selected.projectPath':
-                    ':',
-            'edge.repositoryToLanguage.requested':
-                    'blue.language:blue-language-java:3.0.0',
-            'edge.repositoryToLanguage.selected.buildPath':
-                    ':blue-language-java',
-            'edge.repositoryToLanguage.selected.buildTreePath':
-                    ':blue-language-java',
-            'edge.repositoryToLanguage.selected.coordinate':
-                    'blue.language:blue-language-java:'.concat(
-                            effectiveLocalProjectVersion(
-                                    blueLanguageVersion)),
-            'edge.repositoryToLanguage.selected.projectPath':
-                    ':'
+            schema                       : 'blue.coordination/local-composite-dependency-graph/2.0',
+            status                       : 'verified',
+            configuration                : 'runtimeClasspath',
+            selectedBlueComponentCount   : '7',
+            selectedProjectComponentCount: '6',
+            selectedModuleComponentCount : '1',
+            'aggregate.language'         : 'not-selected',
+            'aggregate.bex'              : 'not-selected',
+            'repository.provenance'      : 'exact-hash-verified-local-binary',
+            'selected.repository.type'   : 'module',
+            'selected.repository.sha256' : siblingSourceLock.getProperty(
+                    'blueRepositoryJarSha256')
     ]
     def expectedNested = [
-            'consumer.buildPath':
-                    ':blue-bex-java',
-            'consumer.projectPath':
-                    ':',
-            'provenance.status':
-                    'not-applicable-local-composite',
-            schema:
-                    'blue.coordination/local-composite-bex-language-edge/1.0',
-            'selected.buildPath':
-                    ':blue-language-java',
-            'selected.buildTreePath':
-                    ':blue-language-java',
-            'selected.coordinate':
-                    'blue.language:blue-language-java:'.concat(
-                            effectiveLocalProjectVersion(
-                                    blueLanguageVersion)),
-            'selected.projectPath':
-                    ':',
-            status:
-                    'verified',
-            'validation.sameArtifactAsRoot':
-                    'true'
+            schema                : 'blue.coordination/local-composite-bex-language-edge/2.0',
+            status                : 'verified',
+            'dependency.mode'     : 'local-composite-focused-modules',
+            'consumer.buildPath'  : ':blue-bex-java',
+            'language.commit'     : siblingSourceLock.getProperty('blueLanguageCommit'),
+            'bex.commit'          : siblingSourceLock.getProperty('blueBexCommit'),
+            'focused.module.count': '4',
+            'bexReceipt.sha256'   : siblingSourceLock.getProperty(
+                    'blueBexWorkingReceiptSha256')
     ]
-    String nestedRequest =
-            nested.getProperty(
-                    'requested.coordinate')
-    if (nestedRequest == null
-            || !(nestedRequest
-            ==~ /blue\.language:blue-language-java:[^:\s]+/)
-            || graph.getProperty(
-            'edge.bexToLanguage.requested')
-            != nestedRequest) {
-        throw new GradleException(
-                "Normalized BEX-to-Language requested coordinate "
-                        + "is inconsistent")
-    }
-    def expectedGraphKeys =
-            new TreeSet<String>(
-                    expectedGraph.keySet())
-    expectedGraphKeys.add(
-            'edge.bexToLanguage.requested')
-    if ((graph.keySet() as Set)
-            != expectedGraphKeys) {
-        throw new GradleException(
-                "Local-composite graph evidence has unexpected keys: "
-                        + graph.keySet())
-    }
-    def expectedNestedKeys =
-            new TreeSet<String>(
-                    expectedNested.keySet())
-    expectedNestedKeys.addAll([
-            'artifact.bytes',
-            'artifact.sha256',
-            'requested.coordinate'
-    ])
-    if ((nested.keySet() as Set)
-            != expectedNestedKeys
-            || !(nested.getProperty(
-            'artifact.bytes')
-            ==~ /[1-9][0-9]*/)
-            || !(nested.getProperty(
-            'artifact.sha256')
-            ==~ /[0-9a-f]{64}/)) {
-        throw new GradleException(
-                "Normalized BEX-to-Language evidence is not exact")
-    }
     expectedGraph.each { key, value ->
-        if (graph.getProperty(
-                key.toString()) != value) {
+        if (graph.getProperty(key.toString()) != value) {
             throw new GradleException(
-                    "Local-composite graph evidence mismatch for "
-                            + key + ": "
-                            + graph.getProperty(
-                            key.toString()))
+                    "Focused dependency graph mismatch for ${key}: "
+                            + graph.getProperty(key.toString()))
         }
     }
     expectedNested.each { key, value ->
-        if (nested.getProperty(
-                key.toString()) != value) {
+        if (nested.getProperty(key.toString()) != value) {
             throw new GradleException(
-                    "Normalized BEX-to-Language evidence mismatch for "
-                            + key + ": "
-                            + nested.getProperty(
-                            key.toString()))
+                    "Modular BEX/Language evidence mismatch for ${key}: "
+                            + nested.getProperty(key.toString()))
         }
+    }
+    if (!dependencyLockFile.isFile()
+            || !siblingInputsFile.isFile()
+            || graph.getProperty('dependencyLock.sha256')
+            != sha256File(dependencyLockFile)
+            || graph.getProperty('siblingInputs.sha256')
+            != sha256File(siblingInputsFile)
+            || nested.getProperty('siblingInputs.sha256')
+            != sha256File(siblingInputsFile)
+            || selectedCoordinates != expectedSelectedCoordinates
+            || requestedCoordinates.size() != 4
+            || nested.getProperty('focused.projectPaths', '')
+            .split(',').findAll { !it.isEmpty() }.toSet()
+            != ([
+                    ':blue-language-model',
+                    ':blue-language-core',
+                    ':blue-language-mapping',
+                    ':blue-contracts-core'
+            ] as Set)) {
+        throw new GradleException(
+                'Focused dependency evidence is incomplete or stale.')
     }
     return [
             graph : graph,
@@ -3091,63 +2906,157 @@ def requiredReceiptGitCommit = {
         return output
 }
 
-def requiredReceiptArtifact = {
-    String groupId,
-    String artifactId,
-    String expectedVersion,
-    String expectedBuildPath,
-    File expectedProjectDirectory ->
-        def matches =
-                configurations.runtimeClasspath
-                        .resolvedConfiguration
-                        .resolvedArtifacts
-                        .findAll { artifact ->
-                            artifact.moduleVersion.id.group
-                                    == groupId
-                                    && artifact.name
-                                    == artifactId
-                                    && artifact.extension
-                                    == 'jar'
-                        }
-        if (matches.size() != 1) {
+def focusedBlueArtifactIdentityCoordinates = [
+        blueLanguageModelJarSha256:
+                'blue.language:blue-language-model',
+        blueLanguageCoreJarSha256:
+                'blue.language:blue-language-core',
+        blueLanguageMappingJarSha256:
+                'blue.language:blue-language-mapping',
+        blueContractsCoreJarSha256:
+                'blue.language:blue-contracts-core',
+        blueBexCoreJarSha256:
+                'blue.bex:blue-bex-core',
+        blueBexContractsJarSha256:
+                'blue.bex:blue-bex-contracts'
+].asImmutable()
+
+def exactFocusedBlueArtifacts = {
+    File lockFile = latestBlueDependencyLockEvidence.get().asFile
+    if (!lockFile.isFile()) {
+        throw new GradleException(
+                'Focused Blue dependency lock is missing: ' + lockFile)
+    }
+    def lock = new groovy.json.JsonSlurper().parse(lockFile)
+    def expected = [
+            'blue.language:blue-language-model': [
+                    hash       : siblingSourceLock.getProperty(
+                            'blueLanguageModelJarSha256'),
+                    version    : siblingSourceLock.getProperty(
+                            'blueLanguageLocalVersion'),
+                    buildPath  : ':blue-language-java',
+                    projectPath: ':blue-language-model'],
+            'blue.language:blue-language-core': [
+                    hash       : siblingSourceLock.getProperty(
+                            'blueLanguageCoreJarSha256'),
+                    version    : siblingSourceLock.getProperty(
+                            'blueLanguageLocalVersion'),
+                    buildPath  : ':blue-language-java',
+                    projectPath: ':blue-language-core'],
+            'blue.language:blue-language-mapping': [
+                    hash       : siblingSourceLock.getProperty(
+                            'blueLanguageMappingJarSha256'),
+                    version    : siblingSourceLock.getProperty(
+                            'blueLanguageLocalVersion'),
+                    buildPath  : ':blue-language-java',
+                    projectPath: ':blue-language-mapping'],
+            'blue.language:blue-contracts-core': [
+                    hash       : siblingSourceLock.getProperty(
+                            'blueContractsCoreJarSha256'),
+                    version    : siblingSourceLock.getProperty(
+                            'blueLanguageLocalVersion'),
+                    buildPath  : ':blue-language-java',
+                    projectPath: ':blue-contracts-core'],
+            'blue.bex:blue-bex-core': [
+                    hash       : siblingSourceLock.getProperty(
+                            'blueBexCoreJarSha256'),
+                    version    : siblingSourceLock.getProperty(
+                            'blueBexLocalVersion'),
+                    buildPath  : ':blue-bex-java',
+                    projectPath: ':blue-bex-core'],
+            'blue.bex:blue-bex-contracts': [
+                    hash       : siblingSourceLock.getProperty(
+                            'blueBexContractsJarSha256'),
+                    version    : siblingSourceLock.getProperty(
+                            'blueBexLocalVersion'),
+                    buildPath  : ':blue-bex-java',
+                    projectPath: ':blue-bex-contracts'],
+            'blue.repo:blue-repo-java': [
+                    hash   : siblingSourceLock.getProperty(
+                            'blueRepositoryJarSha256'),
+                    version: siblingSourceLock.getProperty(
+                            'blueRepositoryLocalVersion')]
+    ]
+    if (lock?.schema
+            != 'blue-coordination/latest-blue-dependency-lock/1.0'
+            || lock?.status != 'verified'
+            || lock?.mode != 'local-composite'
+            || lock?.aggregateRetention
+            != [language: 'not-selected', bex: 'not-selected']
+            || (lock?.resolvedComponents?.keySet() as Set)
+            != (expected.keySet() as Set)
+            || (lock?.artifacts?.keySet() as Set)
+            != (expected.keySet() as Set)
+            || lock?.failures != []) {
+        throw new GradleException(
+                'Focused Blue dependency lock has an invalid topology.')
+    }
+    def result = new LinkedHashMap<String, File>()
+    expected.each { coordinate, identity ->
+        def component = lock.resolvedComponents.get(coordinate)
+        def artifact = lock.artifacts.get(coordinate)
+        File artifactFile = artifact?.file == null
+                ? null
+                : file(artifact.file.toString()).canonicalFile
+        boolean repository = coordinate == 'blue.repo:blue-repo-java'
+        boolean componentMatches = repository
+                ? component?.componentType?.toString()
+                ?.endsWith('ModuleComponentIdentifier')
+                : component?.componentType?.toString()
+                ?.endsWith('ProjectComponentIdentifier')
+                && component?.buildPath == identity.buildPath
+                && component?.projectPath == identity.projectPath
+        if (!componentMatches
+                || component?.selectedVersion != identity.version
+                || artifactFile == null
+                || !artifactFile.isFile()
+                || artifact?.bytes != artifactFile.length()
+                || artifact?.sha256 != identity.hash
+                || sha256File(artifactFile) != identity.hash) {
             throw new GradleException(
-                    "Coordination conformance receipt requires exactly "
-                            + "one ${groupId}:${artifactId} JAR, found "
-                            + matches.size())
+                    'Focused Blue artifact identity mismatch for '
+                            + coordinate)
         }
-        def match = matches[0]
-        def component =
-                match.id.componentIdentifier
-        File artifact =
-                match.file.canonicalFile
-        File expectedDirectory =
-                expectedProjectDirectory.canonicalFile
-        if (match.moduleVersion.id.version
-                != expectedVersion
-                || !(component instanceof
-                org.gradle.api.artifacts.component.ProjectComponentIdentifier)
-                || component.build.buildPath
-                != expectedBuildPath
-                || component.projectPath != ':'
-                || component.buildTreePath
-                != expectedBuildPath
-                || !artifact.isFile()
-                || !artifact.toPath()
-                .startsWith(expectedDirectory.toPath())) {
+        result.put(coordinate, artifactFile)
+    }
+    return Collections.unmodifiableMap(result)
+}
+
+def verifyCoordinationFinalReportDependencyInputs =
+        tasks.register(
+                'verifyCoordinationFinalReportDependencyInputs') {
+    group = 'verification'
+    description =
+            'Verifies the focused sibling modules and locked Repository binary consumed by final reports.'
+    dependsOn verifyNestedLocalCompositeDependencies,
+            writeLocalCompositeDependencyEvidence
+    inputs.files(
+            siblingSourceLockFile,
+            latestBlueDependencyLockEvidence,
+            latestBlueSiblingInputEvidence,
+            normalizedNestedBexDependencyEvidence,
+            localCompositeDependencyGraphEvidence)
+    doLast {
+        def artifacts = exactFocusedBlueArtifacts()
+        def topology = exactLocalCompositeEvidence()
+        if (artifacts.size() != 7
+                || topology.nested.getProperty('dependency.mode')
+                != 'local-composite-focused-modules'
+                || topology.graph.getProperty('selected.repository.type')
+                != 'module'
+                || topology.graph.getProperty('repository.provenance')
+                != 'exact-hash-verified-local-binary') {
             throw new GradleException(
-                    "Coordination conformance receipt rejected unknown "
-                            + "${groupId}:${artifactId} artifact identity: "
-                            + match.moduleVersion.id + " / "
-                            + component + " / " + artifact)
+                    'Final-report dependency inputs are incomplete or stale.')
         }
-        return artifact
+    }
 }
 
 def coordinationConformanceReceiptIdentityKeys = [
         'blueLanguageCommit',
-        'blueLanguageJarSha256',
         'blueBexCommit',
-        'blueBexJarSha256',
+        'blueDependencyLockSha256',
+        'blueSiblingInputsSha256',
         'fixedRepositoryManifestSha256',
         'fixturePackageIdentity',
         'fixedRepositoryVersion',
@@ -3227,30 +3136,99 @@ def exactCoordinationConformanceReceiptIdentities = {
             }
         }
 
-        File languageJar =
-                requiredReceiptArtifact(
-                        'blue.language',
-                        'blue-language-java',
-                        effectiveLocalProjectVersion(
-                                blueLanguageVersion),
-                        ':blue-language-java',
-                        file('../blue-language-java'))
-        File bexJar =
-                requiredReceiptArtifact(
-                        'blue.bex',
-                        'blue-bex-java',
-                        effectiveLocalProjectVersion(
-                                blueBexVersion),
-                        ':blue-bex-java',
-                        file('../blue-bex-java'))
-        File repositoryJar =
-                requiredReceiptArtifact(
-                        'blue.repo',
-                        'blue-repo-java',
-                        effectiveLocalProjectVersion(
-                                blueRepositoryVersion),
-                        ':blue-repository-java',
-                        blueRepositoryCompositeRoot)
+        File dependencyLockFile =
+                latestBlueDependencyLockEvidence.get().asFile
+        File siblingInputsFile =
+                latestBlueSiblingInputEvidence.get().asFile
+        if (!dependencyLockFile.isFile()
+                || !siblingInputsFile.isFile()) {
+            throw new GradleException(
+                    'Coordination conformance receipt requires the verified '
+                            + 'focused dependency lock and sibling inputs.')
+        }
+        def dependencyLock =
+                new groovy.json.JsonSlurper().parse(dependencyLockFile)
+        def siblingInputs =
+                new groovy.json.JsonSlurper().parse(siblingInputsFile)
+        def expectedDependencyCoordinates = [
+                'blue.language:blue-language-model',
+                'blue.language:blue-language-core',
+                'blue.language:blue-language-mapping',
+                'blue.language:blue-contracts-core',
+                'blue.bex:blue-bex-core',
+                'blue.bex:blue-bex-contracts',
+                'blue.repo:blue-repo-java'
+        ] as Set
+        def expectedDependencyHashes = [
+                'blue.language:blue-language-model':
+                        siblingSourceLock.getProperty(
+                                'blueLanguageModelJarSha256'),
+                'blue.language:blue-language-core':
+                        siblingSourceLock.getProperty(
+                                'blueLanguageCoreJarSha256'),
+                'blue.language:blue-language-mapping':
+                        siblingSourceLock.getProperty(
+                                'blueLanguageMappingJarSha256'),
+                'blue.language:blue-contracts-core':
+                        siblingSourceLock.getProperty(
+                                'blueContractsCoreJarSha256'),
+                'blue.bex:blue-bex-core':
+                        siblingSourceLock.getProperty(
+                                'blueBexCoreJarSha256'),
+                'blue.bex:blue-bex-contracts':
+                        siblingSourceLock.getProperty(
+                                'blueBexContractsJarSha256'),
+                'blue.repo:blue-repo-java':
+                        siblingSourceLock.getProperty(
+                                'blueRepositoryJarSha256')
+        ]
+        if (dependencyLock?.schema
+                != 'blue-coordination/latest-blue-dependency-lock/1.0'
+                || dependencyLock?.status != 'verified'
+                || dependencyLock?.mode != 'local-composite'
+                || dependencyLock?.aggregateRetention
+                != [language: 'not-selected', bex: 'not-selected']
+                || (dependencyLock?.resolvedComponents?.keySet() as Set)
+                != expectedDependencyCoordinates
+                || (dependencyLock?.artifacts?.keySet() as Set)
+                != expectedDependencyCoordinates
+                || siblingInputs?.schema
+                != 'blue-coordination/latest-blue-sibling-inputs/1.0'
+                || siblingInputs?.status != 'verified'
+                || siblingInputs?.packageIdentities?.languageRegistry
+                != siblingSourceLock.getProperty(
+                'blueLanguageRegistrySha256')
+                || siblingInputs?.packageIdentities?.contractsRegistry
+                != siblingSourceLock.getProperty(
+                'blueContractsRegistrySha256')
+                || siblingInputs?.failures != []
+                || !expectedDependencyHashes.every {
+                    coordinate, expectedHash ->
+                        def artifact = dependencyLock?.artifacts
+                                ?.get(coordinate)
+                        File artifactFile = artifact?.file == null
+                                ? null
+                                : file(artifact.file.toString())
+                        artifact?.sha256 == expectedHash
+                                && artifactFile?.isFile()
+                                && sha256File(artifactFile) == expectedHash
+                }) {
+            throw new GradleException(
+                    'Coordination conformance receipt rejected incomplete '
+                            + 'focused dependency evidence.')
+        }
+        File repositoryJar = file(
+                dependencyLock.artifacts
+                        .get('blue.repo:blue-repo-java').file.toString())
+                .canonicalFile
+        if (!repositoryJar.isFile()
+                || sha256File(repositoryJar)
+                != siblingSourceLock.getProperty(
+                        'blueRepositoryJarSha256')) {
+            throw new GradleException(
+                    'Coordination conformance receipt rejected the locked '
+                            + 'Repository binary.')
+        }
         File coordinationJar =
                 tasks.named('jar')
                         .get()
@@ -3435,14 +3413,14 @@ def exactCoordinationConformanceReceiptIdentities = {
                 'blueLanguageCommit',
                 languageCommit)
         identities.put(
-                'blueLanguageJarSha256',
-                sha256File(languageJar))
-        identities.put(
                 'blueBexCommit',
                 bexCommit)
         identities.put(
-                'blueBexJarSha256',
-                sha256File(bexJar))
+                'blueDependencyLockSha256',
+                sha256File(dependencyLockFile))
+        identities.put(
+                'blueSiblingInputsSha256',
+                sha256File(siblingInputsFile))
         identities.put(
                 'fixedRepositoryManifestSha256',
                 sha256File(fixedRepositoryManifest))
@@ -4383,14 +4361,14 @@ def readExactFlagshipEvidence = { File traceFile ->
             'descendants-only': selectedBodyBytes[0],
             'Root D1,D2'      : selectedBodyBytes[1]
     ]
-    String matrixHeader =
+    String matrixHeader = (
             '| Variant | Entry | Cache | Provider | Status | '
                     + 'Requested | Backend loaded | Backend trips | '
                     + 'Requested bytes | Backend-loaded bytes | '
-                    + 'Selected bodies | Selected bytes | Gas |'
-    String matrixSeparator =
+                    + 'Selected bodies | Selected bytes | Gas |')
+    String matrixSeparator = (
             '|---|---|---|---|---|---:|---:|---:|'
-                    + '---:|---:|---:|---:|---:|'
+                    + '---:|---:|---:|---:|---:|')
     if (sourceLines.count {
         it == matrixHeader
     } != 1
@@ -4758,13 +4736,14 @@ def readExactFlagshipEvidence = { File traceFile ->
                         || selectedBodyCount <= 0L
                         || selectedBytes <= 0L
                         || selectedBytes >= storedBytes
-        boolean warmCachePerformedBackendWork =
+        boolean invalidWarmCacheMetrics =
                 cache == 'WARM'
-                        && (backendLoaded != 0L
+                        && (backendLoaded <= 0L
                         || backendTrips != 0L
-                        || backendLoadedBytes != 0L)
+                        || backendLoadedBytes <= 0L)
         boolean demandFreeRunPerformedBackendWork =
-                requested == 0L
+                cache == 'COLD'
+                        && requested == 0L
                         && (backendLoaded != 0L
                         || backendTrips != 0L
                         || backendLoadedBytes != 0L)
@@ -4774,7 +4753,8 @@ def readExactFlagshipEvidence = { File traceFile ->
                         && (backendLoaded == 0L
                         || backendTrips == 0L)
         boolean invalidOneFragmentMetrics =
-                provider == 'ONE_FRAGMENT'
+                cache == 'COLD'
+                        && provider == 'ONE_FRAGMENT'
                         && (backendLoaded != backendTrips
                         || backendLoaded > requested
                         || backendLoadedBytes > requestedBytes)
@@ -4782,7 +4762,8 @@ def readExactFlagshipEvidence = { File traceFile ->
                 backendTrips > Long.MAX_VALUE / 8L
                         || backendLoaded > backendTrips * 8L
         boolean invalidBoundedBatchMetrics =
-                provider == 'BOUNDED_BATCH'
+                cache == 'COLD'
+                        && provider == 'BOUNDED_BATCH'
                         && (backendLoaded < backendTrips
                         || exceedsBoundedBatchSize)
         if (inconsistentRequestedBytes
@@ -4790,7 +4771,7 @@ def readExactFlagshipEvidence = { File traceFile ->
                 || impossibleTripCount
                 || impossibleByteSelection
                 || inconsistentLogicalSelection
-                || warmCachePerformedBackendWork
+                || invalidWarmCacheMetrics
                 || demandFreeRunPerformedBackendWork
                 || coldDemandSkippedBackendWork
                 || invalidOneFragmentMetrics
@@ -5186,6 +5167,81 @@ def verifyExactCoordinationFlagshipEvidence =
     }
 }
 
+def verifyRepositoryIndependentCoordinationFlagshipLinkage =
+        tasks.register(
+                'verifyRepositoryIndependentCoordinationFlagshipLinkage') {
+    group = 'verification'
+    description = 'Rejects any compiled Phase A flagship/runtime linkage to the locked BlueRepository bootstrap.'
+    dependsOn tasks.named('testClasses')
+    inputs.files(sourceSets.test.output.classesDirs)
+    doLast {
+        def requiredClasses = [
+                'blue/coordination/processor/'
+                        + 'CoordinationComplexEmbeddedDeterminismFlagshipTest.class',
+                'blue/coordination/processor/'
+                        + 'RepositoryIndependentCoordinationTestRuntime.class',
+                'blue/coordination/processor/'
+                        + 'RepositoryIndependentCoordinationTypes.class',
+                'blue/coordination/processor/'
+                        + 'RepositoryIndependentCoordinationProvider.class'
+        ]
+        def classFiles = new LinkedHashMap<String, File>()
+        sourceSets.test.output.classesDirs.files.each { classesDirectory ->
+            requiredClasses.each { relativePath ->
+                File candidate = new File(
+                        classesDirectory,
+                        relativePath)
+                if (candidate.isFile()) {
+                    classFiles.put(relativePath, candidate)
+                }
+            }
+            fileTree(classesDirectory) {
+                include 'blue/coordination/processor/CoordinationComplexEmbeddedDeterminismFlagshipTest$*.class'
+                include 'blue/coordination/processor/RepositoryIndependentCoordinationTestRuntime$*.class'
+                include 'blue/coordination/processor/RepositoryIndependentCoordinationTypes$*.class'
+                include 'blue/coordination/processor/RepositoryIndependentCoordinationProvider$*.class'
+            }.files.each { candidate ->
+                String relativePath = classesDirectory.toPath()
+                        .relativize(candidate.toPath())
+                        .toString()
+                        .replace(File.separatorChar, '/' as char)
+                classFiles.put(relativePath, candidate)
+            }
+        }
+        def missingClasses = requiredClasses.findAll {
+            !classFiles.containsKey(it)
+        }
+        if (!missingClasses.isEmpty()) {
+            throw new GradleException(
+                    'Repository-independent Coordination flagship linkage '
+                            + 'is incomplete; missing compiled classes: '
+                            + missingClasses)
+        }
+        String forbiddenInternalName = 'blue/repo/BlueRepository'
+        def forbiddenLinkages = classFiles.findAll { relativePath, classFile ->
+            new String(
+                    classFile.bytes,
+                    java.nio.charset.StandardCharsets.ISO_8859_1)
+                    .contains(forbiddenInternalName)
+        }.keySet().sort()
+        if (!forbiddenLinkages.isEmpty()) {
+            throw new GradleException(
+                    'Repository-independent Coordination flagship classes '
+                            + 'retain forbidden BlueRepository linkage: '
+                            + forbiddenLinkages)
+        }
+    }
+}
+
+def coordinationRepositoryIndependentRuntimeFlagship =
+        tasks.register(
+                'coordinationRepositoryIndependentRuntimeFlagship') {
+    group = 'verification'
+    description = 'Runs and strictly verifies the 32-case Repository-independent Coordination runtime flagship.'
+    dependsOn verifyExactCoordinationFlagshipEvidence,
+            verifyRepositoryIndependentCoordinationFlagshipLinkage
+}
+
 def verifyExactCoordinationLoopEvidence =
         tasks.register(
                 'verifyExactCoordinationLoopEvidence') {
@@ -5300,7 +5356,7 @@ def finalCoordinationTestTasks = [
         'coordinationRuntimeGasTest',
         'coordinationLoopSafetyTest',
         'coordinationFlagshipTest',
-        'localFixedRepositoryCompatibilityTest',
+        'currentRepositoryIntegrationTest',
         'coordinationClosedConformanceTest'
 ]
 
@@ -5325,8 +5381,8 @@ def finalCoordinationSectionTasks = [
                 'coordinationLoopSafetyTest',
         'root-emb1-emb2-emb3-flagship':
                 'coordinationFlagshipTest',
-        'local-fixed-repository-compatibility':
-                'localFixedRepositoryCompatibilityTest',
+        'current-local-repository':
+                'currentRepositoryIntegrationTest',
         'closed-coordination-conformance':
                 'coordinationClosedConformanceTest'
 ]
@@ -5553,10 +5609,10 @@ def exactFinalReportFlagshipEvidence = {
 
 def exactFinalReportMaximumRuntimeTraceEntries = {
     Map<String, Object> taskCounts ->
-        String scalingCase =
+        String scalingCase = (
                 'blue.coordination.processor.'
                         + 'CoordinationRuntimeGasScalingTest'
-                        + '#shouldRetainTheFullTraceForA129MemberCompositeScan()'
+                        + '#shouldRetainTheFullTraceForA129MemberCompositeScan()')
         if (taskCounts == null
                 || taskCounts.total <= 0L
                 || taskCounts.passed
@@ -5572,9 +5628,9 @@ def exactFinalReportMaximumRuntimeTraceEntries = {
                 layout.buildDirectory.dir(
                         'test-results/coordinationRuntimeGasTest')
                         .get().asFile
-        String scalingClass =
+        String scalingClass = (
                 'blue.coordination.processor.'
-                        + 'CoordinationRuntimeGasScalingTest'
+                        + 'CoordinationRuntimeGasScalingTest')
         String metricPrefix =
                 'coordination.maximumRuntimeTraceEntriesObserved='
         def metricValues =
@@ -6095,12 +6151,13 @@ def finalCoordinationReport = tasks.register(
     description = 'Writes stable JSON and Markdown evidence from every successful release-gating suite.'
     dependsOn finalCoordinationTestTasks
     dependsOn verifyPublishedDependencyAlignment
+    dependsOn verifyCoordinationFinalReportDependencyInputs
     dependsOn tasks.named('check'),
             binaryCompatibilityCheck,
             verifyJava8Bytecode,
             verifyReproducibleArchives,
             verifyReleaseGitDiffCheck,
-            generateCoordinationRequiredRepositoryClosure,
+            verifyLocalRepositoryReceipt,
             tasks.named('jar'),
             tasks.named('sourcesJar'),
             tasks.named('javadocJar'),
@@ -6114,6 +6171,8 @@ def finalCoordinationReport = tasks.register(
     inputs.dir(coordinationConformancePackageDirectory)
     inputs.file(coordinationConformanceReceipt)
     inputs.file(siblingSourceLockFile)
+    inputs.file(latestBlueDependencyLockEvidence)
+    inputs.file(latestBlueSiblingInputEvidence)
     inputs.file(coordinationReleaseBaselineFile)
     inputs.file(requiredRepositoryClosureGenerationReport)
     inputs.file(localCompositeDependencyGraphEvidence)
@@ -6173,34 +6232,6 @@ def finalCoordinationReport = tasks.register(
                             + repositoryManifest.repositoryVersionBlueId)
         }
 
-        def dependencyArtifact = { String groupId,
-                                   String artifactId,
-                                   String expectedVersion ->
-            def matches = configurations.runtimeClasspath
-                    .resolvedConfiguration
-                    .resolvedArtifacts
-                    .findAll { artifact ->
-                        artifact.moduleVersion.id.group == groupId
-                                && artifact.name == artifactId
-                    }
-            if (matches.size() != 1) {
-                throw new GradleException(
-                        "Expected one resolved ${groupId}:${artifactId} "
-                                + "artifact, found ${matches.size()}")
-            }
-            def match = matches[0]
-            if (match.moduleVersion.id.version
-                    != expectedVersion) {
-                throw new GradleException(
-                        "Resolved stale ${groupId}:${artifactId} "
-                                + "version "
-                                + match.moduleVersion.id.version
-                                + "; expected local project version "
-                                + expectedVersion)
-            }
-            return match.file
-        }
-
         File currentJar =
                 tasks.named('jar').get()
                         .archiveFile.get().asFile
@@ -6213,21 +6244,9 @@ def finalCoordinationReport = tasks.register(
         File currentSourceArchive =
                 tasks.named('sourceArchive').get()
                         .archiveFile.get().asFile
-        File languageJar = dependencyArtifact(
-                'blue.language',
-                'blue-language-java',
-                effectiveLocalProjectVersion(
-                        blueLanguageVersion))
-        File bexJar = dependencyArtifact(
-                'blue.bex',
-                'blue-bex-java',
-                effectiveLocalProjectVersion(
-                        blueBexVersion))
-        File repositoryJar = dependencyArtifact(
-                'blue.repo',
-                'blue-repo-java',
-                effectiveLocalProjectVersion(
-                        blueRepositoryVersion))
+        def focusedBlueArtifacts = exactFocusedBlueArtifacts()
+        File repositoryJar = focusedBlueArtifacts.get(
+                'blue.repo:blue-repo-java')
         def repositoryJarFile =
                 new java.util.jar.JarFile(repositoryJar)
         def repositoryJarManifest
@@ -6280,9 +6299,8 @@ def finalCoordinationReport = tasks.register(
                 currentSourcesJar,
                 currentJavadocJar,
                 currentSourceArchive,
-                languageJar,
-                bexJar,
-                repositoryJar,
+                latestBlueDependencyLockEvidence.get().asFile,
+                latestBlueSiblingInputEvidence.get().asFile,
                 localCompositeGraph,
                 normalizedBexLanguageEdge,
                 gasManifest,
@@ -6298,6 +6316,8 @@ def finalCoordinationReport = tasks.register(
                 flagshipTrace,
                 loopTrace
         ]
+        requiredEvidence.addAll(
+                focusedBlueArtifacts.values())
         def missing = requiredEvidence.findAll {
             !it.isFile()
         }
@@ -6310,16 +6330,13 @@ def finalCoordinationReport = tasks.register(
                 exactLocalCompositeEvidence()
         if (localCompositeEvidence.nested
                 .getProperty(
-                        'artifact.bytes')
-                != String.valueOf(
-                        languageJar.length())
-                || localCompositeEvidence.nested
+                        'requested.coordinates')
+                != localCompositeEvidence.nested
                 .getProperty(
-                        'artifact.sha256')
-                != sha256File(languageJar)) {
+                        'selected.coordinates')) {
             throw new GradleException(
-                    "Normalized BEX-to-Language evidence no longer "
-                            + "matches the root-resolved Language artifact")
+                    'Normalized BEX-to-Language evidence no longer matches '
+                            + 'the selected focused Language modules.')
         }
         def exactFlagshipEvidence =
                 readExactFlagshipEvidence(
@@ -6452,11 +6469,21 @@ def finalCoordinationReport = tasks.register(
                 'blueBexSourceState',
                 projectState(file('../blue-bex-java')))
         identities.put(
-                'blueRepositoryArtifactVersion',
-                blueRepositoryVersion)
+                'blueRepositoryArtifactCoordinate',
+                localCompositeEvidence.graph.getProperty(
+                        'selected.repository.coordinate'))
         identities.put(
-                'blueRepositoryDependencyMode',
-                'local-composite:immutable-repository-head')
+                'blueRepositoryArtifactType',
+                localCompositeEvidence.graph.getProperty(
+                        'selected.repository.type'))
+        identities.put(
+                'blueRepositoryArtifactVersion',
+                localCompositeEvidence.graph.getProperty(
+                        'selected.repository.version'))
+        identities.put(
+                'blueRepositoryArtifactProvenance',
+                localCompositeEvidence.graph.getProperty(
+                        'repository.provenance'))
         identities.put(
                 'blueRepositoryCommit',
                 actualSiblingCommits
@@ -6504,14 +6531,25 @@ def finalCoordinationReport = tasks.register(
                 'blueSiblingSourceLockSha256',
                 sha256File(siblingSourceLockFile))
         identities.put(
-                'blueLanguageJarSha256',
-                sha256File(languageJar))
+                'blueDependencyLockSha256',
+                sha256File(
+                        latestBlueDependencyLockEvidence.get().asFile))
         identities.put(
-                'blueBexJarSha256',
-                sha256File(bexJar))
+                'blueSiblingInputsSha256',
+                sha256File(
+                        latestBlueSiblingInputEvidence.get().asFile))
+        focusedBlueArtifactIdentityCoordinates.each {
+            identityKey, coordinate ->
+                identities.put(
+                        identityKey.toString(),
+                        sha256File(
+                                focusedBlueArtifacts.get(
+                                        coordinate)))
+        }
         identities.put(
                 'blueBexLanguageDependencyMode',
-                'local-composite')
+                localCompositeEvidence.nested.getProperty(
+                        'dependency.mode'))
         identities.put(
                 'blueBexLanguageCompositePath',
                 '../blue-language-java')
@@ -6520,21 +6558,10 @@ def finalCoordinationReport = tasks.register(
                 sha256File(
                         normalizedBexLanguageEdge))
         identities.put(
-                'blueBexLanguageRequestedCoordinate',
+                'blueBexLanguageRequestedCoordinates',
                 localCompositeEvidence.nested
                         .getProperty(
-                        'requested.coordinate'))
-        identities.put(
-                'blueRepositoryLanguageDependencyMode',
-                'local-composite')
-        identities.put(
-                'blueRepositoryLanguageCompositePath',
-                '../blue-language-java')
-        identities.put(
-                'blueRepositoryLanguageRequestedCoordinate',
-                localCompositeEvidence.graph
-                        .getProperty(
-                        'edge.repositoryToLanguage.requested'))
+                        'requested.coordinates'))
         identities.put(
                 'blueLocalCompositeDependencyGraphSha256',
                 sha256File(
@@ -7124,30 +7151,9 @@ def legacyAllGreenCoordinationVerification =
         File finalCurrentSourceArchive =
                 tasks.named('sourceArchive').get()
                         .archiveFile.get().asFile
-        File finalLanguageJar =
-                requiredReceiptArtifact(
-                        'blue.language',
-                        'blue-language-java',
-                        effectiveLocalProjectVersion(
-                                blueLanguageVersion),
-                        ':blue-language-java',
-                        file('../blue-language-java'))
-        File finalBexJar =
-                requiredReceiptArtifact(
-                        'blue.bex',
-                        'blue-bex-java',
-                        effectiveLocalProjectVersion(
-                                blueBexVersion),
-                        ':blue-bex-java',
-                        file('../blue-bex-java'))
-        File finalRepositoryJar =
-                requiredReceiptArtifact(
-                        'blue.repo',
-                        'blue-repo-java',
-                        effectiveLocalProjectVersion(
-                                blueRepositoryVersion),
-                        ':blue-repository-java',
-                        blueRepositoryCompositeRoot)
+        def finalFocusedBlueArtifacts = exactFocusedBlueArtifacts()
+        File finalRepositoryJar = finalFocusedBlueArtifacts.get(
+                'blue.repo:blue-repo-java')
         File finalBinaryCompatibilityBaseline =
                 configurations.binaryCompatibilityBaseline
                         .singleFile
@@ -7194,12 +7200,14 @@ def legacyAllGreenCoordinationVerification =
                 blueSiblingSourceLockSha256:
                         sha256File(
                                 siblingSourceLockFile),
-                blueLanguageJarSha256:
+                blueDependencyLockSha256:
                         sha256File(
-                                finalLanguageJar),
-                blueBexJarSha256:
+                                latestBlueDependencyLockEvidence
+                                        .get().asFile),
+                blueSiblingInputsSha256:
                         sha256File(
-                                finalBexJar),
+                                latestBlueSiblingInputEvidence
+                                        .get().asFile),
                 blueBexLanguageDependencyEvidenceSha256:
                         sha256File(
                                 normalizedBexLanguageEdge),
@@ -7245,6 +7253,14 @@ def legacyAllGreenCoordinationVerification =
                         sha256File(
                                 finalLoopTrace)
         ]
+        focusedBlueArtifactIdentityCoordinates.each {
+            identityKey, coordinate ->
+                independentlyObservedArtifactIdentities.put(
+                        identityKey,
+                        sha256File(
+                                finalFocusedBlueArtifacts.get(
+                                        coordinate)))
+        }
         def invalidArtifactIdentity =
                 independentlyObservedArtifactIdentities
                         .find { key, expected ->
@@ -7342,48 +7358,44 @@ def legacyAllGreenCoordinationVerification =
                                 'blueBexCommit')
                 || report.identities
                         .blueBexLanguageDependencyMode
-                        != 'local-composite'
+                        != localCompositeEvidence.nested
+                                .getProperty(
+                                'dependency.mode')
                 || report.identities
                         .blueBexLanguageCompositePath
                         != '../blue-language-java'
                 || report.identities
-                        .blueBexLanguageRequestedCoordinate
+                        .blueBexLanguageRequestedCoordinates
                         != localCompositeEvidence.nested
                                 .getProperty(
-                                'requested.coordinate')
+                                'requested.coordinates')
                 || report.identities
                         .blueBexLanguageDependencyEvidenceSha256
                         != independentlyObservedArtifactIdentities
                                 .blueBexLanguageDependencyEvidenceSha256
                 || report.identities
-                        .blueLanguageJarSha256
-                        != independentlyObservedArtifactIdentities
-                                .blueLanguageJarSha256
-                || localCompositeEvidence.nested
-                        .getProperty(
-                        'artifact.sha256')
-                        != independentlyObservedArtifactIdentities
-                                .blueLanguageJarSha256
+                        .blueRepositoryArtifactCoordinate
+                        != localCompositeEvidence.graph
+                                .getProperty(
+                                'selected.repository.coordinate')
+                || report.identities
+                        .blueRepositoryArtifactType
+                        != localCompositeEvidence.graph
+                                .getProperty(
+                                'selected.repository.type')
                 || report.identities
                         .blueRepositoryArtifactVersion
-                        != blueRepositoryVersion
+                        != localCompositeEvidence.graph
+                                .getProperty(
+                                'selected.repository.version')
                 || report.identities
-                        .blueRepositoryDependencyMode
-                        != 'local-composite:immutable-repository-head'
+                        .blueRepositoryArtifactProvenance
+                        != localCompositeEvidence.graph
+                                .getProperty(
+                                'repository.provenance')
                 || report.identities.blueRepositoryCommit
                         != siblingSourceLock.getProperty(
                                 'blueRepositoryCommit')
-                || report.identities
-                        .blueRepositoryLanguageDependencyMode
-                        != 'local-composite'
-                || report.identities
-                        .blueRepositoryLanguageCompositePath
-                        != '../blue-language-java'
-                || report.identities
-                        .blueRepositoryLanguageRequestedCoordinate
-                        != localCompositeEvidence.graph
-                                .getProperty(
-                                'edge.repositoryToLanguage.requested')
                 || report.identities
                         .blueLocalCompositeDependencyGraphSha256
                         != independentlyObservedArtifactIdentities
@@ -7458,8 +7470,213 @@ ext.coordinationReleaseFocusedTaskNames =
 ext.coordinationReleaseReadExactFlagshipEvidence =
         readExactFlagshipEvidence
 
+apply from: 'gradle/latest-language-topology.gradle'
+apply from: 'gradle/current-repository.gradle'
 apply from: 'gradle/coordination-release.gradle'
 apply from: 'gradle/coordination-working.gradle'
+apply from: 'gradle/coordination-engine.gradle'
+apply from: 'gradle/myos-demo-tests.gradle'
+
+/*
+ * The release-candidate acceptance contract has one explicit, ordered lane
+ * for each requested proof.  `mustRunAfter` makes the order deterministic
+ * whenever the lanes share a graph, while the aggregate task schedules the
+ * complete sequence without changing the standalone working-gate semantics.
+ */
+def coordinationAcceptance01DependencyAndSiblingLock =
+        tasks.register(
+                'coordinationAcceptance01DependencyAndSiblingLock') {
+    group = 'verification'
+    description = 'Verifies exact sibling inputs and the seven-artifact resolved dependency lock.'
+    dependsOn tasks.named('verifyLatestBlueSiblingInputs'),
+            tasks.named('writeLatestBlueDependencyLock'),
+            tasks.named('verifyNestedLocalCompositeDependencies'),
+            tasks.named('writeLocalCompositeDependencyEvidence')
+}
+def coordinationAcceptance02FocusedModuleCompilation =
+        tasks.register(
+                'coordinationAcceptance02FocusedModuleCompilation') {
+    group = 'verification'
+    description = 'Compiles Coordination against the six focused Language/BEX modules and exact Repository binary.'
+    dependsOn tasks.named('compileJava'),
+            tasks.named('compileTestJava'),
+            tasks.named('compileJmhJava')
+}
+def registerCoordinationAcceptanceTest = {
+    String taskName, String description, List<String> classes ->
+        tasks.register(taskName, Test) { focusedTest ->
+            focusedTest.description = description
+            configureFocusedTest(focusedTest, classes)
+        }
+}
+def coordinationAcceptance03InitialSubscriptionProjection =
+        registerCoordinationAcceptanceTest(
+                'coordinationAcceptance03InitialSubscriptionProjection',
+                'Verifies initial subscription-surface projection.',
+                [
+                        'blue.coordination.processor.CoordinationCollectionSubscriptionLifecycleTest.shouldProjectInitialStableKeyCollectionMembersThroughPublicContractsApi'
+                ])
+def coordinationAcceptance04IncrementalCollectionLifecycle =
+        registerCoordinationAcceptanceTest(
+                'coordinationAcceptance04IncrementalCollectionLifecycle',
+                'Verifies incremental collection-member activation, retirement, and fresh re-addition intervals.',
+                [
+                        'blue.coordination.processor.CoordinationCollectionSubscriptionLifecycleTest',
+                        'blue.coordination.processor.CoordinationPublicCollectionPlatformLifecycleTest',
+                        'blue.coordination.processor.CoordinationSubscriptionProvenancePersistenceTest'
+                ])
+def coordinationAcceptance05IndexedCandidateVerification =
+        registerCoordinationAcceptanceTest(
+                'coordinationAcceptance05IndexedCandidateVerification',
+                'Verifies exact, omitted, extra, duplicate, wrong-order, and stale-revision indexed candidates.',
+                [
+                        'blue.coordination.processor.CoordinationPublicIndexedDeliveryCandidatesTest'
+                ])
+def coordinationAcceptance06PureReferenceHeaderMaterialization =
+        registerCoordinationAcceptanceTest(
+                'coordinationAcceptance06PureReferenceHeaderMaterialization',
+                'Verifies pure-reference Channel-header and exact operation-body materialization.',
+                [
+                        'blue.coordination.processor.CoordinationCollectionSubscriptionLifecycleTest.shouldMaterializePureReferenceChannelHeaderThroughPublicContractsApi',
+                        'blue.coordination.processor.CoordinationContractsHostTest'
+                ])
+def coordinationAcceptance07CurrentRootIndexedEquivalence =
+        registerCoordinationAcceptanceTest(
+                'coordinationAcceptance07CurrentRootIndexedEquivalence',
+                'Verifies current-Root and indexed delivery equivalence.',
+                [
+                        'blue.coordination.processor.CoordinationNestedIndexedCurrentRootDeliveryEquivalenceTest',
+                        'blue.coordination.processor.delivery.CoordinationCurrentRootDeliveryPlanDeriverTest'
+                ])
+def coordinationAcceptance08OperationRequestRouting =
+        registerCoordinationAcceptanceTest(
+                'coordinationAcceptance08OperationRequestRouting',
+                'Verifies Operation Request source-to-target routing.',
+                [
+                        'blue.coordination.processor.OperationRequestLogicalRoutingTest'
+                ])
+def coordinationAcceptance09HostedComputeAdmission =
+        registerCoordinationAcceptanceTest(
+                'coordinationAcceptance09HostedComputeAdmission',
+                'Verifies hosted Compute semantic-output admission through the current modular BEX surface.',
+                [
+                        'blue.coordination.processor.workflow.ComputeEffectPlanTest.shouldRetainFrozenBexValuesAndMaterializeComputedValuesOnce',
+                        'blue.coordination.processor.workflow.ComputeEffectPlanTest.shouldPreserveSemanticContentForAdmittedExactPatchValues',
+                        'blue.coordination.processor.bex.BexModularApiMigrationTest'
+                ])
+def coordinationAcceptance10NestedCollectionReconstruction =
+        registerCoordinationAcceptanceTest(
+                'coordinationAcceptance10NestedCollectionReconstruction',
+                'Verifies nested collection canonical slicing and selected-chain-only reconstruction.',
+                [
+                        'blue.coordination.processor.CoordinationCanonicalFragmentContractTest',
+                        'blue.coordination.processor.CoordinationNestedEmbeddedCollectionFlagshipStructuralTest',
+                        'blue.coordination.processor.CoordinationNestedIndexedCurrentRootDeliveryEquivalenceTest'
+                ])
+def coordinationAcceptance11RuntimeFlagship =
+        registerCoordinationAcceptanceTest(
+                'coordinationAcceptance11RuntimeFlagship',
+                'Runs the nested agreements/lessons/cancellations/payments runtime flagship and inline parity proof.',
+                [
+                        'blue.coordination.processor.CoordinationNestedEmbeddedCollectionFlagshipStructuralTest',
+                        'blue.coordination.processor.CoordinationNestedIndexedCurrentRootDeliveryEquivalenceTest'
+                ])
+def coordinationAcceptance12WorkingVerification =
+        tasks.named('coordinationWorkingVerification')
+
+def coordinationAcceptanceLanes = [
+        coordinationAcceptance01DependencyAndSiblingLock,
+        coordinationAcceptance02FocusedModuleCompilation,
+        coordinationAcceptance03InitialSubscriptionProjection,
+        coordinationAcceptance04IncrementalCollectionLifecycle,
+        coordinationAcceptance05IndexedCandidateVerification,
+        coordinationAcceptance06PureReferenceHeaderMaterialization,
+        coordinationAcceptance07CurrentRootIndexedEquivalence,
+        coordinationAcceptance08OperationRequestRouting,
+        coordinationAcceptance09HostedComputeAdmission,
+        coordinationAcceptance10NestedCollectionReconstruction,
+        coordinationAcceptance11RuntimeFlagship,
+        coordinationAcceptance12WorkingVerification
+]
+coordinationAcceptance02FocusedModuleCompilation.configure {
+    mustRunAfter coordinationAcceptance01DependencyAndSiblingLock
+}
+coordinationAcceptance03InitialSubscriptionProjection.configure {
+    mustRunAfter coordinationAcceptance02FocusedModuleCompilation
+}
+coordinationAcceptance04IncrementalCollectionLifecycle.configure {
+    mustRunAfter coordinationAcceptance03InitialSubscriptionProjection
+}
+coordinationAcceptance05IndexedCandidateVerification.configure {
+    mustRunAfter coordinationAcceptance04IncrementalCollectionLifecycle
+}
+coordinationAcceptance06PureReferenceHeaderMaterialization.configure {
+    mustRunAfter coordinationAcceptance05IndexedCandidateVerification
+}
+coordinationAcceptance07CurrentRootIndexedEquivalence.configure {
+    mustRunAfter coordinationAcceptance06PureReferenceHeaderMaterialization
+}
+coordinationAcceptance08OperationRequestRouting.configure {
+    mustRunAfter coordinationAcceptance07CurrentRootIndexedEquivalence
+}
+coordinationAcceptance09HostedComputeAdmission.configure {
+    mustRunAfter coordinationAcceptance08OperationRequestRouting
+}
+coordinationAcceptance10NestedCollectionReconstruction.configure {
+    mustRunAfter coordinationAcceptance09HostedComputeAdmission
+}
+coordinationAcceptance11RuntimeFlagship.configure {
+    dependsOn coordinationRepositoryIndependentRuntimeFlagship
+    mustRunAfter coordinationAcceptance10NestedCollectionReconstruction
+}
+coordinationAcceptance12WorkingVerification.configure {
+    mustRunAfter coordinationAcceptance11RuntimeFlagship
+}
+[
+        'compileJava',
+        'compileTestJava',
+        'compileJmhJava'
+].each { compilationTask ->
+    tasks.named(compilationTask) {
+        mustRunAfter coordinationAcceptance01DependencyAndSiblingLock
+    }
+}
+[
+        'coordinationReleaseEvidenceTest',
+        'coordinationWorkingEvidenceTest',
+        'coordinationExternalBlockerProbeEvidenceTest',
+        'coordinationExternalBlockerProbeTest',
+        'coordinationWorkingTest',
+        'coordinationFullSuitePartitionVerification',
+        'generateCoordinationSameRunEvidenceReport',
+        'generateCoordinationWorkingReport'
+].each { workingLaneTask ->
+    tasks.named(workingLaneTask) {
+        mustRunAfter coordinationAcceptance11RuntimeFlagship
+    }
+}
+tasks.register('coordinationAcceptanceOrder') {
+    group = 'verification'
+    description = 'Runs the exact twelve Coordination acceptance lanes in order.'
+    dependsOn coordinationAcceptanceLanes
+}
+coordinationAcceptanceLanes.each { lane ->
+    project.ext.coordinationReleaseRegisterRequiredEvidenceGate
+            .call(lane.name, false)
+}
+
+tasks.named('verifyNestedLocalCompositeDependencies') {
+    dependsOn tasks.named('verifyLatestBlueSiblingInputs')
+}
+tasks.named('writeLocalCompositeDependencyEvidence') {
+    dependsOn tasks.named('writeLatestBlueDependencyLock')
+}
+tasks.named('verifyCoordinationConformanceReceiptIdentities') {
+    dependsOn tasks.named('writeLatestBlueDependencyLock')
+}
+tasks.named('coordinationClosedConformanceTest') {
+    dependsOn tasks.named('writeLatestBlueDependencyLock')
+}
 
 /*
  * `clean` is itself part of the hard release graph. Order every other root

@@ -1,8 +1,9 @@
 package blue.language.processor;
 
 import blue.coordination.processor.CoordinationRuntimeGas;
-import blue.language.Blue;
+import blue.language.codec.BlueFormat;
 import blue.language.model.Node;
+import blue.language.runtime.BlueLanguage;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -59,7 +60,7 @@ final class CoordinationDirectPortableGasMicrofixtureTest {
     @MethodSource("portableGasFixtureResources")
     void shouldExecuteEveryDirectPortableGasMicrofixture(
             String resource) {
-        // Given
+        // given
         Node fixtureNode = load(resource);
         Fixture fixture = decodeInput(
                 fixtureNode, resource);
@@ -68,7 +69,7 @@ final class CoordinationDirectPortableGasMicrofixtureTest {
                 parent,
                 RuntimeWorkSession.Mode.PROCESSING);
 
-        // When
+        // when
         CoordinationRuntimeGas.Ledger ledger =
                 CoordinationRuntimeGas.open(session);
         ledger.charge(
@@ -82,7 +83,7 @@ final class CoordinationDirectPortableGasMicrofixtureTest {
         ledger.submit();
         session.complete();
 
-        // Then
+        // then
         Expected expected = decodeExpected(
                 fixtureNode,
                 fixture,
@@ -93,19 +94,19 @@ final class CoordinationDirectPortableGasMicrofixtureTest {
 
     @Test
     void shouldCoverEveryPortableCounterExactlyOnce() {
-        // Given
+        // given
         Set<String> expected = new LinkedHashSet<String>(
                 CoordinationRuntimeGas.counterWeights().keySet());
         List<String> decoded = new ArrayList<String>();
 
-        // When
+        // when
         for (String resource : RESOURCES) {
             decoded.add(decodeInput(
                     load(resource),
                     resource).counter);
         }
 
-        // Then
+        // then
         assertEquals(14, RESOURCES.size());
         assertEquals(RESOURCES.size(),
                 new LinkedHashSet<String>(decoded).size());
@@ -114,13 +115,13 @@ final class CoordinationDirectPortableGasMicrofixtureTest {
 
     @Test
     void shouldRejectUnknownFixtureFields() {
-        // Given
+        // given
         Node fixture = load(RESOURCES.get(0));
         fixture.properties(
                 "unexpected",
                 new Node().value("must-fail"));
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
@@ -128,20 +129,20 @@ final class CoordinationDirectPortableGasMicrofixtureTest {
                                 fixture,
                                 "unknown-field"));
 
-        // Then
+        // then
         assertTrue(failure.getMessage().contains(
                 "fixture fields"));
     }
 
     @Test
     void shouldRejectUnknownFixtureOperations() {
-        // Given
+        // given
         Node fixture = load(RESOURCES.get(0));
         fixture.properties(
                 "operation",
                 new Node().value("not-an-operation"));
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
@@ -149,20 +150,20 @@ final class CoordinationDirectPortableGasMicrofixtureTest {
                                 fixture,
                                 "unknown-operation"));
 
-        // Then
+        // then
         assertTrue(failure.getMessage().contains(
                 "operation"));
     }
 
     @Test
     void shouldRejectUnknownFixtureCounters() {
-        // Given
+        // given
         Node fixture = load(RESOURCES.get(0));
         requiredObject(fixture, "input").properties(
                 "counter",
                 new Node().value("not-a-portable-counter"));
 
-        // When
+        // when
         IllegalArgumentException failure =
                 assertThrows(
                         IllegalArgumentException.class,
@@ -170,7 +171,7 @@ final class CoordinationDirectPortableGasMicrofixtureTest {
                                 fixture,
                                 "unknown-counter"));
 
-        // Then
+        // then
         assertTrue(failure.getMessage().contains(
                 "portable counter"));
     }
@@ -339,12 +340,9 @@ final class CoordinationDirectPortableGasMicrofixtureTest {
     }
 
     private static Node load(String resource) {
-        Blue blue = new Blue();
-        try {
-            return blue.parseSourceYaml(
-                    readResource(resource));
-        } finally {
-            blue.close();
+        try (BlueLanguage language = BlueLanguage.builder().build()) {
+            return language.codec().parseSource(
+                    readResource(resource), BlueFormat.YAML);
         }
     }
 

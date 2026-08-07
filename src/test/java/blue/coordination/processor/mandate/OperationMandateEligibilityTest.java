@@ -3,9 +3,10 @@ package blue.coordination.processor.mandate;
 import blue.coordination.processor.CoordinationHostQuotaSession;
 import blue.coordination.processor.CoordinationHostQuotaTraceEntry;
 import blue.coordination.processor.ExternalBlockerProbeAssertions;
-import blue.language.Blue;
+import blue.coordination.processor.CoordinationTestRuntime;
+import blue.coordination.processor.CoordinationTestResources;
 import blue.language.model.Node;
-import blue.language.utils.BlueIdCalculator;
+import blue.language.identity.DirectBlueIdCalculator;
 import blue.repo.coordination.Authority;
 import blue.repo.coordination.StatusInProgress;
 import blue.repo.mandate.DocumentResponderMandate;
@@ -28,12 +29,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class OperationMandateEligibilityTest {
     @Test
     void shouldRecordEligibleMandatePredicatesInExactOrder() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         CoordinationHostQuotaSession session =
                 CoordinationHostQuotaSession.observing();
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder().build(),
@@ -46,7 +47,7 @@ class OperationMandateEligibilityTest {
             reasons.add(entry.reason());
         }
 
-        // Then
+        // then
         assertTrue(decision.isEligible(), decision.reason());
         assertEquals(
                 Arrays.asList(
@@ -78,10 +79,10 @@ class OperationMandateEligibilityTest {
 
     @Test
     void shouldAuthorizeFixtureShapedOperationWithActiveExactMandate() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder().build());
@@ -90,7 +91,7 @@ class OperationMandateEligibilityTest {
                         MyOSDocumentOperationMandate
                                 .blueId());
 
-        // Then
+        // then
         ExternalBlockerProbeAssertions.classify(
                 "fixed-repository-mandate-subtype-evidence",
                 "Fixed Repository Mandate subtype evidence defect:",
@@ -113,34 +114,34 @@ class OperationMandateEligibilityTest {
         assertTrue(decision.isEligible(), decision.reason());
         assertEquals("active-operation-mandate", decision.reason());
         assertEquals(
-                BlueIdCalculator.calculateBlueId(fixture.mandate),
+                DirectBlueIdCalculator.calculateBlueId(fixture.mandate),
                 decision.selectedMandateBlueId());
     }
 
     @Test
     void shouldRejectOperationWhenAuthorizedActorDoesNotMatch() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         Node malloryEvent = fixture.event(actor("mallory"), fixture.request);
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder()
                                 .event(malloryEvent)
                                 .build());
 
-        // Then
+        // then
         assertTrue(decision.isIneligible());
         assertEquals("authorized-actor-mismatch", decision.reason());
     }
 
     @Test
     void shouldRejectOperationWhenCurrentDocumentDoesNotMatch() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder()
@@ -154,7 +155,7 @@ class OperationMandateEligibilityTest {
                                                 new Node().value(2)))
                                 .build());
 
-        // Then
+        // then
         assertTrue(decision.isIneligible());
         assertEquals(
                 "current-document-precondition-mismatch",
@@ -163,12 +164,12 @@ class OperationMandateEligibilityTest {
 
     @Test
     void shouldDeriveExactVersionMismatchWithoutCallerPrecondition() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         Node requestedDocument = documentRevision(1);
         Node currentDocument = documentRevision(2);
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder()
@@ -177,7 +178,7 @@ class OperationMandateEligibilityTest {
                                 .currentDocument(currentDocument)
                                 .build());
 
-        // Then
+        // then
         assertTrue(decision.isIneligible());
         assertEquals(
                 "current-document-precondition-mismatch",
@@ -186,10 +187,10 @@ class OperationMandateEligibilityTest {
 
     @Test
     void shouldSuspendExactVersionRequestWhenCurrentStateIsUnavailable() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder()
@@ -197,7 +198,7 @@ class OperationMandateEligibilityTest {
                                         documentRevision(1)))
                                 .build());
 
-        // Then
+        // then
         assertTrue(decision.isSuspended());
         assertEquals(
                 "current-document-evidence-unavailable",
@@ -206,11 +207,11 @@ class OperationMandateEligibilityTest {
 
     @Test
     void shouldAcceptExactVersionRequestAcrossInlineAndReferenceForms() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         Node currentDocument = documentRevision(1);
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder()
@@ -219,13 +220,13 @@ class OperationMandateEligibilityTest {
                                 .currentDocument(currentDocument)
                                 .build());
 
-        // Then
+        // then
         assertTrue(decision.isEligible());
     }
 
     @Test
     void shouldNotRequireCurrentStateWhenExactVersionFlagIsFalse() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         Node falseFlagEvent = fixture.event(
                 fixture.alice, fixture.request);
@@ -235,34 +236,34 @@ class OperationMandateEligibilityTest {
                 "requireExactDocumentVersion",
                 new Node().value(false));
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder()
                                 .event(falseFlagEvent)
                                 .build());
 
-        // Then
+        // then
         assertTrue(decision.isEligible());
     }
 
     @Test
     void shouldNotRequireCurrentStateWhenExactVersionFlagIsAbsent() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder().build());
 
-        // Then
+        // then
         assertTrue(decision.isEligible());
     }
 
     @Test
     void shouldRequireDocumentWhenExactVersionIsRequested() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         Node missingDocument = fixture.event(
                 fixture.alice, fixture.request);
@@ -270,7 +271,7 @@ class OperationMandateEligibilityTest {
                 "requireExactDocumentVersion",
                 new Node().value(true));
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder()
@@ -278,7 +279,7 @@ class OperationMandateEligibilityTest {
                                 .currentDocument(documentRevision(1))
                                 .build());
 
-        // Then
+        // then
         assertTrue(decision.isIneligible());
         assertEquals(
                 "operation-request-document-required",
@@ -287,7 +288,7 @@ class OperationMandateEligibilityTest {
 
     @Test
     void shouldRejectNonBooleanExactVersionPolicy() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         Node malformedPolicy = fixture.event(
                 fixture.alice, fixture.request);
@@ -295,7 +296,7 @@ class OperationMandateEligibilityTest {
                 "requireExactDocumentVersion",
                 new Node().value("true"));
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder()
@@ -303,7 +304,7 @@ class OperationMandateEligibilityTest {
                                 .currentDocument(documentRevision(1))
                                 .build());
 
-        // Then
+        // then
         assertTrue(decision.isIneligible());
         assertEquals(
                 "require-exact-document-version-invalid",
@@ -312,7 +313,7 @@ class OperationMandateEligibilityTest {
 
     @Test
     void shouldTreatInlineAndPureReferenceInitialDocumentsAsEquivalent() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         Node event = fixture.event(fixture.alice, fixture.request);
         event.getAsNode("/onBehalfOf").getProperties().put(
@@ -322,7 +323,7 @@ class OperationMandateEligibilityTest {
                 "initialDocument",
                 reference(fixture.targetInitialDocument));
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder()
@@ -333,13 +334,13 @@ class OperationMandateEligibilityTest {
                                         fixture.targetInitialDocument)
                                 .build());
 
-        // Then
+        // then
         assertTrue(decision.isEligible());
     }
 
     @Test
     void shouldAuthorizeWhenStaticPatternAndBoundValidationEvidencePass() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         Node function = validationFunction();
         Node requestPattern = new Node().properties(
@@ -350,7 +351,7 @@ class OperationMandateEligibilityTest {
                         .properties("request", requestPattern)
                         .properties("function", function));
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder()
@@ -360,20 +361,20 @@ class OperationMandateEligibilityTest {
                                                 fixture.request))
                                 .build());
 
-        // Then
+        // then
         assertTrue(decision.isEligible());
     }
 
     @Test
     void shouldRejectWhenBoundValidationEvidenceRejectsRequest() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         Node function = validationFunction();
         fixture.mandate.properties(
                 "validation",
                 new Node().properties("function", function));
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder()
@@ -384,7 +385,7 @@ class OperationMandateEligibilityTest {
                                                 "mandate-validation-function-rejected"))
                                 .build());
 
-        // Then
+        // then
         assertTrue(decision.isIneligible());
         assertEquals(
                 "mandate-validation-function-rejected",
@@ -393,7 +394,7 @@ class OperationMandateEligibilityTest {
 
     @Test
     void shouldRejectWhenStaticRequestPatternDoesNotMatch() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         Node function = validationFunction();
         Node requestPattern = new Node().properties(
@@ -406,7 +407,7 @@ class OperationMandateEligibilityTest {
         Node mismatchingRequest = new Node().properties(
                 "amount", new Node().value(8));
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder()
@@ -419,7 +420,7 @@ class OperationMandateEligibilityTest {
                                                 mismatchingRequest))
                                 .build());
 
-        // Then
+        // then
         assertTrue(decision.isIneligible());
         assertEquals(
                 "mandate-request-pattern-mismatch",
@@ -428,36 +429,36 @@ class OperationMandateEligibilityTest {
 
     @Test
     void shouldSuspendWhenMandateHistoryIsIncomplete() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder()
                                 .historyCompleteAtEventTime(false)
                                 .build());
 
-        // Then
+        // then
         assertTrue(decision.isSuspended());
         assertEquals("mandate-history-incomplete", decision.reason());
     }
 
     @Test
     void shouldSuspendWhenValidationEvidenceIsUnavailable() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         Node function = validationFunction();
         fixture.mandate.properties(
                 "validation",
                 new Node().properties("function", function));
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder().build());
 
-        // Then
+        // then
         assertTrue(decision.isSuspended());
         assertEquals(
                 "mandate-validation-evidence-unavailable",
@@ -466,18 +467,18 @@ class OperationMandateEligibilityTest {
 
     @Test
     void shouldSuspendWhenParticipantChannelIsReferenceBacked() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         fixture.mandate.getContracts().getProperties().put(
                 "authorizedActorChannel",
                 reference(channel(fixture.alice)));
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder().build());
 
-        // Then
+        // then
         assertTrue(decision.isSuspended());
         assertEquals(
                 "mandate-participant-channel-unavailable",
@@ -486,12 +487,12 @@ class OperationMandateEligibilityTest {
 
     @Test
     void shouldRejectMandateActivatedAfterOriginalEventTime() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         fixture.mandate.properties(
                 "activatedAt", new Node().value(101));
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder().build());
@@ -500,7 +501,7 @@ class OperationMandateEligibilityTest {
                         DocumentResponderMandate
                                 .blueId());
 
-        // Then
+        // then
         ExternalBlockerProbeAssertions.classify(
                 "fixed-repository-mandate-subtype-evidence",
                 "Fixed Repository Mandate subtype evidence defect:",
@@ -530,19 +531,19 @@ class OperationMandateEligibilityTest {
 
     @Test
     void shouldRejectMandateTerminatedAtOriginalEventTime() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         fixture.mandate.properties(
                 "activatedAt", new Node().value(50));
         fixture.mandate.properties(
                 "terminatedAt", new Node().value(100));
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder().build());
 
-        // Then
+        // then
         assertTrue(decision.isIneligible());
         assertEquals(
                 "mandate-terminated-at-event-time",
@@ -551,37 +552,37 @@ class OperationMandateEligibilityTest {
 
     @Test
     void shouldAuthorizeVerifiedOperationMandateSubtype() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         fixture.mandate.type(
                 MyOSDocumentOperationMandate
                         .repositoryType()
                         .reference());
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder().build());
 
-        // Then
+        // then
         assertTrue(decision.isEligible(), decision.reason());
     }
 
     @Test
     void shouldRejectDifferentFixedMandateType() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         fixture.mandate.type(
                 DocumentResponderMandate
                         .repositoryType()
                         .reference());
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder().build());
 
-        // Then
+        // then
         assertTrue(decision.isIneligible());
         assertEquals(
                 "operation-mandate-type-mismatch",
@@ -590,38 +591,38 @@ class OperationMandateEligibilityTest {
 
     @Test
     void shouldRejectStatusParentAsActiveStatus() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         fixture.mandate.getAsNode("/status").type(
                 StatusInProgress
                         .repositoryType()
                         .reference());
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder().build());
 
-        // Then
+        // then
         assertTrue(decision.isIneligible());
         assertEquals("mandate-not-active", decision.reason());
     }
 
     @Test
     void shouldRejectAuthorityParentAsMandateAuthority() {
-        // Given
+        // given
         Fixture fixture = new Fixture();
         fixture.event.getAsNode("/onBehalfOf").type(
                 Authority.repositoryType().reference());
 
-        // When
+        // when
         MandateEligibilityDecision decision =
                 OperationMandateEligibility.evaluate(
                         fixture.evidenceBuilder()
                                 .event(fixture.event)
                                 .build());
 
-        // Then
+        // then
         assertTrue(decision.isIneligible());
         assertEquals(
                 "mandate-authority-type-mismatch",
@@ -760,7 +761,7 @@ class OperationMandateEligibilityTest {
 
     private static Node reference(Node exactNode) {
         return new Node().blueId(
-                BlueIdCalculator.calculateBlueId(exactNode));
+                DirectBlueIdCalculator.calculateBlueId(exactNode));
     }
 
     private static boolean exactTimelineIdEvidenceFailure(
@@ -774,9 +775,9 @@ class OperationMandateEligibilityTest {
 
     private static String fixedTypeProviderDiagnostic(
             String blueId) {
-        Blue blue =
-                BlueRepository.latest()
-                        .configure(new Blue());
+        CoordinationTestRuntime blue =
+                CoordinationTestResources.configuredBlue(
+                        BlueRepository.current());
         try {
             blue.loadSnapshot(blueId);
             return null;

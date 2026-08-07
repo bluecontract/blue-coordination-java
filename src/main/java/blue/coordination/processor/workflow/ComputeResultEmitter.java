@@ -9,9 +9,9 @@ import blue.bex.value.BexValue;
 import blue.bex.value.BexValues;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.model.Node;
-import blue.language.processor.CoordinationProcessHeaderBridge;
+import blue.coordination.processor.support.CoordinationProcessHeaderSupport;
 import blue.language.processor.WorkingDocument;
-import blue.language.processor.model.FrozenJsonPatch;
+import blue.language.processor.FrozenJsonPatch;
 import blue.language.snapshot.FrozenNode;
 
 import java.util.ArrayList;
@@ -548,7 +548,7 @@ final class ComputeResultEmitter {
         long writerStart = System.nanoTime();
         try {
             FrozenNode materialized = FrozenNode.fromNode(
-                    CoordinationProcessHeaderBridge
+                    CoordinationProcessHeaderSupport
                             .canonicalExactCopy(semantic));
             return requireExactPatchIdentity(
                     materialized, expectedBlueId);
@@ -615,7 +615,7 @@ final class ComputeResultEmitter {
          * authored input to Language's hosted output boundary. Strip that
          * provenance once, after rebuilding the complete semantic value.
          */
-        return CoordinationProcessHeaderBridge
+        return CoordinationProcessHeaderSupport
                 .canonicalExactCopy(
                         semanticOutputView(value));
     }

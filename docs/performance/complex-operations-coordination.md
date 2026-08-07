@@ -30,8 +30,11 @@ resource use—not elapsed time on one machine.
   diagnostics through production entry points. These counters enforce
   preparation/provider limits and never contribute to portable PROCESS gas.
 
-The flagship writes executable-derived evidence to
-`build/reports/coordination-flagship/trace.md`. Loop prefixes are written to
+The fixed-scope flagship writes executable-derived evidence to
+`build/reports/coordination-flagship/trace.md` only after both runtime variants
+and all 32 matrix runs pass in the same invocation. The nested collection
+walkthrough uses a separate structured JSON contract and cannot treat that
+fixed-scope Markdown as its input. Loop prefixes are written to
 `build/reports/coordination-loops/trace-prefixes.json`.
 
 ## Required invariants
@@ -85,3 +88,24 @@ portable value of 256 bounds distinct counter kinds in one child catalog; it
 does not cap repeated staged trace entries. Coordination therefore preserves
 the exact charge-before-work order and failure prefix without batching,
 reordering, or hiding work.
+
+## Per-operation elapsed-time diagnostics
+
+Elapsed time is diagnostic evidence, not a portable pass/fail budget. Capture
+one exact MyOS run with the optional monotonic recorder:
+
+```bash
+./gradlew coordinationMyosDemoTest \
+  --tests blue.coordination.examples.WadowiceHotelDinnerOrderExampleTest \
+  -Dmyos.demo.operationTiming="$PWD/build/reports/myos-demo-examples/operation-timing.json" \
+  -PtestJfr=false --offline --no-daemon
+```
+
+The JVM writes the report once at shutdown. Each operation records append,
+route lookup, affected Root count, complete PROCESS time, and one delivery per
+Root. Delivery detail includes indexed planning, selected-bundle loading,
+Contracts PROCESS, retained-reference materialization, subscription
+projection, fragment-transition planning, commit, backend batch/body/byte
+counts, and unattributed time. Nanosecond values come from `System.nanoTime`
+around the live call sites; convert them to seconds for presentation, but keep
+the original integers when comparing phases within that exact run.

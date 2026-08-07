@@ -1,14 +1,13 @@
 package blue.coordination.processor;
 
-import blue.language.NodeProvider;
+import blue.language.provider.NodeProvider;
+import blue.language.api.NodeProviderOutcome;
+import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.model.Node;
+import blue.language.model.NodePathEditor;
+import blue.language.model.NodeWireForm;
 import blue.language.processor.registry.RuntimeBlueIds;
-import blue.language.provider.NodeProviderOutcome;
 import blue.language.provider.NodeProviderResult;
-import blue.language.utils.BlueIdCalculator;
-import blue.language.utils.NodePathEditor;
-import blue.language.utils.NodeToMapListOrValue;
-import blue.language.utils.NodeTransformer;
 import blue.repo.coordination.ChatWorkflowOperation;
 import blue.repo.coordination.SequentialWorkflow;
 import blue.repo.coordination.SequentialWorkflowOperation;
@@ -61,49 +60,36 @@ class CoordinationDocumentSplitterDeepLocalityTest {
 
     @Test
     void shouldReconstructExactDeepRootFromCompleteFragmentInventory() {
-        // Given
+        // given
         Fixture fixture = Fixture.create();
 
-        // When
+        // when
         CoordinationDocumentSplitter.SplitGraph split =
                 CoordinationDocumentSplitterTestSupport
                         .splitDocument(fixture.root);
 
-        Node reconstructed =
-                NodeTransformer.transform(
-                        split.pureReference(),
-                        node -> {
-                            if (!node.isReferenceOnly()) {
-                                return node;
-                            }
-                            Node fragment =
-                                    split.fragments().get(
-                                            node.getBlueId());
-                            return fragment != null
-                                    ? fragment
-                                    : node;
-                        });
+        Node reconstructed = split.reconstruct();
 
-        // Then
+        // then
         assertEquals(
-                NodeToMapListOrValue.get(
+                NodeWireForm.get(
                         fixture.root),
-                NodeToMapListOrValue.get(
+                NodeWireForm.get(
                         reconstructed));
         assertEquals(
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         fixture.root),
                 split.rootBlueId());
         assertEquals(
                 split.rootBlueId(),
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         reconstructed));
 
         for (Map.Entry<String, Node> fragment
                 : split.fragments().entrySet()) {
             assertEquals(
                     fragment.getKey(),
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             fragment.getValue()));
             NodeProviderResult result =
                     split.provider()
@@ -139,17 +125,17 @@ class CoordinationDocumentSplitterDeepLocalityTest {
 
     @Test
     void shouldDemandNoChildOrSiblingRootForRootOnlySurface() {
-        // Given
+        // given
         List<String> selectedScopePaths =
                 Collections.singletonList(
                         ROOT);
 
-        // When
+        // when
         DemandProof proof =
                 demandSurface(
                         selectedScopePaths);
 
-        // Then
+        // then
         Set<String> childAndSiblingRoots =
                 new LinkedHashSet<>(
                         proof.fixture.scopeBlueIds
@@ -177,16 +163,16 @@ class CoordinationDocumentSplitterDeepLocalityTest {
     void shouldDemandOnlySelectedChainsAndAllowListedBodies(
             String label,
             List<String> selectedScopePaths) {
-        // Given
+        // given
         List<String> selection =
                 selectedScopePaths;
 
-        // When
+        // when
         DemandProof proof =
                 demandSurface(
                         selection);
 
-        // Then
+        // then
         assertEquals(
                 proof.expectedBlueIds,
                 proof.provider.demandedBlueIds(),
@@ -688,7 +674,7 @@ class CoordinationDocumentSplitterDeepLocalityTest {
                 properties.put(key, siblingRoot);
                 embeddedPaths.add("/" + key);
                 siblingRootBlueIds.add(
-                        BlueIdCalculator
+                        DirectBlueIdCalculator
                                 .calculateBlueId(
                                         siblingRoot));
             }
@@ -705,17 +691,17 @@ class CoordinationDocumentSplitterDeepLocalityTest {
                             + depth);
             selectedBodyBlueIds.put(
                     scopePath,
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             selectedBody));
             causalBodyBlueIds.put(
                     scopePath,
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             causalBody));
             decoyBodyBlueIds.add(
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             decoyOperationBody));
             decoyBodyBlueIds.add(
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             decoyReactionBody));
 
             Map<String, Node> contracts =
@@ -761,7 +747,7 @@ class CoordinationDocumentSplitterDeepLocalityTest {
                                     contracts));
             scopeBlueIds.put(
                     scopePath,
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             scope));
             return scope;
         }
@@ -792,7 +778,7 @@ class CoordinationDocumentSplitterDeepLocalityTest {
             Node exact = nodes.get(0);
             assertEquals(
                     blueId,
-                    BlueIdCalculator.calculateBlueId(
+                    DirectBlueIdCalculator.calculateBlueId(
                             exact));
             cache.put(blueId, exact.clone());
             return exact;

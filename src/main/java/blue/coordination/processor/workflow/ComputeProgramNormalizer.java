@@ -3,7 +3,7 @@ package blue.coordination.processor.workflow;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.model.Node;
 import blue.language.snapshot.FrozenNode;
-import blue.language.utils.Nodes;
+import blue.language.model.Nodes;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -19,7 +19,7 @@ import java.util.Map;
  */
 final class ComputeProgramNormalizer {
     private static final String NORMALIZATION_VERSION =
-            "compute-program-v5|exact-definition-identity|normalized-bex-source";
+            "compute-program-v6|exact-definition-identity|canonical-bex-source";
 
     private final BexProcessingMetrics metrics;
 
@@ -231,7 +231,7 @@ final class ComputeProgramNormalizer {
                 || Nodes.isEmptyPlaceholder(statement)) {
             return new Node().properties("$return", new Node());
         }
-        return statement.clone();
+        return canonicalStaticSource(statement);
     }
 
     private Node authoredMap(Node node) {
@@ -240,15 +240,56 @@ final class ComputeProgramNormalizer {
         }
         Map<String, Node> properties = new LinkedHashMap<String, Node>();
         for (Map.Entry<String, Node> entry : node.getProperties().entrySet()) {
-            properties.put(entry.getKey(), entry.getValue().clone());
+            properties.put(entry.getKey(),
+                    canonicalStaticSource(entry.getValue()));
         }
         return new Node().properties(properties);
     }
 
     private void putIfMeaningful(Map<String, Node> properties, String key, Node value) {
         if (hasAuthoredContent(value)) {
-            properties.put(key, value.clone());
+            properties.put(key, canonicalStaticSource(value));
         }
+    }
+
+    /**
+     * Restores canonical pure-reference shape inside a resolved executable
+     * view.  Language may retain a provider BlueId beside resolved fields so
+     * hosts can inspect effective content.  Those sibling fields are not part
+     * of the authored BEX literal and would make a transient Blue output
+     * invalid if compiled as object members.
+     */
+    private Node canonicalStaticSource(Node source) {
+        if (source == null) {
+            return null;
+        }
+        if (source.getBlueId() != null) {
+            return new Node().blueId(source.getBlueId());
+        }
+        Node normalized = source.clone();
+        normalized.type(canonicalStaticSource(source.getType()));
+        normalized.itemType(canonicalStaticSource(source.getItemType()));
+        normalized.keyType(canonicalStaticSource(source.getKeyType()));
+        normalized.valueType(canonicalStaticSource(source.getValueType()));
+        normalized.blue(canonicalStaticSource(source.getBlue()));
+        normalized.contracts(canonicalStaticSource(source.getContracts()));
+        if (source.getItems() != null) {
+            java.util.List<Node> items = new java.util.ArrayList<Node>();
+            for (Node item : source.getItems()) {
+                items.add(canonicalStaticSource(item));
+            }
+            normalized.items(items);
+        }
+        if (source.getProperties() != null) {
+            Map<String, Node> properties = new LinkedHashMap<String, Node>();
+            for (Map.Entry<String, Node> entry
+                    : source.getProperties().entrySet()) {
+                properties.put(entry.getKey(),
+                        canonicalStaticSource(entry.getValue()));
+            }
+            normalized.properties(properties);
+        }
+        return normalized;
     }
 
     private boolean hasAuthoredContent(Node node) {
@@ -261,7 +302,7 @@ final class ComputeProgramNormalizer {
         }
         target.name(source.getName());
         target.description(source.getDescription());
-        target.type(source.getType() != null ? source.getType().clone() : null);
+        target.type(canonicalStaticSource(source.getType()));
     }
 
     private void copyMetadata(Node target, FrozenNode source) {
@@ -270,6 +311,8 @@ final class ComputeProgramNormalizer {
         }
         target.name(source.getName());
         target.description(source.getDescription());
-        target.type(source.getType() != null ? source.getType().toNode() : null);
+        target.type(source.getType() != null
+                ? canonicalStaticSource(source.getType().toNode())
+                : null);
     }
 }

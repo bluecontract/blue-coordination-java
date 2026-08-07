@@ -1,7 +1,6 @@
 package blue.coordination.processor;
 
 import blue.coordination.processor.CoordinationProcessors;
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.ProcessorStatus;
@@ -23,16 +22,16 @@ class TriggerEventStepExecutorTest {
 
     @Test
     void shouldEmitStaticEventPayload() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, directWorkflowDocument(fixture.repository,
                 0,
                 triggerEventStep(chatMessageEvent("Hello World"))));
 
-        // When
+        // when
         DocumentProcessingResult result = processChat(fixture, document);
 
-        // Then
+        // then
         assertEquals(1, result.events().size());
         assertEventType(result.events().get(0), ChatMessage.qualifiedName(), ChatMessage.blueId());
         assertEquals("Hello World", result.events().get(0).get("/message"));
@@ -40,7 +39,7 @@ class TriggerEventStepExecutorTest {
 
     @Test
     void shouldPreserveNonStringValuesInStaticPayload() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, directWorkflowDocument(fixture.repository,
                 1,
@@ -48,25 +47,25 @@ class TriggerEventStepExecutorTest {
                         .type("Coordination/Event")
                         .properties("amount", new Node().value(2)))));
 
-        // When
+        // when
         DocumentProcessingResult result = processChat(fixture, document);
 
-        // Then
+        // then
         assertEquals(BigInteger.valueOf(2), result.events().get(0).get("/amount"));
     }
 
     @Test
     void shouldEmitDollarPrefixedLiteralPayloadExactly() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, directWorkflowDocument(fixture.repository,
                 0,
                 triggerEventStep(new Node().properties("$document", new Node().value("/counter")))));
 
-        // When
+        // when
         DocumentProcessingResult result = processChat(fixture, document);
 
-        // Then
+        // then
         assertEquals(
                 ProcessorStatus.SUCCESS,
                 result.status(),
@@ -77,31 +76,31 @@ class TriggerEventStepExecutorTest {
 
     @Test
     void shouldFailClearlyWhenEventIsMissing() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, directWorkflowDocument(fixture.repository,
                 0,
                 new Node().type("Coordination/Trigger Event")));
 
-        // When
+        // when
         DocumentProcessingResult result = processChat(fixture, document);
 
-        // Then
+        // then
         assertRuntimeFatal(result, "Trigger Event step must declare event payload");
     }
 
     @Test
     void shouldPreserveNamedOnlyEventAsExactIdentityBearingPayload() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, directWorkflowDocument(fixture.repository,
                 0,
                 triggerEventStep(new Node().name("Named Event Only"))));
 
-        // When
+        // when
         DocumentProcessingResult result = processChat(fixture, document);
 
-        // Then
+        // then
         assertEquals(
                 ProcessorStatus.SUCCESS,
                 result.status(),
@@ -112,7 +111,7 @@ class TriggerEventStepExecutorTest {
 
     @Test
     void shouldPreserveEmptyListEventAsExactListPayload() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(
                 fixture,
@@ -123,10 +122,10 @@ class TriggerEventStepExecutorTest {
                                 new Node().items(
                                         Collections.<Node>emptyList()))));
 
-        // When
+        // when
         DocumentProcessingResult result = processChat(fixture, document);
 
-        // Then
+        // then
         assertEquals(
                 ProcessorStatus.SUCCESS,
                 result.status(),
@@ -137,7 +136,7 @@ class TriggerEventStepExecutorTest {
 
     @Test
     void shouldRejectCanonicalEmptyObjectEventAsOmittedPayload() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(
                 fixture,
@@ -148,10 +147,10 @@ class TriggerEventStepExecutorTest {
                                 new Node().properties(
                                         Collections.<String, Node>emptyMap()))));
 
-        // When
+        // when
         DocumentProcessingResult result = processChat(fixture, document);
 
-        // Then
+        // then
         assertRuntimeFatal(
                 result,
                 "Trigger Event step must declare event payload");
@@ -159,28 +158,28 @@ class TriggerEventStepExecutorTest {
 
     @Test
     void shouldDeliverEmittedEventToRuntimeTriggeredChannel() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, triggeredConsumerDocument(fixture.repository));
 
-        // When
+        // when
         DocumentProcessingResult result = processChat(fixture, document);
 
-        // Then
+        // then
         assertContainsEventType(result.events(), StatusCompleted.qualifiedName(), StatusCompleted.blueId());
         assertContainsChatMessage(result.events(), "Triggered consumer ran");
     }
 
     @Test
     void shouldAllowLifecycleProducerToTriggerConsumer() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
 
-        // When
+        // when
         DocumentProcessingResult result = fixture.blue.initializeDocument(
                 fixture.blue.preprocess(lifecycleProducerDocument(fixture.repository)));
 
-        // Then
+        // then
         assertEquals(
                 ProcessorStatus.SUCCESS,
                 result.status(),
@@ -191,16 +190,16 @@ class TriggerEventStepExecutorTest {
 
     @Test
     void shouldNotMutateDocumentStateWhenTriggeringEvent() {
-        // Given
+        // given
         Fixture fixture = configuredFixture();
         Node document = initializedDocument(fixture, directWorkflowDocument(fixture.repository,
                 9,
                 triggerEventStep(chatMessageEvent("state is external"))));
 
-        // When
+        // when
         DocumentProcessingResult result = processChat(fixture, document);
 
-        // Then
+        // then
         assertEquals(BigInteger.valueOf(9), result.document().get("/counter"));
         assertTriggeredChatMessage(result, "state is external");
     }
@@ -288,7 +287,7 @@ class TriggerEventStepExecutorTest {
 
     private static Node document(BlueRepository repository, int counter, Map<String, Node> contracts) {
         return new Node()
-                .blue(repository.typeAliasBlue())
+                .blue(repository.importsDirective())
                 .name("Trigger Event Test")
                 .properties("counter", new Node().value(counter))
                 .properties("contracts", new Node().properties(contracts));
@@ -308,9 +307,9 @@ class TriggerEventStepExecutorTest {
     }
 
     private static Fixture configuredFixture() {
-        BlueRepository repository = BlueRepository.latest();
-        Blue blue = CoordinationTestResources.configuredBlue(repository);
-        CoordinationProcessors.registerWith(blue);
+        BlueRepository repository = BlueRepository.current();
+        CoordinationTestRuntime blue =
+                CoordinationTestResources.configuredBlue(repository);
         return new Fixture(repository, blue);
     }
 
@@ -379,9 +378,11 @@ class TriggerEventStepExecutorTest {
 
     private static final class Fixture {
         private final BlueRepository repository;
-        private final Blue blue;
+        private final CoordinationTestRuntime blue;
 
-        private Fixture(BlueRepository repository, Blue blue) {
+        private Fixture(
+                BlueRepository repository,
+                CoordinationTestRuntime blue) {
             this.repository = repository;
             this.blue = blue;
         }

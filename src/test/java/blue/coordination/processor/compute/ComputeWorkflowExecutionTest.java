@@ -2,7 +2,7 @@ package blue.coordination.processor.compute;
 
 import blue.bex.api.BexEngine;
 import blue.bex.api.BexMetricsSink;
-import blue.bex.result.BexMetrics;
+import blue.bex.result.BexMetricsSnapshot;
 import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationTestResources;
 import blue.coordination.processor.workflow.SequentialWorkflowRunner;
@@ -49,7 +49,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ComputeWorkflowExecutionTest {
     @Test
     void shouldEmitEventWithoutMutatingDocumentForInlineCompute() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -61,10 +61,10 @@ class ComputeWorkflowExecutionTest {
                 "              kind: Compute Event",
                 "          - $return: {}"));
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertEquals("idle", result.document().get("/status"));
         assertEquals(1, result.events().size());
         assertEquals("Compute Event", result.events().get(0).get("/kind"));
@@ -72,7 +72,7 @@ class ComputeWorkflowExecutionTest {
 
     @Test
     void shouldExposeInlineComputeResultToLaterSteps() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -94,11 +94,11 @@ class ComputeWorkflowExecutionTest {
                 "                $steps: Build.reason",
                 "          - $return: {}"));
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
         Node event = onlyEvent(result);
 
-        // Then
+        // then
         assertEquals("Prior Result", event.get("/kind"));
         assertEquals(Boolean.TRUE, event.get("/approved"));
         assertEquals("ok", event.get("/reason"));
@@ -106,7 +106,7 @@ class ComputeWorkflowExecutionTest {
 
     @Test
     void shouldSuppressComputedEventsWhenEmissionIsDisabled() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -119,16 +119,16 @@ class ComputeWorkflowExecutionTest {
                 "              kind: Should Not Emit",
                 "          - $return: {}"));
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertTrue(result.events().isEmpty());
     }
 
     @Test
     void shouldExportStepResultWhenEventEmissionIsDisabled() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -151,17 +151,17 @@ class ComputeWorkflowExecutionTest {
                 "                $steps: Build.approved",
                 "          - $return: {}"));
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertEquals("Exported Result", onlyEvent(result).get("/kind"));
         assertEquals(Boolean.TRUE, onlyEvent(result).get("/approved"));
     }
 
     @Test
     void shouldSuppressStepResultWhenReturnResultIsFalse() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -183,16 +183,16 @@ class ComputeWorkflowExecutionTest {
                 "                  - missing",
                 "          - $return: {}"));
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertEquals("missing", onlyEvent(result).get("/approved"));
     }
 
     @Test
     void shouldEmitEventsWhenReturnResultIsFalse() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -206,16 +206,16 @@ class ComputeWorkflowExecutionTest {
                 "          - $return:",
                 "              approved: true"));
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertEquals("Event Still Emits", onlyEvent(result).get("/kind"));
     }
 
     @Test
     void shouldExportUnnamedComputeStepByIndexKey() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -232,16 +232,16 @@ class ComputeWorkflowExecutionTest {
                 "                $steps: Step1.value",
                 "          - $return: {}"));
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertEquals("abc", onlyEvent(result).get("/kind"));
     }
 
     @Test
     void shouldApplyComputeChangesetAndRetainStepData() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -269,10 +269,10 @@ class ComputeWorkflowExecutionTest {
                 "                  path: /changeset/0/val",
                 "          - $return: {}"));
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertEquals("active", result.document().get("/status"));
         assertEquals("/status", onlyEvent(result).get("/patchPath"));
         assertEquals("active", onlyEvent(result).get("/patchValue"));
@@ -280,7 +280,7 @@ class ComputeWorkflowExecutionTest {
 
     @Test
     void shouldSuppressAccumulatedChangesWithExplicitEmptyChangeset() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -294,16 +294,16 @@ class ComputeWorkflowExecutionTest {
                 "          - $return:",
                 "              changeset: []"));
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertEquals("idle", result.document().get("/status"));
     }
 
     @Test
     void shouldApplyChangesetWhenReturnResultIsFalse() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -318,16 +318,16 @@ class ComputeWorkflowExecutionTest {
                 "          - $return:",
                 "              ignored: true"));
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertEquals("active", result.document().get("/status"));
     }
 
     @Test
     void shouldExportScalarResultFromInlineExpression() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -345,10 +345,10 @@ class ComputeWorkflowExecutionTest {
                 "                $steps: ReadStatus",
                 "          - $return: {}"));
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         Node event = support.blue.resolveToSnapshot(
                 onlyEvent(result)).resolvedRoot();
         assertEquals("idle", event.get("/status"));
@@ -356,7 +356,7 @@ class ComputeWorkflowExecutionTest {
 
     @Test
     void shouldReadEventDocumentAndCurrentContract() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -374,12 +374,12 @@ class ComputeWorkflowExecutionTest {
                 "                $currentContract: /channel",
                 "          - $return: {}"));
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document, new Node().value("hello"));
         Node event = support.blue.resolveToSnapshot(
                 onlyEvent(result)).resolvedRoot();
 
-        // Then
+        // then
         assertEquals("hello", event.get("/request"));
         assertEquals("idle", event.get("/status"));
         assertEquals("ownerChannel", event.get("/channel"));
@@ -387,7 +387,7 @@ class ComputeWorkflowExecutionTest {
 
     @Test
     void shouldPreserveAuthoredCurrentContractChannelBinding() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initialize(support.yaml(String.join("\n",
                 "name: Compute Authored Channel Test",
@@ -408,18 +408,18 @@ class ComputeWorkflowExecutionTest {
                 "                $currentContract: /channel",
                 "          - $return: {}"))).document();
 
-        // When
+        // when
         DocumentProcessingResult result = support.process(
                 document,
                 support.operationRequest("run", "manualChannel", new Node().value("request")));
 
-        // Then
+        // then
         assertEquals("manualChannel", onlyEvent(result).get("/channel"));
     }
 
     @Test
     void shouldResolveComputeDefinitionBySiblingContractKey() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initialize(support.yaml(support.operationWorkflowDocumentWithContracts(String.join("\n",
                 "  computeLogic:",
@@ -441,16 +441,16 @@ class ComputeWorkflowExecutionTest {
                 "        definition: computeLogic",
                 "        entry: build")))).document();
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertEquals("From Definition", onlyEvent(result).get("/kind"));
     }
 
     @Test
     void shouldResolveComputeDefinitionByAbsolutePointer() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initialize(support.yaml(support.operationWorkflowDocumentWithContracts(String.join("\n",
                 "  computeLogic:",
@@ -469,16 +469,16 @@ class ComputeWorkflowExecutionTest {
                 "        definition: /contracts/computeLogic",
                 "        entry: build")))).document();
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertEquals("Absolute Definition", onlyEvent(result).get("/kind"));
     }
 
     @Test
     void shouldExecuteInlineObjectComputeDefinition() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -497,16 +497,16 @@ class ComputeWorkflowExecutionTest {
                 "                - $return: {}",
                 "        entry: build"));
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertEquals("Inline Definition", onlyEvent(result).get("/kind"));
     }
 
     @Test
     void shouldNotExecuteComputeDefinitionMarkerByItself() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initialize(support.yaml(support.operationWorkflowDocumentWithContracts(String.join("\n",
                 "  computeLogic:",
@@ -521,16 +521,16 @@ class ComputeWorkflowExecutionTest {
                 String.join("\n",
                 "    steps: []")))).document();
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertTrue(result.events().isEmpty());
     }
 
     @Test
     void shouldFailClosedForMissingDefinition() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -539,16 +539,16 @@ class ComputeWorkflowExecutionTest {
                 "        definition: missingCompute",
                 "        entry: build"));
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertRuntimeFatal(result, "Compute definition not found");
     }
 
     @Test
     void shouldFailClosedForMissingEntry() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initialize(support.yaml(support.operationWorkflowDocumentWithContracts(String.join("\n",
                 "  computeLogic:",
@@ -564,16 +564,16 @@ class ComputeWorkflowExecutionTest {
                 "        definition: computeLogic",
                 "        entry: missing")))).document();
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertRuntimeFatal(result, "Unknown entry function");
     }
 
     @Test
     void shouldOverrideDefinitionConstantsWithStepConstants() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initialize(support.yaml(support.operationWorkflowDocumentWithContracts(String.join("\n",
                 "  computeLogic:",
@@ -597,16 +597,16 @@ class ComputeWorkflowExecutionTest {
                 "        constants:",
                 "          kind: From Step")))).document();
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertEquals("From Step", onlyEvent(result).get("/kind"));
     }
 
     @Test
     void shouldEscapeJsonPointerSegmentsInDefinitionReference() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initialize(support.yaml(support.operationWorkflowDocumentWithContracts(String.join("\n",
                 "  \"compute/logic~v1\":",
@@ -625,16 +625,16 @@ class ComputeWorkflowExecutionTest {
                 "        definition: compute/logic~v1",
                 "        entry: build")))).document();
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertEquals("Escaped Definition", onlyEvent(result).get("/kind"));
     }
 
     @Test
     void shouldExecuteLocalFunctionsWithoutDefinition() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -649,16 +649,16 @@ class ComputeWorkflowExecutionTest {
                 "                  kind: Local Function",
                 "              - $return: {}"));
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertEquals("Local Function", onlyEvent(result).get("/kind"));
     }
 
     @Test
     void shouldReportExplicitBexGasExhaustionAsGasLimitExceeded() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -669,16 +669,16 @@ class ComputeWorkflowExecutionTest {
                 "          - $return:",
                 "              ok: true"));
 
-        // When
+        // when
         DocumentProcessingResult explicit = support.processRun(document);
 
-        // Then
+        // then
         assertGasLimitExceeded(explicit);
     }
 
     @Test
     void shouldReportDefaultBexGasExhaustionAsGasLimitExceeded() {
-        // Given
+        // given
         ComputeWorkflowTestSupport lowDefault = ComputeWorkflowTestSupport.create(
                 CoordinationProcessorOptions.builder().defaultComputeGasLimit(1L).build());
         Node lowDefaultDocument = lowDefault.initializedOperationWorkflow(String.join("\n",
@@ -689,16 +689,16 @@ class ComputeWorkflowExecutionTest {
                 "          - $return:",
                 "              ok: true"));
 
-        // When
+        // when
         DocumentProcessingResult defaultFailure = lowDefault.processRun(lowDefaultDocument);
 
-        // Then
+        // then
         assertGasLimitExceeded(defaultFailure);
     }
 
     @Test
     void shouldRunComputeWithSufficientDefaultGasLimit() {
-        // Given
+        // given
         ComputeWorkflowTestSupport normalDefault = ComputeWorkflowTestSupport.create(
                 CoordinationProcessorOptions.builder().defaultComputeGasLimit(100_000L).build());
         Node normalDocument = normalDefault.initializedOperationWorkflow(String.join("\n",
@@ -709,28 +709,28 @@ class ComputeWorkflowExecutionTest {
                 "          - $return:",
                 "              ok: true"));
 
-        // When
+        // when
         DocumentProcessingResult result = normalDefault.processRun(
                 normalDocument);
 
-        // Then
+        // then
         assertFalse(blue.coordination.processor.ProcessingResultTestSupport
                 .isCapabilityFailure(result));
     }
 
     @Test
     void shouldRequirePositiveDefaultComputeGasLimit() {
-        // Given
+        // given
         long[] invalidLimits = {0L, -1L};
 
-        // When
+        // when
         for (long invalidLimit : invalidLimits) {
             IllegalArgumentException failure = assertThrows(
                     IllegalArgumentException.class,
                     () -> CoordinationProcessorOptions.builder()
                             .defaultComputeGasLimit(invalidLimit));
 
-            // Then
+            // then
             assertTrue(failure.getMessage().contains(
                     "defaultComputeGasLimit must be positive"));
         }
@@ -738,7 +738,7 @@ class ComputeWorkflowExecutionTest {
 
     @Test
     void shouldEmitExplicitAndAccumulatedResultEvents() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -759,10 +759,10 @@ class ComputeWorkflowExecutionTest {
                 "          - $return:",
                 "              approved: true"));
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertEquals(2, result.events().size());
         assertEquals("Explicit Events", result.events().get(0).get("/kind"));
         assertEquals("Accumulator Event", result.events().get(1).get("/kind"));
@@ -770,7 +770,7 @@ class ComputeWorkflowExecutionTest {
 
     @Test
     void shouldFailClosedForInvalidEventsField() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -780,16 +780,16 @@ class ComputeWorkflowExecutionTest {
                 "          - $return:",
                 "              events: not-a-list"));
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertRuntimeFatal(result, "Compute result events must be a list");
     }
 
     @Test
     void shouldFailClosedForInvalidChangesetField() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -799,16 +799,16 @@ class ComputeWorkflowExecutionTest {
                 "          - $return:",
                 "              changeset: not-a-list"));
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertRuntimeFatal(result, "Compute result changeset must be a list");
     }
 
     @Test
     void shouldFailClosedForScalarChangesetEntries() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -819,16 +819,16 @@ class ComputeWorkflowExecutionTest {
                 "              changeset:",
                 "                - hello"));
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertRuntimeFatal(result, "Compute result changeset entry 0 must be an object");
     }
 
     @Test
     void shouldEmitScalarEventEntriesAsBlueNodes() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -839,10 +839,10 @@ class ComputeWorkflowExecutionTest {
                 "              events:",
                 "                - hello"));
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertEquals(
                 ProcessorStatus.SUCCESS,
                 result.status(),
@@ -854,7 +854,7 @@ class ComputeWorkflowExecutionTest {
 
     @Test
     void shouldEvaluateNullYamlEventPlaceholderAsBexEmptyPredicate() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -865,10 +865,10 @@ class ComputeWorkflowExecutionTest {
                 "              events:",
                 "                - null"));
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertEquals(
                 ProcessorStatus.SUCCESS,
                 result.status(),
@@ -882,7 +882,7 @@ class ComputeWorkflowExecutionTest {
 
     @Test
     void shouldRunPureComputeWorkflowWithBexOnlyRunner() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create(
                 CoordinationProcessorOptions.builder()
                         .sequentialWorkflowRunner(SequentialWorkflowRunner.withBexEngine(
@@ -899,16 +899,16 @@ class ComputeWorkflowExecutionTest {
                 "              kind: BEX Only",
                 "          - $return: {}"));
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertEquals("BEX Only", onlyEvent(result).get("/kind"));
     }
 
     @Test
     void shouldRunLiteralTriggerAndUpdateDocumentSteps() {
-        // Given
+        // given
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create();
         Node document = support.initializedOperationWorkflow(String.join("\n",
                 "    steps:",
@@ -925,10 +925,10 @@ class ComputeWorkflowExecutionTest {
                 "          kind: Existing Trigger",
                 "          status: static"));
 
-        // When
+        // when
         DocumentProcessingResult result = support.processRun(document);
 
-        // Then
+        // then
         assertEquals(BigInteger.valueOf(42), result.document().get("/status"));
         assertEquals("Existing Trigger", onlyEvent(result).get("/kind"));
         assertEquals("static", onlyEvent(result).get("/status"));
@@ -936,12 +936,13 @@ class ComputeWorkflowExecutionTest {
 
     @Test
     void shouldUseBexEngineCompileCacheAcrossRuns() {
-        // Given
-        final List<BexMetrics> metrics = new ArrayList<BexMetrics>();
+        // given
+        final List<BexMetricsSnapshot> metrics =
+                new ArrayList<BexMetricsSnapshot>();
         BexEngine engine = BexEngine.builder().metrics(new BexMetricsSink() {
             @Override
-            public void accept(BexMetrics item) {
-                metrics.add(item.copy());
+            public void accept(BexMetricsSnapshot item) {
+                metrics.add(item);
             }
         }).build();
         ComputeWorkflowTestSupport support = ComputeWorkflowTestSupport.create(
@@ -953,31 +954,40 @@ class ComputeWorkflowExecutionTest {
                 "        expr:",
                 "          $document: /status"));
 
-        // When
+        // when
         Node afterFirst = support.processRun(document).document();
         long hitsAfterWarmup = 0L;
         long missesAfterWarmup = 0L;
-        for (BexMetrics item : metrics) {
+        for (BexMetricsSnapshot item : metrics) {
             hitsAfterWarmup += item.compileCacheHits();
             missesAfterWarmup += item.compileCacheMisses();
         }
+        BexMetricsSnapshot firstWarmupSnapshot = metrics.get(0);
+        long firstWarmupHits =
+                firstWarmupSnapshot.compileCacheHits();
+        long firstWarmupMisses =
+                firstWarmupSnapshot.compileCacheMisses();
 
         support.processRun(afterFirst);
 
         long totalHits = 0L;
         long totalMisses = 0L;
-        for (BexMetrics item : metrics) {
+        for (BexMetricsSnapshot item : metrics) {
             totalHits += item.compileCacheHits();
             totalMisses += item.compileCacheMisses();
         }
-        // Then
+        // then
         assertTrue(totalHits - hitsAfterWarmup > 0L);
         assertEquals(0L, totalMisses - missesAfterWarmup);
+        assertEquals(firstWarmupHits,
+                firstWarmupSnapshot.compileCacheHits());
+        assertEquals(firstWarmupMisses,
+                firstWarmupSnapshot.compileCacheMisses());
     }
 
     @Test
     void shouldProvideFrozenStepAndContractNodesToExecutors() {
-        // Given
+        // given
         final AtomicBoolean sawFrozenStep = new AtomicBoolean(false);
         final AtomicBoolean sawFrozenContract = new AtomicBoolean(false);
         WorkflowStepExecutor<Compute> executor = new WorkflowStepExecutor<Compute>() {
@@ -1009,10 +1019,10 @@ class ComputeWorkflowExecutionTest {
                 "        do:",
                 "          - $return: {}"));
 
-        // When
+        // when
         support.processRun(document);
 
-        // Then
+        // then
         assertTrue(sawFrozenStep.get());
         assertTrue(sawFrozenContract.get());
     }

@@ -6,13 +6,12 @@ import blue.bex.api.BexExecutionContext;
 import blue.bex.api.BexProgramSource;
 import blue.bex.result.BexExecutionResult;
 import blue.coordination.processor.CoordinationProcessorOptions;
-import blue.coordination.processor.CoordinationProcessors;
 import blue.coordination.processor.CoordinationTestResources;
+import blue.coordination.processor.CoordinationTestRuntime;
 import blue.coordination.processor.ProcessingResultTestSupport;
 import blue.coordination.processor.TestTimelineProvider;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.coordination.processor.bex.BexWorkflowContextFactory;
-import blue.language.Blue;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.GasMeter;
@@ -20,11 +19,11 @@ import blue.language.processor.ProcessorErrorCategory;
 import blue.language.processor.ProcessorFatalException;
 import blue.language.processor.ProcessorStatus;
 import blue.language.processor.WorkingDocument;
-import blue.language.processor.model.FrozenJsonPatch;
+import blue.language.processor.FrozenJsonPatch;
 import blue.language.processor.model.JsonPatch;
 import blue.language.processor.registry.RuntimeBlueIds;
 import blue.language.snapshot.FrozenNode;
-import blue.language.snapshot.ResolvedSnapshot;
+import blue.language.merge.ResolvedSnapshot;
 import blue.repo.BlueRepository;
 import blue.repo.coordination.Compute;
 import blue.repo.coordination.SequentialWorkflowStep;
@@ -47,13 +46,13 @@ class FrozenComputeDifferentialTest {
 
     @Test
     void shouldMatchLegacyMutableHandoffForComputeEffectsAndMetrics() {
-        // Given
+        // given
         Outcome legacy = run(true);
 
-        // When
+        // when
         Outcome frozen = run(false);
 
-        // Then
+        // then
         assertEquivalentOutcome(frozen, legacy);
         assertAppliedEffects(frozen);
         assertEventOrder(frozen);
@@ -124,39 +123,41 @@ class FrozenComputeDifferentialTest {
     }
 
     private static Outcome run(boolean legacyMutableHandoff) {
-        BlueRepository repository = BlueRepository.latest();
+        BlueRepository repository = BlueRepository.current();
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         BexEngine engine = BexEngine.builder().build();
         SequentialWorkflowRunner runner = legacyMutableHandoff
                 ? legacyRunner(engine, metrics)
                 : SequentialWorkflowRunner.withBexEngine(engine, 100_000L, metrics);
-        Blue blue = CoordinationTestResources.configuredBlue(repository);
+        CoordinationTestRuntime runtime =
+                CoordinationTestResources.configuredBlue(repository);
         try {
-            CoordinationProcessors.registerWith(blue, CoordinationProcessorOptions.builder()
+            runtime.configure(CoordinationProcessorOptions.builder()
                     .bexEngine(engine)
                     .sequentialWorkflowRunner(runner)
                     .defaultComputeGasLimit(100_000L)
                     .processingMetrics(metrics)
                     .build());
-            Node authored = blue.parseSourceYaml(documentYaml());
-            Node initialized = blue.initializeDocument(
+            Node authored = runtime.parseSourceYaml(documentYaml());
+            Node initialized = runtime.initializeDocument(
                     CoordinationTestResources
                             .preprocessWithFixedRepository(
-                                    blue,
+                                    runtime,
                                     repository,
                                     authored))
                     .document();
             BexProcessingMetrics.Snapshot metricsBeforeRun = metrics.snapshot();
-            Node event = TestTimelineProvider.timelineEntry(blue,
+            Node event = TestTimelineProvider.timelineEntry(runtime,
                     repository,
                     "owner",
                     1,
                     TestTimelineProvider.chatMessage("run"));
 
-            DocumentProcessingResult result = blue.processDocument(initialized, event);
+            DocumentProcessingResult result = runtime.processDocument(
+                    initialized, event);
             List<Node> documentEvents = immutableClones(result.events());
             ResolvedSnapshot resultSnapshot =
-                    ProcessingResultTestSupport.snapshot(blue, result);
+                    ProcessingResultTestSupport.snapshot(runtime, result);
             return new Outcome(result.document().clone(),
                     resultSnapshot != null
                             ? resultSnapshot.frozenCanonicalRoot().resolvedStructuralKey()
@@ -165,14 +166,14 @@ class FrozenComputeDifferentialTest {
                             ? resultSnapshot.frozenResolvedRoot().resolvedStructuralKey()
                             : null,
                     ProcessingResultTestSupport.blueId(result),
-                    jsonEvents(blue, documentEvents, false),
-                    jsonEvents(blue, documentEvents, true),
+                    jsonEvents(runtime, documentEvents, false),
+                    jsonEvents(runtime, documentEvents, true),
                     result.totalGas(),
                     result.status(),
                     ProcessingResultTestSupport.diagnosticCategory(result),
                     ProcessingResultTestSupport.diagnosticMessage(result),
-                    jsonAt(blue, result.document(), "/contracts/terminated"),
-                    jsonAt(blue,
+                    jsonAt(runtime, result.document(), "/contracts/terminated"),
+                    jsonAt(runtime,
                             result.document(),
                             "/contracts/checkpoint/entries/ownerChannel/subject"),
                     documentEvents,
@@ -180,7 +181,7 @@ class FrozenComputeDifferentialTest {
                     metricsBeforeRun);
         } finally {
             try {
-                blue.close();
+                runtime.close();
             } finally {
                 runner.close();
             }
@@ -286,21 +287,24 @@ class FrozenComputeDifferentialTest {
         return Collections.unmodifiableList(clones);
     }
 
-    private static List<String> jsonEvents(Blue blue,
+    private static List<String> jsonEvents(CoordinationTestRuntime runtime,
                                            List<Node> events,
                                            boolean documentUpdatesOnly) {
         List<String> json = new ArrayList<String>();
         for (Node event : events) {
             if (!documentUpdatesOnly || isDocumentUpdateTrace(event)) {
-                json.add(blue.nodeToJson(event));
+                json.add(runtime.nodeToJson(event));
             }
         }
         return Collections.unmodifiableList(json);
     }
 
-    private static String jsonAt(Blue blue, Node document, String pointer) {
+    private static String jsonAt(
+            CoordinationTestRuntime runtime,
+            Node document,
+            String pointer) {
         Node node = nodeAt(document, pointer);
-        return node != null ? blue.nodeToJson(node) : null;
+        return node != null ? runtime.nodeToJson(node) : null;
     }
 
     private static List<String> selectedKinds(List<Node> events) {
@@ -503,7 +507,7 @@ class FrozenComputeDifferentialTest {
                 long gasLimit = gasLimit(program);
                 BexExecutionContext bexContext = contextFactory.create(context, gasLimit);
                 BexExecutionResult execution = bexEngine.compileAndExecute(source, bexContext);
-                metrics.addBexMetrics(execution.metrics());
+                metrics.addBexMetrics(execution.metricsSnapshot());
                 GasMeter.ChildGasLedger legacyLedger =
                         context.processorContext().newRuntimeGasLedger(
                                 "legacyMutableBexTest",

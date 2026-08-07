@@ -1,11 +1,12 @@
 package blue.coordination.processor.workflow;
 
 import blue.bex.api.BexGasLedgerHost;
-import blue.bex.api.ProcessorExecutionContextBexGasLedgerHost;
+import blue.bex.contracts.ProcessorExecutionContextBexGasLedgerHost;
+import blue.coordination.processor.bex.BexWorkflowStepContext;
 import blue.language.model.Node;
 import blue.language.processor.ProcessorExecutionContext;
 import blue.language.processor.WorkingDocument;
-import blue.language.processor.model.FrozenJsonPatch;
+import blue.language.processor.FrozenJsonPatch;
 import blue.language.processor.model.JsonPatch;
 import blue.language.snapshot.FrozenNode;
 import blue.repo.coordination.SequentialWorkflow;
@@ -21,7 +22,7 @@ import java.util.Set;
  * <p>The context is invocation-local and never represents an independent
  * embedded-document session.</p>
  */
-public final class StepExecutionContext {
+public final class StepExecutionContext implements BexWorkflowStepContext {
     private final ProcessorExecutionContext processorContext;
     private final SequentialWorkflow workflow;
     private final SequentialWorkflowStep step;

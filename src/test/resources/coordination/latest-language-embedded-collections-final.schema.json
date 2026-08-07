@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bluecontract.org/schemas/coordination/latest-language-embedded-collections-final.schema.json",
+  "title": "Blue Coordination latest embedded-collections final report",
+  "type": "object",
+  "required": [
+    "schema",
+    "run",
+    "generatedAt",
+    "sourceEvidenceSha256",
+    "coordinationCommit",
+    "coordinationDirty",
+    "language",
+    "bex",
+    "repository",
+    "resolvedModuleGraph",
+    "packageIdentities",
+    "artifactIdentities",
+    "ordinaryTestTotals",
+    "collectionSpecificTestTotals",
+    "conformanceTotals",
+    "flagshipMatrixTotals",
+    "failureClassifications",
+    "providerDemandTotals",
+    "forbiddenDemands",
+    "subscriptionProjectionTotals",
+    "subscriptionUpdateTotals",
+    "maximumGasTrace",
+    "jmhCampaignSummary",
+    "apiChanges",
+    "splitPackageCount",
+    "packageCycleCount",
+    "reproducibilityDigests",
+    "remainingExternalBlockers",
+    "gates",
+    "componentReportDigests",
+    "releaseEligible"
+  ],
+  "properties": {
+    "schema": {
+      "const": "blue-coordination/latest-language-embedded-collections-final/2.0"
+    },
+    "run": { "type": "object" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "sourceEvidenceSha256": { "$ref": "#/$defs/sha256" },
+    "coordinationCommit": { "$ref": "#/$defs/gitSha" },
+    "coordinationDirty": { "type": "boolean" },
+    "coordinationVersion": { "type": ["string", "null"] },
+    "language": { "type": "object" },
+    "bex": { "type": "object" },
+    "repository": { "type": "object" },
+    "resolvedModuleGraph": { "type": ["object", "array"] },
+    "packageIdentities": { "type": "object" },
+    "artifactIdentities": { "type": "object" },
+    "ordinaryTestTotals": { "$ref": "#/$defs/totals" },
+    "collectionSpecificTestTotals": { "$ref": "#/$defs/totals" },
+    "conformanceTotals": { "$ref": "#/$defs/totals" },
+    "flagshipMatrixTotals": { "$ref": "#/$defs/totals" },
+    "failureClassifications": { "type": "object" },
+    "providerDemandTotals": { "type": "object" },
+    "forbiddenDemands": { "type": "integer", "minimum": 0 },
+    "subscriptionProjectionTotals": { "$ref": "#/$defs/totals" },
+    "subscriptionUpdateTotals": { "$ref": "#/$defs/totals" },
+    "maximumGasTrace": { "type": ["object", "array", "null"] },
+    "jmhCampaignSummary": { "type": ["object", "array", "null"] },
+    "apiChanges": { "type": "array" },
+    "splitPackageCount": { "type": "integer", "minimum": 0 },
+    "packageCycleCount": { "type": "integer", "minimum": 0 },
+    "reproducibilityDigests": { "type": "object" },
+    "remainingExternalBlockers": { "type": "array" },
+    "gates": { "type": "array", "minItems": 1 },
+    "componentReportDigests": {
+      "type": "object",
+      "minProperties": 5,
+      "additionalProperties": { "$ref": "#/$defs/sha256" }
+    },
+    "releaseEligible": { "type": "boolean" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "gitSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "totals": {
+      "type": "object",
+      "required": ["executed", "passed", "failed", "skipped", "unclassified"],
+      "properties": {
+        "executed": { "type": "integer", "minimum": 0 },
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "skipped": { "type": "integer", "minimum": 0 },
+        "unclassified": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

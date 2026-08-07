@@ -1,23 +1,22 @@
 package blue.coordination.processor.compute;
 
-import blue.coordination.processor.CoordinationDeliveryPlanning;
 import blue.coordination.processor.CoordinationProcessorOptions;
-import blue.coordination.processor.CoordinationProcessors;
+import blue.coordination.processor.CoordinationTestRuntime;
 import blue.coordination.processor.CoordinationTestResources;
-import blue.language.Blue;
-import blue.language.NodeProvider;
+import blue.language.provider.NodeProvider;
 import blue.language.model.Node;
 import blue.language.processor.DocumentProcessingResult;
-import blue.language.provider.SequentialNodeProvider;
 import blue.repo.BlueRepository;
 
 final class ComputeWorkflowTestSupport {
     private int timestamp = 1;
 
     final BlueRepository repository;
-    final Blue blue;
+    final CoordinationTestRuntime blue;
 
-    private ComputeWorkflowTestSupport(BlueRepository repository, Blue blue) {
+    private ComputeWorkflowTestSupport(
+            BlueRepository repository,
+            CoordinationTestRuntime blue) {
         this.repository = repository;
         this.blue = blue;
     }
@@ -33,17 +32,15 @@ final class ComputeWorkflowTestSupport {
     static ComputeWorkflowTestSupport create(
             CoordinationProcessorOptions options,
             NodeProvider localProvider) {
-        BlueRepository repository = BlueRepository.latest();
-        Blue blue = CoordinationTestResources.configuredBlue(repository);
+        BlueRepository repository = BlueRepository.current();
+        CoordinationTestRuntime blue =
+                CoordinationTestResources.configuredBlue(repository);
         if (localProvider != null) {
-            blue.nodeProvider(
-                    new SequentialNodeProvider(
-                            localProvider,
-                            blue.getNodeProvider()));
+            blue.addNodeProvider(localProvider);
         }
-        CoordinationProcessors.registerWith(blue, options);
-        CoordinationDeliveryPlanning.currentRootCompatibility(
-                blue.getDocumentProcessor());
+        if (options != null) {
+            blue.configure(options);
+        }
         return new ComputeWorkflowTestSupport(repository, blue);
     }
 

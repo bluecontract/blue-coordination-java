@@ -1,5 +1,7 @@
 package blue.coordination.processor;
 
+import blue.coordination.processor.delivery.CoordinationDeliveryDiagnosticView;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -13,7 +15,8 @@ import java.util.Objects;
  * same-scope Channel header only; it is never promoted to an External source
  * by this diagnostic view.</p>
  */
-public final class CoordinationDeliveryDiagnostic {
+public final class CoordinationDeliveryDiagnostic
+        implements CoordinationDeliveryDiagnosticView {
 
     private final String occurrenceKey;
     private final String scopePath;

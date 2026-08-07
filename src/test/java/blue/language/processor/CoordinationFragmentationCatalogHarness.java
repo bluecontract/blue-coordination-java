@@ -1,10 +1,11 @@
 package blue.language.processor;
 
+import blue.coordination.processor.CoordinationDocumentSplitter;
 import blue.language.model.Node;
 import blue.language.processor.registry.RuntimeBlueIds;
 import blue.language.processor.util.PointerUtils;
-import blue.language.utils.BlueIdCalculator;
-import blue.language.utils.NodePathEditor;
+import blue.language.identity.DirectBlueIdCalculator;
+import blue.language.model.NodePathEditor;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -23,24 +24,34 @@ import java.util.TreeMap;
  * Splitter-test fixture for synthetic roots that intentionally are not valid
  * processing documents.
  *
- * <p>The production splitter still has to invoke
- * {@link DocumentProcessor#effectiveFragmentationCatalog(Node)}. This harness
- * supplies a fixed effective catalog for one exact test root; it is not
- * production authored-contract fallback behavior.</p>
+ * <p>The harness supplies a fixed effective catalog for one exact test root;
+ * it is not production authored-contract fallback behavior.</p>
  */
 public final class CoordinationFragmentationCatalogHarness {
 
     private CoordinationFragmentationCatalogHarness() {
     }
 
-    public static DocumentProcessor processor(
+    public static CoordinationDocumentSplitter splitter(
             Node exactRoot,
             Map<String, List<String>>
                     executableBodyFieldsByType) {
-        return processor(
+        return splitter(
                 exactRoot,
                 executableBodyFieldsByType,
-                Collections.<String, String>emptyMap());
+                Collections.<String, String>emptyMap(),
+                null);
+    }
+
+    public static CoordinationDocumentSplitter splitter(
+            Node exactRoot,
+            Map<String, List<String>> executableBodyFieldsByType,
+            blue.language.provider.NodeProvider localProvider) {
+        return splitter(
+                exactRoot,
+                executableBodyFieldsByType,
+                Collections.<String, String>emptyMap(),
+                localProvider);
     }
 
     /**
@@ -52,12 +63,24 @@ public final class CoordinationFragmentationCatalogHarness {
      * @param contractRolesByType effective role by effective type
      * @return processor exposing the fixed effective catalog
      */
-    public static DocumentProcessor processor(
+    public static CoordinationDocumentSplitter splitter(
             Node exactRoot,
             Map<String, List<String>>
                     executableBodyFieldsByType,
             Map<String, String>
                     contractRolesByType) {
+        return splitter(
+                exactRoot,
+                executableBodyFieldsByType,
+                contractRolesByType,
+                null);
+    }
+
+    private static CoordinationDocumentSplitter splitter(
+            Node exactRoot,
+            Map<String, List<String>> executableBodyFieldsByType,
+            Map<String, String> contractRolesByType,
+            blue.language.provider.NodeProvider localProvider) {
         Node retainedRoot =
                 Objects.requireNonNull(
                         exactRoot, "exactRoot")
@@ -67,7 +90,7 @@ public final class CoordinationFragmentationCatalogHarness {
                     "Harness Root must contain exact content");
         }
         String rootBlueId =
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         retainedRoot);
         EffectiveFragmentationCatalog catalog =
                 catalog(
@@ -75,11 +98,8 @@ public final class CoordinationFragmentationCatalogHarness {
                         executableBodyFieldsByType,
                         immutableRoles(
                                 contractRolesByType));
-        return new DocumentProcessor() {
-            @Override
-            public EffectiveFragmentationCatalog
-            effectiveFragmentationCatalog(
-                    Node suppliedRoot) {
+        return CoordinationDocumentSplitter.fromEffectiveCatalog(
+                suppliedRoot -> {
                 Node supplied =
                         Objects.requireNonNull(
                                 suppliedRoot,
@@ -87,7 +107,7 @@ public final class CoordinationFragmentationCatalogHarness {
                 String suppliedBlueId =
                         supplied.isReferenceOnly()
                                 ? supplied.getBlueId()
-                                : BlueIdCalculator
+                                : DirectBlueIdCalculator
                                 .calculateBlueId(
                                         supplied);
                 if (!rootBlueId.equals(
@@ -99,8 +119,8 @@ public final class CoordinationFragmentationCatalogHarness {
                                     + suppliedBlueId);
                 }
                 return catalog;
-            }
-        };
+            },
+                localProvider);
     }
 
     private static EffectiveFragmentationCatalog catalog(
@@ -185,7 +205,7 @@ public final class CoordinationFragmentationCatalogHarness {
         }
 
         return new EffectiveFragmentationCatalog(
-                BlueIdCalculator.calculateBlueId(
+                DirectBlueIdCalculator.calculateBlueId(
                         root),
                 pathsByScope,
                 contractsByScope);
@@ -284,7 +304,7 @@ public final class CoordinationFragmentationCatalogHarness {
                                             : EffectiveContractSnapshotConstants
                                             .Role.MARKER)
                             .sourceContribution(
-                                    BlueIdCalculator
+                                    DirectBlueIdCalculator
                                             .calculateBlueId(
                                                     contract));
             if (declaredBodies != null) {
@@ -302,7 +322,7 @@ public final class CoordinationFragmentationCatalogHarness {
                                 field,
                                 body.isReferenceOnly()
                                         ? body.getBlueId()
-                                        : BlueIdCalculator
+                                        : DirectBlueIdCalculator
                                         .calculateBlueId(
                                                 body));
                     } else {
@@ -331,7 +351,7 @@ public final class CoordinationFragmentationCatalogHarness {
         }
         return type.isReferenceOnly()
                 ? type.getBlueId()
-                : BlueIdCalculator.calculateBlueId(
+                : DirectBlueIdCalculator.calculateBlueId(
                         type);
     }
 
