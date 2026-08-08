@@ -73,7 +73,6 @@ public final class MyOsDemoTimeline {
                         runtime,
                         this,
                         operation,
-                        timestamp,
                         expectedPrevious);
         PendingTimelineAppend pending = template.instantiate(
                 this,
@@ -97,8 +96,7 @@ public final class MyOsDemoTimeline {
         MyOsDemoOperation checked = Objects.requireNonNull(
                 operation, "operation");
         long timestamp = runtime.peekNextTimelineTimestampMicros();
-        MyOsPreparedEntryTemplate template = preparedTemplate(
-                checked, timestamp);
+        MyOsPreparedEntryTemplate template = preparedTemplate(checked);
         runtime.primeEventAdmission(template.instantiate(
                 this,
                 runtime,
@@ -111,19 +109,15 @@ public final class MyOsDemoTimeline {
     public void primeTemplate(MyOsDemoOperation operation) {
         MyOsDemoOperation checked = Objects.requireNonNull(
                 operation, "operation");
-        preparedTemplate(
-                checked,
-                runtime.peekNextTimelineTimestampMicros());
+        preparedTemplate(checked);
     }
 
     private MyOsPreparedEntryTemplate preparedTemplate(
-            MyOsDemoOperation operation,
-            long timestamp) {
+            MyOsDemoOperation operation) {
         return MyOsPreparedEntryTemplates.require(
                 runtime,
                 this,
                 operation,
-                timestamp,
                 previousEntryBlueId);
     }
 

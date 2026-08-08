@@ -770,6 +770,11 @@ public abstract class CoordinationProcessingBundleLoaderContract {
         }
 
         @Override
+        public String storageGenerationAuthority() {
+            return delegate.storageGenerationAuthority();
+        }
+
+        @Override
         public List<Node> fetchByBlueId(String blueId) {
             NodeProviderResult result = fetchResultByBlueId(blueId);
             return result.outcome() == NodeProviderOutcome.FOUND

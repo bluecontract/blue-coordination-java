@@ -10,7 +10,7 @@ final class FastPathFixtures {
 
     static ProjectionGenerationKey generation(long revision) {
         return new ProjectionGenerationKey(
-                "environment", "session", "root-" + revision, revision,
+                "environment", "root-" + revision, revision,
                 "inventory-" + revision, "subscriptions-" + revision,
                 "runtime");
     }

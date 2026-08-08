@@ -40,7 +40,7 @@ public final class CoordinationProcessingViews {
             }
             Node view = provided.nodes().get(0).clone();
             String actual = DirectBlueIdCalculator.calculateBlueId(
-                    view.clone());
+                    view);
             if (!entry.getKey().equals(actual)) {
                 throw new IllegalStateException(
                         "Splitter PROCESS view changed identity from "

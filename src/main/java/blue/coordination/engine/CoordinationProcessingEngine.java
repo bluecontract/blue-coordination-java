@@ -5,8 +5,14 @@ import blue.bex.gas.BexGasCounter;
 import blue.coordination.engine.api.CommitOutcome;
 import blue.coordination.engine.api.CoordinationAtomicCommitPlan;
 import blue.coordination.engine.api.CoordinationEventAdmissionCompiler;
+import blue.coordination.engine.api.CoordinationEventShapeCompiler;
+import blue.coordination.engine.api.CoordinationEventShapeInstance;
+import blue.coordination.engine.api.CoordinationEventShapeMetrics;
+import blue.coordination.engine.api.CoordinationEventShapePatch;
+import blue.coordination.engine.api.CoordinationEventShapeTemplate;
 import blue.coordination.engine.api.CoordinationFragmentInventory;
 import blue.coordination.engine.api.CoordinationFragmentTransition;
+import blue.coordination.engine.api.CoordinationFragmentTransitionWorkSnapshot;
 import blue.coordination.engine.api.CoordinationProcessingPlan;
 import blue.coordination.engine.api.CoordinationRootViewCacheSnapshot;
 import blue.coordination.engine.api.CoordinationScopeTransition;
@@ -34,6 +40,7 @@ import blue.coordination.engine.api.TransitionMemoKey;
 import blue.coordination.engine.internal.CoordinationFragmentTransitionPlanner;
 import blue.coordination.engine.internal.CoordinationProcessingViews;
 import blue.coordination.engine.internal.CoordinationTransitionMemoPolicy;
+import blue.coordination.engine.spi.CoordinationCanonicalFragmentHandleStore;
 import blue.coordination.engine.spi.CoordinationFragmentStore;
 import blue.coordination.engine.spi.CoordinationLocalityDiagnosticsProvider;
 import blue.coordination.engine.spi.CoordinationProcessingBundleLoader;
@@ -46,12 +53,27 @@ import blue.coordination.engine.memory.CoordinationEventAdmissionReceipt;
 import blue.coordination.engine.fastpath.RequestDigestMemo;
 import blue.coordination.engine.fastpath.VerifiedProcessOutput;
 import blue.coordination.engine.fastpath.ExactNodeHandle;
+import blue.coordination.engine.fastpath.FastFragmentDelta;
 import blue.coordination.engine.fastpath.HybridResultFrontier;
 import blue.coordination.engine.fastpath.IndexedRetainedReferenceResolver;
 import blue.coordination.engine.fastpath.PreparedRootContextCache;
 import blue.coordination.engine.fastpath.PreparedRootExecutionContext;
 import blue.coordination.engine.fastpath.RetainedReferenceIndex;
 import blue.coordination.engine.fastpath.VerifiedHybridResultFrontier;
+import blue.coordination.engine.fastpath.VerifiedFragmentTransitionFrontier;
+import blue.coordination.engine.fastpath.ActivePathSet;
+import blue.coordination.engine.fastpath.ReferenceCutConfiguration;
+import blue.coordination.engine.fastpath.ReferenceCutDecision;
+import blue.coordination.engine.fastpath.InventoryReferenceCutRootCompiler;
+import blue.coordination.engine.fastpath.ReferenceCutFragmentSource;
+import blue.coordination.engine.fastpath.ReferenceCutMetrics;
+import blue.coordination.engine.fastpath.ReferenceCutPlan;
+import blue.coordination.engine.fastpath.ReferenceCutPlanner;
+import blue.coordination.engine.fastpath.ReferenceCutPolicy;
+import blue.coordination.engine.fastpath.ReferenceCutRootArtifact;
+import blue.coordination.engine.fastpath.ReferenceCutRootCache;
+import blue.coordination.engine.fastpath.ReferenceCutRootCacheKey;
+import blue.coordination.engine.fastpath.ReferenceCutRootCompiler;
 import blue.coordination.fastpath.DeltaProjectionApplier;
 import blue.coordination.fastpath.AdmittedProjection;
 import blue.coordination.fastpath.CacheMetrics;
@@ -80,6 +102,7 @@ import blue.language.api.BlueOperationResult;
 import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.model.Node;
 import blue.language.model.NodePathEditor;
+import blue.language.model.Schema;
 import blue.language.model.wire.JsonPointer;
 import blue.language.processor.BlueContracts;
 import blue.language.processor.ContractProcessor;
@@ -101,6 +124,8 @@ import blue.language.provider.SequentialNodeProvider;
 import blue.language.runtime.LanguageRuntimeAccess;
 import blue.language.snapshot.FrozenNode;
 
+import java.lang.ref.WeakReference;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -113,6 +138,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 
 /**
  * Storage-neutral host facade for exact Coordination admission and PROCESS.
@@ -129,6 +156,11 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
             CoordinationInventoryRootViewCache.DEFAULT_MAXIMUM_SIZE;
     private static final long DEFAULT_PLANNING_CACHE_MAXIMUM_WEIGHT =
             64L * 1024L * 1024L;
+    private static final String PLANNING_PROJECTION_CACHE_ALGORITHM_IDENTITY =
+            "blue.coordination/shared-planning-projection-cache/1.0";
+    private static final String PLATFORM_CONTRACTS_PATH = "/contracts";
+    private static final String PREPARED_CHECKPOINT_ALGORITHM_IDENTITY =
+            "blue.coordination/prepared-root-checkpoint/2.0";
 
     /**
      * Unforgeable engine capability for zero-copy access to verified Nodes.
@@ -208,6 +240,8 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
     private final FastPathWorkMetrics planningFastPathMetrics;
     private final CoordinationPlanningProjectionCompiler
             planningProjectionCompiler;
+    private final ProjectionGenerationCache.SharedBacking
+            planningProjectionCacheBacking;
     private final ProjectionGenerationCache planningProjectionCache;
     private final CoordinationPreparedDeliveryMemoizer
             preparedDeliveryMemoizer;
@@ -217,15 +251,51 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
     private final NodeProvider runtimeProvider;
     private final String environmentIdentity;
     private final String gasScheduleIdentity;
+    private final String referenceCutProviderStorageGenerationAuthority;
+    private final String preparedCheckpointBindingIdentity;
     private final CoordinationEventAdmissionCompiler eventAdmissionCompiler;
     private final CoordinationEventAdmissionMetrics eventAdmissionMetrics;
+    private final CoordinationEventShapeMetrics eventShapeMetrics;
+    private final CoordinationEventShapeCompiler eventShapeCompiler;
     private final PreparedRootContextCache preparedRootContexts;
+    private final ReferenceCutConfiguration referenceCutConfiguration;
+    private final ReferenceCutMetrics referenceCutMetrics;
+    private final ReferenceCutPlanner referenceCutPlanner;
+    private final ReferenceCutRootCompiler referenceCutRootCompiler;
+    private final InventoryReferenceCutRootCompiler
+            inventoryReferenceCutRootCompiler;
+    private final ReferenceCutRootCache.SharedBacking
+            referenceCutRootCacheBacking;
+    private final ReferenceCutRootCache referenceCutRootCache;
     private final Object preparedRootOwnership;
+    private final PreparedCheckpointState acceptedPreparedCheckpointState;
+    private final PreparedCheckpointLease acceptedPreparedCheckpointLease;
     private final VerifiedNodeAccessAuthority verifiedNodeAccessAuthority;
-    private final LinkedHashMap<String, PreparedRootExecutionContext>
+    private final LinkedHashMap<String, PendingPreparedGeneration>
             pendingPreparedRootContexts;
     private final int pendingPreparedRootContextMaximumSize;
+    private final long pendingPreparedRootContextMaximumWeightBytes;
+    private long pendingPreparedRootContextWeightBytes;
+    private final LinkedHashMap<String, PlannedReferenceCutRoot>
+            plannedReferenceCutRoots;
+    private final int plannedReferenceCutRootMaximumSize;
+    private final long plannedReferenceCutRootMaximumWeightBytes;
+    private long plannedReferenceCutRootWeightBytes;
     private final boolean ownsRuntimes;
+    private final AtomicLong checkpointPreparedContextReuses =
+            new AtomicLong();
+    private final AtomicLong checkpointPreparedContextFallbacks =
+            new AtomicLong();
+    private final AtomicLong checkpointPreparedContextRebuilds =
+            new AtomicLong();
+    private final AtomicLong transitionFrontierBoundaryGrafts =
+            new AtomicLong();
+    private final AtomicLong transitionExpandedNodesVisited =
+            new AtomicLong();
+    private final AtomicLong transitionFullRootMaterializations =
+            new AtomicLong();
+    private final AtomicLong transitionRetainedIndexFullScans =
+            new AtomicLong();
 
     private volatile boolean closed;
 
@@ -265,11 +335,13 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
         this.subscriptionProjector =
                 CoordinationDeliveryPlanning.subscriptionProjector(
                         documentProcessor, contracts);
-        this.deltaSubscriptionProjector =
-                new CoordinationDeltaSubscriptionProjector();
-        this.commitProjectionEvidenceBuilder =
-                new CoordinationCommitProjectionEvidenceBuilder();
         this.projectionFastPathMetrics = new FastPathWorkMetrics();
+        this.deltaSubscriptionProjector =
+                new CoordinationDeltaSubscriptionProjector(
+                        projectionFastPathMetrics);
+        this.commitProjectionEvidenceBuilder =
+                new CoordinationCommitProjectionEvidenceBuilder(
+                        projectionFastPathMetrics);
         this.admittedPlanningAuthority = new AdmittedPlanningAuthority(
                 documentProcessor, contracts);
         this.indexedPlanner = CoordinationDeliveryPlanning.indexed(
@@ -280,16 +352,44 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                 builder.rootViewCacheMaximumSize);
         this.preparedRootContexts = new PreparedRootContextCache(
                 builder.rootViewCacheMaximumSize);
-        this.preparedRootOwnership = new Object();
+        this.referenceCutConfiguration = Objects.requireNonNull(
+                builder.referenceCutConfiguration,
+                "referenceCutConfiguration");
+        this.referenceCutMetrics = new ReferenceCutMetrics();
+        this.referenceCutPlanner = new ReferenceCutPlanner(
+                ReferenceCutPolicy.strictDefaults());
+        this.referenceCutRootCompiler = new ReferenceCutRootCompiler(
+                referenceCutPlanner,
+                referenceCutMetrics);
+        this.inventoryReferenceCutRootCompiler =
+                new InventoryReferenceCutRootCompiler(
+                        referenceCutPlanner,
+                        ReferenceCutFragmentSource.bestAvailable(
+                                fragmentStore,
+                                referenceCutMetrics),
+                        referenceCutMetrics);
         this.verifiedNodeAccessAuthority =
                 new VerifiedNodeAccessAuthority();
         this.pendingPreparedRootContexts =
-                new LinkedHashMap<String, PreparedRootExecutionContext>(
+                new LinkedHashMap<String, PendingPreparedGeneration>(
                         Math.min(16, builder.rootViewCacheMaximumSize),
                         0.75f,
                         true);
         this.pendingPreparedRootContextMaximumSize =
                 builder.rootViewCacheMaximumSize;
+        this.pendingPreparedRootContextMaximumWeightBytes =
+                Math.addExact(
+                        preparedRootContexts.maximumWeightBytes(),
+                        DEFAULT_PLANNING_CACHE_MAXIMUM_WEIGHT);
+        this.plannedReferenceCutRoots =
+                new LinkedHashMap<String, PlannedReferenceCutRoot>(
+                        Math.min(16, builder.rootViewCacheMaximumSize),
+                        0.75f,
+                        true);
+        this.plannedReferenceCutRootMaximumSize =
+                builder.rootViewCacheMaximumSize;
+        this.plannedReferenceCutRootMaximumWeightBytes =
+                referenceCutConfiguration.maximumCacheWeightBytes();
         for (Map.Entry<String, Node> entry
                 : builder.retainedRootViews.entrySet()) {
             CoordinationFragmentInventory inventory =
@@ -309,6 +409,26 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                 : deriveEnvironmentIdentity(builder);
         LanguageRuntimeAccess languageGeneration = contracts.runtimeAccess()
                 .languageRuntime();
+        String providerGenerationAuthority =
+                builder.providerEvidenceDomain != null
+                        ? builder.providerEvidenceDomain
+                        : environmentIdentity + "|provider="
+                                + runtimeProvider.getClass().getName();
+        String storageGenerationAuthority =
+                fragmentStore
+                        instanceof CoordinationCanonicalFragmentHandleStore
+                        ? requireText(
+                                ((CoordinationCanonicalFragmentHandleStore)
+                                        fragmentStore)
+                                        .canonicalFragmentStorageGenerationAuthority(),
+                                "canonicalFragmentStorageGenerationAuthority")
+                        : requireText(
+                                fragmentStore.storageGenerationAuthority(),
+                                "storageGenerationAuthority");
+        this.referenceCutProviderStorageGenerationAuthority = identity(
+                "reference-cut-provider-storage-generation",
+                providerGenerationAuthority,
+                storageGenerationAuthority);
         this.eventAdmissionMetrics =
                 new CoordinationEventAdmissionMetrics();
         this.eventAdmissionCompiler =
@@ -319,28 +439,77 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                                 languageGeneration.languageVersion(),
                                 languageGeneration
                                         .canonicalRegistryIdentity()),
-                        builder.providerEvidenceDomain != null
-                                ? builder.providerEvidenceDomain
-                                : environmentIdentity + "|provider="
-                                        + runtimeProvider.getClass().getName(),
+                        referenceCutProviderStorageGenerationAuthority,
                         splitter,
                         builder.maximumCachedEventAdmissions,
                         builder.maximumCachedEventAdmissionWeightBytes,
                         builder.maximumCachedFragmentEvidence,
                         builder.maximumCachedFragmentEvidenceWeightBytes,
                         eventAdmissionMetrics);
+        this.eventShapeMetrics = new CoordinationEventShapeMetrics();
+        this.eventShapeCompiler = new CoordinationEventShapeCompiler(
+                eventAdmissionCompiler, eventShapeMetrics);
         this.planningRuntimeIdentity = identity(
                 "admitted-planning-runtime",
                 environmentIdentity,
                 CoordinationSubscriptionSnapshot.VERSION,
                 CoordinationSubscriptionSnapshot.ALGORITHM_IDENTITY);
+        this.preparedCheckpointBindingIdentity = identity(
+                PREPARED_CHECKPOINT_ALGORITHM_IDENTITY,
+                environmentIdentity,
+                planningRuntimeIdentity,
+                gasScheduleIdentity,
+                fragmentStore.fragmentationProfileIdentity(),
+                CoordinationDocumentSplitter.EDGE_METADATA_SCHEMA_ID,
+                referenceCutProviderStorageGenerationAuthority,
+                referenceCutConfigurationIdentity(
+                        referenceCutConfiguration),
+                PLANNING_PROJECTION_CACHE_ALGORITHM_IDENTITY,
+                Integer.toString(builder.rootViewCacheMaximumSize),
+                Long.toString(DEFAULT_PLANNING_CACHE_MAXIMUM_WEIGHT));
+        PreparedCheckpointState suppliedCheckpointState =
+                builder.preparedCheckpointState;
+        PreparedCheckpointLease checkpointLease =
+                suppliedCheckpointState == null
+                ? null
+                : suppliedCheckpointState.tryAcquire(
+                        preparedCheckpointBindingIdentity,
+                        contracts,
+                        documentProcessor);
+        if (checkpointLease != null) {
+            this.preparedRootOwnership =
+                    checkpointLease.ownerCapability;
+            this.acceptedPreparedCheckpointState =
+                    suppliedCheckpointState;
+            this.acceptedPreparedCheckpointLease = checkpointLease;
+        } else {
+            this.preparedRootOwnership = new Object();
+            this.acceptedPreparedCheckpointState = null;
+            this.acceptedPreparedCheckpointLease = null;
+        }
+        this.referenceCutRootCacheBacking =
+                acceptedPreparedCheckpointLease != null
+                        ? acceptedPreparedCheckpointLease
+                                .referenceCutRootCacheBacking
+                        : ReferenceCutRootCache.sharedBacking(
+                                referenceCutConfiguration
+                                        .maximumCacheWeightBytes());
+        this.referenceCutRootCache = new ReferenceCutRootCache(
+                referenceCutRootCacheBacking,
+                referenceCutMetrics);
         this.planningFastPathMetrics = new FastPathWorkMetrics();
         this.planningProjectionCompiler =
                 new CoordinationPlanningProjectionCompiler(
                         planningFastPathMetrics);
+        this.planningProjectionCacheBacking =
+                acceptedPreparedCheckpointLease != null
+                        ? acceptedPreparedCheckpointLease
+                                .planningProjectionCacheBacking
+                        : ProjectionGenerationCache.sharedBacking(
+                                builder.rootViewCacheMaximumSize,
+                                DEFAULT_PLANNING_CACHE_MAXIMUM_WEIGHT);
         this.planningProjectionCache = new ProjectionGenerationCache(
-                builder.rootViewCacheMaximumSize,
-                DEFAULT_PLANNING_CACHE_MAXIMUM_WEIGHT);
+                planningProjectionCacheBacking);
         this.preparedDeliveryMemoizer =
                 new CoordinationPreparedDeliveryMemoizer(
                         indexedPlanner,
@@ -352,7 +521,8 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
         this.commitCoordinator = new CoordinationAtomicCommitCoordinator(
                 fragmentStore,
                 sessionStore,
-                environmentIdentity);
+                environmentIdentity,
+                verifiedNodeAccessAuthority);
     }
 
     /** Starts a mutable, single-owner engine configuration builder. */
@@ -412,7 +582,12 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                 planningGeneration(session, inventory),
                 session.subscriptions(),
                 exactDocument,
-                inventory);
+                inventory,
+                exactRootPlanningProvider(
+                        graph.rootBlueId(),
+                        exactDocument,
+                        inventory,
+                        session.subscriptions()));
         DocumentAdmissionResult result = sessionStore.admit(
                 new DocumentAdmissionCommit(
                         request, session, epochZero, inventory));
@@ -443,6 +618,7 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                 && result.session().get().status()
                         == ManagedDocumentStatus.REMOVED) {
             preparedRootContexts.removeSession(checked.value());
+            removePlannedReferenceCutRoots(checked.value());
         }
         return result;
     }
@@ -481,14 +657,84 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                 Objects.requireNonNull(eventOrderKey, "eventOrderKey"));
     }
 
+    /**
+     * Compiles one immutable operation/event shape. The authoritative full
+     * splitter runs only for the sentinel prototype, never for a future exact
+     * timestamp/previous-entry instance.
+     */
+    public CoordinationEventShapeTemplate compileEventShape(
+            String shapeIdentity,
+            Node resolvedPrototype,
+            Collection<String> volatileLeafPointers) {
+        requireOpen();
+        return eventShapeCompiler.compile(
+                shapeIdentity,
+                materializeExact(resolvedPrototype, "resolvedPrototype"),
+                volatileLeafPointers);
+    }
+
+    /** Instantiates a shared shape while charging work to this engine. */
+    public CoordinationEventShapeInstance instantiateEventShape(
+            CoordinationEventShapeTemplate template,
+            Collection<CoordinationEventShapePatch> patches) {
+        requireOpen();
+        return Objects.requireNonNull(template, "template").instantiate(
+                Objects.requireNonNull(patches, "patches"),
+                eventShapeMetrics);
+    }
+
+    /** Admits an already verified first-seen shape instance without a split. */
+    public StoredCoordinationEvent prepareEvent(
+            CoordinationEventShapeInstance instance,
+            ExternalOrderKey eventOrderKey) {
+        requireOpen();
+        CoordinationEventShapeInstance checked = Objects.requireNonNull(
+                instance, "instance");
+        return admitCompiledEvent(
+                checked.admission(),
+                Objects.requireNonNull(eventOrderKey, "eventOrderKey"));
+    }
+
+    public CoordinationEventShapeMetrics.Snapshot eventShapeMetrics() {
+        return eventShapeMetrics.snapshot();
+    }
+
     public CoordinationEventAdmissionMetrics.Snapshot
             eventAdmissionMetrics() {
         return eventAdmissionMetrics.snapshot();
     }
 
+    /** Opaque identity of evidence accepted by this engine's event domain. */
+    public String eventAdmissionDomainIdentity() {
+        return eventAdmissionCompiler.admissionDomainIdentity();
+    }
+
     /** Returns exact delta-projection hit/fallback work counters. */
     public FastPathWorkMetrics.Snapshot projectionFastPathMetrics() {
         return projectionFastPathMetrics.snapshot();
+    }
+
+    /** Returns measured production work for verified fragment transitions. */
+    public CoordinationFragmentTransitionWorkSnapshot
+            fragmentTransitionWorkSnapshot() {
+        CoordinationFragmentTransitionWorkSnapshot planner =
+                transitionPlanner.workSnapshot();
+        return new CoordinationFragmentTransitionWorkSnapshot(
+                planner.deltaHits(),
+                planner.typedFallbacksByReason(),
+                planner.fullBlueprintAttempts(),
+                planner.sparseFrontierNodes(),
+                planner.changedFragmentsHashed(),
+                planner.unchangedFragmentsShared(),
+                planner.fullResultClones(),
+                transitionFullRootMaterializations.get(),
+                transitionFrontierBoundaryGrafts.get(),
+                transitionExpandedNodesVisited.get(),
+                transitionRetainedIndexFullScans.get(),
+                planner.inventoryRecordsReused(),
+                planner.inventoryRecordsRebuilt(),
+                planner.edgeRecordsReused(),
+                planner.edgeRecordsRebuilt());
     }
 
     CacheMetrics planningProjectionCacheMetricsForTest() {
@@ -552,7 +798,16 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
             throw new IllegalStateException(
                     "Stored event handle does not bind its inventory Root");
         }
-        Node exactRoot = exactRootForIndexedPlanning(rootInventory);
+        ReferenceCutRootSelection rootSelection =
+                referenceCutRootSelection(
+                        session,
+                        rootInventory,
+                        () -> exactRootForIndexedPlanning(rootInventory),
+                        planningScopePaths(
+                                session.subscriptions(),
+                                candidates,
+                                rootInventory));
+        Node exactRoot = rootSelection.root;
         Node exactEvent = exactRootForIndexedPlanning(eventInventory);
         NodeProvider planningProvider = exactPlanningProvider(
                 session.currentRootBlueId(),
@@ -560,7 +815,8 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                 rootInventory,
                 event.eventBlueId(),
                 exactEvent,
-                eventInventory);
+                eventInventory,
+                session.subscriptions());
         CoordinationPreparedDelivery prepared = prepareIndexedAdmitted(
                 session,
                 rootInventory,
@@ -595,6 +851,7 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                 prepared.demandBoundary(),
                 planIdentity,
                 policy);
+        retainPlannedReferenceCutRoot(result, rootSelection);
         notifyIndexedPlanTiming(
                 result,
                 elapsedNanos(planStartedNanos));
@@ -634,15 +891,25 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
         admitGraph(eventGraph, eventInventory);
 
         CoordinationPreparedDelivery prepared;
+        ReferenceCutRootSelection rootSelection = null;
         if (checked.planningMode() == DeliveryPlanningMode.INDEXED) {
-            Node exactRoot = exactRootForIndexedPlanning(rootInventory);
+            rootSelection = referenceCutRootSelection(
+                    session,
+                    rootInventory,
+                    () -> exactRootForIndexedPlanning(rootInventory),
+                    planningScopePaths(
+                            session.subscriptions(),
+                            checked.orderedIndexedOccurrenceKeys(),
+                            rootInventory));
+            Node exactRoot = rootSelection.root;
             NodeProvider planningProvider = exactPlanningProvider(
                     session.currentRootBlueId(),
                     exactRoot,
                     rootInventory,
                     eventGraph.rootBlueId(),
                     exactEvent,
-                    eventInventory);
+                    eventInventory,
+                    session.subscriptions());
             prepared = prepareIndexedAdmitted(
                     session,
                     rootInventory,
@@ -668,7 +935,8 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                                     rootInventory,
                                     eventGraph.rootBlueId(),
                                     exactEvent,
-                                    eventInventory),
+                                    eventInventory,
+                                    session.subscriptions()),
                             session.subscriptions().rootRevision(),
                             checked.eventOrderKey());
         }
@@ -698,6 +966,7 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                 prepared.demandBoundary(),
                 planIdentity,
                 checked.prefetchPolicy());
+        retainPlannedReferenceCutRoot(result, rootSelection);
         notifyPlanTiming(
                 checked, result, elapsedNanos(planStartedNanos));
         notifyPlan(result);
@@ -720,7 +989,8 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                 generation,
                 session.subscriptions(),
                 exactRoot,
-                rootInventory);
+                rootInventory,
+                exactProvider);
         if (projection == null) {
             return indexedPlanner.prepareAdmitted(
                     admittedPlanningAuthority,
@@ -736,6 +1006,7 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
         }
         return preparedDeliveryMemoizer.prepareAdmitted(
                 generation,
+                session.sessionId().value(),
                 projection,
                 eventBlueId,
                 eventInventoryIdentity,
@@ -767,7 +1038,6 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
         }
         return new ProjectionGenerationKey(
                 environmentIdentity,
-                exactSession.sessionId().value(),
                 exactSession.currentRootBlueId(),
                 exactSession.subscriptions().rootRevision(),
                 exactInventory.inventoryIdentity(),
@@ -784,7 +1054,8 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
             ProjectionGenerationKey generation,
             CoordinationSubscriptionSnapshot snapshot,
             Node exactRoot,
-            CoordinationFragmentInventory inventory) {
+            CoordinationFragmentInventory inventory,
+            NodeProvider exactProvider) {
         try {
             return planningProjectionCache.getOrCompile(
                     generation,
@@ -792,27 +1063,507 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                             generation,
                             snapshot,
                             exactRoot,
-                            exactRootPlanningProvider(
-                                    generation.rootBlueId(),
-                                    exactRoot,
-                                    inventory)));
+                            Objects.requireNonNull(
+                                    exactProvider,
+                                    "exactProvider")));
         } catch (ExecutionEvidenceUnavailableException unavailable) {
             planningFastPathMetrics.coldProjectionFallback();
             return null;
         }
     }
 
+    /**
+     * Builds an immutable successor projection from commit-local proof only.
+     * The candidate remains private to the transition until the authoritative
+     * session CAS succeeds; failed or losing transitions can never seed a
+     * future planning generation.
+     */
+    private AdmittedProjection prepareIncrementalPlanningProjection(
+            ManagedDocumentSnapshot previousSession,
+            CoordinationFragmentInventory previousInventory,
+            ManagedDocumentSnapshot resultingSession,
+            CoordinationFragmentInventory resultingInventory,
+            CoordinationSubscriptionUpdate subscriptionUpdate,
+            CoordinationCommitProjectionEvidence evidence,
+            VerifiedFragmentTransitionFrontier frontier) {
+        if (evidence == null || frontier == null) {
+            planningFastPathMetrics.coldProjectionFallback();
+            return null;
+        }
+        try {
+            ProjectionGenerationKey previousGeneration = planningGeneration(
+                    previousSession, previousInventory);
+            AdmittedProjection previous = planningProjectionCache.find(
+                    previousGeneration);
+            if (previous == null) {
+                planningFastPathMetrics.coldProjectionFallback();
+                return null;
+            }
+            ProjectionGenerationKey nextGeneration = planningGeneration(
+                    resultingSession, resultingInventory);
+            return planningProjectionCompiler.advance(
+                    previous,
+                    nextGeneration,
+                    subscriptionUpdate,
+                    evidence,
+                    frontier.sparseResultRoot());
+        } catch (RuntimeException unavailableDerivedEvidence) {
+            planningFastPathMetrics.coldProjectionFallback();
+            return null;
+        }
+    }
+
+    private ReferenceCutRootSelection referenceCutRootSelection(
+            ManagedDocumentSnapshot session,
+            CoordinationFragmentInventory inventory,
+            Supplier<Node> exactRootSupplier,
+            Collection<String> activePaths) {
+        Supplier<Node> fullRoot = Objects.requireNonNull(
+                exactRootSupplier, "exactRootSupplier");
+        if (!referenceCutConfiguration.enabled()) {
+            referenceCutMetrics.fullRootUsed();
+            return ReferenceCutRootSelection.full(fullRoot.get());
+        }
+        ActivePathSet active = ActivePathSet.of(activePaths);
+        ReferenceCutRootCacheKey key = new ReferenceCutRootCacheKey(
+                session.currentRootBlueId(),
+                inventory.inventoryIdentity(),
+                active.paths(),
+                environmentIdentity,
+                gasScheduleIdentity,
+                session.subscriptions().digest(),
+                planningRuntimeIdentity,
+                referenceCutProviderStorageGenerationAuthority,
+                InventoryReferenceCutRootCompiler.ALGORITHM_VERSION);
+        ReferenceCutRootArtifact artifact = referenceCutRootCache.peek(key);
+        if (artifact == null) {
+            ReferenceCutPlan preflight = referenceCutPlanner.plan(
+                    inventory, active);
+            if (preflight.cuts().isEmpty()
+                    || preflight.cuts().size()
+                            > referenceCutConfiguration.maximumCuts()
+                    || InventoryReferenceCutRootCompiler
+                            .estimatedFragmentReduction(inventory, preflight)
+                            < referenceCutConfiguration
+                                    .minimumNodeReduction()) {
+                referenceCutMetrics.fullRootUsed();
+                return ReferenceCutRootSelection.full(fullRoot.get());
+            }
+            artifact = referenceCutRootCache.getOrBuild(
+                    key,
+                    () -> inventoryReferenceCutRootCompiler.compile(
+                            inventory, active, preflight));
+        }
+        ReferenceCutDecision decision = ReferenceCutDecision.evaluate(
+                referenceCutConfiguration, artifact);
+        if (!decision.useSparseRoot()) {
+            referenceCutMetrics.fullRootUsed();
+            return ReferenceCutRootSelection.full(fullRoot.get());
+        }
+        if (referenceCutConfiguration.mode()
+                == blue.coordination.engine.fastpath.ReferenceCutMode
+                        .SHADOW_DIFFERENTIAL) {
+            Node exact = fullRoot.get();
+            ReferenceCutRootArtifact oracle = referenceCutRootCompiler.compile(
+                    inventory, exact, active);
+            if (!blue.language.model.NodeWireForm.get(
+                    oracle.copyForFrozenBoundary()).equals(
+                            blue.language.model.NodeWireForm.get(
+                                    artifact.copyForFrozenBoundary()))) {
+                throw new IllegalStateException(
+                        "Direct sparse-Root assembly differs from the "
+                                + "full-Root reference-cut oracle");
+            }
+        }
+        referenceCutMetrics.sparseUsed();
+        return ReferenceCutRootSelection.sparse(
+                artifact.copyForFrozenBoundary(),
+                artifact,
+                active.paths());
+    }
+
+    private void retainPlannedReferenceCutRoot(
+            CoordinationProcessingPlan plan,
+            ReferenceCutRootSelection selection) {
+        if (selection == null || selection.artifact == null) return;
+        CoordinationProcessingPlan checked = Objects.requireNonNull(
+                plan, "plan");
+        if (!referenceCutRoleSurfacesMatch(
+                selection.activePaths,
+                preparedScopePaths(
+                        checked.preparedDelivery(),
+                        checked.session().subscriptions(),
+                        checked.rootInventory()))) {
+            return;
+        }
+        PlannedReferenceCutRoot retained = new PlannedReferenceCutRoot(
+                checked,
+                selection.artifact,
+                selection.activePaths,
+                environmentIdentity,
+                gasScheduleIdentity,
+                referenceCutProviderStorageGenerationAuthority);
+        synchronized (plannedReferenceCutRoots) {
+            long weight = retained.approximateRetainedWeightBytes();
+            if (weight > plannedReferenceCutRootMaximumWeightBytes) return;
+            PlannedReferenceCutRoot previous = plannedReferenceCutRoots.put(
+                    checked.planIdentity(), retained);
+            if (previous != null) {
+                plannedReferenceCutRootWeightBytes -=
+                        previous.approximateRetainedWeightBytes();
+            }
+            plannedReferenceCutRootWeightBytes = Math.addExact(
+                    plannedReferenceCutRootWeightBytes, weight);
+            while (!plannedReferenceCutRoots.isEmpty()
+                    && (plannedReferenceCutRoots.size()
+                            > plannedReferenceCutRootMaximumSize
+                    || plannedReferenceCutRootWeightBytes
+                            > plannedReferenceCutRootMaximumWeightBytes)) {
+                Map.Entry<String, PlannedReferenceCutRoot> eldest =
+                        plannedReferenceCutRoots.entrySet()
+                                .iterator().next();
+                plannedReferenceCutRootWeightBytes -= eldest.getValue()
+                        .approximateRetainedWeightBytes();
+                plannedReferenceCutRoots.remove(eldest.getKey());
+            }
+        }
+    }
+
+    private PlannedReferenceCutRoot takePlannedReferenceCutRoot(
+            String planIdentity) {
+        String checked = requireText(planIdentity, "planIdentity");
+        synchronized (plannedReferenceCutRoots) {
+            PlannedReferenceCutRoot removed =
+                    plannedReferenceCutRoots.remove(checked);
+            if (removed != null) {
+                plannedReferenceCutRootWeightBytes -=
+                        removed.approximateRetainedWeightBytes();
+            }
+            return removed;
+        }
+    }
+
+    private void removePlannedReferenceCutRoots(String sessionId) {
+        String checked = requireText(sessionId, "sessionId");
+        synchronized (plannedReferenceCutRoots) {
+            java.util.Iterator<Map.Entry<String, PlannedReferenceCutRoot>>
+                    iterator = plannedReferenceCutRoots.entrySet().iterator();
+            while (iterator.hasNext()) {
+                PlannedReferenceCutRoot candidate =
+                        iterator.next().getValue();
+                if (candidate.sessionId.equals(checked)) {
+                    plannedReferenceCutRootWeightBytes -= candidate
+                            .approximateRetainedWeightBytes();
+                    iterator.remove();
+                }
+            }
+        }
+    }
+
+    /**
+     * Builds the exact sparse planning surface for selected occurrences.
+     * Invalid or duplicate keys fail with the same authoritative rejection as
+     * admitted projection selection. Selected scope chains retain their
+     * non-contract state because ancestor handlers may execute alongside the
+     * routed leaf occurrence.
+     */
+    static List<String> planningScopePaths(
+            CoordinationSubscriptionSnapshot snapshot,
+            Collection<String> occurrenceKeys,
+            CoordinationFragmentInventory inventory) {
+        CoordinationSubscriptionSnapshot checkedSnapshot =
+                Objects.requireNonNull(snapshot, "snapshot");
+        CoordinationFragmentInventory checkedInventory =
+                Objects.requireNonNull(inventory, "inventory");
+        LinkedHashSet<String> paths = new LinkedHashSet<String>();
+        paths.add(JsonPointer.ROOT);
+        paths.add(PLATFORM_CONTRACTS_PATH);
+        LinkedHashSet<String> selectedDependencyBlueIds =
+                new LinkedHashSet<String>();
+        LinkedHashSet<String> selectedScopeChainPaths =
+                new LinkedHashSet<String>();
+        LinkedHashSet<String> selectedScopePaths =
+                new LinkedHashSet<String>();
+        LinkedHashSet<String> activeRecognitionBlueIds =
+                new LinkedHashSet<String>();
+        LinkedHashSet<String> activeContractsMapPaths =
+                new LinkedHashSet<String>();
+        LinkedHashSet<String> activeScopePaths =
+                new LinkedHashSet<String>();
+        LinkedHashSet<String> executableBodyPaths =
+                new LinkedHashSet<String>();
+        for (FragmentMetadataRecord metadata : checkedInventory.metadata()) {
+            if (metadata.kind()
+                    == CoordinationDocumentSplitter.FragmentKind
+                            .EXECUTABLE_BODY
+                    && metadata.pointer() != null) {
+                executableBodyPaths.add(metadata.pointer());
+            }
+        }
+        /* Frozen Contracts verifies the complete active interval surface
+         * before it evaluates the selected physical candidates. Keep every
+         * active contract/type recognition header concrete in the sparse
+         * Root, while candidate bodies and ordinary dependencies remain
+         * limited to the requested occurrences below. */
+        for (CoordinationSubscriptionOccurrence occurrence
+                : checkedSnapshot.occurrences()) {
+            activeScopePaths.add(JsonPointer.canonicalize(
+                    occurrence.scopePath()));
+            addScopeChainRecognitionSurfaces(
+                    paths,
+                    activeContractsMapPaths,
+                    occurrence.scopePath());
+            activeRecognitionBlueIds.add(
+                    occurrence.effectiveTypeBlueId());
+            activeRecognitionBlueIds.add(
+                    occurrence.headerIdentityBlueId());
+            activeRecognitionBlueIds.addAll(
+                    occurrence.sourceContributionNodeBlueIds());
+        }
+        LinkedHashSet<String> uniqueKeys = new LinkedHashSet<String>();
+        for (String suppliedKey : Objects.requireNonNull(
+                occurrenceKeys, "occurrenceKeys")) {
+            String occurrenceKey = requireText(
+                    suppliedKey, "occurrenceKey");
+            if (!uniqueKeys.add(occurrenceKey)) {
+                throw new IllegalArgumentException(
+                        "duplicate candidate: " + occurrenceKey);
+            }
+            CoordinationSubscriptionOccurrence occurrence =
+                    checkedSnapshot.candidateOccurrence(occurrenceKey);
+            if (occurrence == null) {
+                throw new IllegalArgumentException(
+                        "stale or unknown occurrence: " + occurrenceKey);
+            }
+            addPathAndAncestors(paths, occurrence.scopePath());
+            addProcessScopeSurface(paths, occurrence.scopePath());
+            addPathAndAncestors(
+                    selectedScopeChainPaths, occurrence.scopePath());
+            selectedScopePaths.add(JsonPointer.canonicalize(
+                    occurrence.scopePath()));
+            selectedDependencyBlueIds.addAll(
+                    occurrence.sourceContributionNodeBlueIds());
+            selectedDependencyBlueIds.addAll(
+                    occurrence.dependencyNodeBlueIds());
+        }
+        // Historical inventories remain body-free and index-free. Scan the
+        // immutable edge vector once for this selected candidate set instead
+        // of retaining an unbounded child-identity map on every revision.
+        for (FragmentEdgeRecord edge : checkedInventory.edges()) {
+            if (edge.rootKind()
+                    != CoordinationDocumentSplitter.FragmentRootKind.DOCUMENT) {
+                continue;
+            }
+            boolean recognitionHeader = activeRecognitionBlueIds.contains(
+                    edge.childBlueId())
+                    || (edge.edgeKind()
+                    == CoordinationDocumentSplitter.EdgeKind
+                            .DOCUMENT_DIRECT_CHILD
+                    && isActiveContractHeaderPath(
+                            edge.absolutePointer(),
+                            activeContractsMapPaths))
+                    || (edge.ownerScopePath() != null
+                    && activeScopePaths.contains(JsonPointer.canonicalize(
+                            edge.ownerScopePath()))
+                    && isContractsDescendantPath(edge.absolutePointer()));
+            recognitionHeader = recognitionHeader
+                    && !isAtOrBelowAny(
+                            edge.absolutePointer(), executableBodyPaths);
+            boolean selectedDependency = selectedDependencyBlueIds.contains(
+                    edge.childBlueId())
+                    && !isContractsDescendantPath(edge.absolutePointer());
+            String ownerScopePath = edge.ownerScopePath() == null
+                    ? null
+                    : JsonPointer.canonicalize(edge.ownerScopePath());
+            boolean selectedScopeValue = ownerScopePath != null
+                    && selectedScopeChainPaths.contains(ownerScopePath)
+                    && (selectedScopePaths.contains(ownerScopePath)
+                            ? isDirectChildOfAnyScope(
+                                    edge.absolutePointer(),
+                                    selectedScopePaths)
+                            : !isAtOrBelowNestedScope(
+                                    edge.absolutePointer(),
+                                    ownerScopePath,
+                                    activeScopePaths))
+                    && !isContractsDescendantPath(edge.absolutePointer());
+            if (recognitionHeader
+                    || selectedDependency
+                    || selectedScopeValue) {
+                paths.add(edge.absolutePointer());
+            }
+        }
+        return ActivePathSet.of(paths).paths();
+    }
+
+    private static void addPathAndAncestors(
+            Set<String> paths,
+            String suppliedPath) {
+        List<String> segments = JsonPointer.split(
+                JsonPointer.canonicalize(Objects.requireNonNull(
+                        suppliedPath, "scopePath")));
+        paths.add(JsonPointer.ROOT);
+        for (int length = 1; length <= segments.size(); length++) {
+            paths.add(JsonPointer.toPointer(
+                    segments.subList(0, length)));
+        }
+    }
+
+    private static List<String> preparedScopePaths(
+            CoordinationPreparedDelivery prepared,
+            CoordinationSubscriptionSnapshot snapshot,
+            CoordinationFragmentInventory inventory) {
+        CoordinationPreparedDelivery checkedPrepared = Objects.requireNonNull(
+                prepared, "prepared");
+        return planningScopePaths(
+                Objects.requireNonNull(snapshot, "snapshot"),
+                checkedPrepared.preselectedOccurrenceOrder(),
+                Objects.requireNonNull(inventory, "inventory"));
+    }
+
+    /** Exact canonical predicate governing planning-to-PROCESS handoff. */
+    static boolean referenceCutRoleSurfacesMatch(
+            Collection<String> planningPaths,
+            Collection<String> processPaths) {
+        return ActivePathSet.of(Objects.requireNonNull(
+                        planningPaths, "planningPaths")).paths().equals(
+                ActivePathSet.of(Objects.requireNonNull(
+                        processPaths, "processPaths")).paths());
+    }
+
+    /**
+     * Keeps only the selected scope and its contracts-map header concrete.
+     * Active-path planning expands the ancestor chain automatically. Handler,
+     * contribution, and dependency bodies deliberately stay as references so
+     * frozen PROCESS resolves them through the exact request-local provider.
+     */
+    static void addProcessScopeSurface(
+            Set<String> paths,
+            String suppliedScopePath) {
+        Set<String> checked = Objects.requireNonNull(paths, "paths");
+        String scopePath = JsonPointer.canonicalize(
+                Objects.requireNonNull(suppliedScopePath, "scopePath"));
+        checked.add(scopePath);
+        List<String> contracts = new ArrayList<String>(
+                JsonPointer.split(scopePath));
+        contracts.add("contracts");
+        checked.add(JsonPointer.toPointer(contracts));
+    }
+
+    private static String contractsPath(String suppliedScopePath) {
+        List<String> contracts = new ArrayList<String>(
+                JsonPointer.split(JsonPointer.canonicalize(
+                        Objects.requireNonNull(
+                                suppliedScopePath, "scopePath"))));
+        contracts.add("contracts");
+        return JsonPointer.toPointer(contracts);
+    }
+
+    private static void addScopeChainRecognitionSurfaces(
+            Set<String> paths,
+            Set<String> contractsMapPaths,
+            String suppliedScopePath) {
+        List<String> segments = JsonPointer.split(
+                JsonPointer.canonicalize(Objects.requireNonNull(
+                        suppliedScopePath, "scopePath")));
+        for (int length = 0; length <= segments.size(); length++) {
+            String scopePath = JsonPointer.toPointer(
+                    segments.subList(0, length));
+            paths.add(scopePath);
+            String contracts = contractsPath(scopePath);
+            paths.add(contracts);
+            contractsMapPaths.add(contracts);
+        }
+    }
+
+    private static boolean isActiveContractHeaderPath(
+            String suppliedPath,
+            Set<String> contractsMapPaths) {
+        List<String> segments = JsonPointer.split(
+                JsonPointer.canonicalize(Objects.requireNonNull(
+                        suppliedPath, "path")));
+        for (int index = 0; index < segments.size(); index++) {
+            if ("contracts".equals(segments.get(index))
+                    && contractsMapPaths.contains(JsonPointer.toPointer(
+                            segments.subList(0, index + 1)))) {
+                return index + 1 < segments.size();
+            }
+        }
+        return false;
+    }
+
+    private static boolean isAtOrBelowAny(
+            String suppliedPath,
+            Set<String> ancestorPaths) {
+        List<String> segments = JsonPointer.split(
+                JsonPointer.canonicalize(Objects.requireNonNull(
+                        suppliedPath, "path")));
+        if (ancestorPaths.contains(JsonPointer.ROOT)) return true;
+        for (int length = 1; length <= segments.size(); length++) {
+            if (ancestorPaths.contains(JsonPointer.toPointer(
+                    segments.subList(0, length)))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isDirectChildOfAnyScope(
+            String suppliedPath,
+            Set<String> scopePaths) {
+        List<String> segments = JsonPointer.split(
+                JsonPointer.canonicalize(Objects.requireNonNull(
+                        suppliedPath, "path")));
+        if (segments.isEmpty()) return false;
+        return scopePaths.contains(JsonPointer.toPointer(
+                segments.subList(0, segments.size() - 1)));
+    }
+
+    private static boolean isAtOrBelowNestedScope(
+            String suppliedPath,
+            String suppliedOwnerScope,
+            Set<String> activeScopePaths) {
+        List<String> path = JsonPointer.split(JsonPointer.canonicalize(
+                Objects.requireNonNull(suppliedPath, "path")));
+        int ownerDepth = JsonPointer.split(JsonPointer.canonicalize(
+                Objects.requireNonNull(
+                        suppliedOwnerScope, "ownerScope"))).size();
+        for (int length = ownerDepth + 1;
+                length <= path.size();
+                length++) {
+            if (activeScopePaths.contains(JsonPointer.toPointer(
+                    path.subList(0, length)))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static boolean isContractsDescendantPath(String pointer) {
+        List<String> segments = JsonPointer.split(pointer);
+        for (int index = 0; index < segments.size() - 1; index++) {
+            if ("contracts".equals(segments.get(index))) return true;
+        }
+        return false;
+    }
+
+    /** Round-4 evidence: real sparse-root compile/cache work. */
+    public ReferenceCutMetrics.Snapshot referenceCutMetrics() {
+        return referenceCutMetrics.snapshot();
+    }
+
     private NodeProvider exactRootPlanningProvider(
             String rootBlueId,
             Node exactRoot,
-            CoordinationFragmentInventory rootInventory) {
+            CoordinationFragmentInventory rootInventory,
+            CoordinationSubscriptionSnapshot snapshot) {
         return exactPlanningProvider(
                 rootBlueId,
                 exactRoot,
                 rootInventory,
                 rootBlueId,
                 exactRoot,
-                rootInventory);
+                rootInventory,
+                snapshot);
     }
 
     private NodeProvider exactPlanningProvider(
@@ -821,7 +1572,8 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
             CoordinationFragmentInventory rootInventory,
             String eventBlueId,
             Node exactEvent,
-            CoordinationFragmentInventory eventInventory) {
+            CoordinationFragmentInventory eventInventory,
+            CoordinationSubscriptionSnapshot snapshot) {
         NodeProvider invocationRoots = requestedBlueId -> {
             /* This invocation-local provider is consumed only by the indexed
              * planner. Its exact-lookup boundary takes the one defensive
@@ -843,31 +1595,126 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                         eventInventory,
                         exactEvent),
                 fragmentStore.canonicalFragmentProvider());
-        Set<String> externalReferences = externalReferenceTargets(
-                rootInventory, eventInventory);
-        return requestedBlueId -> {
-            List<Node> selected = admitted.fetchByBlueId(requestedBlueId);
-            if (selected.size() == 1
+        return new AdmittedReferenceClosureProvider(
+                admitted,
+                runtimeProvider,
+                externalReferenceTargets(rootInventory, eventInventory));
+    }
+
+    /**
+     * Resolves only the transitive semantic closure of an authored reference.
+     *
+     * <p>An inventory can prove the outer reference to a runtime contracts
+     * map without containing that map's nested contract-header references.
+     * Once the exact outer value has been demanded and identity-verified by
+     * the frozen processor, those directly reachable references become part
+     * of the same request-local admitted closure. Arbitrary provider misses
+     * still fail closed; this is not a runtime fallback.</p>
+     */
+    private static final class AdmittedReferenceClosureProvider
+            implements NodeProvider {
+        private final NodeProvider admitted;
+        private final NodeProvider semantic;
+        private final Set<String> allowedExternalReferences;
+
+        private AdmittedReferenceClosureProvider(
+                NodeProvider admitted,
+                NodeProvider semantic,
+                Collection<String> directExternalReferences) {
+            this.admitted = Objects.requireNonNull(admitted, "admitted");
+            this.semantic = Objects.requireNonNull(semantic, "semantic");
+            this.allowedExternalReferences = new LinkedHashSet<String>(
+                    Objects.requireNonNull(
+                            directExternalReferences,
+                            "directExternalReferences"));
+        }
+
+        @Override
+        public synchronized List<Node> fetchByBlueId(String requestedBlueId) {
+            String checkedBlueId = requireText(
+                    requestedBlueId, "requestedBlueId");
+            List<Node> selected = admitted.fetchByBlueId(checkedBlueId);
+            if (selected == null) selected = Collections.emptyList();
+            if (!selected.isEmpty()
+                    && !(selected.size() == 1
                     && selected.get(0).isReferenceOnly()
-                    && externalReferences.contains(requestedBlueId)) {
-                List<Node> semantic = runtimeProvider.fetchByBlueId(
-                        requestedBlueId);
-                if (semantic.size() == 1
-                        && !semantic.get(0).isReferenceOnly()) {
-                    return semantic;
-                }
-            }
-            if (!selected.isEmpty()) {
+                    && allowedExternalReferences.contains(checkedBlueId))) {
                 return selected;
             }
-            if (!externalReferences.contains(requestedBlueId)) {
+            if (!allowedExternalReferences.contains(checkedBlueId)) {
                 throw new IllegalStateException(
                         "Indexed planning requested a value outside the "
-                                + "admitted Root/Event inventories: "
-                                + requestedBlueId);
+                                + "admitted Root/Event reference closure: "
+                                + checkedBlueId);
             }
-            return runtimeProvider.fetchByBlueId(requestedBlueId);
-        };
+            List<Node> resolved = semantic.fetchByBlueId(checkedBlueId);
+            if (resolved == null) resolved = Collections.emptyList();
+            if (resolved.size() == 1 && !resolved.get(0).isReferenceOnly()) {
+                addDirectReferenceTargets(
+                        resolved.get(0), allowedExternalReferences);
+            }
+            return resolved;
+        }
+    }
+
+    /** Adds references visible inside one demanded exact semantic value. */
+    private static void addDirectReferenceTargets(
+            Node exactRoot,
+            Set<String> result) {
+        ArrayDeque<Node> pending = new ArrayDeque<Node>();
+        IdentityHashMap<Node, Boolean> visited =
+                new IdentityHashMap<Node, Boolean>();
+        pending.add(Objects.requireNonNull(exactRoot, "exactRoot"));
+        while (!pending.isEmpty()) {
+            Node node = pending.removeLast();
+            if (visited.put(node, Boolean.TRUE) != null) continue;
+            if (node.isReferenceOnly()) {
+                result.add(requireText(node.getBlueId(), "referenceBlueId"));
+                continue;
+            }
+            addIfPresent(pending, node.getType());
+            addIfPresent(pending, node.getItemType());
+            addIfPresent(pending, node.getKeyType());
+            addIfPresent(pending, node.getValueType());
+            addIfPresent(pending, node.getContracts());
+            addIfPresent(pending, node.getBlue());
+            if (node.getItems() != null) pending.addAll(node.getItems());
+            if (node.getProperties() != null) {
+                pending.addAll(node.getProperties().values());
+            }
+            addSchemaReferenceTargets(node.getSchema(), pending, result);
+        }
+    }
+
+    private static void addSchemaReferenceTargets(
+            Schema schema,
+            ArrayDeque<Node> pending,
+            Set<String> result) {
+        if (schema == null) return;
+        if (schema.isReferenceOnly()) {
+            result.add(requireText(schema.getBlueId(), "schemaReferenceBlueId"));
+            return;
+        }
+        addIfPresent(pending, schema.getRequired());
+        addIfPresent(pending, schema.getMinLength());
+        addIfPresent(pending, schema.getMaxLength());
+        addIfPresent(pending, schema.getMinimum());
+        addIfPresent(pending, schema.getMaximum());
+        addIfPresent(pending, schema.getExclusiveMinimum());
+        addIfPresent(pending, schema.getExclusiveMaximum());
+        addIfPresent(pending, schema.getMultipleOf());
+        addIfPresent(pending, schema.getMinItems());
+        addIfPresent(pending, schema.getMaxItems());
+        addIfPresent(pending, schema.getUniqueItems());
+        addIfPresent(pending, schema.getMinFields());
+        addIfPresent(pending, schema.getMaxFields());
+        if (schema.getEnum() != null) pending.addAll(schema.getEnum());
+    }
+
+    private static void addIfPresent(
+            ArrayDeque<Node> pending,
+            Node value) {
+        if (value != null) pending.addLast(value);
     }
 
     private static Set<String> externalReferenceTargets(
@@ -961,6 +1808,8 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
         ManagedDocumentSnapshot current = requireActiveSession(
                 checked.session().sessionId());
         requireCurrentPlan(checked, current);
+        PlannedReferenceCutRoot plannedReferenceCutRoot =
+                takePlannedReferenceCutRoot(checked.planIdentity());
 
         TransitionMemoKey memoKey = new TransitionMemoKey(
                 current.sessionId(),
@@ -1018,14 +1867,52 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
         Object preparedOwner = preparedRoot == null
                 ? null
                 : preparedRootOwnership;
-        Node exactRoot = preparedRoot != null
-                ? preparedRoot.copyRootForPublicInvocation()
-                : exactRootForIndexedPlanning(checked.rootInventory());
-        Node exactPriorProofRoot = preparedRoot != null
-                ? preparedRoot.borrowRootVerified(
+        Supplier<Node> exactPriorProofRoot = preparedRoot != null
+                ? () -> preparedRoot.borrowRootVerified(
                         preparedOwner,
                         verifiedNodeAccessAuthority)
-                : exactRoot;
+                : () -> exactRootForIndexedPlanning(checked.rootInventory());
+        List<String> processScopePaths = preparedScopePaths(
+                checked.preparedDelivery(),
+                current.subscriptions(),
+                checked.rootInventory());
+        boolean reusedPlannedReferenceCut =
+                plannedReferenceCutRoot != null
+                && plannedReferenceCutRoot.matches(
+                        checked,
+                        current,
+                        processScopePaths,
+                        environmentIdentity,
+                        gasScheduleIdentity,
+                        referenceCutProviderStorageGenerationAuthority);
+        if (plannedReferenceCutRoot != null) {
+            if (reusedPlannedReferenceCut) {
+                referenceCutMetrics.plannedArtifactReused();
+            } else {
+                referenceCutMetrics.plannedArtifactFallback();
+            }
+        } else {
+            referenceCutMetrics.plannedArtifactNotApplicable();
+        }
+        ReferenceCutRootSelection processRootSelection =
+                reusedPlannedReferenceCut
+                ? ReferenceCutRootSelection.sparse(
+                        plannedReferenceCutRoot.artifact
+                                .copyForFrozenBoundary(),
+                        plannedReferenceCutRoot.artifact,
+                        processScopePaths)
+                : referenceCutRootSelection(
+                        current,
+                        checked.rootInventory(),
+                        exactPriorProofRoot,
+                        processScopePaths);
+        if (reusedPlannedReferenceCut) {
+            referenceCutMetrics.sparseUsed();
+        }
+        referenceCutMetrics.processSelection(
+                processScopePaths.size(),
+                processRootSelection.artifact);
+        Node exactRoot = processRootSelection.root;
         Node exactEvent = exactRootForIndexedPlanning(
                 checked.eventInventory());
         notifyProcessInputMaterializationTiming(
@@ -1057,6 +1944,7 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                         verifiedNodeAccessAuthority)
                 : checked.rootReference();
         VerifiedHybridResultFrontier projectionFrontier = null;
+        VerifiedFragmentTransitionFrontier fragmentTransitionFrontier = null;
         DeltaProjectionApplier.ColdProjectionRequiredException
                 projectionFrontierFailure = null;
         if (rootCommit && preparedRoot != null) {
@@ -1067,6 +1955,10 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                                 resultingRoot,
                                 preparedRoot,
                                 preparedOwner);
+                fragmentTransitionFrontier = projectionFrontier
+                        .snapshotForFragmentTransition(
+                                resultingRoot,
+                                verifiedOutput.resultingRootBlueId());
             } catch (DeltaProjectionApplier
                     .ColdProjectionRequiredException cold) {
                 projectionFrontierFailure = cold;
@@ -1076,30 +1968,31 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                         elapsedNanos(hybridFrontierStartedNanos));
             }
         }
-        long retainedMaterializationStartedNanos = System.nanoTime();
-        Node exactResultingRoot = rootCommit
-                ? preparedRoot != null
-                        ? new IndexedRetainedReferenceResolver(
-                                preparedRoot.retainedReferences(),
-                                preparedOwner)
-                                .resolveRequestOwned(resultingRoot)
-                        : materializeRetainedResultReferences(
-                                resultingRoot,
-                                exactRoot)
-                : resultingRoot;
-        notifyRetainedReferenceMaterializationTiming(
-                checked,
-                elapsedNanos(retainedMaterializationStartedNanos));
         String resultingRootBlueId = rootCommit
                 ? verifiedOutput.resultingRootBlueId()
                 : current.currentRootBlueId();
         long resultingEpoch = rootCommit
                 ? current.currentEpoch() + 1L
                 : current.currentEpoch();
+        long retainedReferenceMaterializationNanos = 0L;
+        Node exactResultingRoot = rootCommit ? null : resultingRoot;
+        if (rootCommit && preparedRoot == null) {
+            long materializationStartedNanos = System.nanoTime();
+            exactResultingRoot = materializeVerifiedResultingRoot(
+                    resultingRoot,
+                    null,
+                    null,
+                    exactRoot,
+                    fragmentTransitionFrontier);
+            retainedReferenceMaterializationNanos += elapsedNanos(
+                    materializationStartedNanos);
+        }
 
         long transitionStartedNanos = System.nanoTime();
         long subscriptionProjectionStartedNanos = System.nanoTime();
         CoordinationSubscriptionUpdate subscriptionUpdate;
+        CoordinationCommitProjectionEvidence incrementalProjectionEvidence =
+                null;
         if (!rootCommit) {
             subscriptionUpdate = CoordinationSubscriptionUpdate.unchanged(
                     current.subscriptions(),
@@ -1118,33 +2011,60 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                         platform.commitCompanion();
                 SubscriptionDelta membershipDelta =
                         companion.subscriptionDelta();
-                EffectiveFragmentationCatalog projectionCatalog =
+                boolean requiresProjectionCatalog =
                         !membershipDelta.isEmpty()
                                 || !projectionFrontier
                                         .processEmbeddedBoundaryBlueIdByPath()
-                                        .isEmpty()
-                                ? contracts.effectiveFragmentationCatalog(
-                                        exactResultingRoot)
-                                : null;
-                CoordinationCommitProjectionEvidence evidence =
+                                        .isEmpty();
+                if (requiresProjectionCatalog
+                        && exactResultingRoot == null) {
+                    long materializationStartedNanos = System.nanoTime();
+                    exactResultingRoot = materializeVerifiedResultingRoot(
+                            resultingRoot,
+                            preparedRoot,
+                            preparedOwner,
+                            exactRoot,
+                            fragmentTransitionFrontier);
+                    retainedReferenceMaterializationNanos += elapsedNanos(
+                            materializationStartedNanos);
+                }
+                EffectiveFragmentationCatalog projectionCatalog =
+                        requiresProjectionCatalog
+                        ? contracts.effectiveFragmentationCatalog(
+                                exactResultingRoot)
+                        : null;
+                incrementalProjectionEvidence =
                         commitProjectionEvidenceBuilder.build(
                                 current.subscriptions(),
                                 projectionFrontier,
-                                exactPriorProofRoot,
-                                exactResultingRoot,
+                                exactPriorProofRoot.get(),
+                                requiresProjectionCatalog
+                                        ? exactResultingRoot
+                                        : resultingRoot,
                                 resultingRootBlueId,
                                 companion.resultingRootRevision(),
                                 companion.eventOrderKey(),
                                 membershipDelta,
                                 projectionCatalog);
                 subscriptionUpdate = deltaSubscriptionProjector.apply(
-                        current.subscriptions(), evidence);
-                projectionFastPathMetrics.deltaProjectionUpdated();
+                        current.subscriptions(),
+                        incrementalProjectionEvidence);
             } catch (DeltaProjectionApplier
                     .ColdProjectionRequiredException cold) {
-                projectionFastPathMetrics.coldProjectionFallback();
+                projectionFastPathMetrics.fullProjectorFallback();
                 notifySubscriptionProjectionColdFallback(
                         checked, cold.getMessage());
+                if (exactResultingRoot == null) {
+                    long materializationStartedNanos = System.nanoTime();
+                    exactResultingRoot = materializeVerifiedResultingRoot(
+                            resultingRoot,
+                            preparedRoot,
+                            preparedOwner,
+                            exactRoot,
+                            fragmentTransitionFrontier);
+                    retainedReferenceMaterializationNanos += elapsedNanos(
+                            materializationStartedNanos);
+                }
                 subscriptionUpdate = subscriptionProjector
                         .applyPlatformCommit(
                                 current.subscriptions(),
@@ -1152,6 +2072,20 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                                 exactResultingRoot);
             }
         }
+        if (rootCommit && exactResultingRoot == null) {
+            long materializationStartedNanos = System.nanoTime();
+            exactResultingRoot = materializeVerifiedResultingRoot(
+                    resultingRoot,
+                    preparedRoot,
+                    preparedOwner,
+                    exactRoot,
+                    fragmentTransitionFrontier);
+            retainedReferenceMaterializationNanos += elapsedNanos(
+                    materializationStartedNanos);
+        }
+        notifyRetainedReferenceMaterializationTiming(
+                checked,
+                retainedReferenceMaterializationNanos);
         requireSubscriptionDelta(
                 subscriptionUpdate,
                 platform.commitCompanion().subscriptionDelta());
@@ -1166,6 +2100,7 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                         checked.rootInventory(),
                         exactResultingRoot,
                         resultingRootBlueId,
+                        fragmentTransitionFrontier,
                         checked.preparedDelivery(),
                         subscriptionUpdate)
                 : new CoordinationFragmentTransition(
@@ -1212,6 +2147,16 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                                 .inventoryIdentity(),
                         subscriptionUpdate.snapshot(),
                         ManagedDocumentStatus.ACTIVE);
+        AdmittedProjection pendingPlanningProjection = rootCommit
+                ? prepareIncrementalPlanningProjection(
+                        current,
+                        checked.rootInventory(),
+                        resultingSession,
+                        fragmentTransition.resultingInventory(),
+                        subscriptionUpdate,
+                        incrementalProjectionEvidence,
+                        fragmentTransitionFrontier)
+                : null;
         long preparedResultContextStartedNanos = System.nanoTime();
         Map<String, ExactNodeHandle> resultingProcessingViews =
                 new LinkedHashMap<String, ExactNodeHandle>();
@@ -1229,14 +2174,29 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
             }
         }
         if (rootCommit) {
-            for (Map.Entry<String, Node> changedView
-                    : fragmentTransition.processingViews().entrySet()) {
-                resultingProcessingViews.put(
-                        changedView.getKey(),
-                        ExactNodeHandle.adoptAndVerify(
-                                changedView.getKey(),
-                                changedView.getValue(),
-                                requestDigests));
+            FastFragmentDelta verifiedFragmentDelta =
+                    fragmentTransition.verifiedDelta(
+                            verifiedNodeAccessAuthority);
+            if (verifiedFragmentDelta != null) {
+                for (Map.Entry<String, ExactNodeHandle> changedView
+                        : verifiedFragmentDelta.changedProcessingViews(
+                                verifiedNodeAccessAuthority).entrySet()) {
+                    resultingProcessingViews.put(
+                            changedView.getKey(),
+                            changedView.getValue().rebind(
+                                    verifiedNodeAccessAuthority,
+                                    requestDigests));
+                }
+            } else {
+                for (Map.Entry<String, Node> changedView
+                        : fragmentTransition.processingViews().entrySet()) {
+                    resultingProcessingViews.put(
+                            changedView.getKey(),
+                            ExactNodeHandle.adoptAndVerify(
+                                    changedView.getKey(),
+                                    changedView.getValue(),
+                                    requestDigests));
+                }
             }
         }
         PreparedRootExecutionContext preparedResult = rootCommit
@@ -1245,7 +2205,10 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                         fragmentTransition.resultingInventory(),
                         verifiedOutput,
                         requestDigests,
-                        resultingProcessingViews)
+                        resultingProcessingViews,
+                        preparedRoot,
+                        preparedOwner,
+                        fragmentTransitionFrontier)
                 : null;
         notifyPreparedResultContextTiming(
                 checked,
@@ -1307,7 +2270,9 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                 locality);
         if (preparedResult != null) {
             retainPendingPreparedRootContext(
-                    transitionIdentity, preparedResult);
+                    transitionIdentity,
+                    preparedResult,
+                    pendingPlanningProjection);
         }
         if (transitionMemoStore != null
                 && CoordinationTransitionMemoPolicy.permits(process)) {
@@ -1352,13 +2317,16 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                 outcome, "outcome");
         String transitionIdentity = checkedTransition.commitPlan()
                 .transitionIdentity();
-        PreparedRootExecutionContext candidate =
-                pendingPreparedRootContext(transitionIdentity);
-        if (candidate == null || !checkedOutcome.committed()
+        if (!checkedOutcome.committed()
                 || !checkedOutcome.transitionIdentity().equals(
                         transitionIdentity)) {
             return false;
         }
+        try {
+        PendingPreparedGeneration pending =
+                pendingPreparedRootContext(transitionIdentity);
+        if (pending == null) return false;
+        PreparedRootExecutionContext candidate = pending.context;
         Optional<ManagedDocumentSnapshot> published =
                 checkedOutcome.session();
         if (!published.isPresent()) return false;
@@ -1391,10 +2359,7 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                 || !sameSessionGeneration(current.get(), expected)) {
             return false;
         }
-        if (!removePendingPreparedRootContext(
-                transitionIdentity, candidate)) {
-            return false;
-        }
+        boolean installed;
         try {
             Optional<ManagedDocumentSnapshot> stillCurrent =
                     sessionStore.findSession(expected.sessionId());
@@ -1403,15 +2368,39 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                             stillCurrent.get(), expected)) {
                 return false;
             }
-            boolean installed = preparedRootContexts.installIfCurrent(
-                    candidate);
-            if (installed) {
-                retirePublishedPlanningGeneration(
-                        checkedTransition,
-                        stillCurrent.get());
+            if (takePendingPreparedRootContext(
+                    transitionIdentity) != pending) {
+                return false;
             }
-            return installed;
+            installed = preparedRootContexts.installIfCurrent(
+                    candidate);
         } catch (RuntimeException derivedCacheFailure) {
+            installed = false;
+        }
+        if (pending.planningProjection != null) {
+            try {
+                ProjectionGenerationKey expectedGeneration =
+                        planningGeneration(
+                                expected,
+                                checkedTransition.fragmentTransition()
+                                        .resultingInventory());
+                if (expectedGeneration.equals(
+                        pending.planningProjection.generation())) {
+                    planningProjectionCache.publish(
+                            pending.planningProjection);
+                }
+            } catch (RuntimeException derivedCacheFailure) {
+                // The authoritative CAS already won. Derived evidence is
+                // optional and must never turn a committed result into failure.
+            }
+        }
+        retirePublishedPlanningGeneration(
+                checkedTransition,
+                expected);
+        return installed;
+        } catch (RuntimeException postPublicationFailure) {
+            // Authoritative publication already succeeded. Storage probes and
+            // all acceleration maintenance are observational and fail closed.
             return false;
         }
     }
@@ -1429,7 +2418,9 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
             ProjectionGenerationKey published = planningGeneration(
                     current, currentInventory);
             if (!previous.equals(published)) {
-                preparedDeliveryMemoizer.generationCommitted(previous);
+                preparedDeliveryMemoizer.generationCommitted(
+                        transition.plan().session().sessionId().value(),
+                        previous);
                 planningProjectionCache.retainOnly(published);
             }
         } catch (RuntimeException derivedCacheFailure) {
@@ -1439,41 +2430,65 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
 
     private void retainPendingPreparedRootContext(
             String transitionIdentity,
-            PreparedRootExecutionContext context) {
+            PreparedRootExecutionContext context,
+            AdmittedProjection planningProjection) {
+        String identity = requireText(
+                transitionIdentity, "transitionIdentity");
+        PendingPreparedGeneration checked = new PendingPreparedGeneration(
+                context, planningProjection);
+        long weight = checked.approximateRetainedWeightBytes();
+        if (weight <= 0L) {
+            throw new IllegalArgumentException(
+                    "prepared context weight must be positive");
+        }
         synchronized (pendingPreparedRootContexts) {
-            pendingPreparedRootContexts.put(
-                    transitionIdentity,
-                    Objects.requireNonNull(context, "context"));
-            if (pendingPreparedRootContexts.size()
-                    > pendingPreparedRootContextMaximumSize) {
-                pendingPreparedRootContexts.remove(
+            if (weight > pendingPreparedRootContextMaximumWeightBytes) {
+                return;
+            }
+            PendingPreparedGeneration previous =
+                    pendingPreparedRootContexts.put(identity, checked);
+            if (previous != null) {
+                pendingPreparedRootContextWeightBytes -= previous
+                        .approximateRetainedWeightBytes();
+            }
+            pendingPreparedRootContextWeightBytes = Math.addExact(
+                    pendingPreparedRootContextWeightBytes, weight);
+            while (!pendingPreparedRootContexts.isEmpty()
+                    && (pendingPreparedRootContexts.size()
+                            > pendingPreparedRootContextMaximumSize
+                    || pendingPreparedRootContextWeightBytes
+                            > pendingPreparedRootContextMaximumWeightBytes)) {
+                Map.Entry<String, PendingPreparedGeneration> eldest =
                         pendingPreparedRootContexts.entrySet()
-                                .iterator().next().getKey());
+                                .iterator().next();
+                pendingPreparedRootContextWeightBytes -= eldest.getValue()
+                        .approximateRetainedWeightBytes();
+                pendingPreparedRootContexts.remove(eldest.getKey());
             }
         }
     }
 
-    private PreparedRootExecutionContext pendingPreparedRootContext(
+    private PendingPreparedGeneration takePendingPreparedRootContext(
+            String transitionIdentity) {
+        synchronized (pendingPreparedRootContexts) {
+            String identity = Objects.requireNonNull(
+                    transitionIdentity, "transitionIdentity");
+            PendingPreparedGeneration removed =
+                    pendingPreparedRootContexts.remove(identity);
+            if (removed != null) {
+                pendingPreparedRootContextWeightBytes -= removed
+                        .approximateRetainedWeightBytes();
+            }
+            return removed;
+        }
+    }
+
+    private PendingPreparedGeneration pendingPreparedRootContext(
             String transitionIdentity) {
         synchronized (pendingPreparedRootContexts) {
             return pendingPreparedRootContexts.get(
                     Objects.requireNonNull(
-                            transitionIdentity,
-                            "transitionIdentity"));
-        }
-    }
-
-    private boolean removePendingPreparedRootContext(
-            String transitionIdentity,
-            PreparedRootExecutionContext expected) {
-        synchronized (pendingPreparedRootContexts) {
-            String identity = Objects.requireNonNull(
-                    transitionIdentity, "transitionIdentity");
-            if (pendingPreparedRootContexts.get(identity) != expected) {
-                return false;
-            }
-            pendingPreparedRootContexts.remove(identity);
-            return true;
+                            transitionIdentity, "transitionIdentity"));
         }
     }
 
@@ -1579,6 +2594,172 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
     }
 
     /**
+     * Captures only already-retained prepared contexts for a local,
+     * quiescent checkpoint. Cache misses are intentionally absent and rebuild
+     * lazily after restore; checkpointing never expands warm state to every
+     * active session. The opaque sidecar strongly owns only this bounded,
+     * immutable acceleration capsule. Runtime service domains remain weak, so
+     * a long-lived checkpoint cannot pin its source engine/service graph.
+     */
+    public PreparedCheckpointState checkpointPreparedState(
+            Collection<ManagedDocumentSnapshot> suppliedSessions) {
+        requireOpen();
+        Map<String, ManagedDocumentSnapshot> active =
+                new LinkedHashMap<String, ManagedDocumentSnapshot>();
+        for (ManagedDocumentSnapshot supplied : Objects.requireNonNull(
+                suppliedSessions, "suppliedSessions")) {
+            ManagedDocumentSnapshot checked = Objects.requireNonNull(
+                    supplied, "session");
+            ManagedDocumentSnapshot current = session(checked.sessionId());
+            if (current.currentEpoch() != checked.currentEpoch()
+                    || !current.currentRootBlueId().equals(
+                            checked.currentRootBlueId())
+                    || !current.fragmentInventoryIdentity().equals(
+                            checked.fragmentInventoryIdentity())
+                    || current.status() != checked.status()) {
+                throw new IllegalStateException(
+                        "Checkpoint session snapshot is stale: "
+                                + checked.sessionId());
+            }
+            if (current.status() == ManagedDocumentStatus.ACTIVE) {
+                active.put(current.sessionId().value(), current);
+            }
+        }
+        Map<String, PreparedRootExecutionContext> contexts =
+                new LinkedHashMap<String, PreparedRootExecutionContext>();
+        for (PreparedRootExecutionContext context
+                : preparedRootContexts.retainedContextsSnapshot()) {
+            ManagedDocumentSnapshot current = active.get(
+                    context.sessionId());
+            if (current == null
+                    || !context.matches(
+                            current.sessionId().value(),
+                            current.currentEpoch(),
+                            current.currentRootBlueId(),
+                            current.fragmentInventoryIdentity())) {
+                continue;
+            }
+            context.borrowRootVerified(
+                    preparedRootOwnership,
+                    verifiedNodeAccessAuthority);
+            contexts.put(current.sessionId().value(), context);
+        }
+        return new PreparedCheckpointState(
+                preparedCheckpointBindingIdentity,
+                contracts,
+                documentProcessor,
+                preparedRootOwnership,
+                referenceCutRootCacheBacking,
+                planningProjectionCacheBacking,
+                contexts);
+    }
+
+    /**
+     * Installs the exact immutable context retained by a compatible local
+     * checkpoint. A false result leaves the bounded cache cold; the ordinary
+     * first request rebuilds from authoritative fragments on demand.
+     */
+    public boolean restorePreparedRootContextFromCheckpoint(
+            ManagedDocumentSnapshot supplied,
+            PreparedCheckpointState state) {
+        RootContextRestore restore = requireRootContextRestore(supplied);
+        PreparedCheckpointState checked = Objects.requireNonNull(
+                state, "state");
+        if (checked != acceptedPreparedCheckpointState
+                || acceptedPreparedCheckpointLease == null) {
+            checkpointPreparedContextFallbacks.incrementAndGet();
+            return false;
+        }
+        PreparedRootExecutionContext context =
+                acceptedPreparedCheckpointLease.contextsBySession.get(
+                        restore.session.sessionId().value());
+        if (context == null
+                || !context.matches(
+                        restore.session.sessionId().value(),
+                        restore.session.currentEpoch(),
+                        restore.session.currentRootBlueId(),
+                        restore.session.fragmentInventoryIdentity())) {
+            checkpointPreparedContextFallbacks.incrementAndGet();
+            return false;
+        }
+        try {
+            context.borrowRootVerified(
+                    preparedRootOwnership,
+                    verifiedNodeAccessAuthority);
+        } catch (IllegalArgumentException | SecurityException mismatch) {
+            checkpointPreparedContextFallbacks.incrementAndGet();
+            return false;
+        }
+        if (!preparedRootContexts.installIfCurrent(context)) {
+            checkpointPreparedContextFallbacks.incrementAndGet();
+            return false;
+        }
+        checkpointPreparedContextReuses.incrementAndGet();
+        return true;
+    }
+
+    /** Exact number of prepared checkpoint contexts installed by reference. */
+    public long checkpointPreparedContextReuseCount() {
+        return checkpointPreparedContextReuses.get();
+    }
+
+    /** Exact number of checkpoint contexts rejected for exact rebuilding. */
+    public long checkpointPreparedContextFallbackCount() {
+        return checkpointPreparedContextFallbacks.get();
+    }
+
+    /** Exact number of checkpoint contexts rebuilt with full verification. */
+    public long checkpointPreparedContextRebuildCount() {
+        return checkpointPreparedContextRebuilds.get();
+    }
+
+    /**
+     * Identity-only audit probe; no context, cache, owner, or Node escapes.
+     */
+    public boolean reusesPreparedCheckpointContext(
+            ManagedDocumentSnapshot supplied,
+            PreparedCheckpointState state) {
+        ManagedDocumentSnapshot checked = Objects.requireNonNull(
+                supplied, "supplied");
+        PreparedCheckpointState checkpointState = Objects.requireNonNull(
+                state, "state");
+        if (checkpointState != acceptedPreparedCheckpointState) return false;
+        PreparedRootExecutionContext retained =
+                acceptedPreparedCheckpointLease.contextsBySession.get(
+                        checked.sessionId().value());
+        return retained != null
+                && retained == preparedRootContexts.get(
+                        checked.sessionId().value(),
+                        checked.currentEpoch(),
+                        checked.currentRootBlueId(),
+                        checked.fragmentInventoryIdentity());
+    }
+
+    /** Identity-only probe for the opaque checkpoint-shared sparse kernel. */
+    public boolean reusesReferenceCutCheckpointKernel(
+            PreparedCheckpointState state) {
+        PreparedCheckpointState checked = Objects.requireNonNull(
+                state, "state");
+        return checked == acceptedPreparedCheckpointState
+                && acceptedPreparedCheckpointLease != null
+                && referenceCutRootCacheBacking
+                        == acceptedPreparedCheckpointLease
+                                .referenceCutRootCacheBacking;
+    }
+
+    /** Identity-only probe for the opaque checkpoint-shared planning kernel. */
+    public boolean reusesPlanningProjectionCheckpointKernel(
+            PreparedCheckpointState state) {
+        PreparedCheckpointState checked = Objects.requireNonNull(
+                state, "state");
+        return checked == acceptedPreparedCheckpointState
+                && acceptedPreparedCheckpointLease != null
+                && planningProjectionCacheBacking
+                        == acceptedPreparedCheckpointLease
+                                .planningProjectionCacheBacking;
+    }
+
+    /**
      * Rebuilds a warm context from exact PROCESS views retained by one local
      * in-process checkpoint. Values cross no old-engine ownership boundary:
      * this method snapshots, verifies, and copies every complete inventory
@@ -1602,6 +2783,7 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                     "Checkpoint Root context is not current or exceeds its "
                             + "retained-memory budget");
         }
+        checkpointPreparedContextRebuilds.incrementAndGet();
     }
 
     private RootContextRestore requireRootContextRestore(
@@ -1652,14 +2834,15 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
      * Captures only the current sessions' bounded exact Root views for an
      * in-process copy-on-write checkpoint.
      *
-     * <p>Historical revisions remain body-free. A cache miss is reconstructed
-     * and verified once at this explicit quiescent boundary, never on the
-     * first operation in every fork.</p>
+     * <p>Historical revisions remain body-free. A cache miss stays cold and
+     * is rebuilt lazily by the first request in a fork; checkpoint creation
+     * never materializes every tenant Root.</p>
      */
     public Map<String, Node> checkpointCurrentRootViews(
             Collection<ManagedDocumentSnapshot> sessions) {
         requireOpen();
-        Map<String, Node> result = new LinkedHashMap<String, Node>();
+        Set<String> currentInventoryIdentities =
+                new LinkedHashSet<String>();
         for (ManagedDocumentSnapshot session : Objects.requireNonNull(
                 sessions, "sessions")) {
             ManagedDocumentSnapshot checked = Objects.requireNonNull(
@@ -1684,9 +2867,13 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                         "Current session Root disagrees with its inventory: "
                                 + checked.sessionId());
             }
-            result.put(
-                    inventory.inventoryIdentity(),
-                    exactRoot(inventory));
+            currentInventoryIdentities.add(inventory.inventoryIdentity());
+        }
+        Map<String, Node> retained = rootViewCache.snapshotRetainedRoots();
+        Map<String, Node> result = new LinkedHashMap<String, Node>();
+        for (String inventoryIdentity : currentInventoryIdentities) {
+            Node root = retained.get(inventoryIdentity);
+            if (root != null) result.put(inventoryIdentity, root);
         }
         return Collections.unmodifiableMap(result);
     }
@@ -1848,7 +3035,10 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
             CoordinationFragmentInventory inventory,
             VerifiedProcessOutput output,
             RequestDigestMemo requestDigests,
-            Map<String, ExactNodeHandle> processingViews) {
+            Map<String, ExactNodeHandle> processingViews,
+            PreparedRootExecutionContext priorPreparedRoot,
+            Object priorPreparedOwner,
+            VerifiedFragmentTransitionFrontier transitionFrontier) {
         VerifiedProcessOutput verified = Objects.requireNonNull(
                 output, "output");
         RequestDigestMemo owner = Objects.requireNonNull(
@@ -1860,13 +3050,28 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
             throw new IllegalArgumentException(
                     "Verified result Root does not match inventory");
         }
-        rootHandle.borrowVerified(
+        Node exactPreparedRoot = rootHandle.borrowVerified(
                 preparedRootOwnership,
                 verifiedNodeAccessAuthority);
-        RetainedReferenceIndex retained = RetainedReferenceIndex.scanOnce(
-                rootHandle,
-                preparedRootOwnership,
-                owner);
+        RetainedReferenceIndex retained;
+        if (priorPreparedRoot != null && transitionFrontier != null) {
+            retained = priorPreparedRoot.retainedReferences()
+                    .graftVerifiedExpanded(
+                            exactPreparedRoot,
+                            transitionFrontier.expandedBlueIdByPath(),
+                            Objects.requireNonNull(
+                                    priorPreparedOwner,
+                                    "priorPreparedOwner"),
+                            preparedRootOwnership,
+                            owner,
+                            verifiedNodeAccessAuthority);
+        } else {
+            transitionRetainedIndexFullScans.incrementAndGet();
+            retained = RetainedReferenceIndex.scanOnce(
+                    rootHandle,
+                    preparedRootOwnership,
+                    owner);
+        }
         Map<String, ExactNodeHandle> views =
                 new LinkedHashMap<String, ExactNodeHandle>();
         for (Map.Entry<String, ExactNodeHandle> view
@@ -2008,6 +3213,31 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                 Objects.requireNonNull(processResult, "processResult"),
                 retainedByIdentity,
                 new LinkedHashSet<String>());
+    }
+
+    /** Grafts retained epoch values without traversing or copying them. */
+    private Node materializeVerifiedResultingRoot(
+            Node processResult,
+            PreparedRootExecutionContext preparedRoot,
+            Object preparedOwner,
+            Node priorExactRoot,
+            VerifiedFragmentTransitionFrontier transitionFrontier) {
+        if (preparedRoot == null) {
+            transitionFullRootMaterializations.incrementAndGet();
+            return materializeRetainedResultReferences(
+                    processResult, priorExactRoot);
+        }
+        if (transitionFrontier != null) {
+            transitionExpandedNodesVisited.addAndGet(
+                    transitionFrontier.sparseExpandedNodeCount());
+            transitionFrontierBoundaryGrafts.addAndGet(
+                    transitionFrontier.retainedBlueIdByPath().size());
+        }
+        return new IndexedRetainedReferenceResolver(
+                preparedRoot.retainedReferences(),
+                Objects.requireNonNull(
+                        preparedOwner, "preparedOwner"))
+                .resolveRequestOwned(processResult);
     }
 
     private static void indexExpandedNodes(
@@ -2549,6 +3779,311 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
         return checked;
     }
 
+    private static String referenceCutConfigurationIdentity(
+            ReferenceCutConfiguration configuration) {
+        ReferenceCutConfiguration checked = Objects.requireNonNull(
+                configuration, "configuration");
+        return identity(
+                "reference-cut-configuration",
+                checked.mode().name(),
+                Long.toString(checked.maximumCacheWeightBytes()),
+                Double.toString(checked.minimumNodeReduction()),
+                Integer.toString(checked.maximumCuts()));
+    }
+
+    /**
+     * Opaque in-process checkpoint acceleration capsule.
+     *
+     * <p>Contracts and processor domains are weak identity guards so this
+     * sidecar cannot retain an obsolete runtime service graph. The owner,
+     * bounded cache backings, and already-retained immutable contexts form one
+     * strong acceleration lease. It therefore survives source-engine close
+     * and GC deterministically while remaining constrained by the same count
+     * and retained-weight limits as the live caches.</p>
+     */
+    public static final class PreparedCheckpointState {
+        private final String bindingIdentity;
+        private final WeakReference<BlueContracts> contractsDomain;
+        private final WeakReference<DocumentProcessor> processorDomain;
+        private final PreparedCheckpointLease acceleration;
+
+        private PreparedCheckpointState(
+                String bindingIdentity,
+                BlueContracts contractsDomain,
+                DocumentProcessor processorDomain,
+                Object ownerCapability,
+                ReferenceCutRootCache.SharedBacking
+                        referenceCutRootCacheBacking,
+                ProjectionGenerationCache.SharedBacking
+                        planningProjectionCacheBacking,
+                Map<String, PreparedRootExecutionContext>
+                        contextsBySession) {
+            this.bindingIdentity = requireText(
+                    bindingIdentity, "bindingIdentity");
+            this.contractsDomain = new WeakReference<BlueContracts>(
+                    Objects.requireNonNull(
+                            contractsDomain, "contractsDomain"));
+            this.processorDomain = new WeakReference<DocumentProcessor>(
+                    Objects.requireNonNull(
+                            processorDomain, "processorDomain"));
+            Map<String, PreparedRootExecutionContext> retained =
+                    new LinkedHashMap<String,
+                            PreparedRootExecutionContext>();
+            for (Map.Entry<String, PreparedRootExecutionContext> entry
+                    : Objects.requireNonNull(
+                            contextsBySession,
+                            "contextsBySession").entrySet()) {
+                String sessionId = requireText(
+                        entry.getKey(), "sessionId");
+                PreparedRootExecutionContext context =
+                        Objects.requireNonNull(
+                                entry.getValue(), "prepared context");
+                if (!sessionId.equals(context.sessionId())) {
+                    throw new IllegalArgumentException(
+                            "Prepared checkpoint session key mismatch");
+                }
+                retained.put(sessionId, context);
+            }
+            this.acceleration = new PreparedCheckpointLease(
+                    Objects.requireNonNull(
+                            ownerCapability, "ownerCapability"),
+                    Objects.requireNonNull(
+                            referenceCutRootCacheBacking,
+                            "referenceCutRootCacheBacking"),
+                    Objects.requireNonNull(
+                            planningProjectionCacheBacking,
+                            "planningProjectionCacheBacking"),
+                    retained);
+        }
+
+        private PreparedCheckpointLease tryAcquire(
+                String expectedBindingIdentity,
+                BlueContracts expectedContracts,
+                DocumentProcessor expectedProcessor) {
+            BlueContracts contracts = contractsDomain.get();
+            DocumentProcessor processor = processorDomain.get();
+            if (!bindingIdentity.equals(expectedBindingIdentity)
+                    || contracts != expectedContracts
+                    || processor != expectedProcessor) {
+                return null;
+            }
+            return acceleration;
+        }
+    }
+
+    /** Strong bounded acceleration lease shared by compatible restored engines. */
+    private static final class PreparedCheckpointLease {
+        private final Object ownerCapability;
+        private final ReferenceCutRootCache.SharedBacking
+                referenceCutRootCacheBacking;
+        private final ProjectionGenerationCache.SharedBacking
+                planningProjectionCacheBacking;
+        private final Map<String, PreparedRootExecutionContext>
+                contextsBySession;
+
+        private PreparedCheckpointLease(
+                Object ownerCapability,
+                ReferenceCutRootCache.SharedBacking
+                        referenceCutRootCacheBacking,
+                ProjectionGenerationCache.SharedBacking
+                        planningProjectionCacheBacking,
+                Map<String, PreparedRootExecutionContext>
+                        contextsBySession) {
+            this.ownerCapability = Objects.requireNonNull(
+                    ownerCapability, "ownerCapability");
+            this.referenceCutRootCacheBacking = Objects.requireNonNull(
+                    referenceCutRootCacheBacking,
+                    "referenceCutRootCacheBacking");
+            this.planningProjectionCacheBacking = Objects.requireNonNull(
+                    planningProjectionCacheBacking,
+                    "planningProjectionCacheBacking");
+            this.contextsBySession = Collections.unmodifiableMap(
+                    new LinkedHashMap<String,
+                            PreparedRootExecutionContext>(
+                            Objects.requireNonNull(
+                                    contextsBySession,
+                                    "contextsBySession")));
+        }
+    }
+
+    private static final class ReferenceCutRootSelection {
+        private final Node root;
+        private final ReferenceCutRootArtifact artifact;
+        private final List<String> activePaths;
+
+        private ReferenceCutRootSelection(
+                Node root,
+                ReferenceCutRootArtifact artifact,
+                Collection<String> activePaths) {
+            this.root = Objects.requireNonNull(root, "root");
+            this.artifact = artifact;
+            this.activePaths = Collections.unmodifiableList(
+                    new ArrayList<String>(Objects.requireNonNull(
+                            activePaths, "activePaths")));
+        }
+
+        private static ReferenceCutRootSelection full(Node root) {
+            return new ReferenceCutRootSelection(
+                    root,
+                    null,
+                    Collections.<String>emptyList());
+        }
+
+        private static ReferenceCutRootSelection sparse(
+                Node root,
+                ReferenceCutRootArtifact artifact,
+                Collection<String> activePaths) {
+            return new ReferenceCutRootSelection(
+                    root,
+                    Objects.requireNonNull(artifact, "artifact"),
+                    activePaths);
+        }
+    }
+
+    /** One bounded pre-publication handoff for successor acceleration state. */
+    private static final class PendingPreparedGeneration {
+        private final PreparedRootExecutionContext context;
+        private final AdmittedProjection planningProjection;
+
+        private PendingPreparedGeneration(
+                PreparedRootExecutionContext context,
+                AdmittedProjection planningProjection) {
+            this.context = Objects.requireNonNull(context, "context");
+            this.planningProjection = planningProjection;
+        }
+
+        private long approximateRetainedWeightBytes() {
+            long contextWeight = context.approximateRetainedWeightBytes();
+            long projectionWeight = planningProjection == null
+                    ? 0L
+                    : planningProjection.estimatedWeight();
+            return Math.addExact(contextWeight, projectionWeight);
+        }
+    }
+
+    /** One bounded, consume-on-execute sparse artifact handoff. */
+    private static final class PlannedReferenceCutRoot {
+        private final String planIdentity;
+        private final String sessionId;
+        private final long epoch;
+        private final String rootBlueId;
+        private final String inventoryIdentity;
+        private final String eventBlueId;
+        private final String subscriptionDigest;
+        private final String environmentIdentity;
+        private final String gasScheduleIdentity;
+        private final String providerStorageGenerationAuthority;
+        private final String algorithmVersion;
+        private final Set<String> activePaths;
+        private final ReferenceCutRootArtifact artifact;
+
+        private PlannedReferenceCutRoot(
+                CoordinationProcessingPlan plan,
+                ReferenceCutRootArtifact artifact,
+                Collection<String> activePaths,
+                String environmentIdentity,
+                String gasScheduleIdentity,
+                String providerStorageGenerationAuthority) {
+            CoordinationProcessingPlan checked = Objects.requireNonNull(
+                    plan, "plan");
+            this.planIdentity = checked.planIdentity();
+            this.sessionId = checked.session().sessionId().value();
+            this.epoch = checked.session().currentEpoch();
+            this.rootBlueId = checked.rootInventory().rootBlueId();
+            this.inventoryIdentity =
+                    checked.rootInventory().inventoryIdentity();
+            this.eventBlueId = checked.eventInventory().rootBlueId();
+            this.subscriptionDigest =
+                    checked.session().subscriptions().digest();
+            this.environmentIdentity = requireText(
+                    environmentIdentity, "environmentIdentity");
+            this.gasScheduleIdentity = requireText(
+                    gasScheduleIdentity, "gasScheduleIdentity");
+            this.providerStorageGenerationAuthority = requireText(
+                    providerStorageGenerationAuthority,
+                    "providerStorageGenerationAuthority");
+            this.algorithmVersion =
+                    InventoryReferenceCutRootCompiler.ALGORITHM_VERSION;
+            this.activePaths = Collections.unmodifiableSet(
+                    new LinkedHashSet<String>(Objects.requireNonNull(
+                            activePaths, "activePaths")));
+            this.artifact = Objects.requireNonNull(artifact, "artifact");
+            if (!rootBlueId.equals(artifact.rootBlueId())
+                    || !inventoryIdentity.equals(
+                            artifact.inventoryIdentity())) {
+                throw new IllegalArgumentException(
+                        "Planned sparse artifact changed Root generation");
+            }
+        }
+
+        private boolean matches(
+                CoordinationProcessingPlan plan,
+                ManagedDocumentSnapshot current,
+                Collection<String> requiredPaths,
+                String expectedEnvironmentIdentity,
+                String expectedGasScheduleIdentity,
+                String expectedProviderStorageGenerationAuthority) {
+            CoordinationProcessingPlan checked = Objects.requireNonNull(
+                    plan, "plan");
+            ManagedDocumentSnapshot session = Objects.requireNonNull(
+                    current, "current");
+            return planIdentity.equals(checked.planIdentity())
+                    && sessionId.equals(session.sessionId().value())
+                    && epoch == session.currentEpoch()
+                    && rootBlueId.equals(session.currentRootBlueId())
+                    && inventoryIdentity.equals(
+                            session.fragmentInventoryIdentity())
+                    && rootBlueId.equals(
+                            checked.rootInventory().rootBlueId())
+                    && inventoryIdentity.equals(
+                            checked.rootInventory().inventoryIdentity())
+                    && eventBlueId.equals(
+                            checked.eventInventory().rootBlueId())
+                    && subscriptionDigest.equals(
+                            session.subscriptions().digest())
+                    && environmentIdentity.equals(
+                            expectedEnvironmentIdentity)
+                    && gasScheduleIdentity.equals(
+                            expectedGasScheduleIdentity)
+                    && providerStorageGenerationAuthority.equals(
+                            expectedProviderStorageGenerationAuthority)
+                    && algorithmVersion.equals(
+                            InventoryReferenceCutRootCompiler
+                                    .ALGORITHM_VERSION)
+                    && activePaths.equals(new LinkedHashSet<String>(
+                            ActivePathSet.of(Objects.requireNonNull(
+                                    requiredPaths,
+                                    "requiredPaths")).paths()));
+        }
+
+        private long approximateRetainedWeightBytes() {
+            long weight = Math.addExact(
+                    artifact.approximateRetainedWeightBytes(), 512L);
+            weight = addTextWeight(weight, planIdentity);
+            weight = addTextWeight(weight, sessionId);
+            weight = addTextWeight(weight, rootBlueId);
+            weight = addTextWeight(weight, inventoryIdentity);
+            weight = addTextWeight(weight, eventBlueId);
+            weight = addTextWeight(weight, subscriptionDigest);
+            weight = addTextWeight(weight, environmentIdentity);
+            weight = addTextWeight(weight, gasScheduleIdentity);
+            weight = addTextWeight(
+                    weight, providerStorageGenerationAuthority);
+            weight = addTextWeight(weight, algorithmVersion);
+            for (String activePath : activePaths) {
+                weight = addTextWeight(weight, activePath);
+            }
+            return weight;
+        }
+
+        private static long addTextWeight(long current, String value) {
+            return Math.addExact(
+                    current,
+                    Math.addExact(48L,
+                            Math.multiplyExact(2L, value.length())));
+        }
+    }
+
     /** Exact authoritative state needed to rebuild one restored Root context. */
     private static final class RootContextRestore {
         private final ManagedDocumentSnapshot session;
@@ -2587,6 +4122,9 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
         private long maximumCachedFragmentEvidenceWeightBytes =
                 CoordinationEventAdmissionCompiler
                         .DEFAULT_FRAGMENT_CACHE_MAXIMUM_WEIGHT_BYTES;
+        private ReferenceCutConfiguration referenceCutConfiguration =
+                ReferenceCutConfiguration.disabled();
+        private PreparedCheckpointState preparedCheckpointState;
         private Map<String, Node> retainedRootViews =
                 Collections.emptyMap();
         private boolean ownsRuntimes;
@@ -2699,6 +4237,24 @@ public final class CoordinationProcessingEngine implements AutoCloseable {
                                 + "positive");
             }
             maximumCachedFragmentEvidenceWeightBytes = value;
+            return this;
+        }
+        /**
+         * Configures identity-equivalent sparse Roots at frozen planning and
+         * PROCESS boundaries. Disabled by default outside explicitly migrated
+         * hosts.
+         */
+        public Builder referenceCutConfiguration(
+                ReferenceCutConfiguration value) {
+            referenceCutConfiguration = Objects.requireNonNull(
+                    value, "referenceCutConfiguration");
+            return this;
+        }
+        /** Seeds an opaque, exact-bound local checkpoint optimization. */
+        public Builder preparedCheckpointState(
+                PreparedCheckpointState value) {
+            preparedCheckpointState = Objects.requireNonNull(
+                    value, "preparedCheckpointState");
             return this;
         }
         /** Seeds verified current Root views restored from a local checkpoint. */

@@ -1,11 +1,17 @@
 package blue.coordination.engine.memory;
 
+import blue.coordination.engine.CoordinationProcessingEngine
+        .PreparedCheckpointState;
+import blue.coordination.engine.CoordinationProcessingEngine
+        .VerifiedNodeAccessAuthority;
 import blue.coordination.engine.api.CoordinationCanonicalFragment;
 import blue.coordination.engine.api.CoordinationEventAdmissionCacheKey;
 import blue.coordination.engine.api.CoordinationFragmentInventory;
 import blue.coordination.engine.api.CoordinationVerifiedEventAdmission;
 import blue.coordination.engine.fastpath.ExactNodeHandle;
+import blue.coordination.engine.fastpath.FastFragmentDelta;
 import blue.coordination.engine.internal.RequestLocalNodeProvider;
+import blue.coordination.engine.spi.CoordinationCanonicalFragmentHandleStore;
 import blue.coordination.engine.spi.CoordinationVerifiedEventAdmissionStore;
 import blue.coordination.processor.CoordinationFragmentAdmissionVerifier;
 import blue.language.api.NodeProviderOutcome;
@@ -24,14 +30,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Supplier;
 
 /** Thread-safe in-memory immutable fragment store and reference SPI adapter. */
 public final class InMemoryCoordinationFragmentStore
-        implements CoordinationVerifiedEventAdmissionStore {
+        implements CoordinationVerifiedEventAdmissionStore,
+        CoordinationCanonicalFragmentHandleStore {
 
     private final String profileIdentity;
     private final Object immutableContentSharingToken;
+    private final String canonicalFragmentStorageGenerationAuthority;
     private final Map<String, Node> fragments =
             new LinkedHashMap<String, Node>();
     private final Map<String, ExactNodeHandle> fragmentHandles =
@@ -58,6 +67,13 @@ public final class InMemoryCoordinationFragmentStore
     private long singleReadCount;
     private long batchReadCount;
     private long requestedIdentityCount;
+    private long checkpointPreparedRepresentationReuseCount;
+    private long checkpointPreparedRepresentationRebuildCount;
+    private long checkpointPreparedFingerprintReuseCount;
+    private long checkpointPreparedFingerprintRebuildCount;
+    private long verifiedTransitionPublicationCount;
+    private long verifiedTransitionBorrowedNodeCount;
+    private long verifiedTransitionWireEvidenceCalculationCount;
     private String verifiedAdmissionDomainIdentity;
     private final ThreadLocal<VerifiedAdmissionCapture>
             verifiedAdmissionCapture =
@@ -70,27 +86,72 @@ public final class InMemoryCoordinationFragmentStore
     private InMemoryCoordinationFragmentStore(
             String profileIdentity,
             Object immutableContentSharingToken) {
+        this(
+                profileIdentity,
+                immutableContentSharingToken,
+                "blue.coordination/in-memory-canonical-store/1|profile="
+                        + requireText(profileIdentity, "profileIdentity")
+                        + "|generation=" + UUID.randomUUID().toString());
+    }
+
+    private InMemoryCoordinationFragmentStore(
+            String profileIdentity,
+            Object immutableContentSharingToken,
+            String canonicalFragmentStorageGenerationAuthority) {
         this.profileIdentity = requireText(
                 profileIdentity, "profileIdentity");
         this.immutableContentSharingToken = Objects.requireNonNull(
                 immutableContentSharingToken,
                 "immutableContentSharingToken");
+        this.canonicalFragmentStorageGenerationAuthority = requireText(
+                canonicalFragmentStorageGenerationAuthority,
+                "canonicalFragmentStorageGenerationAuthority");
     }
 
     static InMemoryCoordinationFragmentStore fromCheckpoint(
             InMemoryCoordinationCheckpoint checkpoint) {
         InMemoryCoordinationCheckpoint checked = Objects.requireNonNull(
                 checkpoint, "checkpoint");
+        return fromCheckpoint(
+                checked,
+                checked.canonicalFragmentStorageGenerationAuthority);
+    }
+
+    static InMemoryCoordinationFragmentStore fromCheckpoint(
+            InMemoryCoordinationCheckpoint checkpoint,
+            String storageGenerationAuthority) {
+        InMemoryCoordinationCheckpoint checked = Objects.requireNonNull(
+                checkpoint, "checkpoint");
         InMemoryCoordinationFragmentStore result =
                 new InMemoryCoordinationFragmentStore(
                         checked.profileIdentity,
-                        checked.immutableContentSharingToken);
+                        checked.immutableContentSharingToken,
+                        storageGenerationAuthority);
         result.fragments.putAll(checked.fragments);
         result.processingViews.putAll(checked.processingViews);
         result.processingViewsByInventory.putAll(
                 checked.processingViewsByInventory);
         result.inventories.putAll(checked.inventories);
-        result.rebuildPreparedRepresentations();
+        if (result.canonicalFragmentStorageGenerationAuthority.equals(
+                checked.preparedRepresentationStorageGenerationAuthority)) {
+            result.fragmentHandles.putAll(checked.fragmentHandles);
+            result.fragmentEncodedSizes.putAll(
+                    checked.fragmentEncodedSizes);
+            result.fragmentWireFingerprints.putAll(
+                    checked.fragmentWireFingerprints);
+            result.processingViewHandlesByInventory.putAll(
+                    checked.processingViewHandlesByInventory);
+            result.processingViewEncodedSizesByInventory.putAll(
+                    checked.processingViewEncodedSizesByInventory);
+            result.processingViewWireFingerprintsByInventory.putAll(
+                    checked.processingViewWireFingerprintsByInventory);
+            result.checkpointPreparedRepresentationReuseCount =
+                    result.preparedRepresentationCount();
+            result.checkpointPreparedFingerprintReuseCount =
+                    result.preparedFingerprintCount();
+        } else {
+            result.rebuildPreparedRepresentations();
+        }
         return result;
     }
 
@@ -462,17 +523,27 @@ public final class InMemoryCoordinationFragmentStore
             InMemoryStoredCoordinationEventStore storedEvents,
             InMemoryCoordinationDispatchLedger dispatchLedger,
             Map<String, Node> currentRootViews,
+            PreparedCheckpointState preparedRootState,
             long sessionSequence) {
         return Objects.requireNonNull(sessionStore, "sessionStore")
                 .checkpoint(
                         profileIdentity,
                         immutableContentSharingToken,
+                        canonicalFragmentStorageGenerationAuthority,
+                        canonicalFragmentStorageGenerationAuthority,
                         fragments,
+                        fragmentHandles,
+                        fragmentEncodedSizes,
+                        fragmentWireFingerprints,
                         processingViews,
                         processingViewsByInventory,
+                        processingViewHandlesByInventory,
+                        processingViewEncodedSizesByInventory,
+                        processingViewWireFingerprintsByInventory,
                         inventories,
                         Objects.requireNonNull(
                                 currentRootViews, "currentRootViews"),
+                        preparedRootState,
                         Objects.requireNonNull(storedEvents, "storedEvents"),
                         Objects.requireNonNull(
                                 dispatchLedger, "dispatchLedger"),
@@ -482,6 +553,50 @@ public final class InMemoryCoordinationFragmentStore
     @Override
     public String fragmentationProfileIdentity() {
         return profileIdentity;
+    }
+
+    @Override
+    public String storageGenerationAuthority() {
+        return canonicalFragmentStorageGenerationAuthority;
+    }
+
+    @Override
+    public String canonicalFragmentStorageGenerationAuthority() {
+        return canonicalFragmentStorageGenerationAuthority;
+    }
+
+    @Override
+    public synchronized CanonicalFragmentHandleBatch
+            readCanonicalFragmentHandles(
+                    String inventoryIdentity,
+                    Collection<String> orderedBlueIds) {
+        String inventory = requireText(
+                inventoryIdentity, "inventoryIdentity");
+        CoordinationFragmentInventory owner = requireInventory(inventory);
+        Collection<String> requested = Objects.requireNonNull(
+                orderedBlueIds, "orderedBlueIds");
+        Set<String> members = new HashSet<String>(
+                owner.fragmentBlueIds());
+        Map<String, ExactNodeHandle> result =
+                new LinkedHashMap<String, ExactNodeHandle>();
+        batchReadCount++;
+        for (String requestedBlueId : requested) {
+            String blueId = requireText(requestedBlueId, "blueId");
+            requestedIdentityCount++;
+            if (!members.contains(blueId)) {
+                throw new IllegalArgumentException(
+                        "Canonical fragment is outside inventory "
+                                + inventory + ": " + blueId);
+            }
+            ExactNodeHandle handle = fragmentHandles.get(blueId);
+            if (handle == null) {
+                throw new IllegalStateException(
+                        "Admitted fragment lacks a verified handle: "
+                                + blueId);
+            }
+            result.put(blueId, handle);
+        }
+        return new CanonicalFragmentHandleBatch(result, 1, 0);
     }
 
     @Override
@@ -525,6 +640,10 @@ public final class InMemoryCoordinationFragmentStore
         fragments.put(blueId, proposed);
         fragmentHandles.put(blueId, handle);
         fragmentEncodedSizes.put(blueId, Long.valueOf(encodedSize));
+        fragmentWireFingerprints.put(
+                blueId,
+                CoordinationFragmentAdmissionVerifier
+                        .physicalFragmentIdentity(proposed));
         return true;
     }
 
@@ -560,10 +679,234 @@ public final class InMemoryCoordinationFragmentStore
                 fragmentHandles.put(entry.getKey(), handle);
                 fragmentEncodedSizes.put(
                         entry.getKey(), Long.valueOf(encodedSize));
+                fragmentWireFingerprints.put(
+                        entry.getKey(),
+                        CoordinationFragmentAdmissionVerifier
+                                .physicalFragmentIdentity(retained));
                 installed = true;
             }
         }
         return installed;
+    }
+
+    /**
+     * Atomically validates and publishes a complete verified transition.
+     * Incoming Nodes remain owned by authority-bound handles; no public DTO
+     * map, defensive clone, or second BlueId calculation is needed.
+     */
+    public synchronized void putVerifiedTransition(
+            VerifiedNodeAccessAuthority authority,
+            FastFragmentDelta delta,
+            boolean inventoryChanged) {
+        VerifiedNodeAccessAuthority access = Objects.requireNonNull(
+                authority, "authority");
+        FastFragmentDelta checked = Objects.requireNonNull(delta, "delta");
+        CoordinationFragmentInventory inventory = checked.inventory();
+        requireProfile(inventory.fragmentationProfileIdentity());
+
+        Map<String, ExactNodeHandle> proposedFragments =
+                checked.newFragments(access);
+        Map<String, Node> insertedFragments =
+                new LinkedHashMap<String, Node>();
+        Map<String, ExactNodeHandle> insertedFragmentHandles =
+                new LinkedHashMap<String, ExactNodeHandle>();
+        Map<String, Long> insertedFragmentSizes =
+                new LinkedHashMap<String, Long>();
+        Map<String, String> proposedFragmentFingerprints =
+                new LinkedHashMap<String, String>();
+        Map<String, String> learnedFragmentFingerprints =
+                new LinkedHashMap<String, String>();
+
+        for (Map.Entry<String, ExactNodeHandle> entry
+                : proposedFragments.entrySet()) {
+            String blueId = entry.getKey();
+            ExactNodeHandle handle = entry.getValue();
+            CoordinationFragmentAdmissionVerifier.PhysicalFragmentEvidence
+                    evidence = handle.physicalEvidence(access, access);
+            verifiedTransitionWireEvidenceCalculationCount++;
+            proposedFragmentFingerprints.put(
+                    blueId, evidence.fingerprint());
+            Node current = fragments.get(blueId);
+            if (current != null) {
+                String currentFingerprint = fragmentWireFingerprints.get(
+                        blueId);
+                if (currentFingerprint == null) {
+                    currentFingerprint = CoordinationFragmentAdmissionVerifier
+                            .physicalFragmentIdentity(current);
+                    learnedFragmentFingerprints.put(
+                            blueId, currentFingerprint);
+                }
+                if (!currentFingerprint.equals(evidence.fingerprint())) {
+                    throw new IllegalStateException(
+                            "Conflicting immutable fragment content for "
+                                    + blueId);
+                }
+                continue;
+            }
+            Node exact = handle.borrowVerified(access, access);
+            verifiedTransitionBorrowedNodeCount++;
+            insertedFragments.put(blueId, exact);
+            insertedFragmentHandles.put(
+                    blueId,
+                    handle.rebind(access, immutableContentSharingToken));
+            insertedFragmentSizes.put(
+                    blueId, Long.valueOf(evidence.encodedSizeBytes()));
+        }
+
+        for (String blueId : inventory.fragmentBlueIds()) {
+            if (!fragments.containsKey(blueId)
+                    && !insertedFragments.containsKey(blueId)) {
+                throw new IllegalStateException(
+                        "Inventory refers to an absent immutable fragment: "
+                                + blueId);
+            }
+        }
+        CoordinationFragmentInventory currentInventory = inventories.get(
+                inventory.inventoryIdentity());
+        if (currentInventory != null
+                && !currentInventory.toMap().equals(inventory.toMap())) {
+            throw new IllegalStateException(
+                    "Conflicting inventory for immutable identity "
+                            + inventory.inventoryIdentity());
+        }
+
+        boolean publishViews = inventoryChanged
+                || !checked.changedProcessingViews(access).isEmpty();
+        Map<String, Node> insertedViews = null;
+        Map<String, ExactNodeHandle> insertedViewHandles = null;
+        Map<String, Long> insertedViewSizes = null;
+        Map<String, String> insertedViewFingerprints = null;
+        Map<String, String> learnedViewFingerprints = null;
+        if (publishViews) {
+            Map<String, ExactNodeHandle> proposedViews =
+                    checked.changedProcessingViews(access);
+            for (String blueId : proposedViews.keySet()) {
+                if (!inventory.fragmentBlueIds().contains(blueId)) {
+                    throw new IllegalStateException(
+                            "PROCESS view is outside inventory "
+                                    + inventory.inventoryIdentity()
+                                    + ": " + blueId);
+                }
+                if (!fragments.containsKey(blueId)
+                        && !insertedFragments.containsKey(blueId)) {
+                    throw new IllegalStateException(
+                            "PROCESS view has no canonical physical fragment: "
+                                    + blueId);
+                }
+            }
+            Map<String, Node> currentViews =
+                    processingViewsByInventory.get(
+                            inventory.inventoryIdentity());
+            if (currentViews != null) {
+                if (!currentViews.keySet().equals(proposedViews.keySet())) {
+                    List<String> onlyCurrent = new ArrayList<String>(
+                            currentViews.keySet());
+                    onlyCurrent.removeAll(proposedViews.keySet());
+                    List<String> onlyProposed = new ArrayList<String>(
+                            proposedViews.keySet());
+                    onlyProposed.removeAll(currentViews.keySet());
+                    throw new IllegalStateException(
+                            "Conflicting PROCESS-view surface for inventory "
+                                    + inventory.inventoryIdentity()
+                                    + "; retained only=" + onlyCurrent
+                                    + "; proposed only=" + onlyProposed);
+                }
+                Map<String, String> currentFingerprints =
+                        processingViewWireFingerprintsByInventory.get(
+                                inventory.inventoryIdentity());
+                learnedViewFingerprints = currentFingerprints == null
+                        ? new LinkedHashMap<String, String>()
+                        : new LinkedHashMap<String, String>(
+                                currentFingerprints);
+                for (Map.Entry<String, ExactNodeHandle> entry
+                        : proposedViews.entrySet()) {
+                    CoordinationFragmentAdmissionVerifier
+                            .PhysicalFragmentEvidence evidence = entry
+                            .getValue().physicalEvidence(access, access);
+                    verifiedTransitionWireEvidenceCalculationCount++;
+                    String retained = learnedViewFingerprints.get(
+                            entry.getKey());
+                    if (retained == null) {
+                        retained = CoordinationFragmentAdmissionVerifier
+                                .physicalFragmentIdentity(
+                                        currentViews.get(entry.getKey()));
+                        learnedViewFingerprints.put(entry.getKey(), retained);
+                    }
+                    if (!retained.equals(evidence.fingerprint())) {
+                        throw new IllegalStateException(
+                                "Conflicting immutable fragment content for "
+                                        + entry.getKey());
+                    }
+                }
+            } else {
+                insertedViews = new LinkedHashMap<String, Node>();
+                insertedViewHandles =
+                        new LinkedHashMap<String, ExactNodeHandle>();
+                insertedViewSizes = new LinkedHashMap<String, Long>();
+                insertedViewFingerprints =
+                        new LinkedHashMap<String, String>();
+                for (Map.Entry<String, ExactNodeHandle> entry
+                        : proposedViews.entrySet()) {
+                    ExactNodeHandle handle = entry.getValue();
+                    CoordinationFragmentAdmissionVerifier
+                            .PhysicalFragmentEvidence evidence =
+                            handle.physicalEvidence(access, access);
+                    verifiedTransitionWireEvidenceCalculationCount++;
+                    Node exact = handle.borrowVerified(access, access);
+                    verifiedTransitionBorrowedNodeCount++;
+                    insertedViews.put(entry.getKey(), exact);
+                    insertedViewHandles.put(
+                            entry.getKey(),
+                            handle.rebind(
+                                    access,
+                                    immutableContentSharingToken));
+                    insertedViewSizes.put(
+                            entry.getKey(),
+                            Long.valueOf(evidence.encodedSizeBytes()));
+                    insertedViewFingerprints.put(
+                            entry.getKey(), evidence.fingerprint());
+                }
+            }
+        }
+
+        // Every validation and allocation above completed before this point.
+        fragmentWireFingerprints.putAll(learnedFragmentFingerprints);
+        for (Map.Entry<String, Node> entry : insertedFragments.entrySet()) {
+            String blueId = entry.getKey();
+            fragments.put(blueId, entry.getValue());
+            fragmentHandles.put(blueId, insertedFragmentHandles.get(blueId));
+            fragmentEncodedSizes.put(
+                    blueId, insertedFragmentSizes.get(blueId));
+            fragmentWireFingerprints.put(
+                    blueId, proposedFragmentFingerprints.get(blueId));
+        }
+        if (currentInventory == null) {
+            inventories.put(
+                    inventory.inventoryIdentity(), inventory.retainedCopy());
+        }
+        if (publishViews) {
+            if (insertedViews != null) {
+                processingViewsByInventory.put(
+                        inventory.inventoryIdentity(),
+                        Collections.unmodifiableMap(insertedViews));
+                processingViewHandlesByInventory.put(
+                        inventory.inventoryIdentity(),
+                        Collections.unmodifiableMap(insertedViewHandles));
+                processingViewEncodedSizesByInventory.put(
+                        inventory.inventoryIdentity(),
+                        Collections.unmodifiableMap(insertedViewSizes));
+                processingViewWireFingerprintsByInventory.put(
+                        inventory.inventoryIdentity(),
+                        Collections.unmodifiableMap(
+                                insertedViewFingerprints));
+            } else if (learnedViewFingerprints != null) {
+                processingViewWireFingerprintsByInventory.put(
+                        inventory.inventoryIdentity(),
+                        Collections.unmodifiableMap(
+                                learnedViewFingerprints));
+            }
+        }
+        verifiedTransitionPublicationCount++;
     }
 
     @Override
@@ -943,6 +1286,8 @@ public final class InMemoryCoordinationFragmentStore
                 new LinkedHashMap<String, ExactNodeHandle>();
         Map<String, Long> retainedSizes =
                 new LinkedHashMap<String, Long>();
+        Map<String, String> retainedFingerprints =
+                new LinkedHashMap<String, String>();
         for (Map.Entry<String, Node> entry : proposed.entrySet()) {
             Node retainedView = entry.getValue().clone();
             retained.put(entry.getKey(), retainedView);
@@ -958,6 +1303,10 @@ public final class InMemoryCoordinationFragmentStore
                         Long.valueOf(RequestLocalNodeProvider.bytes(
                                 retainedView)));
             }
+            retainedFingerprints.put(
+                    entry.getKey(),
+                    CoordinationFragmentAdmissionVerifier
+                            .physicalFragmentIdentity(retainedView));
         }
         processingViewsByInventory.put(
                 inventory, Collections.unmodifiableMap(retained));
@@ -965,6 +1314,9 @@ public final class InMemoryCoordinationFragmentStore
                 inventory, Collections.unmodifiableMap(retainedHandles));
         processingViewEncodedSizesByInventory.put(
                 inventory, Collections.unmodifiableMap(retainedSizes));
+        processingViewWireFingerprintsByInventory.put(
+                inventory,
+                Collections.unmodifiableMap(retainedFingerprints));
     }
 
     @Override
@@ -1029,6 +1381,42 @@ public final class InMemoryCoordinationFragmentStore
         return requestedIdentityCount;
     }
 
+    /** Exact verified handle/encoded-size pairs reused by checkpoint restore. */
+    public synchronized long checkpointPreparedRepresentationReuseCount() {
+        return checkpointPreparedRepresentationReuseCount;
+    }
+
+    /** Exact handle/encoded-size pairs rebuilt by checkpoint restore. */
+    public synchronized long checkpointPreparedRepresentationRebuildCount() {
+        return checkpointPreparedRepresentationRebuildCount;
+    }
+
+    /** Exact immutable wire fingerprints reused by checkpoint restore. */
+    public synchronized long checkpointPreparedFingerprintReuseCount() {
+        return checkpointPreparedFingerprintReuseCount;
+    }
+
+    /** Exact immutable wire fingerprints rebuilt by checkpoint restore. */
+    public synchronized long checkpointPreparedFingerprintRebuildCount() {
+        return checkpointPreparedFingerprintRebuildCount;
+    }
+
+    /** Successful all-or-nothing verified transition publications. */
+    public synchronized long verifiedTransitionPublicationCount() {
+        return verifiedTransitionPublicationCount;
+    }
+
+    /** Nodes retained directly from authority-bound verified handles. */
+    public synchronized long verifiedTransitionBorrowedNodeCount() {
+        return verifiedTransitionBorrowedNodeCount;
+    }
+
+    /** Single-pass canonical wire evidence calculations requested by commit. */
+    public synchronized long
+            verifiedTransitionWireEvidenceCalculationCount() {
+        return verifiedTransitionWireEvidenceCalculationCount;
+    }
+
     public synchronized void resetReadCounts() {
         singleReadCount = 0L;
         batchReadCount = 0L;
@@ -1036,6 +1424,12 @@ public final class InMemoryCoordinationFragmentStore
     }
 
     private void rebuildPreparedRepresentations() {
+        fragmentHandles.clear();
+        fragmentEncodedSizes.clear();
+        fragmentWireFingerprints.clear();
+        processingViewHandlesByInventory.clear();
+        processingViewEncodedSizesByInventory.clear();
+        processingViewWireFingerprintsByInventory.clear();
         for (Map.Entry<String, Node> entry : fragments.entrySet()) {
             fragmentHandles.put(
                     entry.getKey(),
@@ -1047,12 +1441,20 @@ public final class InMemoryCoordinationFragmentStore
                     entry.getKey(),
                     Long.valueOf(RequestLocalNodeProvider.bytes(
                             entry.getValue())));
+            fragmentWireFingerprints.put(
+                    entry.getKey(),
+                    CoordinationFragmentAdmissionVerifier
+                            .physicalFragmentIdentity(entry.getValue()));
+            checkpointPreparedRepresentationRebuildCount++;
+            checkpointPreparedFingerprintRebuildCount++;
         }
         for (Map.Entry<String, Map<String, Node>> inventory
                 : processingViewsByInventory.entrySet()) {
             Map<String, ExactNodeHandle> handles =
                     new LinkedHashMap<String, ExactNodeHandle>();
             Map<String, Long> sizes = new LinkedHashMap<String, Long>();
+            Map<String, String> fingerprints =
+                    new LinkedHashMap<String, String>();
             for (Map.Entry<String, Node> entry
                     : inventory.getValue().entrySet()) {
                 if (!entry.getValue().isReferenceOnly()) {
@@ -1066,13 +1468,40 @@ public final class InMemoryCoordinationFragmentStore
                             entry.getKey(),
                             Long.valueOf(RequestLocalNodeProvider.bytes(
                                     entry.getValue())));
+                    checkpointPreparedRepresentationRebuildCount++;
                 }
+                fingerprints.put(
+                        entry.getKey(),
+                        CoordinationFragmentAdmissionVerifier
+                                .physicalFragmentIdentity(entry.getValue()));
+                checkpointPreparedFingerprintRebuildCount++;
             }
             processingViewHandlesByInventory.put(
                     inventory.getKey(), Collections.unmodifiableMap(handles));
             processingViewEncodedSizesByInventory.put(
                     inventory.getKey(), Collections.unmodifiableMap(sizes));
+            processingViewWireFingerprintsByInventory.put(
+                    inventory.getKey(),
+                    Collections.unmodifiableMap(fingerprints));
         }
+    }
+
+    private long preparedRepresentationCount() {
+        long count = fragmentHandles.size();
+        for (Map<String, ExactNodeHandle> handles
+                : processingViewHandlesByInventory.values()) {
+            count = Math.addExact(count, handles.size());
+        }
+        return count;
+    }
+
+    private long preparedFingerprintCount() {
+        long count = fragmentWireFingerprints.size();
+        for (Map<String, String> fingerprints
+                : processingViewWireFingerprintsByInventory.values()) {
+            count = Math.addExact(count, fingerprints.size());
+        }
+        return count;
     }
 
     static final class StagedVerifiedEvent<T> {
@@ -1278,14 +1707,7 @@ public final class InMemoryCoordinationFragmentStore
 
     private static String admissionDomainIdentity(
             CoordinationEventAdmissionCacheKey key) {
-        return lengthPrefixed(key.environmentIdentity())
-                + lengthPrefixed(key.fragmentationProfileIdentity())
-                + lengthPrefixed(key.languageGenerationIdentity())
-                + lengthPrefixed(key.providerGenerationIdentity());
-    }
-
-    private static String lengthPrefixed(String value) {
-        return value.length() + ":" + value;
+        return key.admissionDomainIdentity();
     }
 
     private static String requireText(String value, String label) {

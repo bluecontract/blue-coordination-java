@@ -1,8 +1,12 @@
 package blue.coordination.processor;
 
+import blue.coordination.fastpath.FastPathWorkMetrics;
+import blue.coordination.fastpath.PathDependencyIndex;
 import blue.coordination.processor.delivery.CoordinationIndexedDeliveryEngine;
 import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.model.Node;
+import blue.language.model.wire.JsonPointer;
+import blue.language.processor.ExternalChannelDependencySnapshot;
 import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.InvalidExecutionEvidenceException;
 import blue.language.processor.util.PointerUtils;
@@ -29,13 +33,13 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class CoordinationSubscriptionSnapshot {
     /** Stable public schema/projection version. */
     public static final String VERSION =
-            "blue.coordination/subscription-snapshot/2.0";
+            "blue.coordination/subscription-snapshot/3.0";
 
     /** Identity of the exact deterministic projection algorithm. */
     public static final String ALGORITHM_IDENTITY =
             identity(
                     "blue.coordination/"
-                            + "subscription-projection-algorithm/2.0",
+                            + "subscription-projection-algorithm/3.0",
                     Collections.singletonList(
                             TimelineSubscriptionProjection.VERSION));
 
@@ -48,21 +52,22 @@ public final class CoordinationSubscriptionSnapshot {
     private final ExternalOrderKey activationFrontier;
     private final List<CoordinationSubscriptionOccurrence>
             occurrences;
-    private final Map<String, CoordinationSubscriptionOccurrence>
-            occurrencesByKey;
-    private final Map<String, CoordinationSubscriptionOccurrence>
-            occurrencesByLanguageKey;
+    private final PathDependencyIndex dependencyIndex;
+    private final CoordinationSubscriptionMerkleIndex merkleIndex;
     private final CoordinationIndexedDeliveryEngine.IndexedActiveSurface
             indexedActiveSurface;
     private final Map<String, List<String>>
             processEmbeddedRoutes;
     private final Set<String> prunedScopePaths;
     private final String digest;
+    private final FastPathWorkMetrics serializationMetrics;
     private final PlanningVerification planningVerification;
     private final long constructionOccurrenceValidationCount;
     private final AtomicLong trustedPlanningVerificationCount =
             new AtomicLong();
     private final AtomicLong exactOccurrenceLookupCount =
+            new AtomicLong();
+    private final AtomicLong candidateScopeLookupCount =
             new AtomicLong();
 
     CoordinationSubscriptionSnapshot(
@@ -86,7 +91,39 @@ public final class CoordinationSubscriptionSnapshot {
                 occurrences,
                 processEmbeddedRoutes,
                 prunedScopePaths,
+                null,
+                null,
+                null,
                 null);
+    }
+
+    CoordinationSubscriptionSnapshot(
+            String languageRuntimeRegistryIdentity,
+            String coordinationRuntimeRegistryIdentity,
+            String rootBlueId,
+            long rootRevision,
+            ExternalOrderKey activationFrontier,
+            List<CoordinationSubscriptionOccurrence> occurrences,
+            Map<String, List<String>> processEmbeddedRoutes,
+            Set<String> prunedScopePaths,
+            PathDependencyIndex dependencyIndex,
+            CoordinationSubscriptionMerkleIndex merkleIndex,
+            FastPathWorkMetrics metrics) {
+        this(
+                VERSION,
+                languageRuntimeRegistryIdentity,
+                coordinationRuntimeRegistryIdentity,
+                ALGORITHM_IDENTITY,
+                rootBlueId,
+                rootRevision,
+                activationFrontier,
+                occurrences,
+                processEmbeddedRoutes,
+                prunedScopePaths,
+                null,
+                dependencyIndex,
+                merkleIndex,
+                metrics);
     }
 
     private CoordinationSubscriptionSnapshot(
@@ -101,7 +138,10 @@ public final class CoordinationSubscriptionSnapshot {
                     occurrences,
             Map<String, List<String>> processEmbeddedRoutes,
             Set<String> prunedScopePaths,
-            String suppliedDigest) {
+            String suppliedDigest,
+            PathDependencyIndex suppliedDependencyIndex,
+            CoordinationSubscriptionMerkleIndex suppliedMerkleIndex,
+            FastPathWorkMetrics metrics) {
         this.projectionVersion =
                 requireText(
                         projectionVersion,
@@ -129,73 +169,37 @@ public final class CoordinationSubscriptionSnapshot {
                 Objects.requireNonNull(
                         activationFrontier,
                         "activationFrontier");
-        List<CoordinationSubscriptionOccurrence> ordered =
-                new ArrayList<
-                        CoordinationSubscriptionOccurrence>(
-                        Objects.requireNonNull(
-                                occurrences, "occurrences"));
-        Collections.sort(
-                ordered,
-                CoordinationSubscriptionOccurrence
-                        .CANONICAL_ORDER);
-        Map<String, CoordinationSubscriptionOccurrence>
-                indexed =
-                new LinkedHashMap<
-                        String,
-                        CoordinationSubscriptionOccurrence>();
-        Map<String, CoordinationSubscriptionOccurrence>
-                indexedByLanguageKey =
-                new LinkedHashMap<
-                        String,
-                        CoordinationSubscriptionOccurrence>();
+        List<CoordinationSubscriptionOccurrence> suppliedOccurrences =
+                Objects.requireNonNull(occurrences, "occurrences");
+        CoordinationSubscriptionMerkleIndex exactMerkleIndex =
+                suppliedMerkleIndex;
         long validatedOccurrences = 0L;
-        for (CoordinationSubscriptionOccurrence occurrence
-                : ordered) {
-            validatedOccurrences++;
-            CoordinationSubscriptionOccurrence exact =
-                    Objects.requireNonNull(
-                            occurrence,
-                            "subscription occurrence");
-            if (exact.endAtRootRevision() != null) {
-                throw new IllegalArgumentException(
-                        "Snapshot contains a retired occurrence: "
-                                + exact.occurrenceKey());
+        if (exactMerkleIndex == null) {
+            exactMerkleIndex = CoordinationSubscriptionMerkleIndex.empty();
+            for (CoordinationSubscriptionOccurrence occurrence
+                    : suppliedOccurrences) {
+                validatedOccurrences++;
+                CoordinationSubscriptionOccurrence exact =
+                        requireActiveOccurrence(
+                                occurrence,
+                                rootRevision,
+                                this.activationFrontier);
+                exactMerkleIndex = exactMerkleIndex.updated(null, exact);
             }
-            if (exact.activationRootRevision() == null
-                    || exact.activationRootRevision().longValue()
-                    > rootRevision
-                    || exact.activationFrontier() == null
-                    || exact.activationFrontier().compareTo(
-                    this.activationFrontier) > 0) {
-                throw new IllegalArgumentException(
-                        "Snapshot contains an inactive or stale occurrence: "
-                                + exact.occurrenceKey());
-            }
-            if (indexed.put(
-                    exact.occurrenceKey(),
-                    exact) != null) {
-                throw new IllegalArgumentException(
-                        "Duplicate subscription occurrence: "
-                                + exact.occurrenceKey());
-            }
-            String languageKey =
-                    CoordinationIndexedDeliveryEngine
-                            .languageOccurrenceKey(
-                                    exact.scopePath(),
-                                    exact.channelKey());
-            if (indexedByLanguageKey.put(
-                    languageKey, exact) != null) {
-                throw new IllegalArgumentException(
-                        "Snapshot maps two active occurrences to one "
-                                + "Language occurrence: " + languageKey);
-            }
+        } else if (!suppliedOccurrences.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "A persistent successor must not also supply a full "
+                            + "occurrence list");
         }
-        this.occurrences =
-                Collections.unmodifiableList(ordered);
-        this.occurrencesByKey =
-                Collections.unmodifiableMap(indexed);
-        this.occurrencesByLanguageKey =
-                Collections.unmodifiableMap(indexedByLanguageKey);
+        this.merkleIndex = exactMerkleIndex;
+        this.occurrences = exactMerkleIndex.occurrences();
+        if (this.merkleIndex.size() != this.occurrences.size()) {
+            throw new IllegalArgumentException(
+                    "Subscription Merkle index size does not match snapshot");
+        }
+        this.dependencyIndex = suppliedDependencyIndex != null
+                ? suppliedDependencyIndex
+                : dependencyIndex(this.occurrences);
         this.indexedActiveSurface =
                 CoordinationIndexedDeliveryEngine.IndexedActiveSurface
                         .from(this.occurrences);
@@ -205,9 +209,8 @@ public final class CoordinationSubscriptionSnapshot {
                 immutableRoutes(processEmbeddedRoutes);
         this.prunedScopePaths =
                 immutablePaths(prunedScopePaths);
-        this.digest =
-                CoordinationSubscriptionSerialization
-                        .digest(toCanonicalMap());
+        this.digest = merkleDigest();
+        this.serializationMetrics = metrics;
         if (suppliedDigest != null
                 && !this.digest.equals(
                         suppliedDigest)) {
@@ -283,7 +286,46 @@ public final class CoordinationSubscriptionSnapshot {
      */
     public CoordinationSubscriptionOccurrence occurrence(
             String occurrenceKey) {
-        return occurrencesByKey.get(occurrenceKey);
+        return merkleIndex.occurrence(occurrenceKey);
+    }
+
+    /**
+     * Returns exact affected public keys from the immutable admitted dependency
+     * trie without iterating the active occurrence list.
+     */
+    public Set<String> affectedOccurrenceKeys(
+            Set<String> changedPaths) {
+        return dependencyIndex.affected(
+                Objects.requireNonNull(changedPaths, "changedPaths"));
+    }
+
+    /** Number of exact occurrence-to-path bindings retained by the trie. */
+    public int dependencyPathBindingCount() {
+        return dependencyIndex.pathCount();
+    }
+
+    CoordinationSubscriptionOccurrence occurrenceByInternalKey(
+            String scopePath,
+            String channelKey) {
+        return merkleIndex.occurrenceByInternalKey(
+                scopePath, channelKey);
+    }
+
+    PathDependencyIndex dependencyIndexForSuccessor() {
+        return dependencyIndex;
+    }
+
+    CoordinationSubscriptionMerkleIndex merkleIndexForSuccessor() {
+        return merkleIndex;
+    }
+
+    /** Constant-time candidate validation used by sparse indexed planning. */
+    public CoordinationSubscriptionOccurrence candidateOccurrence(
+            String occurrenceKey) {
+        String checked = Objects.requireNonNull(
+                occurrenceKey, "occurrenceKey");
+        candidateScopeLookupCount.incrementAndGet();
+        return merkleIndex.occurrence(checked);
     }
 
     /**
@@ -349,7 +391,8 @@ public final class CoordinationSubscriptionSnapshot {
         return new PlanningMetrics(
                 constructionOccurrenceValidationCount,
                 trustedPlanningVerificationCount.get(),
-                exactOccurrenceLookupCount.get());
+                exactOccurrenceLookupCount.get(),
+                candidateScopeLookupCount.get());
     }
 
     /**
@@ -369,6 +412,9 @@ public final class CoordinationSubscriptionSnapshot {
      * @return immutable canonical persistence map including the digest
      */
     public Map<String, Object> toMap() {
+        if (serializationMetrics != null) {
+            serializationMetrics.snapshotSerialized(occurrences.size());
+        }
         Map<String, Object> result =
                 new LinkedHashMap<String, Object>(
                         toCanonicalMap());
@@ -486,7 +532,10 @@ public final class CoordinationSubscriptionSnapshot {
                         new LinkedHashSet<String>(
                                 encodedPrunedScopePaths),
                         CoordinationSubscriptionSerialization
-                                .text(persisted, "digest"));
+                                .text(persisted, "digest"),
+                        null,
+                        null,
+                        null);
         snapshot.requireCurrentFormat();
         if (!snapshot.occurrences().equals(
                 occurrences)) {
@@ -506,6 +555,132 @@ public final class CoordinationSubscriptionSnapshot {
 
     Map<String, List<String>> processEmbeddedRoutes() {
         return processEmbeddedRoutes;
+    }
+
+    static Set<String> exactDependencyPaths(
+            CoordinationSubscriptionOccurrence occurrence) {
+        CoordinationSubscriptionOccurrence exact = Objects.requireNonNull(
+                occurrence, "occurrence");
+        LinkedHashSet<String> paths = new LinkedHashSet<String>();
+        paths.add(exact.scopePath());
+        ExternalChannelDependencySnapshot dependencies =
+                exact.dependencyEvidence();
+        LinkedHashSet<String> exactContractKeys =
+                new LinkedHashSet<String>();
+        exactContractKeys.add(exact.channelKey());
+        for (ExternalChannelDependencySnapshot.Entry entry
+                : dependencies.entries()) {
+            exactContractKeys.add(entry.channelKey());
+        }
+        for (ExternalChannelDependencySnapshot.ChannelEntry entry
+                : dependencies.channelEntries()) {
+            exactContractKeys.add(entry.channelKey());
+        }
+        boolean wholeContractSurface =
+                dependencies.wholeSameScopeExternalSurface()
+                        || dependencies.wholeSameScopeChannelCatalog()
+                        || !dependencies.typeFamilies().isEmpty();
+        for (ExternalChannelDependencySnapshot.TypeFamily family
+                : dependencies.typeFamilies()) {
+            for (ExternalChannelDependencySnapshot.Member member
+                    : family.members()) {
+                exactContractKeys.add(member.channelKey());
+            }
+        }
+        String scope = exact.scopePath();
+        while (true) {
+            String contracts = JsonPointer.append(scope, "$contracts");
+            if (wholeContractSurface) paths.add(contracts);
+            for (String contractKey : exactContractKeys) {
+                paths.add(JsonPointer.append(contracts, contractKey));
+            }
+            if ("/".equals(scope)) break;
+            int slash = scope.lastIndexOf('/');
+            scope = slash <= 0 ? "/" : scope.substring(0, slash);
+        }
+        return Collections.unmodifiableSet(paths);
+    }
+
+    private static PathDependencyIndex dependencyIndex(
+            List<CoordinationSubscriptionOccurrence> occurrences) {
+        PathDependencyIndex result = PathDependencyIndex.empty();
+        for (CoordinationSubscriptionOccurrence occurrence : occurrences) {
+            result = result.updated(
+                    occurrence.occurrenceKey(),
+                    Collections.<String>emptySet(),
+                    exactDependencyPaths(occurrence));
+        }
+        return result;
+    }
+
+    private static CoordinationSubscriptionOccurrence requireActiveOccurrence(
+            CoordinationSubscriptionOccurrence occurrence,
+            long rootRevision,
+            ExternalOrderKey activationFrontier) {
+        CoordinationSubscriptionOccurrence exact = Objects.requireNonNull(
+                occurrence, "subscription occurrence");
+        if (exact.endAtRootRevision() != null) {
+            throw new IllegalArgumentException(
+                    "Snapshot contains a retired occurrence: "
+                            + exact.occurrenceKey());
+        }
+        if (exact.activationRootRevision() == null
+                || exact.activationRootRevision().longValue() > rootRevision
+                || exact.activationFrontier() == null
+                || exact.activationFrontier().compareTo(
+                        activationFrontier) > 0) {
+            throw new IllegalArgumentException(
+                    "Snapshot contains an inactive or stale occurrence: "
+                            + exact.occurrenceKey());
+        }
+        return exact;
+    }
+
+    /**
+     * Calculates the version-3 identity from bounded scalar commitments.
+     * Occurrence content is represented by the persistent treap root, so a
+     * successor snapshot does not serialize or hash every active occurrence.
+     */
+    private String merkleDigest() {
+        Map<String, Object> encodedRoutes =
+                new LinkedHashMap<String, Object>();
+        encodedRoutes.putAll(processEmbeddedRoutes);
+        Map<String, Object> encodedPruned =
+                new LinkedHashMap<String, Object>();
+        encodedPruned.put(
+                "paths",
+                new ArrayList<String>(prunedScopePaths));
+
+        Map<String, Object> commitment =
+                new LinkedHashMap<String, Object>();
+        commitment.put(
+                "kind",
+                "blue.coordination/subscription-snapshot-merkle/1.0");
+        commitment.put("projectionVersion", projectionVersion);
+        commitment.put(
+                "languageRuntimeRegistryIdentity",
+                languageRuntimeRegistryIdentity);
+        commitment.put(
+                "coordinationRuntimeRegistryIdentity",
+                coordinationRuntimeRegistryIdentity);
+        commitment.put("algorithmIdentity", algorithmIdentity);
+        commitment.put("rootBlueId", rootBlueId);
+        commitment.put("rootRevision", rootRevision);
+        commitment.put(
+                "activationFrontier",
+                CoordinationSubscriptionSerialization.orderKeyToList(
+                        activationFrontier));
+        commitment.put("occurrenceCount", merkleIndex.size());
+        commitment.put("occurrences", merkleIndex.digest());
+        commitment.put(
+                "processEmbeddedRoutes",
+                CoordinationSubscriptionSerialization.digest(
+                        encodedRoutes));
+        commitment.put(
+                "prunedScopePaths",
+                CoordinationSubscriptionSerialization.digest(
+                        encodedPruned));
+        return CoordinationSubscriptionSerialization.digest(commitment);
     }
 
     private Map<String, Object> toCanonicalMap() {
@@ -568,16 +743,19 @@ public final class CoordinationSubscriptionSnapshot {
         private final long constructionOccurrenceValidationCount;
         private final long trustedPlanningVerificationCount;
         private final long exactOccurrenceLookupCount;
+        private final long candidateScopeLookupCount;
 
         private PlanningMetrics(
                 long constructionOccurrenceValidationCount,
                 long trustedPlanningVerificationCount,
-                long exactOccurrenceLookupCount) {
+                long exactOccurrenceLookupCount,
+                long candidateScopeLookupCount) {
             this.constructionOccurrenceValidationCount =
                     constructionOccurrenceValidationCount;
             this.trustedPlanningVerificationCount =
                     trustedPlanningVerificationCount;
             this.exactOccurrenceLookupCount = exactOccurrenceLookupCount;
+            this.candidateScopeLookupCount = candidateScopeLookupCount;
         }
 
         public long constructionOccurrenceValidationCount() {
@@ -590,6 +768,10 @@ public final class CoordinationSubscriptionSnapshot {
 
         public long exactOccurrenceLookupCount() {
             return exactOccurrenceLookupCount;
+        }
+
+        public long candidateScopeLookupCount() {
+            return candidateScopeLookupCount;
         }
     }
 
@@ -617,13 +799,13 @@ public final class CoordinationSubscriptionSnapshot {
 
         CoordinationSubscriptionOccurrence occurrence(String key) {
             snapshot.exactOccurrenceLookupCount.incrementAndGet();
-            return snapshot.occurrencesByKey.get(key);
+            return snapshot.merkleIndex.occurrence(key);
         }
 
         CoordinationSubscriptionOccurrence occurrenceByLanguageKey(
                 String key) {
             snapshot.exactOccurrenceLookupCount.incrementAndGet();
-            return snapshot.occurrencesByLanguageKey.get(key);
+            return snapshot.merkleIndex.occurrenceByInternalKey(key);
         }
 
         String bindingIdentity() {

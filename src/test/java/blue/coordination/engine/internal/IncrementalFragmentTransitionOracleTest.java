@@ -8,6 +8,7 @@ import blue.coordination.processor.CoordinationEngineProcessorTestFixtures;
 import blue.coordination.processor.CoordinationPreparedDelivery;
 import blue.coordination.processor.CoordinationSubscriptionSnapshot;
 import blue.coordination.processor.CoordinationSubscriptionUpdate;
+import blue.coordination.round4.Round4ParityReceipt;
 import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.model.Node;
 import blue.language.processor.CoordinationFragmentationCatalogHarness;
@@ -31,6 +32,27 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Full-split differential oracle for every supported transition shape. */
 final class IncrementalFragmentTransitionOracleTest {
+
+    @Test
+    void shouldMatchOneThousandCanonicalTransitionOracles() {
+        // given
+        List<TransitionPair> proofs = new ArrayList<>();
+
+        // when
+        for (int iteration = 0; iteration < 1_000; iteration++) {
+            MutationCase mutation = new MutationCase(
+                    "deterministic-" + iteration,
+                    valueDocument("before-" + iteration),
+                    valueDocument("after-" + iteration),
+                    noBodies());
+            proofs.add(verifyDifferential(mutation));
+        }
+
+        // then
+        assertEquals(1_000, proofs.size());
+        Round4ParityReceipt.write(
+                "transitionComparisons", 1_000L, 0L);
+    }
 
     @Test
     void shouldMatchTheCanonicalSplitterAcrossTheTransitionMatrix() {

@@ -317,6 +317,13 @@ final class CoordinationPublicApiSurfaceTest {
                         + "->blue.coordination.processor."
                         + "CoordinationDocumentSplitter$"
                         + "DocumentFragmentationBlueprint",
+                "verifiedFrontierFragmentationBlueprint("
+                        + "blue.language.model.Node,java.lang.String,"
+                        + "blue.language.processor."
+                        + "EffectiveFragmentationCatalog)"
+                        + "->blue.coordination.processor."
+                        + "CoordinationDocumentSplitter$"
+                        + "DocumentFragmentationBlueprint",
                 "inspectDirectChild(blue.coordination.processor."
                         + "CoordinationDocumentSplitter$"
                         + "DocumentFragmentationBlueprint,"
@@ -352,6 +359,7 @@ final class CoordinationPublicApiSurfaceTest {
         assertEquals(
                 names(
                         "describeRetainedDirectEdge",
+                        "completeBlueprintCanonicalCopyCount",
                         "documentFragmentationBlueprint",
                         "forEventSplitting",
                         "fromEffectiveCatalog",
@@ -360,9 +368,10 @@ final class CoordinationPublicApiSurfaceTest {
                         "inspectPhysicalRoot",
                         "prepareForProcessing",
                         "splitDocument",
-                        "splitEvent"),
+                        "splitEvent",
+                        "verifiedFrontierFragmentationBlueprint"),
                 publicMethodNames(CoordinationDocumentSplitter.class));
-        assertEquals(13L,
+        assertEquals(15L,
                 publicMethodCount(CoordinationDocumentSplitter.class));
     }
 

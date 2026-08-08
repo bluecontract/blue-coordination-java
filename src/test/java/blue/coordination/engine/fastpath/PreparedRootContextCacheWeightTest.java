@@ -8,10 +8,13 @@ import blue.language.model.Node;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -109,6 +112,201 @@ final class PreparedRootContextCacheWeightTest {
             release.countDown();
             pool.shutdownNow();
         }
+    }
+
+    @Test
+    void shouldFailFastWhenAllPhysicalSlotsAreBuilding()
+            throws Exception {
+        PreparedRootExecutionContext first = context(
+                "session-flight-first", 0L, "first");
+        PreparedRootExecutionContext second = context(
+                "session-flight-second", 0L, "second");
+        PreparedRootExecutionContext third = context(
+                "session-flight-third", 0L, "third");
+        PreparedRootContextCache cache = new PreparedRootContextCache(
+                2, Long.MAX_VALUE);
+        CountDownLatch entered = new CountDownLatch(2);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger rejectedBuilds = new AtomicInteger();
+        ExecutorService workers = Executors.newFixedThreadPool(2);
+        try {
+            Future<PreparedRootExecutionContext> firstResult =
+                    workers.submit(() -> cache.getOrBuild(
+                            first.sessionId(),
+                            first.epoch(),
+                            first.rootBlueId(),
+                            first.inventoryIdentity(),
+                            () -> {
+                                entered.countDown();
+                                await(release);
+                                return first;
+                            }));
+            Future<PreparedRootExecutionContext> secondResult =
+                    workers.submit(() -> cache.getOrBuild(
+                            second.sessionId(),
+                            second.epoch(),
+                            second.rootBlueId(),
+                            second.inventoryIdentity(),
+                            () -> {
+                                entered.countDown();
+                                await(release);
+                                return second;
+                            }));
+            entered.await();
+
+            PreparedRootContextCache.Snapshot saturated = cache.snapshot();
+            assertEquals(2, saturated.inFlight());
+            assertEquals(2, saturated.totalSize());
+            assertThrows(RejectedExecutionException.class, () ->
+                    cache.getOrBuild(
+                            third.sessionId(),
+                            third.epoch(),
+                            third.rootBlueId(),
+                            third.inventoryIdentity(),
+                            () -> {
+                                rejectedBuilds.incrementAndGet();
+                                return third;
+                            }));
+            assertEquals(0, rejectedBuilds.get());
+            assertEquals(1L, cache.snapshot().rejections());
+            assertEquals(2, cache.snapshot().peakInFlight());
+            assertEquals(2, cache.snapshot().peakTotalSize());
+
+            release.countDown();
+            assertSame(first, firstResult.get());
+            assertSame(second, secondResult.get());
+            assertEquals(0, cache.snapshot().inFlight());
+            assertEquals(2, cache.snapshot().size());
+        } finally {
+            release.countDown();
+            workers.shutdownNow();
+        }
+    }
+
+    @Test
+    void invalidatedFlightCannotRemoveOrReplaceANewerExactGeneration()
+            throws Exception {
+        PreparedRootExecutionContext old = context(
+                "session-replaced-flight", 0L, "same-root");
+        PreparedRootExecutionContext replacement = context(
+                "session-replaced-flight", 0L, "same-root");
+        PreparedRootContextCache cache = new PreparedRootContextCache(
+                2, Long.MAX_VALUE);
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        ExecutorService worker = Executors.newSingleThreadExecutor();
+        try {
+            Future<PreparedRootExecutionContext> oldResult =
+                    worker.submit(() -> cache.getOrBuild(
+                            old.sessionId(),
+                            old.epoch(),
+                            old.rootBlueId(),
+                            old.inventoryIdentity(),
+                            () -> {
+                                entered.countDown();
+                                await(release);
+                                return old;
+                            }));
+            entered.await();
+            cache.removeSession(old.sessionId());
+
+            assertSame(replacement, cache.getOrBuild(
+                    replacement.sessionId(),
+                    replacement.epoch(),
+                    replacement.rootBlueId(),
+                    replacement.inventoryIdentity(),
+                    () -> replacement));
+            assertEquals(2, cache.snapshot().peakInFlight());
+
+            release.countDown();
+            assertSame(old, oldResult.get());
+            assertSame(replacement, get(cache, replacement));
+            assertEquals(1, cache.size());
+            assertEquals(0, cache.inFlightCount());
+        } finally {
+            release.countDown();
+            worker.shutdownNow();
+        }
+    }
+
+    @Test
+    void invalidatedBuildFailureCannotRemoveANewerExactGeneration()
+            throws Exception {
+        PreparedRootExecutionContext key = context(
+                "session-replaced-failure", 0L, "same-root");
+        PreparedRootExecutionContext replacement = context(
+                "session-replaced-failure", 0L, "same-root");
+        PreparedRootContextCache cache = new PreparedRootContextCache(
+                2, Long.MAX_VALUE);
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        ExecutorService worker = Executors.newSingleThreadExecutor();
+        try {
+            Future<PreparedRootExecutionContext> failedOld =
+                    worker.submit(() -> cache.getOrBuild(
+                            key.sessionId(),
+                            key.epoch(),
+                            key.rootBlueId(),
+                            key.inventoryIdentity(),
+                            () -> {
+                                entered.countDown();
+                                await(release);
+                                throw new IllegalStateException(
+                                        "old failed");
+                            }));
+            entered.await();
+            cache.removeSession(key.sessionId());
+            assertSame(replacement, cache.getOrBuild(
+                    replacement.sessionId(),
+                    replacement.epoch(),
+                    replacement.rootBlueId(),
+                    replacement.inventoryIdentity(),
+                    () -> replacement));
+
+            release.countDown();
+            ExecutionException failure = assertThrows(
+                    ExecutionException.class, failedOld::get);
+            assertTrue(failure.getCause()
+                    instanceof IllegalStateException);
+            assertSame(replacement, get(cache, replacement));
+            assertEquals(1, cache.size());
+            assertEquals(0, cache.inFlightCount());
+            assertEquals(1L, cache.snapshot().failures());
+        } finally {
+            release.countDown();
+            worker.shutdownNow();
+        }
+    }
+
+    @Test
+    void retainedContextSnapshotIsImmutableBoundedAndNeverBuilds() {
+        PreparedRootExecutionContext first = context(
+                "snapshot-first", 0L, "first");
+        PreparedRootExecutionContext second = context(
+                "snapshot-second", 0L, "second");
+        PreparedRootExecutionContext third = context(
+                "snapshot-third", 0L, "third");
+        PreparedRootContextCache cache = new PreparedRootContextCache(
+                2, Long.MAX_VALUE);
+        assertTrue(cache.installIfNotOlder(first));
+        assertTrue(cache.installIfNotOlder(second));
+
+        List<PreparedRootExecutionContext> retained =
+                cache.retainedContextsSnapshot();
+        assertEquals(2, retained.size());
+        assertTrue(retained.contains(first));
+        assertTrue(retained.contains(second));
+        assertThrows(UnsupportedOperationException.class, () ->
+                retained.add(third));
+
+        assertTrue(cache.installIfNotOlder(third));
+        assertEquals(2, retained.size(),
+                "a checkpoint snapshot is a stable copy");
+        assertEquals(2, cache.retainedContextsSnapshot().size());
+        assertTrue(cache.snapshot().size() <= cache.snapshot().maximumSize());
+        assertTrue(cache.snapshot().retainedWeightBytes()
+                <= cache.snapshot().maximumWeightBytes());
+        assertEquals(0L, cache.snapshot().builds());
     }
 
     @Test

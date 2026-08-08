@@ -5,8 +5,13 @@ import blue.coordination.engine.CoordinationFragmentSlicePlanner;
 import blue.coordination.engine.api.CoordinationCommittedDelivery;
 import blue.coordination.engine.api.CoordinationDeliveryReceipt;
 import blue.coordination.engine.api.CoordinationDispatchSnapshot;
+import blue.coordination.engine.api.CoordinationEventShapeInstance;
+import blue.coordination.engine.api.CoordinationEventShapeMetrics;
+import blue.coordination.engine.api.CoordinationEventShapePatch;
+import blue.coordination.engine.api.CoordinationEventShapeTemplate;
 import blue.coordination.engine.api.CoordinationFragmentInventory;
 import blue.coordination.engine.api.CoordinationFragmentTransition;
+import blue.coordination.engine.api.CoordinationFragmentTransitionWorkSnapshot;
 import blue.coordination.engine.api.CoordinationFragmentSlice;
 import blue.coordination.engine.api.CoordinationFragmentSlicePlan;
 import blue.coordination.engine.api.DocumentSessionId;
@@ -19,6 +24,8 @@ import blue.coordination.engine.memory.CoordinationEngineWorkRecorder;
 import blue.coordination.engine.memory.CoordinationEngineWorkSnapshot;
 import blue.coordination.engine.memory.CoordinationEventAdmissionMetrics;
 import blue.coordination.engine.memory.CoordinationParallelismPolicy;
+import blue.coordination.engine.fastpath.ReferenceCutConfiguration;
+import blue.coordination.fastpath.FastPathWorkMetrics;
 import blue.coordination.engine.memory.CoordinationRootPreparationObserver;
 import blue.coordination.engine.memory.CoordinationTwoPhaseDeliveryExecutor;
 import blue.coordination.engine.memory.InMemoryCoordinationCheckpoint;
@@ -121,6 +128,7 @@ public final class MyOsDemoRuntime implements AutoCloseable {
             new ConcurrentHashMap<>();
     private final MyOsWorkRecorder work = new MyOsWorkRecorder();
     private final Object exactPublicationOwner = new Object();
+    private final long timelineTimestampOffsetMicros;
     private final Map<String, Node> ownedInitializationEvidence =
             new LinkedHashMap<>();
     private final Map<String, Map<String, Node>> currentExactScopes =
@@ -134,6 +142,15 @@ public final class MyOsDemoRuntime implements AutoCloseable {
     private RuntimeException nextAppendFailure;
 
     private MyOsDemoRuntime(String exampleId, String caseId) {
+        this(exampleId, caseId, 0L);
+    }
+
+    private MyOsDemoRuntime(
+            String exampleId,
+            String caseId,
+            long timelineTimestampOffsetMicros) {
+        this.timelineTimestampOffsetMicros = requireTimestampOffset(
+                timelineTimestampOffsetMicros);
         evidence = MyOsDemoEvidence.begin(exampleId, caseId);
         operationTiming = MyOsOperationTimingRecorder.begin(
                 exampleId, caseId);
@@ -145,6 +162,14 @@ public final class MyOsDemoRuntime implements AutoCloseable {
                 .observer(MyOsProcessingEngineObservers.compose(
                         operationTiming, engineWork))
                 .environmentIdentity("blue-coordination/myos-demo-suite/1.0")
+                .referenceCutConfiguration(
+                        ReferenceCutConfiguration.verifiedDefaults())
+                .rootPreparationParallelism(
+                        MyOsPerformanceTuning
+                                .rootPreparationParallelism())
+                .rootPreparationQueueCapacity(
+                        MyOsPerformanceTuning
+                                .rootPreparationQueueCapacity())
                 .build();
         dispatchLedger = new InMemoryCoordinationDispatchLedger();
         journal = new MyOsPositionedTimelineJournal();
@@ -160,8 +185,24 @@ public final class MyOsDemoRuntime implements AutoCloseable {
             String exampleId,
             String caseId,
             MyOsDemoCheckpoint checkpoint) {
+        this(
+                exampleId,
+                caseId,
+                checkpoint,
+                Objects.requireNonNull(
+                        checkpoint, "checkpoint")
+                        .timelineTimestampOffsetMicros);
+    }
+
+    private MyOsDemoRuntime(
+            String exampleId,
+            String caseId,
+            MyOsDemoCheckpoint checkpoint,
+            long timelineTimestampOffsetMicros) {
         MyOsDemoCheckpoint checked = Objects.requireNonNull(
                 checkpoint, "checkpoint");
+        this.timelineTimestampOffsetMicros = requireTimestampOffset(
+                timelineTimestampOffsetMicros);
         evidence = MyOsDemoEvidence.begin(exampleId, caseId);
         operationTiming = MyOsOperationTimingRecorder.begin(
                 exampleId, caseId);
@@ -174,6 +215,14 @@ public final class MyOsDemoRuntime implements AutoCloseable {
                         operationTiming, engineWork))
                 .environmentIdentity(
                         "blue-coordination/myos-demo-suite/1.0")
+                .referenceCutConfiguration(
+                        ReferenceCutConfiguration.verifiedDefaults())
+                .rootPreparationParallelism(
+                        MyOsPerformanceTuning
+                                .rootPreparationParallelism())
+                .rootPreparationQueueCapacity(
+                        MyOsPerformanceTuning
+                                .rootPreparationQueueCapacity())
                 .checkpoint(checked.environment)
                 .build();
         dispatchLedger = checked.fanoutLedger.copyAtQuiescence();
@@ -222,6 +271,7 @@ public final class MyOsDemoRuntime implements AutoCloseable {
             }
             admissionSequence = checked.admissionSequence;
             timelineEntrySequence = checked.timelineEntrySequence;
+            requireTimestampAfterCheckpointHistory(checked);
         } catch (RuntimeException | Error failure) {
             try {
                 MyOsDemoKernel.releaseCurrentExactNodes(
@@ -256,6 +306,21 @@ public final class MyOsDemoRuntime implements AutoCloseable {
         return new MyOsDemoRuntime(exampleId, caseId);
     }
 
+    /**
+     * Creates an isolated runtime with a deterministic timestamp offset.
+     *
+     * <p>The zero-offset overload retains every historical demo identity.
+     * An explicit offset is useful for independent deterministic branches
+     * that must author different exact Timeline entries.</p>
+     */
+    public static MyOsDemoRuntime create(
+            String exampleId,
+            String caseId,
+            long timelineTimestampOffsetMicros) {
+        return new MyOsDemoRuntime(
+                exampleId, caseId, timelineTimestampOffsetMicros);
+    }
+
     /** Restores a private mutable branch without parsing or replay. */
     public static MyOsDemoRuntime fork(
             String exampleId,
@@ -265,6 +330,22 @@ public final class MyOsDemoRuntime implements AutoCloseable {
                 exampleId,
                 caseId,
                 Objects.requireNonNull(checkpoint, "checkpoint"));
+    }
+
+    /**
+     * Restores an isolated branch with an explicit deterministic timestamp
+     * offset while retaining all immutable checkpoint content.
+     */
+    public static MyOsDemoRuntime fork(
+            String exampleId,
+            String caseId,
+            MyOsDemoCheckpoint checkpoint,
+            long timelineTimestampOffsetMicros) {
+        return new MyOsDemoRuntime(
+                exampleId,
+                caseId,
+                Objects.requireNonNull(checkpoint, "checkpoint"),
+                timelineTimestampOffsetMicros);
     }
 
     public String exampleId() {
@@ -278,7 +359,8 @@ public final class MyOsDemoRuntime implements AutoCloseable {
     public synchronized MyOsDemoDocument addDocument(
             String key,
             String authoredYaml) {
-        return addDocument(key, authoredYaml, List.of());
+        return addDocumentWithTiming(key, authoredYaml, List.of())
+                .document();
     }
 
     /**
@@ -289,18 +371,46 @@ public final class MyOsDemoRuntime implements AutoCloseable {
             String key,
             String authoredYaml,
             List<MyOsManagedEmbedding> declaredEmbeddings) {
+        return addDocumentWithTiming(
+                key, authoredYaml, declaredEmbeddings).document();
+    }
+
+    /** Starts one document and returns timings from the exact same path. */
+    public synchronized MyOsDocumentStartResult addDocumentWithTiming(
+            String key,
+            String authoredYaml) {
+        return addDocumentWithTiming(key, authoredYaml, List.of());
+    }
+
+    private MyOsDocumentStartResult addDocumentWithTiming(
+            String key,
+            String authoredYaml,
+            List<MyOsManagedEmbedding> declaredEmbeddings) {
+        long documentStartedNanos = System.nanoTime();
         Objects.requireNonNull(key, "key");
         if (documents.containsKey(key)) {
-            throw new IllegalArgumentException("Duplicate document key: " + key);
+            throw new IllegalArgumentException(
+                    "Duplicate document key: " + key);
         }
+
+        long phaseStartedNanos = System.nanoTime();
         String resolvedYaml = MyOsDemoYaml.resolveInitialBlueIds(
                 authoredYaml, initialBlueIds);
+        long resolveReferencesNanos = elapsedNanos(phaseStartedNanos);
+
+        phaseStartedNanos = System.nanoTime();
         Node source = runtime.parseSourceYaml(resolvedYaml);
         work.sourceParsed();
+        long parseSourceNanos = elapsedNanos(phaseStartedNanos);
+
+        phaseStartedNanos = System.nanoTime();
         String initialBlueId = runtime.calculateSourceDocumentBlueId(source);
         Node exactInitial = runtime.canonicalize(source);
         MyOsDemoKernel.registerExactDocument(
                 initialBlueId, exactInitial);
+        long canonicalIdentityNanos = elapsedNanos(phaseStartedNanos);
+
+        phaseStartedNanos = System.nanoTime();
         DocumentSessionId sessionId = DocumentSessionId.of(
                 "myos-demo/" + key);
         MyOsDocumentIdentity identity = new MyOsDocumentIdentity(
@@ -332,7 +442,11 @@ public final class MyOsDemoRuntime implements AutoCloseable {
                 stagedState,
                 admissionHighWater,
                 embeddingPlan.desiredLinks());
+        long admissionPlanningNanos = elapsedNanos(phaseStartedNanos);
 
+        DocumentInitializationTimings initializationTimings =
+                new DocumentInitializationTimings();
+        phaseStartedNanos = System.nanoTime();
         MyOsDemoDocument document = initialization.initialize(
                 identity,
                 sessionId.value(),
@@ -344,12 +458,16 @@ public final class MyOsDemoRuntime implements AutoCloseable {
                             initialBlueId,
                             sessionId,
                             adoptedSource,
-                            admissionOrder);
+                            admissionOrder,
+                            initializationTimings);
                     return new MyOsInitializationCoordinator.Completed<>(
                             initialized,
                             environment.engine().session(sessionId)
                                     .currentRootBlueId());
                 });
+        long initializeOnceNanos = elapsedNanos(phaseStartedNanos);
+
+        phaseStartedNanos = System.nanoTime();
         ManagedDocumentSnapshot committed = environment.engine().session(
                 sessionId);
         topology.registerWithLinks(
@@ -385,7 +503,18 @@ public final class MyOsDemoRuntime implements AutoCloseable {
                 document,
                 canonicalIdentityInputBlueId,
                 initialization.requireTerminalReceipt(identity));
-        return document;
+        long hostPublicationNanos = elapsedNanos(phaseStartedNanos);
+        MyOsDocumentStartTiming timing = new MyOsDocumentStartTiming(
+                key,
+                elapsedNanos(documentStartedNanos),
+                resolveReferencesNanos,
+                parseSourceNanos,
+                canonicalIdentityNanos,
+                admissionPlanningNanos,
+                initializeOnceNanos,
+                hostPublicationNanos,
+                initializationTimings.snapshot());
+        return new MyOsDocumentStartResult(document, timing);
     }
 
     public synchronized MyOsDemoTimeline timeline(
@@ -458,7 +587,7 @@ public final class MyOsDemoRuntime implements AutoCloseable {
         PreparedEventPublication preparedEvent;
         try {
             preparedEvent = environment.prepareEventOnceForPublication(
-                    entry.blueId(), entry.exactEntry(), entry.orderKey());
+                    pending.preparedEvent(), entry.orderKey());
         } finally {
             long fullEventSplitsAfter = environment.eventAdmissionMetrics()
                     .fullEventSplits();
@@ -514,7 +643,33 @@ public final class MyOsDemoRuntime implements AutoCloseable {
     long peekNextTimelineTimestampMicros() {
         return Math.addExact(
                 BASE_TIMESTAMP_MICROS,
-                Math.addExact(timelineEntrySequence, 1L));
+                Math.addExact(
+                        timelineTimestampOffsetMicros,
+                        Math.addExact(timelineEntrySequence, 1L)));
+    }
+
+    private static long requireTimestampOffset(long offsetMicros) {
+        if (offsetMicros < 0L) {
+            throw new IllegalArgumentException(
+                    "timelineTimestampOffsetMicros must be non-negative");
+        }
+        Math.addExact(BASE_TIMESTAMP_MICROS, offsetMicros);
+        return offsetMicros;
+    }
+
+    private void requireTimestampAfterCheckpointHistory(
+            MyOsDemoCheckpoint checkpoint) {
+        long nextTimestamp = peekNextTimelineTimestampMicros();
+        long latestTimestamp = checkpoint.authoredEntries.values().stream()
+                .mapToLong(MyOsDemoEntry::timestampMicros)
+                .max()
+                .orElse(Long.MIN_VALUE);
+        if (nextTimestamp <= latestTimestamp) {
+            throw new IllegalArgumentException(
+                    "timestamp offset would move a restored Timeline clock "
+                            + "backwards: next=" + nextTimestamp
+                            + ", latest=" + latestTimestamp);
+        }
     }
 
     private void commitTimelineTimestamp(long timestampMicros) {
@@ -671,16 +826,7 @@ public final class MyOsDemoRuntime implements AutoCloseable {
             activeDispatches.remove(canonicalEntry.blueId(), capture);
         }
         advanceManagedPublications(capture);
-        if (canonicalDispatch.plan().targets().isEmpty()) {
-            throw new IllegalStateException(
-                    "No active Root matches Timeline Entry "
-                            + canonicalEntry.blueId()
-                            + "; subscriptionKeys="
-                            + timeline.subscriptionKeys()
-                            + "; indexedKeys="
-                            + environment.subscriptionIndex()
-                            .subscriptionKeys());
-        }
+        boolean unrouted = canonicalDispatch.plan().targets().isEmpty();
         long routingNanos = capture.firstDeliveryStartedNanos() < 0L
                 ? elapsedNanos(routingStartedNanos)
                 : Math.max(0L, capture.firstDeliveryStartedNanos()
@@ -705,6 +851,7 @@ public final class MyOsDemoRuntime implements AutoCloseable {
                 throw new IllegalStateException(
                         "Canonical fanout did not commit " + receipt.sessionId());
             }
+            operationTiming.recordReceipt(canonicalEntry, receipt);
             MyOsDemoDocument document = documentsBySession.get(
                     receipt.sessionId());
             if (document == null) {
@@ -726,7 +873,7 @@ public final class MyOsDemoRuntime implements AutoCloseable {
             results.put(document.key(),
                     new MyOsDemoResult(canonicalEntry, transition));
         }
-        if (results.isEmpty()) {
+        if (results.isEmpty() && !unrouted) {
             throw new IllegalStateException(
                     "No routed Root committed Timeline Entry "
                             + canonicalEntry.blueId());
@@ -785,6 +932,22 @@ public final class MyOsDemoRuntime implements AutoCloseable {
 
     public Node exactEvent(String sourceYaml) {
         return resolvedExactEvent(sourceYaml).canonicalRoot();
+    }
+
+    CoordinationEventShapeTemplate compileEntryShape(
+            String shapeIdentity,
+            Node resolvedPrototype,
+            List<String> volatileLeafPointers) {
+        return environment.compileEventShape(
+                shapeIdentity,
+                resolvedPrototype,
+                volatileLeafPointers);
+    }
+
+    CoordinationEventShapeInstance instantiateEntryShape(
+            CoordinationEventShapeTemplate template,
+            List<CoordinationEventShapePatch> patches) {
+        return environment.instantiateEventShape(template, patches);
     }
 
     /** Parses, preprocesses, and resolves one authored entry exactly once. */
@@ -904,6 +1067,23 @@ public final class MyOsDemoRuntime implements AutoCloseable {
         return environment.eventAdmissionMetrics();
     }
 
+    public CoordinationEventShapeMetrics.Snapshot eventShapeMetrics() {
+        return environment.eventShapeMetrics();
+    }
+
+    String eventAdmissionDomainIdentity() {
+        return environment.eventAdmissionDomainIdentity();
+    }
+
+    public FastPathWorkMetrics.Snapshot projectionFastPathMetrics() {
+        return environment.projectionFastPathMetrics();
+    }
+
+    public CoordinationFragmentTransitionWorkSnapshot
+            fragmentTransitionWorkSnapshot() {
+        return environment.fragmentTransitionWorkSnapshot();
+    }
+
     /** Labels the next raw timing record without doing work in its span. */
     public synchronized void labelNextOperationTimingSample(
             String sampleKind) {
@@ -970,6 +1150,7 @@ public final class MyOsDemoRuntime implements AutoCloseable {
                 transitionsByEvent,
                 admissionSequence,
                 timelineEntrySequence,
+                timelineTimestampOffsetMicros,
                 fingerprint);
     }
 
@@ -996,6 +1177,9 @@ public final class MyOsDemoRuntime implements AutoCloseable {
                 host.routeIndexProbes(),
                 host.fanoutChunks(),
                 engineWork.snapshot(),
+                environment.referenceCutMetrics(),
+                environment.projectionFastPathMetrics(),
+                environment.fragmentTransitionWorkSnapshot(),
                 environment.fragmentStore().singleReadCount(),
                 environment.fragmentStore().batchReadCount(),
                 environment.fragmentStore().requestedIdentityCount());
@@ -1611,10 +1795,19 @@ public final class MyOsDemoRuntime implements AutoCloseable {
             String initialBlueId,
             DocumentSessionId sessionId,
             Node adoptedSource,
-            ExternalOrderKey admissionOrder) {
+            ExternalOrderKey admissionOrder,
+            DocumentInitializationTimings timings) {
+        long phaseStartedNanos = System.nanoTime();
         Node preprocessed = runtime.preprocess(adoptedSource);
+        timings.preprocessNanos = elapsedNanos(phaseStartedNanos);
+
+        phaseStartedNanos = System.nanoTime();
         ResolvedSnapshot initializationSnapshot =
                 runtime.resolveToSnapshot(preprocessed);
+        timings.resolveSourceSnapshotNanos = elapsedNanos(
+                phaseStartedNanos);
+
+        phaseStartedNanos = System.nanoTime();
         Map<String, Node> previousEvidence = immutableClonedExactNodes(
                 ownedInitializationEvidence);
         Map<String, Node> nextEvidence = new LinkedHashMap<>(
@@ -1629,9 +1822,14 @@ public final class MyOsDemoRuntime implements AutoCloseable {
                     "Initialization BlueId has conflicting exact content");
         }
         replaceOwnedInitializationEvidence(nextEvidence);
+        timings.evidencePreparationNanos = elapsedNanos(
+                phaseStartedNanos);
         try {
+            phaseStartedNanos = System.nanoTime();
             DocumentProcessingResult initializationResult =
                     runtime.initializeDocument(initializationSnapshot);
+            timings.frozenInitializeNanos = elapsedNanos(
+                    phaseStartedNanos);
             if (initializationResult.status() != ProcessorStatus.SUCCESS
                     || !initializationResult.commits()) {
                 throw new IllegalStateException(
@@ -1642,12 +1840,21 @@ public final class MyOsDemoRuntime implements AutoCloseable {
                                 : initializationResult.diagnostic()
                                 .message()));
             }
+            phaseStartedNanos = System.nanoTime();
             ResolvedSnapshot initializedSnapshot = runtime.resolveToSnapshot(
                     initializationResult.document());
+            timings.resolveInitializedSnapshotNanos = elapsedNanos(
+                    phaseStartedNanos);
+
+            phaseStartedNanos = System.nanoTime();
             environment.addDocument(
                     sessionId,
                     initializationResult.document(),
                     admissionOrder);
+            timings.engineAdmissionNanos = elapsedNanos(
+                    phaseStartedNanos);
+
+            phaseStartedNanos = System.nanoTime();
             cachedRootViews.put(
                     key,
                     new CachedRootView(
@@ -1655,12 +1862,14 @@ public final class MyOsDemoRuntime implements AutoCloseable {
                             initializationResult.document(),
                             initializedSnapshot));
             work.documentInitialized();
-            return new MyOsDemoDocument(
+            MyOsDemoDocument initialized = new MyOsDemoDocument(
                     key,
                     resolvedYaml,
                     exactInitial,
                     initialBlueId,
                     sessionId);
+            timings.bookkeepingNanos = elapsedNanos(phaseStartedNanos);
+            return initialized;
         } catch (RuntimeException | Error failure) {
             try {
                 replaceOwnedInitializationEvidence(previousEvidence);
@@ -1707,6 +1916,27 @@ public final class MyOsDemoRuntime implements AutoCloseable {
                 runtime.resolveToSnapshot(exactRoot));
         cachedRootViews.put(key, current);
         return current;
+    }
+
+    private static final class DocumentInitializationTimings {
+        private long preprocessNanos;
+        private long resolveSourceSnapshotNanos;
+        private long evidencePreparationNanos;
+        private long frozenInitializeNanos;
+        private long resolveInitializedSnapshotNanos;
+        private long engineAdmissionNanos;
+        private long bookkeepingNanos;
+
+        private MyOsDocumentStartTiming.Initialization snapshot() {
+            return new MyOsDocumentStartTiming.Initialization(
+                    preprocessNanos,
+                    resolveSourceSnapshotNanos,
+                    evidencePreparationNanos,
+                    frozenInitializeNanos,
+                    resolveInitializedSnapshotNanos,
+                    engineAdmissionNanos,
+                    bookkeepingNanos);
+        }
     }
 
     private record CachedRootView(
@@ -2012,7 +2242,8 @@ public final class MyOsDemoRuntime implements AutoCloseable {
                 .append('\n')
                 .append("sequences:")
                 .append(admissionSequence).append(',')
-                .append(timelineEntrySequence).append('\n')
+                .append(timelineEntrySequence).append(',')
+                .append(timelineTimestampOffsetMicros).append('\n')
                 .append("initialization:")
                 .append(initialization.evidence()).append('\n');
 

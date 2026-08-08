@@ -173,6 +173,21 @@ public final class VerifiedHybridResultFrontier {
         return newSubtreeHeaderBlueIdByPath;
     }
 
+    /**
+     * Freezes the sparse hybrid result before retained-reference resolution.
+     * The retained subtrees remain pure references, so snapshot work is
+     * proportional to the verified PROCESS frontier.
+     */
+    public VerifiedFragmentTransitionFrontier
+            snapshotForFragmentTransition(
+                    Node requestOwnedHybridRoot,
+                    String verifiedResultingRootBlueId) {
+        return new VerifiedFragmentTransitionFrontier(
+                this,
+                requestOwnedHybridRoot,
+                verifiedResultingRootBlueId);
+    }
+
     /** Verifies the exact borrowed prior Root object bound by this proof. */
     public boolean bindsPriorRoot(Node supplied) {
         return exactPriorRoot == supplied;
@@ -202,14 +217,11 @@ public final class VerifiedHybridResultFrontier {
             Node actual = structuralNodeAt(root, retained.getKey());
             Node resolved = retainedResolvedNodeByPath.get(
                     retained.getKey());
-            if (resolved != null && actual != resolved) {
-                return false;
-            }
-            if (resolved == null
-                    && (actual == null
-                        || !actual.isReferenceOnly()
-                        || !retained.getValue().equals(
-                                actual.getBlueId()))) {
+            boolean exactResolved = resolved != null && actual == resolved;
+            boolean exactSparseReference = actual != null
+                    && actual.isReferenceOnly()
+                    && retained.getValue().equals(actual.getBlueId());
+            if (!exactResolved && !exactSparseReference) {
                 return false;
             }
         }
@@ -256,12 +268,11 @@ public final class VerifiedHybridResultFrontier {
                 : expectedBlueIds.entrySet()) {
             Node actual = structuralNodeAt(root, expected.getKey());
             Node resolved = resolvedNodes.get(expected.getKey());
-            if (resolved != null && actual != resolved) return false;
-            if (resolved == null
-                    && (actual == null
-                            || !actual.isReferenceOnly()
-                            || !expected.getValue().equals(
-                                    actual.getBlueId()))) {
+            boolean exactResolved = resolved != null && actual == resolved;
+            boolean exactSparseReference = actual != null
+                    && actual.isReferenceOnly()
+                    && expected.getValue().equals(actual.getBlueId());
+            if (!exactResolved && !exactSparseReference) {
                 return false;
             }
         }

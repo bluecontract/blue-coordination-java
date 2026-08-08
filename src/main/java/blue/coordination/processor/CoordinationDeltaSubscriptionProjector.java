@@ -1,9 +1,12 @@
 package blue.coordination.processor;
 
 import blue.coordination.fastpath.DeltaProjectionApplier;
+import blue.coordination.fastpath.FastPathWorkMetrics;
+import blue.coordination.fastpath.PathDependencyIndex;
 import blue.language.processor.SubscriptionDelta;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -21,6 +24,17 @@ import java.util.Set;
  * cold projector instead.</p>
  */
 public final class CoordinationDeltaSubscriptionProjector {
+    private final FastPathWorkMetrics metrics;
+
+    public CoordinationDeltaSubscriptionProjector() {
+        this(new FastPathWorkMetrics());
+    }
+
+    public CoordinationDeltaSubscriptionProjector(
+            FastPathWorkMetrics metrics) {
+        this.metrics = Objects.requireNonNull(metrics, "metrics");
+    }
+
     public CoordinationSubscriptionUpdate apply(
             CoordinationSubscriptionSnapshot previous,
             CoordinationCommitProjectionEvidence supplied) {
@@ -42,14 +56,18 @@ public final class CoordinationDeltaSubscriptionProjector {
                     "transition order must advance the projection frontier");
         }
 
-        Map<String, CoordinationSubscriptionOccurrence> active =
-                byInternalKey(prior.occurrences());
         Map<String, CoordinationSubscriptionOccurrence> refreshed =
                 byInternalKey(evidence.currentEvidence());
         Set<String> affectedPublic = evidence.affectedRetainedOccurrenceKeys();
         Set<String> consumedPublic = new LinkedHashSet<String>();
+        Set<String> removedPublic = new LinkedHashSet<String>();
+        Set<String> removedInternal = new LinkedHashSet<String>();
         List<CoordinationSubscriptionOccurrence> retired =
                 new ArrayList<CoordinationSubscriptionOccurrence>();
+        PathDependencyIndex dependencyIndex =
+                prior.dependencyIndexForSuccessor();
+        CoordinationSubscriptionMerkleIndex merkleIndex =
+                prior.merkleIndexForSuccessor();
         for (SubscriptionDelta.Entry removal
                 : evidence.membershipDelta().removed()) {
             if (!Long.valueOf(evidence.resultingRootRevision()).equals(
@@ -58,44 +76,58 @@ public final class CoordinationDeltaSubscriptionProjector {
                         "retirement does not close at resulting revision");
             }
             String internal = internalKey(removal);
-            CoordinationSubscriptionOccurrence old = active.remove(internal);
-            if (old == null) {
+            CoordinationSubscriptionOccurrence old =
+                    prior.occurrenceByInternalKey(
+                            removal.scopePath(), removal.channelKey());
+            if (old == null || !removedInternal.add(internal)
+                    || !removedPublic.add(old.occurrenceKey())) {
                 throw new IllegalArgumentException(
                         "membership delta retires inactive occurrence at " + internal);
             }
             requireSameMembership(old.toSubscriptionDeltaEntry(), removal, true);
             retired.add(old.withScopeAndInterval(old.scopeBlueId(), removal));
+            dependencyIndex = dependencyIndex.updated(
+                    old.occurrenceKey(),
+                    CoordinationSubscriptionSnapshot.exactDependencyPaths(old),
+                    Collections.<String>emptySet());
+            merkleIndex = merkleIndex.updated(old, null);
         }
 
-        List<CoordinationSubscriptionOccurrence> unchanged =
-                new ArrayList<CoordinationSubscriptionOccurrence>();
-        List<Map.Entry<String, CoordinationSubscriptionOccurrence>> retained =
-                new ArrayList<Map.Entry<String, CoordinationSubscriptionOccurrence>>(
-                        active.entrySet());
-        for (Map.Entry<String, CoordinationSubscriptionOccurrence> entry : retained) {
-            CoordinationSubscriptionOccurrence old = entry.getValue();
-            if (!affectedPublic.contains(old.occurrenceKey())) {
-                unchanged.add(old);
-                continue;
+        Map<String, CoordinationSubscriptionOccurrence> replacements =
+                new LinkedHashMap<String, CoordinationSubscriptionOccurrence>();
+        for (String publicKey : affectedPublic) {
+            CoordinationSubscriptionOccurrence old = prior.occurrence(publicKey);
+            if (old == null || removedPublic.contains(publicKey)) {
+                throw new IllegalArgumentException(
+                        "affected set contains unknown occurrence: " + publicKey);
             }
-            CoordinationSubscriptionOccurrence current = refreshed.remove(entry.getKey());
+            CoordinationSubscriptionOccurrence current = refreshed.remove(
+                    internalKey(old.toSubscriptionDeltaEntry()));
             if (current == null) {
                 throw new DeltaProjectionApplier.ColdProjectionRequiredException(
                         "affected retained occurrence lacks current evidence: "
-                                + old.occurrenceKey());
+                                + publicKey);
             }
             requireRetainedInterval(old, current);
-            active.put(entry.getKey(), current);
-            unchanged.add(current);
-            consumedPublic.add(old.occurrenceKey());
+            replacements.put(publicKey, current);
+            consumedPublic.add(publicKey);
+            dependencyIndex = dependencyIndex.updated(
+                    publicKey,
+                    CoordinationSubscriptionSnapshot.exactDependencyPaths(old),
+                    CoordinationSubscriptionSnapshot.exactDependencyPaths(current));
+            merkleIndex = merkleIndex.updated(old, current);
         }
 
+        CoordinationSubscriptionMerkleIndex retainedIndex = merkleIndex;
         List<CoordinationSubscriptionOccurrence> added =
                 new ArrayList<CoordinationSubscriptionOccurrence>();
         for (SubscriptionDelta.Entry addition
                 : evidence.membershipDelta().added()) {
             String internal = internalKey(addition);
-            if (active.containsKey(internal)) {
+            CoordinationSubscriptionOccurrence existing =
+                    prior.occurrenceByInternalKey(
+                            addition.scopePath(), addition.channelKey());
+            if (existing != null && !removedInternal.contains(internal)) {
                 throw new IllegalArgumentException(
                         "membership delta adds active occurrence at " + internal);
             }
@@ -105,20 +137,25 @@ public final class CoordinationDeltaSubscriptionProjector {
                         "new active occurrence lacks exact current evidence at " + internal);
             }
             requireSameMembership(current.toSubscriptionDeltaEntry(), addition, false);
-            active.put(internal, current);
             added.add(current);
+            dependencyIndex = dependencyIndex.updated(
+                    current.occurrenceKey(),
+                    Collections.<String>emptySet(),
+                    CoordinationSubscriptionSnapshot.exactDependencyPaths(current));
+            merkleIndex = merkleIndex.updated(null, current);
         }
         if (!refreshed.isEmpty()) {
             throw new IllegalArgumentException(
                     "current evidence contains unaffected occurrence(s): "
                             + refreshed.keySet());
         }
-        Set<String> missingAffected = new LinkedHashSet<String>(affectedPublic);
-        missingAffected.removeAll(consumedPublic);
-        if (!missingAffected.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "affected set contains unknown occurrence(s): " + missingAffected);
+        if (consumedPublic.size() != affectedPublic.size()) {
+            throw new IllegalStateException(
+                    "affected occurrence accounting is inconsistent");
         }
+
+        List<CoordinationSubscriptionOccurrence> unchanged =
+                retainedIndex.occurrences();
 
         CoordinationSubscriptionSnapshot snapshot =
                 new CoordinationSubscriptionSnapshot(
@@ -127,9 +164,22 @@ public final class CoordinationDeltaSubscriptionProjector {
                         evidence.resultingRootBlueId(),
                         evidence.resultingRootRevision(),
                         evidence.transitionOrderKey(),
-                        new ArrayList<CoordinationSubscriptionOccurrence>(active.values()),
+                        Collections.<CoordinationSubscriptionOccurrence>emptyList(),
                         evidence.processEmbeddedRoutes(),
-                        evidence.prunedScopePaths());
+                        evidence.prunedScopePaths(),
+                        dependencyIndex,
+                        merkleIndex,
+                        metrics);
+        metrics.candidatesLookedUp(
+                affectedPublic.size()
+                        + evidence.membershipDelta().removed().size()
+                        + evidence.membershipDelta().added().size());
+        metrics.deltaProjectionUpdated(
+                affectedPublic.size(),
+                replacements.size(),
+                0L);
+        metrics.merkleOccurrencesUpdated(
+                removedPublic.size() + replacements.size() + added.size());
         return new CoordinationSubscriptionUpdate(
                 snapshot,
                 added,

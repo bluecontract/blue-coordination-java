@@ -36,7 +36,7 @@ final class CoordinationSubscriptionProvenancePersistenceTest {
 
         // then
         assertEquals(
-                "blue.coordination/subscription-snapshot/2.0",
+                "blue.coordination/subscription-snapshot/3.0",
                 rehydrated.projectionVersion());
         assertEquals("/", occurrence.declaringScopePath());
         assertEquals(

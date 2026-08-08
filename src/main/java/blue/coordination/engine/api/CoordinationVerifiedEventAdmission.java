@@ -117,6 +117,11 @@ public final class CoordinationVerifiedEventAdmission {
         return exactEvent.toNode();
     }
 
+    /** Immutable exact-event handle for trusted in-process adapters. */
+    public FrozenNode frozenExactEvent() {
+        return exactEvent;
+    }
+
     public Map<String, CoordinationCanonicalFragment> fragments() {
         return fragments;
     }

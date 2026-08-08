@@ -43,6 +43,7 @@ public final class MyOsDemoCheckpoint {
             transitionsByEvent;
     final long admissionSequence;
     final long timelineEntrySequence;
+    final long timelineTimestampOffsetMicros;
     private final String stateFingerprint;
 
     MyOsDemoCheckpoint(
@@ -66,6 +67,7 @@ public final class MyOsDemoCheckpoint {
                     transitionsByEvent,
             long admissionSequence,
             long timelineEntrySequence,
+            long timelineTimestampOffsetMicros,
             String stateFingerprint) {
         this.environment = Objects.requireNonNull(environment, "environment");
         this.fanoutLedger = Objects.requireNonNull(
@@ -110,12 +112,16 @@ public final class MyOsDemoCheckpoint {
         this.transitionsByEvent = immutableTransitionMap(
                 Objects.requireNonNull(
                         transitionsByEvent, "transitionsByEvent"));
-        if (admissionSequence < 0L || timelineEntrySequence < 0L) {
+        if (admissionSequence < 0L || timelineEntrySequence < 0L
+                || timelineTimestampOffsetMicros < 0L) {
             throw new IllegalArgumentException(
-                    "checkpoint sequences must be non-negative");
+                    "checkpoint sequences and timestamp offset must be "
+                            + "non-negative");
         }
         this.admissionSequence = admissionSequence;
         this.timelineEntrySequence = timelineEntrySequence;
+        this.timelineTimestampOffsetMicros =
+                timelineTimestampOffsetMicros;
         this.stateFingerprint = requireText(
                 stateFingerprint, "stateFingerprint");
         if (this.journal.size() != this.authoredEntries.size()

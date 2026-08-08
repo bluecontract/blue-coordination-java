@@ -98,7 +98,7 @@ final class CoordinationEventAdmissionCompilerTest {
         compiler.compile(event);
 
         assertEquals(0, compiler.cachedEventCount());
-        assertEquals(0L, compiler.eventCacheMetrics().retainedWeight());
+        assertEquals(0L, compiler.eventCacheMetrics().weight());
         assertEquals(2L, metrics.snapshot().fullEventSplits());
         assertEquals(2L, compiler.eventCacheMetrics().evictions());
     }

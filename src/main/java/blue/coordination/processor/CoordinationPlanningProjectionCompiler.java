@@ -2,7 +2,9 @@ package blue.coordination.processor;
 
 import blue.coordination.fastpath.AdmittedOccurrence;
 import blue.coordination.fastpath.AdmittedProjection;
+import blue.coordination.fastpath.DeltaProjectionApplier;
 import blue.coordination.fastpath.FastPathWorkMetrics;
+import blue.coordination.fastpath.ProjectionDelta;
 import blue.coordination.fastpath.ProjectionGenerationKey;
 import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.model.Node;
@@ -15,9 +17,11 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Admission-time compiler from the durable semantic subscription snapshot to
@@ -95,7 +99,8 @@ public final class CoordinationPlanningProjectionCompiler {
                 : exactSnapshot.occurrences()) {
             dependencyPaths.put(
                     occurrence.occurrenceKey(),
-                    Collections.singleton(JsonPointer.ROOT));
+                    CoordinationSubscriptionSnapshot.exactDependencyPaths(
+                            occurrence));
         }
         return compile(
                 exactGeneration,
@@ -157,6 +162,216 @@ public final class CoordinationPlanningProjectionCompiler {
                 exactGeneration, compiled);
         metrics.admittedProjectionBuilt(compiled.size());
         return result;
+    }
+
+    /**
+     * Advances a compiled planning generation from exact commit-local delta
+     * evidence. Only added and affected retained scope chains are traversed and
+     * hashed; unrelated admitted rows and dependency-index branches are shared.
+     */
+    public AdmittedProjection advance(
+            AdmittedProjection previous,
+            ProjectionGenerationKey resultingGeneration,
+            CoordinationSubscriptionUpdate subscriptionUpdate,
+            CoordinationCommitProjectionEvidence evidence,
+            Node sparseResultingRoot) {
+        AdmittedProjection prior = Objects.requireNonNull(previous, "previous");
+        ProjectionGenerationKey generation = Objects.requireNonNull(
+                resultingGeneration, "resultingGeneration");
+        CoordinationSubscriptionUpdate update = Objects.requireNonNull(
+                subscriptionUpdate, "subscriptionUpdate");
+        CoordinationCommitProjectionEvidence exactEvidence =
+                Objects.requireNonNull(evidence, "evidence");
+        CoordinationSubscriptionSnapshot snapshot = update.snapshot();
+        requireBinding(generation, snapshot);
+        Node root = Objects.requireNonNull(
+                sparseResultingRoot, "sparseResultingRoot");
+        if (!exactEvidence.complete()
+                || exactEvidence.verifiedChangedPaths().isEmpty()) {
+            throw new DeltaProjectionApplier.ColdProjectionRequiredException(
+                    "incremental planning projection lacks complete changed-path evidence");
+        }
+
+        Set<String> retired = new LinkedHashSet<String>();
+        for (CoordinationSubscriptionOccurrence occurrence : update.retired()) {
+            if (!retired.add(occurrence.occurrenceKey())) {
+                throw new IllegalArgumentException(
+                        "duplicate retired planning occurrence: "
+                                + occurrence.occurrenceKey());
+            }
+        }
+        Map<String, CoordinationSubscriptionOccurrence> additions =
+                new LinkedHashMap<String, CoordinationSubscriptionOccurrence>();
+        for (CoordinationSubscriptionOccurrence occurrence : update.added()) {
+            if (additions.put(occurrence.occurrenceKey(), occurrence) != null) {
+                throw new IllegalArgumentException(
+                        "duplicate added planning occurrence: "
+                                + occurrence.occurrenceKey());
+            }
+        }
+
+        CoordinationExactNodeIndex identities = new CoordinationExactNodeIndex();
+        Map<String, String> identitiesByPointer =
+                new LinkedHashMap<String, String>();
+        identitiesByPointer.put(JsonPointer.ROOT, generation.rootBlueId());
+        Map<String, List<String>> chainsByScope =
+                new LinkedHashMap<String, List<String>>();
+        List<AdmittedOccurrence> refreshed =
+                new ArrayList<AdmittedOccurrence>();
+        List<AdmittedOccurrence> added =
+                new ArrayList<AdmittedOccurrence>();
+
+        Set<String> affected = exactEvidence
+                .affectedRetainedOccurrenceKeys();
+        for (String publicKey : affected) {
+            CoordinationSubscriptionOccurrence current =
+                    snapshot.occurrence(publicKey);
+            if (current == null || retired.contains(publicKey)) {
+                throw new DeltaProjectionApplier.ColdProjectionRequiredException(
+                        "affected planning occurrence is absent from resulting snapshot: "
+                                + publicKey);
+            }
+            if (additions.containsKey(publicKey)) continue;
+            refreshed.add(admitted(
+                    current,
+                    generation,
+                    root,
+                    identities,
+                    identitiesByPointer,
+                    chainsByScope));
+        }
+
+        Set<String> replacementKeys = new LinkedHashSet<String>(retired);
+        replacementKeys.retainAll(additions.keySet());
+        for (CoordinationSubscriptionOccurrence occurrence
+                : additions.values()) {
+            AdmittedOccurrence compiled = admitted(
+                    occurrence,
+                    generation,
+                    root,
+                    identities,
+                    identitiesByPointer,
+                    chainsByScope);
+            if (replacementKeys.contains(occurrence.occurrenceKey())) {
+                refreshed.add(compiled);
+            } else {
+                added.add(compiled);
+            }
+        }
+        retired.removeAll(replacementKeys);
+
+        ProjectionDelta delta = new ProjectionDelta(
+                added,
+                retired,
+                refreshed,
+                exactEvidence.verifiedChangedPaths(),
+                true);
+        return new DeltaProjectionApplier(metrics).apply(
+                prior, generation, delta);
+    }
+
+    private AdmittedOccurrence admitted(
+            CoordinationSubscriptionOccurrence occurrence,
+            ProjectionGenerationKey generation,
+            Node sparseRoot,
+            CoordinationExactNodeIndex identities,
+            Map<String, String> identitiesByPointer,
+            Map<String, List<String>> chainsByScope) {
+        List<String> chain = chainsByScope.get(occurrence.scopePath());
+        if (chain == null) {
+            chain = sparseScopeChain(
+                    generation,
+                    occurrence,
+                    sparseRoot,
+                    identities,
+                    identitiesByPointer);
+            chainsByScope.put(occurrence.scopePath(), chain);
+        }
+        return new AdmittedOccurrence(
+                occurrence.occurrenceKey(),
+                occurrence.scopePath(),
+                occurrence.scopeBlueId(),
+                occurrence.channelKey(),
+                occurrence.effectiveTypeBlueId(),
+                occurrence.order(),
+                occurrence.headerIdentityBlueId(),
+                occurrence.checkpointDomainBlueId(),
+                chain,
+                occurrence.sourceContributionNodeBlueIds(),
+                occurrence.dependencyNodeBlueIds(),
+                occurrence.subscriptionKeys(),
+                CoordinationSubscriptionSnapshot.exactDependencyPaths(
+                        occurrence));
+    }
+
+    private List<String> sparseScopeChain(
+            ProjectionGenerationKey generation,
+            CoordinationSubscriptionOccurrence occurrence,
+            Node sparseRoot,
+            CoordinationExactNodeIndex identities,
+            Map<String, String> identitiesByPointer) {
+        List<String> chain = new ArrayList<String>();
+        chain.add(generation.rootBlueId());
+        List<String> prefix = new ArrayList<String>();
+        for (String segment : JsonPointer.split(occurrence.scopePath())) {
+            prefix.add(segment);
+            String pointer = JsonPointer.toPointer(prefix);
+            String identity = identitiesByPointer.get(pointer);
+            if (identity == null) {
+                metrics.scopeTraversed();
+                Node selected = sparseNodeAt(sparseRoot, pointer);
+                if (selected == null) {
+                    throw new DeltaProjectionApplier
+                            .ColdProjectionRequiredException(
+                            "affected sparse planning scope is unavailable at "
+                                    + pointer);
+                }
+                if (!selected.isReferenceOnly()) {
+                    metrics.rootIdentityCalculated();
+                }
+                identity = exactIdentity(selected, identities);
+                identitiesByPointer.put(pointer, identity);
+            }
+            chain.add(identity);
+        }
+        if (!occurrence.scopeBlueId().equals(
+                chain.get(chain.size() - 1))) {
+            throw new DeltaProjectionApplier.ColdProjectionRequiredException(
+                    "incremental planning scope identity is stale at "
+                            + occurrence.scopePath());
+        }
+        return Collections.unmodifiableList(chain);
+    }
+
+    private static Node sparseNodeAt(Node root, String pointer) {
+        Node current = root;
+        for (String segment : JsonPointer.split(pointer)) {
+            if (current == null || current.isReferenceOnly()) return null;
+            if ("$type".equals(segment)) {
+                current = current.getType();
+            } else if ("$itemType".equals(segment)) {
+                current = current.getItemType();
+            } else if ("$keyType".equals(segment)) {
+                current = current.getKeyType();
+            } else if ("$valueType".equals(segment)) {
+                current = current.getValueType();
+            } else if ("$contracts".equals(segment)) {
+                current = current.getContracts();
+            } else if ("$blue".equals(segment)) {
+                current = current.getBlue();
+            } else if (JsonPointer.isArrayIndexSegment(segment)
+                    && current.getItems() != null) {
+                int index = Integer.parseInt(segment);
+                current = index < current.getItems().size()
+                        ? current.getItems().get(index)
+                        : null;
+            } else {
+                current = current.getProperties() == null
+                        ? null
+                        : current.getProperties().get(segment);
+            }
+        }
+        return current;
     }
 
     private static void requireBinding(

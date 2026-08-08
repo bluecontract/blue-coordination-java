@@ -31,41 +31,35 @@ final class AdmittedPlanningInputTest {
         ProjectionGenerationKey generation = authoritative.generation();
         List<ProjectionGenerationKey> stale = Arrays.asList(
                 generation(
-                        "other-environment", generation.sessionId(),
+                        "other-environment",
                         generation.rootBlueId(), generation.rootRevision(),
                         generation.inventoryIdentity(),
                         generation.subscriptionDigest(),
                         generation.runtimeIdentity()),
                 generation(
-                        generation.environmentIdentity(), "other-session",
-                        generation.rootBlueId(), generation.rootRevision(),
-                        generation.inventoryIdentity(),
-                        generation.subscriptionDigest(),
-                        generation.runtimeIdentity()),
-                generation(
-                        generation.environmentIdentity(), generation.sessionId(),
+                        generation.environmentIdentity(),
                         "other-root", generation.rootRevision(),
                         generation.inventoryIdentity(),
                         generation.subscriptionDigest(),
                         generation.runtimeIdentity()),
                 generation(
-                        generation.environmentIdentity(), generation.sessionId(),
+                        generation.environmentIdentity(),
                         generation.rootBlueId(), generation.rootRevision() + 1L,
                         generation.inventoryIdentity(),
                         generation.subscriptionDigest(),
                         generation.runtimeIdentity()),
                 generation(
-                        generation.environmentIdentity(), generation.sessionId(),
+                        generation.environmentIdentity(),
                         generation.rootBlueId(), generation.rootRevision(),
                         "other-inventory", generation.subscriptionDigest(),
                         generation.runtimeIdentity()),
                 generation(
-                        generation.environmentIdentity(), generation.sessionId(),
+                        generation.environmentIdentity(),
                         generation.rootBlueId(), generation.rootRevision(),
                         generation.inventoryIdentity(), "other-subscriptions",
                         generation.runtimeIdentity()),
                 generation(
-                        generation.environmentIdentity(), generation.sessionId(),
+                        generation.environmentIdentity(),
                         generation.rootBlueId(), generation.rootRevision(),
                         generation.inventoryIdentity(),
                         generation.subscriptionDigest(), "other-runtime"));
@@ -77,6 +71,7 @@ final class AdmittedPlanningInputTest {
         for (ProjectionGenerationKey rejected : stale) {
             PlanCacheKey key = new PlanCacheKey(
                     rejected,
+                    "session",
                     "event",
                     "event-inventory",
                     ExternalOrderKey.of(Arrays.<Object>asList("order")),
@@ -171,7 +166,6 @@ final class AdmittedPlanningInputTest {
 
     private static ProjectionGenerationKey generation(
             String environment,
-            String session,
             String root,
             long revision,
             String inventory,
@@ -179,7 +173,6 @@ final class AdmittedPlanningInputTest {
             String runtime) {
         return new ProjectionGenerationKey(
                 environment,
-                session,
                 root,
                 revision,
                 inventory,

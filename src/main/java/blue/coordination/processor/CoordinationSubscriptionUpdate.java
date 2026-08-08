@@ -129,11 +129,15 @@ public final class CoordinationSubscriptionUpdate {
     private static List<CoordinationSubscriptionOccurrence> immutable(
             List<CoordinationSubscriptionOccurrence> supplied,
             String label) {
+        Objects.requireNonNull(supplied, label);
+        if (CoordinationSubscriptionMerkleIndex
+                .isPersistentOccurrenceList(supplied)) {
+            return supplied;
+        }
         List<CoordinationSubscriptionOccurrence> copy =
                 new ArrayList<
                         CoordinationSubscriptionOccurrence>(
-                        Objects.requireNonNull(
-                                supplied, label));
+                        supplied);
         for (CoordinationSubscriptionOccurrence occurrence
                 : copy) {
             Objects.requireNonNull(

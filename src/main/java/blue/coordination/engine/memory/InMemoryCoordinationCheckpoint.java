@@ -1,10 +1,13 @@
 package blue.coordination.engine.memory;
 
+import blue.coordination.engine.CoordinationProcessingEngine
+        .PreparedCheckpointState;
 import blue.coordination.engine.api.CommitOutcome;
 import blue.coordination.engine.api.CoordinationFragmentInventory;
 import blue.coordination.engine.api.DocumentEpochSnapshot;
 import blue.coordination.engine.api.DocumentSessionId;
 import blue.coordination.engine.api.ManagedDocumentSnapshot;
+import blue.coordination.engine.fastpath.ExactNodeHandle;
 import blue.language.model.Node;
 
 import java.util.ArrayList;
@@ -29,11 +32,23 @@ public final class InMemoryCoordinationCheckpoint {
 
     final String profileIdentity;
     final Object immutableContentSharingToken;
+    final String canonicalFragmentStorageGenerationAuthority;
+    final String preparedRepresentationStorageGenerationAuthority;
     final Map<String, Node> fragments;
+    final Map<String, ExactNodeHandle> fragmentHandles;
+    final Map<String, Long> fragmentEncodedSizes;
+    final Map<String, String> fragmentWireFingerprints;
     final Map<String, Node> processingViews;
     final Map<String, Map<String, Node>> processingViewsByInventory;
+    final Map<String, Map<String, ExactNodeHandle>>
+            processingViewHandlesByInventory;
+    final Map<String, Map<String, Long>>
+            processingViewEncodedSizesByInventory;
+    final Map<String, Map<String, String>>
+            processingViewWireFingerprintsByInventory;
     final Map<String, CoordinationFragmentInventory> inventories;
     final Map<String, Node> currentRootViews;
+    final PreparedCheckpointState preparedRootState;
     final Map<DocumentSessionId, ManagedDocumentSnapshot> sessions;
     final Map<DocumentSessionId, Map<Long, DocumentEpochSnapshot>> epochs;
     final Map<String, CommitOutcome> committedTransitions;
@@ -48,11 +63,23 @@ public final class InMemoryCoordinationCheckpoint {
     InMemoryCoordinationCheckpoint(
             String profileIdentity,
             Object immutableContentSharingToken,
+            String canonicalFragmentStorageGenerationAuthority,
+            String preparedRepresentationStorageGenerationAuthority,
             Map<String, Node> fragments,
+            Map<String, ExactNodeHandle> fragmentHandles,
+            Map<String, Long> fragmentEncodedSizes,
+            Map<String, String> fragmentWireFingerprints,
             Map<String, Node> processingViews,
             Map<String, Map<String, Node>> processingViewsByInventory,
+            Map<String, Map<String, ExactNodeHandle>>
+                    processingViewHandlesByInventory,
+            Map<String, Map<String, Long>>
+                    processingViewEncodedSizesByInventory,
+            Map<String, Map<String, String>>
+                    processingViewWireFingerprintsByInventory,
             Map<String, CoordinationFragmentInventory> inventories,
             Map<String, Node> currentRootViews,
+            PreparedCheckpointState preparedRootState,
             Map<DocumentSessionId, ManagedDocumentSnapshot> sessions,
             Map<DocumentSessionId, Map<Long, DocumentEpochSnapshot>> epochs,
             Map<String, CommitOutcome> committedTransitions,
@@ -66,13 +93,34 @@ public final class InMemoryCoordinationCheckpoint {
         this.immutableContentSharingToken = Objects.requireNonNull(
                 immutableContentSharingToken,
                 "immutableContentSharingToken");
+        this.canonicalFragmentStorageGenerationAuthority = requireText(
+                canonicalFragmentStorageGenerationAuthority,
+                "canonicalFragmentStorageGenerationAuthority");
+        this.preparedRepresentationStorageGenerationAuthority = requireText(
+                preparedRepresentationStorageGenerationAuthority,
+                "preparedRepresentationStorageGenerationAuthority");
         this.fragments = immutableNodeMap(fragments);
+        this.fragmentHandles = immutableHandleMap(fragmentHandles);
+        this.fragmentEncodedSizes = immutableLongMap(
+                fragmentEncodedSizes, "fragmentEncodedSizes");
+        this.fragmentWireFingerprints = immutableStringMap(
+                fragmentWireFingerprints, "fragmentWireFingerprints");
         this.processingViews = immutableNodeMap(processingViews);
         this.processingViewsByInventory = immutableNestedNodeMap(
                 processingViewsByInventory);
+        this.processingViewHandlesByInventory = immutableNestedHandleMap(
+                processingViewHandlesByInventory);
+        this.processingViewEncodedSizesByInventory = immutableNestedLongMap(
+                processingViewEncodedSizesByInventory,
+                "processingViewEncodedSizesByInventory");
+        this.processingViewWireFingerprintsByInventory =
+                immutableNestedStringMap(
+                        processingViewWireFingerprintsByInventory,
+                        "processingViewWireFingerprintsByInventory");
         this.inventories = immutableMap(inventories, "inventories");
         this.currentRootViews = immutableClonedNodeMap(
                 currentRootViews, "currentRootViews");
+        this.preparedRootState = preparedRootState;
         this.sessions = immutableMap(sessions, "sessions");
         this.epochs = immutableNestedMap(epochs, "epochs");
         this.committedTransitions = immutableMap(
@@ -216,6 +264,30 @@ public final class InMemoryCoordinationCheckpoint {
     }
 
     private void requireClosedContentGraph() {
+        if (!fragments.keySet().equals(fragmentHandles.keySet())
+                || !fragments.keySet().equals(
+                        fragmentEncodedSizes.keySet())) {
+            throw new IllegalArgumentException(
+                    "prepared physical representations must exactly cover "
+                            + "fragments");
+        }
+        for (Map.Entry<String, ExactNodeHandle> entry
+                : fragmentHandles.entrySet()) {
+            if (!entry.getKey().equals(entry.getValue().blueId())
+                    || !entry.getValue().belongsTo(
+                            immutableContentSharingToken)) {
+                throw new IllegalArgumentException(
+                        "prepared physical handle has invalid ownership: "
+                                + entry.getKey());
+            }
+        }
+        requireNonNegativeSizes(
+                fragmentEncodedSizes, "fragmentEncodedSizes");
+        if (!fragments.keySet().containsAll(
+                fragmentWireFingerprints.keySet())) {
+            throw new IllegalArgumentException(
+                    "physical fingerprints name absent fragments");
+        }
         if (!fragments.keySet().containsAll(processingViews.keySet())) {
             throw new IllegalArgumentException(
                     "global PROCESS views must name physical fragments");
@@ -239,6 +311,50 @@ public final class InMemoryCoordinationCheckpoint {
                         "inventory PROCESS views must belong to inventory "
                                 + entry.getKey());
             }
+            Map<String, ExactNodeHandle> handles =
+                    processingViewHandlesByInventory.get(entry.getKey());
+            Map<String, Long> sizes =
+                    processingViewEncodedSizesByInventory.get(
+                            entry.getKey());
+            if (handles == null || sizes == null
+                    || !handles.keySet().equals(sizes.keySet())) {
+                throw new IllegalArgumentException(
+                        "prepared PROCESS representations are incomplete for "
+                                + entry.getKey());
+            }
+            java.util.Set<String> expanded =
+                    new java.util.LinkedHashSet<String>();
+            for (Map.Entry<String, Node> view : entry.getValue().entrySet()) {
+                if (!view.getValue().isReferenceOnly()) {
+                    expanded.add(view.getKey());
+                }
+            }
+            if (!expanded.equals(handles.keySet())) {
+                throw new IllegalArgumentException(
+                        "prepared PROCESS handles do not match expanded views "
+                                + entry.getKey());
+            }
+            for (Map.Entry<String, ExactNodeHandle> handle
+                    : handles.entrySet()) {
+                if (!handle.getKey().equals(handle.getValue().blueId())
+                        || !handle.getValue().belongsTo(
+                                immutableContentSharingToken)) {
+                    throw new IllegalArgumentException(
+                            "prepared PROCESS handle has invalid ownership: "
+                                    + handle.getKey());
+                }
+            }
+            requireNonNegativeSizes(
+                    sizes, "processing view encoded sizes");
+        }
+        if (!processingViewsByInventory.keySet().equals(
+                processingViewHandlesByInventory.keySet())
+                || !processingViewsByInventory.keySet().equals(
+                        processingViewEncodedSizesByInventory.keySet())
+                || !processingViewsByInventory.keySet().containsAll(
+                        processingViewWireFingerprintsByInventory.keySet())) {
+            throw new IllegalArgumentException(
+                    "prepared PROCESS representation inventories disagree");
         }
         for (Map.Entry<String, CoordinationFragmentInventory> entry
                 : inventories.entrySet()) {
@@ -274,9 +390,10 @@ public final class InMemoryCoordinationCheckpoint {
             expectedCurrentInventories.add(
                     session.fragmentInventoryIdentity());
         }
-        if (!currentRootViews.keySet().equals(expectedCurrentInventories)) {
+        if (!expectedCurrentInventories.containsAll(
+                currentRootViews.keySet())) {
             throw new IllegalArgumentException(
-                    "current Root views must cover exactly the current "
+                    "current Root views must be a bounded subset of current "
                             + "session inventories");
         }
         for (Map.Entry<String, Node> entry : currentRootViews.entrySet()) {
@@ -325,6 +442,71 @@ public final class InMemoryCoordinationCheckpoint {
             copy.put(entry.getKey(), immutableNodeMap(entry.getValue()));
         }
         return Collections.unmodifiableMap(copy);
+    }
+
+    private static Map<String, ExactNodeHandle> immutableHandleMap(
+            Map<String, ExactNodeHandle> source) {
+        return immutableMap(source, "handle map");
+    }
+
+    private static Map<String, Long> immutableLongMap(
+            Map<String, Long> source,
+            String label) {
+        return immutableMap(source, label);
+    }
+
+    private static Map<String, String> immutableStringMap(
+            Map<String, String> source,
+            String label) {
+        return immutableMap(source, label);
+    }
+
+    private static Map<String, Map<String, ExactNodeHandle>>
+            immutableNestedHandleMap(
+                    Map<String, Map<String, ExactNodeHandle>> source) {
+        return immutableNestedStringKeyMap(source, "nested handle map");
+    }
+
+    private static Map<String, Map<String, Long>> immutableNestedLongMap(
+            Map<String, Map<String, Long>> source,
+            String label) {
+        return immutableNestedStringKeyMap(source, label);
+    }
+
+    private static Map<String, Map<String, String>> immutableNestedStringMap(
+            Map<String, Map<String, String>> source,
+            String label) {
+        return immutableNestedStringKeyMap(source, label);
+    }
+
+    private static <V> Map<String, Map<String, V>>
+            immutableNestedStringKeyMap(
+                    Map<String, Map<String, V>> source,
+                    String label) {
+        Map<String, Map<String, V>> copy =
+                new LinkedHashMap<String, Map<String, V>>();
+        for (Map.Entry<String, Map<String, V>> entry
+                : Objects.requireNonNull(source, label).entrySet()) {
+            copy.put(
+                    Objects.requireNonNull(entry.getKey(), label + " key"),
+                    Collections.unmodifiableMap(
+                            new LinkedHashMap<String, V>(Objects.requireNonNull(
+                                    entry.getValue(), label + " value"))));
+        }
+        return Collections.unmodifiableMap(copy);
+    }
+
+    private static void requireNonNegativeSizes(
+            Map<String, Long> sizes,
+            String label) {
+        for (Map.Entry<String, Long> entry : sizes.entrySet()) {
+            Long size = Objects.requireNonNull(
+                    entry.getValue(), label + " value");
+            if (size.longValue() < 0L) {
+                throw new IllegalArgumentException(
+                        label + " must be non-negative");
+            }
+        }
     }
 
     private static <K, V> Map<K, V> immutableMap(

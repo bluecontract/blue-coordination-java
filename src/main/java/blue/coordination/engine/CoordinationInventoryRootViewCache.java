@@ -6,6 +6,7 @@ import blue.coordination.engine.fastpath.RetainedNodeWeight;
 import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.model.Node;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -198,6 +199,19 @@ final class CoordinationInventoryRootViewCache {
                 evictionCount,
                 maximumWeightBytes,
                 retainedWeightBytes);
+    }
+
+    /**
+     * Captures only values which are already inside this cache's hard entry
+     * and byte bounds. Checkpointing must never turn cache misses into an
+     * eager, tenant-wide Root materialization pass.
+     */
+    synchronized Map<String, Node> snapshotRetainedRoots() {
+        Map<String, Node> snapshot = new LinkedHashMap<String, Node>();
+        for (Map.Entry<String, Entry> retained : roots.entrySet()) {
+            snapshot.put(retained.getKey(), retained.getValue().root.clone());
+        }
+        return Collections.unmodifiableMap(snapshot);
     }
 
     private void installEntry(

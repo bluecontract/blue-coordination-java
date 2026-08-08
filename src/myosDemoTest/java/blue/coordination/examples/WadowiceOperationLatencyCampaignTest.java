@@ -2,6 +2,7 @@ package blue.coordination.examples;
 
 import blue.coordination.engine.memory.CoordinationEventAdmissionMetrics;
 import blue.coordination.examples.scenarios.WadowiceHotelDinnerScenario;
+import blue.coordination.examples.scenarios.WadowicePreparedFixture;
 import blue.coordination.examples.support.MyOsDemoAssertions;
 import blue.coordination.examples.support.MyOsDemoCheckpoint;
 import blue.coordination.examples.support.MyOsDemoDispatch;
@@ -30,6 +31,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 final class WadowiceOperationLatencyCampaignTest {
 
     private static final int OPERATION_COUNT = 17;
+    private static final long COMPLETE_CAMPAIGN_MAXIMUM_NANOS =
+            Duration.ofSeconds(20).toNanos();
 
     @Test
     @Tag("performance")
@@ -39,19 +42,34 @@ final class WadowiceOperationLatencyCampaignTest {
         int requestedSamples = Integer.getInteger(
                 "coordination.performance.operation.samples",
                 WadowiceLatencyEvidence.REQUIRED_SAMPLE_COUNT);
+        WadowicePreparedFixture fixture = WadowicePreparedFixture.shared();
         CampaignOutcome correctness = runCampaign(
-                -1, null, new LinkedHashMap<>());
-        WadowiceLatencyEvidence evidence = new WadowiceLatencyEvidence(
+                fixture, -1, null, new LinkedHashMap<>());
+        WadowiceLatencyEvidence evidence =
+                WadowiceLatencyEvidence.rootAlignedCampaign(
                 "wadowice-all-17-operations",
                 "campaign",
-                WadowiceLatencyEvidence.REQUIRED_SAMPLE_COUNT);
+                WadowiceLatencyEvidence.REQUIRED_SAMPLE_COUNT,
+                COMPLETE_CAMPAIGN_MAXIMUM_NANOS);
         Map<String, List<Long>> rawByOperation = new LinkedHashMap<>();
+        List<Long> rawCampaignTotals = new ArrayList<>();
         List<String> semanticFailures = new ArrayList<>();
 
         // when
         for (int iteration = 0; iteration < requestedSamples; iteration++) {
-            CampaignOutcome measured = runCampaign(
-                    iteration, evidence, rawByOperation);
+            AtomicReference<CampaignOutcome> captured =
+                    new AtomicReference<>();
+            int measuredIteration = iteration;
+            long campaignElapsedNanos = MyOsLatencyProbe.measureNanos(() ->
+                    captured.set(runCampaign(
+                            fixture,
+                            measuredIteration,
+                            evidence,
+                            rawByOperation)));
+            CampaignOutcome measured = Objects.requireNonNull(
+                    captured.get(), "measured campaign");
+            evidence.addCampaignTotal(iteration, campaignElapsedNanos);
+            rawCampaignTotals.add(campaignElapsedNanos);
             if (!correctness.equals(measured)) {
                 semanticFailures.add("iteration " + iteration
                         + " differs from the correctness campaign");
@@ -61,7 +79,10 @@ final class WadowiceOperationLatencyCampaignTest {
         Map<String, Object> reference = correctnessReference(correctness);
         Path artifact = evidence.write(
                 semanticFailures.isEmpty(), reference);
-        List<String> latencyFailures = latencyFailures(rawByOperation);
+        List<String> latencyFailures = latencyFailures(
+                rawByOperation,
+                rawCampaignTotals,
+                correctness);
 
         // then
         assertEquals(OPERATION_COUNT, correctness.operations().size());
@@ -76,11 +97,12 @@ final class WadowiceOperationLatencyCampaignTest {
                 () -> "campaign semantics changed: " + semanticFailures
                         + "; evidence=" + artifact);
         assertTrue(latencyFailures.isEmpty(),
-                () -> "operation p95 failures=" + latencyFailures
+                () -> "root-aligned latency failures=" + latencyFailures
                         + "; evidence=" + artifact);
     }
 
     private static CampaignOutcome runCampaign(
+            WadowicePreparedFixture fixture,
             int iteration,
             WadowiceLatencyEvidence evidence,
             Map<String, List<Long>> rawByOperation) {
@@ -88,7 +110,7 @@ final class WadowiceOperationLatencyCampaignTest {
         Map<String, String> finalStates = new LinkedHashMap<>();
         MyOsDemoCheckpoint outcomeCheckpoint;
         try (WadowiceHotelDinnerScenario source =
-                     WadowiceHotelDinnerScenario.create(
+                     fixture.beforePayNoteBranch(
                              caseId("source", iteration))) {
             operations.add(observe(
                     "attachPayNoteAsCustomer",
@@ -374,6 +396,7 @@ final class WadowiceOperationLatencyCampaignTest {
                 forbiddenReads,
                 coldFallbacks,
                 work,
+                null,
                 admission);
     }
 
@@ -391,7 +414,21 @@ final class WadowiceOperationLatencyCampaignTest {
         if (observation.localityFallbackReadCount() != 0L
                 || observation.forbiddenReadCount() != 0L
                 || observation.subscriptionProjectionColdFallbackCount()
-                != 0L) {
+                != 0L
+                || observation.work().projection()
+                        .coldProjectionFallbacks() != 0L
+                || observation.work().projection()
+                        .fullProjectorFallbacks() != 0L
+                || observation.work().projection()
+                        .catalogFallbacks() != 0L
+                || observation.work().fragmentTransition()
+                        .typedFallbackCount() != 0L
+                || observation.work().fragmentTransition()
+                        .fullBlueprintAttempts() != 0L
+                || observation.work().fragmentTransition()
+                        .fullResultClones() != 0L
+                || observation.work().fragmentTransition()
+                        .fullRootMaterializations() != 0L) {
             throw new IllegalStateException(
                     operation + " used a forbidden cold fallback");
         }
@@ -429,24 +466,75 @@ final class WadowiceOperationLatencyCampaignTest {
                                 operation.operation(),
                                 operation.roots().size()),
                         LinkedHashMap::putAll));
+        Map<String, Long> budget = new LinkedHashMap<>();
+        budget.put("oneRootP95Nanos",
+                WadowiceLatencyEvidence.ONE_ROOT_P95_NANOS);
+        budget.put("oneRootMaximumNanos",
+                WadowiceLatencyEvidence.ONE_ROOT_MAXIMUM_NANOS);
+        budget.put("twoRootP95Nanos",
+                WadowiceLatencyEvidence.TWO_ROOT_P95_NANOS);
+        budget.put("twoRootMaximumNanos",
+                WadowiceLatencyEvidence.TWO_ROOT_MAXIMUM_NANOS);
+        budget.put("completeCampaignMaximumNanos",
+                COMPLETE_CAMPAIGN_MAXIMUM_NANOS);
+        result.put("latencyBudget", budget);
         result.put("finalStateFingerprints", outcome.finalStates());
         return result;
     }
 
     private static List<String> latencyFailures(
-            Map<String, List<Long>> rawByOperation) {
+            Map<String, List<Long>> rawByOperation,
+            List<Long> rawCampaignTotals,
+            CampaignOutcome correctness) {
+        Map<String, Integer> rootCounts = new LinkedHashMap<>();
+        for (OperationSignature operation : correctness.operations()) {
+            rootCounts.put(operation.operation(), operation.roots().size());
+        }
         List<String> failures = new ArrayList<>();
         for (Map.Entry<String, List<Long>> entry
                 : rawByOperation.entrySet()) {
             long p95 = MyOsLatencyProbe.percentile(
                     entry.getValue(), 0.95d);
-            if (p95 > Duration.ofSeconds(1).toNanos()) {
-                failures.add(entry.getKey() + "=" + p95 + "ns");
+            long maximum = Collections.max(entry.getValue());
+            Integer roots = rootCounts.get(entry.getKey());
+            long p95Budget = roots != null && roots.intValue() == 1
+                    ? WadowiceLatencyEvidence.ONE_ROOT_P95_NANOS
+                    : roots != null && roots.intValue() == 2
+                    ? WadowiceLatencyEvidence.TWO_ROOT_P95_NANOS
+                    : -1L;
+            long maximumBudget = roots != null && roots.intValue() == 1
+                    ? WadowiceLatencyEvidence.ONE_ROOT_MAXIMUM_NANOS
+                    : roots != null && roots.intValue() == 2
+                    ? WadowiceLatencyEvidence.TWO_ROOT_MAXIMUM_NANOS
+                    : -1L;
+            if (p95Budget < 0L || maximumBudget < 0L) {
+                failures.add(entry.getKey()
+                        + " has unsupported affectedRootCount=" + roots);
+            } else {
+                if (p95 > p95Budget) {
+                    failures.add(entry.getKey() + " p95=" + p95
+                            + "ns > " + p95Budget + "ns");
+                }
+                if (maximum > maximumBudget) {
+                    failures.add(entry.getKey() + " max=" + maximum
+                            + "ns > " + maximumBudget + "ns");
+                }
             }
             if (entry.getValue().size()
                     < WadowiceLatencyEvidence.REQUIRED_SAMPLE_COUNT) {
                 failures.add(entry.getKey() + " has only "
                         + entry.getValue().size() + " samples");
+            }
+        }
+        if (rawCampaignTotals.size()
+                < WadowiceLatencyEvidence.REQUIRED_SAMPLE_COUNT) {
+            failures.add("complete campaign has only "
+                    + rawCampaignTotals.size() + " samples");
+        } else {
+            long maximumCampaign = Collections.max(rawCampaignTotals);
+            if (maximumCampaign > COMPLETE_CAMPAIGN_MAXIMUM_NANOS) {
+                failures.add("complete campaign max=" + maximumCampaign
+                        + "ns > " + COMPLETE_CAMPAIGN_MAXIMUM_NANOS + "ns");
             }
         }
         return Collections.unmodifiableList(failures);

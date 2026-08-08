@@ -1,6 +1,7 @@
 package blue.coordination.examples.support;
 
 import blue.coordination.engine.api.CommitOutcome;
+import blue.coordination.engine.api.CoordinationDeliveryReceipt;
 import blue.coordination.engine.api.CoordinationFragmentTransition;
 import blue.coordination.engine.api.CoordinationProcessingPlan;
 import blue.coordination.engine.api.CoordinationTransition;
@@ -237,6 +238,51 @@ final class MyOsOperationTimingRecorder
         operation.put("processObserved", true);
     }
 
+    /** Binds the dispatch ledger's authoritative attempt receipt to its Root. */
+    void recordReceipt(
+            MyOsDemoEntry entry,
+            CoordinationDeliveryReceipt receipt) {
+        if (!enabled) return;
+        CoordinationDeliveryReceipt checked = Objects.requireNonNull(
+                receipt, "receipt");
+        Map<String, Object> operation = requireOperation(entry);
+        String sessionId = checked.sessionId().value();
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> deliveries =
+                (List<Map<String, Object>>) operation.get("deliveries");
+        Map<String, Object> matching = null;
+        synchronized (this) {
+            for (Map<String, Object> delivery : deliveries) {
+                if (sessionId.equals(delivery.get("sessionId"))) {
+                    if (matching != null) {
+                        throw new IllegalStateException(
+                                "Duplicate timing delivery for session "
+                                        + sessionId);
+                    }
+                    matching = delivery;
+                }
+            }
+            if (matching == null) {
+                throw new IllegalStateException(
+                        "Receipt has no timed delivery for session "
+                                + sessionId);
+            }
+            matching.put("attempt", checked.attemptCount());
+            matching.put("receiptStatus", checked.status().name());
+            matching.put("receiptPlannedEpoch", checked.plannedEpoch());
+            matching.put("receiptPlannedRootBlueId",
+                    checked.plannedRootBlueId());
+            matching.put("receiptPlannedSubscriptionIdentity",
+                    checked.plannedSubscriptionSnapshotIdentity());
+            matching.put("receiptResultingEpoch",
+                    checked.resultingEpoch().orElse(null));
+            matching.put("receiptResultingRootBlueId",
+                    checked.resultingRootBlueId().orElse(null));
+            matching.put("receiptTransitionIdentity",
+                    checked.transitionIdentity().orElse(null));
+        }
+    }
+
     void labelNextOperation(String sampleKind) {
         if (!enabled) return;
         String checked = Objects.requireNonNull(
@@ -261,6 +307,29 @@ final class MyOsOperationTimingRecorder
             CoordinationProcessingPlan plan,
             long elapsedNanos) {
         recordEnginePhase("indexedPlan", elapsedNanos);
+        DeliveryTiming timing = activeDelivery.get();
+        if (enabled && timing != null) {
+            timing.delivery.put(
+                    "sessionId", plan.session().sessionId().value());
+            timing.delivery.put(
+                    "rootBefore", plan.session().currentRootBlueId());
+            timing.delivery.put(
+                    "inventoryBefore",
+                    plan.rootInventory().inventoryIdentity());
+            timing.delivery.put("planIdentity", plan.planIdentity());
+            timing.delivery.put(
+                    "subscriptionDigest",
+                    plan.session().subscriptions().digest());
+            timing.delivery.put(
+                    "subscriptionDigestBefore",
+                    plan.session().subscriptions().digest());
+            timing.delivery.put(
+                    "requiredSeedIdentityCount",
+                    plan.requiredSeedBlueIds().size());
+            timing.delivery.put(
+                    "preferredPrefetchIdentityCount",
+                    plan.preferredPrefetchBlueIds().size());
+        }
     }
 
     @Override
@@ -275,6 +344,9 @@ final class MyOsOperationTimingRecorder
             timing.delivery.put(
                     "backendLoadedIdentityCount",
                     bundle.backendLoadedBlueIds().size());
+            timing.delivery.put(
+                    "boundPrefetchIdentityCount",
+                    bundle.prefetchedBlueIds().size());
             timing.delivery.put("loadedBytes", bundle.loadedBytes());
         }
     }
@@ -389,6 +461,33 @@ final class MyOsOperationTimingRecorder
     public void onProcessComplete(CoordinationTransition transition) {
         DeliveryTiming timing = activeDelivery.get();
         if (!enabled || timing == null) return;
+        PlatformProcessingResult platform = transition.platformResult();
+        timing.delivery.put("processorStatus", transition.status().name());
+        timing.delivery.put("rootAfter", transition.afterRootBlueId());
+        timing.delivery.put(
+                "inventoryAfter",
+                transition.fragmentTransition()
+                        .resultingInventory().inventoryIdentity());
+        timing.delivery.put(
+                "transitionIdentity",
+                transition.commitPlan().transitionIdentity());
+        timing.delivery.put(
+                "subscriptionDigestAfter",
+                transition.commitPlan().subscriptionUpdate()
+                        .snapshot().digest());
+        timing.delivery.put(
+                "totalGas", platform.processResult().totalGas());
+        timing.delivery.put(
+                "outboxEventBlueIds",
+                transition.commitPlan().rootOutboxEventBlueIds());
+        timing.delivery.put(
+                "reusedFragmentCount",
+                transition.fragmentTransition()
+                        .reusedFragmentBlueIds().size());
+        timing.delivery.put(
+                "resultFragmentCount",
+                transition.fragmentTransition()
+                        .resultingInventory().fragmentBlueIds().size());
         timing.delivery.put(
                 "fallbackReadCount",
                 transition.locality().fallbackReadCount());
@@ -405,6 +504,10 @@ final class MyOsOperationTimingRecorder
         recordEnginePhase("commit", elapsedNanos);
         DeliveryTiming timing = activeDelivery.get();
         if (enabled && timing != null) {
+            timing.delivery.put("receiptStatus", outcome.status().name());
+            timing.delivery.put(
+                    "receiptTransitionIdentity",
+                    outcome.transitionIdentity());
             timing.delivery.put("engineCommitEndedNanos", System.nanoTime());
         }
     }
@@ -483,6 +586,8 @@ final class MyOsOperationTimingRecorder
         metadata.put("availableProcessors",
                 Runtime.getRuntime().availableProcessors());
         metadata.put("maxHeapBytes", Runtime.getRuntime().maxMemory());
+        metadata.put("jvmFlags", new ArrayList<>(
+                ManagementFactory.getRuntimeMXBean().getInputArguments()));
         metadata.put("gcCollectors",
                 ManagementFactory.getGarbageCollectorMXBeans().stream()
                         .map(bean -> bean.getName())

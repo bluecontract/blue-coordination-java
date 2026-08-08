@@ -1,0 +1,53 @@
+name: Alice and Bob Counter
+counter: 0
+contracts:
+  aliceChannel:
+    description: Alice may increment the Counter
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/basic-counter/alice
+    actor:
+      type: MyOS/Principal Actor
+      accountId: alice
+  bobChannel:
+    description: Bob may decrement the Counter
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/basic-counter/bob
+    actor:
+      type: MyOS/Principal Actor
+      accountId: bob
+  increment:
+    type: Coordination/Sequential Workflow Operation
+    channel: aliceChannel
+    request:
+      amount: {type: Integer}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /counter
+              val:
+                $add:
+                  - $document: /counter
+                  - $binding: event/message/request/amount
+          - $return: true
+  decrement:
+    type: Coordination/Sequential Workflow Operation
+    channel: bobChannel
+    request:
+      amount: {type: Integer}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /counter
+              val:
+                $subtract:
+                  - $document: /counter
+                  - $binding: event/message/request/amount
+          - $return: true

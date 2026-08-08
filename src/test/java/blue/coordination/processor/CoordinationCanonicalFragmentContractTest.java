@@ -344,6 +344,36 @@ class CoordinationCanonicalFragmentContractTest {
     }
 
     @Test
+    void shouldCanonicalizeObjectOrderInPhysicalFragmentEvidence() {
+        // given
+        Node first = new Node().properties(
+                "alpha", scalar("one"),
+                "beta", scalar("two"));
+        Node reordered = new Node().properties(
+                "beta", scalar("two"),
+                "alpha", scalar("one"));
+
+        // when
+        CoordinationFragmentAdmissionVerifier.PhysicalFragmentEvidence
+                firstEvidence = CoordinationFragmentAdmissionVerifier
+                .physicalFragmentEvidence(first);
+        CoordinationFragmentAdmissionVerifier.PhysicalFragmentEvidence
+                reorderedEvidence = CoordinationFragmentAdmissionVerifier
+                .physicalFragmentEvidence(reordered);
+
+        // then
+        assertEquals(
+                DirectBlueIdCalculator.calculateBlueId(first),
+                DirectBlueIdCalculator.calculateBlueId(reordered));
+        assertEquals(
+                firstEvidence.fingerprint(),
+                reorderedEvidence.fingerprint());
+        assertEquals(
+                firstEvidence.encodedSizeBytes(),
+                reorderedEvidence.encodedSizeBytes());
+    }
+
+    @Test
     void shouldRejectInconsistentConcurrentAdmissionWinner() {
         // given
         Node child = new Node().properties(

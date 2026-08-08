@@ -2,6 +2,7 @@ package blue.coordination.processor.delivery;
 
 import blue.coordination.engine.CoordinationProcessingEngine
         .AdmittedPlanningAuthority;
+import blue.coordination.processor.CoordinationSubscriptionMerkleIndex;
 import blue.language.model.Node;
 import blue.language.processor.BlueContracts;
 import blue.language.processor.ExternalChannelDependencySnapshot;
@@ -13,6 +14,7 @@ import blue.language.processor.IndexedDeliveryDiagnostic;
 import blue.language.processor.IndexedDeliveryPreparation;
 import blue.language.processor.InvalidExecutionEvidenceException;
 import blue.language.processor.PlatformProcessingResult;
+import blue.language.processor.PlatformProcessInvocation;
 import blue.language.processor.SubscriptionDelta;
 import blue.language.processor.VerifiedExecutionEvidence;
 import blue.language.processor.registry.RuntimeBlueIds;
@@ -24,6 +26,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -214,20 +217,28 @@ public final class CoordinationIndexedDeliveryEngine {
                 eventOrderKey, "eventOrderKey");
         IndexedActiveSurface surface = Objects.requireNonNull(
                 activeSurface, "activeSurface");
-        Map<ExternalSubscriptionOccurrenceKey,
-                CoordinationSubscriptionOccurrenceView> occurrences =
-                surface.occurrences;
         List<ExternalSubscriptionOccurrenceKey> candidateKeys =
                 surface.candidateKeys(indexedCandidateOccurrenceKeys);
 
-        IndexedDeliveryPreparation indexed = indexedDeliveryEvaluator()
-                .prepare(
-                        exactRoot,
-                        exactEvent,
-                        rootRevision,
-                        exactOrder,
-                        surface.intervals,
-                        candidateKeys);
+        final IndexedDeliveryPreparation indexed;
+        try {
+            indexed = indexedDeliveryEvaluator().prepare(
+                    exactRoot,
+                    exactEvent,
+                    rootRevision,
+                    exactOrder,
+                    surface.intervals,
+                    candidateKeys);
+        } catch (InvalidExecutionEvidenceException invalidCandidates) {
+            throw classifiedCandidateFailure(
+                    invalidCandidates,
+                    exactRoot,
+                    exactEvent,
+                    rootRevision,
+                    exactOrder,
+                    surface,
+                    candidateKeys);
+        }
         ExternalDeliveryPlan plan = indexed.deliveryPlan();
         Map<ExternalSubscriptionOccurrenceKey, IndexedDeliveryDiagnostic>
                 diagnosticByOccurrence = new LinkedHashMap<>();
@@ -246,7 +257,7 @@ public final class CoordinationIndexedDeliveryEngine {
                             delivery.scopePath(),
                             delivery.channelKey());
             CoordinationSubscriptionOccurrenceView occurrence =
-                    occurrences.get(key);
+                    surface.occurrence(key);
             IndexedDeliveryDiagnostic diagnostic =
                     diagnosticByOccurrence.get(key);
             if (occurrence == null || diagnostic == null
@@ -302,9 +313,108 @@ public final class CoordinationIndexedDeliveryEngine {
                 Objects.requireNonNull(evidence, "evidence"));
     }
 
+    /**
+     * Processes the evaluator-bound plan through one strict request-local
+     * provider. Unlike reconstructed public evidence, the plan retains the
+     * frozen Contracts generation identity established by the indexed
+     * evaluator itself.
+     */
+    public PlatformProcessingResult processForPlatformCommit(
+            Node root,
+            Node event,
+            ExternalDeliveryPlan plan,
+            NodeProvider exactProvider) {
+        PlatformProcessInvocation invocation =
+                PlatformProcessInvocation.builder()
+                        .deliveryPlan(Objects.requireNonNull(
+                                plan, "plan"))
+                        .nodeProvider(Objects.requireNonNull(
+                                exactProvider, "exactProvider"))
+                        .build();
+        return contracts.processForPlatformCommit(
+                Objects.requireNonNull(root, "root"),
+                Objects.requireNonNull(event, "event"),
+                invocation);
+    }
+
     private blue.language.processor.IndexedDeliveryEvaluator
     indexedDeliveryEvaluator() {
         return contracts.indexedDeliveryEvaluator();
+    }
+
+    /*
+     * Frozen Contracts deliberately reports one generic mismatch for an
+     * inexact physical candidate vector. Keep the successful path single-pass,
+     * but classify that already-failed request through the public compatibility
+     * deriver so Coordination's persistence boundary exposes a stable and
+     * actionable omission/extra/order diagnostic. If independent derivation
+     * cannot establish the distinction, preserve the authoritative failure.
+     */
+    private InvalidExecutionEvidenceException classifiedCandidateFailure(
+            InvalidExecutionEvidenceException original,
+            Node root,
+            Node event,
+            long rootRevision,
+            ExternalOrderKey eventOrderKey,
+            IndexedActiveSurface surface,
+            List<ExternalSubscriptionOccurrenceKey> supplied) {
+        String message = original.getMessage();
+        if (message == null
+                || !message.contains(
+                        "candidate occurrence list does not match")) {
+            return original;
+        }
+        final ExternalDeliveryPlan expectedPlan;
+        try {
+            expectedPlan = contracts.currentRootDeliveryPlanDeriver(
+                            rootRevision,
+                            eventOrderKey,
+                            surface.intervals)
+                    .derive(root, event);
+        } catch (RuntimeException unavailableClassification) {
+            return original;
+        }
+        List<ExternalSubscriptionOccurrenceKey> expected =
+                new ArrayList<ExternalSubscriptionOccurrenceKey>();
+        for (ExternalDeliverySnapshot delivery
+                : expectedPlan.deliveries()) {
+            expected.add(ExternalSubscriptionOccurrenceKey.of(
+                    delivery.scopePath(), delivery.channelKey()));
+        }
+        if (expected.equals(supplied)) {
+            return original;
+        }
+        Set<ExternalSubscriptionOccurrenceKey> expectedSet =
+                new LinkedHashSet<ExternalSubscriptionOccurrenceKey>(
+                        expected);
+        Set<ExternalSubscriptionOccurrenceKey> suppliedSet =
+                new LinkedHashSet<ExternalSubscriptionOccurrenceKey>(
+                        supplied);
+        Set<ExternalSubscriptionOccurrenceKey> omitted =
+                new LinkedHashSet<ExternalSubscriptionOccurrenceKey>(
+                        expectedSet);
+        omitted.removeAll(suppliedSet);
+        Set<ExternalSubscriptionOccurrenceKey> extras =
+                new LinkedHashSet<ExternalSubscriptionOccurrenceKey>(
+                        suppliedSet);
+        extras.removeAll(expectedSet);
+        if (omitted.isEmpty() && extras.isEmpty()) {
+            return invalid(
+                    "Indexed candidates are in the wrong canonical order");
+        }
+        if (!omitted.isEmpty() && extras.isEmpty()) {
+            return invalid(
+                    "Indexed candidate list omits canonical occurrences: "
+                            + omitted);
+        }
+        if (omitted.isEmpty()) {
+            return invalid(
+                    "Indexed candidate list contains illegal extras: "
+                            + extras);
+        }
+        return invalid(
+                "Indexed candidate list both omits canonical occurrences "
+                        + omitted + " and contains illegal extras " + extras);
     }
 
     private static CoordinationDeliveryDiagnosticView publicDiagnostic(
@@ -503,6 +613,8 @@ public final class CoordinationIndexedDeliveryEngine {
         private final Map<String, ExternalSubscriptionOccurrenceKey>
                 occurrenceKeysByPublicKey;
         private final List<SubscriptionDelta.Entry> intervals;
+        private final CoordinationSubscriptionMerkleIndex
+                .PersistentOccurrenceList persistentOccurrences;
 
         private IndexedActiveSurface(
                 Map<ExternalSubscriptionOccurrenceKey,
@@ -521,6 +633,31 @@ public final class CoordinationIndexedDeliveryEngine {
                             occurrenceKeysByPublicKey));
             this.intervals = Collections.unmodifiableList(
                     new ArrayList<SubscriptionDelta.Entry>(intervals));
+            this.persistentOccurrences = null;
+        }
+
+        private IndexedActiveSurface(
+                CoordinationSubscriptionMerkleIndex
+                        .PersistentOccurrenceList occurrences) {
+            this.occurrences = Collections.emptyMap();
+            this.occurrenceKeysByPublicKey = Collections.emptyMap();
+            this.persistentOccurrences = Objects.requireNonNull(
+                    occurrences, "occurrences");
+            this.intervals = Collections.unmodifiableList(
+                    new AbstractList<SubscriptionDelta.Entry>() {
+                        @Override
+                        public SubscriptionDelta.Entry get(int index) {
+                            return IndexedActiveSurface.this
+                                    .persistentOccurrences.get(index)
+                                    .toSubscriptionDeltaEntry();
+                        }
+
+                        @Override
+                        public int size() {
+                            return IndexedActiveSurface.this
+                                    .persistentOccurrences.size();
+                        }
+                    });
         }
 
         /** Builds and verifies exact active-surface indexes once. */
@@ -528,6 +665,12 @@ public final class CoordinationIndexedDeliveryEngine {
                 Collection<? extends CoordinationSubscriptionOccurrenceView>
                         supplied) {
             Objects.requireNonNull(supplied, "activeOccurrences");
+            if (supplied instanceof CoordinationSubscriptionMerkleIndex
+                    .PersistentOccurrenceList) {
+                return new IndexedActiveSurface(
+                        (CoordinationSubscriptionMerkleIndex
+                                .PersistentOccurrenceList) supplied);
+            }
             Map<ExternalSubscriptionOccurrenceKey,
                     CoordinationSubscriptionOccurrenceView> occurrences =
                     new LinkedHashMap<>();
@@ -577,8 +720,13 @@ public final class CoordinationIndexedDeliveryEngine {
                             "Duplicate indexed candidate occurrence: "
                                     + publicKey);
                 }
-                ExternalSubscriptionOccurrenceKey key =
-                        occurrenceKeysByPublicKey.get(publicKey);
+                CoordinationSubscriptionOccurrenceView occurrence =
+                        occurrence(publicKey);
+                ExternalSubscriptionOccurrenceKey key = occurrence == null
+                        ? null
+                        : ExternalSubscriptionOccurrenceKey.of(
+                                occurrence.scopePath(),
+                                occurrence.channelKey());
                 if (key == null) {
                     throw invalid(
                             "Indexed candidate is absent or stale in the "
@@ -587,6 +735,25 @@ public final class CoordinationIndexedDeliveryEngine {
                 result.add(key);
             }
             return Collections.unmodifiableList(result);
+        }
+
+        private CoordinationSubscriptionOccurrenceView occurrence(
+                String publicKey) {
+            return persistentOccurrences != null
+                    ? persistentOccurrences.occurrence(publicKey)
+                    : occurrenceFor(occurrenceKeysByPublicKey.get(publicKey));
+        }
+
+        private CoordinationSubscriptionOccurrenceView occurrence(
+                ExternalSubscriptionOccurrenceKey key) {
+            return persistentOccurrences != null
+                    ? persistentOccurrences.occurrence(key)
+                    : occurrenceFor(key);
+        }
+
+        private CoordinationSubscriptionOccurrenceView occurrenceFor(
+                ExternalSubscriptionOccurrenceKey key) {
+            return key == null ? null : occurrences.get(key);
         }
     }
 

@@ -1,11 +1,16 @@
 package blue.coordination.engine.fastpath;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
@@ -13,9 +18,10 @@ import java.util.function.Supplier;
  * session generation.
  *
  * <p>Context construction is single-flight per exact key and runs outside
- * the cache monitor. Failed builds are never retained. A context larger than
- * the entire byte budget is returned to its current callers but is not
- * cached.</p>
+ * the cache monitor. Running and retained generations share the entry cap;
+ * admission evicts retained LRU contexts and fails fast when every slot is
+ * running. Failed builds are never retained. A context larger than the entire
+ * byte budget is returned to its current callers but is not cached.</p>
  */
 public final class PreparedRootContextCache {
     public static final long DEFAULT_MAXIMUM_WEIGHT_BYTES =
@@ -24,13 +30,22 @@ public final class PreparedRootContextCache {
     private final int maximumSize;
     private final long maximumWeightBytes;
     private final LinkedHashMap<Key, Entry> entries;
-    private final Map<Key, CompletableFuture<PreparedRootExecutionContext>>
-            inFlight;
+    private final Map<Key, Flight> inFlight;
     private final Map<String, Generation> authoritativeBySession;
     private long retainedWeightBytes;
     private long hits;
     private long misses;
     private long evictions;
+    private long builds;
+    private long coalesced;
+    private long failures;
+    private long rejections;
+    private int currentInFlight;
+    private int peakInFlight;
+    private int peakTotalSize;
+    private int peakRetainedSize;
+    private long peakRetainedWeightBytes;
+    private int peakAuthoritativeGenerations;
 
     public PreparedRootContextCache(int maximumSize) {
         this(maximumSize, DEFAULT_MAXIMUM_WEIGHT_BYTES);
@@ -49,10 +64,10 @@ public final class PreparedRootContextCache {
         this.maximumWeightBytes = maximumWeightBytes;
         this.entries = new LinkedHashMap<Key, Entry>(
                 Math.min(16, maximumSize), 0.75f, true);
-        this.inFlight = new LinkedHashMap<Key, CompletableFuture<
-                PreparedRootExecutionContext>>();
+        this.inFlight = new LinkedHashMap<Key, Flight>();
         this.authoritativeBySession =
-                new LinkedHashMap<String, Generation>();
+                new LinkedHashMap<String, Generation>(
+                        Math.min(16, maximumSize), 0.75f, true);
     }
 
     public synchronized PreparedRootExecutionContext get(
@@ -80,17 +95,25 @@ public final class PreparedRootContextCache {
         if (ready != null) return ready;
         Supplier<PreparedRootExecutionContext> checkedBuilder =
                 Objects.requireNonNull(builder, "builder");
-        CompletableFuture<PreparedRootExecutionContext> future;
+        Flight flight;
         boolean owner;
         synchronized (this) {
             Entry race = entries.get(key);
             if (race != null) return race.context;
-            future = inFlight.get(key);
-            owner = future == null;
+            flight = inFlight.get(key);
+            owner = flight == null;
             if (owner) {
-                future = new CompletableFuture<
-                        PreparedRootExecutionContext>();
-                inFlight.put(key, future);
+                admitFlightLocked();
+                flight = new Flight();
+                inFlight.put(key, flight);
+                currentInFlight++;
+                builds++;
+                peakInFlight = Math.max(
+                        peakInFlight, currentInFlight);
+                peakTotalSize = Math.max(
+                        peakTotalSize, totalSizeLocked());
+            } else {
+                coalesced++;
             }
         }
         if (owner) {
@@ -105,24 +128,32 @@ public final class PreparedRootContextCache {
                     throw new IllegalArgumentException(
                             "Built context changed session generation");
                 }
+                PreparedRootExecutionContext result;
                 synchronized (this) {
                     Entry race = entries.get(key);
-                    PreparedRootExecutionContext result = race == null
+                    result = flight.invalidated || race == null
                             ? built : race.context;
-                    if (race == null) installBuiltLocked(key, built);
-                    inFlight.remove(key, future);
-                    future.complete(result);
+                    boolean mayRetain = !flight.invalidated
+                            && inFlight.get(key) == flight;
+                    inFlight.remove(key, flight);
+                    finishFlightLocked(flight);
+                    if (race == null && mayRetain) {
+                        installBuiltLocked(key, built);
+                    }
                 }
+                flight.future.complete(result);
             } catch (Throwable failure) {
                 synchronized (this) {
-                    inFlight.remove(key, future);
-                    future.completeExceptionally(failure);
+                    failures++;
+                    inFlight.remove(key, flight);
+                    finishFlightLocked(flight);
                 }
+                flight.future.completeExceptionally(failure);
                 throw propagate(failure);
             }
         }
         try {
-            return future.join();
+            return flight.future.join();
         } catch (CompletionException failure) {
             throw propagate(failure.getCause());
         }
@@ -166,7 +197,17 @@ public final class PreparedRootContextCache {
                 sessionId, epoch, rootBlueId, inventoryIdentity);
         Generation current = authoritativeBySession.get(next.sessionId);
         if (current != null && current.epoch > next.epoch) return;
+        if (current == null
+                && authoritativeBySession.size() >= maximumSize) {
+            Iterator<Map.Entry<String, Generation>> eldest =
+                    authoritativeBySession.entrySet().iterator();
+            eldest.next();
+            eldest.remove();
+        }
         authoritativeBySession.put(next.sessionId, next);
+        peakAuthoritativeGenerations = Math.max(
+                peakAuthoritativeGenerations,
+                authoritativeBySession.size());
         Iterator<Map.Entry<Key, Entry>> iterator =
                 entries.entrySet().iterator();
         while (iterator.hasNext()) {
@@ -178,6 +219,8 @@ public final class PreparedRootContextCache {
                 evictions++;
             }
         }
+        invalidateFlightsLocked(key -> key.sessionId.equals(next.sessionId)
+                && !next.matches(key));
     }
 
     /** Removes one inactive session's cache entry and generation watermark. */
@@ -194,6 +237,7 @@ public final class PreparedRootContextCache {
                 evictions++;
             }
         }
+        invalidateFlightsLocked(key -> key.sessionId.equals(checked));
     }
 
     private boolean installIfNotOlderLocked(
@@ -217,42 +261,108 @@ public final class PreparedRootContextCache {
         }
         if (weight > maximumWeightBytes) return false;
         Key key = Key.of(checked);
-        Entry previous = entries.remove(key);
+        Entry previous = entries.get(key);
+        if (previous == null && !makeRetainedSlotLocked()) {
+            return false;
+        }
+        previous = entries.remove(key);
         if (previous != null) {
             retainedWeightBytes -= previous.weightBytes;
         }
-        evictUntilFits(weight);
+        evictUntilWeightFitsLocked(weight);
         entries.put(key, new Entry(checked, weight));
         retainedWeightBytes += weight;
+        peakRetainedSize = Math.max(peakRetainedSize, entries.size());
+        peakRetainedWeightBytes = Math.max(
+                peakRetainedWeightBytes, retainedWeightBytes);
+        peakTotalSize = Math.max(peakTotalSize, totalSizeLocked());
         return true;
     }
 
-    private void installBuiltLocked(
+    private boolean installBuiltLocked(
             Key key, PreparedRootExecutionContext built) {
         if (!key.equals(Key.of(built))) {
             throw new IllegalArgumentException(
                     "Built context changed cache key");
         }
-        installIfNotOlderLocked(built);
+        return installIfNotOlderLocked(built);
     }
 
-    private void evictUntilFits(long incomingWeightBytes) {
+    private void evictUntilWeightFitsLocked(long incomingWeightBytes) {
         while (!entries.isEmpty()
-                && (entries.size() >= maximumSize
-                || retainedWeightBytes
-                > maximumWeightBytes - incomingWeightBytes)) {
-            Iterator<Map.Entry<Key, Entry>> iterator =
-                    entries.entrySet().iterator();
-            Entry eldest = iterator.next().getValue();
-            iterator.remove();
-            retainedWeightBytes -= eldest.weightBytes;
-            evictions++;
+                && retainedWeightBytes
+                > maximumWeightBytes - incomingWeightBytes) {
+            evictEldestRetainedLocked();
         }
+    }
+
+    private void admitFlightLocked() {
+        while (totalSizeLocked() >= maximumSize) {
+            if (entries.isEmpty()) {
+                rejections++;
+                throw new RejectedExecutionException(
+                        "prepared-context cache capacity exhausted");
+            }
+            evictEldestRetainedLocked();
+        }
+    }
+
+    private boolean makeRetainedSlotLocked() {
+        while (totalSizeLocked() >= maximumSize) {
+            if (entries.isEmpty()) {
+                rejections++;
+                return false;
+            }
+            evictEldestRetainedLocked();
+        }
+        return true;
+    }
+
+    private void evictEldestRetainedLocked() {
+        Iterator<Map.Entry<Key, Entry>> iterator =
+                entries.entrySet().iterator();
+        if (!iterator.hasNext()) {
+            throw new IllegalStateException(
+                    "prepared-context eviction has no retained entry");
+        }
+        Entry eldest = iterator.next().getValue();
+        iterator.remove();
+        retainedWeightBytes -= eldest.weightBytes;
+        evictions++;
+    }
+
+    private void invalidateFlightsLocked(Predicate<Key> remove) {
+        Iterator<Map.Entry<Key, Flight>> iterator =
+                inFlight.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<Key, Flight> candidate = iterator.next();
+            if (!remove.test(candidate.getKey())) continue;
+            candidate.getValue().invalidated = true;
+            iterator.remove();
+        }
+    }
+
+    private void finishFlightLocked(Flight flight) {
+        if (flight.finished) return;
+        flight.finished = true;
+        currentInFlight--;
+        if (currentInFlight < 0) {
+            throw new IllegalStateException(
+                    "prepared-context in-flight accounting became negative");
+        }
+    }
+
+    private int totalSizeLocked() {
+        return Math.addExact(entries.size(), currentInFlight);
     }
 
     public synchronized long hits() { return hits; }
     public synchronized long misses() { return misses; }
     public synchronized int size() { return entries.size(); }
+    public synchronized int maximumSize() { return maximumSize; }
+    /** Includes invalidated generations still physically building. */
+    public synchronized int inFlightCount() { return currentInFlight; }
+    public synchronized int totalSize() { return totalSizeLocked(); }
     public synchronized long retainedWeightBytes() {
         return retainedWeightBytes;
     }
@@ -260,6 +370,46 @@ public final class PreparedRootContextCache {
         return maximumWeightBytes;
     }
     public synchronized long evictions() { return evictions; }
+    public synchronized long rejections() { return rejections; }
+
+    /**
+     * Immutable bounded view for checkpoint capture. This returns only
+     * contexts already resident in the LRU; it never awaits or triggers a
+     * builder and never expands the retained session set.
+     */
+    public synchronized List<PreparedRootExecutionContext>
+            retainedContextsSnapshot() {
+        List<PreparedRootExecutionContext> retained =
+                new ArrayList<PreparedRootExecutionContext>(entries.size());
+        for (Entry entry : entries.values()) {
+            retained.add(entry.context);
+        }
+        return Collections.unmodifiableList(retained);
+    }
+
+    /** Immutable operational evidence for the bounded cache generation. */
+    public synchronized Snapshot snapshot() {
+        return new Snapshot(
+                maximumSize,
+                maximumWeightBytes,
+                entries.size(),
+                retainedWeightBytes,
+                currentInFlight,
+                peakInFlight,
+                totalSizeLocked(),
+                peakTotalSize,
+                peakRetainedSize,
+                peakRetainedWeightBytes,
+                authoritativeBySession.size(),
+                peakAuthoritativeGenerations,
+                hits,
+                misses,
+                builds,
+                coalesced,
+                failures,
+                evictions,
+                rejections);
+    }
 
     private static String requireText(String value, String label) {
         String checked = Objects.requireNonNull(value, label);
@@ -277,6 +427,104 @@ public final class PreparedRootContextCache {
         if (failure instanceof Error) throw (Error) failure;
         return new IllegalStateException(
                 "Prepared context construction failed", failure);
+    }
+
+    /** Immutable Java-8-compatible cache evidence. */
+    public static final class Snapshot {
+        private final int maximumSize;
+        private final long maximumWeightBytes;
+        private final int size;
+        private final long retainedWeightBytes;
+        private final int inFlight;
+        private final int peakInFlight;
+        private final int totalSize;
+        private final int peakTotalSize;
+        private final int peakRetainedSize;
+        private final long peakRetainedWeightBytes;
+        private final int authoritativeGenerations;
+        private final int peakAuthoritativeGenerations;
+        private final long hits;
+        private final long misses;
+        private final long builds;
+        private final long coalesced;
+        private final long failures;
+        private final long evictions;
+        private final long rejections;
+
+        private Snapshot(
+                int maximumSize,
+                long maximumWeightBytes,
+                int size,
+                long retainedWeightBytes,
+                int inFlight,
+                int peakInFlight,
+                int totalSize,
+                int peakTotalSize,
+                int peakRetainedSize,
+                long peakRetainedWeightBytes,
+                int authoritativeGenerations,
+                int peakAuthoritativeGenerations,
+                long hits,
+                long misses,
+                long builds,
+                long coalesced,
+                long failures,
+                long evictions,
+                long rejections) {
+            this.maximumSize = maximumSize;
+            this.maximumWeightBytes = maximumWeightBytes;
+            this.size = size;
+            this.retainedWeightBytes = retainedWeightBytes;
+            this.inFlight = inFlight;
+            this.peakInFlight = peakInFlight;
+            this.totalSize = totalSize;
+            this.peakTotalSize = peakTotalSize;
+            this.peakRetainedSize = peakRetainedSize;
+            this.peakRetainedWeightBytes = peakRetainedWeightBytes;
+            this.authoritativeGenerations = authoritativeGenerations;
+            this.peakAuthoritativeGenerations =
+                    peakAuthoritativeGenerations;
+            this.hits = hits;
+            this.misses = misses;
+            this.builds = builds;
+            this.coalesced = coalesced;
+            this.failures = failures;
+            this.evictions = evictions;
+            this.rejections = rejections;
+        }
+
+        public int maximumSize() { return maximumSize; }
+        public long maximumWeightBytes() { return maximumWeightBytes; }
+        public int size() { return size; }
+        public long retainedWeightBytes() { return retainedWeightBytes; }
+        public int inFlight() { return inFlight; }
+        public int peakInFlight() { return peakInFlight; }
+        public int totalSize() { return totalSize; }
+        public int peakTotalSize() { return peakTotalSize; }
+        public int peakRetainedSize() { return peakRetainedSize; }
+        public long peakRetainedWeightBytes() {
+            return peakRetainedWeightBytes;
+        }
+        public int authoritativeGenerations() {
+            return authoritativeGenerations;
+        }
+        public int peakAuthoritativeGenerations() {
+            return peakAuthoritativeGenerations;
+        }
+        public long hits() { return hits; }
+        public long misses() { return misses; }
+        public long builds() { return builds; }
+        public long coalesced() { return coalesced; }
+        public long failures() { return failures; }
+        public long evictions() { return evictions; }
+        public long rejections() { return rejections; }
+    }
+
+    private static final class Flight {
+        private final CompletableFuture<PreparedRootExecutionContext> future =
+                new CompletableFuture<PreparedRootExecutionContext>();
+        private boolean invalidated;
+        private boolean finished;
     }
 
     private static final class Entry {
@@ -319,6 +567,13 @@ public final class PreparedRootContextCache {
                     && rootBlueId.equals(context.rootBlueId())
                     && inventoryIdentity.equals(
                             context.inventoryIdentity());
+        }
+
+        private boolean matches(Key key) {
+            return sessionId.equals(key.sessionId)
+                    && epoch == key.epoch
+                    && rootBlueId.equals(key.rootBlueId)
+                    && inventoryIdentity.equals(key.inventoryIdentity);
         }
     }
 

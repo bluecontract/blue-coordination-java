@@ -1,5 +1,6 @@
 package blue.coordination.examples.support;
 
+import blue.coordination.engine.api.CoordinationEventShapeMetrics;
 import blue.coordination.engine.memory.CoordinationEventAdmissionMetrics;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -16,7 +17,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 final class MyOsAppendFastPathTest {
 
     @Test
-    void shouldKeepPrimingCacheOnlyAndReuseItsCanonicalSplitOnAppend() {
+    void shouldSeparatePrototypeCompilationFromShapeCompiledAppend() {
         // given
         try (MyOsDemoRuntime demo = MyOsDemoRuntime.create(
                 "append-fast-path", "cache-only-prime")) {
@@ -27,6 +28,8 @@ final class MyOsAppendFastPathTest {
             int fragmentsBefore = demo.physicalFragmentCount();
             CoordinationEventAdmissionMetrics.Snapshot before =
                     demo.eventAdmissionMetrics();
+            CoordinationEventShapeMetrics.Snapshot shapeBefore =
+                    demo.eventShapeMetrics();
 
             // when
             timeline.prime(operation);
@@ -38,10 +41,25 @@ final class MyOsAppendFastPathTest {
             assertEquals(fragmentsBefore, demo.physicalFragmentCount());
             CoordinationEventAdmissionMetrics.Snapshot primed =
                     demo.eventAdmissionMetrics().minus(before);
+            CoordinationEventShapeMetrics.Snapshot shapeAfterPrime =
+                    demo.eventShapeMetrics();
             assertEquals(1, primed.fullEventSplits());
             assertEquals(1, primed.templateCompilations());
             assertEquals(0, primed.admittedFragments());
             assertEquals(0, primed.nodeMaterializations());
+            assertEquals(1L,
+                    shapeAfterPrime.templatesCompiled()
+                            - shapeBefore.templatesCompiled(),
+                    "priming compiles one authoritative prototype shape");
+            assertEquals(1L,
+                    shapeAfterPrime.instancesCompiled()
+                            - shapeBefore.instancesCompiled(),
+                    "exact priming instantiates that shape once");
+            assertEquals(1L,
+                    shapeAfterPrime.exactGraphsMaterialized()
+                            - shapeBefore.exactGraphsMaterialized());
+
+            MyOsWorkSnapshot workBeforeAppend = demo.work().snapshot();
 
             MyOsDemoEntry appended = demo.append(timeline, operation);
 
@@ -51,14 +69,40 @@ final class MyOsAppendFastPathTest {
             assertEquals(1, demo.canonicalStoredEventCount());
             CoordinationEventAdmissionMetrics.Snapshot actual =
                     demo.eventAdmissionMetrics().minus(before);
+            CoordinationEventShapeMetrics.Snapshot shapeAfterAppend =
+                    demo.eventShapeMetrics();
 
             // then
             assertEquals(1, actual.fullEventSplits(),
-                    "append must reuse the primed canonical split");
+                    "append must add no exact-event split beyond prototype "
+                            + "compilation");
+            assertEquals(0L,
+                    actual.fullEventSplits() - primed.fullEventSplits());
             assertEquals(1, actual.templateCompilations());
             assertTrue(actual.templateHits() >= 1L);
             assertTrue(actual.admittedFragments() > 0L);
             assertEquals(0, actual.winnerReadBacks());
+            assertEquals(0L, demo.work().snapshot()
+                    .minus(workBeforeAppend).eventSplits());
+            assertEquals(0L,
+                    shapeAfterAppend.templatesCompiled()
+                            - shapeAfterPrime.templatesCompiled());
+            assertEquals(1L,
+                    shapeAfterAppend.instancesCompiled()
+                            - shapeAfterPrime.instancesCompiled());
+            assertEquals(1L,
+                    shapeAfterAppend.exactGraphsMaterialized()
+                            - shapeAfterPrime.exactGraphsMaterialized());
+            assertTrue(shapeAfterAppend.directFragmentsRehashed()
+                    > shapeAfterPrime.directFragmentsRehashed());
+            assertTrue(shapeAfterAppend.staticFragmentsReused()
+                    > shapeAfterPrime.staticFragmentsReused());
+            assertEquals(0L,
+                    shapeAfterAppend.fullSplitterOracleRuns()
+                            - shapeAfterPrime.fullSplitterOracleRuns());
+            assertEquals(0L,
+                    shapeAfterAppend.oracleFailures()
+                            - shapeAfterPrime.oracleFailures());
             assertEquals(appended.blueId(),
                     demo.authoredEntries().get(0).blueId());
         }

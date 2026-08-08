@@ -1,7 +1,8 @@
 package blue.coordination.engine.api;
 
-import blue.coordination.engine.memory.BoundedSingleFlightCache;
 import blue.coordination.engine.memory.CoordinationEventAdmissionMetrics;
+import blue.coordination.fastpath.BoundedSingleFlightCache;
+import blue.coordination.fastpath.CacheMetrics;
 import blue.coordination.processor.CoordinationDocumentSplitter;
 import blue.coordination.processor.CoordinationFragmentAdmissionVerifier;
 import blue.language.identity.DirectBlueIdCalculator;
@@ -20,26 +21,10 @@ public final class CoordinationEventAdmissionCompiler {
     public static final long DEFAULT_FRAGMENT_CACHE_MAXIMUM_WEIGHT_BYTES =
             256L * 1024L * 1024L;
 
-    /* Fragment evidence is immutable and its key binds the complete engine,
-     * fragmentation, Language, and provider domain. Sharing this bounded
-     * cache across engine instances lets independent first-seen events reuse
-     * verified static descendants without sharing the exact event artifact.
-     * The event Root deliberately bypasses this cache, so a first-seen exact
-     * event still performs its own Root wire verification. */
-    private static final BoundedSingleFlightCache<
-            CoordinationFragmentEvidenceCacheKey,
-            CoordinationCanonicalFragment> SHARED_FRAGMENT_EVIDENCE =
-            new BoundedSingleFlightCache<
-                    CoordinationFragmentEvidenceCacheKey,
-                    CoordinationCanonicalFragment>(
-                    16_384,
-                    DEFAULT_FRAGMENT_CACHE_MAXIMUM_WEIGHT_BYTES,
-                    CoordinationCanonicalFragment
-                            ::approximateRetainedWeightBytes);
-
     private final String environmentIdentity;
     private final String languageGenerationIdentity;
     private final String providerGenerationIdentity;
+    private final String admissionDomainIdentity;
     private final CoordinationDocumentSplitter splitter;
     private final BoundedSingleFlightCache<
             CoordinationEventAdmissionCacheKey,
@@ -87,6 +72,12 @@ public final class CoordinationEventAdmissionCompiler {
         this.providerGenerationIdentity = requireText(
                 providerGenerationIdentity,
                 "providerGenerationIdentity");
+        this.admissionDomainIdentity = CoordinationEventAdmissionCacheKey
+                .admissionDomainIdentity(
+                this.environmentIdentity,
+                CoordinationDocumentSplitter.FRAGMENTATION_PROFILE_ID,
+                this.languageGenerationIdentity,
+                this.providerGenerationIdentity);
         this.splitter = Objects.requireNonNull(splitter, "splitter");
         this.cache = new BoundedSingleFlightCache<
                 CoordinationEventAdmissionCacheKey,
@@ -127,15 +118,20 @@ public final class CoordinationEventAdmissionCompiler {
     }
 
     public int cachedEventCount() {
-        return cache.size();
+        return cache.retainedSize();
     }
 
-    public BoundedSingleFlightCache.Snapshot eventCacheMetrics() {
+    public CacheMetrics eventCacheMetrics() {
         return cache.metrics();
     }
 
-    public BoundedSingleFlightCache.Snapshot fragmentCacheMetrics() {
+    public CacheMetrics fragmentCacheMetrics() {
         return fragmentEvidence.metrics();
+    }
+
+    /** Complete opaque domain captured by every compiled admission. */
+    public String admissionDomainIdentity() {
+        return admissionDomainIdentity;
     }
 
     private CoordinationVerifiedEventAdmission compileKnownIdentity(
@@ -151,7 +147,7 @@ public final class CoordinationEventAdmissionCompiler {
                         providerGenerationIdentity,
                         eventBlueId);
         final boolean[] compiled = new boolean[]{false};
-        CoordinationVerifiedEventAdmission result = cache.compute(
+        CoordinationVerifiedEventAdmission result = cache.getOrCompute(
                 key,
                 ignored -> {
                     compiled[0] = true;
@@ -202,27 +198,15 @@ public final class CoordinationEventAdmissionCompiler {
                             key.languageGenerationIdentity(),
                             key.providerGenerationIdentity(),
                             checkedFragmentBlueId);
-            final boolean shareAcrossEngines = !graph.rootBlueId().equals(
-                    checkedFragmentBlueId);
             final boolean[] physicalCompilation = new boolean[]{false};
             CoordinationCanonicalFragment evidence =
-                    fragmentEvidence.compute(
+                    fragmentEvidence.getOrCompute(
                             fragmentKey,
                             ignored -> {
-                                if (!shareAcrossEngines) {
-                                    physicalCompilation[0] = true;
-                                    return compileFragmentEvidence(
-                                            graph,
-                                            checkedFragmentBlueId);
-                                }
-                                return SHARED_FRAGMENT_EVIDENCE.compute(
-                                        fragmentKey,
-                                        sharedIgnored -> {
-                                            physicalCompilation[0] = true;
-                                            return compileFragmentEvidence(
-                                                    graph,
-                                                    checkedFragmentBlueId);
-                                        });
+                                physicalCompilation[0] = true;
+                                return compileFragmentEvidence(
+                                        graph,
+                                        checkedFragmentBlueId);
                             });
             if (physicalCompilation[0]) {
                 metrics.fragmentEvidenceMiss();

@@ -61,6 +61,19 @@ final class CoordinationIncrementalFragmentAssembler {
             CoordinationDocumentSplitter.DocumentFragmentationBlueprint
                     blueprint,
             Collection<String> causalScopePaths) {
+        return assemble(
+                priorInventory,
+                blueprint,
+                causalScopePaths,
+                Collections.<String, String>emptyMap());
+    }
+
+    AssembledDocument assemble(
+            CoordinationFragmentInventory priorInventory,
+            CoordinationDocumentSplitter.DocumentFragmentationBlueprint
+                    blueprint,
+            Collection<String> causalScopePaths,
+            Map<String, String> retainedBlueIdByPhysicalPath) {
         CoordinationFragmentInventory prior = Objects.requireNonNull(
                 priorInventory, "priorInventory");
         CoordinationDocumentSplitter.DocumentFragmentationBlueprint plan =
@@ -72,7 +85,8 @@ final class CoordinationIncrementalFragmentAssembler {
                 prior,
                 plan,
                 causalPaths,
-                admittedPhysicalBodies);
+                admittedPhysicalBodies,
+                retainedBlueIdByPhysicalPath);
 
         List<CoordinationDocumentSplitter.PhysicalFragmentRoot> roots =
                 new ArrayList<CoordinationDocumentSplitter
@@ -95,6 +109,7 @@ final class CoordinationIncrementalFragmentAssembler {
                 : roots) {
             assembly.visit(root);
         }
+        assembly.requireCompleteRetainedCoverage();
 
         List<FragmentRootRecord> rootRecords =
                 new ArrayList<FragmentRootRecord>();
@@ -141,7 +156,27 @@ final class CoordinationIncrementalFragmentAssembler {
         return new AssembledDocument(
                 inventory,
                 assembly.newFragments,
-                processingViews);
+                processingViews,
+                assembly.hashedFragmentCount,
+                intersectionSize(
+                        prior.fragmentBlueIds(),
+                        inventory.fragmentBlueIds()),
+                intersectionSize(prior.fragmentRoots(), rootRecords)
+                        + intersectionSize(prior.metadata(), metadata),
+                rootRecords.size() + metadata.size()
+                        - intersectionSize(prior.fragmentRoots(), rootRecords)
+                        - intersectionSize(prior.metadata(), metadata),
+                intersectionSize(prior.edges(), inventory.edges()),
+                inventory.edges().size()
+                        - intersectionSize(prior.edges(), inventory.edges()));
+    }
+
+    private static int intersectionSize(
+            Collection<?> left,
+            Collection<?> right) {
+        Set<Object> intersection = new LinkedHashSet<Object>(left);
+        intersection.retainAll(new LinkedHashSet<Object>(right));
+        return intersection.size();
     }
 
     private Map<String, NodeProviderResult> admittedPhysicalBodies(
@@ -263,23 +298,59 @@ final class CoordinationIncrementalFragmentAssembler {
         private final SortedMap<String, SortedMap<String, ShapeReference>>
                 physicalShapes =
                 new TreeMap<String, SortedMap<String, ShapeReference>>();
+        private final Map<String, String> retainedBlueIdByPhysicalPath;
+        private final Map<PriorOccurrenceKey, FragmentEdgeRecord>
+                priorOccurrenceByPath =
+                new LinkedHashMap<PriorOccurrenceKey, FragmentEdgeRecord>();
+        private final Map<String, Set<String>> priorBlueIdsByAbsolutePath =
+                new LinkedHashMap<String, Set<String>>();
+        private final Set<String> classifiedRetainedPaths =
+                new LinkedHashSet<String>();
+        private long hashedFragmentCount;
 
         private Assembly(
                 CoordinationFragmentInventory prior,
                 CoordinationDocumentSplitter
                         .DocumentFragmentationBlueprint blueprint,
                 Set<String> causalPaths,
-                Map<String, NodeProviderResult> admittedPhysicalBodies) {
+                Map<String, NodeProviderResult> admittedPhysicalBodies,
+                Map<String, String> retainedBlueIdByPhysicalPath) {
             this.blueprint = blueprint;
             this.causalPaths = causalPaths;
             this.admittedPhysicalBodies = Objects.requireNonNull(
                     admittedPhysicalBodies, "admittedPhysicalBodies");
+            this.retainedBlueIdByPhysicalPath =
+                    immutableRetainedPaths(retainedBlueIdByPhysicalPath);
             for (String blueId : prior.fragmentBlueIds()) {
                 physicalShapes.put(
                         blueId,
                         new TreeMap<String, ShapeReference>());
             }
             for (FragmentEdgeRecord edge : prior.edges()) {
+                PriorOccurrenceKey occurrenceKey =
+                        new PriorOccurrenceKey(
+                                edge.rootKind(),
+                                edge.absolutePointer(),
+                                edge.childBlueId());
+                FragmentEdgeRecord previousOccurrence =
+                        priorOccurrenceByPath.putIfAbsent(
+                                occurrenceKey, edge);
+                if (previousOccurrence != null
+                        && !physicallyEquivalent(
+                                previousOccurrence, edge)) {
+                    throw new IllegalStateException(
+                            "Prior inventory repeats one physical occurrence "
+                                    + "with different provenance at "
+                                    + edge.absolutePointer());
+                }
+                Set<String> identities = priorBlueIdsByAbsolutePath.get(
+                        edge.absolutePointer());
+                if (identities == null) {
+                    identities = new LinkedHashSet<String>();
+                    priorBlueIdsByAbsolutePath.put(
+                            edge.absolutePointer(), identities);
+                }
+                identities.add(edge.childBlueId());
                 SortedMap<String, ShapeReference> shape =
                         physicalShapes.get(edge.ownerNodeBlueId());
                 if (shape == null) {
@@ -359,10 +430,11 @@ final class CoordinationIncrementalFragmentAssembler {
                                 + "canonical body: " + ownerBlueId);
             }
             Node selectedBody = admittedBody != null
-                    ? admittedBody.clone()
+                    ? admittedBody
                     : inspection.directFragment();
             String selectedBlueId = DirectBlueIdCalculator.calculateBlueId(
-                    selectedBody.clone());
+                    selectedBody);
+            hashedFragmentCount++;
             if (!ownerBlueId.equals(selectedBlueId)
                     || selectedBody.isReferenceOnly()) {
                 throw new IllegalStateException(
@@ -375,6 +447,7 @@ final class CoordinationIncrementalFragmentAssembler {
 
             List<SelectedChild> children = selectedPhysicalChildren(
                     rootKind,
+                    ownerBlueId,
                     ownerAbsolutePath,
                     selectedBody,
                     inspection.children());
@@ -417,12 +490,6 @@ final class CoordinationIncrementalFragmentAssembler {
                 FragmentEdgeRecord edge = edgeRecord(child.edge);
                 retainEdge(edge);
                 if (edge.splitterCreated()) {
-                    if (child.recursionSource == null) {
-                        throw new IllegalStateException(
-                                "A splitter-created physical edge has no exact "
-                                        + "recursion source at "
-                                        + edge.absolutePointer());
-                    }
                     String childBlueId = edge.childBlueId();
                     if (!beginVisit(
                             childBlueId,
@@ -436,6 +503,13 @@ final class CoordinationIncrementalFragmentAssembler {
                                 rootKind,
                                 edge.absolutePointer());
                         continue;
+                    }
+                    if (child.recursionSource == null) {
+                        throw cold(
+                                ColdGraftReason.RETAINED_SHAPE_MISSING,
+                                "A retained splitter-created edge has no prior "
+                                        + "shape at "
+                                        + edge.absolutePointer());
                     }
                     Node admittedChild = admittedPhysicalBody(
                             childBlueId);
@@ -480,7 +554,7 @@ final class CoordinationIncrementalFragmentAssembler {
             }
             Node body = candidates.get(0).clone();
             String actual = DirectBlueIdCalculator.calculateBlueId(
-                    body.clone());
+                    body);
             if (!blueId.equals(actual) || body.isReferenceOnly()) {
                 throw new IllegalStateException(
                         "Canonical physical provider returned invalid body for "
@@ -491,6 +565,7 @@ final class CoordinationIncrementalFragmentAssembler {
 
         private List<SelectedChild> selectedPhysicalChildren(
                 CoordinationDocumentSplitter.FragmentRootKind rootKind,
+                String ownerBlueId,
                 String ownerAbsolutePath,
                 Node selectedBody,
                 Collection<CoordinationDocumentSplitter
@@ -534,6 +609,43 @@ final class CoordinationIncrementalFragmentAssembler {
                 CoordinationDocumentSplitter.DirectChildOccurrence source =
                         sourceByPointer.get(
                                 child.edge().ownerRelativePointer());
+                String retainedBlueId = retainedBlueIdByPhysicalPath.get(
+                        child.edge().absolutePointer());
+                if (retainedBlueId != null) {
+                    if (!retainedBlueId.equals(
+                            child.edge().childBlueId())) {
+                        throw cold(
+                                ColdGraftReason.PATH_IDENTITY_MISMATCH,
+                                "Retained frontier identity changed at "
+                                        + child.edge().absolutePointer());
+                    }
+                    FragmentEdgeRecord prior = priorOccurrenceByPath.get(
+                            new PriorOccurrenceKey(
+                                    rootKind,
+                                    child.edge().absolutePointer(),
+                                    retainedBlueId));
+                    if (prior == null) {
+                        throw cold(
+                                ColdGraftReason.PRIOR_OCCURRENCE_MISSING,
+                                "Retained frontier has no exact prior "
+                                        + "occurrence at "
+                                        + child.edge().absolutePointer());
+                    }
+                    classifiedRetainedPaths.add(
+                            child.edge().absolutePointer());
+                    selected.add(new SelectedChild(
+                            splitter.describeRetainedDirectEdge(
+                                    blueprint,
+                                    rootKind,
+                                    ownerBlueId,
+                                    ownerAbsolutePath,
+                                    prior.ownerRelativePointer(),
+                                    prior.childBlueId(),
+                                    prior.originalPureReference(),
+                                    prior.splitterCreated()),
+                            null));
+                    continue;
+                }
                 if (source != null
                         && source.edge().childBlueId().equals(
                                 child.edge().childBlueId())) {
@@ -547,6 +659,41 @@ final class CoordinationIncrementalFragmentAssembler {
                 }
             }
             return selected;
+        }
+
+        private void requireCompleteRetainedCoverage() {
+            if (retainedBlueIdByPhysicalPath.isEmpty()) return;
+            Set<String> missing = new LinkedHashSet<String>(
+                    retainedBlueIdByPhysicalPath.keySet());
+            missing.removeAll(classifiedRetainedPaths);
+            Set<String> uncoveredPhysical = new LinkedHashSet<String>();
+            for (String path : missing) {
+                Set<String> priorIdentities =
+                        priorBlueIdsByAbsolutePath.get(path);
+                if (priorIdentities == null) {
+                    // The verified hybrid frontier also tracks retained
+                    // Language/runtime references that are not physical
+                    // fragment edges. They participate in Root identity but
+                    // require no inventory graft and must not force a full
+                    // splitter fallback.
+                    continue;
+                }
+                String expected = retainedBlueIdByPhysicalPath.get(path);
+                if (!priorIdentities.contains(expected)) {
+                    throw cold(
+                            ColdGraftReason.PATH_IDENTITY_MISMATCH,
+                            "Retained frontier identity changed at prior "
+                                    + "physical occurrence " + path);
+                }
+                uncoveredPhysical.add(path);
+            }
+            if (!uncoveredPhysical.isEmpty()) {
+                throw cold(
+                        ColdGraftReason.PATH_UNCOVERED,
+                        "Sparse fragment graft did not classify retained "
+                                + "physical boundaries "
+                                + uncoveredPhysical);
+            }
         }
 
         private void retainShape(
@@ -586,6 +733,30 @@ final class CoordinationIncrementalFragmentAssembler {
                                 reference.childBlueId,
                                 reference.originalPureReference,
                                 reference.splitterCreated));
+                String retainedBlueId = retainedBlueIdByPhysicalPath.get(
+                        edge.absolutePointer());
+                if (retainedBlueId != null) {
+                    if (!retainedBlueId.equals(edge.childBlueId())) {
+                        throw cold(
+                                ColdGraftReason.PATH_IDENTITY_MISMATCH,
+                                "Retained frontier identity changed inside "
+                                        + "shared physical shape at "
+                                        + edge.absolutePointer());
+                    }
+                    FragmentEdgeRecord prior = priorOccurrenceByPath.get(
+                            new PriorOccurrenceKey(
+                                    rootKind,
+                                    edge.absolutePointer(),
+                                    retainedBlueId));
+                    if (prior == null) {
+                        throw cold(
+                                ColdGraftReason.PRIOR_OCCURRENCE_MISSING,
+                                "Shared physical shape has no exact prior "
+                                        + "occurrence at "
+                                        + edge.absolutePointer());
+                    }
+                    classifiedRetainedPaths.add(edge.absolutePointer());
+                }
                 retainEdge(edge);
                 if (!reference.splitterCreated) {
                     continue;
@@ -745,6 +916,37 @@ final class CoordinationIncrementalFragmentAssembler {
         }
     }
 
+    private static final class PriorOccurrenceKey {
+        private final CoordinationDocumentSplitter.FragmentRootKind rootKind;
+        private final String absolutePointer;
+        private final String childBlueId;
+
+        private PriorOccurrenceKey(
+                CoordinationDocumentSplitter.FragmentRootKind rootKind,
+                String absolutePointer,
+                String childBlueId) {
+            this.rootKind = Objects.requireNonNull(rootKind, "rootKind");
+            this.absolutePointer = Objects.requireNonNull(
+                    absolutePointer, "absolutePointer");
+            this.childBlueId = Objects.requireNonNull(
+                    childBlueId, "childBlueId");
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (!(other instanceof PriorOccurrenceKey)) return false;
+            PriorOccurrenceKey that = (PriorOccurrenceKey) other;
+            return rootKind == that.rootKind
+                    && absolutePointer.equals(that.absolutePointer)
+                    && childBlueId.equals(that.childBlueId);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(rootKind, absolutePointer, childBlueId);
+        }
+    }
+
     /** Deterministic edge tuple without concatenating deep pointer strings. */
     private static final class EdgeKey implements Comparable<EdgeKey> {
         private final String ownerBlueId;
@@ -839,6 +1041,34 @@ final class CoordinationIncrementalFragmentAssembler {
         return Collections.unmodifiableSet(result);
     }
 
+    private static Map<String, String> immutableRetainedPaths(
+            Map<String, String> supplied) {
+        Map<String, String> result = new LinkedHashMap<String, String>();
+        for (Map.Entry<String, String> entry : Objects.requireNonNull(
+                supplied, "retainedBlueIdByPhysicalPath").entrySet()) {
+            String path = blue.language.model.wire.JsonPointer.canonicalize(
+                    Objects.requireNonNull(entry.getKey(), "retained path"));
+            String blueId = Objects.requireNonNull(
+                    entry.getValue(), "retained BlueId");
+            if (blueId.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "retained BlueId must not be empty");
+            }
+            String previous = result.put(path, blueId);
+            if (previous != null && !previous.equals(blueId)) {
+                throw new IllegalArgumentException(
+                        "Retained path has two identities: " + path);
+            }
+        }
+        return Collections.unmodifiableMap(result);
+    }
+
+    private static ColdFragmentGraftRequiredException cold(
+            ColdGraftReason reason,
+            String detail) {
+        return new ColdFragmentGraftRequiredException(reason, detail);
+    }
+
     private static boolean causallyRelated(
             String path,
             Set<String> causalPaths) {
@@ -869,20 +1099,71 @@ final class CoordinationIncrementalFragmentAssembler {
                 && candidate.charAt(ancestor.length()) == '/');
     }
 
+    enum ColdGraftReason {
+        FRONTIER_UNAVAILABLE,
+        BINDING_CHANGED,
+        CATALOG_OR_BLUEPRINT,
+        PATH_UNCOVERED,
+        PATH_IDENTITY_MISMATCH,
+        PRIOR_OCCURRENCE_MISSING,
+        RETAINED_SHAPE_MISSING,
+        SPARSE_ASSEMBLY_FAILED
+    }
+
+    static final class ColdFragmentGraftRequiredException
+            extends RuntimeException {
+        private final ColdGraftReason reason;
+
+        ColdFragmentGraftRequiredException(
+                ColdGraftReason reason,
+                String message) {
+            super(message);
+            this.reason = Objects.requireNonNull(reason, "reason");
+        }
+
+        ColdFragmentGraftRequiredException(
+                ColdGraftReason reason,
+                String message,
+                Throwable cause) {
+            super(message, cause);
+            this.reason = Objects.requireNonNull(reason, "reason");
+        }
+
+        ColdGraftReason reason() { return reason; }
+    }
+
     static final class AssembledDocument {
 
         private final CoordinationFragmentInventory inventory;
         private final Map<String, Node> newFragments;
         private final Map<String, Node> processingViews;
+        private final long hashedFragmentCount;
+        private final long reusedFragmentCount;
+        private final long reusedInventoryRecordCount;
+        private final long rebuiltInventoryRecordCount;
+        private final long reusedEdgeRecordCount;
+        private final long rebuiltEdgeRecordCount;
 
         private AssembledDocument(
                 CoordinationFragmentInventory inventory,
                 Map<String, Node> newFragments,
-                Map<String, Node> processingViews) {
+                Map<String, Node> processingViews,
+                long hashedFragmentCount,
+                long reusedFragmentCount,
+                long reusedInventoryRecordCount,
+                long rebuiltInventoryRecordCount,
+                long reusedEdgeRecordCount,
+                long rebuiltEdgeRecordCount) {
             this.inventory = Objects.requireNonNull(
                     inventory, "inventory");
             this.newFragments = immutableNodes(newFragments);
             this.processingViews = immutableNodes(processingViews);
+            this.hashedFragmentCount = hashedFragmentCount;
+            this.reusedFragmentCount = reusedFragmentCount;
+            this.reusedInventoryRecordCount = reusedInventoryRecordCount;
+            this.rebuiltInventoryRecordCount = rebuiltInventoryRecordCount;
+            this.reusedEdgeRecordCount = reusedEdgeRecordCount;
+            this.rebuiltEdgeRecordCount = rebuiltEdgeRecordCount;
         }
 
         CoordinationFragmentInventory inventory() {
@@ -897,6 +1178,17 @@ final class CoordinationIncrementalFragmentAssembler {
             return processingViews;
         }
 
+        long hashedFragmentCount() { return hashedFragmentCount; }
+        long reusedFragmentCount() { return reusedFragmentCount; }
+        long reusedInventoryRecordCount() {
+            return reusedInventoryRecordCount;
+        }
+        long rebuiltInventoryRecordCount() {
+            return rebuiltInventoryRecordCount;
+        }
+        long reusedEdgeRecordCount() { return reusedEdgeRecordCount; }
+        long rebuiltEdgeRecordCount() { return rebuiltEdgeRecordCount; }
+
         private static Map<String, Node> immutableNodes(
                 Map<String, Node> supplied) {
             Map<String, Node> result = new LinkedHashMap<String, Node>();
@@ -905,7 +1197,10 @@ final class CoordinationIncrementalFragmentAssembler {
                             Objects.requireNonNull(
                                     supplied,
                                     "supplied")).entrySet()) {
-                result.put(entry.getKey(), entry.getValue().clone());
+                result.put(
+                        entry.getKey(),
+                        Objects.requireNonNull(
+                                entry.getValue(), "supplied Node"));
             }
             return Collections.unmodifiableMap(result);
         }

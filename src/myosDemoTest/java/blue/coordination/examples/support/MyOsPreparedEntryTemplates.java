@@ -1,17 +1,28 @@
 package blue.coordination.examples.support;
 
-import blue.coordination.engine.memory.BoundedSingleFlightCache;
+import blue.coordination.engine.api.CoordinationEventShapeTemplate;
+import blue.coordination.fastpath.BoundedSingleFlightCache;
+import blue.coordination.fastpath.CacheMetrics;
+import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.merge.ResolvedSnapshot;
 import blue.language.model.Node;
+import blue.language.model.NodePathEditor;
 import blue.language.snapshot.FrozenNode;
 
+import java.util.List;
 import java.util.Objects;
 
 /** JVM-shared bounded cache over the immutable current MyOS kernel. */
 final class MyOsPreparedEntryTemplates {
 
     static final String CANONICAL_ENVIRONMENT_IDENTITY =
-            "blue-coordination/myos-demo-entry-template/3.0";
+            "blue-coordination/myos-demo-entry-template/4.0";
+    private static final long PROTOTYPE_TIMESTAMP_MICROS = 0L;
+    private static final String PROTOTYPE_PREVIOUS_BLUE_ID =
+            DirectBlueIdCalculator.calculateBlueId(new Node().properties(
+                    "kind", new Node().value(
+                            "blue-coordination/event-shape-sentinel"),
+                    "version", new Node().value(1L)));
 
     private static final int MAXIMUM_TEMPLATES = 256;
     private static final long MAXIMUM_TEMPLATE_WEIGHT_BYTES =
@@ -34,36 +45,69 @@ final class MyOsPreparedEntryTemplates {
             MyOsDemoRuntime runtime,
             MyOsDemoTimeline timeline,
             MyOsDemoOperation operation,
-            long prototypeTimestampMicros,
-            String prototypePreviousBlueId) {
+            String previousEntryBlueId) {
+        return requireShape(
+                runtime,
+                timeline,
+                operation,
+                previousEntryBlueId != null);
+    }
+
+    /**
+     * The cache compiler deliberately accepts only shape facts. In
+     * particular, no exact previous-entry identity can enter or be captured
+     * by its single-flight loader.
+     */
+    private static MyOsPreparedEntryTemplate requireShape(
+            MyOsDemoRuntime runtime,
+            MyOsDemoTimeline timeline,
+            MyOsDemoOperation operation,
+            boolean hasPreviousEntry) {
         Objects.requireNonNull(runtime, "runtime");
         Objects.requireNonNull(timeline, "timeline");
         Objects.requireNonNull(operation, "operation");
         MyOsEntryTemplateKey key = MyOsEntryTemplateKey.of(
                 CANONICAL_ENVIRONMENT_IDENTITY,
+                runtime.eventAdmissionDomainIdentity(),
                 timeline.timelineId(),
                 timeline.actor(),
                 operation,
-                prototypePreviousBlueId != null);
+                hasPreviousEntry);
         final boolean[] compiled = {false};
-        MyOsPreparedEntryTemplate result = CACHE.compute(
+        MyOsPreparedEntryTemplate result = CACHE.getOrCompute(
                 key,
                 ignored -> {
                     compiled[0] = true;
                     String yaml = timeline.eventYaml(
                             operation,
-                            prototypeTimestampMicros,
-                            prototypePreviousBlueId);
+                            PROTOTYPE_TIMESTAMP_MICROS,
+                            null);
                     ResolvedSnapshot snapshot =
                             runtime.resolvedExactEvent(yaml);
                     Node exact = snapshot.canonicalRoot();
+                    if (hasPreviousEntry) {
+                        NodePathEditor.put(
+                                exact,
+                                "/prevEntry",
+                                new Node().blueId(
+                                        PROTOTYPE_PREVIOUS_BLUE_ID));
+                    }
                     MyOsTimelineBinding binding = new MyOsTimelineBinding(
                             requiredResolvedBlueId(
                                     snapshot, "/timeline"),
                             requiredResolvedBlueId(snapshot, "/actor"));
+                    CoordinationEventShapeTemplate eventShape =
+                            runtime.compileEntryShape(
+                                    "myos-entry/" + key,
+                                    exact,
+                                    key.hasPreviousEntry()
+                                            ? List.of(
+                                                    "/timestamp",
+                                                    "/prevEntry")
+                                            : List.of("/timestamp"));
                     METRICS.compiled();
                     return new MyOsPreparedEntryTemplate(
-                            key, exact, binding, METRICS);
+                            key, eventShape, binding, METRICS);
                 });
         if (compiled[0]) {
             METRICS.miss();
@@ -78,11 +122,19 @@ final class MyOsPreparedEntryTemplates {
     }
 
     static int size() {
-        return CACHE.size();
+        return CACHE.retainedSize();
     }
 
-    static BoundedSingleFlightCache.Snapshot cacheMetrics() {
+    static CacheMetrics cacheMetrics() {
         return CACHE.metrics();
+    }
+
+    static long prototypeTimestampMicrosForAudit() {
+        return PROTOTYPE_TIMESTAMP_MICROS;
+    }
+
+    static String prototypePreviousBlueIdForAudit() {
+        return PROTOTYPE_PREVIOUS_BLUE_ID;
     }
 
     private static String requiredResolvedBlueId(

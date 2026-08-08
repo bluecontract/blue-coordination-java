@@ -1,5 +1,8 @@
 package blue.coordination.engine.api;
 
+import blue.coordination.engine.CoordinationProcessingEngine
+        .VerifiedNodeAccessAuthority;
+import blue.coordination.engine.fastpath.FastFragmentDelta;
 import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.model.Node;
 import blue.language.model.NodeWireForm;
@@ -26,6 +29,8 @@ public final class CoordinationFragmentTransition {
     private final List<FragmentEdgeRecord> addedEdges;
     private final List<FragmentEdgeRecord> retiredEdges;
     private final List<CoordinationScopeTransition> scopeTransitions;
+    private final VerifiedNodeAccessAuthority verifiedAuthority;
+    private final FastFragmentDelta verifiedDelta;
 
     public CoordinationFragmentTransition(
             CoordinationFragmentInventory resultingInventory,
@@ -94,15 +99,56 @@ public final class CoordinationFragmentTransition {
                 new ArrayList<CoordinationScopeTransition>(
                         Objects.requireNonNull(
                                 scopeTransitions, "scopeTransitions")));
+        this.verifiedAuthority = null;
+        this.verifiedDelta = null;
+        validateCoverage(
+                this.newFragments.keySet(),
+                this.processingViews.keySet());
+    }
+
+    private CoordinationFragmentTransition(
+            VerifiedNodeAccessAuthority verifiedAuthority,
+            FastFragmentDelta verifiedDelta) {
+        this.verifiedAuthority = Objects.requireNonNull(
+                verifiedAuthority, "verifiedAuthority");
+        this.verifiedDelta = Objects.requireNonNull(
+                verifiedDelta, "verifiedDelta");
+        this.resultingInventory = verifiedDelta.inventory();
+        this.newFragments = Collections.emptyMap();
+        this.processingViews = Collections.emptyMap();
+        this.reusedFragmentBlueIds = verifiedDelta.reused();
+        this.retiredFragmentBlueIds = verifiedDelta.retired();
+        this.addedEdges = verifiedDelta.addedEdges();
+        this.retiredEdges = verifiedDelta.retiredEdges();
+        this.scopeTransitions = verifiedDelta.scopeTransitions();
+        validateCoverage(
+                verifiedDelta.newFragments(verifiedAuthority).keySet(),
+                verifiedDelta.changedProcessingViews(verifiedAuthority)
+                        .keySet());
+    }
+
+    /**
+     * Carries an engine-verified delta without materializing mutable DTO
+     * bodies. The authority is unforgeable and is retained only internally.
+     */
+    public static CoordinationFragmentTransition fromVerifiedDelta(
+            VerifiedNodeAccessAuthority authority,
+            FastFragmentDelta delta) {
+        return new CoordinationFragmentTransition(authority, delta);
+    }
+
+    private void validateCoverage(
+            Collection<String> newFragmentBlueIds,
+            Collection<String> processingViewBlueIds) {
         Set<String> overlap = new LinkedHashSet<String>(
-                this.newFragments.keySet());
+                newFragmentBlueIds);
         overlap.retainAll(this.reusedFragmentBlueIds);
         if (!overlap.isEmpty()) {
             throw new IllegalArgumentException(
                     "Fragments cannot be both new and reused: " + overlap);
         }
         Set<String> complete = new LinkedHashSet<String>(
-                this.newFragments.keySet());
+                newFragmentBlueIds);
         complete.addAll(this.reusedFragmentBlueIds);
         if (!complete.equals(new LinkedHashSet<String>(
                 resultingInventory.fragmentBlueIds()))) {
@@ -110,7 +156,7 @@ public final class CoordinationFragmentTransition {
                     "New and reused fragments do not cover resulting inventory");
         }
         if (!resultingInventory.fragmentBlueIds().containsAll(
-                this.processingViews.keySet())) {
+                processingViewBlueIds)) {
             throw new IllegalArgumentException(
                     "PROCESS views must belong to the resulting inventory");
         }
@@ -128,10 +174,15 @@ public final class CoordinationFragmentTransition {
         return resultingInventory;
     }
     public Map<String, Node> newFragments() {
-        return defensiveFragments(newFragments);
+        return verifiedDelta == null
+                ? defensiveFragments(newFragments)
+                : verifiedDelta.materializeNewFragments(verifiedAuthority);
     }
     public Map<String, Node> processingViews() {
-        return defensiveFragments(processingViews);
+        return verifiedDelta == null
+                ? defensiveFragments(processingViews)
+                : verifiedDelta.materializeChangedProcessingViews(
+                        verifiedAuthority);
     }
     public Set<String> reusedFragmentBlueIds() {
         return reusedFragmentBlueIds;
@@ -145,6 +196,20 @@ public final class CoordinationFragmentTransition {
         return scopeTransitions;
     }
 
+    /** Engine-only access to the verified carrier, guarded by exact token. */
+    public FastFragmentDelta verifiedDelta(
+            VerifiedNodeAccessAuthority authority) {
+        Objects.requireNonNull(authority, "authority");
+        if (verifiedDelta == null) {
+            return null;
+        }
+        if (verifiedAuthority != authority) {
+            throw new IllegalArgumentException(
+                    "Fragment transition belongs to another engine");
+        }
+        return verifiedDelta;
+    }
+
     private static Map<String, Node> immutableFragments(
             Map<String, Node> source) {
         Map<String, Node> result = new TreeMap<String, Node>();
@@ -153,7 +218,7 @@ public final class CoordinationFragmentTransition {
             Node node = Objects.requireNonNull(
                     entry.getValue(), "new fragment").clone();
             String actual = DirectBlueIdCalculator.calculateBlueId(
-                    node.clone());
+                    node);
             if (!entry.getKey().equals(actual)) {
                 throw new IllegalArgumentException(
                         "New fragment identity mismatch for " + entry.getKey());

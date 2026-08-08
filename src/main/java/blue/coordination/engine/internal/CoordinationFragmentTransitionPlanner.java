@@ -5,8 +5,16 @@ import blue.coordination.engine.CoordinationProcessingEngine
 import blue.coordination.engine.api.ChangeKind;
 import blue.coordination.engine.api.CoordinationFragmentInventory;
 import blue.coordination.engine.api.CoordinationFragmentTransition;
+import blue.coordination.engine.api.CoordinationFragmentTransitionWorkSnapshot;
 import blue.coordination.engine.api.CoordinationScopeTransition;
 import blue.coordination.engine.api.FragmentEdgeRecord;
+import blue.coordination.engine.api.FragmentMetadataRecord;
+import blue.coordination.engine.fastpath.AssembledInventoryDelta;
+import blue.coordination.engine.fastpath.ContentAddressedNodeInterner;
+import blue.coordination.engine.fastpath.FastFragmentDelta;
+import blue.coordination.engine.fastpath.RequestDigestMemo;
+import blue.coordination.engine.fastpath.ResultDeltaTransitionAssembler;
+import blue.coordination.engine.fastpath.VerifiedFragmentTransitionFrontier;
 import blue.coordination.engine.spi.CoordinationFragmentStore;
 import blue.coordination.processor.CoordinationDocumentSplitter;
 import blue.coordination.processor.CoordinationPreparedDelivery;
@@ -19,6 +27,7 @@ import blue.language.provider.NodeProvider;
 import blue.language.provider.NodeProviderResult;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -47,6 +56,9 @@ public final class CoordinationFragmentTransitionPlanner {
     private final CoordinationDocumentSplitter splitter;
     private final NodeProvider canonicalPhysicalProvider;
     private final CoordinationFragmentStore canonicalPhysicalStore;
+    private final ResultDeltaTransitionAssembler verifiedDeltaAssembler;
+    private final CoordinationFragmentTransitionMetrics metrics =
+            new CoordinationFragmentTransitionMetrics();
 
     /**
      * Creates an isolated planner that assumes no cross-inventory physical
@@ -97,6 +109,8 @@ public final class CoordinationFragmentTransitionPlanner {
         this.canonicalPhysicalProvider = canonicalPhysicalStore != null
                 ? canonicalPhysicalStore.canonicalFragmentProvider()
                 : checked;
+        this.verifiedDeltaAssembler = new ResultDeltaTransitionAssembler(
+                new ContentAddressedNodeInterner(64));
     }
 
     public CoordinationFragmentTransition plan(
@@ -107,9 +121,11 @@ public final class CoordinationFragmentTransitionPlanner {
         Node result = Objects.requireNonNull(
                 resultingExactRoot, "resultingExactRoot");
         return planVerifiedInternal(
+                null,
                 priorInventory,
                 result,
                 DirectBlueIdCalculator.calculateBlueId(result),
+                null,
                 preparedDelivery,
                 subscriptionUpdate);
     }
@@ -126,22 +142,27 @@ public final class CoordinationFragmentTransitionPlanner {
             CoordinationFragmentInventory priorInventory,
             Node resultingExactRoot,
             String verifiedResultingRootBlueId,
+            VerifiedFragmentTransitionFrontier transitionFrontier,
             CoordinationPreparedDelivery preparedDelivery,
             CoordinationSubscriptionUpdate subscriptionUpdate) {
         Objects.requireNonNull(
                 accessAuthority, "verifiedNodeAccessAuthority");
         return planVerifiedInternal(
+                accessAuthority,
                 priorInventory,
                 resultingExactRoot,
                 verifiedResultingRootBlueId,
+                transitionFrontier,
                 preparedDelivery,
                 subscriptionUpdate);
     }
 
     private CoordinationFragmentTransition planVerifiedInternal(
+            VerifiedNodeAccessAuthority accessAuthority,
             CoordinationFragmentInventory priorInventory,
             Node resultingExactRoot,
             String verifiedResultingRootBlueId,
+            VerifiedFragmentTransitionFrontier transitionFrontier,
             CoordinationPreparedDelivery preparedDelivery,
             CoordinationSubscriptionUpdate subscriptionUpdate) {
         CoordinationFragmentInventory prior = Objects.requireNonNull(
@@ -179,32 +200,195 @@ public final class CoordinationFragmentTransitionPlanner {
                     Collections.<CoordinationScopeTransition>emptyList());
         }
 
-        CoordinationDocumentSplitter.DocumentFragmentationBlueprint
-                blueprint = catalog != null
-                ? splitter.documentFragmentationBlueprint(result, catalog)
-                : splitter.documentFragmentationBlueprint(result);
-        CoordinationIncrementalFragmentAssembler.AssembledDocument assembled =
+        Collection<String> causalPaths = causalScopePaths(
+                prepared, subscriptions);
+        CoordinationIncrementalFragmentAssembler assembler =
                 new CoordinationIncrementalFragmentAssembler(
                         splitter,
                         canonicalPhysicalProvider,
-                        canonicalPhysicalStore)
-                        .assemble(
-                                prior,
-                                blueprint,
-                                causalScopePaths(
-                                        prepared,
-                                        subscriptions));
+                        canonicalPhysicalStore);
+        CoordinationIncrementalFragmentAssembler.AssembledDocument assembled =
+                null;
+        boolean sparseAssembly = false;
+        if (transitionFrontier == null) {
+            metrics.fallback(
+                    CoordinationIncrementalFragmentAssembler
+                            .ColdGraftReason.FRONTIER_UNAVAILABLE);
+        } else if (!transitionFrontier.remainsBound(prior, result)
+                || !resultingRootBlueId.equals(
+                        transitionFrontier.resultingRootBlueId())) {
+            metrics.fallback(
+                    CoordinationIncrementalFragmentAssembler
+                            .ColdGraftReason.BINDING_CHANGED);
+        } else {
+            try {
+                CoordinationDocumentSplitter.DocumentFragmentationBlueprint
+                        sparseBlueprint = splitter
+                        .verifiedFrontierFragmentationBlueprint(
+                                transitionFrontier.sparseResultRoot(),
+                                resultingRootBlueId,
+                                catalog);
+                assembled = assembler.assemble(
+                        prior,
+                        sparseBlueprint,
+                        causalPaths,
+                        transitionFrontier
+                                .retainedBlueIdByPhysicalPath());
+                if (!resultingRootBlueId.equals(
+                        assembled.inventory().rootBlueId())) {
+                    throw new CoordinationIncrementalFragmentAssembler
+                            .ColdFragmentGraftRequiredException(
+                            CoordinationIncrementalFragmentAssembler
+                                    .ColdGraftReason.PATH_IDENTITY_MISMATCH,
+                            "Sparse inventory changed resulting Root identity");
+                }
+                metrics.deltaHit(
+                        transitionFrontier.sparseExpandedNodeCount(),
+                        assembled);
+                sparseAssembly = true;
+            } catch (CoordinationIncrementalFragmentAssembler
+                    .ColdFragmentGraftRequiredException cold) {
+                metrics.fallback(cold.reason());
+                assembled = null;
+            } catch (RuntimeException sparseFailure) {
+                metrics.fallback(
+                        CoordinationIncrementalFragmentAssembler
+                                .ColdGraftReason.SPARSE_ASSEMBLY_FAILED);
+                assembled = null;
+            }
+        }
+        if (assembled == null) {
+            metrics.fullBlueprintAttempt();
+            long copiesBefore = splitter
+                    .completeBlueprintCanonicalCopyCount();
+            CoordinationDocumentSplitter.DocumentFragmentationBlueprint
+                    blueprint;
+            try {
+                blueprint = catalog != null
+                        ? splitter.documentFragmentationBlueprint(
+                                result, catalog)
+                        : splitter.documentFragmentationBlueprint(result);
+            } finally {
+                metrics.fullResultClones(Math.subtractExact(
+                        splitter.completeBlueprintCanonicalCopyCount(),
+                        copiesBefore));
+            }
+            assembled = assembler.assemble(
+                    prior,
+                    blueprint,
+                    causalPaths);
+        }
         CoordinationFragmentInventory resulting = assembled.inventory();
         if (!resultingRootBlueId.equals(resulting.rootBlueId())) {
             throw new IllegalStateException(
                     "Incremental inventory changed the resulting Root identity");
         }
+        Map<String, Node> processingViews = sparseAssembly
+                ? carryForwardExecutableProcessingViews(
+                        prior,
+                        resulting,
+                        assembled.processingViews())
+                : assembled.processingViews();
 
-        return transition(
-                prior,
+        if (accessAuthority == null) {
+            return transition(
+                    prior,
+                    resulting,
+                    assembled.newFragments(),
+                    processingViews);
+        }
+        RequestDigestMemo digests = new RequestDigestMemo();
+        bindVerified(digests, assembled.newFragments());
+        bindVerified(digests, processingViews);
+        AssembledInventoryDelta raw = new AssembledInventoryDelta(
+                accessAuthority,
                 resulting,
                 assembled.newFragments(),
-                assembled.processingViews());
+                processingViews,
+                scopeTransitions(prior, resulting));
+        FastFragmentDelta fast = verifiedDeltaAssembler.assemble(
+                accessAuthority,
+                prior,
+                raw,
+                digests);
+        return CoordinationFragmentTransition.fromVerifiedDelta(
+                accessAuthority, fast);
+    }
+
+    public CoordinationFragmentTransitionWorkSnapshot workSnapshot() {
+        return metrics.snapshot();
+    }
+
+    /**
+     * A verified sparse frontier deliberately keeps retained executable
+     * descendants as references. Such a frontier is sufficient for physical
+     * inventory grafting, but its derived PROCESS body view is only a header
+     * shell. Reuse the prior inventory's already verified exact-item view for
+     * executable identities retained by content address. This keeps the
+     * transition proportional to the changed surface without publishing a
+     * provider-visible partial workflow.
+     */
+    private Map<String, Node> carryForwardExecutableProcessingViews(
+            CoordinationFragmentInventory prior,
+            CoordinationFragmentInventory resulting,
+            Map<String, Node> sparseViews) {
+        if (canonicalPhysicalStore == null || sparseViews.isEmpty()) {
+            return sparseViews;
+        }
+        Set<String> priorExecutable = executableBodyBlueIds(prior);
+        priorExecutable.retainAll(executableBodyBlueIds(resulting));
+        priorExecutable.retainAll(sparseViews.keySet());
+        if (priorExecutable.isEmpty()) {
+            return sparseViews;
+        }
+        Map<String, NodeProviderResult> retained = canonicalPhysicalStore
+                .readProcessingAll(
+                        prior.inventoryIdentity(),
+                        priorExecutable);
+        Map<String, Node> merged = new LinkedHashMap<String, Node>(
+                sparseViews);
+        for (String blueId : priorExecutable) {
+            NodeProviderResult result = retained.get(blueId);
+            if (result == null
+                    || result.outcome()
+                    != blue.language.api.NodeProviderOutcome.FOUND
+                    || result.nodes().size() != 1) {
+                throw new IllegalStateException(
+                        "Retained executable PROCESS view is unavailable: "
+                                + blueId);
+            }
+            Node exact = result.nodes().get(0).clone();
+            if (exact.isReferenceOnly()
+                    || !blueId.equals(
+                            DirectBlueIdCalculator.calculateBlueId(exact))) {
+                throw new IllegalStateException(
+                        "Retained executable PROCESS view changed identity: "
+                                + blueId);
+            }
+            merged.put(blueId, exact);
+        }
+        return Collections.unmodifiableMap(merged);
+    }
+
+    private static Set<String> executableBodyBlueIds(
+            CoordinationFragmentInventory inventory) {
+        Set<String> result = new LinkedHashSet<String>();
+        for (FragmentMetadataRecord metadata : inventory.metadata()) {
+            if (metadata.kind()
+                    == CoordinationDocumentSplitter.FragmentKind
+                            .EXECUTABLE_BODY) {
+                result.add(metadata.blueId());
+            }
+        }
+        return result;
+    }
+
+    private static void bindVerified(
+            RequestDigestMemo digests,
+            Map<String, Node> verifiedNodes) {
+        for (Map.Entry<String, Node> entry : verifiedNodes.entrySet()) {
+            digests.bindVerified(entry.getValue(), entry.getKey());
+        }
     }
 
     /**

@@ -1,5 +1,6 @@
 package blue.coordination.processor;
 
+import blue.coordination.round4.Round4ParityReceipt;
 import blue.language.provider.NodeProvider;
 import blue.language.model.Node;
 import blue.language.processor.ChannelCheckpointContext;
@@ -7,14 +8,13 @@ import blue.language.processor.ChannelEvaluation;
 import blue.language.processor.ChannelEvaluationContext;
 import blue.language.processor.ChannelProcessor;
 import blue.language.processor.DocumentProcessingResult;
-import blue.language.processor.DocumentProcessor;
 import blue.language.processor.ExternalChannelFunctionContext;
 import blue.language.processor.ExternalChannelSubscriptionFunctions;
 import blue.language.processor.ExternalDeliveryPlan;
 import blue.language.processor.ExternalDeliverySnapshot;
 import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.InvalidExecutionEvidenceException;
-import blue.language.processor.ProcessingDebugResult;
+import blue.language.processor.PlatformProcessingResult;
 import blue.language.processor.ProcessorStatus;
 import blue.language.processor.SubscriptionDelta;
 import blue.language.provider.SequentialNodeProvider;
@@ -46,6 +46,54 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class CoordinationIndexedDeliveryPlannerTest {
+
+    @Test
+    void shouldMatchTheCompatibilityOracleForOneThousandExactCandidates() {
+        // given
+        try (Fixture fixture = fixture(channels("matching", "other"))) {
+            CoordinationSubscriptionSnapshot snapshot = fixture.project(
+                    ExternalOrderKey.of(Collections.emptyList()));
+            List<String> candidates = candidateKeys(snapshot, "matching");
+            List<SubscriptionDelta.Entry> active = activeIntervals(snapshot);
+
+            // when
+            for (int iteration = 0; iteration < 1_000; iteration++) {
+                Node event = fixture.event("matching", 10_000 + iteration);
+                ExternalOrderKey order = eventOrder(event);
+                CoordinationPreparedDelivery indexed = fixture.planner.prepare(
+                        fixture.rootBlueId,
+                        DirectBlueIdCalculator.calculateBlueId(event),
+                        snapshot,
+                        candidates,
+                        fixture.provider(event),
+                        fixture.revision,
+                        order);
+                ExternalDeliveryPlan compatibility =
+                        CoordinationDeliveryPlanning
+                                .currentRootCompatibilityDeriver(
+                                        fixture.blue.contracts(),
+                                        fixture.revision,
+                                        order,
+                                        active)
+                                .derive(fixture.root, event);
+
+                // then
+                assertEquals(
+                        deliverySignatures(compatibility),
+                        deliverySignatures(indexed.deliveryPlan()),
+                        "planning mismatch at iteration " + iteration);
+                assertEquals(
+                        activeSurfaceSignatures(
+                                compatibility.activeSubscriptionIntervals()),
+                        activeSurfaceSignatures(
+                                indexed.evidence()
+                                        .activeSubscriptionIntervals()),
+                        "active-surface mismatch at iteration " + iteration);
+            }
+            Round4ParityReceipt.write(
+                    "planningComparisons", 1_000L, 0L);
+        }
+    }
 
     @Test
     void shouldProduceTheCompatibilityPlannerDeliveryFromAnExactIndex() {
@@ -200,12 +248,16 @@ final class CoordinationIndexedDeliveryPlannerTest {
                                     Collections.emptyList()));
             fixture.blue.registerTimelineSubtype(
                     MyOSTimelineChannel.class);
+            CoordinationIndexedDeliveryPlanner currentPlanner =
+                    CoordinationDeliveryPlanning.indexed(
+                            fixture.blue.processor(),
+                            fixture.blue.contracts());
 
             // when
             InvalidExecutionEvidenceException failure =
                     assertThrows(
                             InvalidExecutionEvidenceException.class,
-                            () -> fixture.planner.prepare(
+                            () -> currentPlanner.prepare(
                                     fixture.rootBlueId,
                                     DirectBlueIdCalculator
                                             .calculateBlueId(
@@ -815,7 +867,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
             CoordinationPreparedDelivery prepared =
                     fixture.prepare(
                             event, snapshot, candidates);
-            ProcessingDebugResult debug =
+            PlatformProcessingResult debug =
                     fixture.execute(event, prepared);
 
             // then
@@ -865,7 +917,7 @@ final class CoordinationIndexedDeliveryPlannerTest {
             CoordinationPreparedDelivery prepared =
                     fixture.prepare(
                             event, snapshot, candidates);
-            ProcessingDebugResult debug =
+            PlatformProcessingResult debug =
                     fixture.execute(event, prepared);
 
             // then
@@ -1737,20 +1789,17 @@ final class CoordinationIndexedDeliveryPlannerTest {
                     eventOrder(event));
         }
 
-        private ProcessingDebugResult execute(
+        private PlatformProcessingResult execute(
                 Node event,
                 CoordinationPreparedDelivery prepared) {
-            try (DocumentProcessor processor =
-                         CoordinationConfiguredProcessorFactory
-                                 .withExecutionEvidencePlan(
-                                         blue,
-                                         null,
-                                         prepared.evidence())) {
-                return processor.processDocumentWithTrace(
-                        root,
-                        event,
-                        prepared.evidence());
-            }
+            return planner.processForPlatformCommit(
+                    root,
+                    event,
+                    prepared,
+                    new SequentialNodeProvider(
+                            Arrays.asList(
+                                    provider(event),
+                                    blue.nodeProvider())));
         }
 
         private CoordinationPreparedDelivery prepared(

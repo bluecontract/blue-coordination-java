@@ -5,6 +5,7 @@ import java.util.Objects;
 /** Every identity-affecting constant in a prepared Timeline entry shape. */
 record MyOsEntryTemplateKey(
         String canonicalEnvironmentIdentity,
+        String eventAdmissionDomainIdentity,
         String timelineId,
         String actorYaml,
         String operation,
@@ -18,6 +19,9 @@ record MyOsEntryTemplateKey(
         canonicalEnvironmentIdentity = text(
                 canonicalEnvironmentIdentity,
                 "canonicalEnvironmentIdentity");
+        eventAdmissionDomainIdentity = text(
+                eventAdmissionDomainIdentity,
+                "eventAdmissionDomainIdentity");
         timelineId = text(timelineId, "timelineId");
         actorYaml = text(actorYaml, "actorYaml");
         operation = text(operation, "operation");
@@ -30,6 +34,7 @@ record MyOsEntryTemplateKey(
 
     static MyOsEntryTemplateKey of(
             String environmentIdentity,
+            String eventAdmissionDomainIdentity,
             String timelineId,
             MyOsDemoActor actor,
             MyOsDemoOperation operation,
@@ -38,6 +43,7 @@ record MyOsEntryTemplateKey(
         Objects.requireNonNull(operation, "operation");
         return new MyOsEntryTemplateKey(
                 environmentIdentity,
+                eventAdmissionDomainIdentity,
                 timelineId,
                 actor.toYaml(0),
                 operation.operation(),

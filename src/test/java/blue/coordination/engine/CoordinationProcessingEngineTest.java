@@ -2,13 +2,16 @@ package blue.coordination.engine;
 
 import blue.coordination.engine.api.CommitOutcome;
 import blue.coordination.engine.api.CommitStatus;
+import blue.coordination.engine.api.CoordinationAtomicCommitPlan;
 import blue.coordination.engine.api.CoordinationProcessingPlan;
 import blue.coordination.engine.api.CoordinationTransition;
 import blue.coordination.engine.api.DeliveryPlanningMode;
+import blue.coordination.engine.api.DocumentAdmissionCommit;
 import blue.coordination.engine.api.DocumentAdmissionResult;
 import blue.coordination.engine.api.DocumentAdmissionStatus;
 import blue.coordination.engine.api.DocumentEpochSnapshot;
 import blue.coordination.engine.api.DocumentRegistration;
+import blue.coordination.engine.api.DocumentRemovalResult;
 import blue.coordination.engine.api.DocumentRemovalStatus;
 import blue.coordination.engine.api.DocumentSessionId;
 import blue.coordination.engine.api.LoadedProcessingBundle;
@@ -23,6 +26,7 @@ import blue.coordination.engine.memory.InMemoryCoordinationFragmentStore;
 import blue.coordination.engine.memory.InMemoryCoordinationProcessingBundleLoader;
 import blue.coordination.engine.memory.InMemoryCoordinationSessionStore;
 import blue.coordination.engine.spi.CoordinationProcessingBundleLoader;
+import blue.coordination.engine.spi.CoordinationSessionStore;
 import blue.coordination.processor.CoordinationDocumentSplitter;
 import blue.coordination.processor.ProcessingResultTestSupport;
 import blue.coordination.processor.RepositoryIndependentCoordinationTestRuntime;
@@ -44,6 +48,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -188,11 +193,19 @@ final class CoordinationProcessingEngineTest {
                     CommitStatus.COMMITTED,
                     transition.commitPlan().resultingSession(),
                     transition.commitPlan().transitionIdentity());
+            long loadsBeforeEvidence = harness.engine
+                    .planningProjectionCacheMetricsForTest().loads();
+            long entriesBeforeEvidence = harness.engine
+                    .planningProjectionCacheMetricsForTest().entries();
 
             // when
             boolean installedWithoutReceipt =
                     harness.engine.installPreparedRootContextAfterPublication(
                             transition, unsupportedClaim);
+            long loadsAfterUnsupported = harness.engine
+                    .planningProjectionCacheMetricsForTest().loads();
+            long entriesAfterUnsupported = harness.engine
+                    .planningProjectionCacheMetricsForTest().entries();
             CommitOutcome committed = harness.engine.commit(transition);
             boolean installedAfterCommit =
                     harness.engine.installPreparedRootContextAfterPublication(
@@ -200,9 +213,59 @@ final class CoordinationProcessingEngineTest {
 
             // then
             assertFalse(installedWithoutReceipt);
+            assertEquals(loadsBeforeEvidence, loadsAfterUnsupported);
+            assertEquals(entriesBeforeEvidence, entriesAfterUnsupported,
+                    "a claimed outcome without authoritative receipt must "
+                            + "neither publish nor consume the successor");
             assertEquals(CommitStatus.COMMITTED, committed.status());
             assertTrue(installedAfterCommit,
                     "invalid early evidence must not consume the candidate");
+            assertEquals(loadsBeforeEvidence + 1L, harness.engine
+                    .planningProjectionCacheMetricsForTest().loads(),
+                    "the retained successor must publish after exact CAS "
+                            + "evidence arrives");
+        }
+    }
+
+    @Test
+    void shouldContainPostCasSessionReadFailureAndRetainSuccessor() {
+        try (Harness harness = Harness.openWithPostCasReadFailure()) {
+            DocumentSessionId sessionId = DocumentSessionId.of(
+                    "post-cas-read-failure-session");
+            harness.engine.addDocument(DocumentRegistration.openOrCreate(
+                    sessionId,
+                    harness.initializedRoot(),
+                    ACTIVATION_ORDER));
+            CoordinationTransition transition = harness.engine.execute(
+                    harness.engine.plan(compatibilityRequest(
+                            sessionId, 0L, timelineEvent())));
+            CommitOutcome committed = harness.engine.commit(transition);
+            long loadsBeforeCallback = harness.engine
+                    .planningProjectionCacheMetricsForTest().loads();
+            harness.failPostCasSessionReads();
+
+            boolean installedDuringFailure = harness.engine
+                    .installPreparedRootContextAfterPublication(
+                            transition, committed);
+
+            assertEquals(CommitStatus.COMMITTED, committed.status());
+            assertFalse(installedDuringFailure,
+                    "derived session probes must fail closed after the CAS");
+            assertEquals(1L, harness.sessionStore.findSession(sessionId)
+                    .get().currentEpoch(),
+                    "the authoritative commit must remain visible");
+            assertEquals(loadsBeforeCallback, harness.engine
+                    .planningProjectionCacheMetricsForTest().loads(),
+                    "a failed post-CAS probe must not publish the successor");
+
+            harness.allowPostCasSessionReads();
+            assertTrue(harness.engine
+                    .installPreparedRootContextAfterPublication(
+                            transition, committed),
+                    "the failed observational callback must not consume the "
+                            + "prepared generation");
+            assertEquals(loadsBeforeCallback + 1L, harness.engine
+                    .planningProjectionCacheMetricsForTest().loads());
         }
     }
 
@@ -541,6 +604,10 @@ final class CoordinationProcessingEngineTest {
                     harness.engine.execute(winningPlan);
             CoordinationTransition staleTransition =
                     harness.engine.execute(stalePlan);
+            long loadsBeforeCas = harness.engine
+                    .planningProjectionCacheMetricsForTest().loads();
+            long entriesBeforeCas = harness.engine
+                    .planningProjectionCacheMetricsForTest().entries();
 
             // when
             CommitOutcome winningOutcome =
@@ -555,6 +622,16 @@ final class CoordinationProcessingEngineTest {
                     harness.sessionStore.terminalProgress(sessionId);
             CommitOutcome staleOutcome =
                     harness.engine.commit(staleTransition);
+            boolean staleInstalled = harness.engine
+                    .installPreparedRootContextAfterPublication(
+                            staleTransition, staleOutcome);
+            long loadsAfterRejectedCallback = harness.engine
+                    .planningProjectionCacheMetricsForTest().loads();
+            long entriesAfterRejectedCallback = harness.engine
+                    .planningProjectionCacheMetricsForTest().entries();
+            boolean winnerInstalled = harness.engine
+                    .installPreparedRootContextAfterPublication(
+                            winningTransition, winningOutcome);
 
             // then
             assertEquals(ProcessorStatus.SUCCESS,
@@ -563,6 +640,15 @@ final class CoordinationProcessingEngineTest {
             assertEquals(CommitStatus.COMMITTED, winningOutcome.status());
             assertEquals(CommitStatus.CONFLICT, staleOutcome.status());
             assertFalse(staleOutcome.committed());
+            assertFalse(staleInstalled,
+                    "a losing CAS must not publish its prepared successor");
+            assertEquals(loadsBeforeCas, loadsAfterRejectedCallback);
+            assertEquals(entriesBeforeCas, entriesAfterRejectedCallback,
+                    "the losing candidate must not enter the admitted "
+                            + "projection cache");
+            assertTrue(winnerInstalled);
+            assertEquals(loadsBeforeCas + 1L, harness.engine
+                    .planningProjectionCacheMetricsForTest().loads());
             assertNotEquals(
                     winningTransition.commitPlan().transitionIdentity(),
                     staleTransition.commitPlan().transitionIdentity());
@@ -867,6 +953,7 @@ final class CoordinationProcessingEngineTest {
         private final RepositoryIndependentCoordinationTestRuntime runtime;
         private final InMemoryCoordinationFragmentStore fragmentStore;
         private final InMemoryCoordinationSessionStore sessionStore;
+        private final PostCasReadFailingSessionStore failingSessionStore;
         private final CoordinationProcessingEngine engine;
 
         private Harness() {
@@ -881,11 +968,21 @@ final class CoordinationProcessingEngineTest {
         }
 
         private Harness(BundleTransform transform, int cacheSize) {
+            this(transform, cacheSize, false);
+        }
+
+        private Harness(
+                BundleTransform transform,
+                int cacheSize,
+                boolean injectPostCasReadFailure) {
             runtime = RepositoryIndependentCoordinationTestRuntime.open();
             fragmentStore = new InMemoryCoordinationFragmentStore(
                     CoordinationDocumentSplitter.FRAGMENTATION_PROFILE_ID);
             runtime.addNodeProvider(fragmentStore);
             sessionStore = new InMemoryCoordinationSessionStore();
+            failingSessionStore = injectPostCasReadFailure
+                    ? new PostCasReadFailingSessionStore(sessionStore)
+                    : null;
             CoordinationProcessingBundleLoader exactLoader =
                     new InMemoryCoordinationProcessingBundleLoader(
                             fragmentStore,
@@ -909,7 +1006,9 @@ final class CoordinationProcessingEngineTest {
                     .contracts(runtime.contracts())
                     .documentProcessor(runtime.platformProcessor())
                     .fragmentStore(fragmentStore)
-                    .sessionStore(sessionStore)
+                    .sessionStore(failingSessionStore == null
+                            ? sessionStore
+                            : failingSessionStore)
                     .bundleLoader(selectedLoader)
                     .rootViewCacheMaximumSize(cacheSize)
                     .providerEvidenceDomain(
@@ -929,6 +1028,22 @@ final class CoordinationProcessingEngineTest {
             return new Harness(null, cacheSize);
         }
 
+        private static Harness openWithPostCasReadFailure() {
+            return new Harness(
+                    null,
+                    CoordinationProcessingEngine
+                            .DEFAULT_ROOT_VIEW_CACHE_MAXIMUM_SIZE,
+                    true);
+        }
+
+        private void failPostCasSessionReads() {
+            failingSessionStore.failReads();
+        }
+
+        private void allowPostCasSessionReads() {
+            failingSessionStore.allowReads();
+        }
+
         private Node initializedRoot() {
             DocumentProcessingResult initialized =
                     runtime.initializeDocument(authoredRoot());
@@ -944,6 +1059,64 @@ final class CoordinationProcessingEngineTest {
         public void close() {
             engine.close();
             runtime.close();
+        }
+    }
+
+    private static final class PostCasReadFailingSessionStore
+            implements CoordinationSessionStore {
+        private final CoordinationSessionStore delegate;
+        private boolean failReads;
+
+        private PostCasReadFailingSessionStore(
+                CoordinationSessionStore delegate) {
+            this.delegate = delegate;
+        }
+
+        private void failReads() {
+            failReads = true;
+        }
+
+        private void allowReads() {
+            failReads = false;
+        }
+
+        @Override
+        public Optional<ManagedDocumentSnapshot> findSession(
+                DocumentSessionId id) {
+            requireReadable();
+            return delegate.findSession(id);
+        }
+
+        @Override
+        public Optional<DocumentEpochSnapshot> findEpoch(
+                DocumentSessionId id,
+                long epoch) {
+            requireReadable();
+            return delegate.findEpoch(id, epoch);
+        }
+
+        @Override
+        public DocumentAdmissionResult admit(DocumentAdmissionCommit commit) {
+            return delegate.admit(commit);
+        }
+
+        @Override
+        public CommitOutcome commit(CoordinationAtomicCommitPlan plan) {
+            return delegate.commit(plan);
+        }
+
+        @Override
+        public DocumentRemovalResult remove(
+                DocumentSessionId id,
+                long expectedEpoch) {
+            return delegate.remove(id, expectedEpoch);
+        }
+
+        private void requireReadable() {
+            if (failReads) {
+                throw new IllegalStateException(
+                        "injected post-CAS session-store read failure");
+            }
         }
     }
 }

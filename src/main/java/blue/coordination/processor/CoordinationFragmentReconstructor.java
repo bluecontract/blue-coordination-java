@@ -897,7 +897,7 @@ public final class CoordinationFragmentReconstructor {
             String label) {
         String actual =
                 DirectBlueIdCalculator.calculateBlueId(
-                        node.clone());
+                        node);
         if (!expected.equals(actual)) {
             throw evidenceFailure(
                     label

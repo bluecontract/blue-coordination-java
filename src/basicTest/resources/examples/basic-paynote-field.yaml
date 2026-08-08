@@ -1,0 +1,28 @@
+name: Alice PayNote Field
+payNote:
+contracts:
+  aliceChannel:
+    description: Alice may append one complete PayNote
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/basic-paynote-field/alice
+    actor:
+      type: MyOS/Principal Actor
+      accountId: alice
+  appendPayNote:
+    name: Append PayNote as an ordinary field
+    description: Stores the submitted PayNote inline without declaring it Process Embedded.
+    type: Coordination/Sequential Workflow Operation
+    channel: aliceChannel
+    request:
+      payNote:
+        description: Complete PayNote value retained as one ordinary field.
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /payNote
+              val: {$binding: event/message/request/payNote}
+          - $return: true

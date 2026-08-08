@@ -37,9 +37,14 @@ public final class PlanningFastPath<P> {
     }
 
     /** Must be called only after the new session generation wins host CAS. */
-    public int generationCommitted(ProjectionGenerationKey obsolete) {
-        ProjectionGenerationKey old = Objects.requireNonNull(obsolete, "obsolete");
-        return plans.invalidateIf(key -> key.generation().equals(old));
+    public int generationCommitted(
+            String sessionId,
+            ProjectionGenerationKey obsolete) {
+        String exactSession = Objects.requireNonNull(sessionId, "sessionId");
+        ProjectionGenerationKey old = Objects.requireNonNull(
+                obsolete, "obsolete");
+        return plans.invalidateIf(key -> key.sessionId().equals(exactSession)
+                && key.generation().equals(old));
     }
 
     public CacheMetrics metrics() { return plans.metrics(); }

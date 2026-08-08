@@ -14,10 +14,27 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CoordinationFragmentInventoryTest {
+
+    @Test
+    void retainedCopyKeepsValidatedIdentityInADistinctOwnershipValue() {
+        CoordinationFragmentInventory inventory =
+                CoordinationEngineStorageTestFixtures
+                        .graph("retained-copy").inventory;
+
+        CoordinationFragmentInventory retained = inventory.retainedCopy();
+
+        assertNotSame(inventory, retained);
+        assertEquals(inventory.inventoryIdentity(),
+                retained.inventoryIdentity());
+        assertEquals(inventory.toMap(), retained.toMap());
+        assertEquals(inventory.fragmentBlueIds(),
+                retained.fragmentBlueIds());
+    }
 
     @Test
     void shouldPersistOnlyClosedBodyFreeCanonicalData() {

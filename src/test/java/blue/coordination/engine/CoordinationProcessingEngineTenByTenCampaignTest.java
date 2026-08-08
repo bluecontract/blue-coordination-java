@@ -15,6 +15,8 @@ import blue.coordination.engine.api.ProcessRequest;
 import blue.coordination.engine.memory.InMemoryCoordinationFragmentStore;
 import blue.coordination.engine.memory.InMemoryCoordinationProcessingBundleLoader;
 import blue.coordination.engine.memory.InMemoryCoordinationSessionStore;
+import blue.coordination.engine.fastpath.ReferenceCutConfiguration;
+import blue.coordination.engine.fastpath.ReferenceCutMetrics;
 import blue.coordination.processor.CoordinationDocumentSplitter;
 import blue.coordination.processor.CoordinationSubscriptionOccurrence;
 import blue.coordination.processor.RepositoryIndependentCoordinationTestRuntime;
@@ -67,16 +69,45 @@ final class CoordinationProcessingEngineTenByTenCampaignTest {
                 PrefetchPolicy.MINIMUM_BYTES,
                 PrefetchPolicy.BALANCED,
                 PrefetchPolicy.MINIMUM_ROUND_TRIPS);
+        List<ReferenceCutConfiguration> rootConfigurations = Arrays.asList(
+                ReferenceCutConfiguration.disabled(),
+                ReferenceCutConfiguration.verifiedDefaults(),
+                ReferenceCutConfiguration.verifiedDefaults());
         List<ConsecutiveExecution> executions =
                 new ArrayList<ConsecutiveExecution>();
 
         // when
-        for (PrefetchPolicy policy : policies) {
-            try (Harness harness = Harness.open(Representation.INLINE)) {
+        for (int index = 0; index < policies.size(); index++) {
+            PrefetchPolicy policy = policies.get(index);
+            try (Harness harness = Harness.open(
+                    Representation.INLINE,
+                    rootConfigurations.get(index))) {
                 executions.add(harness.executeConsecutiveLeaves(
                         DocumentSessionId.of(
                                 "ten-by-ten-consecutive-" + policy.name()),
                         policy));
+                ReferenceCutMetrics.Snapshot sparse =
+                        harness.engine.referenceCutMetrics();
+                if (index == 0) {
+                    assertEquals(0L, sparse.sparseUses(),
+                            "the exact full-Root baseline must stay full");
+                } else {
+                    assertEquals(2L, sparse.sparseUses(), sparse.toString());
+                    assertEquals(0L, sparse.fullRootUses(),
+                            sparse.toString());
+                    assertEquals(2L, sparse.processRootSelections(),
+                            sparse.toString());
+                    assertTrue(sparse.processActivePaths() >= 4L,
+                            sparse.toString());
+                    assertTrue(sparse.materializedFragments()
+                                    < sparse.inventoryFragments(),
+                            "demand-sparse PROCESS must not materialize the "
+                                    + "whole ten-by-ten inventory: " + sparse);
+                    assertTrue(sparse.processFragmentMaterializationFraction()
+                                    < 1.0d,
+                            "PROCESS-only sparse work must expose its exact "
+                                    + "fragment reduction: " + sparse);
+                }
             }
         }
 
@@ -964,6 +995,12 @@ final class CoordinationProcessingEngineTenByTenCampaignTest {
         private final Map<String, Node> externalExactNodes;
 
         private Harness(Representation representation) {
+            this(representation, ReferenceCutConfiguration.disabled());
+        }
+
+        private Harness(
+                Representation representation,
+                ReferenceCutConfiguration referenceCutConfiguration) {
             this.representation = Objects.requireNonNull(
                     representation, "representation");
             runtime = RepositoryIndependentCoordinationTestRuntime.open();
@@ -994,11 +1031,21 @@ final class CoordinationProcessingEngineTenByTenCampaignTest {
                                             .getNodeProvider()))
                     .providerEvidenceDomain(
                             "test:ten-by-ten-engine-fragment-store")
+                    .referenceCutConfiguration(
+                            Objects.requireNonNull(
+                                    referenceCutConfiguration,
+                                    "referenceCutConfiguration"))
                     .build();
         }
 
         private static Harness open(Representation representation) {
             return new Harness(representation);
+        }
+
+        private static Harness open(
+                Representation representation,
+                ReferenceCutConfiguration referenceCutConfiguration) {
+            return new Harness(representation, referenceCutConfiguration);
         }
 
         private DocumentAdmissionResult admit(DocumentSessionId sessionId) {

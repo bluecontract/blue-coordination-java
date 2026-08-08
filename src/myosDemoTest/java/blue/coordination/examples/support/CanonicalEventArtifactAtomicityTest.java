@@ -21,18 +21,34 @@ final class CanonicalEventArtifactAtomicityTest {
 
     @Test
     void shouldRemainAtomicBeforeFragmentAdmission() {
-        assertAtomicFailureAt(
+        // given
+        MyOsDemoRuntime.AppendFailureBoundary boundary =
                 MyOsDemoRuntime.AppendFailureBoundary
-                        .BEFORE_FRAGMENT_ADMISSION,
+                        .BEFORE_FRAGMENT_ADMISSION;
+
+        // when
+        assertAtomicFailureAt(
+                boundary,
                 "before-fragment-admission");
+
+        // then
+        // The shared oracle asserts that no partial publication escaped.
     }
 
     @Test
     void shouldRemainAtomicAfterPreparedFragmentAdmission() {
-        assertAtomicFailureAt(
+        // given
+        MyOsDemoRuntime.AppendFailureBoundary boundary =
                 MyOsDemoRuntime.AppendFailureBoundary
-                        .AFTER_FRAGMENT_ADMISSION,
+                        .AFTER_FRAGMENT_ADMISSION;
+
+        // when
+        assertAtomicFailureAt(
+                boundary,
                 "after-fragment-admission");
+
+        // then
+        // The shared oracle asserts that staged fragments remain invisible.
     }
 
     @Test
@@ -113,10 +129,8 @@ final class CanonicalEventArtifactAtomicityTest {
     @Test
     void shouldRejectAnArtifactFromAnotherEnvironmentOrProfileAtomically() {
         // given
-        Node event = new Node().properties(
-                "type", new Node().value("acceptance-event"),
-                "message", new Node().properties(
-                        "sequence", new Node().value(1L)));
+        Node event = MyOsDemoKernel.runtime().parseSourceYaml(
+                "type: acceptance-event\nmessage:\n  sequence: 1\n");
         String eventBlueId = DirectBlueIdCalculator.calculateBlueId(event);
         CoordinationVerifiedEventAdmission first = compiler("environment-a")
                 .compile(eventBlueId, event);

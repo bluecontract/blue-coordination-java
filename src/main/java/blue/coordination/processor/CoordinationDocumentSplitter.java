@@ -44,6 +44,7 @@ import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 
 /**
@@ -99,6 +100,8 @@ public final class CoordinationDocumentSplitter {
     private final Function<Node, EffectiveFragmentationCatalog>
             fragmentationCatalog;
     private final NodeProvider localProvider;
+    private final AtomicLong completeBlueprintCanonicalCopyCount =
+            new AtomicLong();
 
     private CoordinationDocumentSplitter() {
         this.fragmentationCatalog = null;
@@ -349,6 +352,48 @@ public final class CoordinationDocumentSplitter {
                         "effectiveCatalog"));
     }
 
+    /**
+     * Builds a fragmentation blueprint from a path-verified sparse PROCESS
+     * result. Pure references are exact retained boundaries, so this entry
+     * point must not canonical-copy or recursively open the resolved Root.
+     * The ordinary blueprint remains the authoritative cold fallback.
+     */
+    public DocumentFragmentationBlueprint
+            verifiedFrontierFragmentationBlueprint(
+                    Node verifiedSparseRoot,
+                    String verifiedRootBlueId,
+                    EffectiveFragmentationCatalog suppliedCatalog) {
+        if (fragmentationCatalog == null && suppliedCatalog == null) {
+            throw new IllegalStateException(
+                    "Frontier splitting requires an effective catalog");
+        }
+        Node sparseRoot = Objects.requireNonNull(
+                verifiedSparseRoot, "verifiedSparseRoot");
+        if (sparseRoot.isReferenceOnly()) {
+            throw new IllegalArgumentException(
+                    "A sparse frontier Root cannot be a pure reference");
+        }
+        String expectedRootBlueId = BlueIds.requirePlainBlueId(
+                verifiedRootBlueId, "verifiedRootBlueId");
+        EffectiveFragmentationCatalog catalog = suppliedCatalog != null
+                ? suppliedCatalog
+                : fragmentationCatalog.apply(sparseRoot);
+        if (!expectedRootBlueId.equals(catalog.rootBlueId())) {
+            throw new IllegalArgumentException(
+                    "Sparse frontier catalog belongs to another Root");
+        }
+        return buildDocumentFragmentationBlueprint(
+                sparseRoot,
+                catalog,
+                CoordinationHostQuotaSession.disabled(),
+                expectedRootBlueId);
+    }
+
+    /** Number of ordinary full-Root canonical blueprint copies attempted. */
+    public long completeBlueprintCanonicalCopyCount() {
+        return completeBlueprintCanonicalCopyCount.get();
+    }
+
     private DocumentFragmentationBlueprint documentFragmentationBlueprint(
             Node admittedRoot,
             CoordinationHostQuotaSession quotas,
@@ -369,6 +414,7 @@ public final class CoordinationDocumentSplitter {
         EffectiveFragmentationCatalog catalog = suppliedCatalog != null
                 ? suppliedCatalog
                 : fragmentationCatalog.apply(suppliedRoot);
+        completeBlueprintCanonicalCopyCount.incrementAndGet();
         Node exactRoot =
                 CoordinationProcessHeaderBridge
                         .canonicalExactCopy(
@@ -378,9 +424,28 @@ public final class CoordinationDocumentSplitter {
                                                 "admittedRoot",
                                                 true)
                                         : suppliedRoot);
+        return buildDocumentFragmentationBlueprint(
+                exactRoot,
+                catalog,
+                quotas,
+                null);
+    }
+
+    private DocumentFragmentationBlueprint
+            buildDocumentFragmentationBlueprint(
+                    Node exactRoot,
+                    EffectiveFragmentationCatalog catalog,
+                    CoordinationHostQuotaSession quotas,
+                    String verifiedRootBlueId) {
         CoordinationExactNodeIndex exactNodeIndex =
                 new CoordinationExactNodeIndex();
         String rootBlueId = exactNodeIndex.blueId(exactRoot);
+        if (verifiedRootBlueId != null
+                && !verifiedRootBlueId.equals(rootBlueId)) {
+            throw new IllegalStateException(
+                    "Sparse frontier changed verified Root BlueId from "
+                            + verifiedRootBlueId + " to " + rootBlueId);
+        }
         if (!rootBlueId.equals(catalog.rootBlueId())) {
             throw new IllegalStateException(
                     "Effective fragmentation catalog changed Root BlueId from "
@@ -3216,7 +3281,7 @@ public final class CoordinationDocumentSplitter {
             Node fragment,
             String label) {
         String actualBlueId =
-                DirectBlueIdCalculator.calculateBlueId(fragment.clone());
+                DirectBlueIdCalculator.calculateBlueId(fragment);
         if (!expectedBlueId.equals(actualBlueId)) {
             throw new IllegalStateException(
                     label

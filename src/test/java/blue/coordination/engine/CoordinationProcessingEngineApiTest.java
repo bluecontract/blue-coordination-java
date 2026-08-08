@@ -195,12 +195,16 @@ final class CoordinationProcessingEngineApiTest {
                         + "blue.coordination.engine.api."
                         + "CoordinationFragmentInventory,"
                         + "blue.language.model.Node,java.lang.String,"
+                        + "blue.coordination.engine.fastpath."
+                        + "VerifiedFragmentTransitionFrontier,"
                         + "blue.coordination.processor."
                         + "CoordinationPreparedDelivery,"
                         + "blue.coordination.processor."
                         + "CoordinationSubscriptionUpdate)"
                         + "->blue.coordination.engine.api."
-                        + "CoordinationFragmentTransition");
+                        + "CoordinationFragmentTransition",
+                "workSnapshot()->blue.coordination.engine.api."
+                        + "CoordinationFragmentTransitionWorkSnapshot");
 
         // when
         Set<String> constructors = publicConstructorSignatures(planner);

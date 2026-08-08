@@ -2,10 +2,11 @@ package blue.coordination.processor;
 
 import blue.coordination.engine.fastpath.VerifiedHybridResultFrontier;
 import blue.coordination.fastpath.DeltaProjectionApplier;
+import blue.coordination.fastpath.FastPathWorkMetrics;
 import blue.coordination.processor.fragmentation.EffectiveCutCatalogReader;
 import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.model.Node;
-import blue.language.model.NodePathEditor;
+import blue.language.model.wire.BlueLanguageConstants;
 import blue.language.model.wire.JsonPointer;
 import blue.language.processor.EffectiveContractSnapshot;
 import blue.language.processor.EffectiveContractSnapshotConstants;
@@ -44,6 +45,16 @@ import java.util.Set;
  * refreshed.  Any broader mutation uses the typed cold projector.</p>
  */
 public final class CoordinationCommitProjectionEvidenceBuilder {
+    private final FastPathWorkMetrics metrics;
+
+    public CoordinationCommitProjectionEvidenceBuilder() {
+        this(new FastPathWorkMetrics());
+    }
+
+    public CoordinationCommitProjectionEvidenceBuilder(
+            FastPathWorkMetrics metrics) {
+        this.metrics = Objects.requireNonNull(metrics, "metrics");
+    }
 
     public CoordinationCommitProjectionEvidence build(
             CoordinationSubscriptionSnapshot previous,
@@ -128,6 +139,7 @@ public final class CoordinationCommitProjectionEvidenceBuilder {
                 ? CatalogEvidence.from(
                         fragmentationCatalog, newRoot, newRootBlueId)
                 : null;
+        if (catalogEvidence != null) metrics.catalogFallback();
         Set<String> newScopeRoots = catalogEvidence == null
                 ? Collections.<String>emptySet()
                 : validateTopologyAndNewScopes(
@@ -163,13 +175,22 @@ public final class CoordinationCommitProjectionEvidenceBuilder {
             }
         }
 
+        Set<String> changedPaths = verifiedChangedPaths(proof, delta);
+        Set<String> candidates = prior.affectedOccurrenceKeys(changedPaths);
+        metrics.candidatesLookedUp(candidates.size());
         Map<String, String> resultingScopeBlueIds =
                 new LinkedHashMap<String, String>();
         List<CoordinationSubscriptionOccurrence> currentEvidence =
                 new ArrayList<CoordinationSubscriptionOccurrence>();
         Set<String> affected = new LinkedHashSet<String>();
-        for (CoordinationSubscriptionOccurrence occurrence
-                : prior.occurrences()) {
+        for (String occurrenceKey : candidates) {
+            CoordinationSubscriptionOccurrence occurrence =
+                    prior.occurrence(occurrenceKey);
+            if (occurrence == null) {
+                throw new IllegalStateException(
+                        "dependency index returned an unknown occurrence: "
+                                + occurrenceKey);
+            }
             if (membership.removedInternalKeys.contains(
                     internalKey(occurrence))) {
                 continue;
@@ -177,7 +198,7 @@ public final class CoordinationCommitProjectionEvidenceBuilder {
             String scopeBlueId = resultingScopeBlueIds.get(
                     occurrence.scopePath());
             if (scopeBlueId == null) {
-                scopeBlueId = exactScopeBlueId(
+                scopeBlueId = exactAffectedScopeBlueId(
                         newRoot,
                         newRootBlueId,
                         occurrence.scopePath(),
@@ -185,11 +206,9 @@ public final class CoordinationCommitProjectionEvidenceBuilder {
                 resultingScopeBlueIds.put(
                         occurrence.scopePath(), scopeBlueId);
             }
-            if (!occurrence.scopeBlueId().equals(scopeBlueId)) {
-                affected.add(occurrence.occurrenceKey());
-                currentEvidence.add(
-                        occurrence.withScopeBlueId(scopeBlueId));
-            }
+            affected.add(occurrence.occurrenceKey());
+            currentEvidence.add(
+                    occurrence.withScopeBlueId(scopeBlueId));
         }
         if (catalogEvidence != null) {
             for (SubscriptionDelta.Entry addition : delta.added()) {
@@ -216,7 +235,47 @@ public final class CoordinationCommitProjectionEvidenceBuilder {
                 catalogEvidence == null
                         ? null
                         : catalogEvidence.catalog,
+                changedPaths,
                 true);
+    }
+
+    private static Set<String> verifiedChangedPaths(
+            VerifiedHybridResultFrontier proof,
+            SubscriptionDelta membershipDelta) {
+        List<String> frontier = new ArrayList<String>(proof.expandedPaths());
+        Collections.sort(frontier);
+        LinkedHashSet<String> changed = new LinkedHashSet<String>();
+        for (int index = 0; index < frontier.size(); index++) {
+            String candidate = frontier.get(index);
+            String prefix = "/".equals(candidate)
+                    ? "/"
+                    : candidate + "/";
+            boolean hasExpandedDescendant = index + 1 < frontier.size()
+                    && frontier.get(index + 1).startsWith(prefix);
+            if (!hasExpandedDescendant) changed.add(candidate);
+        }
+        changed.addAll(proof.newRuntimeBoundaryBlueIdByPath().keySet());
+        changed.addAll(proof.processEmbeddedBoundaryBlueIdByPath().keySet());
+        changed.addAll(proof.newSubtreeHeaderBlueIdByPath().keySet());
+        for (SubscriptionDelta.Entry entry : membershipDelta.removed()) {
+            changed.add(contractPath(entry));
+        }
+        for (SubscriptionDelta.Entry entry : membershipDelta.added()) {
+            changed.add(contractPath(entry));
+        }
+        if (changed.isEmpty()) {
+            throw cold("verified PROCESS frontier carries no changed path");
+        }
+        List<String> ordered = new ArrayList<String>(changed);
+        Collections.sort(ordered, ExternalOrderKey::compareTextCodePoints);
+        return Collections.unmodifiableSet(
+                new LinkedHashSet<String>(ordered));
+    }
+
+    private static String contractPath(SubscriptionDelta.Entry entry) {
+        return append(
+                append(entry.scopePath(), "$contracts"),
+                entry.channelKey());
     }
 
     private static boolean samePayloadShape(
@@ -311,8 +370,8 @@ public final class CoordinationCommitProjectionEvidenceBuilder {
                         oldNode.getContracts(),
                         newNode.getContracts(),
                         identities);
-        return sameNodeIdentity(
-                        oldNode.getType(), newNode.getType(), identities)
+        return sameCanonicalTypeMetadata(
+                        oldNode, newNode, identities)
                 && sameNodeIdentity(
                         oldNode.getItemType(),
                         newNode.getItemType(),
@@ -438,16 +497,13 @@ public final class CoordinationCommitProjectionEvidenceBuilder {
             SubscriptionDelta delta,
             Set<String> newScopeRoots,
             CatalogEvidence catalog) {
-        Map<String, CoordinationSubscriptionOccurrence> previous =
-                new LinkedHashMap<String, CoordinationSubscriptionOccurrence>();
-        for (CoordinationSubscriptionOccurrence occurrence
-                : prior.occurrences()) {
-            previous.put(internalKey(occurrence), occurrence);
-        }
         Set<String> removed = new LinkedHashSet<String>();
         for (SubscriptionDelta.Entry retirement : delta.removed()) {
             String key = internalKey(retirement);
-            if (!previous.containsKey(key) || !removed.add(key)) {
+            CoordinationSubscriptionOccurrence previous =
+                    prior.occurrenceByInternalKey(
+                            retirement.scopePath(), retirement.channelKey());
+            if (previous == null || !removed.add(key)) {
                 throw cold("membership delta retires an unknown occurrence at "
                         + retirement.scopePath() + "/"
                         + retirement.channelKey());
@@ -931,14 +987,53 @@ public final class CoordinationCommitProjectionEvidenceBuilder {
         return blueId(left, identities).equals(blueId(right, identities));
     }
 
+    /**
+     * A Text scalar with no declared {@code $type} already has the canonical
+     * Text identity. PROCESS is allowed to materialize that exact header while
+     * changing the business value; no other absent/present type transition is
+     * equivalent. Full identity equality remains the ordinary path.
+     */
+    private static boolean sameCanonicalTypeMetadata(
+            Node oldNode,
+            Node newNode,
+            IdentityHashMap<Node, String> identities) {
+        if (sameNodeIdentity(
+                oldNode.getType(), newNode.getType(), identities)) {
+            return true;
+        }
+        return oldNode.getType() == null
+                && newNode.getType() != null
+                && oldNode.getValue() instanceof String
+                && newNode.getValue() instanceof String
+                && BlueLanguageConstants.TEXT_TYPE_BLUE_ID.equals(
+                        blueId(newNode.getType(), identities));
+    }
+
+    private String exactAffectedScopeBlueId(
+            Node exactResultingRoot,
+            String resultingRootBlueId,
+            String scopePath,
+            IdentityHashMap<Node, String> identities) {
+        if ("/".equals(scopePath)) return resultingRootBlueId;
+        metrics.scopeTraversed();
+        Node scope = structuralNodeAt(exactResultingRoot, scopePath);
+        if (scope == null) {
+            throw cold("active subscription scope is absent at "
+                    + scopePath);
+        }
+        if (!scope.isReferenceOnly() && !identities.containsKey(scope)) {
+            metrics.rootIdentityCalculated();
+        }
+        return blueId(scope, identities);
+    }
+
     private static String exactScopeBlueId(
             Node exactResultingRoot,
             String resultingRootBlueId,
             String scopePath,
             IdentityHashMap<Node, String> identities) {
         if ("/".equals(scopePath)) return resultingRootBlueId;
-        Node scope = NodePathEditor.getOrNull(
-                exactResultingRoot, scopePath);
+        Node scope = structuralNodeAt(exactResultingRoot, scopePath);
         if (scope == null) {
             throw cold("active subscription scope is absent at "
                     + scopePath);

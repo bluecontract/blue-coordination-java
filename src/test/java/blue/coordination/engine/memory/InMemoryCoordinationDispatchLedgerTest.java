@@ -13,6 +13,7 @@ import java.util.Arrays;
 import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -175,6 +176,32 @@ final class InMemoryCoordinationDispatchLedgerTest {
         assertEquals(Arrays.asList(1, 2), Arrays.asList(
                 retried.plan().pages().get(0).size(),
                 retried.plan().pages().get(1).size()));
+    }
+
+    @Test
+    void shouldReleaseOnlyFullyCommittedDispatchesAtExplicitLifecycleBoundary() {
+        InMemoryCoordinationDispatchLedger ledger =
+                new InMemoryCoordinationDispatchLedger();
+        StoredCoordinationEvent event = event(
+                "event-release", "inventory-release");
+        IndexedSessionCandidates target = target("session-a", "/a");
+        ledger.beginOrResume(
+                event,
+                Collections.singletonList("actor:alice"),
+                "ownerChannel",
+                1L,
+                Collections.singletonList(target),
+                1);
+
+        assertThrows(IllegalStateException.class,
+                () -> ledger.releaseCompletedDispatch(event.eventBlueId()));
+        CoordinationDeliveryAdmission admission = ledger.beginAttempt(
+                event.eventBlueId(), target.sessionId());
+        ledger.commit(admission, committed(event, target, "transition-a"));
+
+        assertTrue(ledger.releaseCompletedDispatch(event.eventBlueId()));
+        assertEquals(0, ledger.dispatchCount());
+        assertFalse(ledger.releaseCompletedDispatch(event.eventBlueId()));
     }
 
     private static StoredCoordinationEvent event(

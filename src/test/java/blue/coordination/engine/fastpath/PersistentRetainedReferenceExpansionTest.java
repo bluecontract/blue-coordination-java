@@ -1,9 +1,12 @@
 package blue.coordination.engine.fastpath;
 
+import blue.coordination.engine.CoordinationProcessingEngine
+        .VerifiedNodeAccessAuthority;
 import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.model.Node;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Constructor;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -114,6 +117,39 @@ final class PersistentRetainedReferenceExpansionTest {
         assertTrue(wrongOwner.getMessage().contains("another epoch"));
     }
 
+    @Test
+    void shouldShareVerifiedHandlesWhenGraftingWithinTheEngineOwner()
+            throws Exception {
+        Object owner = new Object();
+        Node retained = new Node().value("retained");
+        String retainedBlueId = blueId(retained);
+        ExactNodeHandle retainedHandle = ExactNodeHandle.adoptAndVerify(
+                retainedBlueId, retained, owner);
+        RetainedReferenceIndex prior = RetainedReferenceIndex.builder(owner)
+                .add(retainedHandle)
+                .build();
+        assertSame(prior,
+                prior.withVerifiedHandles(
+                        Collections.<ExactNodeHandle>emptyList(), owner),
+                "an empty projection extension is allocation-free");
+        Node expanded = new Node().value("expanded");
+        String expandedBlueId = blueId(expanded);
+        Node resultingRoot = new Node().properties("expanded", expanded);
+
+        RetainedReferenceIndex resulting = prior.graftVerifiedExpanded(
+                resultingRoot,
+                Collections.singletonMap("/expanded", expandedBlueId),
+                owner,
+                owner,
+                new RequestDigestMemo(),
+                authority());
+
+        assertSame(retainedHandle, resulting.find(retainedBlueId),
+                "same-domain immutable handles need no successor wrapper");
+        assertEquals(expandedBlueId,
+                resulting.find(expandedBlueId).blueId());
+    }
+
     private static Node fullyExpand(
             Node root, Map<String, Node> retained) {
         return fullyExpand(
@@ -122,6 +158,13 @@ final class PersistentRetainedReferenceExpansionTest {
                 Collections.newSetFromMap(
                         new IdentityHashMap<Node, Boolean>()),
                 new LinkedHashSet<String>());
+    }
+
+    private static VerifiedNodeAccessAuthority authority() throws Exception {
+        Constructor<VerifiedNodeAccessAuthority> constructor =
+                VerifiedNodeAccessAuthority.class.getDeclaredConstructor();
+        constructor.setAccessible(true);
+        return constructor.newInstance();
     }
 
     private static Node fullyExpand(

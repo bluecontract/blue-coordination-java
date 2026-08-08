@@ -35,7 +35,6 @@ final class CoordinationPlanningProjectionCompilerTest {
                 rootBlueId, nestedBlueId);
         ProjectionGenerationKey generation = new ProjectionGenerationKey(
                 "environment",
-                "session",
                 rootBlueId,
                 snapshot.rootRevision(),
                 "inventory",
@@ -78,7 +77,6 @@ final class CoordinationPlanningProjectionCompilerTest {
                 rootBlueId, nestedBlueId);
         ProjectionGenerationKey generation = new ProjectionGenerationKey(
                 "environment",
-                "session",
                 rootBlueId,
                 snapshot.rootRevision(),
                 "inventory",
@@ -109,7 +107,6 @@ final class CoordinationPlanningProjectionCompilerTest {
                 rootBlueId, nestedBlueId);
         ProjectionGenerationKey generation = new ProjectionGenerationKey(
                 "environment",
-                "session",
                 rootBlueId,
                 snapshot.rootRevision(),
                 "inventory",

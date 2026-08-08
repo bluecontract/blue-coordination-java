@@ -459,7 +459,8 @@ final class CoordinationCommitProjectionEvidenceBuilderTest {
     void expandedImplicitTextTypeIsOneExactValueBoundary() {
         Node priorAccountId = new Node().value("alice");
         Node resultingAccountId = new Node()
-                .type(runtimeType(BlueLanguageConstants.TEXT_TYPE_BLUE_ID))
+                .type(new Node().blueId(
+                        BlueLanguageConstants.TEXT_TYPE_BLUE_ID))
                 .value("alice");
         assertEquals(
                 blueId(priorAccountId),
@@ -515,6 +516,123 @@ final class CoordinationCommitProjectionEvidenceBuilderTest {
     }
 
     @Test
+    void changedTextScalarAcceptsOnlyItsCanonicalMaterializedType() {
+        Node priorAccountId = new Node().value("alice");
+        Node resultingAccountId = new Node()
+                .type(new Node().blueId(
+                        BlueLanguageConstants.TEXT_TYPE_BLUE_ID))
+                .value("bob");
+        Node prior = new Node()
+                .contracts(new Node().properties(
+                        "customerChannel",
+                        new Node().properties(
+                                "actor",
+                                new Node().properties(
+                                        "accountId", priorAccountId))))
+                .properties("counter", new Node().value(1));
+        PreparedFixture prepared = prepared(prior);
+        Node result = new Node()
+                .contracts(new Node().properties(
+                        "customerChannel",
+                        new Node().properties(
+                                "actor",
+                                new Node().properties(
+                                        "accountId", resultingAccountId))))
+                .properties("counter", new Node().value(2));
+        String resultingRootBlueId = blueId(result);
+        CoordinationSubscriptionOccurrence retained = occurrence(
+                "/", prepared.rootBlueId, "root-channel", 0);
+        VerifiedHybridResultFrontier frontier = HybridResultFrontier
+                .proveRetainedBindings(
+                        result, prepared.context, prepared.owner);
+
+        CoordinationCommitProjectionEvidence evidence =
+                new CoordinationCommitProjectionEvidenceBuilder().build(
+                        snapshot(
+                                prepared.rootBlueId,
+                                1L,
+                                order(1L),
+                                retained),
+                        frontier,
+                        prepared.exactPriorRoot,
+                        result,
+                        resultingRootBlueId,
+                        2L,
+                        order(2L),
+                        SubscriptionDelta.empty());
+
+        assertEquals(resultingRootBlueId, evidence.resultingRootBlueId());
+        assertTrue(evidence.affectedRetainedOccurrenceKeys().contains(
+                retained.occurrenceKey()));
+    }
+
+    @Test
+    void changedTextScalarRejectsANonCanonicalMaterializedType() {
+        String forgedTypeBlueId = blueId(new Node().properties(
+                "kind", new Node().value("not-text")));
+        Node prior = new Node().properties(
+                "accountId", new Node().value("alice"));
+        PreparedFixture prepared = prepared(prior);
+        Node result = new Node().properties(
+                "accountId", new Node()
+                        .type(new Node().blueId(forgedTypeBlueId))
+                        .value("bob"));
+
+        DeltaProjectionApplier.ColdProjectionRequiredException failure =
+                assertThrows(
+                        DeltaProjectionApplier
+                                .ColdProjectionRequiredException.class,
+                        () -> HybridResultFrontier.proveRetainedBindings(
+                                result,
+                                prepared.context,
+                                prepared.owner));
+
+        assertTrue(failure.getMessage().contains("/accountId/$type"));
+    }
+
+    @Test
+    void changedTextScalarRejectsExplicitToImplicitTypeMetadata() {
+        Node prior = new Node().properties(
+                "accountId", new Node()
+                        .type(new Node().blueId(
+                                BlueLanguageConstants.TEXT_TYPE_BLUE_ID))
+                        .value("alice"));
+        PreparedFixture prepared = prepared(prior);
+        Node result = new Node().properties(
+                "accountId", new Node().value("bob"));
+        String resultingRootBlueId = blueId(result);
+        VerifiedHybridResultFrontier frontier = HybridResultFrontier
+                .proveRetainedBindings(
+                        result, prepared.context, prepared.owner);
+
+        DeltaProjectionApplier.ColdProjectionRequiredException failure =
+                assertThrows(
+                        DeltaProjectionApplier
+                                .ColdProjectionRequiredException.class,
+                        () -> new CoordinationCommitProjectionEvidenceBuilder()
+                                .build(
+                                        snapshot(
+                                                prepared.rootBlueId,
+                                                1L,
+                                                order(1L),
+                                                occurrence(
+                                                        "/",
+                                                        prepared.rootBlueId,
+                                                        "root-channel",
+                                                        0)),
+                                        frontier,
+                                        prepared.exactPriorRoot,
+                                        result,
+                                        resultingRootBlueId,
+                                        2L,
+                                        order(2L),
+                                        SubscriptionDelta.empty()));
+
+        assertTrue(failure.getMessage().contains(
+                "semantic metadata at /accountId"));
+    }
+
+    @Test
     void expandedProcessEmbeddedTypeProvesOnlyOneCanonicalPathAppend() {
         Node prior = new Node()
                 .contracts(new Node().properties(
@@ -555,6 +673,124 @@ final class CoordinationCommitProjectionEvidenceBuilderTest {
                 .getProperties().get("paths").getItems().get(1)
                 .value("/payNotes/forged");
         assertFalse(frontier.retainedBindingsRemainExact(result));
+    }
+
+    @Test
+    void processEmbeddedAppendAcceptsCanonicalMaterializedPathMetadata() {
+        Node prior = new Node()
+                .contracts(new Node().properties(
+                        "embedded",
+                        processEmbedded(
+                                runtimeType(RuntimeBlueIds.PROCESS_EMBEDDED),
+                                "/product")))
+                .properties(
+                        "product", new Node().value("existing"),
+                        "payNotes", new Node().properties(
+                                Collections.<String, Node>emptyMap()));
+        PreparedFixture prepared = prepared(prior);
+        Node declaration = processEmbedded(
+                runtimeType(RuntimeBlueIds.PROCESS_EMBEDDED),
+                "/product",
+                "/payNotes/packagePayment");
+        materializeCanonicalPathMetadata(declaration);
+        Node result = new Node()
+                .contracts(new Node().properties(
+                        "embedded", declaration))
+                .properties(
+                        "product", new Node().value("existing"),
+                        "payNotes", new Node().properties(
+                                "packagePayment",
+                                new Node().value("new")));
+
+        VerifiedHybridResultFrontier frontier = HybridResultFrontier
+                .proveRetainedBindings(
+                        result, prepared.context, prepared.owner);
+
+        assertEquals(
+                blueId(declaration),
+                frontier.processEmbeddedBoundaryBlueIdByPath().get(
+                        "/$contracts/embedded"));
+        assertFalse(frontier.retainedBlueIdByPath().containsKey(
+                "/$contracts/embedded/paths/1/$type"));
+        assertTrue(frontier.retainedBindingsRemainExact(result));
+    }
+
+    @Test
+    void processEmbeddedAppendRejectsANonCanonicalMaterializedListType() {
+        Node prior = new Node().contracts(new Node().properties(
+                "embedded",
+                processEmbedded(
+                        new Node().blueId(RuntimeBlueIds.PROCESS_EMBEDDED),
+                        "/product")));
+        PreparedFixture prepared = prepared(prior);
+        Node declaration = processEmbedded(
+                new Node().blueId(RuntimeBlueIds.PROCESS_EMBEDDED),
+                "/product",
+                "/payNote");
+        materializeCanonicalPathMetadata(declaration);
+        declaration.getProperties().get("paths").type(
+                new Node().blueId(
+                        BlueLanguageConstants.TEXT_TYPE_BLUE_ID));
+        Node result = new Node().contracts(new Node().properties(
+                "embedded", declaration));
+
+        DeltaProjectionApplier.ColdProjectionRequiredException failure =
+                assertThrows(
+                        DeltaProjectionApplier
+                                .ColdProjectionRequiredException.class,
+                        () -> HybridResultFrontier.proveRetainedBindings(
+                                result,
+                                prepared.context,
+                                prepared.owner));
+
+        assertTrue(failure.getMessage().contains("/paths/$type"));
+    }
+
+    @Test
+    void processEmbeddedAppendRejectsExplicitToImplicitPathMetadata() {
+        Node priorDeclaration = processEmbedded(
+                new Node().blueId(RuntimeBlueIds.PROCESS_EMBEDDED),
+                "/product");
+        materializeCanonicalPathMetadata(priorDeclaration);
+        PreparedFixture prepared = prepared(
+                new Node().contracts(new Node().properties(
+                        "embedded", priorDeclaration)));
+        Node result = new Node().contracts(new Node().properties(
+                "embedded",
+                processEmbedded(
+                        new Node().blueId(RuntimeBlueIds.PROCESS_EMBEDDED),
+                        "/product",
+                        "/payNote")));
+
+        VerifiedHybridResultFrontier frontier = HybridResultFrontier
+                .proveRetainedBindings(
+                        result, prepared.context, prepared.owner);
+
+        assertTrue(frontier.processEmbeddedBoundaryBlueIdByPath().isEmpty());
+    }
+
+    @Test
+    void processEmbeddedAppendRejectsExtraPathItemMetadata() {
+        Node prior = new Node().contracts(new Node().properties(
+                "embedded",
+                processEmbedded(
+                        new Node().blueId(RuntimeBlueIds.PROCESS_EMBEDDED),
+                        "/product")));
+        PreparedFixture prepared = prepared(prior);
+        Node declaration = processEmbedded(
+                new Node().blueId(RuntimeBlueIds.PROCESS_EMBEDDED),
+                "/product",
+                "/payNote");
+        declaration.getProperties().get("paths").getItems().get(1)
+                .name("forged-item-metadata");
+        Node result = new Node().contracts(new Node().properties(
+                "embedded", declaration));
+
+        VerifiedHybridResultFrontier frontier = HybridResultFrontier
+                .proveRetainedBindings(
+                        result, prepared.context, prepared.owner);
+
+        assertTrue(frontier.processEmbeddedBoundaryBlueIdByPath().isEmpty());
     }
 
     @Test
@@ -840,6 +1076,18 @@ final class CoordinationCommitProjectionEvidenceBuilderTest {
                 .description("Exact test Process Embedded declaration")
                 .type(exactType)
                 .properties("paths", new Node().items(values));
+    }
+
+    private static void materializeCanonicalPathMetadata(Node declaration) {
+        Node paths = declaration.getProperties().get("paths");
+        paths.type(new Node().blueId(
+                        BlueLanguageConstants.LIST_TYPE_BLUE_ID))
+                .itemType(new Node().blueId(
+                        BlueLanguageConstants.TEXT_TYPE_BLUE_ID));
+        for (Node item : paths.getItems()) {
+            item.type(new Node().blueId(
+                    BlueLanguageConstants.TEXT_TYPE_BLUE_ID));
+        }
     }
 
     private static Node runtimeType(String blueId) {

@@ -84,6 +84,21 @@ final class AdmittedProjectionTest {
     }
 
     @Test
+    void canonicalOccurrenceOrderComparesUnicodeCodePoints() {
+        AdmittedOccurrence privateUse = FastPathFixtures.occurrence(
+                1, "/\uE000");
+        AdmittedOccurrence supplementary = FastPathFixtures.occurrence(
+                2, "/\uD800\uDC00");
+
+        AdmittedProjection projection = new AdmittedProjection(
+                FastPathFixtures.generation(1L),
+                Arrays.asList(supplementary, privateUse));
+
+        assertEquals(Arrays.asList(privateUse, supplementary),
+                projection.occurrences());
+    }
+
+    @Test
     void changedPathInvalidationMatchesAncestorsAndDescendants() {
         AdmittedProjection projection = new AdmittedProjection(
                 FastPathFixtures.generation(1L),
@@ -95,5 +110,36 @@ final class AdmittedProjectionTest {
                 Arrays.asList("public-1", "public-2"),
                 new java.util.ArrayList<String>(projection.affectedOccurrences(
                         Collections.singletonList("/orders/a/lines"))));
+    }
+
+    @Test
+    void retainedWeightChargesAllOccurrenceAndDependencyPathEvidence() {
+        AdmittedOccurrence compact = FastPathFixtures.occurrence(1, "/a");
+        String padding = String.join("", Collections.nCopies(256, "weight"));
+        AdmittedOccurrence expanded = new AdmittedOccurrence(
+                compact.publicKey(),
+                compact.scopePath(),
+                compact.scopeBlueId(),
+                compact.channelKey(),
+                compact.effectiveTypeBlueId(),
+                compact.order(),
+                compact.headerIdentityBlueId() + padding,
+                compact.checkpointDomainBlueId() + padding,
+                compact.scopeChainBlueIds(),
+                Collections.singletonList(padding),
+                Collections.singletonList(padding + "-dependency"),
+                Collections.singletonList(padding + "-subscription"),
+                Collections.singletonList("/" + padding));
+
+        long compactWeight = new AdmittedProjection(
+                FastPathFixtures.generation(1L),
+                Collections.singletonList(compact)).estimatedWeight();
+        long expandedWeight = new AdmittedProjection(
+                FastPathFixtures.generation(1L),
+                Collections.singletonList(expanded)).estimatedWeight();
+
+        assertTrue(expandedWeight > compactWeight + padding.length() * 8L,
+                "weight must include header, checkpoint, source, dependency, "
+                        + "subscription and persistent path-index evidence");
     }
 }

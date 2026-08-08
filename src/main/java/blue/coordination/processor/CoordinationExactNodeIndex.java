@@ -26,7 +26,7 @@ import java.util.Map;
  * duration of one immutable fragmentation blueprint. Consumers clone a node
  * before mutation; the retained references are never exposed publicly.</p>
  */
-final class CoordinationExactNodeIndex {
+public final class CoordinationExactNodeIndex {
 
     private final IdentityHashMap<Node, String> identities =
             new IdentityHashMap<Node, String>();
@@ -39,7 +39,7 @@ final class CoordinationExactNodeIndex {
     private long identityCalculationCount;
 
     /** Indexes an exact inline node and returns its strict direct identity. */
-    synchronized String blueId(Node supplied) {
+    public synchronized String blueId(Node supplied) {
         Node node = java.util.Objects.requireNonNull(
                 supplied, "supplied");
         if (node.isReferenceOnly()) {
@@ -87,7 +87,7 @@ final class CoordinationExactNodeIndex {
     }
 
     /** Number of inline object occurrences actually hashed by this index. */
-    synchronized long identityCalculationCount() {
+    public synchronized long identityCalculationCount() {
         return identityCalculationCount;
     }
 

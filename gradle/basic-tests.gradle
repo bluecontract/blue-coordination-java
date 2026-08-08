@@ -1,0 +1,77 @@
+/*
+ * Small, independent Java 17 acceptance source set built on the executable
+ * myOS demo runtime. Keeping this separate prevents the basic scenario from
+ * entering the closed myosDemoTest evidence inventory.
+ */
+sourceSets {
+    basicTest {
+        java.setSrcDirs(['src/basicTest/java'])
+        resources.setSrcDirs(['src/basicTest/resources'])
+        compileClasspath += sourceSets.main.output \
+                + sourceSets.coordinationTestSupport.output \
+                + sourceSets.myosDemoTest.output
+        runtimeClasspath += output + compileClasspath
+    }
+}
+
+configurations {
+    basicTestImplementation.extendsFrom myosDemoTestImplementation
+    basicTestCompileOnly.extendsFrom myosDemoTestCompileOnly
+    basicTestRuntimeOnly.extendsFrom myosDemoTestRuntimeOnly
+}
+
+tasks.named('compileBasicTestJava', JavaCompile) {
+    javaCompiler.set(javaToolchains.compilerFor {
+        languageVersion = JavaLanguageVersion.of(17)
+    })
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+    options.release.set(17)
+    options.encoding = 'UTF-8'
+    options.compilerArgs.addAll([
+            '-Xlint:all',
+            '-Xlint:-serial',
+            '-Werror'
+    ])
+}
+
+tasks.register('basicTest', Test) {
+    group = 'verification'
+    description = 'Runs the focused executable myOS acceptance scenarios.'
+    dependsOn tasks.named('basicTestClasses'),
+            tasks.named('myosDemoTestClasses')
+    testClassesDirs = sourceSets.basicTest.output.classesDirs
+    classpath = sourceSets.basicTest.runtimeClasspath
+    javaLauncher.set(javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(17)
+    })
+    useJUnitPlatform()
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+
+    def metricsDirectory = layout.buildDirectory.dir(
+            'reports/basic-test/metrics')
+    systemProperty 'basic.test.metrics.dir',
+            metricsDirectory.get().asFile.absolutePath
+    outputs.dir(metricsDirectory)
+    outputs.upToDateWhen { false }
+    outputs.doNotCacheIf('contains wall-clock diagnostics') { true }
+    doFirst {
+        delete(metricsDirectory.get().asFile)
+    }
+
+    maxHeapSize = '2g'
+    maxParallelForks = 1
+    // These acceptance scenarios intentionally build large immutable Blue
+    // graphs. Isolate classes so one diagnostic run cannot retain caches or
+    // heap pressure that biases the next test's timings.
+    forkEvery = 1L
+    reports {
+        junitXml.required = true
+        html.required = true
+    }
+    testLogging {
+        events 'FAILED', 'SKIPPED'
+        showStandardStreams = true
+        exceptionFormat = 'full'
+    }
+}

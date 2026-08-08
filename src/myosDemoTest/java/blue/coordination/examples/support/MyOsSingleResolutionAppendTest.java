@@ -1,5 +1,6 @@
 package blue.coordination.examples.support;
 
+import blue.coordination.engine.api.CoordinationEventShapeMetrics;
 import blue.coordination.engine.memory.CoordinationEventAdmissionMetrics;
 import blue.coordination.examples.documents.OrderDocuments;
 import blue.language.model.NodeWireForm;
@@ -26,7 +27,11 @@ final class MyOsSingleResolutionAppendTest {
                     .request("amount: 1")
                     .build();
 
+            // when
             assertSingleResolutionAppend(demo, timeline, operation);
+
+            // then
+            // The shared oracle verifies identity, work, and exact wire parity.
         }
     }
 
@@ -61,6 +66,9 @@ final class MyOsSingleResolutionAppendTest {
                 MyOsDemoRuntime.appendTemplateMetrics();
         CoordinationEventAdmissionMetrics.Snapshot admissionBefore =
                 demo.eventAdmissionMetrics();
+        CoordinationEventShapeMetrics.Snapshot shapeBefore =
+                demo.eventShapeMetrics();
+        MyOsWorkSnapshot workBefore = demo.work().snapshot();
 
         // when
         MyOsDemoEntry appended = demo.append(timeline, operation);
@@ -70,15 +78,37 @@ final class MyOsSingleResolutionAppendTest {
                 MyOsDemoRuntime.appendTemplateMetrics(), templateBefore);
         CoordinationEventAdmissionMetrics.Snapshot admission =
                 demo.eventAdmissionMetrics().minus(admissionBefore);
+        CoordinationEventShapeMetrics.Snapshot shapeAfter =
+                demo.eventShapeMetrics();
+        MyOsWorkSnapshot work = demo.work().snapshot().minus(workBefore);
         assertEquals(1L, template.canonicalCompilations(),
                 "one template compilation is the parse/preprocess/resolve "
                         + "pipeline for the unprepared entry");
         assertEquals(1L, template.exactMaterializations());
         assertEquals(1L, template.rootBlueIdCalculations(),
                 "the event identity is calculated once after composition");
-        assertEquals(1L, admission.fullEventSplits());
-        assertEquals(0L, admission.blueIdCalculations(),
-                "the first canonical split verifies the claimed event ID");
+        assertEquals(1L, admission.fullEventSplits(),
+                "the unprepared operation compiles one authoritative "
+                        + "prototype shape");
+        assertEquals(1L, admission.blueIdCalculations(),
+                "prototype compilation calculates its canonical Root once");
+        assertEquals(0L, work.eventSplits(),
+                "the exact shape instance must be admitted without a full "
+                        + "event split");
+        assertEquals(1L,
+                shapeAfter.templatesCompiled()
+                        - shapeBefore.templatesCompiled());
+        assertEquals(1L,
+                shapeAfter.instancesCompiled()
+                        - shapeBefore.instancesCompiled());
+        assertEquals(1L,
+                shapeAfter.exactGraphsMaterialized()
+                        - shapeBefore.exactGraphsMaterialized());
+        assertEquals(0L,
+                shapeAfter.fullSplitterOracleRuns()
+                        - shapeBefore.fullSplitterOracleRuns());
+        assertEquals(0L,
+                shapeAfter.oracleFailures() - shapeBefore.oracleFailures());
         assertEquals(expectedBinding, appended.binding(),
                 "timeline and actor identities must come from that snapshot");
         assertEquals(expectedBinding, timeline.binding());

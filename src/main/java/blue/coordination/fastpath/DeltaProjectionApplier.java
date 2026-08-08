@@ -16,6 +16,16 @@ import java.util.Set;
  * projector. It never silently assumes an unchanged header.
  */
 public final class DeltaProjectionApplier {
+    private final FastPathWorkMetrics metrics;
+
+    public DeltaProjectionApplier() {
+        this(new FastPathWorkMetrics());
+    }
+
+    public DeltaProjectionApplier(FastPathWorkMetrics metrics) {
+        this.metrics = Objects.requireNonNull(metrics, "metrics");
+    }
+
     public AdmittedProjection apply(
             AdmittedProjection previous,
             ProjectionGenerationKey resultingGeneration,
@@ -42,37 +52,66 @@ public final class DeltaProjectionApplier {
                             + missingEvidence);
         }
 
-        Map<String, AdmittedOccurrence> result = new LinkedHashMap<String, AdmittedOccurrence>();
-        for (AdmittedOccurrence occurrence : prior.occurrences()) {
-            String key = occurrence.publicKey();
-            if (removed.contains(key)) continue;
-            AdmittedOccurrence replacement = refreshed.remove(key);
-            result.put(key, replacement != null ? replacement : occurrence);
-        }
-        if (!refreshed.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "delta refreshes inactive occurrence(s): " + refreshed.keySet());
-        }
-        for (AdmittedOccurrence addition : exact.added()) {
-            if (result.put(addition.publicKey(), addition) != null) {
-                throw new IllegalArgumentException(
-                        "delta adds active occurrence: " + addition.publicKey());
-            }
-        }
         for (String retired : removed) {
-            boolean existed = false;
-            for (AdmittedOccurrence occurrence : prior.occurrences()) {
-                if (retired.equals(occurrence.publicKey())) {
-                    existed = true;
-                    break;
-                }
-            }
-            if (!existed) {
+            if (prior.findPublic(retired) == null) {
                 throw new IllegalArgumentException(
                         "delta retires inactive occurrence: " + retired);
             }
         }
-        return new AdmittedProjection(generation, result.values());
+
+        PathDependencyIndex dependencyIndex =
+                prior.dependencyIndexForSuccessor();
+        for (String retired : removed) {
+            AdmittedOccurrence old = prior.findPublic(retired);
+            dependencyIndex = dependencyIndex.updated(
+                    retired,
+                    old.dependencyPaths(),
+                    java.util.Collections.<String>emptySet());
+        }
+
+        for (AdmittedOccurrence replacement : exact.refreshed()) {
+            AdmittedOccurrence old = prior.findPublic(
+                    replacement.publicKey());
+            if (old == null) {
+                throw new IllegalArgumentException(
+                        "delta refreshes inactive occurrence: "
+                                + replacement.publicKey());
+            }
+            dependencyIndex = dependencyIndex.updated(
+                    replacement.publicKey(),
+                    old.dependencyPaths(),
+                    replacement.dependencyPaths());
+        }
+        for (AdmittedOccurrence addition : exact.added()) {
+            if (prior.findPublic(addition.publicKey()) != null) {
+                throw new IllegalArgumentException(
+                        "delta adds active occurrence: " + addition.publicKey());
+            }
+            dependencyIndex = dependencyIndex.updated(
+                    addition.publicKey(),
+                    java.util.Collections.<String>emptySet(),
+                    addition.dependencyPaths());
+        }
+        AdmittedProjection result = prior.successor(
+                generation,
+                removed,
+                exact.refreshed(),
+                exact.added(),
+                dependencyIndex);
+        Set<String> lookedUpPrior = new LinkedHashSet<String>(affected);
+        lookedUpPrior.addAll(removed);
+        lookedUpPrior.addAll(refreshed.keySet());
+        metrics.candidatesLookedUp(
+                lookedUpPrior.size() + exact.added().size());
+        metrics.deltaProjectionUpdated(
+                affected.size(),
+                exact.refreshed().size(),
+                0L);
+        metrics.merkleOccurrencesUpdated(
+                removed.size()
+                        + exact.refreshed().size()
+                        + exact.added().size());
+        return result;
     }
 
     private static Map<String, AdmittedOccurrence> index(
@@ -94,7 +133,6 @@ public final class DeltaProjectionApplier {
         if (!previous.environmentIdentity().equals(resulting.environmentIdentity())) {
             differences.add("environmentIdentity");
         }
-        if (!previous.sessionId().equals(resulting.sessionId())) differences.add("sessionId");
         if (!previous.runtimeIdentity().equals(resulting.runtimeIdentity())) differences.add("runtimeIdentity");
         if (resulting.rootRevision() != previous.rootRevision() + 1L) differences.add("rootRevision");
         if (previous.rootBlueId().equals(resulting.rootBlueId())) differences.add("rootBlueId");

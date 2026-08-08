@@ -57,12 +57,39 @@ public final class CoordinationEventAdmissionCacheKey {
         return eventBlueId;
     }
 
+    /**
+     * Opaque identity of the complete evidence domain, excluding only the
+     * event-specific canonical identity.
+     */
+    public String admissionDomainIdentity() {
+        return admissionDomainIdentity(
+                environmentIdentity,
+                fragmentationProfileIdentity,
+                languageGenerationIdentity,
+                providerGenerationIdentity);
+    }
+
+    /** Builds the same delimiter-safe domain identity before an event exists. */
+    public static String admissionDomainIdentity(
+            String environmentIdentity,
+            String fragmentationProfileIdentity,
+            String languageGenerationIdentity,
+            String providerGenerationIdentity) {
+        return field(requireText(environmentIdentity, "environmentIdentity"))
+                + field(requireText(
+                        fragmentationProfileIdentity,
+                        "fragmentationProfileIdentity"))
+                + field(requireText(
+                        languageGenerationIdentity,
+                        "languageGenerationIdentity"))
+                + field(requireText(
+                        providerGenerationIdentity,
+                        "providerGenerationIdentity"));
+    }
+
     /** A compact, delimiter-safe diagnostic identity. */
     public String diagnosticIdentity() {
-        return field(environmentIdentity)
-                + field(fragmentationProfileIdentity)
-                + field(languageGenerationIdentity)
-                + field(providerGenerationIdentity)
+        return admissionDomainIdentity()
                 + field(eventBlueId);
     }
 

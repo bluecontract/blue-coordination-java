@@ -1,6 +1,8 @@
 package blue.coordination.processor;
 
 import blue.coordination.fastpath.DeltaProjectionApplier;
+import blue.coordination.fastpath.FastPathWorkMetrics;
+import blue.coordination.round4.Round4ParityReceipt;
 import blue.language.processor.EffectiveFragmentationCatalog;
 import blue.language.processor.ExternalChannelDependencySnapshot;
 import blue.language.processor.ExternalOrderKey;
@@ -25,6 +27,64 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Complete-snapshot oracle for commit-local subscription delta publication. */
 final class IncrementalSubscriptionProjectionOracleTest {
+
+    @Test
+    void shouldMatchOneThousandCompleteProjectionOracles() {
+        // given
+        CoordinationDeltaSubscriptionProjector projector =
+                new CoordinationDeltaSubscriptionProjector();
+
+        // when
+        for (int iteration = 0; iteration < 1_000; iteration++) {
+            String beforeRoot = "root-before-" + iteration;
+            String afterRoot = "root-after-" + iteration;
+            CoordinationSubscriptionOccurrence before = occurrence(
+                    "/", beforeRoot, "root-channel", iteration,
+                    1L, order(1L));
+            CoordinationSubscriptionOccurrence after =
+                    before.withScopeBlueId(afterRoot);
+            CoordinationSubscriptionSnapshot previous = snapshot(
+                    beforeRoot,
+                    1L,
+                    order(1L),
+                    Collections.<String, List<String>>emptyMap(),
+                    Collections.<String>emptySet(),
+                    before);
+            CoordinationCommitProjectionEvidence evidence = evidence(
+                    afterRoot,
+                    2L,
+                    order(2L),
+                    SubscriptionDelta.empty(),
+                    Collections.singletonList(after),
+                    Collections.singleton(before.occurrenceKey()),
+                    Collections.<String, List<String>>emptyMap(),
+                    Collections.<String>emptySet(),
+                    null,
+                    true);
+            CoordinationSubscriptionSnapshot oracle = snapshot(
+                    afterRoot,
+                    2L,
+                    order(2L),
+                    Collections.<String, List<String>>emptyMap(),
+                    Collections.<String>emptySet(),
+                    after);
+            CoordinationSubscriptionSnapshot actual = projector.apply(
+                    previous, evidence).snapshot();
+
+            // then
+            assertEquals(
+                    oracle.toMap(),
+                    actual.toMap(),
+                    "projection mismatch at iteration " + iteration);
+            assertEquals(
+                    oracle.digest(),
+                    actual.digest(),
+                    "projection identity mismatch at iteration "
+                            + iteration);
+        }
+        Round4ParityReceipt.write(
+                "projectionComparisons", 1_000L, 0L);
+    }
 
     @Test
     void shouldMatchTheCompleteProjectionForRefreshAddRetireAndTopology()
@@ -94,11 +154,25 @@ final class IncrementalSubscriptionProjectionOracleTest {
                 added);
 
         // when
+        FastPathWorkMetrics metrics = new FastPathWorkMetrics();
+        FastPathWorkMetrics.Snapshot beforeWork = metrics.snapshot();
         CoordinationSubscriptionUpdate actual =
-                new CoordinationDeltaSubscriptionProjector().apply(
+                new CoordinationDeltaSubscriptionProjector(metrics).apply(
                         previous, evidence);
+        FastPathWorkMetrics.Snapshot work =
+                metrics.snapshot().minus(beforeWork);
 
         // then
+        assertEquals(0L, work.snapshotSerializations(),
+                "successor publication must not serialize all occurrences");
+        assertEquals(4L, work.merkleOccurrenceUpdates());
+        assertEquals(2L, work.affectedOccurrences());
+        assertEquals(2L, work.refreshedOccurrences());
+        assertEquals(0L, work.unrelatedOccurrences(),
+                "incremental projection must not visit unrelated rows");
+        assertEquals(0L, actual.snapshot().planningMetrics()
+                .constructionOccurrenceValidationCount(),
+                "trusted persistent successor must not revalidate all rows");
         assertEquals(completeOracle.toMap(), actual.snapshot().toMap());
         assertEquals(completeOracle.digest(), actual.snapshot().digest());
         assertEquals(routes, actual.snapshot().processEmbeddedRoutes());
@@ -221,6 +295,42 @@ final class IncrementalSubscriptionProjectionOracleTest {
         // then
         assertTrue(extraFailure.getMessage().contains("unaffected"));
         assertTrue(catalogFailure.getMessage().contains("Root mismatch"));
+    }
+
+    @Test
+    void shouldProduceHistoryIndependentMerkleIdentity() {
+        CoordinationSubscriptionOccurrence one = occurrence(
+                "/one", "one-v1", "one-channel", 1, 1L, order(1L));
+        CoordinationSubscriptionOccurrence oneRefreshed =
+                one.withScopeBlueId("one-v2");
+        CoordinationSubscriptionOccurrence two = occurrence(
+                "/two", "two", "two-channel", 2, 1L, order(1L));
+        CoordinationSubscriptionOccurrence three = occurrence(
+                "/three", "three", "three-channel", 3, 1L, order(1L));
+        CoordinationSubscriptionOccurrence retired = occurrence(
+                "/retired", "retired", "retired-channel", 4,
+                1L, order(1L));
+
+        CoordinationSubscriptionMerkleIndex history =
+                CoordinationSubscriptionMerkleIndex.empty()
+                        .updated(null, retired)
+                        .updated(null, two)
+                        .updated(null, one)
+                        .updated(one, oneRefreshed)
+                        .updated(null, three)
+                        .updated(retired, null);
+        CoordinationSubscriptionMerkleIndex rebuilt =
+                CoordinationSubscriptionMerkleIndex.empty()
+                        .updated(null, three)
+                        .updated(null, oneRefreshed)
+                        .updated(null, two);
+
+        assertEquals(3, history.size());
+        assertEquals(rebuilt.digest(), history.digest());
+        assertEquals(
+                CoordinationSubscriptionMerkleIndex.from(Arrays.asList(
+                        two, three, oneRefreshed)).digest(),
+                history.digest());
     }
 
     private static CoordinationSubscriptionSnapshot snapshot(

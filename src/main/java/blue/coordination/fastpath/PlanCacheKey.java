@@ -11,6 +11,7 @@ import java.util.Objects;
 /** Exact cache key for a semantically verified indexed plan. */
 public final class PlanCacheKey {
     private final ProjectionGenerationKey generation;
+    private final String sessionId;
     private final String eventBlueId;
     private final String eventInventoryIdentity;
     private final ExternalOrderKey eventOrderKey;
@@ -20,12 +21,14 @@ public final class PlanCacheKey {
 
     public PlanCacheKey(
             ProjectionGenerationKey generation,
+            String sessionId,
             String eventBlueId,
             String eventInventoryIdentity,
             ExternalOrderKey eventOrderKey,
             Collection<String> orderedCandidates,
             String planningPolicyIdentity) {
         this.generation = Objects.requireNonNull(generation, "generation");
+        this.sessionId = text(sessionId, "sessionId");
         this.eventBlueId = text(eventBlueId, "eventBlueId");
         this.eventInventoryIdentity = text(
                 eventInventoryIdentity, "eventInventoryIdentity");
@@ -38,6 +41,7 @@ public final class PlanCacheKey {
         this.orderedCandidates = Collections.unmodifiableList(copy);
         this.hashCode = Objects.hash(
                 this.generation,
+                this.sessionId,
                 this.eventBlueId,
                 this.eventInventoryIdentity,
                 this.eventOrderKey,
@@ -46,6 +50,7 @@ public final class PlanCacheKey {
     }
 
     public ProjectionGenerationKey generation() { return generation; }
+    public String sessionId() { return sessionId; }
     public String eventBlueId() { return eventBlueId; }
     public String eventInventoryIdentity() { return eventInventoryIdentity; }
     public ExternalOrderKey eventOrderKey() { return eventOrderKey; }
@@ -58,6 +63,7 @@ public final class PlanCacheKey {
         if (!(supplied instanceof PlanCacheKey)) return false;
         PlanCacheKey other = (PlanCacheKey) supplied;
         return generation.equals(other.generation)
+                && sessionId.equals(other.sessionId)
                 && eventBlueId.equals(other.eventBlueId)
                 && eventInventoryIdentity.equals(
                         other.eventInventoryIdentity)

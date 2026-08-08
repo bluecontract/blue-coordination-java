@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bluecontract.dev/schemas/coordination/myos-round4-evidence-failure-1.json",
+  "title": "Blue Coordination myOS Round 4 failed evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "attemptedSchema",
+    "status",
+    "blockers",
+    "readiness"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {"const": "failed"}
+        },
+        "required": ["status"]
+      },
+      "then": {
+        "required": ["evidence"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {"const": "aggregationFailed"}
+        },
+        "required": ["status"]
+      },
+      "then": {
+        "required": ["failure"]
+      }
+    }
+  ],
+  "properties": {
+    "schema": {
+      "const": "blue-coordination/myos-round4-evidence-failure/1.0"
+    },
+    "attemptedSchema": {
+      "const": "blue-coordination/myos-round4-evidence/1.0"
+    },
+    "status": {
+      "enum": ["failed", "aggregationFailed"]
+    },
+    "evidence": {
+      "type": "object"
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "message"],
+      "properties": {
+        "type": {"type": "string", "minLength": 1},
+        "message": {"type": "string", "minLength": 1}
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["owner", "identity", "description"],
+        "properties": {
+          "owner": {"enum": ["coordination", "language", "bex", "repository", "external-catalog"]},
+          "identity": {"type": "string", "minLength": 1},
+          "description": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "readiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["myosReady", "performanceReady", "repositoryReady"],
+      "properties": {
+        "myosReady": {"type": "boolean"},
+        "performanceReady": {"const": false},
+        "repositoryReady": {"const": false}
+      }
+    }
+  }
+}

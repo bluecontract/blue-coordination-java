@@ -1,5 +1,7 @@
 package blue.coordination.engine.fastpath;
 
+import blue.coordination.engine.CoordinationProcessingEngine
+        .VerifiedNodeAccessAuthority;
 import blue.coordination.engine.api.CoordinationFragmentInventory;
 import blue.coordination.engine.api.FragmentEdgeRecord;
 import blue.language.model.Node;
@@ -27,9 +29,12 @@ public final class ResultDeltaTransitionAssembler {
     }
 
     public FastFragmentDelta assemble(
+            VerifiedNodeAccessAuthority accessAuthority,
             CoordinationFragmentInventory prior,
             AssembledInventoryDelta assembled,
             RequestDigestMemo digests) {
+        VerifiedNodeAccessAuthority authority = Objects.requireNonNull(
+                accessAuthority, "accessAuthority");
         CoordinationFragmentInventory before = Objects.requireNonNull(
                 prior, "prior");
         AssembledInventoryDelta after = Objects.requireNonNull(
@@ -41,18 +46,21 @@ public final class ResultDeltaTransitionAssembler {
                 resulting.fragmentBlueIds());
         Set<String> expectedNew = new LinkedHashSet<String>(resultIds);
         expectedNew.removeAll(priorIds);
-        if (!expectedNew.equals(after.newFragmentBodies().keySet())) {
+        Map<String, Node> newBodies = after.newFragmentBodies(authority);
+        if (!expectedNew.equals(newBodies.keySet())) {
             throw new IllegalArgumentException(
                     "One-pass assembler returned an incomplete body delta");
         }
 
         RequestDigestMemo memo = Objects.requireNonNull(digests, "digests");
         Map<String, ExactNodeHandle> newHandles = intern(
+                authority,
                 ContentAddressedNodeInterner.PHYSICAL,
-                after.newFragmentBodies(), memo);
+                newBodies, memo);
         Map<String, ExactNodeHandle> viewHandles = intern(
+                authority,
                 "processing:" + after.inventory().inventoryIdentity(),
-                after.changedProcessingViews(), memo);
+                after.changedProcessingViews(authority), memo);
         Set<String> reused = new LinkedHashSet<String>();
         for (String blueId : resulting.fragmentBlueIds()) {
             if (priorIds.contains(blueId)) reused.add(blueId);
@@ -77,6 +85,7 @@ public final class ResultDeltaTransitionAssembler {
         }
 
         return new FastFragmentDelta(
+                authority,
                 resulting,
                 newHandles,
                 viewHandles,
@@ -84,10 +93,13 @@ public final class ResultDeltaTransitionAssembler {
                 retired,
                 addedEdges,
                 retiredEdges,
-                after.scopeTransitions());
+                after.scopeTransitions(),
+                memo.calculations(),
+                memo.hits());
     }
 
     private Map<String, ExactNodeHandle> intern(
+            VerifiedNodeAccessAuthority accessAuthority,
             String namespace,
             Map<String, Node> bodies,
             RequestDigestMemo digests) {
@@ -100,7 +112,10 @@ public final class ResultDeltaTransitionAssembler {
                             namespace,
                             entry.getKey(),
                             entry.getValue(),
-                            digests));
+                            digests)
+                            .rebind(
+                                    interner.ownershipToken(),
+                                    accessAuthority));
         }
         return result;
     }

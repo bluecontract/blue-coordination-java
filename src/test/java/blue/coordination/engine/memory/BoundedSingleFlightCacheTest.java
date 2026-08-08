@@ -9,6 +9,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -148,7 +149,8 @@ final class BoundedSingleFlightCacheTest {
     }
 
     @Test
-    void shouldNeverEvictAnInFlightCompilation() throws Exception {
+    void shouldCoalesceOneFlightAndRejectUnrelatedWorkAtTheHardBound()
+            throws Exception {
         BoundedSingleFlightCache<String, String> cache =
                 new BoundedSingleFlightCache<String, String>(
                         1, 1L, ignored -> 1L);
@@ -164,11 +166,6 @@ final class BoundedSingleFlightCacheTest {
                         return "slow";
                     }));
             slowStarted.await();
-            assertEquals("fast", cache.compute(
-                    "fast", ignored -> "fast"));
-            assertEquals(1, cache.size(),
-                    "the completed value, not in-flight work, is evicted");
-
             AtomicInteger duplicateLoads = new AtomicInteger();
             Future<String> coalesced = pool.submit(() -> cache.compute(
                     "slow",
@@ -177,6 +174,16 @@ final class BoundedSingleFlightCacheTest {
                         return "duplicate";
                     }));
             awaitCoalesced(cache);
+            AtomicInteger rejectedLoads = new AtomicInteger();
+            assertThrows(RejectedExecutionException.class, () ->
+                    cache.compute("fast", ignored -> {
+                        rejectedLoads.incrementAndGet();
+                        return "fast";
+                    }));
+            assertEquals(0, rejectedLoads.get());
+            assertEquals(1, cache.metrics().inFlight());
+            assertEquals(1, cache.metrics().totalEntries());
+            assertEquals(1L, cache.metrics().rejections());
             releaseSlow.countDown();
 
             assertEquals("slow", slow.get());
@@ -185,6 +192,35 @@ final class BoundedSingleFlightCacheTest {
         } finally {
             releaseSlow.countDown();
             pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void clearPreservesCompatibilityByRejectingAnActiveCompilation()
+            throws Exception {
+        BoundedSingleFlightCache<String, String> cache =
+                new BoundedSingleFlightCache<String, String>(2);
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        ExecutorService worker = Executors.newSingleThreadExecutor();
+        try {
+            Future<String> result = worker.submit(() -> cache.compute(
+                    "key",
+                    ignored -> {
+                        entered.countDown();
+                        await(release);
+                        return "value";
+                    }));
+            entered.await();
+            assertThrows(IllegalStateException.class, cache::clear);
+            assertEquals(1, cache.metrics().inFlight());
+            release.countDown();
+            assertEquals("value", result.get());
+            cache.clear();
+            assertEquals(0, cache.size());
+        } finally {
+            release.countDown();
+            worker.shutdownNow();
         }
     }
 

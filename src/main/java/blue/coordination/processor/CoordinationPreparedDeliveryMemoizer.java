@@ -51,6 +51,7 @@ public final class CoordinationPreparedDeliveryMemoizer {
 
     public CoordinationPreparedDelivery prepare(
             ProjectionGenerationKey generation,
+            String sessionId,
             AdmittedProjection admittedProjection,
             String eventBlueId,
             String eventInventoryIdentity,
@@ -64,6 +65,7 @@ public final class CoordinationPreparedDeliveryMemoizer {
                 orderedOccurrenceKeys);
         PlanCacheKey key = new PlanCacheKey(
                 exactGeneration,
+                sessionId,
                 eventBlueId,
                 eventInventoryIdentity,
                 eventOrder,
@@ -92,6 +94,7 @@ public final class CoordinationPreparedDeliveryMemoizer {
      */
     public CoordinationPreparedDelivery prepareAdmitted(
             ProjectionGenerationKey generation,
+            String sessionId,
             AdmittedProjection admittedProjection,
             String eventBlueId,
             String eventInventoryIdentity,
@@ -111,6 +114,7 @@ public final class CoordinationPreparedDeliveryMemoizer {
                 orderedOccurrenceKeys);
         PlanCacheKey key = new PlanCacheKey(
                 exactGeneration,
+                sessionId,
                 eventBlueId,
                 eventInventoryIdentity,
                 eventOrder,
@@ -136,8 +140,10 @@ public final class CoordinationPreparedDeliveryMemoizer {
         });
     }
 
-    public int generationCommitted(ProjectionGenerationKey previous) {
-        return cache.generationCommitted(previous);
+    public int generationCommitted(
+            String sessionId,
+            ProjectionGenerationKey previous) {
+        return cache.generationCommitted(sessionId, previous);
     }
 
     public blue.coordination.fastpath.CacheMetrics metrics() {

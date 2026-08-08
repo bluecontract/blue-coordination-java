@@ -1,6 +1,9 @@
 package blue.coordination.engine.fastpath;
 
+import blue.coordination.engine.CoordinationProcessingEngine
+        .VerifiedNodeAccessAuthority;
 import blue.language.model.Node;
+import blue.language.model.wire.JsonPointer;
 
 import java.util.ArrayDeque;
 import java.util.Collection;
@@ -31,11 +34,25 @@ public final class RetainedReferenceIndex {
             Map<String, ExactNodeHandle> byBlueId,
             Map<Node, String> verifiedBlueIdByNode,
             long approximateRetainedGraphWeightBytes) {
+        this(
+                owner,
+                new LinkedHashMap<String, ExactNodeHandle>(byBlueId),
+                new IdentityHashMap<Node, String>(verifiedBlueIdByNode),
+                approximateRetainedGraphWeightBytes,
+                FreshMaps.INSTANCE);
+    }
+
+    /** Adopts maps allocated exclusively for this immutable successor. */
+    private RetainedReferenceIndex(
+            Object owner,
+            Map<String, ExactNodeHandle> byBlueId,
+            Map<Node, String> verifiedBlueIdByNode,
+            long approximateRetainedGraphWeightBytes,
+            FreshMaps ignored) {
         this.owner = Objects.requireNonNull(owner, "owner");
-        this.byBlueId = Collections.unmodifiableMap(
-                new LinkedHashMap<String, ExactNodeHandle>(byBlueId));
+        this.byBlueId = Collections.unmodifiableMap(byBlueId);
         this.verifiedBlueIdByNode = Collections.unmodifiableMap(
-                new IdentityHashMap<Node, String>(verifiedBlueIdByNode));
+                verifiedBlueIdByNode);
         if (approximateRetainedGraphWeightBytes <= 0L) {
             throw new IllegalArgumentException(
                     "retained graph weight must be positive");
@@ -130,12 +147,14 @@ public final class RetainedReferenceIndex {
             Collection<ExactNodeHandle> handles,
             Object expectedOwner) {
         requireOwner(expectedOwner);
+        Collection<ExactNodeHandle> supplied = Objects.requireNonNull(
+                handles, "handles");
+        if (supplied.isEmpty()) return this;
         Map<String, ExactNodeHandle> identities =
                 new LinkedHashMap<String, ExactNodeHandle>(byBlueId);
         Map<Node, String> bindings =
                 new IdentityHashMap<Node, String>(verifiedBlueIdByNode);
-        for (ExactNodeHandle handle : Objects.requireNonNull(
-                handles, "handles")) {
+        for (ExactNodeHandle handle : supplied) {
             ExactNodeHandle checked = Objects.requireNonNull(
                     handle, "handle");
             Node node = checked.borrowTrusted(expectedOwner);
@@ -150,7 +169,76 @@ public final class RetainedReferenceIndex {
                 owner,
                 identities,
                 bindings,
-                approximateRetainedGraphWeightBytes);
+                approximateRetainedGraphWeightBytes,
+                FreshMaps.INSTANCE);
+    }
+
+    /**
+     * Creates the next epoch index by structurally sharing the prior proof
+     * and binding only expanded nodes from a verified sparse frontier.
+     * Retained subtrees are neither traversed nor copied.
+     */
+    public RetainedReferenceIndex graftVerifiedExpanded(
+            Node exactResolvedRoot,
+            Map<String, String> expandedBlueIdByPath,
+            Object expectedOwner,
+            Object nextOwner,
+            RequestDigestMemo digests,
+            VerifiedNodeAccessAuthority accessAuthority) {
+        requireOwner(expectedOwner);
+        Objects.requireNonNull(accessAuthority, "accessAuthority");
+        Object targetOwner = Objects.requireNonNull(nextOwner, "nextOwner");
+        RequestDigestMemo memo = Objects.requireNonNull(digests, "digests");
+        Map<String, ExactNodeHandle> identities =
+                new LinkedHashMap<String, ExactNodeHandle>();
+        for (Map.Entry<String, ExactNodeHandle> retained
+                : byBlueId.entrySet()) {
+            identities.put(
+                    retained.getKey(),
+                    owner == targetOwner
+                            ? retained.getValue()
+                            : retained.getValue().rebind(
+                                    owner, targetOwner));
+        }
+        Map<Node, String> bindings =
+                new IdentityHashMap<Node, String>(verifiedBlueIdByNode);
+        Node root = Objects.requireNonNull(
+                exactResolvedRoot, "exactResolvedRoot");
+        long addedWeight = 0L;
+        for (Map.Entry<String, String> expanded
+                : Objects.requireNonNull(
+                        expandedBlueIdByPath,
+                        "expandedBlueIdByPath").entrySet()) {
+            Node node = structuralNodeAt(root, expanded.getKey());
+            if (node == null || node.isReferenceOnly()) {
+                throw new IllegalArgumentException(
+                        "Verified expanded path is unavailable after graft: "
+                                + expanded.getKey());
+            }
+            String blueId = Objects.requireNonNull(
+                    expanded.getValue(), "expanded BlueId");
+            memo.bindVerified(node, blueId);
+            String previous = bindings.put(node, blueId);
+            if (previous != null && !previous.equals(blueId)) {
+                throw new IllegalStateException(
+                        "One grafted Node was bound to two identities");
+            }
+            identities.putIfAbsent(
+                    blueId,
+                    ExactNodeHandle.adoptBound(
+                            blueId, node, targetOwner, memo));
+            addedWeight += 64L;
+        }
+        long weight = approximateRetainedGraphWeightBytes > Long.MAX_VALUE
+                - addedWeight
+                ? Long.MAX_VALUE
+                : approximateRetainedGraphWeightBytes + addedWeight;
+        return new RetainedReferenceIndex(
+                targetOwner,
+                identities,
+                bindings,
+                Math.max(1L, weight),
+                FreshMaps.INSTANCE);
     }
 
     /**
@@ -197,6 +285,43 @@ public final class RetainedReferenceIndex {
             }
         }
     }
+
+    private static Node structuralNodeAt(Node root, String path) {
+        Node current = root;
+        for (String segment : JsonPointer.split(path)) {
+            if (current == null || current.isReferenceOnly()) return null;
+            if ("$type".equals(segment)) {
+                current = current.getType();
+            } else if ("$itemType".equals(segment)) {
+                current = current.getItemType();
+            } else if ("$keyType".equals(segment)) {
+                current = current.getKeyType();
+            } else if ("$valueType".equals(segment)) {
+                current = current.getValueType();
+            } else if ("$contracts".equals(segment)) {
+                current = current.getContracts();
+            } else if ("$blue".equals(segment)) {
+                current = current.getBlue();
+            } else if (current.getItems() != null) {
+                int index;
+                try {
+                    index = Integer.parseInt(segment);
+                } catch (NumberFormatException invalid) {
+                    return null;
+                }
+                current = index >= 0 && index < current.getItems().size()
+                        ? current.getItems().get(index)
+                        : null;
+            } else {
+                current = current.getProperties() == null
+                        ? null
+                        : current.getProperties().get(segment);
+            }
+        }
+        return current;
+    }
+
+    private enum FreshMaps { INSTANCE }
 
     public static final class Builder {
         private final Object owner;

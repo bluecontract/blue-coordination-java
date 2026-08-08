@@ -5,6 +5,9 @@ import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.model.Node;
 import blue.language.model.NodeWireForm;
 import blue.language.provider.ExactNodeGraphFragments;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectWriter;
+import com.fasterxml.jackson.databind.SerializationFeature;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -29,6 +32,10 @@ import java.util.TreeMap;
  * profile.</p>
  */
 public final class CoordinationFragmentAdmissionVerifier {
+
+    private static final ObjectWriter CANONICAL_WIRE_WRITER =
+            UncheckedObjectMapper.JSON_MAPPER.writer()
+                    .with(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
 
     private CoordinationFragmentAdmissionVerifier() {
     }
@@ -315,17 +322,58 @@ public final class CoordinationFragmentAdmissionVerifier {
      */
     public static String physicalFragmentIdentity(
             Node fragment) {
-        String json =
-                UncheckedObjectMapper.JSON_MAPPER
-                        .writeValueAsString(
-                                NodeWireForm.get(
-                                        Objects.requireNonNull(
-                                                fragment,
-                                                "fragment")));
-        return "sha256:"
-                + sha256Hex(
-                json.getBytes(
-                        StandardCharsets.UTF_8));
+        return physicalFragmentEvidence(fragment).fingerprint();
+    }
+
+    /**
+     * Calculates the canonical wire fingerprint and encoded size in one
+     * serialization pass.
+     *
+     * <p>Verified engine handles retain this immutable scalar evidence so a
+     * storage adapter does not have to serialize the same mutable graph once
+     * for equality and again for accounting.</p>
+     */
+    public static PhysicalFragmentEvidence physicalFragmentEvidence(
+            Node fragment) {
+        byte[] encoded;
+        try {
+            encoded = CANONICAL_WIRE_WRITER.writeValueAsBytes(
+                    NodeWireForm.get(Objects.requireNonNull(
+                            fragment, "fragment")));
+        } catch (JsonProcessingException failure) {
+            throw new IllegalStateException(
+                    "Cannot encode canonical fragment wire evidence",
+                    failure);
+        }
+        return new PhysicalFragmentEvidence(
+                "sha256:" + sha256Hex(encoded),
+                encoded.length);
+    }
+
+    /** Immutable canonical-wire evidence for one exact representation. */
+    public static final class PhysicalFragmentEvidence {
+        private final String fingerprint;
+        private final long encodedSizeBytes;
+
+        private PhysicalFragmentEvidence(
+                String fingerprint,
+                long encodedSizeBytes) {
+            this.fingerprint = Objects.requireNonNull(
+                    fingerprint, "fingerprint");
+            if (encodedSizeBytes < 0L) {
+                throw new IllegalArgumentException(
+                        "encodedSizeBytes must not be negative");
+            }
+            this.encodedSizeBytes = encodedSizeBytes;
+        }
+
+        public String fingerprint() {
+            return fingerprint;
+        }
+
+        public long encodedSizeBytes() {
+            return encodedSizeBytes;
+        }
     }
 
     /**
@@ -522,7 +570,7 @@ public final class CoordinationFragmentAdmissionVerifier {
             String label) {
         String actual =
                 DirectBlueIdCalculator.calculateBlueId(
-                        node.clone());
+                        node);
         if (!Objects.equals(
                 expected,
                 actual)) {

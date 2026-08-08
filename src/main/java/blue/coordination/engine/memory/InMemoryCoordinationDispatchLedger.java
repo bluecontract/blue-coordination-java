@@ -366,6 +366,32 @@ public final class InMemoryCoordinationDispatchLedger {
     public synchronized int dispatchCount() { return dispatches.size(); }
 
     /**
+     * Explicitly releases a fully committed dispatch plan and its receipts.
+     *
+     * <p>The ledger deliberately does not guess a time-based retention
+     * policy: exact resume evidence remains available until its owner chooses
+     * this lifecycle boundary. Pending, failed, in-flight, or incompletely
+     * frozen work is never eligible for release.</p>
+     *
+     * @return {@code true} when a completed dispatch was removed
+     */
+    public synchronized boolean releaseCompletedDispatch(
+            String eventBlueId) {
+        String checked = requireText(eventBlueId, "eventBlueId");
+        MutableDispatch dispatch = dispatches.get(checked);
+        if (dispatch == null) return false;
+        dispatch.requireSealed();
+        for (MutableReceipt receipt : dispatch.receipts.values()) {
+            if (receipt.status != CoordinationDeliveryStatus.COMMITTED) {
+                throw new IllegalStateException(
+                        "Dispatch is not fully committed: " + checked);
+            }
+        }
+        dispatches.remove(checked);
+        return true;
+    }
+
+    /**
      * Captures a quiescent isolated ledger copy for an in-process checkpoint.
      *
      * <p>An incomplete target freeze or an in-flight Root claim is rejected
@@ -487,6 +513,15 @@ public final class InMemoryCoordinationDispatchLedger {
                     "Unknown dispatch " + eventBlueId);
         }
         return dispatch;
+    }
+
+    private static String requireText(String value, String label) {
+        String checked = Objects.requireNonNull(value, label);
+        if (checked.isEmpty()) {
+            throw new IllegalArgumentException(
+                    label + " must not be empty");
+        }
+        return checked;
     }
 
     /** Opaque token proving ownership of an incomplete target freeze. */

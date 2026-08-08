@@ -1,5 +1,7 @@
 package blue.coordination.engine;
 
+import blue.coordination.engine.CoordinationProcessingEngine
+        .VerifiedNodeAccessAuthority;
 import blue.coordination.engine.api.CommitOutcome;
 import blue.coordination.engine.api.CoordinationAtomicCommitPlan;
 import blue.coordination.engine.api.CoordinationFragmentTransition;
@@ -7,6 +9,8 @@ import blue.coordination.engine.api.CoordinationProcessingPlan;
 import blue.coordination.engine.api.CoordinationTransition;
 import blue.coordination.engine.api.ManagedDocumentSnapshot;
 import blue.coordination.engine.api.ManagedDocumentStatus;
+import blue.coordination.engine.fastpath.FastFragmentDelta;
+import blue.coordination.engine.memory.InMemoryCoordinationFragmentStore;
 import blue.coordination.engine.spi.CoordinationFragmentStore;
 import blue.coordination.engine.spi.CoordinationSessionStore;
 import blue.coordination.processor.CoordinationFragmentAdmissionVerifier;
@@ -25,17 +29,22 @@ final class CoordinationAtomicCommitCoordinator {
     private final CoordinationFragmentStore fragmentStore;
     private final CoordinationSessionStore sessionStore;
     private final String environmentIdentity;
+    private final VerifiedNodeAccessAuthority verifiedNodeAccessAuthority;
 
     CoordinationAtomicCommitCoordinator(
             CoordinationFragmentStore fragmentStore,
             CoordinationSessionStore sessionStore,
-            String environmentIdentity) {
+            String environmentIdentity,
+            VerifiedNodeAccessAuthority verifiedNodeAccessAuthority) {
         this.fragmentStore = Objects.requireNonNull(
                 fragmentStore, "fragmentStore");
         this.sessionStore = Objects.requireNonNull(
                 sessionStore, "sessionStore");
         this.environmentIdentity = Objects.requireNonNull(
                 environmentIdentity, "environmentIdentity");
+        this.verifiedNodeAccessAuthority = Objects.requireNonNull(
+                verifiedNodeAccessAuthority,
+                "verifiedNodeAccessAuthority");
     }
 
     CommitOutcome commit(CoordinationTransition transition) {
@@ -50,23 +59,35 @@ final class CoordinationAtomicCommitCoordinator {
         }
         CoordinationFragmentTransition fragments =
                 checked.fragmentTransition();
-        Map<String, Node> newFragments = fragments.newFragments();
-        if (!newFragments.isEmpty()) {
-            CoordinationFragmentAdmissionVerifier.admitDelta(
-                    fragments.resultingInventory()
-                            .fragmentationProfileIdentity(),
-                    newFragments,
-                    fragmentStore);
-        }
-        fragmentStore.putInventory(fragments.resultingInventory());
         boolean inventoryChanged = !fragments.resultingInventory()
                 .inventoryIdentity().equals(
                         commitPlan.expectedFragmentInventoryIdentity());
-        Map<String, Node> processingViews = fragments.processingViews();
-        if (inventoryChanged || !processingViews.isEmpty()) {
-            fragmentStore.putProcessingViews(
-                    fragments.resultingInventory().inventoryIdentity(),
-                    processingViews);
+        FastFragmentDelta verified = fragments.verifiedDelta(
+                verifiedNodeAccessAuthority);
+        if (verified != null
+                && fragmentStore.getClass()
+                == InMemoryCoordinationFragmentStore.class) {
+            ((InMemoryCoordinationFragmentStore) fragmentStore)
+                    .putVerifiedTransition(
+                    verifiedNodeAccessAuthority,
+                    verified,
+                    inventoryChanged);
+        } else {
+            Map<String, Node> newFragments = fragments.newFragments();
+            if (!newFragments.isEmpty()) {
+                CoordinationFragmentAdmissionVerifier.admitDelta(
+                        fragments.resultingInventory()
+                                .fragmentationProfileIdentity(),
+                        newFragments,
+                        fragmentStore);
+            }
+            fragmentStore.putInventory(fragments.resultingInventory());
+            Map<String, Node> processingViews = fragments.processingViews();
+            if (inventoryChanged || !processingViews.isEmpty()) {
+                fragmentStore.putProcessingViews(
+                        fragments.resultingInventory().inventoryIdentity(),
+                        processingViews);
+            }
         }
         return sessionStore.commit(commitPlan);
     }

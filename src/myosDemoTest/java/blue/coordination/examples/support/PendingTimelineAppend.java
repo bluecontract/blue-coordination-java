@@ -1,5 +1,7 @@
 package blue.coordination.examples.support;
 
+import blue.coordination.engine.api.CoordinationEventShapeInstance;
+
 import java.util.Objects;
 
 /**
@@ -12,6 +14,7 @@ final class PendingTimelineAppend {
 
     private final MyOsDemoTimeline owner;
     private final MyOsDemoEntry entry;
+    private final CoordinationEventShapeInstance preparedEvent;
     private final String expectedPreviousBlueId;
     private final long expectedPublicationVersion;
     private final long resultingPublicationVersion;
@@ -19,9 +22,16 @@ final class PendingTimelineAppend {
     PendingTimelineAppend(
             MyOsDemoTimeline owner,
             MyOsDemoEntry entry,
+            CoordinationEventShapeInstance preparedEvent,
             String expectedPreviousBlueId) {
         this.owner = Objects.requireNonNull(owner, "owner");
         this.entry = Objects.requireNonNull(entry, "entry");
+        this.preparedEvent = Objects.requireNonNull(
+                preparedEvent, "preparedEvent");
+        if (!entry.blueId().equals(preparedEvent.eventBlueId())) {
+            throw new IllegalArgumentException(
+                    "Entry and prepared event identities differ");
+        }
         this.expectedPreviousBlueId = expectedPreviousBlueId;
         this.expectedPublicationVersion = owner.publicationVersion();
         this.resultingPublicationVersion = owner.nextPublicationVersion();
@@ -33,6 +43,10 @@ final class PendingTimelineAppend {
 
     MyOsDemoEntry entry() {
         return entry;
+    }
+
+    CoordinationEventShapeInstance preparedEvent() {
+        return preparedEvent;
     }
 
     String expectedPreviousBlueId() {

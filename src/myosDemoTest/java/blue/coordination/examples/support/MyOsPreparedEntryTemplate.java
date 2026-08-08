@@ -1,36 +1,41 @@
 package blue.coordination.examples.support;
 
+import blue.coordination.engine.api.CoordinationEventShapeInstance;
+import blue.coordination.engine.api.CoordinationEventShapePatch;
+import blue.coordination.engine.api.CoordinationEventShapeTemplate;
 import blue.language.model.Node;
-import blue.language.model.NodePathEditor;
 import blue.language.processor.ExternalOrderKey;
-import blue.language.snapshot.FrozenNode;
 
 import java.math.BigInteger;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-/** Immutable resolved prototype for one Timeline/actor/operation shape. */
+/** Immutable resolved prototype and fragment topology for one entry shape. */
 final class MyOsPreparedEntryTemplate {
 
     private final MyOsEntryTemplateKey key;
-    private final FrozenNode exactPrototype;
+    private final CoordinationEventShapeTemplate eventShape;
     private final MyOsTimelineBinding binding;
     private final MyOsAppendTemplateMetrics metrics;
 
     MyOsPreparedEntryTemplate(
             MyOsEntryTemplateKey key,
-            Node exactPrototype,
+            CoordinationEventShapeTemplate eventShape,
             MyOsTimelineBinding binding,
             MyOsAppendTemplateMetrics metrics) {
         this.key = Objects.requireNonNull(key, "key");
-        this.exactPrototype = FrozenNode.fromNode(
-                Objects.requireNonNull(exactPrototype, "exactPrototype"));
+        this.eventShape = Objects.requireNonNull(eventShape, "eventShape");
         this.binding = Objects.requireNonNull(binding, "binding");
         this.metrics = Objects.requireNonNull(metrics, "metrics");
     }
 
     long approximateRetainedWeightBytes() {
-        return exactPrototype.approximateRetainedWeightBytes();
+        return eventShape.approximateRetainedWeightBytes();
+    }
+
+    Node sentinelPrototypeForAudit() {
+        return eventShape.sentinelPrototypeForAudit();
     }
 
     PendingTimelineAppend instantiate(
@@ -46,22 +51,22 @@ final class MyOsPreparedEntryTemplate {
             throw new IllegalArgumentException(
                     "Prepared entry previous-link shape differs");
         }
-        Node exact = exactPrototype.toNode();
-        metrics.materialized();
-        NodePathEditor.put(
-                exact,
-                "/timestamp",
-                new Node().value(timestampMicros));
-        metrics.leafPatched();
+        List<CoordinationEventShapePatch> patches =
+                new ArrayList<CoordinationEventShapePatch>(2);
+        patches.add(CoordinationEventShapePatch.scalar(
+                "/timestamp", timestampMicros));
         if (previousEntryBlueId != null) {
-            NodePathEditor.put(
-                    exact,
-                    "/prevEntry",
-                    new Node().blueId(previousEntryBlueId));
+            patches.add(CoordinationEventShapePatch.reference(
+                    "/prevEntry", previousEntryBlueId));
+        }
+        CoordinationEventShapeInstance preparedEvent =
+                runtime.instantiateEntryShape(eventShape, patches);
+        metrics.materialized();
+        for (int index = 0; index < patches.size(); index++) {
             metrics.leafPatched();
         }
         metrics.rootBlueIdCalculated();
-        String blueId = runtime.directBlueId(exact);
+        String blueId = preparedEvent.eventBlueId();
         ExternalOrderKey orderKey = ExternalOrderKey.of(List.<Object>of(
                 BigInteger.valueOf(timestampMicros),
                 key.timelineId(),
@@ -69,7 +74,7 @@ final class MyOsPreparedEntryTemplate {
         return new PendingTimelineAppend(
                 owner,
                 new MyOsDemoEntry(
-                        exact,
+                        preparedEvent.frozenExactEvent(),
                         blueId,
                         orderKey,
                         binding,
@@ -79,6 +84,7 @@ final class MyOsPreparedEntryTemplate {
                         operation.operation(),
                         operation.handlerChannel(),
                         timestampMicros),
+                preparedEvent,
                 previousEntryBlueId);
     }
 }

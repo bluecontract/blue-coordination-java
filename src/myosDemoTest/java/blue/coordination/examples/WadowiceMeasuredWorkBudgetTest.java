@@ -16,6 +16,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Budgets backed only by live engine, store and host work sites. */
 final class WadowiceMeasuredWorkBudgetTest {
 
+    /** Provider-backed authorization definition in the frozen Wadowice set. */
+    private static final String AUTHORIZATION_PROVIDER_BLUE_ID =
+            "7qzdy4hb1EpafAHj7SELuiBSY1nfj5P8HhupnXTMjdYb";
+
     private static final WadowicePreparedFixture FIXTURE =
             WadowicePreparedFixture.shared();
 
@@ -69,6 +73,24 @@ final class WadowiceMeasuredWorkBudgetTest {
                             .collect(java.util.stream.Collectors.toSet()));
             assertTrue(committedReceipts.stream().allMatch(receipt ->
                     receipt.eventBlueId().equals(dispatch.entry().blueId())));
+            var providerResolved = dispatch.deliveries().stream()
+                    .map(result -> result.delivery().transition())
+                    .filter(transition -> transition.locality()
+                            .requestedBlueIds()
+                            .contains(AUTHORIZATION_PROVIDER_BLUE_ID))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError(
+                            "Frozen PROCESS bypassed the request-local "
+                                    + "provider for the authorization "
+                                    + "definition"));
+            assertTrue(providerResolved.locality().backendLoadedBlueIds()
+                            .contains(AUTHORIZATION_PROVIDER_BLUE_ID),
+                    "the demanded authorization definition must come from "
+                            + "the exact prepared provider bundle");
+            assertEquals(0, providerResolved.locality()
+                    .fallbackReadCount());
+            assertEquals(0, providerResolved.locality()
+                    .forbiddenReadCount());
             WadowiceWorkBudgetAssertions.assertTwoRootFanout(delta);
         }
     }

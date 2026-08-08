@@ -3,6 +3,7 @@ package blue.coordination.engine.fastpath;
 import blue.coordination.fastpath.DeltaProjectionApplier;
 import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.model.Node;
+import blue.language.model.wire.BlueLanguageConstants;
 import blue.language.model.wire.JsonPointer;
 import blue.language.processor.registry.RuntimeBlueIds;
 import blue.language.processor.registry.RuntimeTypeKey;
@@ -322,16 +323,16 @@ public final class HybridResultFrontier {
     }
 
     private static boolean isWithinAnyBoundary(
-            String path, Collection<String> boundaries) {
-        for (String boundary : boundaries) {
-            if (path.equals(boundary)
-                    || ("/".equals(boundary)
-                            ? path.startsWith("/")
-                            : path.startsWith(boundary + "/"))) {
-                return true;
-            }
+            String path, Set<String> boundaries) {
+        String current = Objects.requireNonNull(path, "path");
+        while (true) {
+            if (boundaries.contains(current)) return true;
+            if (JsonPointer.ROOT.equals(current)) return false;
+            int slash = current.lastIndexOf('/');
+            current = slash <= 0
+                    ? JsonPointer.ROOT
+                    : current.substring(0, slash);
         }
-        return false;
     }
 
     private static String exactBoundaryBlueId(
@@ -394,6 +395,15 @@ public final class HybridResultFrontier {
             RetainedReferenceIndex projectionIndex,
             Object owner) {
         if (!isTypeFamilyHeader(path)) return false;
+        if (materializesCanonicalImplicitTextHeader(
+                path,
+                blueId,
+                priorRoot,
+                resultRoot,
+                prepared,
+                owner)) {
+            return true;
+        }
         int slash = path.lastIndexOf('/');
         if (slash <= 0) return false;
         String parent = path.substring(0, slash);
@@ -410,6 +420,47 @@ public final class HybridResultFrontier {
         }
         return projectionIndex.find(blueId) != null
                 || PUBLISHED_RUNTIME_TYPE_BLUE_IDS.contains(blueId);
+    }
+
+    /**
+     * A changed Text scalar cannot be collapsed into an exact-value boundary,
+     * but PROCESS may still make its already-implied canonical type explicit.
+     * Prove that one header directly from both bound parents; this does not
+     * authorize any sibling or descendant payload reference.
+     */
+    private static boolean materializesCanonicalImplicitTextHeader(
+            String path,
+            String blueId,
+            Node priorRoot,
+            Node resultRoot,
+            PreparedRootExecutionContext prepared,
+            Object owner) {
+        if (!path.endsWith("/$type")
+                || !BlueLanguageConstants.TEXT_TYPE_BLUE_ID.equals(blueId)) {
+            return false;
+        }
+        String parent = parentPath(path);
+        Node priorParent = prepared.projectionNodeAtVerified(parent, owner);
+        if (priorParent == null) {
+            priorParent = structuralNodeAt(priorRoot, parent);
+        }
+        Node resultParent = structuralNodeAt(resultRoot, parent);
+        return canonicalImplicitTextScalar(priorParent, true)
+                && canonicalImplicitTextScalar(resultParent, false)
+                && resultParent.getType().isReferenceOnly()
+                && blueId.equals(resultParent.getType().getBlueId());
+    }
+
+    private static boolean canonicalImplicitTextScalar(
+            Node node, boolean requireImplicitType) {
+        return node != null
+                && !node.isReferenceOnly()
+                && node.getValue() instanceof String
+                && node.getItems() == null
+                && node.getProperties() == null
+                && (requireImplicitType
+                        ? node.getType() == null
+                        : node.getType() != null);
     }
 
     private static String newRuntimeCheckpointBoundaryBlueId(
@@ -503,12 +554,14 @@ public final class HybridResultFrontier {
                 || !Objects.equals(prior.getName(), result.getName())
                 || !Objects.equals(
                         prior.getDescription(), result.getDescription())
-                || !sameExactIdentity(
+                || !sameOrMaterializedCanonicalType(
                         prior.getProperties().get("paths").getType(),
-                        result.getProperties().get("paths").getType())
-                || !sameExactIdentity(
+                        result.getProperties().get("paths").getType(),
+                        BlueLanguageConstants.LIST_TYPE_BLUE_ID)
+                || !sameOrMaterializedCanonicalType(
                         prior.getProperties().get("paths").getItemType(),
-                        result.getProperties().get("paths").getItemType())) {
+                        result.getProperties().get("paths").getItemType(),
+                        BlueLanguageConstants.TEXT_TYPE_BLUE_ID)) {
             return false;
         }
         List<Node> oldPaths = prior.getProperties().get("paths").getItems();
@@ -520,6 +573,10 @@ public final class HybridResultFrontier {
             String newValue = canonicalPathValue(newPaths.get(index));
             if (oldValue == null
                     || !oldValue.equals(newValue)
+                    || !canonicalScalarIdentity(
+                            oldPaths.get(index), oldValue)
+                    || !canonicalScalarIdentity(
+                            newPaths.get(index), newValue)
                     || !sameExactIdentity(
                             oldPaths.get(index), newPaths.get(index))
                     || !oldValues.add(oldValue)) {
@@ -593,6 +650,33 @@ public final class HybridResultFrontier {
         }
     }
 
+    /**
+     * PROCESS may make the canonical List/Text headers of a path declaration
+     * explicit.  Only the one-way implicit-to-exact representation change is
+     * admitted; an explicit prior header may not disappear or change.
+     */
+    private static boolean sameOrMaterializedCanonicalType(
+            Node prior,
+            Node result,
+            String canonicalBlueId) {
+        return sameExactIdentity(prior, result)
+                || (prior == null
+                        && hasExactIdentity(result, canonicalBlueId));
+    }
+
+    private static boolean hasExactIdentity(
+            Node node, String expectedBlueId) {
+        if (node == null) return false;
+        try {
+            String actual = node.isReferenceOnly()
+                    ? node.getBlueId()
+                    : DirectBlueIdCalculator.calculateBlueId(node);
+            return expectedBlueId.equals(actual);
+        } catch (RuntimeException invalidMetadata) {
+            return false;
+        }
+    }
+
     private static boolean canonicalScalarIdentity(
             Node item, String value) {
         try {
@@ -609,6 +693,14 @@ public final class HybridResultFrontier {
                 || paths.isReferenceOnly()
                 || paths.getName() != null
                 || paths.getDescription() != null
+                || (paths.getType() != null
+                        && !hasExactIdentity(
+                                paths.getType(),
+                                BlueLanguageConstants.LIST_TYPE_BLUE_ID))
+                || (paths.getItemType() != null
+                        && !hasExactIdentity(
+                                paths.getItemType(),
+                                BlueLanguageConstants.TEXT_TYPE_BLUE_ID))
                 || paths.getKeyType() != null
                 || paths.getValueType() != null
                 || paths.getValue() != null
@@ -626,7 +718,10 @@ public final class HybridResultFrontier {
             return false;
         }
         for (Node item : paths.getItems()) {
-            if (canonicalPathValue(item) == null) return false;
+            String value = canonicalPathValue(item);
+            if (value == null || !canonicalScalarIdentity(item, value)) {
+                return false;
+            }
         }
         return true;
     }

@@ -1,5 +1,7 @@
 package blue.coordination.engine.memory;
 
+import blue.coordination.engine.CoordinationProcessingEngine
+        .PreparedCheckpointState;
 import blue.coordination.engine.api.CommitOutcome;
 import blue.coordination.engine.api.CommitStatus;
 import blue.coordination.engine.api.CoordinationAtomicCommitPlan;
@@ -15,6 +17,7 @@ import blue.coordination.engine.api.DocumentSessionId;
 import blue.coordination.engine.api.ManagedDocumentSnapshot;
 import blue.coordination.engine.api.ManagedDocumentStatus;
 import blue.coordination.engine.api.RegistrationMode;
+import blue.coordination.engine.fastpath.ExactNodeHandle;
 import blue.coordination.engine.spi.CoordinationSessionStore;
 import blue.language.model.Node;
 
@@ -85,22 +88,43 @@ public final class InMemoryCoordinationSessionStore
     synchronized InMemoryCoordinationCheckpoint checkpoint(
             String profileIdentity,
             Object immutableContentSharingToken,
+            String canonicalFragmentStorageGenerationAuthority,
+            String preparedRepresentationStorageGenerationAuthority,
             Map<String, Node> fragments,
+            Map<String, ExactNodeHandle> fragmentHandles,
+            Map<String, Long> fragmentEncodedSizes,
+            Map<String, String> fragmentWireFingerprints,
             Map<String, Node> processingViews,
             Map<String, Map<String, Node>> processingViewsByInventory,
+            Map<String, Map<String, ExactNodeHandle>>
+                    processingViewHandlesByInventory,
+            Map<String, Map<String, Long>>
+                    processingViewEncodedSizesByInventory,
+            Map<String, Map<String, String>>
+                    processingViewWireFingerprintsByInventory,
             Map<String, CoordinationFragmentInventory> inventories,
             Map<String, Node> currentRootViews,
+            PreparedCheckpointState preparedRootState,
             InMemoryStoredCoordinationEventStore storedEvents,
             InMemoryCoordinationDispatchLedger dispatchLedger,
             long sessionSequence) {
         return new InMemoryCoordinationCheckpoint(
                 profileIdentity,
                 immutableContentSharingToken,
+                canonicalFragmentStorageGenerationAuthority,
+                preparedRepresentationStorageGenerationAuthority,
                 fragments,
+                fragmentHandles,
+                fragmentEncodedSizes,
+                fragmentWireFingerprints,
                 processingViews,
                 processingViewsByInventory,
+                processingViewHandlesByInventory,
+                processingViewEncodedSizesByInventory,
+                processingViewWireFingerprintsByInventory,
                 inventories,
                 currentRootViews,
+                preparedRootState,
                 sessions,
                 epochs,
                 committedTransitions,

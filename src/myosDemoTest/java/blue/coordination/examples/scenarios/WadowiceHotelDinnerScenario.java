@@ -49,6 +49,17 @@ public final class WadowiceHotelDinnerScenario implements AutoCloseable {
     }
 
     private WadowiceHotelDinnerScenario(
+            String caseId,
+            MyOsDemoCheckpoint checkpoint,
+            long timelineTimestampOffsetMicros) {
+        this(MyOsDemoRuntime.fork(
+                "wadowice-hotel-dinner",
+                caseId,
+                checkpoint,
+                timelineTimestampOffsetMicros), false);
+    }
+
+    private WadowiceHotelDinnerScenario(
             MyOsDemoRuntime runtime,
             boolean addDocuments) {
         demo = runtime;
@@ -95,6 +106,18 @@ public final class WadowiceHotelDinnerScenario implements AutoCloseable {
                         checkpoint, "checkpoint"));
     }
 
+    /** Forks with a deterministic offset for branch-unique exact entries. */
+    public static WadowiceHotelDinnerScenario fork(
+            MyOsDemoCheckpoint checkpoint,
+            String caseId,
+            long timelineTimestampOffsetMicros) {
+        return new WadowiceHotelDinnerScenario(
+                caseId,
+                java.util.Objects.requireNonNull(
+                        checkpoint, "checkpoint"),
+                timelineTimestampOffsetMicros);
+    }
+
     public MyOsDemoRuntime demo() {
         return demo;
     }
@@ -111,6 +134,27 @@ public final class WadowiceHotelDinnerScenario implements AutoCloseable {
         return demo.append(customer, attachPayNoteOperation());
     }
 
+    /**
+     * Authors a real, unrouted customer cursor before a first-seen PayNote.
+     *
+     * <p>The cursor is deliberately outside the measured span. Its exact
+     * BlueId becomes the next PayNote's canonical {@code prevEntry}, allowing
+     * every isolated campaign fork to use a distinct current previous-entry
+     * identity without mutating checkpoint state.</p>
+     */
+    public MyOsDemoEntry appendPayNoteCampaignCursor() {
+        return demo.append(
+                customer,
+                MyOsDemoOperation.operation("payNoteCampaignCursor")
+                        .through("payNoteCampaignCursorChannel")
+                        .build());
+    }
+
+    /** Warms only the PayNote shape for a Timeline with a previous entry. */
+    public void primePayNoteShape() {
+        customer.primeTemplate(attachPayNoteOperation());
+    }
+
     /** Explicit secondary-path prime; it never runs implicitly for the gate. */
     public void primePayNoteAppend() {
         customer.prime(attachPayNoteOperation());
@@ -120,14 +164,18 @@ public final class WadowiceHotelDinnerScenario implements AutoCloseable {
     public void requirePayNoteAttachmentObservable(
             MyOsDemoDispatch dispatch) {
         Set<String> expectedRoots = Set.of(ORDER, PAYNOTE);
+        int expectedJournalHighWater = demo.journalEntryCount();
         if (!dispatch.documentKeys().equals(expectedRoots)) {
             throw new IllegalStateException(
                     "PayNote fan-out mismatch: " + dispatch.documentKeys());
         }
-        if (demo.journalEntryCount() != 1
-                || demo.storedEventInventoryCount() != 1
-                || demo.canonicalStoredEventCount() != 1
-                || demo.authoredEntries().size() != 1) {
+        if (expectedJournalHighWater < 1
+                || demo.storedEventInventoryCount()
+                        != expectedJournalHighWater
+                || demo.canonicalStoredEventCount()
+                        != expectedJournalHighWater
+                || demo.authoredEntries().size()
+                        != expectedJournalHighWater) {
             throw new IllegalStateException(
                     "PayNote append is not fully observable in the journal "
                             + "and event stores");
@@ -144,7 +192,7 @@ public final class WadowiceHotelDinnerScenario implements AutoCloseable {
                     || result.delivery().transition().afterEpoch()
                     != demo.currentEpoch(documentKey)
                     || demo.committedJournalHighWater(
-                    documentKey, customer) != 1L) {
+                    documentKey, customer) != expectedJournalHighWater) {
                 throw new IllegalStateException(
                         "PayNote Root is not fully observable: "
                                 + documentKey);

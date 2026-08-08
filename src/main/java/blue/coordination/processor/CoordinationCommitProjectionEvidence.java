@@ -3,6 +3,7 @@ package blue.coordination.processor;
 import blue.language.processor.EffectiveFragmentationCatalog;
 import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.SubscriptionDelta;
+import blue.language.model.wire.JsonPointer;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -27,6 +28,7 @@ public final class CoordinationCommitProjectionEvidence {
     private final SubscriptionDelta membershipDelta;
     private final List<CoordinationSubscriptionOccurrence> currentEvidence;
     private final Set<String> affectedRetainedOccurrenceKeys;
+    private final Set<String> verifiedChangedPaths;
     private final Map<String, List<String>> processEmbeddedRoutes;
     private final Set<String> prunedScopePaths;
     private final EffectiveFragmentationCatalog fragmentationCatalog;
@@ -43,6 +45,32 @@ public final class CoordinationCommitProjectionEvidence {
             Set<String> prunedScopePaths,
             EffectiveFragmentationCatalog fragmentationCatalog,
             boolean complete) {
+        this(
+                resultingRootBlueId,
+                resultingRootRevision,
+                transitionOrderKey,
+                membershipDelta,
+                currentEvidence,
+                affectedRetainedOccurrenceKeys,
+                processEmbeddedRoutes,
+                prunedScopePaths,
+                fragmentationCatalog,
+                Collections.<String>emptySet(),
+                complete);
+    }
+
+    public CoordinationCommitProjectionEvidence(
+            String resultingRootBlueId,
+            long resultingRootRevision,
+            ExternalOrderKey transitionOrderKey,
+            SubscriptionDelta membershipDelta,
+            Collection<CoordinationSubscriptionOccurrence> currentEvidence,
+            Collection<String> affectedRetainedOccurrenceKeys,
+            Map<String, List<String>> processEmbeddedRoutes,
+            Set<String> prunedScopePaths,
+            EffectiveFragmentationCatalog fragmentationCatalog,
+            Collection<String> verifiedChangedPaths,
+            boolean complete) {
         this.resultingRootBlueId = text(resultingRootBlueId, "resultingRootBlueId");
         if (resultingRootRevision < 0L) {
             throw new IllegalArgumentException("resultingRootRevision must be non-negative");
@@ -54,6 +82,7 @@ public final class CoordinationCommitProjectionEvidence {
         this.currentEvidence = immutableOccurrences(currentEvidence);
         this.affectedRetainedOccurrenceKeys = immutableKeys(
                 affectedRetainedOccurrenceKeys);
+        this.verifiedChangedPaths = immutablePaths(verifiedChangedPaths);
         this.processEmbeddedRoutes = immutableRoutes(processEmbeddedRoutes);
         this.prunedScopePaths = Collections.unmodifiableSet(
                 new LinkedHashSet<String>(Objects.requireNonNull(
@@ -76,6 +105,7 @@ public final class CoordinationCommitProjectionEvidence {
     public Set<String> affectedRetainedOccurrenceKeys() {
         return affectedRetainedOccurrenceKeys;
     }
+    public Set<String> verifiedChangedPaths() { return verifiedChangedPaths; }
     public Map<String, List<String>> processEmbeddedRoutes() {
         return processEmbeddedRoutes;
     }
@@ -105,6 +135,26 @@ public final class CoordinationCommitProjectionEvidence {
         Set<String> unique = new LinkedHashSet<String>(result);
         if (unique.size() != result.size()) {
             throw new IllegalArgumentException("duplicate affected occurrence key");
+        }
+        return Collections.unmodifiableSet(unique);
+    }
+
+    private static Set<String> immutablePaths(Collection<String> supplied) {
+        List<String> result = new ArrayList<String>(
+                Objects.requireNonNull(supplied, "verifiedChangedPaths"));
+        for (int index = 0; index < result.size(); index++) {
+            String path = text(result.get(index), "verified changed path");
+            String canonical = JsonPointer.canonicalize(path);
+            if (!path.equals(canonical)) {
+                throw new IllegalArgumentException(
+                        "verified changed path must be canonical: " + path);
+            }
+            result.set(index, canonical);
+        }
+        Collections.sort(result);
+        Set<String> unique = new LinkedHashSet<String>(result);
+        if (unique.size() != result.size()) {
+            throw new IllegalArgumentException("duplicate verified changed path");
         }
         return Collections.unmodifiableSet(unique);
     }

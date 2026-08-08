@@ -1,6 +1,9 @@
 package blue.coordination.examples.support;
 
+import blue.coordination.engine.api.CoordinationFragmentTransitionWorkSnapshot;
 import blue.coordination.engine.memory.CoordinationEngineWorkSnapshot;
+import blue.coordination.engine.fastpath.ReferenceCutMetrics;
+import blue.coordination.fastpath.FastPathWorkMetrics;
 
 import java.util.Objects;
 
@@ -20,6 +23,9 @@ public record MyOsMeasuredWork(
         long routeIndexProbes,
         long fanoutPages,
         CoordinationEngineWorkSnapshot engine,
+        ReferenceCutMetrics.Snapshot referenceCuts,
+        FastPathWorkMetrics.Snapshot projection,
+        CoordinationFragmentTransitionWorkSnapshot fragmentTransition,
         long storeSingleReads,
         long storeBatchReads,
         long storeRequestedIdentities) {
@@ -32,6 +38,11 @@ public record MyOsMeasuredWork(
         nonNegative(routeIndexProbes, "routeIndexProbes");
         nonNegative(fanoutPages, "fanoutPages");
         engine = Objects.requireNonNull(engine, "engine");
+        referenceCuts = Objects.requireNonNull(
+                referenceCuts, "referenceCuts");
+        projection = Objects.requireNonNull(projection, "projection");
+        fragmentTransition = Objects.requireNonNull(
+                fragmentTransition, "fragmentTransition");
         nonNegative(storeSingleReads, "storeSingleReads");
         nonNegative(storeBatchReads, "storeBatchReads");
         nonNegative(storeRequestedIdentities, "storeRequestedIdentities");
@@ -47,6 +58,9 @@ public record MyOsMeasuredWork(
                 routeIndexProbes - checked.routeIndexProbes,
                 fanoutPages - checked.fanoutPages,
                 engine.minus(checked.engine),
+                referenceCuts.minus(checked.referenceCuts),
+                projection.minus(checked.projection),
+                fragmentTransition.minus(checked.fragmentTransition),
                 storeSingleReads - checked.storeSingleReads,
                 storeBatchReads - checked.storeBatchReads,
                 storeRequestedIdentities

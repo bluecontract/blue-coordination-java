@@ -11,6 +11,7 @@ import blue.language.model.NodeWireForm;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -171,6 +172,28 @@ final class CoordinationInventoryRootViewCacheTest {
         assertEquals(1, cache.snapshot().currentSize());
         assertEquals(warmWeight, cache.snapshot().currentWeightBytes());
         assertEquals(1L, cache.snapshot().evictionCount());
+    }
+
+    @Test
+    void checkpointSnapshotShouldContainOnlyBoundedDefensiveWarmRoots() {
+        RootFixture first = root("first-checkpoint");
+        RootFixture second = root("second-checkpoint");
+        CoordinationInventoryRootViewCache cache =
+                new CoordinationInventoryRootViewCache(1);
+        cache.install(first.inventory, first.root);
+        cache.install(second.inventory, second.root);
+
+        Map<String, Node> retained = cache.snapshotRetainedRoots();
+
+        assertEquals(1, retained.size());
+        assertNull(retained.get(first.inventory.inventoryIdentity()));
+        Node snapshot = retained.get(second.inventory.inventoryIdentity());
+        assertEquals(NodeWireForm.get(second.root), NodeWireForm.get(snapshot));
+        snapshot.properties("tampered", new Node().value(true));
+        assertEquals(
+                NodeWireForm.get(second.root),
+                NodeWireForm.get(cache.find(second.inventory)));
+        assertThrows(UnsupportedOperationException.class, () -> retained.clear());
     }
 
     private static RootFixture root(String value) {

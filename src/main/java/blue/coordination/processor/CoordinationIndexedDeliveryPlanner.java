@@ -133,6 +133,26 @@ public final class CoordinationIndexedDeliveryPlanner {
     }
 
     /**
+     * Processes an exact preparation with the same strict request-local
+     * provider domain used by platform hosts. The evaluator-produced plan
+     * carries its non-forgeable Contracts generation binding into PROCESS.
+     */
+    public PlatformProcessingResult processForPlatformCommit(
+            Node root,
+            Node event,
+            CoordinationPreparedDelivery prepared,
+            NodeProvider exactProvider) {
+        CoordinationPreparedDelivery exactPrepared =
+                Objects.requireNonNull(prepared, "prepared");
+        return engine.processForPlatformCommit(
+                Objects.requireNonNull(root, "root"),
+                Objects.requireNonNull(event, "event"),
+                exactPrepared.deliveryPlan(),
+                Objects.requireNonNull(
+                        exactProvider, "exactProvider"));
+    }
+
+    /**
      * Prepares one exact event while enforcing explicit nonportable host-work
      * quotas for candidate validation and prefetch construction.
      *

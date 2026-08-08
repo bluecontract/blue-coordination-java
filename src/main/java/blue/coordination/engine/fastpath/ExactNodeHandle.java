@@ -2,6 +2,7 @@ package blue.coordination.engine.fastpath;
 
 import blue.coordination.engine.CoordinationProcessingEngine
         .VerifiedNodeAccessAuthority;
+import blue.coordination.processor.CoordinationFragmentAdmissionVerifier;
 import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.model.Node;
 
@@ -18,6 +19,8 @@ public final class ExactNodeHandle {
     private final String blueId;
     private final Node node;
     private final Object owner;
+    private volatile CoordinationFragmentAdmissionVerifier
+            .PhysicalFragmentEvidence physicalEvidence;
 
     private ExactNodeHandle(String blueId, Node node, Object owner) {
         this.blueId = requireText(blueId, "blueId");
@@ -119,10 +122,39 @@ public final class ExactNodeHandle {
     public ExactNodeHandle rebind(
             Object expectedOwner, Object newOwner) {
         requireOwner(expectedOwner);
-        return new ExactNodeHandle(
+        ExactNodeHandle rebound = new ExactNodeHandle(
                 blueId,
                 node,
                 Objects.requireNonNull(newOwner, "newOwner"));
+        rebound.physicalEvidence = physicalEvidence;
+        return rebound;
+    }
+
+    /**
+     * Returns immutable canonical-wire evidence without exposing the Node.
+     * The first request serializes once; all later storage checks reuse the
+     * retained fingerprint and encoded byte count.
+     */
+    public CoordinationFragmentAdmissionVerifier.PhysicalFragmentEvidence
+            physicalEvidence(
+                    Object expectedOwner,
+                    VerifiedNodeAccessAuthority accessAuthority) {
+        requireOwner(expectedOwner);
+        Objects.requireNonNull(accessAuthority, "accessAuthority");
+        CoordinationFragmentAdmissionVerifier.PhysicalFragmentEvidence
+                current = physicalEvidence;
+        if (current != null) {
+            return current;
+        }
+        synchronized (this) {
+            current = physicalEvidence;
+            if (current == null) {
+                current = CoordinationFragmentAdmissionVerifier
+                        .physicalFragmentEvidence(node);
+                physicalEvidence = current;
+            }
+            return current;
+        }
     }
 
     private void requireOwner(Object expectedOwner) {

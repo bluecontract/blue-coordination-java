@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Three purposeful checkpoints built by one linear Wadowice preparation.
+ * Four purposeful checkpoints built by one linear Wadowice preparation.
  *
  * <p>The JVM-shared fixture admits documents once, attaches the PayNote once,
  * continues through attached conditions once, and continues again through the
@@ -19,6 +19,7 @@ import java.util.Objects;
  */
 public final class WadowicePreparedFixture implements AutoCloseable {
 
+    private final MyOsDemoCheckpoint beforePayNote;
     private final MyOsDemoCheckpoint payNoteAttached;
     private final MyOsDemoCheckpoint conditionsAttached;
     private final MyOsDemoCheckpoint restaurantOutcome;
@@ -26,10 +27,13 @@ public final class WadowicePreparedFixture implements AutoCloseable {
     private boolean closed;
 
     private WadowicePreparedFixture(
+            MyOsDemoCheckpoint beforePayNote,
             MyOsDemoCheckpoint payNoteAttached,
             MyOsDemoCheckpoint conditionsAttached,
             MyOsDemoCheckpoint restaurantOutcome,
             MyOsMeasuredWork preparationWork) {
+        this.beforePayNote = Objects.requireNonNull(
+                beforePayNote, "beforePayNote");
         this.payNoteAttached = Objects.requireNonNull(
                 payNoteAttached, "payNoteAttached");
         this.conditionsAttached = Objects.requireNonNull(
@@ -45,6 +49,8 @@ public final class WadowicePreparedFixture implements AutoCloseable {
         try (WadowiceHotelDinnerScenario source =
                      WadowiceHotelDinnerScenario.create(
                              "wadowice-prepared-source")) {
+            MyOsDemoCheckpoint beforePayNote = source.demo().checkpoint(
+                    "before-pay-note");
             MyOsDemoAssertions.assertSuccessful(source.attachPayNote());
             MyOsDemoCheckpoint payNoteAttached = source.demo().checkpoint(
                     "pay-note-attached");
@@ -73,6 +79,7 @@ public final class WadowicePreparedFixture implements AutoCloseable {
             MyOsDemoCheckpoint restaurantOutcome =
                     source.demo().checkpoint("restaurant-outcome");
             return new WadowicePreparedFixture(
+                    beforePayNote,
                     payNoteAttached,
                     conditionsAttached,
                     restaurantOutcome,
@@ -99,6 +106,28 @@ public final class WadowicePreparedFixture implements AutoCloseable {
         return fork(payNoteAttached, caseId);
     }
 
+    /** Private branch immediately before the first PayNote Timeline entry. */
+    public synchronized WadowiceHotelDinnerScenario beforePayNoteBranch(
+            String caseId) {
+        return fork(beforePayNote, caseId);
+    }
+
+    /**
+     * Private pre-PayNote branch with a deterministic timestamp offset.
+     * Existing zero-offset branches retain their historical exact identities.
+     */
+    public synchronized WadowiceHotelDinnerScenario beforePayNoteBranch(
+            String caseId,
+            long timelineTimestampOffsetMicros) {
+        if (closed) {
+            throw new IllegalStateException("Prepared fixture is closed");
+        }
+        return WadowiceHotelDinnerScenario.fork(
+                beforePayNote,
+                requireText(caseId, "caseId"),
+                timelineTimestampOffsetMicros);
+    }
+
     public MyOsDemoCheckpoint checkpoint() { return restaurantOutcome; }
 
     public MyOsDemoCheckpoint conditionsCheckpoint() {
@@ -109,9 +138,13 @@ public final class WadowicePreparedFixture implements AutoCloseable {
         return payNoteAttached;
     }
 
+    public MyOsDemoCheckpoint beforePayNoteCheckpoint() {
+        return beforePayNote;
+    }
+
     public MyOsMeasuredWork preparationWork() { return preparationWork; }
 
-    /** The fixture's three checkpoints came from exactly one source run. */
+    /** The fixture's four checkpoints came from exactly one source run. */
     public int preparationExecutions() { return 1; }
 
     private WadowiceHotelDinnerScenario fork(

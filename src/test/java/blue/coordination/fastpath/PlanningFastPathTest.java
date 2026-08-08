@@ -17,11 +17,11 @@ final class PlanningFastPathTest {
                 8, 1024L, String::length);
         AtomicInteger semanticCalls = new AtomicInteger();
         PlanCacheKey first = new PlanCacheKey(
-                projection.generation(), "event-a", "inventory-a",
+                projection.generation(), "session", "event-a", "inventory-a",
                 order("order-a"),
                 Arrays.asList("public-10", "public-11"), "policy");
         PlanCacheKey second = new PlanCacheKey(
-                projection.generation(), "event-b", "inventory-b",
+                projection.generation(), "session", "event-b", "inventory-b",
                 order("order-b"),
                 Arrays.asList("public-10", "public-11"), "policy");
 
@@ -44,7 +44,7 @@ final class PlanningFastPathTest {
     void planCannotCrossRootGeneration() {
         AdmittedProjection projection = FastPathFixtures.projection(20, 1L);
         PlanCacheKey foreign = new PlanCacheKey(
-                FastPathFixtures.generation(2L), "event", "inventory",
+                FastPathFixtures.generation(2L), "session", "event", "inventory",
                 order("order"),
                 Arrays.asList("public-10", "public-11"), "policy");
         assertThrows(IllegalArgumentException.class,
@@ -58,12 +58,61 @@ final class PlanningFastPathTest {
         PlanningFastPath<String> fastPath = new PlanningFastPath<String>(
                 8, 1024L, String::length);
         PlanCacheKey key = new PlanCacheKey(
-                projection.generation(), "event", "inventory",
+                projection.generation(), "session", "event", "inventory",
                 order("order"),
                 Arrays.asList("public-10", "public-11"), "policy");
         fastPath.prepare(key, projection, ignored -> "planned");
-        assertEquals(1, fastPath.generationCommitted(projection.generation()));
+        assertEquals(1, fastPath.generationCommitted(
+                "session", projection.generation()));
         assertEquals(0, fastPath.metrics().entries());
+    }
+
+    @Test
+    void exactEventMemoRemainsSessionPrivateForSharedProjectionGeneration() {
+        AdmittedProjection firstProjection = FastPathFixtures.projection(
+                20, 1L);
+        ProjectionGenerationKey firstGeneration =
+                firstProjection.generation();
+        PlanningFastPath<String> fastPath = new PlanningFastPath<String>(
+                8, 1024L, String::length);
+        AtomicInteger semanticCalls = new AtomicInteger();
+        PlanCacheKey first = new PlanCacheKey(
+                firstGeneration,
+                "first-session",
+                "event",
+                "event-inventory",
+                order("order"),
+                Arrays.asList("public-10", "public-11"),
+                "policy");
+        PlanCacheKey second = new PlanCacheKey(
+                firstGeneration,
+                "second-session",
+                "event",
+                "event-inventory",
+                order("order"),
+                Arrays.asList("public-10", "public-11"),
+                "policy");
+
+        assertEquals("first", fastPath.prepare(
+                first,
+                firstProjection,
+                ignored -> {
+                    semanticCalls.incrementAndGet();
+                    return "first";
+                }));
+        assertEquals("second", fastPath.prepare(
+                second,
+                firstProjection,
+                ignored -> {
+                    semanticCalls.incrementAndGet();
+                    return "second";
+                }));
+
+        assertEquals(2, semanticCalls.get());
+        assertEquals(1, fastPath.generationCommitted(
+                "first-session", firstGeneration));
+        assertEquals(1, fastPath.metrics().entries(),
+                "another session's exact event memo must survive");
     }
 
     @Test
@@ -74,6 +123,7 @@ final class PlanningFastPathTest {
         AtomicInteger semanticCalls = new AtomicInteger();
         PlanCacheKey first = new PlanCacheKey(
                 projection.generation(),
+                "session",
                 "event",
                 "event-inventory-a",
                 order("order"),
@@ -81,6 +131,7 @@ final class PlanningFastPathTest {
                 "policy");
         PlanCacheKey second = new PlanCacheKey(
                 projection.generation(),
+                "session",
                 "event",
                 "event-inventory-b",
                 order("order"),
@@ -107,6 +158,7 @@ final class PlanningFastPathTest {
         AtomicInteger semanticCalls = new AtomicInteger();
         PlanCacheKey deepFirst = new PlanCacheKey(
                 projection.generation(),
+                "session",
                 "event",
                 "event-inventory",
                 order("order"),
@@ -114,6 +166,7 @@ final class PlanningFastPathTest {
                 "policy");
         PlanCacheKey shallowFirst = new PlanCacheKey(
                 projection.generation(),
+                "session",
                 "event",
                 "event-inventory",
                 order("order"),

@@ -2,7 +2,13 @@ package blue.coordination.engine.memory;
 
 import blue.coordination.engine.CoordinationProcessingEngine;
 import blue.coordination.engine.api.CoordinationDispatchSnapshot;
+import blue.coordination.engine.api.CoordinationEventShapeInstance;
+import blue.coordination.engine.api.CoordinationEventShapeMetrics;
+import blue.coordination.engine.api.CoordinationEventShapePatch;
+import blue.coordination.engine.api.CoordinationEventShapeTemplate;
+import blue.coordination.engine.api.CoordinationFragmentTransitionWorkSnapshot;
 import blue.coordination.engine.api.CoordinationProcessingPlan;
+import blue.coordination.engine.api.CoordinationRootViewCacheSnapshot;
 import blue.coordination.engine.api.CoordinationTransition;
 import blue.coordination.engine.api.CoordinationTransitionPublicationGuard;
 import blue.coordination.engine.api.DeliveryPlanningMode;
@@ -15,6 +21,9 @@ import blue.coordination.engine.api.ManagedDocumentStatus;
 import blue.coordination.engine.api.PrefetchPolicy;
 import blue.coordination.engine.api.ProcessRequest;
 import blue.coordination.engine.api.StoredCoordinationEvent;
+import blue.coordination.engine.fastpath.ReferenceCutConfiguration;
+import blue.coordination.engine.fastpath.ReferenceCutMetrics;
+import blue.coordination.fastpath.FastPathWorkMetrics;
 import blue.coordination.engine.spi.CoordinationProcessingBundleLoader;
 import blue.coordination.engine.spi.CoordinationProcessingEngineObserver;
 import blue.coordination.engine.spi.CoordinationTransitionMemoStore;
@@ -26,12 +35,13 @@ import blue.language.processor.DocumentProcessor;
 import blue.language.processor.ExternalOrderKey;
 
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
-import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.WeakHashMap;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.RejectedExecutionHandler;
@@ -79,9 +89,13 @@ public final class InMemoryCoordinationEnvironment implements AutoCloseable {
     private final InMemoryCoordinationDispatchLedger dispatchLedger;
     private final InMemoryCoordinationFanout defaultFanout;
     private final ThreadPoolExecutor rootPreparationExecutor;
+    // Environment-created schedulers must participate in the checkpoint
+    // quiescence barrier while callers retain them, but that barrier must not
+    // become their lifetime owner. Weak keys preserve that distinction and
+    // iteration below also expunges schedulers which callers released.
     private final Set<BoundedCoordinationRootScheduler<?>> parallelSchedulers =
             Collections.newSetFromMap(
-                    new IdentityHashMap<
+                    new WeakHashMap<
                             BoundedCoordinationRootScheduler<?>, Boolean>());
     private final AtomicLong sessionSequence = new AtomicLong();
     private final BlueContracts contracts;
@@ -156,14 +170,20 @@ public final class InMemoryCoordinationEnvironment implements AutoCloseable {
                         .observer(builder.observer != null
                                 ? builder.observer
                                 : CoordinationProcessingEngineObserver.none())
+                        .referenceCutConfiguration(
+                                builder.referenceCutConfiguration)
                         .transferRuntimeOwnership(builder.ownsRuntimes);
         if (checkpoint != null) {
             engineBuilder
-                    .retainedRootViews(checkpoint.currentRootViews)
-                    .rootViewCacheMaximumSize(Math.max(
-                            CoordinationProcessingEngine
-                                    .DEFAULT_ROOT_VIEW_CACHE_MAXIMUM_SIZE,
-                            sessionStore.sessions().size()));
+                    .retainedRootViews(checkpoint.currentRootViews);
+            if (checkpoint.preparedRootState != null) {
+                engineBuilder.preparedCheckpointState(
+                        checkpoint.preparedRootState);
+            }
+        }
+        if (builder.rootViewCacheMaximumSize != null) {
+            engineBuilder.rootViewCacheMaximumSize(
+                    builder.rootViewCacheMaximumSize.intValue());
         }
         if (builder.environmentIdentity != null) {
             engineBuilder.environmentIdentity(builder.environmentIdentity);
@@ -171,13 +191,12 @@ public final class InMemoryCoordinationEnvironment implements AutoCloseable {
         this.engine = engineBuilder.build();
         this.sessionIndexPublisher = new InMemorySessionIndexPublisher(
                 engine, sessionStore, subscriptionIndex);
-        if (checkpoint != null) {
+        if (checkpoint != null && checkpoint.preparedRootState != null) {
             for (ManagedDocumentSnapshot restored : sessionStore.sessions()) {
                 if (restored.status() == ManagedDocumentStatus.ACTIVE) {
-                    engine.prepareRootContextFromCheckpoint(
+                    engine.restorePreparedRootContextFromCheckpoint(
                             restored,
-                            checkpoint.completeProcessingViewsForRestore(
-                                    restored.fragmentInventoryIdentity()));
+                            checkpoint.preparedRootState);
                 }
             }
         }
@@ -188,7 +207,9 @@ public final class InMemoryCoordinationEnvironment implements AutoCloseable {
                     return sessionStore.committedDeliveries().require(
                             event.eventBlueId(), target.sessionId());
                 });
-        this.rootPreparationExecutor = newRootPreparationExecutor();
+        this.rootPreparationExecutor = newRootPreparationExecutor(
+                builder.rootPreparationParallelism,
+                builder.rootPreparationQueueCapacity);
     }
 
     public static Builder builder() { return new Builder(); }
@@ -235,6 +256,46 @@ public final class InMemoryCoordinationEnvironment implements AutoCloseable {
         }
     }
 
+    /** Compiles one immutable first-seen event shape for this environment. */
+    public CoordinationEventShapeTemplate compileEventShape(
+            String shapeIdentity,
+            Node resolvedPrototype,
+            Collection<String> volatileLeafPointers) {
+        lifecycle.readLock().lock();
+        try {
+            requireOpen();
+            return engine.compileEventShape(
+                    shapeIdentity,
+                    resolvedPrototype,
+                    volatileLeafPointers);
+        } finally {
+            lifecycle.readLock().unlock();
+        }
+    }
+
+    /** Instantiates a shared shape and records work in this environment. */
+    public CoordinationEventShapeInstance instantiateEventShape(
+            CoordinationEventShapeTemplate template,
+            Collection<CoordinationEventShapePatch> patches) {
+        lifecycle.readLock().lock();
+        try {
+            requireOpen();
+            return engine.instantiateEventShape(template, patches);
+        } finally {
+            lifecycle.readLock().unlock();
+        }
+    }
+
+    /** Admits one exact shape instance once and returns its verified handle. */
+    public StoredCoordinationEvent prepareEvent(
+            CoordinationEventShapeInstance instance,
+            ExternalOrderKey eventOrderKey) {
+        PreparedEventPublication prepared =
+                prepareEventOnceForPublication(instance, eventOrderKey);
+        publishPreparedEvent(prepared);
+        return prepared.event();
+    }
+
     /** Admits one exact event graph once and returns its verified handle. */
     public StoredCoordinationEvent prepareEvent(
             Node exactEvent,
@@ -269,6 +330,58 @@ public final class InMemoryCoordinationEnvironment implements AutoCloseable {
                 claimedEventBlueId, exactEvent, eventOrderKey);
         publishPreparedEvent(prepared);
         return prepared.event();
+    }
+
+    /**
+     * Stages a shape-compiled first-seen event without re-materializing or
+     * re-splitting its exact graph. A duplicate is bound by both event and
+     * inventory identity before publication is skipped.
+     */
+    public synchronized PreparedEventPublication
+            prepareEventOnceForPublication(
+                    CoordinationEventShapeInstance instance,
+                    ExternalOrderKey eventOrderKey) {
+        lifecycle.readLock().lock();
+        try {
+            requireOpen();
+            CoordinationEventShapeInstance checked = Objects.requireNonNull(
+                    instance, "instance");
+            ExternalOrderKey checkedOrder = Objects.requireNonNull(
+                    eventOrderKey, "eventOrderKey");
+            StoredCoordinationEvent existing = eventStore.find(
+                    checked.eventBlueId()).orElse(null);
+            if (existing != null) {
+                if (!existing.orderKey().equals(checkedOrder)) {
+                    throw new IllegalStateException(
+                            "Stored event order conflict for "
+                                    + checked.eventBlueId());
+                }
+                if (!existing.fragmentInventoryIdentity().equals(
+                        checked.admission().inventory()
+                                .inventoryIdentity())) {
+                    throw new IllegalStateException(
+                            "Stored event inventory conflict for "
+                                    + checked.eventBlueId());
+                }
+                return new PreparedEventPublication(
+                        this,
+                        null,
+                        eventStore.prepareCanonical(existing));
+            }
+            InMemoryCoordinationFragmentStore.StagedVerifiedEvent<
+                    StoredCoordinationEvent> staged =
+                    fragmentStore.stageVerifiedEventAdmission(
+                            () -> engine.prepareEvent(
+                                    checked, checkedOrder));
+            if (!checked.eventBlueId().equals(
+                    staged.result().eventBlueId())) {
+                throw new IllegalStateException(
+                        "Shape-compiled event identity changed at admission");
+            }
+            return preparedEventPublication(staged);
+        } finally {
+            lifecycle.readLock().unlock();
+        }
     }
 
     /**
@@ -544,6 +657,36 @@ public final class InMemoryCoordinationEnvironment implements AutoCloseable {
         return engine.eventAdmissionMetrics();
     }
 
+    public CoordinationEventShapeMetrics.Snapshot eventShapeMetrics() {
+        return engine.eventShapeMetrics();
+    }
+
+    /** Opaque identity of evidence accepted by this environment. */
+    public String eventAdmissionDomainIdentity() {
+        return engine.eventAdmissionDomainIdentity();
+    }
+
+    /** Exact cumulative incremental-projection work in this environment. */
+    public FastPathWorkMetrics.Snapshot projectionFastPathMetrics() {
+        return engine.projectionFastPathMetrics();
+    }
+
+    /** Exact cumulative verified fragment-transition work. */
+    public CoordinationFragmentTransitionWorkSnapshot
+            fragmentTransitionWorkSnapshot() {
+        return engine.fragmentTransitionWorkSnapshot();
+    }
+
+    /** Current hard-bounded exact Root-view cache occupancy and work. */
+    public CoordinationRootViewCacheSnapshot rootViewCacheSnapshot() {
+        return engine.rootViewCacheSnapshot();
+    }
+
+    /** Exact cumulative reference-cut work performed by the live engine. */
+    public ReferenceCutMetrics.Snapshot referenceCutMetrics() {
+        return engine.referenceCutMetrics();
+    }
+
     /** Cache-only preparation; authoritative stores remain unchanged. */
     public void primeEventAdmission(
             String claimedEventBlueId,
@@ -574,11 +717,15 @@ public final class InMemoryCoordinationEnvironment implements AutoCloseable {
             Map<String, Node> currentRootViews =
                     engine.checkpointCurrentRootViews(
                             sessionStore.sessions());
+            CoordinationProcessingEngine.PreparedCheckpointState
+                    preparedRootState = engine.checkpointPreparedState(
+                            sessionStore.sessions());
             return fragmentStore.fragmentCheckpoint(
                     sessionStore,
                     eventStore,
                     dispatchLedger,
                     currentRootViews,
+                    preparedRootState,
                     sessionSequence.get());
         } finally {
             lifecycle.writeLock().unlock();
@@ -792,16 +939,38 @@ public final class InMemoryCoordinationEnvironment implements AutoCloseable {
         }
     }
 
-    private static ThreadPoolExecutor newRootPreparationExecutor() {
+    private static ThreadPoolExecutor newRootPreparationExecutor(
+            int parallelism,
+            int queueCapacity) {
+        if (parallelism <= 0 || queueCapacity <= 0) {
+            throw new IllegalArgumentException(
+                    "Root-preparation executor bounds must be positive");
+        }
         return new ThreadPoolExecutor(
-                PREPARATION_PARALLELISM,
-                PREPARATION_PARALLELISM,
+                parallelism,
+                parallelism,
                 0L,
                 TimeUnit.MILLISECONDS,
-                new ArrayBlockingQueue<Runnable>(
-                        PREPARATION_QUEUE_CAPACITY),
+                new ArrayBlockingQueue<Runnable>(queueCapacity),
                 new DaemonPreparationThreadFactory(),
                 new RunInCallerBackpressurePolicy());
+    }
+
+    /** Returns real executor work rather than an inferred test counter. */
+    public CoordinationRootPreparationPoolSnapshot
+            rootPreparationPoolSnapshot() {
+        lifecycle.readLock().lock();
+        try {
+            return new CoordinationRootPreparationPoolSnapshot(
+                    rootPreparationExecutor.getCorePoolSize(),
+                    rootPreparationExecutor.getActiveCount(),
+                    rootPreparationExecutor.getPoolSize(),
+                    rootPreparationExecutor.getQueue().size(),
+                    rootPreparationExecutor.getCompletedTaskCount(),
+                    rootPreparationExecutor.getLargestPoolSize());
+        } finally {
+            lifecycle.readLock().unlock();
+        }
     }
 
     private static String requireText(String value, String name) {
@@ -885,6 +1054,12 @@ public final class InMemoryCoordinationEnvironment implements AutoCloseable {
         private CoordinationTransitionMemoStore memoStore;
         private CoordinationProcessingEngineObserver observer;
         private String environmentIdentity;
+        private ReferenceCutConfiguration referenceCutConfiguration =
+                ReferenceCutConfiguration.disabled();
+        private int rootPreparationParallelism = PREPARATION_PARALLELISM;
+        private int rootPreparationQueueCapacity =
+                PREPARATION_QUEUE_CAPACITY;
+        private Integer rootViewCacheMaximumSize;
         private boolean ownsRuntimes;
         private InMemoryCoordinationCheckpoint checkpoint;
 
@@ -930,6 +1105,41 @@ public final class InMemoryCoordinationEnvironment implements AutoCloseable {
                     value, "environmentIdentity");
             return this;
         }
+        public Builder referenceCutConfiguration(
+                ReferenceCutConfiguration value) {
+            referenceCutConfiguration = Objects.requireNonNull(
+                    value, "referenceCutConfiguration");
+            return this;
+        }
+        /** Configures the engine's exact retained Root/planning entry bound. */
+        public Builder rootViewCacheMaximumSize(int value) {
+            if (value <= 0) {
+                throw new IllegalArgumentException(
+                        "rootViewCacheMaximumSize must be positive");
+            }
+            rootViewCacheMaximumSize = Integer.valueOf(value);
+            return this;
+        }
+        /** Bounds concurrent expensive Root preparation for this host. */
+        public Builder rootPreparationParallelism(int value) {
+            if (value <= 0) {
+                throw new IllegalArgumentException(
+                        "rootPreparationParallelism must be positive");
+            }
+            rootPreparationParallelism = value;
+            return this;
+        }
+
+        /** Bounds queued Root preparations; saturation runs in the caller. */
+        public Builder rootPreparationQueueCapacity(int value) {
+            if (value <= 0) {
+                throw new IllegalArgumentException(
+                        "rootPreparationQueueCapacity must be positive");
+            }
+            rootPreparationQueueCapacity = value;
+            return this;
+        }
+
         public Builder transferRuntimeOwnership(boolean value) {
             ownsRuntimes = value;
             return this;

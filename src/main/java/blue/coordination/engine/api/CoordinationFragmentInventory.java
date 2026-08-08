@@ -127,6 +127,26 @@ public final class CoordinationFragmentInventory {
         validateDirectRoot(directRoot);
     }
 
+    /**
+     * Makes a new ownership value from an already validated immutable
+     * inventory without replaying graph validation and canonical hashing.
+     */
+    private CoordinationFragmentInventory(
+            CoordinationFragmentInventory validated) {
+        this.schemaVersion = validated.schemaVersion;
+        this.fragmentationProfileIdentity =
+                validated.fragmentationProfileIdentity;
+        this.edgeMetadataSchemaIdentity =
+                validated.edgeMetadataSchemaIdentity;
+        this.rootBlueId = validated.rootBlueId;
+        this.fragmentBlueIds = validated.fragmentBlueIds;
+        this.exactBodyBlueIds = validated.exactBodyBlueIds;
+        this.fragmentRoots = validated.fragmentRoots;
+        this.edges = validated.edges;
+        this.metadata = validated.metadata;
+        this.inventoryIdentity = validated.inventoryIdentity;
+    }
+
     /** Creates the persistable value directly from the canonical splitter. */
     public static CoordinationFragmentInventory from(
             CoordinationDocumentSplitter.SplitGraph graph) {
@@ -182,18 +202,15 @@ public final class CoordinationFragmentInventory {
     }
 
     /**
-     * Returns a distinct body-free immutable copy.
+     * Returns a distinct body-free immutable ownership value.
+     *
+     * <p>Every reachable value was made immutable and identity-checked by the
+     * public constructor. Retaining that validated structure makes this copy
+     * O(1), avoiding a second sort, graph scan, serialization, and SHA-256
+     * pass at every successful publication.</p>
      */
     public CoordinationFragmentInventory retainedCopy() {
-        return new CoordinationFragmentInventory(
-                schemaVersion,
-                fragmentationProfileIdentity,
-                edgeMetadataSchemaIdentity,
-                rootBlueId,
-                fragmentBlueIds,
-                fragmentRoots,
-                edges,
-                metadata);
+        return new CoordinationFragmentInventory(this);
     }
 
     /** Returns the closed scalar/list/map persistence representation. */

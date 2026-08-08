@@ -24,6 +24,7 @@ final class WadowiceWorkBudgetAssertions {
         assertTrue(work.storeBatchReads() <= 2L,
                 () -> "expected at most two store batches but saw "
                         + work.storeBatchReads());
+        assertIncrementalProjectionAndTransition(work, 1L);
     }
 
     static void assertTwoRootFanout(MyOsMeasuredWork work) {
@@ -45,6 +46,7 @@ final class WadowiceWorkBudgetAssertions {
         assertTrue(work.storeBatchReads() <= 4L,
                 () -> "expected at most four store batches but saw "
                         + work.storeBatchReads());
+        assertIncrementalProjectionAndTransition(work, 2L);
     }
 
     private static void assertHostEntryWork(MyOsMeasuredWork work) {
@@ -52,7 +54,8 @@ final class WadowiceWorkBudgetAssertions {
         assertEquals(0L, work.documentInitializations());
         assertEquals(1L, work.eventPreparations(),
                 "prepare one canonical event");
-        assertEquals(1L, work.eventSplits(), "split the event graph once");
+        assertEquals(0L, work.eventSplits(),
+                "cached-shape exact admission must not split the event");
         assertEquals(1L, work.routeIndexProbes(),
                 "query the cross-session index once");
         assertEquals(1L, work.fanoutPages(),
@@ -62,5 +65,40 @@ final class WadowiceWorkBudgetAssertions {
     private static void assertNoRetryOrConflict(MyOsMeasuredWork work) {
         assertEquals(0L, work.engine().alreadyCommitted());
         assertEquals(0L, work.engine().conflicts());
+    }
+
+    private static void assertIncrementalProjectionAndTransition(
+            MyOsMeasuredWork work, long affectedRoots) {
+        assertEquals(affectedRoots,
+                work.projection().deltaProjectionUpdates(),
+                "one delta projection per committed Root");
+        assertEquals(0L, work.projection().coldProjectionFallbacks());
+        assertEquals(0L, work.projection().fullProjectorFallbacks());
+        assertEquals(0L, work.projection().catalogFallbacks());
+        assertEquals(0L, work.projection().unrelatedOccurrences(),
+                "unrelated occurrences must not be visited or refreshed");
+        assertEquals(0L, work.projection().snapshotSerializations(),
+                "the persistent snapshot identity must not serialize all "
+                        + "occurrences");
+        assertEquals(0L, work.projection().snapshotSerializedOccurrences());
+
+        assertEquals(affectedRoots, work.fragmentTransition().deltaHits(),
+                "one verified frontier transition per committed Root");
+        assertEquals(0L,
+                work.fragmentTransition().typedFallbackCount());
+        assertEquals(0L,
+                work.fragmentTransition().fullBlueprintAttempts());
+        assertEquals(0L, work.fragmentTransition().fullResultClones());
+        assertEquals(0L,
+                work.fragmentTransition().fullRootMaterializations());
+        assertEquals(0L,
+                work.fragmentTransition().retainedIndexFullScans());
+        assertTrue(
+                work.fragmentTransition().unchangedFragmentShareRatio()
+                        >= 0.90d,
+                () -> "expected at least 90% unchanged fragment sharing but "
+                        + "saw "
+                        + work.fragmentTransition()
+                                .unchangedFragmentShareRatio());
     }
 }

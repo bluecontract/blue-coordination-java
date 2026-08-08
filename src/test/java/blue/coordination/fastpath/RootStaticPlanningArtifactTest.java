@@ -72,7 +72,7 @@ final class RootStaticPlanningArtifactTest {
     }
 
     @Test
-    void shouldInvalidateOnlyOnAnExactGenerationChange() {
+    void shouldRetainSharedGenerationsUntilBoundedEviction() {
         // given
         ProjectionGenerationCache cache = new ProjectionGenerationCache(
                 16, 1_000_000L);
@@ -80,7 +80,6 @@ final class RootStaticPlanningArtifactTest {
         ProjectionGenerationKey rootChanged = FastPathFixtures.generation(2L);
         ProjectionGenerationKey subscriptionsChanged = new ProjectionGenerationKey(
                 initial.environmentIdentity(),
-                initial.sessionId(),
                 initial.rootBlueId(),
                 initial.rootRevision(),
                 initial.inventoryIdentity(),
@@ -88,43 +87,90 @@ final class RootStaticPlanningArtifactTest {
                 initial.runtimeIdentity());
         ProjectionGenerationKey runtimeChanged = new ProjectionGenerationKey(
                 initial.environmentIdentity(),
-                initial.sessionId(),
                 initial.rootBlueId(),
                 initial.rootRevision(),
                 initial.inventoryIdentity(),
                 initial.subscriptionDigest(),
                 "runtime-new");
-        ProjectionGenerationKey otherSession = key(
-                "other-session", "root-independent", 1L);
+        ProjectionGenerationKey independentGeneration = key(
+                "root-independent", 1L);
         cache.getOrCompile(initial, key -> projection(key, 8));
         cache.getOrCompile(rootChanged, key -> projection(key, 8));
         cache.getOrCompile(subscriptionsChanged, key -> projection(key, 8));
         cache.getOrCompile(runtimeChanged, key -> projection(key, 8));
         AdmittedProjection independent = cache.getOrCompile(
-                otherSession, key -> projection(key, 8));
+                independentGeneration, key -> projection(key, 8));
 
         // when
         int removed = cache.retainOnly(runtimeChanged);
 
         // then
-        assertEquals(3, removed,
-                "only other generations of the same session are obsolete");
-        assertNull(cache.find(initial));
-        assertNull(cache.find(rootChanged));
-        assertNull(cache.find(subscriptionsChanged));
+        assertEquals(0, removed,
+                "one fork must not invalidate sibling generation artifacts");
+        assertTrue(cache.find(initial) != null);
+        assertTrue(cache.find(rootChanged) != null);
+        assertTrue(cache.find(subscriptionsChanged) != null);
         assertSame(
                 cache.getOrCompile(runtimeChanged, key -> projection(key, 8)),
                 cache.find(runtimeChanged));
-        assertSame(independent, cache.find(otherSession),
-                "another session remains independent");
+        assertSame(independent, cache.find(independentGeneration),
+                "another semantic generation remains independent");
+    }
+
+    @Test
+    void shouldShareAcrossForkFacadesWithoutSessionProvenance() {
+        ProjectionGenerationKey firstKey = key("shared-root", 7L);
+        ProjectionGenerationKey secondKey = new ProjectionGenerationKey(
+                firstKey.environmentIdentity(),
+                firstKey.rootBlueId(),
+                firstKey.rootRevision(),
+                firstKey.inventoryIdentity(),
+                firstKey.subscriptionDigest(),
+                firstKey.runtimeIdentity());
+        ProjectionGenerationCache.SharedBacking backing =
+                ProjectionGenerationCache.sharedBacking(8, 1_000_000L);
+        ProjectionGenerationCache first = new ProjectionGenerationCache(
+                backing);
+        ProjectionGenerationCache second = new ProjectionGenerationCache(
+                backing);
+        AtomicInteger builds = new AtomicInteger();
+
+        AdmittedProjection compiled = first.getOrCompile(
+                firstKey,
+                key -> {
+                    builds.incrementAndGet();
+                    return projection(key, 8);
+                });
+        AdmittedProjection reused = second.getOrCompile(
+                secondKey,
+                key -> {
+                    builds.incrementAndGet();
+                    return projection(key, 8);
+                });
+
+        assertEquals(firstKey, secondKey);
+        assertSame(compiled, reused);
+        assertTrue(Arrays.stream(
+                        ProjectionGenerationKey.class.getMethods())
+                .noneMatch(method -> "sessionId".equals(method.getName())),
+                "a shared projection must expose no source-fork session");
+        assertEquals(compiled.projectionIdentity(),
+                projection(secondKey, 8).projectionIdentity());
+        assertEquals(1, builds.get());
+        assertEquals(1L, first.metrics().loads());
+        assertEquals(1L, first.metrics().misses());
+        assertEquals(0L, first.metrics().hits());
+        assertEquals(0L, second.metrics().loads());
+        assertEquals(0L, second.metrics().misses());
+        assertEquals(1L, second.metrics().hits());
     }
 
     @Test
     void shouldEnforceWeightBoundsWithDeterministicLruEviction() {
         // given
-        ProjectionGenerationKey firstKey = key("session", "root-a", 1L);
-        ProjectionGenerationKey secondKey = key("session", "root-b", 2L);
-        ProjectionGenerationKey thirdKey = key("session", "root-c", 3L);
+        ProjectionGenerationKey firstKey = key("root-a", 1L);
+        ProjectionGenerationKey secondKey = key("root-b", 2L);
+        ProjectionGenerationKey thirdKey = key("root-c", 3L);
         AdmittedProjection first = projection(firstKey, 4);
         AdmittedProjection second = projection(secondKey, 4);
         AdmittedProjection third = projection(thirdKey, 4);
@@ -148,10 +194,9 @@ final class RootStaticPlanningArtifactTest {
     }
 
     private static ProjectionGenerationKey key(
-            String session, String root, long revision) {
+            String root, long revision) {
         return new ProjectionGenerationKey(
                 "environment",
-                session,
                 root,
                 revision,
                 "inventory-" + root,

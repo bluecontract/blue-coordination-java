@@ -234,6 +234,11 @@ final class CoordinationPhysicalSliceLoaderTest {
         }
 
         @Override
+        public String storageGenerationAuthority() {
+            return delegate.storageGenerationAuthority();
+        }
+
+        @Override
         public Map<String, NodeProviderResult> readAll(
                 Collection<String> blueIds) {
             Map<String, NodeProviderResult> result = new LinkedHashMap<>(

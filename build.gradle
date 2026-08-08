@@ -2314,6 +2314,8 @@ def requireJsonSchema = {
                 (Map) schema,
                 '$')
 }
+// Applied verification scripts reuse the same offline schema engine.
+project.ext.requireCheckedJsonSchema = requireJsonSchema
 
 def coordinationConformancePackageDirectory =
         file('src/test/resources/coordination/conformance')
@@ -7476,6 +7478,7 @@ apply from: 'gradle/coordination-release.gradle'
 apply from: 'gradle/coordination-working.gradle'
 apply from: 'gradle/coordination-engine.gradle'
 apply from: 'gradle/myos-demo-tests.gradle'
+apply from: 'gradle/basic-tests.gradle'
 
 /*
  * The release-candidate acceptance contract has one explicit, ordered lane

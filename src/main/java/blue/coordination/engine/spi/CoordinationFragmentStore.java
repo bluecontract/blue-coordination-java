@@ -24,6 +24,22 @@ public interface CoordinationFragmentStore
     /** Returns the single physical fragmentation-profile namespace. */
     String fragmentationProfileIdentity();
 
+    /**
+     * Returns the exact immutable storage generation/authority used by this
+     * store instance.
+     *
+     * <p>Derived kernels and admission evidence must not be shared merely
+     * because two stores have the same implementation class and profile. The
+     * compatibility default therefore fails closed; portable stores opt in by
+     * supplying an identifier which changes whenever their canonical content
+     * authority changes.</p>
+     */
+    default String storageGenerationAuthority() {
+        throw new IllegalStateException(
+                "CoordinationFragmentStore must expose an exact storage "
+                        + "generation authority");
+    }
+
     /** Reads exact outcomes for every requested identity. */
     Map<String, NodeProviderResult> readAll(Collection<String> blueIds);
 
