@@ -1,21 +1,20 @@
-name: Alice and Bob Counter
+documentId: counter
+name: Clean Counter
 counter: 0
 contracts:
   aliceChannel:
-    description: Alice may increment the Counter
     type: Coordination/Timeline Channel
     timeline:
       type: MyOS/MyOS Timeline
-      timelineId: examples/basic-counter/alice
+      timelineId: examples/clean-counter/alice
     actor:
       type: MyOS/Principal Actor
       accountId: alice
   bobChannel:
-    description: Bob may decrement the Counter
     type: Coordination/Timeline Channel
     timeline:
       type: MyOS/MyOS Timeline
-      timelineId: examples/basic-counter/bob
+      timelineId: examples/clean-counter/bob
     actor:
       type: MyOS/Principal Actor
       accountId: bob
@@ -34,6 +33,11 @@ contracts:
                 $add:
                   - $document: /counter
                   - $binding: event/message/request/amount
+          - $appendEvent:
+              type: Coordination/Event
+              kind: Basic/Counter Changed
+              direction: increment
+              amount: {$binding: event/message/request/amount}
           - $return: true
   decrement:
     type: Coordination/Sequential Workflow Operation
@@ -50,4 +54,9 @@ contracts:
                 $subtract:
                   - $document: /counter
                   - $binding: event/message/request/amount
+          - $appendEvent:
+              type: Coordination/Event
+              kind: Basic/Counter Changed
+              direction: decrement
+              amount: {$binding: event/message/request/amount}
           - $return: true

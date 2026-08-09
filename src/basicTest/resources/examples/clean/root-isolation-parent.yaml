@@ -1,0 +1,83 @@
+documentId: root-isolation-parent
+name: Root Isolation Parent
+rootCount: 0
+childRevisionApplications: 0
+contracts:
+  sharedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/root-isolation/shared
+    actor:
+      type: MyOS/Principal Actor
+      accountId: alice
+  coordinationEmbeddedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: coordination/internal/root-isolation-parent
+    actor:
+      type: MyOS/Principal Actor
+      accountId: coordination
+  embedded:
+    type: Process Embedded
+    paths: [/child]
+  attachChild:
+    type: Coordination/Sequential Workflow Operation
+    channel: sharedChannel
+    request:
+      document:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: add
+              path: /child
+              val: {$binding: event/message/request/document}
+          - $return: true
+  collide:
+    type: Coordination/Sequential Workflow Operation
+    channel: sharedChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /rootCount
+              val: {$add: [$document: /rootCount, 1]}
+          - $return: true
+  mutateChildIllegally:
+    type: Coordination/Sequential Workflow Operation
+    channel: sharedChannel
+    request:
+      amount: {type: Integer}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /child/childCount
+              val: {$add: [$document: /child/childCount, $binding: event/message/request/amount]}
+          - $return: true
+  coordinationApplyEmbeddedRevision:
+    type: Coordination/Sequential Workflow Operation
+    channel: coordinationEmbeddedChannel
+    request:
+      childDocumentId: {type: Text}
+      childEpoch: {type: Integer}
+      after:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /child
+              val: {$binding: event/message/request/after}
+          - $appendChange:
+              op: replace
+              path: /childRevisionApplications
+              val: {$add: [$document: /childRevisionApplications, 1]}
+          - $return: true

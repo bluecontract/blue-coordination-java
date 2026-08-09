@@ -1,0 +1,54 @@
+documentId: embedded-root-B
+name: Embedded Root B
+leafCounter: 0
+childRevisionApplications: 0
+contracts:
+  ownerChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/embedded/root
+    actor:
+      type: MyOS/Principal Actor
+      accountId: root-owner
+  coordinationEmbeddedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: coordination/internal/embedded-root-B
+    actor:
+      type: MyOS/Principal Actor
+      accountId: coordination
+  embedded:
+    type: Process Embedded
+    paths: [/child]
+  attachChild:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request:
+      document:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange: {op: add, path: /child, val: {$binding: event/message/request/document}}
+          - $return: true
+  coordinationApplyEmbeddedRevision:
+    type: Coordination/Sequential Workflow Operation
+    channel: coordinationEmbeddedChannel
+    request:
+      after:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange: {op: replace, path: /child, val: {$binding: event/message/request/after}}
+          - $appendChange:
+              op: replace
+              path: /leafCounter
+              val: {$binding: event/message/request/after/childCounter}
+          - $appendChange:
+              op: replace
+              path: /childRevisionApplications
+              val: {$add: [$document: /childRevisionApplications, 1]}
+          - $return: true

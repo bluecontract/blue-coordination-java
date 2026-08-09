@@ -1,5 +1,6 @@
 package blue.coordination.processor;
 
+import blue.language.api.BlueCachePolicy;
 import blue.language.codec.BlueFormat;
 import blue.language.mapping.BlueMapper;
 import blue.language.mapping.TypeClassResolver;
@@ -39,6 +40,7 @@ import java.util.Objects;
 public final class CoordinationTestRuntime implements AutoCloseable {
 
     private final BlueRepository repository;
+    private final BlueCachePolicy cachePolicy;
     private final NodeProvider currentRepositoryExactNodes;
     private final List<NodeProvider> additionalProviders =
             new ArrayList<NodeProvider>();
@@ -60,16 +62,42 @@ public final class CoordinationTestRuntime implements AutoCloseable {
     private DocumentProcessor processor;
     private boolean closed;
 
-    private CoordinationTestRuntime(BlueRepository repository) {
+    private CoordinationTestRuntime(
+            BlueRepository repository,
+            Collection<NodeProvider> initialProviders,
+            BlueCachePolicy cachePolicy) {
         this.repository = Objects.requireNonNull(repository, "repository");
+        this.cachePolicy = Objects.requireNonNull(cachePolicy, "cachePolicy");
         this.currentRepositoryExactNodes =
                 new CurrentRepositoryExactNodeProvider(repository);
+        this.additionalProviders.addAll(Objects.requireNonNull(
+                initialProviders, "initialProviders"));
         rebuild();
     }
 
     /** Creates a fixture bound to the exact selected Repository release. */
     public static CoordinationTestRuntime create(BlueRepository repository) {
-        return new CoordinationTestRuntime(repository);
+        return new CoordinationTestRuntime(
+                repository,
+                Collections.<NodeProvider>emptyList(),
+                BlueCachePolicy.boundedDefaults());
+    }
+
+    /**
+     * Creates one runtime generation with its highest-priority provider and
+     * cache policy already installed. This avoids constructing and immediately
+     * closing a throwaway generation during test-environment startup.
+     */
+    public static CoordinationTestRuntime create(
+            BlueRepository repository,
+            NodeProvider highestPriorityProvider,
+            BlueCachePolicy cachePolicy) {
+        return new CoordinationTestRuntime(
+                repository,
+                Collections.singletonList(Objects.requireNonNull(
+                        highestPriorityProvider,
+                        "highestPriorityProvider")),
+                cachePolicy);
     }
 
     /** Returns the focused Language runtime. */
@@ -314,6 +342,7 @@ public final class CoordinationTestRuntime implements AutoCloseable {
                 .nodeProvider(nextProvider)
                 .preprocessingAliases(imports)
                 .environmentImports(imports)
+                .cachePolicy(cachePolicy)
                 .build();
 
         CoordinationProcessorOptions effectiveOptions =

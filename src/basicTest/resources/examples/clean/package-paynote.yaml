@@ -380,10 +380,10 @@ contracts:
           - $return: true
   hotelConditionEvents:
     type: Embedded Node Channel
-    childPath: /productConditions/hotel/product
+    sourcePath: /productConditions/hotel/product
   restaurantConditionEvents:
     type: Embedded Node Channel
-    childPath: /productConditions/restaurant/product
+    sourcePath: /productConditions/restaurant/product
   attachHotelCondition:
     name: Attach Wadowice Hotel as Capture Condition
     description: Attach the trusted Hotel view for later provider entries.

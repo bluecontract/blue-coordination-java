@@ -1,0 +1,89 @@
+documentId: nba-game-host
+name: NBA Game Host
+hostOperationCount: 0
+gameEnded: false
+gameEndedEventCount: 0
+observedHomeScore: 0
+observedAwayScore: 0
+observedPlayCount: 0
+observedStatus: None
+revisionApplications: 0
+contracts:
+  hostChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/nba/host
+    actor:
+      type: MyOS/Principal Actor
+      accountId: host-owner
+  coordinationEmbeddedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: coordination/internal/nba-game-host
+    actor:
+      type: MyOS/Principal Actor
+      accountId: coordination
+  embedded:
+    type: Process Embedded
+    paths: [/game]
+  touchHost:
+    type: Coordination/Sequential Workflow Operation
+    channel: hostChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /hostOperationCount
+              val: {$add: [$document: /hostOperationCount, 1]}
+          - $return: true
+  attachGame:
+    type: Coordination/Sequential Workflow Operation
+    channel: hostChannel
+    request:
+      document:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange: {op: add, path: /game, val: {$binding: event/message/request/document}}
+          - $return: true
+  coordinationApplyEmbeddedRevision:
+    type: Coordination/Sequential Workflow Operation
+    channel: coordinationEmbeddedChannel
+    request:
+      after:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange: {op: replace, path: /game, val: {$binding: event/message/request/after}}
+          - $appendChange: {op: replace, path: /observedHomeScore, val: {$binding: event/message/request/after/homeScore}}
+          - $appendChange: {op: replace, path: /observedAwayScore, val: {$binding: event/message/request/after/awayScore}}
+          - $appendChange: {op: replace, path: /observedPlayCount, val: {$binding: event/message/request/after/playCount}}
+          - $appendChange: {op: replace, path: /observedStatus, val: {$binding: event/message/request/after/status}}
+          - $appendChange:
+              op: replace
+              path: /revisionApplications
+              val: {$add: [$document: /revisionApplications, 1]}
+          - $if:
+              cond:
+                $some:
+                  in: {$binding: event/message/request/emittedEvents}
+                  item: emittedEvent
+                  where:
+                    $eq:
+                      - $var:
+                          name: emittedEvent
+                          path: /kind
+                      - NBA/Game Ended
+              then:
+                - $appendChange: {op: replace, path: /gameEnded, val: true}
+                - $appendChange:
+                    op: replace
+                    path: /gameEndedEventCount
+                    val: {$add: [$document: /gameEndedEventCount, 1]}
+          - $return: true

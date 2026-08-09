@@ -1,0 +1,62 @@
+documentId: embedded-parent-B
+name: Embedded Parent B
+childCounter: 0
+childRevisionApplications: 0
+contracts:
+  ownerChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/embedded/B
+    actor:
+      type: MyOS/Principal Actor
+      accountId: bob
+  coordinationEmbeddedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: coordination/internal/embedded-parent-B
+    actor:
+      type: MyOS/Principal Actor
+      accountId: coordination
+  embedded:
+    type: Process Embedded
+    paths: [/child]
+  attachChild:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request:
+      document:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: add
+              path: /child
+              val: {$binding: event/message/request/document}
+          - $return: true
+  coordinationApplyEmbeddedRevision:
+    type: Coordination/Sequential Workflow Operation
+    channel: coordinationEmbeddedChannel
+    request:
+      childDocumentId: {type: Text}
+      childEpoch: {type: Integer}
+      after:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /child
+              val: {$binding: event/message/request/after}
+          - $appendChange:
+              op: replace
+              path: /childCounter
+              val: {$binding: event/message/request/after/counter}
+          - $appendChange:
+              op: replace
+              path: /childRevisionApplications
+              val: {$add: [$document: /childRevisionApplications, 1]}
+          - $return: true

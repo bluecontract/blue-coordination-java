@@ -1,0 +1,78 @@
+{
+  "schema": "coordination.basic.round9.test-results.v1",
+  "generatedDate": "2026-08-08",
+  "source": {
+    "commit": "d2ccb3b8074560bfa49906a8e8accdde44efca4e",
+    "branch": "feature/graph-focused-approach",
+    "kitSha256": "8320fbbc30c5a9f0f54ffa03e7c4aa60e649ab846f423e0a4d4674e6b6626e0d",
+    "dirtyAtBaseline": true,
+    "engineBefore": {"classes": 35, "javaLines": 5196},
+    "engineAfter": {"classes": 35, "javaLines": 5198},
+    "newProductionClasses": 0
+  },
+  "baseline": [
+    {"task": "compileBasicTestJava", "wallSeconds": 2, "result": "PASS"},
+    {"task": "basicTest", "tests": 20, "failures": 0, "errors": 0, "skipped": 0, "wallSeconds": 36, "result": "PASS"},
+    {"task": "basicScenarioTest", "tests": 2, "failures": 0, "errors": 0, "skipped": 0, "wallSeconds": 55, "result": "PASS"},
+    {"task": "basicPerformanceTest", "tests": 4, "failures": 0, "errors": 0, "skipped": 0, "wallSeconds": 54, "result": "PASS"}
+  ],
+  "permanent": [
+    {"task": "compileBasicTestJava", "wallSeconds": 2, "result": "PASS"},
+    {"task": "basicSmokeTest", "tests": 6, "failures": 0, "errors": 0, "skipped": 0, "wallSeconds": 7, "suiteSeconds": 5.368, "result": "PASS"},
+    {"task": "basicTest", "tests": 22, "failures": 0, "errors": 0, "skipped": 0, "wallSeconds": 42, "suiteSeconds": 40.175, "result": "PASS"},
+    {"task": "basicScenarioTest", "tests": 2, "failures": 0, "errors": 0, "skipped": 0, "wallSeconds": 55, "suiteSeconds": 52.977, "result": "PASS"},
+    {"task": "basicPerformanceTest", "tests": 4, "failures": 0, "errors": 0, "skipped": 0, "wallSeconds": 53, "suiteSeconds": 51.119, "result": "PASS"},
+    {"task": "basicRuntimeCampaign", "tests": 1, "failures": 0, "errors": 0, "skipped": 0, "wallSeconds": 558, "suiteSeconds": 556.156, "documentSamples": 30, "result": "PASS"}
+  ],
+  "identityExperiment": {
+    "promoted": false,
+    "fullyReverted": true,
+    "tests": 6,
+    "passed": 1,
+    "failed": 5,
+    "wallSeconds": 9,
+    "exception": "InvalidExecutionEvidenceException: Retained active External Channel surface does not match the exact Root (omitted=1, extra=0)",
+    "semanticRootBlueId": "DxuR4ZFzD9YvC63Eboyf7pDmdU5evWBh6ET47kfidayZ",
+    "processingRootBlueId": "DxuR4ZFzD9YvC63Eboyf7pDmdU5evWBh6ET47kfidayZ",
+    "selectedOccurrences": ["/child"]
+  },
+  "wholeObjectFailureHygiene": {
+    "attempts": 20,
+    "countBefore": 6,
+    "countsAfterEachFailedAttempt": [6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6],
+    "countAfterSuccessfulCommit": 9,
+    "frozenProcessCallsDuringFailures": 20,
+    "transactionRetries": 20,
+    "journalRollbacks": 20,
+    "stableForIdenticalRetry": true
+  },
+  "runtimeP95Ms": {
+    "tinyExactAppend": 0.119791,
+    "payNoteExactAppend": 0.095667,
+    "oneRootRouteLookup": 0.0225,
+    "counterFrozen": 256.286917,
+    "counterHost": 0.846459,
+    "oneVs61WorkflowHostDelta": 2.798208,
+    "existingChild20Revisions": 39.289083,
+    "lateChild20Entries": 103.453627,
+    "nestedThreeLevels": 82.929792,
+    "nbaFiveRevisions": 93.138248,
+    "twoParentFanout": 33.536459
+  },
+  "strictHostMs": {
+    "largeHostCold": 12.133,
+    "largeHostWarm": 12.145,
+    "payNoteAuthorization1": 48.258,
+    "payNoteAuthorization2": 33.272,
+    "restaurantConfirmation": 31.531,
+    "attachAndInitializePayNote": 647.403
+  },
+  "workShape": {
+    "postProcessCompleteProjections": 0,
+    "requestSplitterCalls": 0,
+    "timelineEntrySplitterCalls": 0,
+    "ordinaryNodeSplitterCalls": 0
+  },
+  "hardPerformanceGatesPassed": true,
+  "stopRecommendation": "STOP_AFTER_ROUND_9"
+}

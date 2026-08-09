@@ -1,0 +1,31 @@
+documentId: embedded-counter-A
+coordination:
+  activationMode: import-full-history
+name: Autonomous Embedded Counter A
+counter: 0
+contracts:
+  ownerChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/embedded/A
+    actor:
+      type: MyOS/Principal Actor
+      accountId: alice
+  increment:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request:
+      amount: {type: Integer}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /counter
+              val: {$add: [$document: /counter, $binding: event/message/request/amount]}
+          - $appendEvent:
+              type: Coordination/Event
+              kind: Basic/Embedded Counter Changed
+              amount: {$binding: event/message/request/amount}
+          - $return: true

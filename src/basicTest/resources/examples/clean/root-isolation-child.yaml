@@ -1,0 +1,26 @@
+documentId: root-isolation-child
+coordination:
+  activationMode: birth
+name: Root Isolation Child
+childCount: 0
+contracts:
+  sharedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/root-isolation/shared
+    actor:
+      type: MyOS/Principal Actor
+      accountId: alice
+  collide:
+    type: Coordination/Sequential Workflow Operation
+    channel: sharedChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /childCount
+              val: {$add: [$document: /childCount, 1]}
+          - $return: true
