@@ -8,6 +8,7 @@ import blue.repo.coordination.TriggerEvent;
 import blue.repo.coordination.UpdateDocument;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -477,10 +478,10 @@ class SequentialWorkflowPlanCacheTest {
 
         // when
         try {
-            @SuppressWarnings("unchecked")
-            Future<SequentialWorkflowPlan>[] futures = new Future[8];
-            for (int i = 0; i < futures.length; i++) {
-                futures[i] = pool.submit(() -> {
+            List<Future<SequentialWorkflowPlan>> futures =
+                    new ArrayList<>(8);
+            for (int i = 0; i < 8; i++) {
+                futures.add(pool.submit(() -> {
                     start.await();
                     SequentialWorkflowPlan plan =
                             cache.getOrBuild(
@@ -498,7 +499,7 @@ class SequentialWorkflowPlanCacheTest {
                     return step.step() != null
                             ? plan
                             : null;
-                });
+                }));
             }
             start.countDown();
             for (Future<SequentialWorkflowPlan> future : futures) {

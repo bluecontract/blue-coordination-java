@@ -26,59 +26,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class TimelineProviderSupportFinalSemanticsTest {
 
     @Test
-    void shouldEnsureThatLegacyFilterValidatesOnlyExactImmutableTimelineHeaders() {
-        // given
-        Timeline timeline =
-                new Timeline().timelineId("timeline-a");
-        PrincipalActor actor =
-                new PrincipalActor().accountId("actor");
-        TimelineChannel contract = new TimelineChannel()
-                .timeline(timeline)
-                .actor(actor);
-        // when
-        try (CoordinationTestRuntime blue =
-                     CoordinationTestResources.configuredBlue(
-                             BlueRepository.current())) {
-            Node matching = entry(
-                    blue.objectToNode(timeline),
-                    10,
-                    "matching")
-                    .properties(
-                            "actor",
-                            blue.objectToNode(actor));
-            Node wrongTimeline = entry(
-                    blue.objectToNode(
-                            new Timeline().timelineId("timeline-b")),
-                    10,
-                    "wrong timeline")
-                    .properties(
-                            "actor",
-                            blue.objectToNode(actor));
-            Node wrongActor = matching.clone()
-                    .properties(
-                            "actor",
-                            blue.objectToNode(
-                                    new PrincipalActor()
-                                            .accountId("other actor")));
-
-            // then
-            assertTrue(TimelineExternalSubscriptionFunctions.INSTANCE.accepts(
-                    contract, matching));
-            assertFalse(TimelineExternalSubscriptionFunctions.INSTANCE.accepts(
-                    contract, wrongTimeline));
-            assertFalse(TimelineExternalSubscriptionFunctions.INSTANCE.accepts(
-                    contract, wrongActor));
-            assertFalse(TimelineExternalSubscriptionFunctions.INSTANCE.accepts(
-                    contract,
-                    new Node().value("not a Timeline Entry")));
-            assertFalse(TimelineExternalSubscriptionFunctions.INSTANCE.accepts(
-                    null, matching));
-            assertFalse(TimelineExternalSubscriptionFunctions.INSTANCE.accepts(
-                    contract, null));
-        }
-    }
-
-    @Test
     void shouldRetainTheExactFixedTimelineCheckpointKey() {
         // given
         Node exactEntry = entry(

@@ -1,0 +1,4 @@
+coordinate=blue.bex:blue-bex-core:1.1.0-rc.3
+contractsCoordinate=blue.bex:blue-bex-contracts:1.1.0-rc.3
+commit=3ebd2d93be7f24ce44840f0aba02b1c40c27f5f8
+

@@ -322,7 +322,7 @@ public final class CoordinationProcessors {
 
     private static Class<? extends MarkerContract>[]
     currentRepositoryMarkerTypes() {
-        @SuppressWarnings("unchecked")
+        @SuppressWarnings({"unchecked", "rawtypes"})
         Class<? extends MarkerContract>[] result = new Class[] {
                 ActorPolicy.class,
                 ComputeDefinition.class,

@@ -1,0 +1,6 @@
+# Local verification input. The required modular Repository changes are based
+# on this commit but are not yet committed/released upstream; see the RC notes.
+coordinate=blue.repo:blue-repo-java:3.0.0-rc.19
+baseCommit=63be6b7d8d2752b5a8c90f38e672859e9b3949a1
+workspaceDiffSha256=b6d6e26c485fbece23e5c7acb3d6d2b8e672ddc3ce3eaf764b5f4047f519ebda
+languageCommit=c3d58561220e6de6be6e302cb16799c1a1b5159f

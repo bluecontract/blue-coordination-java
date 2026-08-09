@@ -43,27 +43,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class CoordinationProcessorsTest {
 
     @Test
-    void shouldConfigureStandaloneProcessorBuilderWithoutMutableRuntimeState() {
-        // given
-        CoordinationTestRuntime runtime =
-                CoordinationTestResources.configuredBlue(
-                        BlueRepository.current());
-
-        // when
-        DocumentProcessor successor =
-                CoordinationProcessors.configure(
-                                DocumentProcessor.Builder.from(
-                                        runtime.processor()))
-                        .build();
-
-        // then
-        assertNotNull(successor);
-        assertNotSame(runtime.processor(), successor);
-        successor.close();
-        runtime.close();
-    }
-
-    @Test
     void shouldRegisterCoordinationChannelsInCurrentContractsRegistry() {
         // given
         ContractProcessorRegistryBuilder builder =

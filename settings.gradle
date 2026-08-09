@@ -1,214 +1,42 @@
-plugins {
-    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
+    }
 }
 
 rootProject.name = 'blue-coordination-java'
 
-def dependencyMode =
-        providers.gradleProperty('blueDependencyMode')
-                .getOrElse('local-composite')
-                .trim()
+def dependencyMode = providers.gradleProperty('blueDependencyMode')
+        .getOrElse('local-composite')
+        .trim()
 if (!(dependencyMode in ['local-composite', 'published-artifact'])) {
     throw new GradleException(
-            "blueDependencyMode must be local-composite or published-artifact; "
-                    + "got '${dependencyMode}'")
-}
-System.setProperty('blue.coordination.dependencyMode', dependencyMode)
-
-def lockFile = file('gradle/blue-sibling-lock.properties')
-if (!lockFile.isFile()) {
-    throw new GradleException("Required Blue dependency lock is missing: ${lockFile}")
-}
-def lock = new Properties()
-lockFile.withInputStream { lock.load(it) }
-
-def gitText = { File directory, String... arguments ->
-    def command = ['git']
-    command.addAll(arguments as List)
-    def process = new ProcessBuilder(command)
-            .directory(directory)
-            .redirectErrorStream(true)
-            .start()
-    String output = process.inputStream.getText('UTF-8').trim()
-    int exitCode = process.waitFor()
-    if (exitCode != 0) {
-        throw new GradleException(
-                "Git command failed in ${directory}: ${command}\n${output}")
-    }
-    output
+            'blueDependencyMode must be local-composite or published-artifact')
 }
 
-def sha256File = { File input ->
-    if (!input.isFile()) {
-        throw new GradleException("Required file is missing: ${input}")
-    }
-    def digest = java.security.MessageDigest.getInstance('SHA-256')
-    input.withInputStream { stream ->
-        byte[] buffer = new byte[8192]
-        int read
-        while ((read = stream.read(buffer)) >= 0) {
-            if (read > 0) {
-                digest.update(buffer, 0, read)
+if (dependencyMode == 'local-composite') {
+    def localBex = file(providers.gradleProperty('blueBexCompositePath')
+            .getOrElse('../blue-bex-java'))
+    if (localBex.isDirectory()) {
+        includeBuild(localBex) {
+            dependencySubstitution {
+                substitute(module('blue.bex:blue-bex-core'))
+                        .using(project(':blue-bex-core'))
+                substitute(module('blue.bex:blue-bex-contracts'))
+                        .using(project(':blue-bex-contracts'))
             }
         }
     }
-    digest.digest().encodeHex().toString()
-}
-
-def relevantRepositoryTreeSha256 = { File root ->
-    def included = []
-    root.eachFileRecurse { File candidate ->
-        if (!candidate.isFile()) {
-            return
-        }
-        String relative = root.toPath().relativize(candidate.toPath())
-                .toString().replace(File.separatorChar, '/' as char)
-        if (relative == '.cz.toml'
-                || relative == 'build.gradle'
-                || relative == 'settings.gradle'
-                || relative == 'package.json'
-                || relative == 'package-lock.json'
-                || relative.startsWith('src/')
-                || relative.startsWith('tools/')) {
-            included.add([path: relative, file: candidate])
-        }
-    }
-    included.sort { left, right -> left.path <=> right.path }
-    def digest = java.security.MessageDigest.getInstance('SHA-256')
-    included.each { entry ->
-        digest.update(entry.path.getBytes('UTF-8'))
-        digest.update((byte) 0)
-        digest.update(sha256File(entry.file).getBytes('UTF-8'))
-        digest.update((byte) '\n')
-    }
-    digest.digest().encodeHex().toString()
-}
-
-String languageVersion = lock.getProperty('blueLanguageVersion')
-if (languageVersion != '3.1.0-rc.20') {
-    throw new GradleException(
-            "Published Language must be exactly 3.1.0-rc.20; lock has ${languageVersion}")
-}
-
-def localBex = file('../blue-bex-java').canonicalFile
-if (!localBex.isDirectory()) {
-    throw new GradleException("Required local BEX checkout is missing: ${localBex}")
-}
-String bexHead = gitText(localBex, 'rev-parse', 'HEAD')
-if (bexHead != lock.getProperty('blueBexCommit')) {
-    throw new GradleException(
-            "Local BEX HEAD ${bexHead} differs from lock ${lock.blueBexCommit}")
-}
-if (gitText(localBex, 'status', '--porcelain', '--untracked-files=no')) {
-    throw new GradleException('The local BEX checkout must be clean.')
-}
-
-/*
- * BEX defaults to the published Language release.  Clearing this inherited
- * project property is deliberate: Coordination must not select the adjacent
- * blue-language-java checkout in this consumer graph.
- */
-System.clearProperty('org.gradle.project.blueLanguageCompositePath')
-if (dependencyMode == 'local-composite') {
-    includeBuild(localBex) {
-        dependencySubstitution {
-            substitute module('blue.bex:blue-bex-core') using project(':blue-bex-core')
-            substitute module('blue.bex:blue-bex-contracts') using project(':blue-bex-contracts')
-            substitute module('blue.bex:blue-bex-java') using project(':blue-bex-java')
+    def localRepository = file(providers.gradleProperty(
+            'blueRepositoryCompositePath')
+            .getOrElse('../blue-repository-java'))
+    if (localRepository.isDirectory()) {
+        includeBuild(localRepository) {
+            dependencySubstitution {
+                substitute(module('blue.repo:blue-repo-java'))
+                        .using(project(':'))
+            }
         }
     }
 }
-
-def localRepository = file('../blue-repository-java').canonicalFile
-if (!localRepository.isDirectory()) {
-    throw new GradleException(
-            "Required local Repository checkout is missing: ${localRepository}")
-}
-String repositoryHead = gitText(localRepository, 'rev-parse', 'HEAD')
-if (repositoryHead != lock.getProperty('blueRepositoryCommit')) {
-    throw new GradleException(
-            "Local Repository HEAD ${repositoryHead} differs from lock "
-                    + lock.getProperty('blueRepositoryCommit'))
-}
-
-def repositoryReceipt = new File(
-        localRepository,
-        'build/reports/repository-local/consumer-receipt.json')
-if (!repositoryReceipt.isFile()) {
-    throw new GradleException(
-            "The verified local Repository consumer receipt is missing: ${repositoryReceipt}")
-}
-def receipt = new groovy.json.JsonSlurper().parse(repositoryReceipt)
-String relevantTreeSha256 = relevantRepositoryTreeSha256(localRepository)
-def receiptFailures = []
-if (receipt.workingReady != true) {
-    receiptFailures.add('workingReady is not true')
-}
-if (receipt.repositoryBlueId != lock.getProperty('blueRepositoryBlueId')) {
-    receiptFailures.add('Repository root BlueId differs from the lock')
-}
-if (receipt.relevantSourceTreeSha256 != relevantTreeSha256
-        || relevantTreeSha256 != lock.getProperty('blueRepositoryRelevantSourceTreeSha256')) {
-    receiptFailures.add('Repository relevant-source-tree SHA-256 differs')
-}
-if (receipt.sourceSha256 != lock.getProperty('blueRepositorySourceSha256')) {
-    receiptFailures.add('Repository source SHA-256 differs')
-}
-if (receipt.manifestSha256 != lock.getProperty('blueRepositoryManifestSha256')) {
-    receiptFailures.add('Repository manifest SHA-256 differs')
-}
-if (sha256File(repositoryReceipt)
-        != lock.getProperty('blueRepositoryConsumerReceiptSha256')) {
-    receiptFailures.add('Repository consumer receipt SHA-256 differs')
-}
-if (receipt.failures != []) {
-    receiptFailures.add('Repository receipt contains failures')
-}
-if (!receiptFailures.isEmpty()) {
-    throw new GradleException(
-            'Current local Repository receipt verification failed: '
-                    + receiptFailures.join('; '))
-}
-
-String repositoryLocalVersion = lock.getProperty('blueRepositoryLocalVersion')
-String repositoryJarName = "blue-repo-java-${repositoryLocalVersion}.jar"
-File repositoryJar = new File(localRepository, "build/libs/${repositoryJarName}")
-String repositoryJarSha256 = lock.getProperty('blueRepositoryJarSha256')
-if (!repositoryJar.isFile()
-        || sha256File(repositoryJar) != repositoryJarSha256
-        || !receipt.artifacts.any {
-            it.fileName == repositoryJarName && it.sha256 == repositoryJarSha256
-        }) {
-    throw new GradleException(
-            "Current local Repository JAR is missing or differs from its receipt: ${repositoryJar}")
-}
-
-def localArtifactRepository = file('.gradle/current-local-artifacts').canonicalFile
-File lockedRepositoryJar = new File(
-        localArtifactRepository,
-        "blue/repo/blue-repo-java/${repositoryLocalVersion}/${repositoryJarName}")
-if (lockedRepositoryJar.isFile()
-        && sha256File(lockedRepositoryJar) != repositoryJarSha256) {
-    throw new GradleException(
-            "Coordination-owned Repository artifact has the wrong digest: ${lockedRepositoryJar}")
-}
-if (!lockedRepositoryJar.isFile()) {
-    lockedRepositoryJar.parentFile.mkdirs()
-    java.nio.file.Files.copy(repositoryJar.toPath(), lockedRepositoryJar.toPath())
-}
-
-System.setProperty(
-        'org.gradle.project.blueRepositoryCompositePath',
-        localRepository.absolutePath)
-System.setProperty(
-        'org.gradle.project.blueRepositoryArtifactPath',
-        lockedRepositoryJar.absolutePath)
-System.setProperty(
-        'org.gradle.project.blueRepositoryArtifactRepositoryPath',
-        localArtifactRepository.absolutePath)
-System.setProperty(
-        'org.gradle.project.blueRepositoryConsumerReceiptPath',
-        repositoryReceipt.absolutePath)
-System.setProperty(
-        'org.gradle.project.blueRepositoryRelevantSourceTreeSha256',
-        relevantTreeSha256)

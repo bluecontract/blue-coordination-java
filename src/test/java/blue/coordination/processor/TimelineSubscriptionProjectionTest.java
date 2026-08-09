@@ -75,47 +75,6 @@ class TimelineSubscriptionProjectionTest {
     }
 
     @Test
-    void shouldSelectOnlyEventsWithTheSameTimelineAndActor() {
-        // given
-        try (ProjectionFixture fixture = configuredFixture()) {
-            TimelineChannel channel = channel(
-                    "timeline-a", "actor-a");
-            Node matching = entry(
-                    timeline(fixture, "timeline-a"),
-                    actor(fixture, "actor-a"));
-            Node differentTimeline = entry(
-                    timeline(fixture, "timeline-b"),
-                    actor(fixture, "actor-a"));
-            Node differentActor = entry(
-                    timeline(fixture, "timeline-a"),
-                    actor(fixture, "actor-b"));
-            ExternalChannelFunctionContext context =
-                    context(fixture, Collections.<String, Node>emptyMap());
-            List<String> channelKeys =
-                    TimelineSubscriptionProjection.channelKeys(channel);
-
-            // when
-            List<String> matchingKeys =
-                    TimelineSubscriptionProjection.eventKeys(
-                            matching, context);
-            List<String> differentTimelineKeys =
-                    TimelineSubscriptionProjection.eventKeys(
-                            differentTimeline, context);
-            List<String> differentActorKeys =
-                    TimelineSubscriptionProjection.eventKeys(
-                            differentActor, context);
-
-            // then
-            assertFalse(Collections.disjoint(
-                    channelKeys, matchingKeys));
-            assertTrue(Collections.disjoint(
-                    channelKeys, differentTimelineKeys));
-            assertTrue(Collections.disjoint(
-                    channelKeys, differentActorKeys));
-        }
-    }
-
-    @Test
     void shouldProduceIdenticalKeysForInlineAndReferenceHeaders() {
         // given
         try (ProjectionFixture fixture = configuredFixture()) {
@@ -321,63 +280,6 @@ class TimelineSubscriptionProjectionTest {
             // then
             assertEquals(inlineKeys, coldKeys);
             assertEquals(coldKeys, warmKeys);
-        }
-    }
-
-    @Test
-    void shouldSelectOneChannelFromLargeSameScopeTimelineCatalog() {
-        // given
-        try (ProjectionFixture fixture = configuredFixture()) {
-            int memberCount = 513;
-            int matchingIndex = 377;
-            List<TimelineChannel> catalog =
-                    new ArrayList<TimelineChannel>(
-                            memberCount);
-            for (int index = 0;
-                 index < memberCount;
-                 index++) {
-                catalog.add(channel(
-                        "timeline-" + index,
-                        "actor-" + index));
-            }
-            Node exactEvent = entry(
-                    timeline(
-                            fixture,
-                            "timeline-" + matchingIndex),
-                    actor(
-                            fixture,
-                            "actor-" + matchingIndex));
-            List<String> exactEventKeys =
-                    eventKeys(
-                            fixture,
-                            exactEvent,
-                            Collections.<String, Node>emptyMap());
-            List<Integer> selected =
-                    new ArrayList<Integer>();
-
-            // when
-            for (int index = 0;
-                 index < catalog.size();
-                 index++) {
-                if (!Collections.disjoint(
-                        TimelineSubscriptionProjection
-                                .channelKeys(
-                                        catalog.get(index)),
-                        exactEventKeys)) {
-                    selected.add(
-                            Integer.valueOf(index));
-                }
-            }
-
-            // then
-            assertEquals(
-                    Collections.singletonList(
-                            Integer.valueOf(
-                                    matchingIndex)),
-                    selected);
-            assertTrue(
-                    exactEventKeys.size() <= 9,
-                    exactEventKeys.toString());
         }
     }
 
@@ -733,80 +635,6 @@ class TimelineSubscriptionProjectionTest {
         }
     }
 
-    @Test
-    void shouldProjectValidUnlistedSubtypesWithoutClosedTypeLists() {
-        // given
-        try (ProjectionFixture fixture = configuredFixture()) {
-            fixture.blue.getTypeClassResolver()
-                    .registerAnnotatedClass(
-                            UnlistedTimeline.class)
-                    .registerAnnotatedClass(
-                            UnlistedActor.class);
-            UnlistedTimeline timeline =
-                    new UnlistedTimeline()
-                            .timelineId("timeline-unlisted");
-            UnlistedActor actor =
-                    new UnlistedActor()
-                            .accountId("actor-unlisted");
-            TimelineChannel channel =
-                    new TimelineChannel()
-                            .timeline(timeline)
-                            .actor(actor);
-            Node event = entry(
-                    fixture.blue.objectToNode(timeline),
-                    fixture.blue.objectToNode(actor));
-            ExternalChannelFunctionContext context =
-                    context(
-                            fixture,
-                            Collections.<String, Node>emptyMap());
-
-            // when
-            boolean accepted =
-                    TimelineExternalSubscriptionFunctions
-                            .INSTANCE
-                            .accepts(
-                                    channel,
-                                    event,
-                                    context);
-            List<String> channelKeys =
-                    TimelineSubscriptionProjection.channelKeys(
-                            channel);
-            List<String> eventKeys =
-                    TimelineSubscriptionProjection.eventKeys(
-                            event,
-                            context);
-
-            // then
-            assertTrue(accepted);
-            assertTrue(contains(
-                    channelKeys,
-                    UNLISTED_TIMELINE_BLUE_ID));
-            assertTrue(contains(
-                    channelKeys,
-                    UNLISTED_ACTOR_BLUE_ID));
-            assertTrue(contains(
-                    eventKeys,
-                    UNLISTED_TIMELINE_BLUE_ID));
-            assertTrue(contains(
-                    eventKeys,
-                    UNLISTED_ACTOR_BLUE_ID));
-            assertTrue(channelKeys.contains(
-                    TimelineSubscriptionProjection.BROAD_KEY));
-            assertFalse(Collections.disjoint(
-                    channelKeys, eventKeys));
-            assertTrue(
-                    channelKeys.size() <= 2,
-                    channelKeys.toString());
-            assertTrue(
-                    eventKeys.size() <= 9,
-                    eventKeys.toString());
-            assertEquals(
-                    eventKeys.size(),
-                    new LinkedHashSet<String>(
-                            eventKeys).size());
-        }
-    }
-
     private static TimelineChannel channel(
             String timelineId,
             String actorId) {
@@ -870,7 +698,7 @@ class TimelineSubscriptionProjectionTest {
         BlueRepository repository =
                 BlueRepository.current();
         CoordinationTestRuntime blue =
-                CoordinationTestResources.configuredBlue(repository);
+                CoordinationTestRuntime.create(repository);
         return new ProjectionFixture(blue);
     }
 

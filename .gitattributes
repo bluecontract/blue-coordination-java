@@ -1,1 +1,10 @@
-src/basicTest/resources/**/*.yaml text eol=lf
+* text=auto
+*.java text eol=lf
+*.gradle text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.jar binary
+*.zip binary
