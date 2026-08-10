@@ -1,0 +1,93 @@
+documentId: deep-same-entry-root
+name: Deep Same-Entry Root
+directCount: 0
+childApplications: 0
+a1DirectCountSeenByDirect: -1
+a11DirectCountSeenByDirect: -1
+a1ChildApplicationsSeenByDirect: -1
+contracts:
+  setupChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/deep-same-entry/root-setup
+    actor:
+      type: MyOS/Principal Actor
+      accountId: root-owner
+  sharedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/deep-same-entry/shared
+    actor:
+      type: MyOS/Principal Actor
+      accountId: shared-actor
+  coordinationEmbeddedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: coordination/internal/deep-same-entry-root
+    actor:
+      type: MyOS/Principal Actor
+      accountId: coordination
+  embedded:
+    type: Process Embedded
+    paths: [/child]
+  attachChild:
+    type: Coordination/Sequential Workflow Operation
+    channel: setupChannel
+    request:
+      document:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: add
+              path: /child
+              val: {$binding: event/message/request/document}
+          - $return: true
+  advance:
+    type: Coordination/Sequential Workflow Operation
+    channel: sharedChannel
+    request:
+      amount: {type: Integer}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /a1DirectCountSeenByDirect
+              val: {$document: /child/directCount}
+          - $appendChange:
+              op: replace
+              path: /a11DirectCountSeenByDirect
+              val: {$document: /child/child/directCount}
+          - $appendChange:
+              op: replace
+              path: /a1ChildApplicationsSeenByDirect
+              val: {$document: /child/childApplications}
+          - $appendChange:
+              op: replace
+              path: /directCount
+              val: {$add: [$document: /directCount, $binding: event/message/request/amount]}
+          - $return: true
+  coordinationApplyEmbeddedRevision:
+    type: Coordination/Sequential Workflow Operation
+    channel: coordinationEmbeddedChannel
+    request:
+      occurrencePath: {type: Text}
+      after:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: {$binding: event/message/request/occurrencePath}
+              val: {$binding: event/message/request/after}
+          - $appendChange:
+              op: replace
+              path: /childApplications
+              val: {$add: [$document: /childApplications, 1]}
+          - $return: true

@@ -15,6 +15,7 @@ record CatchUpPlan(Link link, Status status) {
             DocumentId parentDocumentId,
             DocumentId childDocumentId,
             String occurrencePath,
-            long appliedChildEpoch) {
+            long appliedChildEpoch,
+            long activationGeneration) {
     }
 }

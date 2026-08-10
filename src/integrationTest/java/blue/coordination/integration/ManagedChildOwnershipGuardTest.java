@@ -13,8 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** An external parent operation cannot mutate an autonomous child's state. */
-final class AutonomousChildOwnershipGuardTest {
+/** An external parent operation cannot mutate a managed child's state. */
+final class ManagedChildOwnershipGuardTest {
     @Test
     void rejectedParentMutationRollsBackAndCreatesNoDeliveryReceipt()
             throws Exception {
@@ -52,10 +52,10 @@ final class AutonomousChildOwnershipGuardTest {
                     before, engine.metricsSnapshot());
 
             assertTrue(first.getMessage().contains(
-                    "attempted to mutate autonomous child"),
+                    "attempted to mutate managed child"),
                     first::getMessage);
             assertTrue(retry.getMessage().contains(
-                    "attempted to mutate autonomous child"),
+                    "attempted to mutate managed child"),
                     retry::getMessage);
             assertEquals(parentEpoch,
                     engine.session("root-isolation-parent").epoch());
@@ -68,10 +68,9 @@ final class AutonomousChildOwnershipGuardTest {
             assertEquals(0L, integer(
                     engine, "root-isolation-parent", "/child/childCount"));
             assertEquals(2L, work.counter(
-                    "layout.externalAutonomousChildMutationsRejected"));
+                    "layout.externalManagedChildMutationsRejected"));
             assertEquals(2L, work.counter(
                     "process.frozenContractsInvocations"));
-            assertEquals(2L, work.counter("transactionRetries"));
         }
     }
 }

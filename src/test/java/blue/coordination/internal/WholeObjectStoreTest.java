@@ -64,13 +64,39 @@ final class WholeObjectStoreTest {
     }
 
     @Test
-    void snapshotsAreImmutableAndUnknownObjectsFailClearly() {
+    void savepointsJournalOnlyChangedKeysAndNestInConstantStartTime() {
+        WholeObjectStore store = new WholeObjectStore(new EngineMetrics());
+        for (int index = 0; index < 100; index++) {
+            store.put(new Node().value("existing-" + index), "existing");
+        }
+        WholeObjectStore.Mark outer = store.mark();
+        ExactValue retained = store.put(
+                new Node().value("outer-change"), "outer");
+        assertEquals(1, outer.changedKeyCount(),
+                "a mark must not copy the hundred existing objects");
+
+        WholeObjectStore.Mark inner = store.mark();
+        ExactValue rolledBack = store.put(
+                new Node().value("inner-change"), "inner");
+        assertEquals(1, inner.changedKeyCount());
+        store.rollbackTo(inner);
+
+        assertTrue(store.contains(retained.blueId()));
+        assertFalse(store.contains(rolledBack.blueId()));
+        store.commit(outer);
+        assertTrue(store.contains(retained.blueId()));
+        assertEquals(101, store.size());
+    }
+
+    @Test
+    void exactReadsAreDetachedAndUnknownObjectsFailClearly() {
         WholeObjectStore store = new WholeObjectStore(new EngineMetrics());
         ExactValue value = store.put(new Node().value("known"), "known");
 
-        assertEquals(value, store.snapshot().get(value.blueId()));
-        assertThrows(UnsupportedOperationException.class,
-                () -> store.snapshot().clear());
+        Node detached = store.require(value.blueId()).copyNode();
+        detached.value("changed");
+        assertEquals("known", store.require(value.blueId())
+                .copyNode().getValue());
         assertThrows(IllegalArgumentException.class,
                 () -> store.require("missing"));
     }

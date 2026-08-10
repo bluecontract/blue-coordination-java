@@ -14,10 +14,10 @@ import static blue.coordination.integration.EngineTestSupport.integer;
 import static blue.coordination.integration.EngineTestSupport.resource;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-/** Existing child revisions can be materialized without parent frozen replay. */
+/** Existing child revisions cross the exact parent PROCESS boundary once each. */
 final class ExistingEmbeddedStateOnlyCatchUpTest {
     @Test
-    void attachmentReusesTwentyRevisionsAndCrossesFrozenContractsOnce()
+    void attachmentReusesChildHistoryAndProcessesEveryParentEpochExactlyOnce()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
             String childInitial = resource(
@@ -53,8 +53,10 @@ final class ExistingEmbeddedStateOnlyCatchUpTest {
                     engine, "embedded-state-parent", "/child/counter"));
             assertEquals(childRevisions, engine.history(
                     "embedded-counter-A").size());
-            assertEquals(1L, work.counter("frozenProcessCalls"),
-                    "only the parent attachment operation is frozen");
+            assertEquals(22L, work.counter("frozenProcessCalls"),
+                    "attachment plus initialization and twenty child epochs");
+            assertEquals(21L, work.counter(
+                    "process.embeddedEpochProcessCalls"));
             assertEquals(0L, work.counter("childHistoricalProcessCalls"));
             assertEquals(21L, work.counter("childRevisionApplications"));
             assertEquals(21L, work.counter(

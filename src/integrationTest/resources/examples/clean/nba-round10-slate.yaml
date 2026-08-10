@@ -1,0 +1,140 @@
+documentId: nba-round10-slate
+name: NBA Round 10 Three-Game Slate
+games: {}
+revisionApplications: 0
+endedGameEventCount: 0
+snapshotCount: 0
+applicationsSeenBySnapshot: 0
+allGamesFinal: false
+observedHomeScoreTotal: 0
+observedAwayScoreTotal: 0
+observedGameAStatus: None
+observedGameBStatus: None
+observedGameCStatus: None
+contracts:
+  slateChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/nba/round10/slate
+    actor:
+      type: MyOS/Principal Actor
+      accountId: slate-owner
+  coordinationEmbeddedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: coordination/internal/nba-round10-slate
+    actor:
+      type: MyOS/Principal Actor
+      accountId: coordination
+  embedded:
+    type: Process Embedded
+    collectionPaths: [/games]
+  attachGames:
+    type: Coordination/Sequential Workflow Operation
+    channel: slateChannel
+    request:
+      a: {documentId: {type: Text}}
+      b: {documentId: {type: Text}}
+      c: {documentId: {type: Text}}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: add
+              path: /games/a
+              val: {$binding: event/message/request/a}
+          - $appendChange:
+              op: add
+              path: /games/b
+              val: {$binding: event/message/request/b}
+          - $appendChange:
+              op: add
+              path: /games/c
+              val: {$binding: event/message/request/c}
+          - $return: true
+  snapshotSlate:
+    type: Coordination/Sequential Workflow Operation
+    channel: slateChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /observedGameAStatus
+              val: {$document: /games/a/status}
+          - $appendChange:
+              op: replace
+              path: /observedGameBStatus
+              val: {$document: /games/b/status}
+          - $appendChange:
+              op: replace
+              path: /observedGameCStatus
+              val: {$document: /games/c/status}
+          - $appendChange:
+              op: replace
+              path: /observedHomeScoreTotal
+              val:
+                $add:
+                  - $document: /games/a/homeScore
+                  - $document: /games/b/homeScore
+                  - $document: /games/c/homeScore
+          - $appendChange:
+              op: replace
+              path: /observedAwayScoreTotal
+              val:
+                $add:
+                  - $document: /games/a/awayScore
+                  - $document: /games/b/awayScore
+                  - $document: /games/c/awayScore
+          - $appendChange:
+              op: replace
+              path: /allGamesFinal
+              val:
+                $and:
+                  - $eq: [$document: /games/a/status, Final]
+                  - $eq: [$document: /games/b/status, Final]
+                  - $eq: [$document: /games/c/status, Final]
+          - $appendChange:
+              op: replace
+              path: /applicationsSeenBySnapshot
+              val: {$document: /revisionApplications}
+          - $appendChange:
+              op: replace
+              path: /snapshotCount
+              val: {$add: [$document: /snapshotCount, 1]}
+          - $return: true
+  coordinationApplyEmbeddedRevision:
+    type: Coordination/Sequential Workflow Operation
+    channel: coordinationEmbeddedChannel
+    request:
+      occurrencePath: {type: Text}
+      after: {documentId: {type: Text}}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: {$binding: event/message/request/occurrencePath}
+              val: {$binding: event/message/request/after}
+          - $appendChange:
+              op: replace
+              path: /revisionApplications
+              val: {$add: [$document: /revisionApplications, 1]}
+          - $if:
+              cond:
+                $some:
+                  in: {$binding: event/message/request/emittedEvents}
+                  item: emittedEvent
+                  where:
+                    $eq:
+                      - $var: {name: emittedEvent, path: /kind}
+                      - NBA/Game Ended
+              then:
+                - $appendChange:
+                    op: replace
+                    path: /endedGameEventCount
+                    val: {$add: [$document: /endedGameEventCount, 1]}
+          - $return: true

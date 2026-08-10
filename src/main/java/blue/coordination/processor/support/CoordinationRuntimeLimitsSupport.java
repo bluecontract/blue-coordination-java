@@ -5,9 +5,7 @@ package blue.coordination.processor.support;
  *
  * <p>The values are mirrored from the bundled
  * {@code coordination-gas-1.0.yaml}. Processing-time limits and counters are
- * enforced through the processor-owned Language runtime work session;
- * preparation-only splitter and Mandate quotas are declared separately by
- * the public host-quota facade.</p>
+ * enforced through the processor-owned Language runtime work session.</p>
  */
 public final class CoordinationRuntimeLimitsSupport {
     public static final int MAX_COMPOSITE_MEMBERS = 1024;

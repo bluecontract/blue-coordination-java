@@ -1,6 +1,4 @@
 documentId: nba-game-2016-lal-min
-coordination:
-  activationMode: import-full-history
 name: Lakers at Timberwolves 2016 Historical Game
 status: Scheduled
 homeTeam: MIN

@@ -2,7 +2,7 @@ package blue.coordination.api;
 
 import java.util.Objects;
 
-/** One autonomous document result selected by a dispatched Timeline Entry. */
+/** One managed document result selected by an external Timeline Entry. */
 public record DocumentDispatchOutcome(
         DocumentId documentId,
         DocumentRevision revision,

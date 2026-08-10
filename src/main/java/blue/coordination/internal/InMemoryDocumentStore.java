@@ -35,6 +35,10 @@ final class InMemoryDocumentStore {
         }
     }
 
+    public synchronized void remove(DocumentId documentId) {
+        sessions.remove(Objects.requireNonNull(documentId, "documentId"));
+    }
+
     public synchronized Collection<DocumentSession> sessions() {
         return Collections.unmodifiableList(new ArrayList<>(sessions.values()));
     }
@@ -43,15 +47,4 @@ final class InMemoryDocumentStore {
         return sessions.size();
     }
 
-    public synchronized Map<DocumentId, DocumentSession> snapshot() {
-        Map<DocumentId, DocumentSession> copy = new LinkedHashMap<>();
-        sessions.forEach((id, session) -> copy.put(id, session.copy()));
-        return Collections.unmodifiableMap(copy);
-    }
-
-    public synchronized void restore(
-            Map<DocumentId, DocumentSession> snapshot) {
-        sessions.clear();
-        Objects.requireNonNull(snapshot, "snapshot").forEach(sessions::put);
-    }
 }

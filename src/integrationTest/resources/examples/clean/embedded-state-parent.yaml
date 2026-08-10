@@ -9,6 +9,14 @@ contracts:
     actor:
       type: MyOS/Principal Actor
       accountId: bob
+  coordinationEmbeddedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: coordination/internal/embedded-state-parent
+    actor:
+      type: MyOS/Principal Actor
+      accountId: coordination
   embedded:
     type: Process Embedded
     paths: [/child]
@@ -31,4 +39,21 @@ contracts:
       - type: Coordination/Compute
         do:
           - $appendChange: {op: remove, path: /child}
+          - $return: true
+  coordinationApplyEmbeddedRevision:
+    type: Coordination/Sequential Workflow Operation
+    channel: coordinationEmbeddedChannel
+    request:
+      occurrencePath: {type: Text}
+      childDocumentId: {type: Text}
+      childEpoch: {type: Integer}
+      after:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /child
+              val: {$binding: event/message/request/after}
           - $return: true

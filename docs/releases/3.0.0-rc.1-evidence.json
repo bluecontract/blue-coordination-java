@@ -1,0 +1,94 @@
+{
+  "$schema": "round10-verification.schema.json",
+  "schemaVersion": "1.0.0",
+  "release": "3.0.0-rc.1",
+  "profile": "ROUND10_PROCESS_EMBEDDED",
+  "verdict": "BLOCKED",
+  "evidenceDate": "2026-08-10",
+  "source": {
+    "baseCommit": "5348428ffba1bedaf5368df72364233f21c6b7b0",
+    "mainSourceManifestAlgorithm": "src/main/java files sorted by project-relative path; each record is path, one ASCII space, and lowercase SHA-256 of file bytes; records are LF-joined without a trailing LF",
+    "mainSourceManifestSha256": "2c970f1149774333ed635b0018d8f82976aaa13262edf5703736ffe0569e018a",
+    "worktreeDirty": true
+  },
+  "shape": {
+    "classes": 107,
+    "lines": 25289,
+    "publicApiTypes": 16
+  },
+  "artifacts": [
+    { "file": "blue-coordination-java-3.0.0-rc.1.jar", "sha256": "6f3d71ac4c1ad15667ad2cdf5d83fb62f73bf872b695397fa08e14358dab1c1f" },
+    { "file": "blue-coordination-java-3.0.0-rc.1-sources.jar", "sha256": "8c9d20cc7f55b0c433b7fb3fe8df4c5e9c660b01b038f7187f7aa77e2279080c" },
+    { "file": "blue-coordination-java-3.0.0-rc.1-javadoc.jar", "sha256": "677fe1066f3a2b7318505efa22cb91cb9446cf47d015ab3fea25268c56cba4a9" },
+    { "file": "blue-coordination-java-3.0.0-rc.1-test-fixtures.jar", "sha256": "1b971870300027340058894f0baede49d0c338a4b7b36e163811e1aa8a432e8f" }
+  ],
+  "tests": {
+    "status": "PASS",
+    "tests": 282,
+    "classes": 62,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "suites": [
+      { "name": "test", "tests": 203, "classes": 28, "failures": 0, "errors": 0, "skipped": 0 },
+      { "name": "integrationTest", "tests": 67, "classes": 29, "failures": 0, "errors": 0, "skipped": 0 },
+      { "name": "consumerTest", "tests": 5, "classes": 1, "failures": 0, "errors": 0, "skipped": 0 },
+      { "name": "scenarioTest", "tests": 7, "classes": 4, "failures": 0, "errors": 0, "skipped": 0 }
+    ]
+  },
+  "runtimes": [
+    { "java": "17.0.10", "gradle": "9.6.0", "gate": "releaseCheck --rerun-tasks", "status": "PASS" },
+    { "java": "21.0.2", "gradle": "9.6.0", "gate": "integrationTest --rerun-tasks; releaseCheck", "status": "PASS" }
+  ],
+  "gates": [
+    { "id": "local-runtime", "status": "PASS", "summary": "All library-owned unit, integration, consumer, and scenario suites pass." },
+    { "id": "production-shape", "status": "PASS", "summary": "107 classes, 25,289 lines, and 16 public API source types remain within limits of 115, 25,500, and 16." },
+    { "id": "occurrence-specific-admission", "status": "PASS", "summary": "Exact occurrence plans bind parent, path, child, state, epoch, frontier, proof, and attachment-entry identity; recurrent states fail closed without an epoch and failed publication preserves the plan for retry." },
+    { "id": "ready-audit-read-boundary", "status": "PASS", "summary": "Application reads expose only READY snapshots; explicit audit reads expose committed CATCHING_UP or BLOCKED state." },
+    { "id": "bounded-resumable-drain", "status": "PASS", "summary": "Entry and PROCESS work budgets pause at deterministic retained boundaries and resume without repeating committed frozen PROCESS." },
+    { "id": "full-wadowice-acceptance", "status": "PASS", "summary": "Standalone and embedded completion converge; cancellation, adjustment, authentic late-refusal, and exactly-once duplicate handling pass with per-step timing attribution." },
+    { "id": "published-dependencies", "status": "BLOCKED", "summary": "Three exact runtime coordinates do not resolve from Maven Central." },
+    { "id": "local-source-inputs", "status": "PASS", "summary": "Repository HEAD and workspace diff match the committed source lock." },
+    { "id": "staging", "status": "BLOCKED", "summary": "Fail-closed readiness remains blocked only by unresolved upstream semantic capabilities and unpublished runtime artifacts." }
+  ],
+  "blockers": [
+    {
+      "id": "timeline-entry-document-target",
+      "category": "semantic-upstream",
+      "owner": "blue-repository-java",
+      "summary": "The pinned public Timeline Entry model has no literal documentId target or target hook.",
+      "requiredAction": "Publish a target-capable upstream entry/provider model and run the mandatory per-document routing campaign."
+    },
+    {
+      "id": "provider-mandate-resolver",
+      "category": "semantic-upstream",
+      "owner": "blue-language-java/provider",
+      "summary": "The provider boundary has no exact Mandate-state resolver at source order.",
+      "requiredAction": "Expose and verify provider-backed target-specific Mandate eligibility."
+    },
+    {
+      "id": "repository-artifact",
+      "category": "artifact-upstream",
+      "owner": "blue-repository-java",
+      "summary": "The pinned Repository artifact is absent from Maven Central.",
+      "requiredAction": "Publish the exact coordinate.",
+      "coordinate": "blue.repo:blue-repo-java:3.0.0-rc.19"
+    },
+    {
+      "id": "bex-core-artifact",
+      "category": "artifact-upstream",
+      "owner": "blue-bex-java",
+      "summary": "The pinned BEX core artifact is absent from Maven Central.",
+      "requiredAction": "Publish the exact coordinate.",
+      "coordinate": "blue.bex:blue-bex-core:1.1.0-rc.3"
+    },
+    {
+      "id": "bex-contracts-artifact",
+      "category": "artifact-upstream",
+      "owner": "blue-bex-java",
+      "summary": "The pinned BEX Contracts artifact is absent from Maven Central.",
+      "requiredAction": "Publish the exact coordinate.",
+      "coordinate": "blue.bex:blue-bex-contracts:1.1.0-rc.3"
+    }
+  ]
+}

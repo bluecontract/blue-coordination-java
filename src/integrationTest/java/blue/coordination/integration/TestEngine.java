@@ -2,8 +2,7 @@ package blue.coordination.integration;
 
 import blue.coordination.api.CoordinationEngine;
 import blue.coordination.api.CoordinationException;
-import blue.coordination.api.CoordinationMetrics;
-import blue.coordination.api.DispatchResult;
+import blue.coordination.api.ProcessingDrainReceipt;
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.DocumentRevision;
 import blue.coordination.api.DocumentSnapshot;
@@ -12,9 +11,11 @@ import blue.coordination.api.Operation;
 import blue.coordination.api.SessionStatus;
 import blue.coordination.api.Timeline;
 import blue.coordination.api.TimelineEntry;
+import blue.coordination.api.ActivationMode;
 import blue.coordination.internal.CoordinationTestControl;
 import blue.language.api.BlueCacheStats;
 import blue.language.model.Node;
+import blue.language.processor.ExternalOrderKey;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -57,6 +58,47 @@ final class TestEngine implements AutoCloseable {
         }
     }
 
+    DocumentView start(
+            String documentId,
+            String sourceYaml,
+            CoordinationEngine.AdmissionPolicy policy,
+            ExternalOrderKey verifiedFrontier) {
+        try {
+            return new DocumentView(engine.startDocument(
+                    DocumentId.of(documentId),
+                    sourceYaml,
+                    policy,
+                    verifiedFrontier));
+        } catch (RuntimeException failure) {
+            throw original(failure);
+        }
+    }
+
+    void configureEmbeddedAdmission(
+            String documentId,
+            ActivationMode mode,
+            ExternalOrderKey verifiedCompleteThrough) {
+        engine.configureEmbeddedAdmission(
+                DocumentId.of(documentId), mode, verifiedCompleteThrough);
+    }
+
+    void configureEmbeddedAdmission(
+            String parentDocumentId,
+            String absoluteChildPath,
+            String childDocumentId,
+            String admittedStateBlueId,
+            Long admittedEpoch,
+            ActivationMode mode,
+            ExternalOrderKey verifiedCompleteThrough,
+            String proofIdentity,
+            String expectedAttachmentEntryBlueId) {
+        engine.configureEmbeddedAdmission(
+                DocumentId.of(parentDocumentId), absoluteChildPath,
+                DocumentId.of(childDocumentId), admittedStateBlueId,
+                admittedEpoch, mode, verifiedCompleteThrough, proofIdentity,
+                expectedAttachmentEntryBlueId);
+    }
+
     ExactValue registerType(String sourceYaml) {
         return engine.exactValue(sourceYaml);
     }
@@ -66,8 +108,11 @@ final class TestEngine implements AutoCloseable {
     }
 
     ExactValue embeddedDocumentRequest(String exactDocumentYaml) {
-        return engine.referenceRequest(
-                "document", engine.exactValue(exactDocumentYaml));
+        return embeddedDocumentRequest(engine.exactValue(exactDocumentYaml));
+    }
+
+    ExactValue embeddedDocumentRequest(ExactValue exactDocument) {
+        return engine.referenceRequest("document", exactDocument);
     }
 
     ExactValue referencedValueRequest(String field, String exactValueYaml) {
@@ -86,13 +131,15 @@ final class TestEngine implements AutoCloseable {
         return engine.appendAt(timeline, operation, timestampMicros);
     }
 
-    DispatchResult appendAndDispatch(Timeline timeline, Operation operation) {
+    ProcessingDrainReceipt appendAndDispatch(
+            Timeline timeline,
+            Operation operation) {
         return dispatch(append(timeline, operation));
     }
 
-    DispatchResult dispatch(TimelineEntry entry) {
+    ProcessingDrainReceipt dispatch(TimelineEntry entry) {
         try {
-            return engine.dispatch(entry);
+            return engine.drainThrough(entry.sourceOrderKey());
         } catch (RuntimeException failure) {
             if (control.isInjectedFailure(failure)) {
                 throw new InjectedFailureException();
@@ -101,12 +148,17 @@ final class TestEngine implements AutoCloseable {
         }
     }
 
+    ProcessingDrainReceipt drain() {
+        return engine.drain();
+    }
+
     int routeTargetCount(TimelineEntry entry) {
         return engine.routeTargetCount(entry);
     }
 
     DocumentView session(String documentId) {
-        return new DocumentView(engine.document(DocumentId.of(documentId)));
+        return new DocumentView(engine.auditDocument(
+                DocumentId.of(documentId)));
     }
 
     Node value(String documentId, String pointer) {
@@ -129,7 +181,8 @@ final class TestEngine implements AutoCloseable {
     }
 
     EngineMetrics.MetricsSnapshot metricsSnapshot() {
-        CoordinationMetrics metrics = engine.metrics();
+        CoordinationTestControl.MetricsSnapshot metrics =
+                control.metricsSnapshot();
         return new EngineMetrics.MetricsSnapshot(
                 metrics.counters(), metrics.phaseNanos());
     }
@@ -165,9 +218,20 @@ final class TestEngine implements AutoCloseable {
                                 DocumentId.of(evidence.parentDocumentId()),
                                 DocumentId.of(evidence.childDocumentId()),
                                 evidence.occurrencePath(),
-                                evidence.appliedChildEpoch()),
-                        CatchUpPlan.Status.valueOf(evidence.status())))
+                                evidence.appliedChildEpoch(),
+                                evidence.activationGeneration()),
+                        catchUpStatus(evidence.status())))
                 .toList();
+    }
+
+    private static CatchUpPlan.Status catchUpStatus(String status) {
+        return switch (status) {
+            case "OPEN", "DEFERRED" -> CatchUpPlan.Status.REPLAYING;
+            case "COMPLETE" -> CatchUpPlan.Status.COMPLETE;
+            case "BLOCKED" -> CatchUpPlan.Status.BLOCKED;
+            default -> throw new IllegalArgumentException(
+                    "Unknown catch-up status " + status);
+        };
     }
 
     void failOnceAt(FailurePoint point) {
@@ -177,6 +241,22 @@ final class TestEngine implements AutoCloseable {
 
     void clearFailureInjection() {
         control.clearFailureInjection();
+    }
+
+    void restartFromStores() {
+        control.restartFromStores();
+    }
+
+    void makeHistoricalUnavailable(String diagnostic) {
+        control.makeHistoricalUnavailable(diagnostic);
+    }
+
+    void makeHistoricalAvailable() {
+        control.makeHistoricalAvailable();
+    }
+
+    void invalidateHistoricalEvidence(String diagnostic) {
+        control.invalidateHistoricalEvidence(diagnostic);
     }
 
     @Override
@@ -216,6 +296,10 @@ final class TestEngine implements AutoCloseable {
 
         String authoredInitialBlueId() {
             return snapshot.authoredInitialBlueId();
+        }
+
+        ExactValue current() {
+            return snapshot.current();
         }
 
         EmbeddedOnlyLayout layout() {

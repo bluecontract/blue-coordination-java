@@ -4,6 +4,7 @@ import blue.coordination.api.CoordinationEngine;
 import blue.language.api.BlueCacheStats;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -38,6 +39,26 @@ public final class CoordinationTestControl {
         engine.clearFailureInjection();
     }
 
+    /** Reconstructs transient scheduling/index state from retained stores. */
+    public void restartFromStores() {
+        engine.restartFromStores();
+    }
+
+    /** Makes bounded historical reads defer without reporting false absence. */
+    public void makeHistoricalUnavailable(String diagnostic) {
+        engine.makeHistoricalUnavailable(diagnostic);
+    }
+
+    /** Restores the deterministic historical feeder after a test deferral. */
+    public void makeHistoricalAvailable() {
+        engine.makeHistoricalAvailable();
+    }
+
+    /** Makes bounded historical reads fail closed on invalid evidence. */
+    public void invalidateHistoricalEvidence(String diagnostic) {
+        engine.invalidateHistoricalEvidence(diagnostic);
+    }
+
     /** Returns whether a failure came from this deterministic fixture. */
     public boolean isInjectedFailure(Throwable failure) {
         return failure instanceof DefaultCoordinationEngine
@@ -49,15 +70,23 @@ public final class CoordinationTestControl {
         return engine.languageCacheStats();
     }
 
+    /** Raw diagnostic metrics for test deltas; never exposed by public API. */
+    public MetricsSnapshot metricsSnapshot() {
+        EngineMetrics.MetricsSnapshot snapshot = engine.metricsSnapshot();
+        return new MetricsSnapshot(
+                snapshot.counters(), snapshot.phaseNanos());
+    }
+
     /** Returns immutable catch-up evidence without exposing mutable plans. */
     public List<CatchUpEvidence> catchUpEvidence() {
-        return engine.catchUpPlans().stream()
-                .map(plan -> new CatchUpEvidence(
-                        plan.link().parentDocumentId().value(),
-                        plan.link().childDocumentId().value(),
-                        plan.link().occurrencePath(),
-                        plan.link().appliedChildEpoch(),
-                        plan.status().name()))
+        return engine.catchUpEvidence().stream()
+                .map(evidence -> new CatchUpEvidence(
+                        evidence.parentDocumentId().value(),
+                        evidence.childDocumentId().value(),
+                        evidence.occurrencePath(),
+                        evidence.appliedChildEpoch(),
+                        evidence.status(),
+                        evidence.activationGeneration()))
                 .toList();
     }
 
@@ -77,6 +106,19 @@ public final class CoordinationTestControl {
             String childDocumentId,
             String occurrencePath,
             long appliedChildEpoch,
-            String status) {
+            String status,
+            long activationGeneration) {
+    }
+
+    /** Immutable raw metrics used only by test-fixture consumers. */
+    public record MetricsSnapshot(
+            Map<String, Long> counters,
+            Map<String, Long> phaseNanos) {
+        public MetricsSnapshot {
+            counters = Map.copyOf(Objects.requireNonNull(
+                    counters, "counters"));
+            phaseNanos = Map.copyOf(Objects.requireNonNull(
+                    phaseNanos, "phaseNanos"));
+        }
     }
 }

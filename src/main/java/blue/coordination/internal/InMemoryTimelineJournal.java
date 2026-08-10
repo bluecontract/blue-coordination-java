@@ -6,20 +6,17 @@ import blue.coordination.api.Timeline;
 
 import blue.coordination.api.Operation;
 
-import blue.coordination.api.EnvironmentFrontier;
-
-import blue.coordination.api.DocumentId;
-
 import blue.language.processor.ExternalOrderKey;
 
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.NavigableMap;
+import java.util.TreeMap;
+import java.util.function.Predicate;
 
 /** Deterministic in-memory journal; each exact entry is retained once. */
 final class InMemoryTimelineJournal {
@@ -30,69 +27,85 @@ final class InMemoryTimelineJournal {
             new LinkedHashMap<>();
     private final Map<String, String> previousByTimeline = new LinkedHashMap<>();
     private final Map<String, Long> sequenceByTimeline = new LinkedHashMap<>();
+    private final NavigableMap<ExternalOrderKey, TimelineEntry> externalByOrder =
+            new TreeMap<>();
+    private final List<TimelineEntry> appendOrder = new ArrayList<>();
+    private final HistoricalAvailabilityControl historicalAvailability;
     private long globalSequence;
+    private long revision;
 
     public InMemoryTimelineJournal(
             WholeRequestEntryFactory entryFactory,
             EngineMetrics metrics) {
+        this(entryFactory, metrics, new HistoricalAvailabilityControl());
+    }
+
+    InMemoryTimelineJournal(
+            WholeRequestEntryFactory entryFactory,
+            EngineMetrics metrics,
+            HistoricalAvailabilityControl historicalAvailability) {
         this.entryFactory = Objects.requireNonNull(entryFactory, "entryFactory");
         this.metrics = Objects.requireNonNull(metrics, "metrics");
+        this.historicalAvailability = Objects.requireNonNull(
+                historicalAvailability, "historicalAvailability");
     }
 
     public synchronized TimelineEntry append(
             Timeline timeline,
             Operation operation,
             long timestampMicros) {
-        return appendInternal(
-                timeline, operation, timestampMicros, false, null, null, null);
+        return appendInternal(timeline, operation, timestampMicros);
     }
 
-    public synchronized TimelineEntry appendProcessorManaged(
+    /** Admits one lossless exact Timeline Entry under provider ordering. */
+    public synchronized TimelineEntry appendExact(
             Timeline timeline,
-            Operation operation,
-            long timestampMicros,
-            DocumentId target,
-            TimelineEntry.CatchUpCause cause,
-            ExternalOrderKey originalSourceOrder) {
-        return appendInternal(
+            blue.coordination.api.ExactValue exactEvent) {
+        Objects.requireNonNull(timeline, "timeline");
+        Objects.requireNonNull(exactEvent, "exactEvent");
+        TimelineEntry duplicate = byBlueId.get(exactEvent.blueId());
+        if (duplicate != null) {
+            if (!duplicate.exactEvent().sameExactValue(exactEvent)) {
+                throw new IllegalStateException(
+                        "Conflicting exact Timeline Entry "
+                                + exactEvent.blueId());
+            }
+            metrics.increment("journal.duplicateEntries");
+            return duplicate;
+        }
+        long nextGlobalSequence = Math.addExact(globalSequence, 1L);
+        long nextTimelineSequence = Math.addExact(
+                sequenceByTimeline.getOrDefault(
+                        timeline.timelineId(), 0L), 1L);
+        TimelineEntry entry = entryFactory.createExact(
                 timeline,
-                operation,
-                timestampMicros,
-                true,
-                Objects.requireNonNull(target, "target"),
-                Objects.requireNonNull(cause, "cause"),
-                Objects.requireNonNull(originalSourceOrder, "originalSourceOrder"));
+                exactEvent,
+                nextGlobalSequence,
+                nextTimelineSequence);
+        return publish(entry, previousIdentity(exactEvent));
     }
 
     private TimelineEntry appendInternal(
             Timeline timeline,
             Operation operation,
-            long timestampMicros,
-            boolean processorManaged,
-            DocumentId target,
-            TimelineEntry.CatchUpCause cause,
-            ExternalOrderKey originalSourceOrder) {
+            long timestampMicros) {
         Objects.requireNonNull(timeline, "timeline");
         long nextGlobalSequence = Math.addExact(globalSequence, 1L);
         long nextTimelineSequence = Math.addExact(
                 sequenceByTimeline.getOrDefault(timeline.timelineId(), 0L), 1L);
-        Map<String, Long> frontierSequences = new LinkedHashMap<>(
-                sequenceByTimeline);
-        frontierSequences.put(timeline.timelineId(), nextTimelineSequence);
-        EnvironmentFrontier appendFrontier = new EnvironmentFrontier(
-                nextGlobalSequence, frontierSequences);
         TimelineEntry entry = entryFactory.create(
                 timeline,
                 previousByTimeline.get(timeline.timelineId()),
                 operation,
                 timestampMicros,
                 nextGlobalSequence,
-                nextTimelineSequence,
-                appendFrontier,
-                processorManaged,
-                target,
-                cause,
-                originalSourceOrder);
+                nextTimelineSequence);
+        return publish(entry, previousByTimeline.get(timeline.timelineId()));
+    }
+
+    private TimelineEntry publish(
+            TimelineEntry entry,
+            String declaredPreviousBlueId) {
         TimelineEntry existing = byBlueId.get(entry.blueId());
         if (existing != null) {
             if (!existing.exactEvent().sameExactValue(entry.exactEvent())) {
@@ -102,24 +115,54 @@ final class InMemoryTimelineJournal {
             metrics.increment("journal.duplicateEntries");
             return existing;
         }
-        List<TimelineEntry> timelineEntries = byTimeline.computeIfAbsent(
-                timeline.timelineId(), ignored -> new ArrayList<>());
+        String timelineId = entry.timeline().timelineId();
+        if (!Objects.equals(
+                previousByTimeline.get(timelineId),
+                declaredPreviousBlueId)) {
+            throw new IllegalArgumentException(
+                    "Timeline Entry predecessor does not match the accepted "
+                            + "Timeline head");
+        }
+        List<TimelineEntry> timelineEntries = byTimeline.getOrDefault(
+                timelineId, List.of());
         if (!timelineEntries.isEmpty()) {
             TimelineEntry last = timelineEntries.get(timelineEntries.size() - 1);
-            if (entry.journalOrderKey().compareTo(last.journalOrderKey()) <= 0) {
+            if (entry.timestampMicros() <= last.timestampMicros()) {
                 throw new IllegalArgumentException(
-                        "Timeline append order must increase monotonically");
+                        "Timeline timestamps must increase monotonically");
             }
         }
+        if (externalByOrder.containsKey(entry.sourceOrderKey())) {
+            throw new IllegalStateException(
+                    "Duplicate external source order "
+                            + entry.sourceOrderKey());
+        }
+        long nextRevision = Math.addExact(revision, 1L);
+        timelineEntries = byTimeline.computeIfAbsent(
+                timelineId, ignored -> new ArrayList<>());
         timelineEntries.add(entry);
         byBlueId.put(entry.blueId(), entry);
-        previousByTimeline.put(timeline.timelineId(), entry.blueId());
-        globalSequence = nextGlobalSequence;
-        sequenceByTimeline.put(timeline.timelineId(), nextTimelineSequence);
+        externalByOrder.put(entry.sourceOrderKey(), entry);
+        previousByTimeline.put(timelineId, entry.blueId());
+        globalSequence = entry.globalSequence();
+        sequenceByTimeline.put(timelineId, entry.timelineSequence());
+        appendOrder.add(entry);
+        revision = nextRevision;
         metrics.increment("journal.entriesStoredWhole");
         metrics.increment("append.journalOperations");
         metrics.increment("requestsStoredWhole");
         return entry;
+    }
+
+    private static String previousIdentity(
+            blue.coordination.api.ExactValue exactEvent) {
+        blue.language.snapshot.FrozenNode previous =
+                exactEvent.canonicalAt("/prevEntry");
+        return previous == null
+                ? null
+                : previous.isReferenceOnly()
+                        ? previous.getReferenceBlueId()
+                        : previous.blueId();
     }
 
     public synchronized Optional<TimelineEntry> byBlueId(String blueId) {
@@ -127,111 +170,196 @@ final class InMemoryTimelineJournal {
                 Objects.requireNonNull(blueId, "blueId")));
     }
 
-    public synchronized List<TimelineEntry> entries(
-            String timelineId,
+    /**
+     * Returns the canonical journal object and rejects caller-forged metadata
+     * even when the supplied value reuses a known BlueId.
+     */
+    public synchronized TimelineEntry requireCanonical(TimelineEntry supplied) {
+        TimelineEntry canonical = byBlueId.get(Objects.requireNonNull(
+                supplied, "supplied").blueId());
+        if (canonical == null) {
+            throw new IllegalArgumentException(
+                    "Timeline Entry is not journaled: " + supplied.blueId());
+        }
+        if (!canonical.equals(supplied)
+                || !canonical.exactEvent().sameExactValue(
+                        supplied.exactEvent())) {
+            throw new IllegalArgumentException(
+                    "Timeline Entry metadata does not match canonical journal "
+                            + "evidence: " + supplied.blueId());
+        }
+        return canonical;
+    }
+
+    /** Canonical next external entry after a completed source-order cursor. */
+    public synchronized Optional<TimelineEntry> nextExternal(
             ExternalOrderKey afterExclusive,
             ExternalOrderKey throughInclusive) {
-        List<TimelineEntry> source = byTimeline.getOrDefault(
-                Objects.requireNonNull(timelineId, "timelineId"), List.of());
-        List<TimelineEntry> result = new ArrayList<>();
-        for (TimelineEntry entry : source) {
-            if (afterExclusive != null
-                    && entry.sourceOrderKey().compareTo(afterExclusive) <= 0) {
+        Map.Entry<ExternalOrderKey, TimelineEntry> candidate =
+                afterExclusive == null
+                        ? externalByOrder.firstEntry()
+                        : externalByOrder.higherEntry(afterExclusive);
+        if (candidate == null || throughInclusive != null
+                && candidate.getKey().compareTo(throughInclusive) > 0) {
+            return Optional.empty();
+        }
+        metrics.increment("journal.orderedCursorReads");
+        return Optional.of(candidate.getValue());
+    }
+
+    /** True only for a canonical frontier retained by this journal. */
+    synchronized boolean containsExternalOrder(ExternalOrderKey frontier) {
+        return externalByOrder.containsKey(Objects.requireNonNull(
+                frontier, "frontier"));
+    }
+
+    /**
+     * Returns a closed result for one dynamically evaluated historical probe.
+     * Completion is bound to the exact journal, route, graph, cutoff, and
+     * active source-surface identities used for this probe.
+     */
+    synchronized HistoricalStep nextHistoricalStep(
+            ExternalOrderKey afterExclusive,
+            ExternalOrderKey cutoffExclusive,
+            String excludedEntryBlueId,
+            Predicate<TimelineEntry> eligible,
+            long routeIndexGeneration,
+            long graphGeneration,
+            String sourceSurfaceIdentity) {
+        Objects.requireNonNull(cutoffExclusive, "cutoffExclusive");
+        Objects.requireNonNull(eligible, "eligible");
+        if (routeIndexGeneration < 0L || graphGeneration < 0L) {
+            throw new IllegalArgumentException(
+                    "historical generations must be non-negative");
+        }
+        String surfaceIdentity = requireText(
+                sourceSurfaceIdentity, "sourceSurfaceIdentity");
+        metrics.increment("journal.historicalWindowsOpened");
+        Optional<HistoricalStep> blocked = historicalAvailability.blockedStep();
+        if (blocked.isPresent()) {
+            return blocked.orElseThrow();
+        }
+        NavigableMap<ExternalOrderKey, TimelineEntry> tail =
+                afterExclusive == null
+                        ? externalByOrder
+                        : externalByOrder.tailMap(afterExclusive, false);
+        boolean sawEntryInWindow = false;
+        for (Map.Entry<ExternalOrderKey, TimelineEntry> item
+                : tail.entrySet()) {
+            metrics.increment("journal.historicalCursorProbes");
+            if (item.getKey().compareTo(cutoffExclusive) >= 0) {
+                break;
+            }
+            sawEntryInWindow = true;
+            TimelineEntry entry = item.getValue();
+            if (entry.blueId().equals(excludedEntryBlueId)
+                    || !eligible.test(entry)) {
                 continue;
             }
-            if (throughInclusive != null
-                    && entry.sourceOrderKey().compareTo(throughInclusive) > 0) {
-                continue;
-            }
-            result.add(entry);
+            return new HistoricalStep.EligibleEntry(
+                    entry, entry.sourceOrderKey());
         }
-        result.sort(Comparator.comparing(TimelineEntry::sourceOrderKey));
-        metrics.add("journal.windowEntriesRead", result.size());
-        return Collections.unmodifiableList(result);
+        CompletenessEvidence evidence = new CompletenessEvidence(
+                revision,
+                routeIndexGeneration,
+                graphGeneration,
+                cutoffExclusive,
+                surfaceIdentity);
+        return sawEntryInWindow
+                ? new HistoricalStep.Complete(evidence)
+                : new HistoricalStep.CompleteEmpty(evidence);
     }
 
-    public synchronized List<TimelineEntry> allEntries() {
-        List<TimelineEntry> result = new ArrayList<>(byBlueId.values());
-        result.sort(Comparator.comparing(TimelineEntry::journalOrderKey));
-        return Collections.unmodifiableList(result);
-    }
-
-    public synchronized EnvironmentFrontier frontier() {
-        return new EnvironmentFrontier(globalSequence, sequenceByTimeline);
-    }
-
-    public synchronized List<TimelineEntry> entriesThrough(
-            String timelineId,
-            EnvironmentFrontier frontier) {
-        Objects.requireNonNull(timelineId, "timelineId");
-        Objects.requireNonNull(frontier, "frontier");
-        List<TimelineEntry> source = byTimeline.getOrDefault(
-                timelineId, List.of());
-        long throughSequence = frontier.sequenceFor(timelineId);
-        List<TimelineEntry> result = new ArrayList<>();
-        for (TimelineEntry entry : source) {
-            if (entry.timelineSequence() <= throughSequence
-                    && entry.globalSequence() <= frontier.globalSequence()) {
-                result.add(entry);
-            }
-        }
-        metrics.add("childHistoricalEntriesRead", result.size());
-        return Collections.unmodifiableList(result);
+    public synchronized ExternalOrderKey latestExternalOrder() {
+        return externalByOrder.isEmpty()
+                ? null
+                : externalByOrder.lastKey();
     }
 
     public synchronized int size() {
         return byBlueId.size();
     }
 
-    /** Append frontier used to roll back processor-managed entries. */
-    public synchronized Mark mark() {
-        return new Mark(globalSequence, sequenceByTimeline);
+    /** Monotonic identity of the exact currently published journal content. */
+    synchronized long revision() {
+        return revision;
     }
-    /** Restores the exact journal frontier captured before one dispatch. */
+
+    synchronized void makeHistoricalUnavailable(String diagnostic) {
+        historicalAvailability.makeUnavailable(diagnostic);
+    }
+
+    synchronized void makeHistoricalAvailable() {
+        historicalAvailability.makeAvailable();
+    }
+
+    synchronized void invalidateHistoricalEvidence(String diagnostic) {
+        historicalAvailability.invalidateEvidence(diagnostic);
+    }
+
+    /** Opens an O(1) append savepoint without copying Timeline indexes. */
+    public synchronized Mark mark() {
+        return new Mark(globalSequence, appendOrder.size());
+    }
+    /** Removes only entries appended after the exact savepoint. */
     public synchronized void rollbackTo(Mark mark) {
         Objects.requireNonNull(mark, "mark");
-        List<String> timelines = new ArrayList<>(byTimeline.keySet());
-        for (String timelineId : timelines) {
+        if (mark.appendOrderSize() > appendOrder.size()
+                || mark.globalSequence() > globalSequence) {
+            throw new IllegalStateException(
+                    "Journal mark is ahead of the append frontier");
+        }
+        long removedCount = 0L;
+        while (appendOrder.size() > mark.appendOrderSize()) {
+            TimelineEntry removed = appendOrder.remove(
+                    appendOrder.size() - 1);
+            String timelineId = removed.timeline().timelineId();
             List<TimelineEntry> entries = byTimeline.get(timelineId);
-            long retained = mark.sequenceByTimeline().getOrDefault(
-                    timelineId, 0L);
-            if (retained > entries.size()) {
+            if (entries == null || entries.isEmpty()
+                    || entries.get(entries.size() - 1) != removed) {
                 throw new IllegalStateException(
-                        "Journal mark is ahead of Timeline " + timelineId);
+                        "Timeline append index is inconsistent for "
+                                + timelineId);
             }
-            while (entries.size() > retained) {
-                TimelineEntry removed = entries.remove(entries.size() - 1);
-                byBlueId.remove(removed.blueId());
-            }
+            entries.remove(entries.size() - 1);
+            byBlueId.remove(removed.blueId());
+            externalByOrder.remove(removed.sourceOrderKey());
             if (entries.isEmpty()) {
                 byTimeline.remove(timelineId);
+                sequenceByTimeline.remove(timelineId);
+                previousByTimeline.remove(timelineId);
+            } else {
+                TimelineEntry previous = entries.get(entries.size() - 1);
+                sequenceByTimeline.put(
+                        timelineId, previous.timelineSequence());
+                previousByTimeline.put(timelineId, previous.blueId());
             }
-        }
-        sequenceByTimeline.clear();
-        sequenceByTimeline.putAll(mark.sequenceByTimeline());
-        previousByTimeline.clear();
-        for (Map.Entry<String, List<TimelineEntry>> timeline
-                : byTimeline.entrySet()) {
-            List<TimelineEntry> entries = timeline.getValue();
-            previousByTimeline.put(
-                    timeline.getKey(),
-                    entries.get(entries.size() - 1).blueId());
+            removedCount++;
         }
         globalSequence = mark.globalSequence();
+        if (removedCount > 0L) {
+            revision = Math.addExact(revision, 1L);
+        }
         metrics.increment("journal.rollbacks");
+        metrics.add("journal.rollbackEntries", removedCount);
     }
-    /** Compact append frontier; no event or request body is copied. */
+    /** Compact append frontier; no Timeline index or body is copied. */
     public record Mark(
             long globalSequence,
-            Map<String, Long> sequenceByTimeline) {
+            int appendOrderSize) {
         public Mark {
-            if (globalSequence < 0L) {
+            if (globalSequence < 0L || appendOrderSize < 0) {
                 throw new IllegalArgumentException(
-                        "globalSequence must be non-negative");
+                        "journal frontier must be non-negative");
             }
-            sequenceByTimeline = Collections.unmodifiableMap(
-                    new LinkedHashMap<>(Objects.requireNonNull(
-                            sequenceByTimeline, "sequenceByTimeline")));
         }
+    }
+
+    private static String requireText(String value, String label) {
+        String checked = Objects.requireNonNull(value, label);
+        if (checked.isBlank()) {
+            throw new IllegalArgumentException(label + " must not be blank");
+        }
+        return checked;
     }
 }

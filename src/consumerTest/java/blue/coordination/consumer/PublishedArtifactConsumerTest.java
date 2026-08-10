@@ -1,6 +1,7 @@
 package blue.coordination.consumer;
 
 import blue.coordination.api.CoordinationEngine;
+import blue.coordination.api.CoordinationMetrics;
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.ExactValue;
 import blue.coordination.api.Operation;
@@ -29,10 +30,20 @@ final class PublishedArtifactConsumerTest {
             DocumentId counter = DocumentId.of("counter");
             engine.startDocument(
                     counter, resource("examples/clean/counter.yaml"));
-            engine.appendAndDispatch(alice, Operation.yaml(
+            engine.append(alice, Operation.yaml(
                     "increment", "aliceChannel", "amount: 3"));
-            engine.appendAndDispatch(bob, Operation.yaml(
+            engine.append(bob, Operation.yaml(
                     "decrement", "bobChannel", "amount: 1"));
+            var first = engine.drain(
+                    new CoordinationEngine.DrainBudget(1L, 1L));
+            assertTrue(first.paused());
+            assertEquals(1L, first.committedProcessTransitions());
+            var second = engine.drain(
+                    new CoordinationEngine.DrainBudget(1L, 1L));
+            assertTrue(second.quiescent());
+            assertEquals(1L, second.committedProcessTransitions());
+            assertEquals(engine.document(counter).blueId(),
+                    engine.auditDocument(counter).blueId());
             assertEquals(2L, integer(engine, counter, "/counter"));
         }
     }
@@ -51,9 +62,9 @@ final class PublishedArtifactConsumerTest {
             assertEquals(0, engine.routeTargetCount(entry));
             assertEquals(1, engine.metrics().journalEntryCount());
             assertEquals(0L, engine.metrics().counter(
-                    "append.requestFragments"));
+                    CoordinationMetrics.Counter.REQUEST_FRAGMENTS));
             assertEquals(0L, engine.metrics().counter(
-                    "append.eventFragments"));
+                    CoordinationMetrics.Counter.TIMELINE_ENTRY_FRAGMENTS));
         }
     }
 
@@ -72,7 +83,7 @@ final class PublishedArtifactConsumerTest {
                     "examples/clean/large-paynote.yaml");
             engine.startDocument(
                     host, resource("examples/clean/large-order-host.yaml"));
-            engine.appendAndDispatch(
+            appendAndDrain(engine,
                     alice,
                     Operation.exact(
                             "attachPayNote",
@@ -80,7 +91,7 @@ final class PublishedArtifactConsumerTest {
                             engine.referenceRequest(
                                     "document",
                                     engine.exactValue(payNoteYaml))));
-            engine.appendAndDispatch(
+            appendAndDrain(engine,
                     admin,
                     Operation.yaml(
                             "authorizeAmount",
@@ -88,7 +99,7 @@ final class PublishedArtifactConsumerTest {
                             "authorizationId: CONSUMER-1\n"
                                     + "amountMinor: 65000\n"
                                     + "currency: PLN"));
-            engine.appendAndDispatch(
+            appendAndDrain(engine,
                     admin,
                     Operation.yaml(
                             "authorizeAmount",
@@ -96,7 +107,7 @@ final class PublishedArtifactConsumerTest {
                             "authorizationId: CONSUMER-2\n"
                                     + "amountMinor: 65000\n"
                                     + "currency: PLN"));
-            engine.appendAndDispatch(
+            appendAndDrain(engine,
                     restaurant,
                     Operation.yaml(
                             "confirmProduct",
@@ -129,7 +140,7 @@ final class PublishedArtifactConsumerTest {
             DocumentId first = DocumentId.of("embedded-parent-one");
             DocumentId second = DocumentId.of("embedded-parent-two");
             engine.startDocument(child, childYaml);
-            engine.appendAndDispatch(childTimeline, Operation.yaml(
+            appendAndDrain(engine, childTimeline, Operation.yaml(
                     "increment", "ownerChannel", "amount: 2"));
             engine.startDocument(first, parentDefinition(
                     "embedded-parent-one",
@@ -141,11 +152,11 @@ final class PublishedArtifactConsumerTest {
                     "bob-two"));
             ExactValue childReference = engine.referenceRequest(
                     "document", engine.exactValue(childYaml));
-            engine.appendAndDispatch(firstTimeline, Operation.exact(
+            appendAndDrain(engine, firstTimeline, Operation.exact(
                     "attachChild", "ownerChannel", childReference));
-            engine.appendAndDispatch(secondTimeline, Operation.exact(
+            appendAndDrain(engine, secondTimeline, Operation.exact(
                     "attachChild", "ownerChannel", childReference));
-            engine.appendAndDispatch(childTimeline, Operation.yaml(
+            appendAndDrain(engine, childTimeline, Operation.yaml(
                     "increment", "ownerChannel", "amount: 5"));
 
             assertEquals(7L, integer(engine, child, "/counter"));
@@ -173,7 +184,7 @@ final class PublishedArtifactConsumerTest {
             engine.startDocument(
                     statistics,
                     resource("examples/clean/nba-statistics.yaml"));
-            engine.appendAndDispatch(
+            appendAndDrain(engine,
                     commissioner,
                     Operation.exact(
                             "attachGame",
@@ -199,10 +210,19 @@ final class PublishedArtifactConsumerTest {
             long timestamp,
             String operation,
             String request) {
-        engine.dispatch(engine.appendAt(
+        var entry = engine.appendAt(
                 timeline,
                 Operation.yaml(operation, "gameFeed", request),
-                timestamp));
+                timestamp);
+        engine.drainThrough(entry.sourceOrderKey());
+    }
+
+    private static void appendAndDrain(
+            CoordinationEngine engine,
+            Timeline timeline,
+            Operation operation) {
+        var entry = engine.append(timeline, operation);
+        engine.drainThrough(entry.sourceOrderKey());
     }
 
     private static String parentDefinition(
@@ -212,6 +232,8 @@ final class PublishedArtifactConsumerTest {
         return resource("examples/clean/embedded-state-parent.yaml")
                 .replace("documentId: embedded-state-parent",
                         "documentId: " + documentId)
+                .replace("coordination/internal/embedded-state-parent",
+                        "coordination/internal/" + documentId)
                 .replace("timelineId: examples/embedded/state-parent",
                         "timelineId: " + timelineId)
                 .replace("accountId: bob", "accountId: " + actorId);

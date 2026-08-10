@@ -1,0 +1,25 @@
+documentId: deep-same-entry-a11
+name: Deep Same-Entry Leaf A11
+directCount: 0
+contracts:
+  sharedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/deep-same-entry/shared
+    actor:
+      type: MyOS/Principal Actor
+      accountId: shared-actor
+  advance:
+    type: Coordination/Sequential Workflow Operation
+    channel: sharedChannel
+    request:
+      amount: {type: Integer}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /directCount
+              val: {$add: [$document: /directCount, $binding: event/message/request/amount]}
+          - $return: true

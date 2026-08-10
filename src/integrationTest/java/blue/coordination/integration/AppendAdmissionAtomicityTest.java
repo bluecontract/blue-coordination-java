@@ -41,7 +41,6 @@ final class AppendAdmissionAtomicityTest {
             assertEquals(expected.blueId(), retry.blueId());
             assertEquals(1L, retry.globalSequence());
             assertEquals(1L, retry.timelineSequence());
-            assertEquals(expected.appendFrontier(), retry.appendFrontier());
             assertEquals(1, engine.journalSize());
         }
     }

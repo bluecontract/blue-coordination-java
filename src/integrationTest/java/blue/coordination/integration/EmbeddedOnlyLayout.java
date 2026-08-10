@@ -27,11 +27,11 @@ final class EmbeddedOnlyLayout {
     }
 
     int splitterCreatedEdgeCount() {
-        return snapshot.autonomousBoundaries().size();
+        return snapshot.processEmbeddedBoundaries().size();
     }
 
     List<Boundary> boundaries() {
-        return snapshot.autonomousBoundaries().stream()
+        return snapshot.processEmbeddedBoundaries().stream()
                 .map(Boundary::new)
                 .toList();
     }

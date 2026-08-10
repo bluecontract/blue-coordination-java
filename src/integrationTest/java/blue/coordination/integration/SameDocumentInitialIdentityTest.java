@@ -11,13 +11,47 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * One stable document identity has one authoritative original initial state.
- * A second parent may reuse that session only by supplying the exact same
- * initial Blue value; a conflicting body with the same documentId fails closed.
+ * A stable document identity accepts verified known epochs and rejects an
+ * unknown divergent body without changing the existing managed lineage.
  */
 final class SameDocumentInitialIdentityTest {
     @Test
-    void sameDocumentIsReusedButConflictingInitialStateIsRejectedAtomically()
+    void equalExactStatesWithDifferentDocumentIdsKeepIndependentHistories()
+            throws Exception {
+        try (TestEngine engine = TestEngine.create()) {
+            String identityFreeCounter = resource(
+                    "examples/clean/embedded-counter.yaml")
+                    .replace("documentId: embedded-counter-A\n", "");
+            Timeline timeline = engine.timeline(
+                    "examples/embedded/A", "alice");
+
+            engine.start("counter-lineage-one", identityFreeCounter);
+            engine.start("counter-lineage-two", identityFreeCounter);
+
+            assertEquals(
+                    engine.session("counter-lineage-one").current().blueId(),
+                    engine.session("counter-lineage-two").current().blueId());
+
+            engine.appendAndDispatch(
+                    timeline,
+                    Operation.yaml(
+                            "increment", "ownerChannel", "amount: 4"));
+
+            assertEquals(4L, integer(
+                    engine, "counter-lineage-one", "/counter"));
+            assertEquals(4L, integer(
+                    engine, "counter-lineage-two", "/counter"));
+            assertEquals(2, engine.history("counter-lineage-one").size());
+            assertEquals(2, engine.history("counter-lineage-two").size());
+            assertEquals("counter-lineage-one", engine.history(
+                    "counter-lineage-one").get(1).documentId().value());
+            assertEquals("counter-lineage-two", engine.history(
+                    "counter-lineage-two").get(1).documentId().value());
+        }
+    }
+
+    @Test
+    void sameDocumentIsReusedButUnknownDivergentStateIsRejectedAtomically()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
             String childInitial = resource(
@@ -78,7 +112,8 @@ final class SameDocumentInitialIdentityTest {
                                             conflictingInitial))));
 
             assertTrue(failure.getMessage().contains(
-                    "exact original initial state"));
+                    "Invalid admission evidence: unknown state"),
+                    failure::getMessage);
             assertEquals(secondParentEpochBefore,
                     engine.session("identity-parent-two").epoch());
             assertTrue(engine.embeddedDocuments(
@@ -99,6 +134,8 @@ final class SameDocumentInitialIdentityTest {
         return resource("examples/clean/embedded-state-parent.yaml")
                 .replace("documentId: embedded-state-parent",
                         "documentId: " + documentId)
+                .replace("coordination/internal/embedded-state-parent",
+                        "coordination/internal/" + documentId)
                 .replace("timelineId: examples/embedded/state-parent",
                         "timelineId: " + timelineId)
                 .replace("accountId: bob", "accountId: " + actorId);

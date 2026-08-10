@@ -8,10 +8,6 @@ import blue.coordination.api.Operation;
 
 import blue.coordination.api.ExactValue;
 
-import blue.coordination.api.EnvironmentFrontier;
-
-import blue.coordination.api.DocumentId;
-
 import blue.language.merge.ResolvedSnapshot;
 import blue.language.model.Node;
 import blue.language.processor.ExternalOrderKey;
@@ -58,12 +54,7 @@ final class WholeRequestEntryFactory {
             Operation operation,
             long timestampMicros,
             long globalSequence,
-            long timelineSequence,
-            EnvironmentFrontier appendFrontier,
-            boolean processorManaged,
-            DocumentId target,
-            TimelineEntry.CatchUpCause cause,
-            ExternalOrderKey sourceOrderOverride) {
+            long timelineSequence) {
         Objects.requireNonNull(timeline, "timeline");
         Objects.requireNonNull(operation, "operation");
         if (timestampMicros <= 0L) {
@@ -80,35 +71,92 @@ final class WholeRequestEntryFactory {
                         previousEntryBlueId,
                         operation,
                         timestampMicros,
-                        request));
+                        request,
+                        "append"));
         ExternalOrderKey journalOrderKey = ExternalOrderKey.of(List.of(
                 BigInteger.valueOf(timestampMicros),
                 timeline.timelineId(),
                 event.blueId()));
-        ExternalOrderKey sourceOrderKey = sourceOrderOverride == null
-                ? journalOrderKey
-                : sourceOrderOverride;
         metrics.increment("append.entriesBuilt");
         return new TimelineEntry(
                 event,
                 request,
                 journalOrderKey,
-                sourceOrderKey,
+                journalOrderKey,
                 timeline,
                 operation.operation(),
                 operation.channel(),
                 timestampMicros,
                 globalSequence,
-                timelineSequence,
-                appendFrontier,
-                processorManaged,
-                target,
-                cause);
+                timelineSequence);
+    }
+
+    /** Retains one already exact external envelope without rebuilding it. */
+    public TimelineEntry createExact(
+            Timeline registeredTimeline,
+            ExactValue exactEvent,
+            long globalSequence,
+            long timelineSequence) {
+        Objects.requireNonNull(registeredTimeline, "registeredTimeline");
+        ExactValue supplied = Objects.requireNonNull(
+                exactEvent, "exactEvent");
+        FrozenNode root = supplied.frozen();
+        String timelineId = (String) root.at(
+                "/timeline/timelineId").getValue();
+        String actorId = (String) root.at("/actor/accountId").getValue();
+        if (!registeredTimeline.equals(new Timeline(timelineId, actorId))) {
+            throw new IllegalArgumentException(
+                    "Timeline Entry does not match the registered Timeline");
+        }
+        long timestamp = new BigInteger(
+                root.at("/timestamp").getValue().toString()).longValueExact();
+        String operation = (String) root.at(
+                "/message/operation").getValue();
+        String channel = (String) root.at("/message/channel").getValue();
+        FrozenNode requestNode = root.at("/message/request");
+        ExactValue request = requestNode.isReferenceOnly()
+                ? objects.require(requestNode.getReferenceBlueId())
+                : objects.put(requestNode, "timeline-request");
+        ExactValue retainedEvent = objects.put(
+                supplied, "timeline-entry");
+        ExternalOrderKey order = ExternalOrderKey.of(List.of(
+                BigInteger.valueOf(timestamp),
+                timelineId,
+                retainedEvent.blueId()));
+        metrics.increment("append.entriesBuilt");
+        return new TimelineEntry(
+                retainedEvent,
+                request,
+                order,
+                order,
+                registeredTimeline,
+                operation,
+                channel,
+                timestamp,
+                globalSequence,
+                timelineSequence);
     }
 
     public ExactValue parseExactRequest(String requestYaml) {
         return exactRequest(Operation.yaml(
                 "requestOnly", "requestOnly", requestYaml));
+    }
+
+    ExactValue createProcessorOwnedEvent(
+            Timeline timeline,
+            String previousEntryBlueId,
+            long timestampMicros,
+            ExactValue request) {
+        return exactEvent(
+                timeline,
+                previousEntryBlueId,
+                Operation.exact(
+                        EmbeddedEpochInput.INTERNAL_OPERATION,
+                        EmbeddedEpochInput.INTERNAL_CHANNEL,
+                        request),
+                timestampMicros,
+                request,
+                "process.embeddedInput");
     }
 
     private ExactValue exactRequest(Operation operation) {
@@ -131,7 +179,8 @@ final class WholeRequestEntryFactory {
             String previousEntryBlueId,
             Operation operation,
             long timestampMicros,
-            ExactValue request) {
+            ExactValue request,
+            String metricPrefix) {
         EventShapeKey key = new EventShapeKey(
                 timeline.timelineId(),
                 timeline.actorId(),
@@ -149,9 +198,9 @@ final class WholeRequestEntryFactory {
                         timestampMicros,
                         request);
                 eventTemplates.put(key, template);
-                metrics.increment("append.eventTemplatesCompiled");
+                metrics.increment(metricPrefix + ".eventTemplatesCompiled");
             } else {
-                metrics.increment("append.eventTemplateHits");
+                metrics.increment(metricPrefix + ".eventTemplateHits");
             }
         }
 

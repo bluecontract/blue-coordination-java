@@ -1,0 +1,60 @@
+documentId: three-child-history-parent
+name: Three Child History Parent
+children: {}
+contracts:
+  ownerChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/embedded/three-child-parent
+    actor:
+      type: MyOS/Principal Actor
+      accountId: bob
+  coordinationEmbeddedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: coordination/internal/three-child-history-parent
+    actor:
+      type: MyOS/Principal Actor
+      accountId: coordination
+  embedded:
+    type: Process Embedded
+    collectionPaths: [/children]
+  attachAll:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request:
+      a: {documentId: {type: Text}}
+      b: {documentId: {type: Text}}
+      c: {documentId: {type: Text}}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: add
+              path: /children/a
+              val: {$binding: event/message/request/a}
+          - $appendChange:
+              op: add
+              path: /children/b
+              val: {$binding: event/message/request/b}
+          - $appendChange:
+              op: add
+              path: /children/c
+              val: {$binding: event/message/request/c}
+          - $return: true
+  coordinationApplyEmbeddedRevision:
+    type: Coordination/Sequential Workflow Operation
+    channel: coordinationEmbeddedChannel
+    request:
+      occurrencePath: {type: Text}
+      after: {documentId: {type: Text}}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: {$binding: event/message/request/occurrencePath}
+              val: {$binding: event/message/request/after}
+          - $return: true

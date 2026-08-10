@@ -73,17 +73,34 @@ final class CoordinationEngineTest {
             DocumentId counter = DocumentId.of("counter");
             engine.startDocument(counter, COUNTER);
 
-            engine.appendAndDispatch(alice, Operation.yaml(
+            TimelineEntry increment = engine.append(alice, Operation.yaml(
                     "increment", "aliceChannel", "amount: 3"));
-            engine.appendAndDispatch(bob, Operation.yaml(
+            assertEquals(1L, engine.metrics().counter(
+                    CoordinationMetrics.Counter.ENTRIES_STORED_WHOLE));
+            assertEquals(0L, engine.metrics().counter(
+                    CoordinationMetrics.Counter.EXTERNAL_PROCESS_CALLS));
+            engine.drainThrough(increment.sourceOrderKey());
+            TimelineEntry decrement = engine.append(bob, Operation.yaml(
                     "decrement", "bobChannel", "amount: 1"));
+            engine.drainThrough(decrement.sourceOrderKey());
 
             assertEquals(BigInteger.valueOf(2L), engine.document(counter)
                     .valueAt("/counter").copyNode().getValue());
             assertEquals(2L, engine.document(counter).epoch());
             assertEquals(2, engine.metrics().journalEntryCount());
             assertEquals(2L, engine.metrics().counter(
-                    "process.frozenContractsInvocations"));
+                    CoordinationMetrics.Counter.ENTRIES_STORED_WHOLE));
+            assertEquals(2L, engine.metrics().counter(
+                    CoordinationMetrics.Counter.ROUTE_INDEX_LOOKUPS));
+            assertEquals(1L, engine.metrics().counter(
+                    CoordinationMetrics.Counter.DOCUMENT_INITIALIZATIONS));
+            assertEquals(2L, engine.metrics().counter(
+                    CoordinationMetrics.Counter.EXTERNAL_PROCESS_CALLS));
+            assertEquals(0L, engine.metrics().counter(
+                    CoordinationMetrics.Counter.CHILD_EPOCHS_COMMITTED));
+            assertEquals(
+                    CoordinationMetrics.Counter.values().length,
+                    engine.metrics().counters().size());
         }
     }
 

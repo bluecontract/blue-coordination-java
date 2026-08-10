@@ -55,7 +55,7 @@ final class NbaHostLifecycleConvergenceTest {
             engine.start("nba-game-host", hostInitial);
             touchHost(engine, timelines.host());
             attach(engine, timelines.host(), gameInitial);
-            dispatchGameRange(engine, timelines.game(), 0, 4);
+            dispatchGameRangeLive(engine, timelines.game(), 0, 4);
             touchHost(engine, timelines.host());
             return result("host first, game history arrives after attachment", engine, GAME_ID);
         }
@@ -86,7 +86,7 @@ final class NbaHostLifecycleConvergenceTest {
             engine.start("nba-game-host", hostInitial);
             touchHost(engine, timelines.host());
             attach(engine, timelines.host(), gameInitial);
-            dispatchGameRange(engine, timelines.game(), 2, 4);
+            dispatchGameRangeLive(engine, timelines.game(), 2, 4);
             touchHost(engine, timelines.host());
             return result("partial history before late game admission", engine, GAME_ID);
         }
@@ -157,6 +157,16 @@ final class NbaHostLifecycleConvergenceTest {
             int to) {
         for (int index = from; index < to; index++) {
             dispatch(engine, game, gameTimestamp(index), gameOperation(index));
+        }
+    }
+
+    private static void dispatchGameRangeLive(
+            TestEngine engine,
+            Timeline game,
+            int from,
+            int to) {
+        for (int index = from; index < to; index++) {
+            engine.appendAndDispatch(game, gameOperation(index));
         }
     }
 

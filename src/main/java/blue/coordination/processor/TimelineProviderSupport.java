@@ -5,13 +5,17 @@ import blue.language.processor.ChannelCheckpointContext;
 import blue.language.processor.ChannelEvaluation;
 import blue.language.processor.ChannelEvaluationContext;
 import blue.language.processor.ExternalChannelMemberSnapshot;
+import blue.repo.coordination.AllTimelinesChannel;
+import blue.repo.coordination.CompositeTimelineChannel;
 import blue.repo.coordination.TimelineChannel;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.SortedSet;
 import java.util.TreeSet;
 
@@ -25,6 +29,123 @@ import java.util.TreeSet;
  */
 public final class TimelineProviderSupport {
     private TimelineProviderSupport() {
+    }
+
+    /**
+     * Returns the bounded exact preselection keys for the scalar Timeline and
+     * Actor envelope used by Coordination's in-memory provider adapter.
+     *
+     * <p>The returned set includes the exact pair, Timeline-only, Actor-only,
+     * and broad keys. The document-local frozen delivery-plan verifier remains
+     * authoritative for acceptance; these keys only prevent whole-document
+     * route scans.</p>
+     */
+    public static List<String> exactScalarEventKeys(
+            String timelineId,
+            String actorId) {
+        return TimelineSubscriptionProjection.exactScalarEventKeys(
+                timelineId,
+                actorId,
+                CoordinationSemanticTypeIdentities.publishedDefaults());
+    }
+
+    /**
+     * Returns every bounded feeder preselection key emitted by the registered
+     * Timeline channel family for one exact Timeline Entry header.
+     */
+    public static List<String> exactTimelineEntryEventKeys(
+            String timelineId,
+            String actorId) {
+        LinkedHashSet<String> result = new LinkedHashSet<>(
+                exactScalarEventKeys(timelineId, actorId));
+        result.add(AllTimelinesExternalSubscriptionFunctions
+                .ALL_TIMELINES_KEY);
+        return List.copyOf(result);
+    }
+
+    /**
+     * Validates the immutable envelope accepted by the compact Timeline
+     * feeder. The check uses the registered Timeline Entry and Operation
+     * Request identities; it does not invent document-targeting semantics.
+     *
+     * @param exactEntry exact, direct-header Timeline Entry
+     * @throws IllegalArgumentException when the supported envelope is invalid
+     */
+    public static void validateExactEnvelope(Node exactEntry) {
+        CoordinationEventNodes.TimelineEntryView entry =
+                CoordinationEventNodes.timelineEntry(exactEntry);
+        CoordinationEventNodes.OperationRequestView request =
+                CoordinationEventNodes.operationRequest(exactEntry);
+        String timelineId = entry == null ? null
+                : textProperty(entry.timeline(), "timelineId");
+        String actorId = entry == null ? null
+                : textProperty(entry.actor(), "accountId");
+        if (entry == null || request == null || !request.routable()
+                || timelineId == null || timelineId.isBlank()
+                || actorId == null || actorId.isBlank()
+                || entry.timestamp().signum() <= 0
+                || entry.timestamp().bitLength() > 63) {
+            throw new IllegalArgumentException(
+                    "Invalid exact Timeline Entry envelope");
+        }
+        Node message = entry.message();
+        if (property(message, "request") == null) {
+            throw new IllegalArgumentException(
+                    "Timeline Entry Operation Request has no request");
+        }
+        Node exactVersion = property(
+                message, "requireExactDocumentVersion");
+        Object exactVersionValue = exactVersion == null
+                ? null : exactVersion.getValue();
+        if (exactVersionValue != null
+                && !(exactVersionValue instanceof Boolean)) {
+            throw new IllegalArgumentException(
+                    "requireExactDocumentVersion must be Boolean");
+        }
+        if (Boolean.TRUE.equals(exactVersionValue)
+                && !hasDocumentValue(property(message, "document"))) {
+            throw new IllegalArgumentException(
+                    "Exact document version requires a document");
+        }
+        if (hasRuntimeValue(property(exactEntry, "onBehalfOf"))) {
+            throw new IllegalArgumentException(
+                    "onBehalfOf requires a Mandate resolver");
+        }
+    }
+
+    /**
+     * Recreates the exact current-runtime checkpoint discriminator retained by
+     * the host for one processor-owned external subscription occurrence.
+     */
+    public static String checkpointDomainRuntimeDiscriminator(
+            String effectiveTypeBlueId) {
+        String typeBlueId = requireText(
+                effectiveTypeBlueId, "effectiveTypeBlueId");
+        if (CompositeTimelineChannel.blueId().equals(typeBlueId)) {
+            return "coordination.composite-timeline:"
+                    + "direct-timeline-members-v2"
+                    + "|subject="
+                    + CompositeTimelineExternalSubscriptionFunctions
+                    .ORDER_SUBJECT_VERSION;
+        }
+        if (AllTimelinesChannel.blueId().equals(typeBlueId)) {
+            return "coordination.all-timelines:"
+                    + "timeline-type-family-v2"
+                    + "|subject="
+                    + AllTimelinesExternalSubscriptionFunctions
+                    .ORDER_SUBJECT_VERSION;
+        }
+        CoordinationSemanticTypeIdentities identities =
+                CoordinationSemanticTypeIdentities.publishedDefaults();
+        return "coordination.timeline-entry:"
+                + identities.timelineEntryBlueId()
+                + "|semantic-profile="
+                + identities.profileIdentity()
+                + "|projection="
+                + TimelineSubscriptionProjection.VERSION
+                + "|subject="
+                + TimelineExternalSubscriptionFunctions
+                .TIMELINE_ORDER_SUBJECT_VERSION;
     }
 
     public static ChannelEvaluation evaluateTimelineEntry(TimelineChannel contract, ChannelEvaluationContext context) {
@@ -322,6 +443,18 @@ public final class TimelineProviderSupport {
         return node.getProperties().get(key);
     }
 
+    private static boolean hasDocumentValue(Node node) {
+        return hasRuntimeValue(node) || node != null && node.getType() != null;
+    }
+
+    private static boolean hasRuntimeValue(Node node) {
+        return node != null && (node.getBlueId() != null
+                || node.getValue() != null
+                || node.getItems() != null && !node.getItems().isEmpty()
+                || node.getProperties() != null
+                && !node.getProperties().isEmpty());
+    }
+
     public static String textProperty(Node node, String key) {
         Node property = property(node, key);
         Object value = property != null ? property.getValue() : null;
@@ -502,6 +635,14 @@ public final class TimelineProviderSupport {
                     role + " has no exact identity");
         }
         return blueId;
+    }
+
+    private static String requireText(String value, String label) {
+        String checked = Objects.requireNonNull(value, label);
+        if (checked.isBlank()) {
+            throw new IllegalArgumentException(label + " must not be blank");
+        }
+        return checked;
     }
 
     private static final class TimelinePosition {

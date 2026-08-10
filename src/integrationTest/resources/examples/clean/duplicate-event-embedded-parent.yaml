@@ -1,0 +1,106 @@
+documentId: duplicate-event-parent
+name: Duplicate Event Occurrence Parent
+oldChildValueSeen: -1
+incomingChildValueSeen: -1
+firstOccurrenceIndexSeen: -1
+secondOccurrenceIndexSeen: -1
+firstEventBlueIdSeen: unset
+secondEventBlueIdSeen: unset
+firstEventTypeBlueIdSeen: unset
+secondEventTypeBlueIdSeen: unset
+contracts:
+  coordinationEmbeddedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: coordination/internal/duplicate-event-parent
+    actor:
+      type: MyOS/Principal Actor
+      accountId: coordination
+  embedded:
+    type: Process Embedded
+    paths: [/child]
+  coordinationApplyEmbeddedRevision:
+    type: Coordination/Sequential Workflow Operation
+    channel: coordinationEmbeddedChannel
+    request:
+      occurrencePath: {type: Text}
+      after:
+        documentId: {type: Text}
+        counter: {type: Integer}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $if:
+              cond:
+                $eq:
+                  - $binding: event/message/request/emittedEventCount
+                  - 2
+              then:
+                - $appendChange:
+                    op: replace
+                    path: /oldChildValueSeen
+                    val: {$document: /child/counter}
+                - $appendChange:
+                    op: replace
+                    path: /incomingChildValueSeen
+                    val: {$binding: event/message/request/after/counter}
+                - $appendChange:
+                    op: replace
+                    path: /firstOccurrenceIndexSeen
+                    val: {$binding: event/message/request/eventOccurrences/0/occurrenceIndex}
+                - $appendChange:
+                    op: replace
+                    path: /secondOccurrenceIndexSeen
+                    val: {$binding: event/message/request/eventOccurrences/1/occurrenceIndex}
+                - $appendChange:
+                    op: replace
+                    path: /firstEventBlueIdSeen
+                    val: {$binding: event/message/request/eventOccurrences/0/eventBlueId}
+                - $appendChange:
+                    op: replace
+                    path: /secondEventBlueIdSeen
+                    val: {$binding: event/message/request/eventOccurrences/1/eventBlueId}
+                - $appendChange:
+                    op: replace
+                    path: /firstEventTypeBlueIdSeen
+                    val: {$binding: event/message/request/eventOccurrences/0/eventTypeBlueId}
+                - $appendChange:
+                    op: replace
+                    path: /secondEventTypeBlueIdSeen
+                    val: {$binding: event/message/request/eventOccurrences/1/eventTypeBlueId}
+          - $appendChange:
+              op: replace
+              path: {$binding: event/message/request/occurrencePath}
+              val: {$binding: event/message/request/after}
+          - $return: true
+child:
+  documentId: duplicate-event-child
+  name: Duplicate Event Child
+  counter: 0
+  contracts:
+    childChannel:
+      type: Coordination/Timeline Channel
+      timeline:
+        type: MyOS/MyOS Timeline
+        timelineId: examples/duplicate-events/child
+      actor:
+        type: MyOS/Principal Actor
+        accountId: alice
+    advance:
+      type: Coordination/Sequential Workflow Operation
+      channel: childChannel
+      request: {}
+      steps:
+        - type: Coordination/Compute
+          do:
+            - $appendChange: {op: replace, path: /counter, val: 1}
+            - $appendEvent:
+                type: Coordination/Event
+                kind: Duplicate/Event
+                payload: identical
+            - $appendEvent:
+                type: Coordination/Event
+                kind: Duplicate/Event
+                payload: identical
+            - $return: true

@@ -10,13 +10,13 @@ public enum CoordinationErrorCode {
     DOCUMENT_NOT_READY,
     /** Authored or referenced content violates exact identity rules. */
     INVALID_DOCUMENT_IDENTITY,
-    /** The requested temporal activation mode is not implemented. */
-    UNSUPPORTED_ACTIVATION_MODE,
-    /** A transition would change parent route membership dynamically. */
-    UNSUPPORTED_DYNAMIC_MEMBERSHIP,
-    /** Process Embedded collections are outside this release's scope. */
-    UNSUPPORTED_EMBEDDED_COLLECTION,
-    /** No autonomous Root matches the supplied entry when one is required. */
+    /** Host-supplied temporal policy evidence is missing or inconsistent. */
+    INVALID_ACTIVATION_EVIDENCE,
+    /** Frozen subscription evidence is inconsistent with the committed state. */
+    INVALID_SUBSCRIPTION_EVIDENCE,
+    /** A Process Embedded topology change would publish a cycle. */
+    PROCESS_EMBEDDED_CYCLE,
+    /** No managed document matches the supplied entry when one is required. */
     ROUTE_NOT_FOUND,
     /** Exact Timeline Entry validation or publication failed. */
     INVALID_TIMELINE_ENTRY,
@@ -24,6 +24,6 @@ public enum CoordinationErrorCode {
     FROZEN_PROCESSING_FAILED,
     /** The in-memory atomic publication boundary could not commit. */
     ATOMIC_COMMIT_FAILED,
-    /** A parent attempted to mutate state owned by an autonomous child. */
-    AUTONOMOUS_OWNERSHIP_VIOLATION
+    /** A parent attempted to mutate state owned by a managed child. */
+    MANAGED_CHILD_OWNERSHIP_VIOLATION
 }

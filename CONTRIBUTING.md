@@ -36,7 +36,11 @@ the changelog, and run `git diff --check`.
 
 - Keep `blue.coordination.api` immutable and small.
 - Never expose `blue.coordination.internal` in a public signature.
-- Admission preparation is side-effect free; publication owns mutation.
+- Append never routes or processes; the sequential drain coordinator owns
+  canonical entry selection.
+- One document transition is the atomic commit boundary. Do not add a
+  whole-engine rollback snapshot.
+- Keep Process Embedded binding topology immutable and cursor progress separate.
 - Unsupported semantics fail with a `CoordinationException` and stable error
   code; never silently approximate them.
 - Every semantic guarantee or fixed regression needs an executable test.

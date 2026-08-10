@@ -10,6 +10,7 @@ import blue.language.snapshot.FrozenNode;
 import blue.language.provider.NodeProvider;
 
 import java.util.Collections;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,7 +22,7 @@ import java.util.Objects;
  * <p>Requests, Timeline Entries, semantic Roots, and Process Embedded documents
  * are retained as whole immutable values. The semantic value retained for API
  * reads is intentionally separate from the representation returned through the
- * Language provider. A provider representation may replace an autonomous child
+ * Language provider. A provider representation may replace a managed child
  * with a pure reference while preserving the exact same BlueId; this lets the
  * frozen runtime use representation invariance without losing the fully
  * materialized semantic value held by the document session.</p>
@@ -32,6 +33,7 @@ final class WholeObjectStore implements NodeProvider {
     private final Map<String, ExactValue> providerByBlueId =
             new LinkedHashMap<>();
     private final Map<String, String> purposeByBlueId = new LinkedHashMap<>();
+    private final List<Mark> activeMarks = new ArrayList<>();
     private final EngineMetrics metrics;
 
     public WholeObjectStore(EngineMetrics metrics) {
@@ -60,6 +62,7 @@ final class WholeObjectStore implements NodeProvider {
         if (existing != null) {
             if (existing.frozen().isReferenceOnly()
                     && !checked.frozen().isReferenceOnly()) {
+                recordBeforeMutation(checked.blueId());
                 canonicalByBlueId.put(checked.blueId(), checked);
                 ExactValue provider = providerByBlueId.get(checked.blueId());
                 if (provider == null || provider.frozen().isReferenceOnly()) {
@@ -79,6 +82,7 @@ final class WholeObjectStore implements NodeProvider {
             return checked;
         }
         String normalizedPurpose = sanitize(purpose);
+        recordBeforeMutation(checked.blueId());
         canonicalByBlueId.put(checked.blueId(), checked);
         providerByBlueId.put(checked.blueId(), checked);
         purposeByBlueId.put(checked.blueId(), normalizedPurpose);
@@ -106,6 +110,7 @@ final class WholeObjectStore implements NodeProvider {
             throw new IllegalArgumentException(
                     "Provider preference must contain an exact object body");
         }
+        recordBeforeMutation(preferred.blueId());
         providerByBlueId.put(preferred.blueId(), preferred);
         purposeByBlueId.put(preferred.blueId(), sanitize(purpose));
         metrics.increment("wholeObjectStore.providerRepresentationsPreferred");
@@ -130,28 +135,40 @@ final class WholeObjectStore implements NodeProvider {
         return canonicalByBlueId.size();
     }
 
-    /** Captures admission-time visibility without copying immutable bodies. */
+    /** Opens an O(1) nested savepoint; only later changed keys are journaled. */
     public synchronized Mark mark() {
-        return new Mark(
-                canonicalByBlueId,
-                providerByBlueId,
-                purposeByBlueId);
+        Mark mark = new Mark();
+        activeMarks.add(mark);
+        metrics.increment("wholeObjectStore.marksOpened");
+        return mark;
     }
 
-    /** Restores the exact provider-visible state before failed admission. */
+    /** Commits one nested savepoint without copying or rewriting stored bodies. */
+    public synchronized void commit(Mark mark) {
+        requireTopMark(mark);
+        activeMarks.remove(activeMarks.size() - 1);
+        mark.close();
+        metrics.add("wholeObjectStore.markKeysCommitted",
+                mark.changedKeyCount());
+    }
+
+    /** Restores only keys changed after the supplied nested savepoint. */
     public synchronized void rollbackTo(Mark mark) {
-        Objects.requireNonNull(mark, "mark");
-        canonicalByBlueId.clear();
-        canonicalByBlueId.putAll(mark.canonicalByBlueId());
-        providerByBlueId.clear();
-        providerByBlueId.putAll(mark.providerByBlueId());
-        purposeByBlueId.clear();
-        purposeByBlueId.putAll(mark.purposeByBlueId());
-    }
-
-    public synchronized Map<String, ExactValue> snapshot() {
-        return Collections.unmodifiableMap(
-                new LinkedHashMap<>(canonicalByBlueId));
+        requireTopMark(mark);
+        List<Map.Entry<String, PriorState>> changes = new ArrayList<>(
+                mark.priorByBlueId.entrySet());
+        for (int index = changes.size() - 1; index >= 0; index--) {
+            Map.Entry<String, PriorState> change = changes.get(index);
+            restore(canonicalByBlueId, change.getKey(),
+                    change.getValue().canonical());
+            restore(providerByBlueId, change.getKey(),
+                    change.getValue().provider());
+            restore(purposeByBlueId, change.getKey(),
+                    change.getValue().purpose());
+        }
+        activeMarks.remove(activeMarks.size() - 1);
+        mark.close();
+        metrics.add("wholeObjectStore.markKeysRolledBack", changes.size());
     }
 
     @Override
@@ -174,21 +191,72 @@ final class WholeObjectStore implements NodeProvider {
         return checked.replaceAll("[^A-Za-z0-9_.-]", "_");
     }
 
-    /** Immutable admission mark; exact values remain structurally shared. */
-    public record Mark(
-            Map<String, ExactValue> canonicalByBlueId,
-            Map<String, ExactValue> providerByBlueId,
-            Map<String, String> purposeByBlueId) {
-        public Mark {
-            canonicalByBlueId = Collections.unmodifiableMap(
-                    new LinkedHashMap<>(Objects.requireNonNull(
-                            canonicalByBlueId, "canonicalByBlueId")));
-            providerByBlueId = Collections.unmodifiableMap(
-                    new LinkedHashMap<>(Objects.requireNonNull(
-                            providerByBlueId, "providerByBlueId")));
-            purposeByBlueId = Collections.unmodifiableMap(
-                    new LinkedHashMap<>(Objects.requireNonNull(
-                            purposeByBlueId, "purposeByBlueId")));
+    private void recordBeforeMutation(String blueId) {
+        if (activeMarks.isEmpty()) {
+            return;
         }
+        PriorState prior = new PriorState(
+                prior(canonicalByBlueId, blueId),
+                prior(providerByBlueId, blueId),
+                prior(purposeByBlueId, blueId));
+        for (Mark mark : activeMarks) {
+            mark.record(blueId, prior);
+        }
+    }
+
+    private void requireTopMark(Mark mark) {
+        Mark checked = Objects.requireNonNull(mark, "mark");
+        if (activeMarks.isEmpty()
+                || activeMarks.get(activeMarks.size() - 1) != checked
+                || !checked.active) {
+            throw new IllegalStateException(
+                    "Whole-object savepoints must close in nested order");
+        }
+    }
+
+    private static <T> Prior<T> prior(Map<String, T> source, String key) {
+        return new Prior<>(source.containsKey(key), source.get(key));
+    }
+
+    private static <T> void restore(
+            Map<String, T> target,
+            String key,
+            Prior<T> prior) {
+        if (prior.present()) {
+            target.put(key, prior.value());
+        } else {
+            target.remove(key);
+        }
+    }
+
+    /** Delta-scoped nested object-store savepoint. */
+    static final class Mark {
+        private final Map<String, PriorState> priorByBlueId =
+                new LinkedHashMap<>();
+        private boolean active = true;
+
+        private void record(String blueId, PriorState prior) {
+            if (!active) {
+                throw new IllegalStateException("Object-store mark is closed");
+            }
+            priorByBlueId.putIfAbsent(blueId, prior);
+        }
+
+        int changedKeyCount() {
+            return priorByBlueId.size();
+        }
+
+        private void close() {
+            active = false;
+        }
+    }
+
+    private record Prior<T>(boolean present, T value) {
+    }
+
+    private record PriorState(
+            Prior<ExactValue> canonical,
+            Prior<ExactValue> provider,
+            Prior<String> purpose) {
     }
 }

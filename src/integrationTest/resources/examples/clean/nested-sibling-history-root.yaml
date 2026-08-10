@@ -1,0 +1,55 @@
+documentId: nested-sibling-history-root
+name: Nested And Sibling Historical Ordering Root
+children: {}
+contracts:
+  ownerChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/nested-sibling/root
+    actor:
+      type: MyOS/Principal Actor
+      accountId: root-owner
+  coordinationEmbeddedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: coordination/internal/nested-sibling-history-root
+    actor:
+      type: MyOS/Principal Actor
+      accountId: coordination
+  embedded:
+    type: Process Embedded
+    collectionPaths: [/children]
+  attachBoth:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request:
+      a1: {documentId: {type: Text}}
+      a2: {documentId: {type: Text}}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: add
+              path: /children/a1
+              val: {$binding: event/message/request/a1}
+          - $appendChange:
+              op: add
+              path: /children/a2
+              val: {$binding: event/message/request/a2}
+          - $return: true
+  coordinationApplyEmbeddedRevision:
+    type: Coordination/Sequential Workflow Operation
+    channel: coordinationEmbeddedChannel
+    request:
+      occurrencePath: {type: Text}
+      after: {documentId: {type: Text}}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: {$binding: event/message/request/occurrencePath}
+              val: {$binding: event/message/request/after}
+          - $return: true

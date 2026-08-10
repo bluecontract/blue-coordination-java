@@ -7,13 +7,21 @@ the new 3.x API before the first stable 3.0.0 release.
 
 ### Added
 
-- A compact Java 17 in-memory Coordination engine with a 16-type application
-  API.
+- A compact Java 17 in-memory Coordination engine with a small immutable
+  application API.
 - Exact whole-request and whole-Timeline-Entry admission.
-- Operation-aware routing, immutable document snapshots and revision history.
-- Autonomous `Process Embedded` documents, historical catch-up, shared-child
-  convergence and nested catch-up.
-- Atomic rollback, committed-delivery receipts and idempotent retry behavior.
+- Environment-selected append/drain processing, immutable document snapshots
+  and revision history.
+- Managed `Process Embedded.paths` and `collectionPaths`, historical catch-up,
+  shared-child convergence and nested synchronized barriers.
+- Immutable bindings with separate occurrence cursors, exact processor-owned
+  child-epoch inputs, document-local commits, commit companions and idempotent
+  retry behavior.
+- Explicit `FULL_HISTORY`, `FROM_FRONTIER`, and `FROM_NOW` top-level admission.
+- Occurrence-specific embedded admission evidence with exact child epoch,
+  completeness proof, attachment identity, atomic consumption, and retry.
+- READY-only application reads, explicit intermediate audit reads, and
+  deterministic paused/resumable PROCESS-work budgets.
 - Phase timers and work counters separating Coordination host work from frozen
   Language/Contracts/BEX execution.
 - Library-owned unit, compact-engine integration, built-JAR consumer and
@@ -25,7 +33,7 @@ the new 3.x API before the first stable 3.0.0 release.
 
 - Java 17 is now the minimum runtime and compilation baseline.
 - The compact engine replaces the 2.x general planning/fragmentation engine.
-- Only embedded autonomous documents are cut; initial documents, requests,
+- Only managed Process Embedded documents are cut; initial documents, requests,
   Timeline Entries and ordinary nested values remain whole.
 
 ### Removed

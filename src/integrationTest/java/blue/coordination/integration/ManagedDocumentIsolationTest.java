@@ -11,9 +11,9 @@ import static blue.coordination.integration.EngineTestSupport.resource;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Parent and child may share an operation without double-processing the child. */
-final class AutonomousRootIsolationTest {
+final class ManagedDocumentIsolationTest {
     @Test
-    void sharedOperationExecutesOncePerAutonomousRootThenOneRevisionPropagation()
+    void sharedOperationExecutesOncePerManagedDocumentThenOneEpochPropagation()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
             Timeline shared = engine.timeline(
@@ -53,16 +53,14 @@ final class AutonomousRootIsolationTest {
                     "parent external + child external + parent revision");
             assertEquals(3L, work.counter(
                     "process.concreteOwnershipRootInputs"));
-            assertEquals(0L, work.counter(
-                    "process.referenceOnlyRootInputs"));
             assertEquals(3L, work.counter(
                     "process.referenceOnlyEventInputs"));
             assertEquals(0L, work.counter(
-                    "process.concreteSubscriptionProjections"));
+                    "POST_PROCESS_FULL_PROJECTIONS"));
             assertEquals(3L, work.counter(
                     "process.commitCompanionDeltasApplied"));
             assertEquals(0L, work.counter(
-                    "layout.externalAutonomousChildMutationsRejected"));
+                    "layout.externalManagedChildMutationsRejected"));
             assertEquals(
                     engine.session("root-isolation-parent").layout().rootBlueId(),
                     engine.session("root-isolation-parent").layout()
@@ -71,10 +69,22 @@ final class AutonomousRootIsolationTest {
                     engine.session("root-isolation-child").layout().rootBlueId(),
                     engine.session("root-isolation-child").layout()
                             .stored("/").blueId());
-            assertEquals(0L, work.nanos(
-                    "process.reconstructEmbeddedOnlyRoot"));
-            assertEquals(0L, work.nanos(
-                    "process.refreshChangedSubscriptionSurface"));
+            assertEquals(3L, work.counter(
+                    "temporal.graphIdentityMatches"));
+            assertEquals(2L, work.counter(
+                    "temporal.graphIdentityOccurrencesCompared"));
+            assertEquals(0L, work.counter(
+                    "temporal.graphDeltaPreviews"));
+            assertEquals(0L, work.counter(
+                    "temporal.graphForwardBucketsUpdated"));
+            assertEquals(0L, work.counter(
+                    "temporal.graphReconciliations"));
+            assertEquals(3L, work.counter(
+                    "routing.surfacePublicationsSkipped"));
+            assertEquals(0L, work.counter(
+                    "routing.surfaceCompilations"));
+            assertEquals(3L, work.counter("layout.plansReused"));
+            assertEquals(3L, work.counter("GRAPH_SNAPSHOTS_REUSED"));
             assertNoGenericSplitting(work);
         }
     }

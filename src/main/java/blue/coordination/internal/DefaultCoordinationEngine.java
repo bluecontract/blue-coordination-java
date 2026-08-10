@@ -10,8 +10,6 @@ import blue.coordination.api.Operation;
 
 import blue.coordination.api.ExactValue;
 
-import blue.coordination.api.EnvironmentFrontier;
-
 import blue.coordination.api.DocumentRevision;
 
 import blue.coordination.api.DocumentId;
@@ -19,9 +17,12 @@ import blue.coordination.api.CoordinationEngine;
 import blue.coordination.api.CoordinationErrorCode;
 import blue.coordination.api.CoordinationException;
 import blue.coordination.api.CoordinationMetrics;
-import blue.coordination.api.DispatchResult;
+import blue.coordination.api.ProcessingDrainReceipt;
+import blue.coordination.api.TimelineAppendReceipt;
+import blue.coordination.api.ActivationMode;
 import blue.coordination.api.DocumentDispatchOutcome;
 import blue.coordination.api.DocumentSnapshot;
+import blue.coordination.processor.TimelineProviderSupport;
 
 import blue.language.api.BlueCacheStats;
 import blue.language.model.Node;
@@ -41,12 +42,12 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 /**
- * Clean, in-memory Coordination vertical slice for the basic acceptance suite.
+ * In-memory Process Embedded temporal-profile engine.
  *
- * <p>Its rules are intentionally small:</p>
+ * <p>Its execution boundary is intentionally sequential:</p>
  * <ul>
  *   <li>one whole request and one whole Timeline Entry;</li>
- *   <li>operation-aware autonomous-Root routing;</li>
+ *   <li>operation-aware managed-document routing;</li>
  *   <li>exactly one frozen Contracts call per selected Root;</li>
  *   <li>only Process Embedded documents are cut;</li>
  *   <li>embedded sessions process source history once;</li>
@@ -84,33 +85,38 @@ public final class DefaultCoordinationEngine
     private final EmbeddedOnlyLayoutBuilder layoutBuilder;
     private final DocumentTransitionProcessor processor;
     private final InMemoryDocumentStore documents;
-    private final EmbeddedGraphCoordinator embeddedGraph;
-    private final InternalRevisionEventFactory internalEvents;
+    private SequentialDrainCoordinator drainCoordinator;
     private final Map<String, Timeline> timelines = new LinkedHashMap<>();
-    private final Map<String, InternalProcessOutcome> deliveryReceipts =
-            new LinkedHashMap<>();
-    private final Set<String> revisionApplicationReceipts =
-            new LinkedHashSet<>();
     private Consumer<FailurePoint> failureInjector = ignored -> { };
     private long logicalClockMicros = BASE_TIMESTAMP_MICROS;
+    private long applicationClockMicros = BASE_TIMESTAMP_MICROS;
     private boolean closed;
 
     private DefaultCoordinationEngine() {
         metrics = new EngineMetrics();
         objects = new WholeObjectStore(metrics);
-        runtime = BlueRuntime.create(objects);
+        runtime = BlueRuntime.create(objects, metrics);
         entryFactory = new WholeRequestEntryFactory(runtime, objects, metrics);
         journal = new InMemoryTimelineJournal(entryFactory, metrics);
-        routeIndex = new OperationRouteIndex(metrics);
+        documents = new InMemoryDocumentStore();
+        routeIndex = new OperationRouteIndex(
+                metrics, documentId -> documents.find(documentId).orElse(null));
         layoutBuilder = new EmbeddedOnlyLayoutBuilder(
                 runtime, objects, metrics);
         processor = new DocumentTransitionProcessor(
                 runtime, objects, layoutBuilder, metrics,
                 this::inject);
-        documents = new InMemoryDocumentStore();
-        embeddedGraph = new EmbeddedGraphCoordinator(this);
-        internalEvents = new InternalRevisionEventFactory(
-                objects, journal, metrics);
+        drainCoordinator = new SequentialDrainCoordinator(
+                runtime,
+                objects,
+                entryFactory,
+                journal,
+                routeIndex,
+                processor,
+                documents,
+                metrics,
+                this::nextApplicationTimestamp,
+                this::inject);
     }
 
     public static DefaultCoordinationEngine create() {
@@ -145,6 +151,18 @@ public final class DefaultCoordinationEngine
     synchronized DocumentSession start(
             DocumentId documentId,
             String authoredYaml) {
+        return start(
+                documentId,
+                authoredYaml,
+                CoordinationEngine.AdmissionPolicy.FROM_NOW,
+                null);
+    }
+
+    private synchronized DocumentSession start(
+            DocumentId documentId,
+            String authoredYaml,
+            CoordinationEngine.AdmissionPolicy policy,
+            ExternalOrderKey verifiedFrontier) {
         ensureOpen();
         if (documents.find(documentId).isPresent()) {
             throw new IllegalArgumentException(
@@ -152,20 +170,42 @@ public final class DefaultCoordinationEngine
         }
         WholeObjectStore.Mark objectMark = objects.mark();
         try {
+            ExternalOrderKey admissionFrontier = switch (policy) {
+                case FULL_HISTORY ->
+                        DocumentTransitionProcessor.fullHistoryFrontier(
+                                documentId);
+                case FROM_FRONTIER -> requireRetainedFrontier(
+                        verifiedFrontier);
+                case FROM_NOW -> currentAdmissionFrontier(documentId);
+            };
             DocumentSession candidate = processor.admit(
                     documentId,
                     authoredYaml,
-                    currentAdmissionFrontier(documentId));
-            validateTopLevelAdmission(candidate);
+                    admissionFrontier);
 
             documents.insert(candidate);
             routeIndex.replace(
                     candidate.documentId(),
-                    candidate.layout().routingSurface());
+                    candidate.layout().routingSurface(),
+                    candidate.activeSubscriptions());
+            drainCoordinator.admitTopLevel(
+                    candidate,
+                    Objects.requireNonNull(policy, "policy"),
+                    verifiedFrontier);
             metrics.increment("sessionsCreated");
+            objects.commit(objectMark);
             return candidate;
         } catch (RuntimeException failure) {
-            objects.rollbackTo(objectMark);
+            boolean retainAdmission = documents.find(documentId).isPresent()
+                    && drainCoordinator.retainFailedAdmission(documentId);
+            if (retainAdmission) {
+                objects.commit(objectMark);
+                metrics.increment("temporal.failedAdmissionsRetained");
+            } else {
+                documents.remove(documentId);
+                routeIndex.remove(documentId);
+                objects.rollbackTo(objectMark);
+            }
             throw failure;
         }
     }
@@ -176,6 +216,52 @@ public final class DefaultCoordinationEngine
             String authoredYaml) {
         try {
             return snapshot(start(documentId, authoredYaml));
+        } catch (RuntimeException failure) {
+            throw translateStartFailure(documentId, failure);
+        }
+    }
+
+    @Override
+    public synchronized void configureEmbeddedAdmission(
+            DocumentId documentId,
+            ActivationMode mode,
+            ExternalOrderKey verifiedCompleteThrough) {
+        ensureOpen();
+        drainCoordinator.configureEmbeddedAdmission(
+                documentId, mode, verifiedCompleteThrough);
+    }
+
+    @Override
+    public synchronized void configureEmbeddedAdmission(
+            DocumentId parentDocumentId,
+            String absoluteChildPath,
+            DocumentId childDocumentId,
+            String admittedStateBlueId,
+            Long admittedEpoch,
+            ActivationMode mode,
+            ExternalOrderKey verifiedCompleteThrough,
+            String completenessProofIdentity,
+            String expectedAttachmentEntryBlueId) {
+        ensureOpen();
+        drainCoordinator.configureEmbeddedAdmission(
+                parentDocumentId, absoluteChildPath, childDocumentId,
+                admittedStateBlueId, admittedEpoch, mode,
+                verifiedCompleteThrough, completenessProofIdentity,
+                expectedAttachmentEntryBlueId);
+    }
+
+    @Override
+    public synchronized DocumentSnapshot startDocument(
+            DocumentId documentId,
+            String authoredYaml,
+            CoordinationEngine.AdmissionPolicy policy,
+            ExternalOrderKey verifiedFrontier) {
+        try {
+            return snapshot(start(
+                    documentId,
+                    authoredYaml,
+                    policy,
+                    verifiedFrontier));
         } catch (RuntimeException failure) {
             throw translateStartFailure(documentId, failure);
         }
@@ -201,7 +287,7 @@ public final class DefaultCoordinationEngine
     }
 
     /**
-     * Retains one autonomous document whole and returns one whole request that
+     * Retains one managed document whole and returns one whole request that
      * points to it. Attachment never serializes or copies the document through
      * the request/Compute boundary.
      */
@@ -249,15 +335,26 @@ public final class DefaultCoordinationEngine
             Timeline timeline,
             Operation operation) {
         ensureOpen();
+        Timeline canonicalTimeline = requireRegisteredTimeline(timeline);
         long candidateTimestamp = Math.addExact(logicalClockMicros, 1L);
-        TimelineEntry entry = metrics.timed(
-                "append.total",
-                () -> journal.append(
-                        timeline,
-                        operation,
-                        candidateTimestamp));
-        logicalClockMicros = candidateTimestamp;
-        return entry;
+        InMemoryTimelineJournal.Mark mark = journal.mark();
+        WholeObjectStore.Mark objectMark = objects.mark();
+        try {
+            TimelineEntry entry = metrics.timed(
+                    "append.total",
+                    () -> journal.append(
+                            canonicalTimeline,
+                            operation,
+                            candidateTimestamp));
+            requireAfterProcessedFrontier(entry);
+            logicalClockMicros = candidateTimestamp;
+            objects.commit(objectMark);
+            return entry;
+        } catch (RuntimeException failure) {
+            journal.rollbackTo(mark);
+            objects.rollbackTo(objectMark);
+            throw failure;
+        }
     }
 
     @Override
@@ -266,111 +363,100 @@ public final class DefaultCoordinationEngine
             Operation operation,
             long timestampMicros) {
         ensureOpen();
+        Timeline canonicalTimeline = requireRegisteredTimeline(timeline);
         long nextClock = Math.max(logicalClockMicros, timestampMicros);
-        TimelineEntry entry = metrics.timed("append.total",
-                () -> journal.append(timeline, operation, timestampMicros));
-        logicalClockMicros = nextClock;
-        return entry;
+        InMemoryTimelineJournal.Mark mark = journal.mark();
+        WholeObjectStore.Mark objectMark = objects.mark();
+        try {
+            TimelineEntry entry = metrics.timed("append.total",
+                    () -> journal.append(
+                            canonicalTimeline, operation, timestampMicros));
+            requireAfterProcessedFrontier(entry);
+            logicalClockMicros = nextClock;
+            objects.commit(objectMark);
+            return entry;
+        } catch (RuntimeException failure) {
+            journal.rollbackTo(mark);
+            objects.rollbackTo(objectMark);
+            throw failure;
+        }
     }
 
     @Override
-    public synchronized DispatchResult appendAndDispatch(
-            Timeline timeline,
-            Operation operation) {
-        return dispatch(append(timeline, operation));
+    public synchronized TimelineAppendReceipt appendTimelineEntry(
+            Node exactEntry) {
+        ensureOpen();
+        long started = System.nanoTime();
+        WholeObjectStore.Mark objectMark = objects.mark();
+        InMemoryTimelineJournal.Mark journalMark = journal.mark();
+        try {
+            ExactValue supplied = ExactValue.verified(
+                    Objects.requireNonNull(exactEntry, "exactEntry"));
+            Node canonical = supplied.copyNode();
+            TimelineProviderSupport.validateExactEnvelope(canonical);
+            String timelineId = requiredTextAt(
+                    canonical, "/timeline/timelineId");
+            String actorId = requiredTextAt(
+                    canonical, "/actor/accountId");
+            long timestamp = requiredLongAt(canonical, "/timestamp");
+            Timeline timeline = requireRegisteredTimeline(
+                    new Timeline(timelineId, actorId));
+            boolean stored = journal.byBlueId(supplied.blueId()).isEmpty();
+            TimelineEntry admitted = journal.appendExact(timeline, supplied);
+            if (stored) {
+                requireAfterProcessedFrontier(admitted);
+            }
+            logicalClockMicros = Math.max(logicalClockMicros, timestamp);
+            objects.commit(objectMark);
+            return new TimelineAppendReceipt(
+                    admitted,
+                    stored,
+                    journal.size(),
+                    System.nanoTime() - started);
+        } catch (RuntimeException failure) {
+            journal.rollbackTo(journalMark);
+            objects.rollbackTo(objectMark);
+            throw failure;
+        } finally {
+            metrics.addNanos("append.total", System.nanoTime() - started);
+        }
     }
 
     /** Measures the already-compiled exact route index without execution. */
     @Override
     public synchronized int routeTargetCount(TimelineEntry entry) {
         ensureOpen();
-        return metrics.timed("process.routeLookup",
-                () -> routeIndex.route(Objects.requireNonNull(entry, "entry"))
-                        .size());
+        return routeIndex.route(journal.requireCanonical(
+                Objects.requireNonNull(entry, "entry"))).size();
     }
 
     @Override
-    public synchronized DispatchResult dispatch(TimelineEntry entry) {
+    public synchronized ProcessingDrainReceipt drain() {
+        return drain(CoordinationEngine.DrainBudget.unlimited());
+    }
+
+    @Override
+    public synchronized ProcessingDrainReceipt drain(
+            CoordinationEngine.DrainBudget budget) {
         try {
-            return publicResult(dispatchInternal(entry));
+            ensureOpen();
+            return drainCoordinator.drain(null, Objects.requireNonNull(
+                    budget, "budget"));
         } catch (RuntimeException failure) {
             throw translateDispatchFailure(failure);
         }
     }
 
-    private InternalDispatchResult dispatchInternal(TimelineEntry entry) {
-        ensureOpen();
-        long started = System.nanoTime();
-        List<DocumentId> routed = metrics.timed(
-                "process.routeLookup", () -> routeIndex.route(entry));
-        List<InternalProcessOutcome> outcomes = new ArrayList<>();
-        List<DocumentSession> selected = new ArrayList<>();
-        for (DocumentId id : routed.stream().distinct().sorted().toList()) {
-            InternalProcessOutcome receipt = deliveryReceipts.get(
-                    deliveryReceiptKey(entry, id));
-            if (receipt != null) {
-                outcomes.add(receipt);
-                metrics.increment("process.duplicateEntriesSkipped");
-            } else {
-                selected.add(documents.require(id));
-            }
-        }
-        for (DocumentSession session : selected) {
-            if (session.status() != SessionStatus.READY) {
-                throw new IllegalStateException(
-                        "Root " + session.documentId()
-                                + " cannot accept live work while "
-                                + session.status());
-            }
-        }
-
-        if (selected.isEmpty()) {
-            InternalDispatchResult result = new InternalDispatchResult(
-                    entry, outcomes, System.nanoTime() - started);
-            metrics.addNanos("process.total", result.elapsedNanos());
-            return result;
-        }
-
-        EngineState before = snapshotState();
-        boolean published = false;
+    @Override
+    public synchronized ProcessingDrainReceipt drainThrough(
+            ExternalOrderKey inclusiveCutoff) {
         try {
-            List<DocumentTransitionProcessor.Prepared> prepared = new ArrayList<>();
-            for (DocumentSession session : selected) {
-                prepared.add(processor.prepare(session, entry));
-            }
-            List<InternalProcessOutcome> fresh = new ArrayList<>();
-            for (DocumentTransitionProcessor.Prepared transition : prepared) {
-                InternalProcessOutcome outcome = processor.commit(transition);
-                fresh.add(outcome);
-                outcomes.add(outcome);
-            }
-            for (InternalProcessOutcome outcome : fresh) {
-                embeddedGraph.afterCommit(outcome, entry);
-            }
-            inject(FailurePoint.BEFORE_COMMIT_VALIDATION);
-            metrics.add("revisionApplicationReceiptsCommitted",
-                    revisionApplicationReceipts.size()
-                            - before.revisionApplicationReceipts().size());
-            for (InternalProcessOutcome outcome : fresh) {
-                deliveryReceipts.put(deliveryReceiptKey(
-                        entry, outcome.session().documentId()), outcome);
-                metrics.increment("deliveryReceiptsCommitted");
-            }
-            published = true;
-            inject(FailurePoint.AFTER_STATE_SWAP_BEFORE_RETURN);
-            metrics.increment("dispatch.entries");
-            metrics.add("dispatch.roots", fresh.size());
-            InternalDispatchResult result = new InternalDispatchResult(
-                    entry, outcomes, System.nanoTime() - started);
-            metrics.addNanos("process.total", result.elapsedNanos());
-            return result;
+            ensureOpen();
+            return drainCoordinator.drain(Objects.requireNonNull(
+                    inclusiveCutoff, "inclusiveCutoff"),
+                    CoordinationEngine.DrainBudget.unlimited());
         } catch (RuntimeException failure) {
-            if (!published) {
-                restoreState(before);
-                metrics.increment("transactionRetries");
-            }
-            metrics.addNanos("process.total", System.nanoTime() - started);
-            throw failure;
+            throw translateDispatchFailure(failure);
         }
     }
 
@@ -391,6 +477,41 @@ public final class DefaultCoordinationEngine
 
     synchronized void clearFailureInjection() {
         failureInjector = ignored -> { };
+    }
+
+    /**
+     * Reconstructs the coordinator and route index from the retained in-memory
+     * document, journal, graph, cursor, barrier, and entry-frame stores.
+     * Runtime caches and exact immutable objects remain reusable.
+     */
+    synchronized void restartFromStores() {
+        ensureOpen();
+        clearFailureInjection();
+        routeIndex.clear();
+        documents.sessions().stream()
+                .sorted(Comparator.comparing(DocumentSession::documentId))
+                .forEach(session -> routeIndex.replace(
+                        session.documentId(),
+                        session.layout().routingSurface(),
+                        session.activeSubscriptions()));
+        drainCoordinator = drainCoordinator.restartFromStores(this::inject);
+    }
+
+    synchronized void makeHistoricalUnavailable(String diagnostic) {
+        ensureOpen();
+        journal.makeHistoricalUnavailable(Objects.requireNonNull(
+                diagnostic, "diagnostic"));
+    }
+
+    synchronized void makeHistoricalAvailable() {
+        ensureOpen();
+        journal.makeHistoricalAvailable();
+    }
+
+    synchronized void invalidateHistoricalEvidence(String diagnostic) {
+        ensureOpen();
+        journal.invalidateHistoricalEvidence(Objects.requireNonNull(
+                diagnostic, "diagnostic"));
     }
 
     synchronized DocumentSession session(String documentId) {
@@ -417,29 +538,44 @@ public final class DefaultCoordinationEngine
         return session(documentId).revisions();
     }
 
-    synchronized List<CatchUpPlan> catchUpPlans() {
-        return embeddedGraph.plans();
+    synchronized List<TemporalCatchUpEvidence> catchUpEvidence() {
+        Map<String, CatchUpBarrier.Status> statusByBinding =
+                new LinkedHashMap<>();
+        drainCoordinator.barrierEvidence().forEach(barrier ->
+                barrier.bindingIds().forEach(bindingId ->
+                        statusByBinding.put(bindingId, barrier.status())));
+        return drainCoordinator.graphSnapshot().bindings().stream()
+                .map(binding -> new TemporalCatchUpEvidence(
+                        binding.parentDocumentId(),
+                        binding.childDocumentId(),
+                        binding.absolutePath(),
+                        drainCoordinator.cursor(binding.bindingId())
+                                .appliedChildEpoch(),
+                        statusByBinding.getOrDefault(
+                                binding.bindingId(),
+                                CatchUpBarrier.Status.COMPLETE).name(),
+                        binding.activationGeneration()))
+                .toList();
     }
 
     /** External source Timelines reachable through this Root and its links. */
     synchronized Set<String> effectiveTimelineIds(String documentId) {
         ensureOpen();
         LinkedHashSet<String> result = new LinkedHashSet<>();
-        collectTimelineIds(
-                documents.require(DocumentId.of(documentId)),
-                result,
-                new LinkedHashSet<>());
+        result.addAll(drainCoordinator.effectiveTimelineIds(
+                DocumentId.of(documentId)));
         return Collections.unmodifiableSet(result);
     }
 
-    /** Direct Process Embedded path -> autonomous child DocumentId. */
+    /** Direct Process Embedded path to managed child DocumentId. */
     synchronized Map<String, String> embeddedDocuments(
             String documentId) {
         ensureOpen();
         Map<String, String> result = new LinkedHashMap<>();
-        documents.require(DocumentId.of(documentId)).linksByPath()
-                .forEach((path, link) -> result.put(
-                        path, link.childDocumentId().value()));
+        drainCoordinator.bindingsForParent(DocumentId.of(documentId))
+                .forEach(binding -> result.put(
+                        binding.absolutePath(),
+                        binding.childDocumentId().value()));
         return Collections.unmodifiableMap(result);
     }
 
@@ -480,90 +616,6 @@ public final class DefaultCoordinationEngine
         return documents;
     }
 
-    synchronized DocumentSession admitEmbedded(
-            EmbeddedOccurrence occurrence,
-            TimelineEntry.CatchUpCause cause,
-            EnvironmentFrontier cutoff,
-            ExternalOrderKey cutoffOrderKey) {
-        DocumentSession existing = documents.find(
-                occurrence.childDocumentId()).orElse(null);
-        if (existing != null) {
-            return existing;
-        }
-        DocumentSession child = processor.admitExact(
-                occurrence.childDocumentId(),
-                occurrence.suppliedState(),
-                DocumentTransitionProcessor.fullHistoryFrontier(
-                        occurrence.childDocumentId()),
-                cause);
-        documents.insert(child);
-        routeIndex.replace(
-                child.documentId(), child.layout().routingSurface());
-        metrics.increment("embedding.childSessionsCreated");
-        metrics.increment("sessionsCreated");
-        inject(FailurePoint.AFTER_STAGING_CHILD_SESSION);
-        embeddedGraph.synchronizeAdmission(
-                child, cause, cutoff, cutoffOrderKey);
-        return child;
-    }
-
-    synchronized List<TimelineEntry> journalEntriesThrough(
-            DocumentSession child,
-            EnvironmentFrontier cutoff) {
-        List<TimelineEntry> result = new ArrayList<>();
-        for (String timelineId : child.layout().routingSurface()
-                .externalTimelineIds()) {
-            journal.entriesThrough(timelineId, cutoff).stream()
-                    .filter(entry -> !entry.processorManaged())
-                    .forEach(result::add);
-        }
-        result.sort(Comparator.comparingLong(
-                TimelineEntry::globalSequence));
-        return Collections.unmodifiableList(result);
-    }
-
-    synchronized boolean routesTo(
-            DocumentId documentId,
-            TimelineEntry entry) {
-        return routeIndex.routesTo(documentId, entry);
-    }
-
-    synchronized InternalProcessOutcome processTarget(
-            DocumentSession session,
-            TimelineEntry entry) {
-        DocumentTransitionProcessor.Prepared prepared =
-                processor.prepare(session, entry);
-        InternalProcessOutcome outcome = processor.commit(prepared);
-        embeddedGraph.afterCommit(outcome, entry);
-        return outcome;
-    }
-
-    synchronized TimelineEntry appendInternalRevision(
-            DocumentSession parent,
-            EmbeddedLink link,
-            DocumentRevision childRevision) {
-        return internalEvents.append(
-                parent,
-                link,
-                childRevision,
-                nextTimestamp());
-    }
-
-    synchronized InternalProcessOutcome materializeEmbeddedRevision(
-            DocumentSession parent,
-            EmbeddedLink link,
-            DocumentRevision childRevision) {
-        return processor.materializeEmbeddedRevision(parent, link, childRevision);
-    }
-
-    synchronized boolean hasRevisionApplicationReceipt(String key) {
-        return revisionApplicationReceipts.contains(key);
-    }
-
-    synchronized void commitRevisionApplicationReceipt(String key) {
-        revisionApplicationReceipts.add(Objects.requireNonNull(key, "key"));
-    }
-
     synchronized void inject(FailurePoint point) {
         failureInjector.accept(Objects.requireNonNull(point, "point"));
     }
@@ -574,9 +626,29 @@ public final class DefaultCoordinationEngine
 
     @Override
     public synchronized DocumentSnapshot document(DocumentId documentId) {
+        DocumentSession session = requireDocument(documentId);
+        if (session.status() != SessionStatus.READY) {
+            throw new CoordinationException(
+                    CoordinationErrorCode.DOCUMENT_NOT_READY,
+                    "Document " + documentId + " is " + session.status(),
+                    null,
+                    Map.of("documentId", documentId.value(),
+                            "status", session.status().name()));
+        }
+        return snapshot(session);
+    }
+
+    @Override
+    public synchronized DocumentSnapshot auditDocument(
+            DocumentId documentId) {
+        return snapshot(requireDocument(documentId));
+    }
+
+    private DocumentSession requireDocument(DocumentId documentId) {
         ensureOpen();
         try {
-            return snapshot(documents.require(documentId));
+            return documents.require(Objects.requireNonNull(
+                    documentId, "documentId"));
         } catch (RuntimeException failure) {
             throw new CoordinationException(
                     CoordinationErrorCode.DOCUMENT_NOT_FOUND,
@@ -588,20 +660,19 @@ public final class DefaultCoordinationEngine
 
     @Override
     public synchronized List<DocumentRevision> history(DocumentId documentId) {
-        document(documentId);
-        return documents.require(documentId).revisions();
+        return requireDocument(documentId).revisions();
     }
 
     @Override
     public synchronized Set<String> effectiveTimelineIds(
             DocumentId documentId) {
-        document(documentId);
+        requireDocument(documentId);
         return effectiveTimelineIds(documentId.value());
     }
 
     @Override
     public synchronized CoordinationMetrics metrics() {
-        EngineMetrics.MetricsSnapshot current = metrics.snapshot();
+        EngineMetrics.MetricsSnapshot current = metrics.publicSnapshot();
         return new CoordinationMetrics(
                 current.counters(),
                 current.phaseNanos(),
@@ -614,8 +685,10 @@ public final class DefaultCoordinationEngine
 
     private DocumentSnapshot snapshot(DocumentSession session) {
         Map<String, DocumentId> children = new LinkedHashMap<>();
-        session.linksByPath().forEach((path, link) -> children.put(
-                path, link.childDocumentId()));
+        drainCoordinator.bindingsForParent(session.documentId())
+                .forEach(binding -> children.put(
+                        binding.absolutePath(),
+                        binding.childDocumentId()));
         EmbeddedOnlyLayout layout = session.layout();
         Map<String, ExactValue> physicalObjects = new LinkedHashMap<>();
         layout.scopePaths().forEach(path -> physicalObjects.put(
@@ -635,22 +708,10 @@ public final class DefaultCoordinationEngine
                 layout.routingSurface().definitions().stream()
                         .map(definition -> definition.operation() + "|"
                                 + definition.channelKey() + "|"
-                                + definition.timelineId() + "|"
-                                + definition.actorId())
+                                + definition.sources())
                         .toList(),
                 layout.physicalObjectCount(),
                 layout.processingFrozen().blueId());
-    }
-
-    private static DispatchResult publicResult(InternalDispatchResult result) {
-        List<DocumentDispatchOutcome> outcomes = result.outcomes().stream()
-                .map(outcome -> new DocumentDispatchOutcome(
-                        outcome.session().documentId(),
-                        outcome.revision(),
-                        outcome.totalNanos()))
-                .toList();
-        return new DispatchResult(
-                result.entry(), outcomes, result.elapsedNanos());
     }
 
     private static CoordinationException translateStartFailure(
@@ -662,6 +723,8 @@ public final class DefaultCoordinationEngine
         CoordinationErrorCode code = message.startsWith(
                 "Duplicate document session")
                 ? CoordinationErrorCode.DUPLICATE_DOCUMENT
+                : message.contains("cycle")
+                ? CoordinationErrorCode.PROCESS_EMBEDDED_CYCLE
                 : message.contains("DocumentId")
                 || message.contains("document identity")
                 ? CoordinationErrorCode.INVALID_DOCUMENT_IDENTITY
@@ -684,10 +747,13 @@ public final class DefaultCoordinationEngine
         CoordinationErrorCode code = message.contains(
                 "cannot accept live work")
                 ? CoordinationErrorCode.DOCUMENT_NOT_READY
-                : message.contains("autonomous child")
-                ? CoordinationErrorCode.AUTONOMOUS_OWNERSHIP_VIOLATION
-                : message.contains("subscription membership change")
-                ? CoordinationErrorCode.UNSUPPORTED_DYNAMIC_MEMBERSHIP
+                : message.contains("admission evidence")
+                || message.contains("Ambiguous historical state")
+                ? CoordinationErrorCode.INVALID_ACTIVATION_EVIDENCE
+                : message.contains("managed child")
+                ? CoordinationErrorCode.MANAGED_CHILD_OWNERSHIP_VIOLATION
+                : message.contains("subscription")
+                ? CoordinationErrorCode.INVALID_SUBSCRIPTION_EVIDENCE
                 : CoordinationErrorCode.FROZEN_PROCESSING_FAILED;
         return new CoordinationException(
                 code, message, failure, Map.of());
@@ -702,44 +768,90 @@ public final class DefaultCoordinationEngine
         runtime.close();
     }
 
-    private void collectTimelineIds(
-            DocumentSession session,
-            Set<String> result,
-            Set<DocumentId> visited) {
-        if (!visited.add(session.documentId())) {
-            return;
-        }
-        result.addAll(session.layout().routingSurface().externalTimelineIds());
-        for (EmbeddedLink link : session.linksByPath().values()) {
-            collectTimelineIds(
-                    documents.require(link.childDocumentId()),
-                    result,
-                    visited);
-        }
-    }
-
-    private long nextTimestamp() {
-        logicalClockMicros = Math.addExact(logicalClockMicros, 1L);
-        return logicalClockMicros;
-    }
-
-    private static void validateTopLevelAdmission(DocumentSession candidate) {
-        if (!candidate.layout().directOccurrences().isEmpty()) {
-            throw new IllegalStateException(
-                    "Top-level start with pre-existing Process Embedded children "
-                            + "must use an explicit admission/catch-up operation");
-        }
+    private long nextApplicationTimestamp() {
+        applicationClockMicros = Math.addExact(
+                Math.max(applicationClockMicros, logicalClockMicros), 1L);
+        return applicationClockMicros;
     }
 
     private ExternalOrderKey currentAdmissionFrontier(DocumentId documentId) {
-        List<TimelineEntry> entries = journal.allEntries();
-        if (entries.isEmpty()) {
+        ExternalOrderKey latest = journal.latestExternalOrder();
+        if (latest == null) {
             return ExternalOrderKey.of(List.of(
                     BigInteger.ZERO,
                     "admission",
                     documentId.value()));
         }
-        return entries.get(entries.size() - 1).sourceOrderKey();
+        return latest;
+    }
+
+    private ExternalOrderKey requireRetainedFrontier(
+            ExternalOrderKey frontier) {
+        ExternalOrderKey checked = Objects.requireNonNull(
+                frontier, "verifiedFrontier is required for FROM_FRONTIER");
+        if (!journal.containsExternalOrder(checked)) {
+            throw new IllegalArgumentException(
+                    "Frontier has no exact retained journal evidence");
+        }
+        return checked;
+    }
+
+    private Timeline requireRegisteredTimeline(Timeline supplied) {
+        Timeline checked = Objects.requireNonNull(supplied, "timeline");
+        Timeline canonical = timelines.get(checked.timelineId());
+        if (canonical == null) {
+            throw new IllegalArgumentException(
+                    "Timeline must be registered before append: "
+                            + checked.timelineId());
+        }
+        if (!canonical.equals(checked)) {
+            throw new IllegalArgumentException(
+                    "Timeline actor/provider evidence does not match registered "
+                            + "Timeline " + checked.timelineId());
+        }
+        return canonical;
+    }
+
+    private void requireAfterProcessedFrontier(TimelineEntry entry) {
+        ExternalOrderKey processed = drainCoordinator.processedThrough();
+        if (processed != null
+                && entry.sourceOrderKey().compareTo(processed) <= 0) {
+            throw new IllegalArgumentException(
+                    "Timeline Entry order " + entry.sourceOrderKey()
+                            + " is not after completed environment frontier "
+                            + processed);
+        }
+    }
+
+    private static String requiredTextAt(Node root, String pointer) {
+        Node selected = NodePathEditor.getOrNull(
+                Objects.requireNonNull(root, "root"), pointer);
+        Object value = selected == null ? null : selected.getValue();
+        if (!(value instanceof String text) || text.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Timeline Entry requires non-blank Text at " + pointer);
+        }
+        return text;
+    }
+
+    private static long requiredLongAt(Node root, String pointer) {
+        Node selected = NodePathEditor.getOrNull(
+                Objects.requireNonNull(root, "root"), pointer);
+        Object value = selected == null ? null : selected.getValue();
+        long result;
+        if (value instanceof BigInteger integer) {
+            result = integer.longValueExact();
+        } else if (value instanceof Number number) {
+            result = number.longValue();
+        } else {
+            throw new IllegalArgumentException(
+                    "Timeline Entry requires Integer at " + pointer);
+        }
+        if (result <= 0L) {
+            throw new IllegalArgumentException(
+                    "Timeline Entry timestamp must be positive");
+        }
+        return result;
     }
 
     private void ensureOpen() {
@@ -748,45 +860,12 @@ public final class DefaultCoordinationEngine
         }
     }
 
-    private EngineState snapshotState() {
-        return new EngineState(
-                documents.snapshot(),
-                embeddedGraph.snapshot(),
-                new LinkedHashMap<>(deliveryReceipts),
-                new LinkedHashSet<>(revisionApplicationReceipts),
-                journal.mark(),
-                logicalClockMicros);
-    }
-
-    private void restoreState(EngineState state) {
-        documents.restore(state.documents());
-        deliveryReceipts.clear();
-        deliveryReceipts.putAll(state.deliveryReceipts());
-        revisionApplicationReceipts.clear();
-        revisionApplicationReceipts.addAll(
-                state.revisionApplicationReceipts());
-        embeddedGraph.restore(state.embeddedGraph());
-        journal.rollbackTo(state.journalMark());
-        logicalClockMicros = state.logicalClockMicros();
-        routeIndex.clear();
-        for (DocumentSession session : documents.sessions()) {
-            routeIndex.replace(
-                    session.documentId(), session.layout().routingSurface());
-        }
-    }
-
-    private static String deliveryReceiptKey(
-            TimelineEntry entry,
-            DocumentId documentId) {
-        return entry.blueId() + "|" + documentId.value();
-    }
-
-    private record EngineState(
-            Map<DocumentId, DocumentSession> documents,
-            EmbeddedGraphCoordinator.State embeddedGraph,
-            Map<String, InternalProcessOutcome> deliveryReceipts,
-            Set<String> revisionApplicationReceipts,
-            InMemoryTimelineJournal.Mark journalMark,
-            long logicalClockMicros) {
+    record TemporalCatchUpEvidence(
+            DocumentId parentDocumentId,
+            DocumentId childDocumentId,
+            String occurrencePath,
+            long appliedChildEpoch,
+            String status,
+            long activationGeneration) {
     }
 }

@@ -1,13 +1,9 @@
 package blue.coordination.internal;
 
-import blue.coordination.api.SessionStatus;
-
-import blue.coordination.api.ExactValue;
-
-import blue.coordination.api.DocumentRevision;
-
 import blue.coordination.api.DocumentId;
-
+import blue.coordination.api.DocumentRevision;
+import blue.coordination.api.ExactValue;
+import blue.coordination.api.SessionStatus;
 import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.SubscriptionDelta;
 
@@ -18,17 +14,18 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 
-/** Mutable in-memory session state behind the synchronized engine boundary. */
 final class DocumentSession {
     private final DocumentId documentId;
-    private final ExactValue authoredInitialState;
     private final String authoredInitialBlueId;
     private List<SubscriptionDelta.Entry> activeSubscriptions;
     private final List<DocumentRevision> revisions = new ArrayList<>();
     private final Set<String> terminalEntryBlueIds = new LinkedHashSet<>();
-    private final Map<String, EmbeddedLink> linksByPath = new LinkedHashMap<>();
+    private final Set<String> transitionReceipts = new LinkedHashSet<>();
+    private final StateEpochs stateEpochs = new StateEpochs();
     private EmbeddedOnlyLayout layout;
     private SessionStatus status;
     private ExternalOrderKey readyThrough;
@@ -43,9 +40,8 @@ final class DocumentSession {
             ExternalOrderKey admissionFrontier,
             DocumentRevision initializationRevision) {
         this.documentId = Objects.requireNonNull(documentId, "documentId");
-        this.authoredInitialState = Objects.requireNonNull(
-                authoredInitialState, "authoredInitialState");
-        this.authoredInitialBlueId = authoredInitialState.blueId();
+        this.authoredInitialBlueId = Objects.requireNonNull(
+                authoredInitialState, "authoredInitialState").blueId();
         this.layout = Objects.requireNonNull(
                 initializedLayout, "initializedLayout");
         this.activeSubscriptions = List.copyOf(Objects.requireNonNull(
@@ -65,36 +61,13 @@ final class DocumentSession {
             throw new IllegalArgumentException(
                     "Initialization revision does not belong to session");
         }
-    }
-
-    private DocumentSession(DocumentSession source) {
-        synchronized (source) {
-            documentId = source.documentId;
-            authoredInitialState = source.authoredInitialState;
-            authoredInitialBlueId = source.authoredInitialBlueId;
-            activeSubscriptions = source.activeSubscriptions;
-            revisions.addAll(source.revisions);
-            terminalEntryBlueIds.addAll(source.terminalEntryBlueIds);
-            source.linksByPath.forEach((path, link) ->
-                    linksByPath.put(path, link.copy()));
-            layout = source.layout;
-            status = source.status;
-            readyThrough = source.readyThrough;
-            epoch = source.epoch;
-            applicationSequence = source.applicationSequence;
-        }
-    }
-
-    public DocumentSession copy() {
-        return new DocumentSession(this);
+        stateEpochs.record(initializationRevision);
+        this.transitionReceipts.add(
+                "initialization|" + documentId.value());
     }
 
     public DocumentId documentId() {
         return documentId;
-    }
-
-    public ExactValue authoredInitialState() {
-        return authoredInitialState;
     }
 
     public String authoredInitialBlueId() {
@@ -115,12 +88,6 @@ final class DocumentSession {
 
     public synchronized List<SubscriptionDelta.Entry> activeSubscriptions() {
         return activeSubscriptions;
-    }
-
-    public synchronized void replaceActiveSubscriptions(
-            List<SubscriptionDelta.Entry> replacement) {
-        activeSubscriptions = List.copyOf(Objects.requireNonNull(
-                replacement, "replacement"));
     }
 
     public synchronized SessionStatus status() {
@@ -151,7 +118,6 @@ final class DocumentSession {
         return revision;
     }
 
-    /** O(number returned), not O(total history), because epochs are contiguous. */
     public synchronized List<DocumentRevision> revisionsAfter(
             long epochExclusive) {
         long firstEpoch = Math.max(0L, Math.addExact(epochExclusive, 1L));
@@ -166,26 +132,39 @@ final class DocumentSession {
         return terminalEntryBlueIds.contains(entryBlueId);
     }
 
-    public synchronized Map<String, EmbeddedLink> linksByPath() {
-        return Collections.unmodifiableMap(new LinkedHashMap<>(linksByPath));
+    public synchronized Optional<DocumentRevision> revisionForEntry(
+            String entryBlueId) {
+        String identity = Objects.requireNonNull(entryBlueId, "entryBlueId");
+        return revisions.stream()
+                .filter(revision -> revision.sourceEntry()
+                        .map(entry -> entry.blueId().equals(identity))
+                        .orElse(false))
+                .findFirst();
     }
 
-    public synchronized void putLink(EmbeddedLink link) {
-        Objects.requireNonNull(link, "link");
-        if (!link.parentDocumentId().equals(documentId)) {
-            throw new IllegalArgumentException("Link belongs to another parent");
-        }
-        EmbeddedLink existing = linksByPath.putIfAbsent(
-                link.occurrencePath(), link);
-        if (existing != null
-                && !existing.childDocumentId().equals(link.childDocumentId())) {
-            throw new IllegalStateException(
-                    "Occurrence path already links another child");
-        }
+    public synchronized boolean hasTransitionReceipt(String receiptId) {
+        return transitionReceipts.contains(Objects.requireNonNull(
+                receiptId, "receiptId"));
     }
 
-    public synchronized void removeLink(String path) {
-        linksByPath.remove(path);
+    public synchronized OptionalLong epochForState(String exactBlueId) {
+        return stateEpochs.first(exactBlueId);
+    }
+
+    synchronized long resolveAdmissionEpoch(
+            String stateBlueId,
+            Long exactEpoch) {
+        String state = Objects.requireNonNull(stateBlueId, "stateBlueId");
+        if (exactEpoch == null) {
+            return stateEpochs.resolve(documentId, authoredInitialBlueId, state);
+        }
+        if (exactEpoch > epoch) {
+            throw invalidAdmission("unknown epoch " + exactEpoch);
+        }
+        if (!revision(exactEpoch).after().blueId().equals(state)) {
+            throw invalidAdmission("epoch does not match state " + state);
+        }
+        return exactEpoch;
     }
 
     public synchronized void markCatchingUp() {
@@ -212,10 +191,21 @@ final class DocumentSession {
         }
     }
 
+    synchronized void restoreCoordinationState(
+            SessionStatus restoredStatus,
+            ExternalOrderKey restoredReadyThrough) {
+        this.status = Objects.requireNonNull(
+                restoredStatus, "restoredStatus");
+        this.readyThrough = Objects.requireNonNull(
+                restoredReadyThrough, "restoredReadyThrough");
+    }
+
     public synchronized void commit(
             DocumentRevision revision,
             EmbeddedOnlyLayout nextLayout,
-            ExternalOrderKey committedFrontier) {
+            ExternalOrderKey committedFrontier,
+            List<SubscriptionDelta.Entry> nextSubscriptions,
+            String transitionReceipt) {
         Objects.requireNonNull(revision, "revision");
         if (!revision.documentId().equals(documentId)) {
             throw new IllegalArgumentException(
@@ -232,10 +222,22 @@ final class DocumentSession {
             throw new IllegalStateException(
                     "Application order is not contiguous");
         }
+        String receipt = Objects.requireNonNull(
+                transitionReceipt, "transitionReceipt");
+        if (receipt.isBlank() || transitionReceipts.contains(receipt)) {
+            throw new IllegalStateException(
+                    "Duplicate or blank transition receipt " + receipt);
+        }
+        List<SubscriptionDelta.Entry> subscriptions = List.copyOf(
+                Objects.requireNonNull(
+                        nextSubscriptions, "nextSubscriptions"));
         this.layout = Objects.requireNonNull(nextLayout, "nextLayout");
+        this.activeSubscriptions = subscriptions;
         this.epoch = expectedEpoch;
         this.applicationSequence = revision.rootApplicationOrder();
         this.revisions.add(revision);
+        transitionReceipts.add(receipt);
+        stateEpochs.record(revision);
         revision.sourceEntry().ifPresent(entry ->
                 terminalEntryBlueIds.add(entry.blueId()));
         if (committedFrontier != null
@@ -243,5 +245,51 @@ final class DocumentSession {
                 || committedFrontier.compareTo(readyThrough) > 0)) {
             readyThrough = committedFrontier;
         }
+    }
+
+    static final class StateEpochs {
+        private final Map<String, Long> first = new LinkedHashMap<>();
+        private final Set<String> ambiguous = new LinkedHashSet<>();
+
+        void record(DocumentRevision revision) {
+            String state = revision.after().blueId();
+            Long prior = first.putIfAbsent(state, revision.epoch());
+            if (prior != null && prior != revision.epoch()) {
+                ambiguous.add(state);
+            }
+        }
+
+        OptionalLong first(String stateBlueId) {
+            Long epoch = first.get(Objects.requireNonNull(
+                    stateBlueId, "stateBlueId"));
+            return epoch == null ? OptionalLong.empty() : OptionalLong.of(epoch);
+        }
+
+        long resolve(
+                DocumentId documentId,
+                String authoredInitialBlueId,
+                String stateBlueId) {
+            OptionalLong known = first(stateBlueId);
+            boolean authored = authoredInitialBlueId.equals(stateBlueId);
+            if (ambiguous.contains(stateBlueId)
+                    || authored && known.isPresent() && known.getAsLong() > 0L) {
+                throw new IllegalStateException(
+                        "Ambiguous historical state " + stateBlueId
+                                + "; exact admitted epoch is required");
+            }
+            if (authored) {
+                return -1L;
+            }
+            if (known.isEmpty()) {
+                throw invalidAdmission("unknown state " + stateBlueId
+                        + " for " + documentId);
+            }
+            return known.getAsLong();
+        }
+    }
+
+    private static IllegalStateException invalidAdmission(String diagnostic) {
+        return new IllegalStateException(
+                "Invalid admission evidence: " + diagnostic);
     }
 }

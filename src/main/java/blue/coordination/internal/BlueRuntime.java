@@ -39,6 +39,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * One immutable production composition of Language, Contracts, BEX, and the
@@ -49,21 +50,30 @@ final class BlueRuntime implements AutoCloseable {
     private final BlueLanguage language;
     private final BlueContracts contracts;
     private final DocumentProcessor processor;
+    private final EngineMetrics metrics;
     private boolean closed;
 
     private BlueRuntime(
             NodeProvider nodeProvider,
             BlueLanguage language,
             BlueContracts contracts,
-            DocumentProcessor processor) {
+            DocumentProcessor processor,
+            EngineMetrics metrics) {
         this.nodeProvider = Objects.requireNonNull(
                 nodeProvider, "nodeProvider");
         this.language = Objects.requireNonNull(language, "language");
         this.contracts = Objects.requireNonNull(contracts, "contracts");
         this.processor = Objects.requireNonNull(processor, "processor");
+        this.metrics = Objects.requireNonNull(metrics, "metrics");
     }
 
     static BlueRuntime create(WholeObjectStore wholeObjects) {
+        return create(wholeObjects, new EngineMetrics());
+    }
+
+    static BlueRuntime create(
+            WholeObjectStore wholeObjects,
+            EngineMetrics metrics) {
         BlueRepository repository = BlueRepository.current();
         List<NodeProvider> providers = new ArrayList<>();
         providers.add(Objects.requireNonNull(wholeObjects, "wholeObjects"));
@@ -96,7 +106,7 @@ final class BlueRuntime implements AutoCloseable {
                         "blue.coordination/in-memory-runtime/3.0")
                 .build();
         return new BlueRuntime(
-                nodeProvider, language, contracts, processor);
+                nodeProvider, language, contracts, processor, metrics);
     }
 
     Node parseSourceYaml(String yaml) {
@@ -183,6 +193,7 @@ final class BlueRuntime implements AutoCloseable {
                 currentRootRepresentation, "currentRootRepresentation");
         Node eventReference = new Node().blueId(Objects.requireNonNull(
                 exactEventBlueId, "exactEventBlueId"));
+        long planStarted = System.nanoTime();
         ExternalDeliveryPlan deliveryPlan = contracts
                 .currentRootDeliveryPlanDeriver(
                         rootRevision,
@@ -190,13 +201,35 @@ final class BlueRuntime implements AutoCloseable {
                         Objects.requireNonNull(
                                 rootSubscriptions, "rootSubscriptions"))
                 .derive(root, eventReference);
+        metrics.addNanos("process.deliveryPlanDerivation",
+                System.nanoTime() - planStarted);
         PlatformProcessInvocation invocation =
                 PlatformProcessInvocation.builder()
                         .deliveryPlan(deliveryPlan)
                         .nodeProvider(nodeProvider)
                         .build();
-        return contracts.processForPlatformCommit(
-                root, eventReference, invocation);
+        return metrics.timed("process.platformCommit", () ->
+                contracts.processForPlatformCommit(
+                        root, eventReference, invocation));
+    }
+
+    SubscriptionDelta projectSubscriptionUpdate(
+            FrozenNode processingRoot,
+            List<SubscriptionDelta.Entry> priorActiveIntervals,
+            Set<String> changedRuntimePointers,
+            long resultingRootRevision,
+            ExternalOrderKey transitionOrderKey) {
+        ensureOpen();
+        return contracts.subscriptionSurfaceProjection().projectUpdate(
+                Objects.requireNonNull(
+                        processingRoot, "processingRoot").toNode(),
+                Objects.requireNonNull(
+                        priorActiveIntervals, "priorActiveIntervals"),
+                Objects.requireNonNull(
+                        changedRuntimePointers, "changedRuntimePointers"),
+                resultingRootRevision,
+                Objects.requireNonNull(
+                        transitionOrderKey, "transitionOrderKey"));
     }
 
     EffectiveFragmentationCatalog effectiveFragmentationCatalog(

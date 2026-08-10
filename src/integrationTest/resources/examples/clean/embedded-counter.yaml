@@ -1,7 +1,5 @@
 documentId: embedded-counter-A
-coordination:
-  activationMode: import-full-history
-name: Autonomous Embedded Counter A
+name: Managed Embedded Counter A
 counter: 0
 contracts:
   ownerChannel:

@@ -1,9 +1,11 @@
 package blue.coordination.internal;
 
+import blue.coordination.api.CoordinationMetrics;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -68,6 +70,78 @@ final class EngineMetricsTest {
                 () -> snapshot.phaseNanos().put("other", 1L));
         assertEquals(3L, metrics.counter("work"));
         assertEquals(7L, metrics.phaseNanos("phase"));
+    }
+
+    @Test
+    void snapshotsProjectCanonicalCountersAndRetainInternalDeltas() {
+        EngineMetrics metrics = new EngineMetrics();
+        metrics.add("journal.entriesStoredWhole", 2L);
+        metrics.add("routing.lookups", 3L);
+        metrics.add("temporal.graphSnapshotsReused", 4L);
+        metrics.add("temporal.graphReconciliations", 5L);
+        metrics.add("documentStart.sessionsInitialized", 6L);
+        metrics.add("deliveryReceiptsCommitted", 7L);
+        metrics.add("process.embeddedEpochProcessCalls", 8L);
+        metrics.add("temporal.childEpochsCommitted", 9L);
+        metrics.add("process.documentRevisionsCommitted", 90L);
+        metrics.add("embedding.parentEpochApplications", 10L);
+        metrics.add("journal.historicalWindowsOpened", 12L);
+        metrics.add("temporal.catchUpBarriersCreated", 11L);
+        metrics.add("temporal.catchUpBarriersExtended", 20L);
+        metrics.add("temporal.historicalEntriesReplayed", 13L);
+        metrics.add("temporal.catchUpBarriersCompleted", 14L);
+        metrics.add("diagnostic.internalDelta", 15L);
+
+        Map<String, Long> snapshot = metrics.snapshot().counters();
+
+        assertEquals(2L, snapshot.get("ENTRIES_STORED_WHOLE"));
+        assertEquals(3L, snapshot.get("ROUTE_INDEX_LOOKUPS"));
+        assertEquals(4L, snapshot.get("GRAPH_SNAPSHOTS_REUSED"));
+        assertEquals(5L, snapshot.get("GRAPH_RECONCILIATIONS"));
+        assertEquals(6L, snapshot.get("DOCUMENT_INITIALIZATIONS"));
+        assertEquals(7L, snapshot.get("EXTERNAL_PROCESS_CALLS"));
+        assertEquals(8L, snapshot.get("EMBEDDED_EPOCH_PROCESS_CALLS"));
+        assertEquals(9L, snapshot.get("CHILD_EPOCHS_COMMITTED"));
+        assertEquals(10L, snapshot.get("PARENT_EPOCH_APPLICATIONS"));
+        assertEquals(12L, snapshot.get("HISTORICAL_WINDOWS_OPENED"));
+        assertEquals(13L, snapshot.get("HISTORICAL_ENTRIES_REPLAYED"));
+        assertEquals(11L, snapshot.get("CATCH_UP_BARRIERS_CREATED"));
+        assertEquals(14L, snapshot.get("CATCH_UP_BARRIERS_COMPLETED"));
+        assertEquals(15L, snapshot.get("diagnostic.internalDelta"));
+        for (CoordinationMetrics.Counter counter
+                : CoordinationMetrics.Counter.values()) {
+            assertTrue(snapshot.containsKey(counter.name()),
+                    () -> "Missing canonical counter " + counter);
+        }
+        assertEquals(0L, snapshot.get("REQUEST_FRAGMENTS"));
+        assertEquals(0L, snapshot.get("FULL_ENVIRONMENT_SCANS"));
+        assertEquals(0L, snapshot.get("POST_PROCESS_FULL_PROJECTIONS"));
+    }
+
+    @Test
+    void forbiddenWorkSourcesCannotDisappearBehindDefaultZero() {
+        EngineMetrics metrics = new EngineMetrics();
+        Map<String, CoordinationMetrics.Counter> sources = Map.of(
+                "temporal.unrelatedDocumentReads",
+                CoordinationMetrics.Counter.UNRELATED_DOCUMENT_READS,
+                "append.requestFragments",
+                CoordinationMetrics.Counter.REQUEST_FRAGMENTS,
+                "append.eventFragments",
+                CoordinationMetrics.Counter.TIMELINE_ENTRY_FRAGMENTS,
+                "layout.ordinaryNodeFragments",
+                CoordinationMetrics.Counter.ORDINARY_NODE_FRAGMENTS,
+                "temporal.fullEnvironmentScans",
+                CoordinationMetrics.Counter.FULL_ENVIRONMENT_SCANS,
+                "temporal.sourceReplaysPerParent",
+                CoordinationMetrics.Counter.SOURCE_REPLAYS_PER_PARENT,
+                "process.postProcessFullProjections",
+                CoordinationMetrics.Counter.POST_PROCESS_FULL_PROJECTIONS);
+
+        sources.forEach((source, ignored) -> metrics.increment(source));
+        Map<String, Long> snapshot = metrics.publicSnapshot().counters();
+
+        sources.values().forEach(counter -> assertEquals(
+                1L, snapshot.get(counter.name()), counter.name()));
     }
 
     @Test

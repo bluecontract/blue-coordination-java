@@ -11,7 +11,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-/** Stable immutable read model for one managed autonomous document. */
+/** Stable immutable read model for one managed document. */
 public record DocumentSnapshot(
         DocumentId documentId,
         long epoch,
@@ -21,7 +21,7 @@ public record DocumentSnapshot(
         ExactValue current,
         Map<String, ExactValue> physicalObjects,
         Map<String, DocumentId> embeddedChildren,
-        List<String> autonomousBoundaries,
+        List<String> processEmbeddedBoundaries,
         List<String> routingDefinitions,
         int physicalObjectCount,
         String processingRootBlueId) {
@@ -38,8 +38,8 @@ public record DocumentSnapshot(
         embeddedChildren = Collections.unmodifiableMap(new LinkedHashMap<>(
                 Objects.requireNonNull(
                         embeddedChildren, "embeddedChildren")));
-        autonomousBoundaries = List.copyOf(Objects.requireNonNull(
-                autonomousBoundaries, "autonomousBoundaries"));
+        processEmbeddedBoundaries = List.copyOf(Objects.requireNonNull(
+                processEmbeddedBoundaries, "processEmbeddedBoundaries"));
         routingDefinitions = List.copyOf(Objects.requireNonNull(
                 routingDefinitions, "routingDefinitions"));
         processingRootBlueId = requireText(

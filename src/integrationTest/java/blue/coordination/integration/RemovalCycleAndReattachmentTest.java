@@ -64,8 +64,9 @@ final class RemovalCycleAndReattachmentTest {
                     before, engine.metricsSnapshot());
             assertEquals(3L, integer(
                     engine, "embedded-state-parent", "/child/counter"));
-            assertEquals(1L, work.counter("childRevisionApplications"),
-                    "reattachment resumes after the detached cursor");
+            assertEquals(3L, work.counter("childRevisionApplications"),
+                    "reattachment creates a fresh generation and applies "
+                            + "initialization plus both known child epochs");
             assertEquals(0L, work.counter("childHistoricalProcessCalls"));
         }
     }

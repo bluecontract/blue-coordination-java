@@ -1,6 +1,4 @@
 documentId: embedded-middle-A
-coordination:
-  activationMode: import-full-history
 name: Embedded Middle A
 childCounter: 0
 childRevisionApplications: 0

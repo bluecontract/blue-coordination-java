@@ -72,36 +72,31 @@ final class PublicValueContractTest {
     }
 
     @Test
-    void frontiersDefensivelyCopyAndValidateEveryCursor() {
-        Map<String, Long> cursors = new LinkedHashMap<>();
-        cursors.put("alice", 2L);
-        EnvironmentFrontier frontier = new EnvironmentFrontier(3L, cursors);
-        cursors.put("alice", 99L);
-
-        assertEquals(2L, frontier.sequenceFor("alice"));
-        assertEquals(0L, frontier.sequenceFor("missing"));
-        assertThrows(UnsupportedOperationException.class,
-                () -> frontier.timelineSequences().put("bob", 1L));
-        assertThrows(IllegalArgumentException.class,
-                () -> new EnvironmentFrontier(-1L, Map.of()));
-        assertThrows(IllegalArgumentException.class,
-                () -> new EnvironmentFrontier(1L, Map.of("", 1L)));
-        assertThrows(IllegalArgumentException.class,
-                () -> new EnvironmentFrontier(1L, Map.of("alice", -1L)));
-    }
-
-    @Test
     void metricsAreStableDefensiveSnapshots() {
         Map<String, Long> counters = new LinkedHashMap<>();
-        counters.put("work", 2L);
+        counters.put("ENTRIES_STORED_WHOLE", 2L);
         CoordinationMetrics metrics = new CoordinationMetrics(
-                counters, Map.of("phase", 2_500_000L),
+                counters, Map.of("append.total", 2_500_000L),
                 1, 2, 3, 4, 5L);
-        counters.put("work", 99L);
+        counters.put("ENTRIES_STORED_WHOLE", 99L);
 
-        assertEquals(2L, metrics.counter("work"));
-        assertEquals(0L, metrics.counter("absent"));
-        assertEquals(2.5, metrics.millis("phase"));
+        for (CoordinationMetrics.Counter counter
+                : CoordinationMetrics.Counter.values()) {
+            long expected = counter
+                    == CoordinationMetrics.Counter.ENTRIES_STORED_WHOLE
+                    ? 2L
+                    : 0L;
+            assertEquals(expected, metrics.counter(counter.name()));
+        }
+        assertThrows(IllegalArgumentException.class,
+                () -> metrics.counter("work"));
+        assertEquals(2.5, metrics.millis("append.total"));
+        assertThrows(IllegalArgumentException.class,
+                () -> metrics.millis("phase"));
+        assertThrows(IllegalArgumentException.class,
+                () -> new CoordinationMetrics(
+                        Map.of("work", 1L), Map.of(),
+                        0, 0, 0, 0, 1L));
         assertThrows(UnsupportedOperationException.class,
                 () -> metrics.counters().clear());
         assertThrows(IllegalArgumentException.class,
@@ -149,22 +144,9 @@ final class PublicValueContractTest {
 
             assertEquals(1L, entry.globalSequence());
             assertEquals(1L, entry.timelineSequence());
-            assertTrue(entry.appendFrontier().includes(entry));
-            assertFalse(entry.processorManaged());
-            assertTrue(entry.target().isEmpty());
             assertEquals(entry.blueId(), entry.exactEvent().blueId());
             assertNotNull(entry.sourceOrderKey());
-
-            TimelineEntry.CatchUpCause cause = new TimelineEntry.CatchUpCause(
-                    DocumentId.of("parent"), entry.blueId(), "/child",
-                    entry.timestampMicros());
-            TimelineEntry enriched = entry.withCatchUpCause(cause);
-            assertEquals(cause, enriched.cause().orElseThrow());
-            assertEquals(entry.blueId(), enriched.blueId());
-            assertThrows(IllegalArgumentException.class,
-                    () -> new TimelineEntry.CatchUpCause(
-                            DocumentId.of("parent"), entry.blueId(),
-                            "/child", 0L));
+            assertTrue(engine.drain().processedEntries().contains(entry));
         }
     }
 
@@ -172,8 +154,10 @@ final class PublicValueContractTest {
     void zeroTargetDispatchIsImmutableAndOnlyOutcomeFailsClearly() {
         try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
             Timeline timeline = engine.registerTimeline("feed", "alice");
-            DispatchResult result = engine.appendAndDispatch(
+            TimelineEntry entry = engine.append(
                     timeline, Operation.yaml("unknown", "owner", "{}"));
+            ProcessingDrainReceipt result = engine.drainThrough(
+                    entry.sourceOrderKey());
 
             assertTrue(result.outcomes().isEmpty());
             assertTrue(result.elapsedNanos() >= 0L);

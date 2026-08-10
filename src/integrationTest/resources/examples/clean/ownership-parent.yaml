@@ -1,5 +1,5 @@
 documentId: ownership-parent
-name: Autonomous Root Ownership Parent
+name: Managed Document Ownership Parent
 rootCounter: 0
 childRevisionApplications: 0
 contracts:

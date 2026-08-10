@@ -1,6 +1,4 @@
 documentId: large-paynote
-coordination:
-  activationMode: birth
 name: ACME Hotel & Dinner PayNote
 status: Awaiting Product Conditions
 attachedBy: Alice
@@ -68,10 +66,12 @@ productConditions:
     captureConditionSatisfied: false
     lastProcessedSourceTimestamp:
     product:
+      documentId: large-paynote-hotel-condition-product
       name: Hotel Mlyn Jacka Stay Condition Listener
       productKey: hotel
       sourceOrderId: wadowice-order-2026-v1
       confirmed: false
+      confirmedAt: 0
       done: false
       contracts:
         providerChannel:
@@ -93,6 +93,10 @@ productConditions:
               type: Coordination/Compute
               do:
                 - $appendChange: {op: replace, path: /confirmed, val: true}
+                - $appendChange:
+                    op: replace
+                    path: /confirmedAt
+                    val: {$binding: event/timestamp}
                 - $appendEvent:
                     type: Coordination/Event
                     kind: PayNote/Condition Product Confirmed
@@ -138,10 +142,12 @@ productConditions:
     captureConditionSatisfied: false
     lastProcessedSourceTimestamp:
     product:
+      documentId: large-paynote-restaurant-condition-product
       name: Old Town Restaurant Condition Listener
       productKey: restaurant
       sourceOrderId: wadowice-order-2026-v1
       confirmed: false
+      confirmedAt: 0
       done: false
       cancelled: false
       discountApplied: false
@@ -174,6 +180,10 @@ productConditions:
               type: Coordination/Compute
               do:
                 - $appendChange: {op: replace, path: /confirmed, val: true}
+                - $appendChange:
+                    op: replace
+                    path: /confirmedAt
+                    val: {$binding: event/timestamp}
                 - $appendEvent:
                     type: Coordination/Event
                     kind: PayNote/Condition Product Confirmed
@@ -257,6 +267,21 @@ productConditions:
                     amountMinor: 38000
                     reason: {$binding: event/message/request/reason}
                 - $return: true
+        cancelOutsideRange:
+          type: Coordination/Sequential Workflow Operation
+          channel: customerChannel
+          request:
+            reason: {type: Text}
+          steps:
+            - name: Refuse Late Restaurant Cancellation
+              type: Coordination/Compute
+              do:
+                - $appendEvent:
+                    type: Coordination/Event
+                    kind: Commerce/Change Declined
+                    productKey: restaurant
+                    reason: {$binding: event/message/request/reason}
+                - $return: true
 contracts:
   payerChannel:
     description: Alice PayNote Timeline
@@ -303,36 +328,195 @@ contracts:
     actor:
       type: MyOS/MyOS Admin Actor
       accountId: myos-admin
-  providerChannel:
-    description: Old Town Restaurant provider Timeline owned by this PayNote Root
+  coordinationEmbeddedChannel:
     type: Coordination/Timeline Channel
     timeline:
       type: MyOS/MyOS Timeline
-      timelineId: examples/order/david
+      timelineId: coordination/internal/large-paynote
     actor:
       type: MyOS/Principal Actor
-      accountId: david
-  confirmProduct:
-    name: Confirm Restaurant Product Condition
-    description: Apply the provider fact atomically inside the unsplit PayNote Root.
+      accountId: coordination
+  embedded:
+    type: Process Embedded
+    paths:
+      - /productConditions/hotel/product
+      - /productConditions/restaurant/product
+  coordinationApplyEmbeddedRevision:
     type: Coordination/Sequential Workflow Operation
-    channel: providerChannel
+    channel: coordinationEmbeddedChannel
     request:
-      confirmationReference: {type: Text}
+      occurrencePath: {type: Text}
+      childDocumentId: {type: Text}
+      childEpoch: {type: Integer}
+      after:
+        documentId: {type: Text}
     steps:
-      - name: Apply Restaurant Confirmation
+      - name: Apply Exact Product Epoch
         type: Coordination/Compute
         do:
-          - $appendChange: {op: replace, path: /productConditions/restaurant/product/confirmed, val: true}
-          - $appendChange: {op: replace, path: /productConditions/restaurant/confirmed, val: true}
-          - $appendChange: {op: replace, path: /productConditions/restaurant/captureConditionSatisfied, val: true}
-          - $appendChange: {op: replace, path: /productConditions/restaurant/status, val: Confirmed}
-          - $appendChange: {op: replace, path: /restaurantConfirmedState, val: true}
-          - $appendEvent:
-              type: Coordination/Event
-              kind: PayNote/Condition Product Confirmed
-              productKey: restaurant
-              confirmationReference: {$binding: event/message/request/confirmationReference}
+          - $appendChange:
+              op: replace
+              path: {$binding: event/message/request/occurrencePath}
+              val: {$binding: event/message/request/after}
+          - $if:
+              cond:
+                $and:
+                  - $eq: [$binding: event/message/request/childDocumentId, large-paynote-hotel-condition-product]
+                  - $eq: [$binding: event/message/request/after/confirmed, true]
+                  - $eq: [$document: /hotelConfirmedState, false]
+              then:
+                - $appendChange: {op: replace, path: /productConditions/hotel/confirmed, val: true}
+                - $appendChange: {op: replace, path: /hotelConfirmedState, val: true}
+                - $appendChange: {op: replace, path: /productConditions/hotel/captureConditionSatisfied, val: true}
+                - $appendChange: {op: replace, path: /productConditions/hotel/status, val: Confirmed}
+                - $appendChange: {op: replace, path: /productConditions/hotel/deliveryStatus, val: Live confirmation received}
+                - $appendChange:
+                    op: replace
+                    path: /productConditions/hotel/lastProcessedSourceTimestamp
+                    val: {$binding: event/message/request/after/confirmedAt}
+                - $appendChange:
+                    op: replace
+                    path: /captureReadiness
+                    val:
+                      confirmed: {$add: [$document: /captureReadinessConfirmedState, 1]}
+                      required: 2
+                - $appendChange:
+                    op: replace
+                    path: /captureReadinessConfirmedState
+                    val: {$add: [$document: /captureReadinessConfirmedState, 1]}
+          - $if:
+              cond:
+                $and:
+                  - $eq: [$binding: event/message/request/childDocumentId, large-paynote-restaurant-condition-product]
+                  - $eq: [$binding: event/message/request/after/confirmed, true]
+                  - $eq: [$document: /restaurantConfirmedState, false]
+              then:
+                - $appendChange: {op: replace, path: /productConditions/restaurant/confirmed, val: true}
+                - $appendChange: {op: replace, path: /restaurantConfirmedState, val: true}
+                - $appendChange: {op: replace, path: /productConditions/restaurant/captureConditionSatisfied, val: true}
+                - $appendChange: {op: replace, path: /productConditions/restaurant/status, val: Confirmed}
+                - $appendChange: {op: replace, path: /productConditions/restaurant/deliveryStatus, val: Live confirmation received}
+                - $appendChange:
+                    op: replace
+                    path: /productConditions/restaurant/lastProcessedSourceTimestamp
+                    val: {$binding: event/message/request/after/confirmedAt}
+                - $appendChange:
+                    op: replace
+                    path: /captureReadiness
+                    val:
+                      confirmed: {$add: [$document: /captureReadinessConfirmedState, 1]}
+                      required: 2
+                - $appendChange:
+                    op: replace
+                    path: /captureReadinessConfirmedState
+                    val: {$add: [$document: /captureReadinessConfirmedState, 1]}
+          - $if:
+              cond:
+                $and:
+                  - $eq: [$binding: event/message/request/childDocumentId, large-paynote-hotel-condition-product]
+                  - $eq: [$binding: event/message/request/after/done, true]
+              then:
+                - $appendChange: {op: replace, path: /productConditions/hotel/done, val: true}
+                - $appendChange: {op: replace, path: /productConditions/hotel/status, val: Done}
+          - $if:
+              cond:
+                $and:
+                  - $eq: [$binding: event/message/request/childDocumentId, large-paynote-restaurant-condition-product]
+                  - $eq: [$binding: event/message/request/after/done, true]
+              then:
+                - $appendChange: {op: replace, path: /productConditions/restaurant/done, val: true}
+                - $appendChange: {op: replace, path: /productConditions/restaurant/status, val: Done}
+          - $if:
+              cond:
+                $and:
+                  - $eq: [$binding: event/message/request/childDocumentId, large-paynote-restaurant-condition-product]
+                  - $eq: [$binding: event/message/request/after/cancelled, true]
+                  - $eq: [$document: /refundRequestedState, false]
+              then:
+                - $appendChange: {op: replace, path: /productConditions/restaurant/cancelled, val: true}
+                - $appendChange: {op: replace, path: /productConditions/restaurant/status, val: Cancelled - Refund Requested}
+                - $appendChange:
+                    op: replace
+                    path: /refund
+                    val:
+                      requested: true
+                      requestId: restaurant-refund-001
+                      amountMinor: 38000
+                      reason: Restaurant cancelled within refund window
+                      completed: false
+                      completedAt:
+                - $appendChange: {op: replace, path: /refundRequestedState, val: true}
+                - $appendChange: {op: replace, path: /refundRequestIdState, val: restaurant-refund-001}
+                - $appendChange: {op: replace, path: /refundAmountMinorState, val: 38000}
+                - $appendChange: {op: replace, path: /refundReasonState, val: Restaurant cancelled within refund window}
+                - $appendChange: {op: replace, path: /status, val: Restaurant Refund Requested}
+                - $appendEvent:
+                    type: Coordination/Event
+                    kind: PayNote/Refund Requested
+                    requestId: restaurant-refund-001
+                    amount: {amountMinor: 38000, currency: PLN}
+          - $if:
+              cond:
+                $and:
+                  - $eq: [$binding: event/message/request/childDocumentId, large-paynote-restaurant-condition-product]
+                  - $eq: [$binding: event/message/request/after/discountApplied, true]
+                  - $eq: [$document: /refundRequestedState, false]
+              then:
+                - $appendChange: {op: replace, path: /productConditions/restaurant/discountApplied, val: true}
+                - $appendChange:
+                    op: replace
+                    path: /refund
+                    val:
+                      requested: true
+                      requestId: restaurant-discount-001
+                      amountMinor: 3800
+                      reason: Restaurant 10% service discount
+                      completed: false
+                      completedAt:
+                - $appendChange: {op: replace, path: /refundRequestedState, val: true}
+                - $appendChange: {op: replace, path: /refundRequestIdState, val: restaurant-discount-001}
+                - $appendChange: {op: replace, path: /refundAmountMinorState, val: 3800}
+                - $appendChange: {op: replace, path: /refundReasonState, val: Restaurant 10% service discount}
+                - $appendChange: {op: replace, path: /status, val: Restaurant Discount Refund Requested}
+                - $appendEvent:
+                    type: Coordination/Event
+                    kind: PayNote/Refund Requested
+                    requestId: restaurant-discount-001
+                    amount: {amountMinor: 3800, currency: PLN}
+          - $return: true
+      - name: Request Capture Once after Both Conditions
+        type: Coordination/Compute
+        do:
+          - $if:
+              cond:
+                $and:
+                  - $eq: [$document: /hotelConfirmedState, true]
+                  - $eq: [$document: /restaurantConfirmedState, true]
+                  - $eq: [$document: /captureRequestedState, false]
+              then:
+                - $appendChange:
+                    op: replace
+                    path: /capture
+                    val:
+                      requested: true
+                      requestCount: 1
+                      requestId: package-capture-001
+                      requestedAt: {$binding: event/message/request/after/confirmedAt}
+                      completed: false
+                      completedAt:
+                      capturedBy:
+                - $appendChange: {op: replace, path: /captureRequestedState, val: true}
+                - $appendChange:
+                    op: replace
+                    path: /captureRequestedAtState
+                    val: {$binding: event/message/request/after/confirmedAt}
+                - $appendChange: {op: replace, path: /status, val: Awaiting ACME Capture}
+                - $appendEvent:
+                    type: Coordination/Event
+                    kind: PayNote/Capture Funds Requested
+                    requestId: package-capture-001
+                    recipientActorId: myos-admin
+                    amount: {amountMinor: 130000, currency: PLN}
           - $return: true
   authorizeAmount:
     name: Authorize PayNote Amount

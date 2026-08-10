@@ -1,10 +1,7 @@
 package blue.coordination.internal;
 
-import blue.coordination.api.Timeline;
-
 import blue.coordination.api.ExactValue;
-
-import blue.coordination.processor.CoordinationSemanticTypeIdentities;
+import blue.coordination.processor.TimelineProviderSupport;
 import blue.language.model.Node;
 import blue.language.processor.SubscriptionDelta;
 
@@ -15,12 +12,6 @@ import java.util.Objects;
 /** Retains exact processor-owned checkpoint descriptors needed by Compute. */
 final class CheckpointDomainEvidence {
     private static final String CONTRACTS_VERSION = "1.0";
-    private static final String PROJECTION_VERSION =
-            "blue.coordination/1.0/timeline-entry-projection-v3";
-    private static final String SUBJECT_VERSION =
-            "blue.coordination/1.0/timeline-order-subject-v3";
-    private static final CoordinationSemanticTypeIdentities IDENTITIES =
-            CoordinationSemanticTypeIdentities.publishedDefaults();
 
     private CheckpointDomainEvidence() {
     }
@@ -73,13 +64,9 @@ final class CheckpointDomainEvidence {
         }
         return descriptor.properties(
                 "runtimeDiscriminator",
-                new Node().value(
-                        "coordination.timeline-entry:"
-                                + IDENTITIES.timelineEntryBlueId()
-                                + "|semantic-profile="
-                                + IDENTITIES.profileIdentity()
-                                + "|projection=" + PROJECTION_VERSION
-                                + "|subject=" + SUBJECT_VERSION));
+                new Node().value(TimelineProviderSupport
+                        .checkpointDomainRuntimeDiscriminator(
+                                subscription.effectiveTypeBlueId())));
     }
 
     private static Node textList(List<String> values) {

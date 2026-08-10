@@ -1,0 +1,64 @@
+documentId: nested-owned-surface-root
+name: Nested Owned Surface Root
+child:
+  documentId: nested-owned-surface-child
+  name: Nested Owned Surface Child
+  total: 0
+  activated: false
+  contracts:
+    ownerChannel:
+      type: Coordination/Timeline Channel
+      timeline:
+        type: MyOS/MyOS Timeline
+        timelineId: examples/nested-owned-surface/owner
+      actor:
+        type: MyOS/Principal Actor
+        accountId: nested-owner
+    activateDynamic:
+      type: Coordination/Sequential Workflow Operation
+      channel: ownerChannel
+      request:
+        dynamicChannel: {}
+        dynamicHandler: {}
+      steps:
+        - type: Coordination/Compute
+          do:
+            - $appendChange:
+                op: add
+                path: /contracts/dynamicChannel
+                val: {$binding: event/message/request/dynamicChannel}
+            - $appendChange:
+                op: add
+                path: /contracts/applyDynamic
+                val: {$binding: event/message/request/dynamicHandler}
+            - $appendChange: {op: replace, path: /activated, val: true}
+            - $return: true
+contracts:
+  coordinationEmbeddedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: coordination/internal/nested-owned-surface-root
+    actor:
+      type: MyOS/Principal Actor
+      accountId: coordination
+  embedded:
+    type: Process Embedded
+    paths: [/child]
+  coordinationApplyEmbeddedRevision:
+    type: Coordination/Sequential Workflow Operation
+    channel: coordinationEmbeddedChannel
+    request:
+      occurrencePath: {type: Text}
+      childDocumentId: {type: Text}
+      childEpoch: {type: Integer}
+      after:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /child
+              val: {$binding: event/message/request/after}
+          - $return: true

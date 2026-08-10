@@ -4,8 +4,6 @@ import blue.coordination.api.ExactValue;
 
 import blue.coordination.api.DocumentId;
 
-import blue.coordination.api.ActivationMode;
-
 import blue.language.snapshot.FrozenNode;
 
 import java.util.Objects;
@@ -13,7 +11,6 @@ import java.util.Objects;
 /** Reads stable process identity and activation policy through immutable indexes. */
 final class DocumentIdentityReader {
     private static final String DOCUMENT_ID = "/documentId";
-    private static final String ACTIVATION_MODE = "/coordination/activationMode";
 
     private DocumentIdentityReader() {
     }
@@ -44,25 +41,6 @@ final class DocumentIdentityReader {
                     "Managed DocumentId " + expected
                             + " does not match authored /documentId " + text);
         }
-    }
-
-    public static ActivationMode activationMode(ExactValue document) {
-        Object value = valueAt(document, ACTIVATION_MODE);
-        if (value == null) {
-            return ActivationMode.IMPORT_FULL_HISTORY;
-        }
-        if (!(value instanceof String text)) {
-            throw new IllegalArgumentException(
-                    "/coordination/activationMode must be Text");
-        }
-        return switch (text) {
-            case "birth" -> ActivationMode.BIRTH_AT_ATTACHMENT;
-            case "import-full-history" -> ActivationMode.IMPORT_FULL_HISTORY;
-            case "import-from-frontier" -> ActivationMode.IMPORT_FROM_FRONTIER;
-            case "passive-snapshot" -> ActivationMode.PASSIVE_SNAPSHOT;
-            default -> throw new IllegalArgumentException(
-                    "Unknown activation mode " + text);
-        };
     }
 
     private static Object valueAt(ExactValue document, String path) {

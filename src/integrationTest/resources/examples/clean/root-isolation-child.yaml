@@ -1,6 +1,4 @@
 documentId: root-isolation-child
-coordination:
-  activationMode: birth
 name: Root Isolation Child
 childCount: 0
 contracts:

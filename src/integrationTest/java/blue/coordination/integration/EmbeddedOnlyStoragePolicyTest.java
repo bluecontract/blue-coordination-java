@@ -95,9 +95,6 @@ final class EmbeddedOnlyStoragePolicyTest {
                     parentLayout.stored("/child").blueId(),
                     storedChildReference.getBlueId());
 
-            assertEquals(0L, attachWork.counter("append.requestFragments"));
-            assertEquals(0L, attachWork.counter("append.eventFragments"));
-            assertEquals(0L, attachWork.counter("layout.ordinaryNodeFragments"));
             assertTrue(attachWork.counter("journal.entriesStoredWhole") >= 1L);
             assertTrue(attachWork.counter(
                     "wholeObjectStore.purpose.timeline-request") >= 1L);

@@ -1,0 +1,25 @@
+documentId: embedded-counter-B
+name: Managed Embedded Counter B
+counter: 0
+contracts:
+  ownerChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/embedded/B
+    actor:
+      type: MyOS/Principal Actor
+      accountId: beatrice
+  increment:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request:
+      amount: {type: Integer}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /counter
+              val: {$add: [$document: /counter, $binding: event/message/request/amount]}
+          - $return: true

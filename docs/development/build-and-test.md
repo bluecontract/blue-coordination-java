@@ -28,18 +28,21 @@ The release-owned suites have distinct responsibilities:
 
 - `test` exercises public value contracts, internal atomic primitives and
   retained workflow/BEX processor semantics.
-- `integrationTest` exercises routing, exact whole-object admission, rollback,
-  embedded-only storage, catch-up, reattachment, ownership and concurrency.
+- `integrationTest` exercises exact append, engine-selected drain, entry-frame
+  ordering, document-local atomic retry, embedded-only storage, `paths` and
+  `collectionPaths`, synchronized catch-up, reattachment and ownership.
 - `consumerTest` compiles against the built production JAR, never main source
   output or test fixtures, and verifies the supported public API as a real
   consumer sees it.
-- `scenarioTest` runs the four-order NBA convergence scenario and the complete
-  large-host/PayNote lifecycle.
+- `scenarioTest` runs NBA admission-order/multi-game convergence and the
+  complete large-host/PayNote lifecycle.
 
 `releaseCheck` runs all four suites. It also enforces minimum suite depth,
-validates the 115-class/25,000-line production budget, checks the 16-type
-application API boundary, scans the production JAR, validates POM scopes and
-versions, and checks legal, documentation, source and Javadoc artifacts.
+validates the production class/line budget and small application API boundary,
+scans the production JAR, validates POM scopes and versions, and checks legal,
+documentation, source and Javadoc artifacts. The current verified status is
+recorded in the RC report; commands listed here are gates to run, not claims
+that a changed source snapshot has passed them.
 `stageRelease` creates a Maven Central-shaped repository at
 `build/staging-deploy`.
 

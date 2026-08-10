@@ -17,9 +17,6 @@ import java.util.Set;
 
 /** Semantic Root, ownership view, and one shell per embedded scope. */
 final class EmbeddedOnlyLayout {
-    public static final String PROFILE_ID =
-            "blue.coordination/basic/process-embedded-only/4.0";
-
     private final ExactValue semanticRoot;
     private final FrozenNode processingRoot;
     private final Map<String, ExactValue> shellsByScope;
@@ -58,10 +55,6 @@ final class EmbeddedOnlyLayout {
         }
     }
 
-    public String profileId() {
-        return PROFILE_ID;
-    }
-
     public String rootBlueId() {
         return semanticRoot.blueId();
     }
@@ -91,16 +84,6 @@ final class EmbeddedOnlyLayout {
         return shellsByScope.size();
     }
 
-    public int embeddedDocumentCount() {
-        return shellsByScope.size() - 1;
-    }
-
-    public int splitterCreatedEdgeCount() {
-        return Math.toIntExact(boundaries.stream()
-                .filter(EmbeddedBoundary::splitterCreated)
-                .count());
-    }
-
     FrozenNode processingFrozen() {
         return processingRoot;
     }
@@ -108,19 +91,6 @@ final class EmbeddedOnlyLayout {
     /** Fully materialized semantic Root, used only at API/assertion boundaries. */
     public Node reconstructRoot() {
         return semanticRoot.copyNode();
-    }
-
-    /** Fully materialized exact scope without recursive mutable assembly. */
-    public Node reconstructScope(String scopePath) {
-        String path = JsonPointer.canonicalize(
-                Objects.requireNonNull(scopePath, "scopePath"));
-        FrozenNode selected = JsonPointer.ROOT.equals(path)
-                ? semanticRoot.frozen()
-                : semanticRoot.canonicalAt(path);
-        if (selected == null) {
-            throw new IllegalArgumentException("Unknown scope " + path);
-        }
-        return selected.toNode();
     }
 
     public ExactValue stored(String scopePath) {
@@ -133,7 +103,7 @@ final class EmbeddedOnlyLayout {
     }
 
     /**
-     * Direct autonomous children were compiled once with this layout. Reading
+     * Direct managed children were compiled once with this layout. Reading
      * them does not reconstruct child graphs or recalculate BlueIds.
      */
     public List<EmbeddedOccurrence> directOccurrences() {

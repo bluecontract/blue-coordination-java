@@ -15,14 +15,15 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Function;
 
 /**
- * Reusable embedded-only cut and routing plan for one autonomous Root.
+ * Reusable embedded-only cut and routing plan for one managed document.
  * Ordinary values and request payloads do not participate in this plan.
  *
- * <p>Plan validity is checked from memoized immutable type/contracts subtree
- * identities. The previous implementation cloned and rehashed authored
- * contracts after every PROCESS call.</p>
+ * <p>Plan reuse is checked from memoized immutable type/contracts subtree
+ * identities. A committed contract-surface change recompiles this plan once;
+ * ordinary state transitions keep the O(1) reuse path.</p>
  */
 final class EmbeddedLayoutPlan {
     private static final String ABSENT = "<absent>";
@@ -42,18 +43,17 @@ final class EmbeddedLayoutPlan {
         }
     }
 
-    private final String rootTypeBlueId;
-    private final String rootContractsBlueId;
+    private final Map<String, AuthoredScopeIdentity> identitiesByScope;
     private final RoutingSurface routingSurface;
     private final Map<String, ScopeRule> rulesByScope;
 
     private EmbeddedLayoutPlan(
-            String rootTypeBlueId,
-            String rootContractsBlueId,
+            Map<String, AuthoredScopeIdentity> identitiesByScope,
             RoutingSurface routingSurface,
             Map<String, ScopeRule> rulesByScope) {
-        this.rootTypeBlueId = requireIdentity(rootTypeBlueId);
-        this.rootContractsBlueId = requireIdentity(rootContractsBlueId);
+        this.identitiesByScope = Collections.unmodifiableMap(
+                new LinkedHashMap<>(Objects.requireNonNull(
+                        identitiesByScope, "identitiesByScope")));
         this.routingSurface = Objects.requireNonNull(
                 routingSurface, "routingSurface");
         this.rulesByScope = Collections.unmodifiableMap(
@@ -63,9 +63,15 @@ final class EmbeddedLayoutPlan {
 
     public static EmbeddedLayoutPlan compile(
             ExactValue exactRoot,
-            EffectiveFragmentationCatalog catalog) {
+            EffectiveFragmentationCatalog catalog,
+            Function<String, FrozenNode> exactScopeAt) {
         Objects.requireNonNull(exactRoot, "exactRoot");
         Objects.requireNonNull(catalog, "catalog");
+        Objects.requireNonNull(exactScopeAt, "exactScopeAt");
+        if (!exactRoot.blueId().equals(catalog.rootBlueId())) {
+            throw new IllegalArgumentException(
+                    "Fragmentation catalog belongs to another Root");
+        }
         Map<String, ScopeRule> rules = new LinkedHashMap<>();
         for (Map.Entry<String, EmbeddedScopePlanView> entry
                 : catalog.scopePlansByScope().entrySet()) {
@@ -82,18 +88,23 @@ final class EmbeddedLayoutPlan {
             rules.put(scopePath, new ScopeRule(
                     scopePath, explicit, collections));
         }
-        EmbeddedLayoutPlan plan = new EmbeddedLayoutPlan(
-                identity(exactRoot.frozen().getType()),
-                authoredContractsIdentity(exactRoot.frozen().getContracts()),
-                RoutingSurface.from(catalog, autonomousBoundaries(catalog)),
-                rules);
-        if (plan.hasCollections()) {
-            throw new IllegalArgumentException(
-                    "The compact basic lane supports explicit Process Embedded "
-                            + "paths only; collection declarations require the "
-                            + "general Coordination engine");
+        List<String> managed = managedBoundaries(catalog);
+        Map<String, AuthoredScopeIdentity> identities = new LinkedHashMap<>();
+        for (String scopePath : catalog.scopePlansByScope().keySet()) {
+            if (!owned(scopePath, managed)) {
+                continue;
+            }
+            FrozenNode scope = exactScopeAt.apply(scopePath);
+            if (scope == null) {
+                throw new IllegalStateException(
+                        "Missing exact active scope " + scopePath);
+            }
+            identities.put(scopePath, AuthoredScopeIdentity.from(scope));
         }
-        return plan;
+        return new EmbeddedLayoutPlan(
+                identities,
+                RoutingSurface.from(catalog, managedBoundaries(catalog)),
+                rules);
     }
 
     public RoutingSurface routingSurface() {
@@ -105,24 +116,28 @@ final class EmbeddedLayoutPlan {
     }
 
     /**
-     * The compact lane freezes type/contracts at admission. Checking two
-     * memoized subtree BlueIds is O(1) after first calculation and independent
-     * of ordinary document size.
+     * Checks only authored scopes owned by this processing Root. Managed child
+     * subtrees have independent plans and must not invalidate their containing
+     * Root when a child epoch replaces ordinary or contract state.
      */
-    public boolean reusableFor(ExactValue exactRoot) {
-        Objects.requireNonNull(exactRoot, "exactRoot");
-        return !hasCollections()
-                && rootTypeBlueId.equals(identity(exactRoot.frozen().getType()))
-                && rootContractsBlueId.equals(
-                        authoredContractsIdentity(
-                                exactRoot.frozen().getContracts()));
+    public boolean reusableFor(Function<String, FrozenNode> exactScopeAt) {
+        Objects.requireNonNull(exactScopeAt, "exactScopeAt");
+        for (Map.Entry<String, AuthoredScopeIdentity> entry
+                : identitiesByScope.entrySet()) {
+            FrozenNode current = exactScopeAt.apply(entry.getKey());
+            if (current == null || !entry.getValue().equals(
+                    AuthoredScopeIdentity.from(current))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public boolean hasCollections() {
         return rulesByScope.values().stream().anyMatch(ScopeRule::hasCollections);
     }
 
-    private static List<String> autonomousBoundaries(
+    private static List<String> managedBoundaries(
             EffectiveFragmentationCatalog catalog) {
         return catalog.scopePlansByScope().values().stream()
                 .flatMap(view -> view.concreteChildPaths().stream())
@@ -133,6 +148,17 @@ final class EmbeddedLayoutPlan {
 
     private static String identity(FrozenNode node) {
         return node == null ? ABSENT : node.blueId();
+    }
+
+    private static boolean owned(
+            String scopePath,
+            List<String> managedBoundaries) {
+        for (String boundary : managedBoundaries) {
+            if (PointerUtils.descendantOrEqual(scopePath, boundary)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** Excludes processor-owned lifecycle/checkpoint fields from plan identity. */
@@ -168,5 +194,20 @@ final class EmbeddedLayoutPlan {
             throw new IllegalArgumentException(label + " must not be blank");
         }
         return checked;
+    }
+
+    private record AuthoredScopeIdentity(
+            String typeBlueId,
+            String contractsBlueId) {
+        private AuthoredScopeIdentity {
+            typeBlueId = requireIdentity(typeBlueId);
+            contractsBlueId = requireIdentity(contractsBlueId);
+        }
+
+        private static AuthoredScopeIdentity from(FrozenNode scope) {
+            return new AuthoredScopeIdentity(
+                    identity(scope.getType()),
+                    authoredContractsIdentity(scope.getContracts()));
+        }
     }
 }

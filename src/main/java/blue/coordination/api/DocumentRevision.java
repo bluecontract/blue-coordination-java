@@ -18,7 +18,9 @@ public final class DocumentRevision {
     private final ExactValue before;
     private final ExactValue after;
     private final TimelineEntry sourceEntry;
-    private final TimelineEntry.CatchUpCause catchUpCause;
+    private final ExternalOrderKey causalOrder;
+    private final String causalEntryBlueId;
+    private final CatchUpCause catchUpCause;
     private final List<Node> emittedEvents;
     private final long processingGas;
 
@@ -31,7 +33,36 @@ public final class DocumentRevision {
             ExactValue before,
             ExactValue after,
             TimelineEntry sourceEntry,
-            TimelineEntry.CatchUpCause catchUpCause,
+            CatchUpCause catchUpCause,
+            List<Node> emittedEvents,
+            long processingGas) {
+        this(
+                documentId,
+                epoch,
+                rootApplicationOrder,
+                kind,
+                before,
+                after,
+                sourceEntry,
+                sourceEntry == null ? null : sourceEntry.sourceOrderKey(),
+                sourceEntry == null ? null : sourceEntry.blueId(),
+                catchUpCause,
+                emittedEvents,
+                processingGas);
+    }
+
+    /** Creates one revision with explicit causal order for processor-owned work. */
+    public DocumentRevision(
+            DocumentId documentId,
+            long epoch,
+            long rootApplicationOrder,
+            DocumentRevision.Kind kind,
+            ExactValue before,
+            ExactValue after,
+            TimelineEntry sourceEntry,
+            ExternalOrderKey causalOrder,
+            String causalEntryBlueId,
+            CatchUpCause catchUpCause,
             List<Node> emittedEvents,
             long processingGas) {
         this.documentId = Objects.requireNonNull(documentId, "documentId");
@@ -51,6 +82,8 @@ public final class DocumentRevision {
         this.before = before;
         this.after = Objects.requireNonNull(after, "after");
         this.sourceEntry = sourceEntry;
+        this.causalOrder = causalOrder;
+        this.causalEntryBlueId = causalEntryBlueId;
         this.catchUpCause = catchUpCause;
         List<Node> events = new ArrayList<>();
         for (Node event : Objects.requireNonNull(emittedEvents, "emittedEvents")) {
@@ -105,13 +138,16 @@ public final class DocumentRevision {
 
     /** Returns the deterministic source order when a source entry exists. */
     public Optional<ExternalOrderKey> sourceOrderKey() {
-        return sourceEntry == null
-                ? Optional.empty()
-                : Optional.of(sourceEntry.sourceOrderKey());
+        return Optional.ofNullable(causalOrder);
+    }
+
+    /** Exact external entry identity that causally owns this epoch segment. */
+    public Optional<String> causalEntryBlueId() {
+        return Optional.ofNullable(causalEntryBlueId);
     }
 
     /** Returns attachment evidence for a historical catch-up transition. */
-    public Optional<TimelineEntry.CatchUpCause> catchUpCause() {
+    public Optional<CatchUpCause> catchUpCause() {
         return Optional.ofNullable(catchUpCause);
     }
 
@@ -133,9 +169,37 @@ public final class DocumentRevision {
         INITIALIZATION,
         /** State produced from an external exact Timeline Entry. */
         TIMELINE_ENTRY,
-        /** Parent state advanced by one autonomous child revision. */
+        /** Parent state advanced through one managed child epoch. */
         EMBEDDED_REVISION_APPLICATION,
         /** Readiness marker after historical work reaches its frontier. */
         CATCH_UP_COMPLETED
+    }
+
+    /** Exact attachment transition that made historical work relevant. */
+    public record CatchUpCause(
+            DocumentId parentDocumentId,
+            String attachmentEntryBlueId,
+            String occurrencePath,
+            long attachmentTimestampMicros) {
+        /** Validates stable parent, entry, occurrence, and time evidence. */
+        public CatchUpCause {
+            parentDocumentId = Objects.requireNonNull(
+                    parentDocumentId, "parentDocumentId");
+            attachmentEntryBlueId = requireText(
+                    attachmentEntryBlueId, "attachmentEntryBlueId");
+            occurrencePath = requireText(occurrencePath, "occurrencePath");
+            if (attachmentTimestampMicros <= 0L) {
+                throw new IllegalArgumentException(
+                        "attachmentTimestampMicros must be positive");
+            }
+        }
+    }
+
+    private static String requireText(String value, String label) {
+        String checked = Objects.requireNonNull(value, label);
+        if (checked.isBlank()) {
+            throw new IllegalArgumentException(label + " must not be blank");
+        }
+        return checked;
     }
 }

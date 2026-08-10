@@ -1,6 +1,8 @@
 package blue.coordination.integration;
 
 import blue.coordination.api.Operation;
+import blue.coordination.api.DocumentRevision;
+import blue.coordination.api.SessionStatus;
 import blue.coordination.api.Timeline;
 import org.junit.jupiter.api.Test;
 
@@ -14,7 +16,232 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** State, cursors, indexes, and receipts publish as one retryable unit. */
 final class FailureRetryAtomicityTest {
     @Test
-    void stagedCatchUpRollsBackAndRetryCommitsEachFactOnce() throws Exception {
+    void stagedChildFailureRollsBackOnlyHostDeltaAndTerminalRetryReconciles()
+            throws Exception {
+        try (TestEngine engine = TestEngine.create()) {
+            String childInitial = resource(
+                    "examples/clean/embedded-counter.yaml");
+            Timeline childTimeline = engine.timeline(
+                    "examples/embedded/A", "alice");
+            engine.append(
+                    childTimeline,
+                    Operation.yaml(
+                            "increment", "ownerChannel", "amount: 1"));
+
+            engine.start(
+                    "embedded-state-parent",
+                    resource("examples/clean/embedded-state-parent.yaml"));
+            Timeline parentTimeline = engine.timeline(
+                    "examples/embedded/state-parent", "bob");
+            var attachment = engine.append(
+                    parentTimeline,
+                    Operation.exact(
+                            "attachChild",
+                            "ownerChannel",
+                            engine.embeddedDocumentRequest(childInitial)));
+            int routeRowsBefore = engine.routeRowCount();
+
+            engine.failOnceAt(TestEngine.FailurePoint
+                    .AFTER_STAGING_CHILD_SESSION);
+            assertThrows(
+                    TestEngine.InjectedFailureException.class,
+                    () -> engine.dispatch(attachment));
+            assertEquals(1L, engine.session(
+                    "embedded-state-parent").epoch(),
+                    "the external parent commit is durable");
+            assertEquals(SessionStatus.READY, engine.session(
+                    "embedded-state-parent").status());
+            assertEquals(1, engine.documentCount(),
+                    "the staged child is not a committed managed document");
+            assertEquals(routeRowsBefore, engine.routeRowCount(),
+                    "staged child route rows roll back with its session");
+            assertTrue(engine.embeddedDocuments(
+                    "embedded-state-parent").isEmpty());
+            assertTrue(engine.catchUpPlans().isEmpty(),
+                    "graph, barrier, and cursor publication roll back together");
+            assertEquals(1L, engine.history("embedded-state-parent").stream()
+                    .filter(revision -> revision.kind()
+                            == DocumentRevision.Kind.TIMELINE_ENTRY)
+                    .count());
+            int objectsAfterFirstFailure = engine.wholeObjectCount();
+
+            engine.failOnceAt(TestEngine.FailurePoint
+                    .AFTER_STAGING_CHILD_SESSION);
+            assertThrows(
+                    TestEngine.InjectedFailureException.class,
+                    () -> engine.dispatch(attachment));
+            assertEquals(1, engine.documentCount());
+            assertEquals(routeRowsBefore, engine.routeRowCount());
+            assertTrue(engine.embeddedDocuments(
+                    "embedded-state-parent").isEmpty());
+            assertTrue(engine.catchUpPlans().isEmpty());
+            assertEquals(objectsAfterFirstFailure, engine.wholeObjectCount(),
+                    "repeated terminal reconciliation has exact object rollback");
+            assertEquals(1L, engine.history("embedded-state-parent").stream()
+                    .filter(revision -> revision.kind()
+                            == DocumentRevision.Kind.TIMELINE_ENTRY)
+                    .count(),
+                    "terminal retry cannot rerun the committed parent PROCESS");
+
+            engine.clearFailureInjection();
+            engine.dispatch(attachment);
+
+            assertEquals(2, engine.documentCount());
+            assertEquals("embedded-counter-A", engine.embeddedDocuments(
+                    "embedded-state-parent").get("/child"));
+            assertEquals(1L, integer(
+                    engine, "embedded-state-parent", "/child/counter"));
+            CatchUpPlan evidence = engine.catchUpPlans().get(0);
+            assertEquals(CatchUpPlan.Status.COMPLETE, evidence.status());
+            assertEquals(1L, evidence.link().appliedChildEpoch());
+            assertEquals(1L, evidence.link().activationGeneration(),
+                    "rolled-back activation state must not skip a generation");
+        }
+    }
+
+    @Test
+    void childCommitSurvivesARepeatedFailureBeforeParentCommit()
+            throws Exception {
+        try (TestEngine engine = TestEngine.create()) {
+            String childInitial = resource(
+                    "examples/clean/embedded-counter.yaml");
+            Timeline childTimeline = engine.timeline(
+                    "examples/embedded/A", "alice");
+            engine.start("embedded-counter-A", childInitial);
+
+            Timeline parentTimeline = engine.timeline(
+                    "examples/embedded/state-parent", "bob");
+            engine.start(
+                    "embedded-state-parent",
+                    resource("examples/clean/embedded-state-parent.yaml"));
+            engine.appendAndDispatch(
+                    parentTimeline,
+                    Operation.exact(
+                            "attachChild",
+                            "ownerChannel",
+                            engine.embeddedDocumentRequest(childInitial)));
+
+            var liveChildEntry = engine.append(
+                    childTimeline,
+                    Operation.yaml(
+                            "increment", "ownerChannel", "amount: 4"));
+            engine.failOnceAt(TestEngine.FailurePoint
+                    .AFTER_STATE_SWAP_BEFORE_RETURN);
+            assertThrows(
+                    TestEngine.InjectedFailureException.class,
+                    () -> engine.dispatch(liveChildEntry));
+            assertEquals(1L, engine.session("embedded-counter-A").epoch());
+            assertEquals(4L, integer(
+                    engine, "embedded-counter-A", "/counter"));
+            assertEquals(0L, integer(
+                    engine, "embedded-state-parent", "/child/counter"));
+
+            engine.failOnceAt(TestEngine.FailurePoint
+                    .AFTER_FROZEN_BEFORE_STAGE);
+            assertThrows(
+                    TestEngine.InjectedFailureException.class,
+                    () -> engine.dispatch(liveChildEntry));
+            assertEquals(1L, engine.session("embedded-counter-A").epoch(),
+                    "parent failure cannot roll back the child commit");
+            assertEquals(2, engine.history("embedded-counter-A").size());
+            assertEquals(0L, integer(
+                    engine, "embedded-state-parent", "/child/counter"));
+            assertEquals(0L, engine.catchUpPlans().get(0)
+                    .link().appliedChildEpoch());
+
+            engine.clearFailureInjection();
+            EngineMetrics.MetricsSnapshot beforeRetry =
+                    engine.metricsSnapshot();
+            engine.dispatch(liveChildEntry);
+            EngineTestSupport.MetricDelta retry = delta(
+                    beforeRetry, engine.metricsSnapshot());
+
+            assertEquals(1L, retry.counter("frozenProcessCalls"),
+                    "retry runs only the missing parent application");
+            assertEquals(2, engine.history("embedded-counter-A").size());
+            assertEquals(4L, integer(
+                    engine, "embedded-state-parent", "/child/counter"));
+            assertEquals(1L, engine.catchUpPlans().get(0)
+                    .link().appliedChildEpoch());
+        }
+    }
+
+    @Test
+    void restartRebuildsQueueAndAppliesOnlyTheMissingParentTransition()
+            throws Exception {
+        try (TestEngine engine = TestEngine.create()) {
+            String childInitial = resource(
+                    "examples/clean/embedded-counter.yaml");
+            Timeline childTimeline = engine.timeline(
+                    "examples/embedded/A", "alice");
+            engine.start("embedded-counter-A", childInitial);
+
+            Timeline parentTimeline = engine.timeline(
+                    "examples/embedded/state-parent", "bob");
+            engine.start(
+                    "embedded-state-parent",
+                    resource("examples/clean/embedded-state-parent.yaml"));
+            engine.appendAndDispatch(
+                    parentTimeline,
+                    Operation.exact(
+                            "attachChild",
+                            "ownerChannel",
+                            engine.embeddedDocumentRequest(childInitial)));
+
+            var childEntry = engine.append(
+                    childTimeline,
+                    Operation.yaml(
+                            "increment", "ownerChannel", "amount: 5"));
+            engine.failOnceAt(TestEngine.FailurePoint
+                    .AFTER_STATE_SWAP_BEFORE_RETURN);
+            assertThrows(
+                    TestEngine.InjectedFailureException.class,
+                    () -> engine.dispatch(childEntry));
+            assertEquals(5L, integer(
+                    engine, "embedded-counter-A", "/counter"));
+
+            engine.failOnceAt(TestEngine.FailurePoint
+                    .AFTER_FROZEN_BEFORE_STAGE);
+            assertThrows(
+                    TestEngine.InjectedFailureException.class,
+                    () -> engine.dispatch(childEntry));
+            assertEquals(0L, integer(
+                    engine, "embedded-state-parent", "/child/counter"));
+            assertEquals(2, engine.history("embedded-counter-A").size());
+            assertEquals(0L, engine.catchUpPlans().get(0)
+                    .link().appliedChildEpoch());
+
+            engine.restartFromStores();
+            EngineMetrics.MetricsSnapshot beforeResume =
+                    engine.metricsSnapshot();
+            engine.dispatch(childEntry);
+            EngineTestSupport.MetricDelta resume = delta(
+                    beforeResume, engine.metricsSnapshot());
+
+            assertEquals(5L, integer(
+                    engine, "embedded-state-parent", "/child/counter"));
+            assertEquals(2, engine.history("embedded-counter-A").size(),
+                    "recovery must not reinitialize or reprocess the child");
+            assertEquals(0L, resume.counter("temporal.externalProcessCalls"));
+            assertEquals(1L, resume.counter(
+                    "temporal.parentEpochApplications"));
+            assertEquals(1L, engine.catchUpPlans().get(0)
+                    .link().appliedChildEpoch());
+            assertEquals(1L, engine.history("embedded-counter-A").stream()
+                    .filter(revision -> revision.kind()
+                            == DocumentRevision.Kind.INITIALIZATION)
+                    .count());
+            assertEquals(1L, engine.history(
+                            "embedded-state-parent").stream()
+                    .filter(revision -> revision.kind()
+                            == DocumentRevision.Kind.INITIALIZATION)
+                    .count());
+        }
+    }
+
+    @Test
+    void committedEmbeddedEpochSurvivesRestartAndReconcilesItsCursorOnce()
+            throws Exception {
         try (TestEngine engine = TestEngine.create()) {
             String childInitial = resource(
                     "examples/clean/embedded-counter.yaml");
@@ -46,12 +273,13 @@ final class FailureRetryAtomicityTest {
             assertThrows(
                     TestEngine.InjectedFailureException.class,
                     () -> engine.dispatch(attachment));
-            assertEquals(0L, engine.session(
+            assertEquals(2L, engine.session(
                     "embedded-state-parent").epoch());
-            assertTrue(engine.embeddedDocuments(
-                    "embedded-state-parent").isEmpty());
+            assertEquals("embedded-counter-A", engine.embeddedDocuments(
+                    "embedded-state-parent").get("/child"));
+            assertEquals(0L, engine.session("embedded-counter-A").epoch());
 
-            engine.clearFailureInjection();
+            engine.restartFromStores();
             engine.dispatch(attachment);
             assertEquals(3L, integer(
                     engine, "embedded-state-parent", "/child/counter"));
@@ -81,25 +309,32 @@ final class FailureRetryAtomicityTest {
                     alice,
                     Operation.yaml(
                             "increment", "aliceChannel", "amount: 3"));
+            EngineMetrics.MetricsSnapshot beforeFailure =
+                    engine.metricsSnapshot();
             engine.failOnceAt(TestEngine.FailurePoint
                     .AFTER_STATE_SWAP_BEFORE_RETURN);
             assertThrows(
                     TestEngine.InjectedFailureException.class,
                     () -> engine.dispatch(entry));
             assertEquals(3L, integer(engine, "counter", "/counter"));
+            assertEquals(1L, delta(beforeFailure, engine.metricsSnapshot())
+                    .counter("EXTERNAL_PROCESS_CALLS"));
 
             engine.clearFailureInjection();
             EngineMetrics.MetricsSnapshot beforeRetry =
                     engine.metricsSnapshot();
-            assertEquals(1, engine.dispatch(entry).outcomes().size());
+            assertEquals(0, engine.dispatch(entry).outcomes().size(),
+                    "receipt reconciliation commits no new transition in "
+                            + "the retry call");
             EngineTestSupport.MetricDelta retry = delta(
                     beforeRetry, engine.metricsSnapshot());
             assertEquals(0L, retry.counter("frozenProcessCalls"));
+            assertEquals(0L, retry.counter("EXTERNAL_PROCESS_CALLS"));
             assertEquals(3L, integer(engine, "counter", "/counter"));
         }
     }
     @Test
-    void failedProcessorManagedParentRevisionRestoresJournalFrontier()
+    void privateEmbeddedInputNeverChangesExternalJournalFrontier()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
             String childInitial = resource(
@@ -125,18 +360,17 @@ final class FailureRetryAtomicityTest {
                     () -> engine.dispatch(attachment));
 
             assertEquals(journalBeforeDispatch, engine.journalSize(),
-                    "The failed processor-managed revision must not leak into "
-                            + "the external journal frontier");
-            assertEquals(1L, engine.metricsSnapshot().counters()
+                    "processor-owned embedded input is never journaled");
+            assertEquals(0L, engine.metricsSnapshot().counters()
                     .getOrDefault("journal.rollbacks", 0L));
-            assertEquals(0L, engine.session("embedded-root-B").epoch());
-            assertTrue(engine.embeddedDocuments(
-                    "embedded-root-B").isEmpty());
+            assertEquals(2L, engine.session("embedded-root-B").epoch());
+            assertEquals("embedded-middle-A", engine.embeddedDocuments(
+                    "embedded-root-B").get("/child"));
 
             engine.clearFailureInjection();
             engine.dispatch(attachment);
-            assertEquals(journalBeforeDispatch + 1, engine.journalSize(),
-                    "Exactly one processor-managed child revision is committed");
+            assertEquals(journalBeforeDispatch, engine.journalSize(),
+                    "retry reconciles the document-local receipt only");
             assertEquals(2L, engine.session("embedded-root-B").epoch());
             assertEquals(1L, integer(
                     engine,
@@ -146,14 +380,13 @@ final class FailureRetryAtomicityTest {
             int journalAfterCommit = engine.journalSize();
             engine.dispatch(attachment);
             assertEquals(journalAfterCommit, engine.journalSize(),
-                    "Delivery receipt replay must not append another internal "
-                            + "revision event");
+                    "receipt replay cannot append an internal event");
             var next = engine.append(
                     rootTimeline,
                     Operation.yaml("ignored", "ownerChannel", "{}"));
-            assertEquals(attachment.timestampMicros() + 2L,
+            assertEquals(attachment.timestampMicros() + 1L,
                     next.timestampMicros());
-            assertEquals(attachment.globalSequence() + 2L,
+            assertEquals(attachment.globalSequence() + 1L,
                     next.globalSequence());
         }
     }

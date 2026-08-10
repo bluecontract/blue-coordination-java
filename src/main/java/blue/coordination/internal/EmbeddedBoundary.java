@@ -10,7 +10,7 @@ record EmbeddedBoundary(
         String childScopePath,
         String childBlueId,
         EmbeddedScopePlanView.Origin origin,
-        boolean splitterCreated) {
+        boolean physicalCutCreated) {
     public EmbeddedBoundary {
         parentScopePath = requireText(parentScopePath, "parentScopePath");
         childScopePath = requireText(childScopePath, "childScopePath");

@@ -10,13 +10,17 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 /** Top-level admission publishes documents and routing as one unit. */
 final class StartAdmissionAtomicityTest {
     @Test
-    void rejectedEmbeddedTopLevelStartPublishesNothingAndRetryMatchesFresh()
+    void rejectedTopLevelSelfCyclePublishesNothingAndRetryMatchesFresh()
             throws Exception {
         String parent = resource(
                 "examples/clean/root-isolation-parent.yaml");
         String child = resource(
                 "examples/clean/root-isolation-child.yaml");
-        String invalidTopLevel = parent + "\nchild:\n" + indent(child, 2);
+        String cyclicChild = child.replace(
+                "documentId: root-isolation-child",
+                "documentId: root-isolation-parent");
+        String invalidTopLevel = parent + "\nchild:\n"
+                + indent(cyclicChild, 2);
 
         try (TestEngine engine = TestEngine.create();
              TestEngine fresh = TestEngine.create()) {

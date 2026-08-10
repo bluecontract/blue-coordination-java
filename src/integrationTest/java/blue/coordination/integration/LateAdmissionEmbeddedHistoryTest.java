@@ -79,7 +79,7 @@ final class LateAdmissionEmbeddedHistoryTest {
     }
 
     @Test
-    void laterAppendWithEarlierEventTimeStaysBeyondCapturedFrontier()
+    void laterAppendWithEarlierSourceOrderIsSelectedBeforeAttachment()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
             String childInitial = resource(
@@ -115,11 +115,13 @@ final class LateAdmissionEmbeddedHistoryTest {
             engine.dispatch(attachment);
             EngineTestSupport.MetricDelta attachWork = delta(
                     beforeAttach, engine.metricsSnapshot());
-            assertEquals(1L, integer(
+            assertEquals(3L, integer(
                     engine, "embedded-state-parent", "/child/counter"));
-            assertEquals(1L, attachWork.counter(
+            assertEquals(2L, attachWork.counter(
                     "childHistoricalProcessCalls"),
-                    "global append sequence, not authored time, closes catch-up");
+                    "the global feeder ordered both entries before the "
+                            + "attachment; late admission then replays them "
+                            + "into the newly managed child");
 
             engine.dispatch(laterAppend);
             assertEquals(3L, integer(

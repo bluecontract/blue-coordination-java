@@ -11,6 +11,9 @@ public enum ActivationMode {
     /** Existing process starting after an explicitly persisted frontier. */
     IMPORT_FROM_FRONTIER,
 
+    /** Existing managed child proven current through the attachment cutoff. */
+    ATTACH_CURRENT_STATE,
+
     /** Ordinary immutable evidence; no initialization, replay, or live link. */
     PASSIVE_SNAPSHOT
 }

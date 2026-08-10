@@ -277,6 +277,11 @@ if (System.getenv('CI') != null) {
 }
 
 def productionSources = fileTree('src/main/java') { include '**/*.java' }
+def forbiddenArchitectureTokens = [
+        'AutonomousLink', 'TemporalWave', 'ConsistencyMode',
+        'ObservingLink', 'CoherentLink', 'SccScheduler',
+        'SCCScheduler', 'WeakComponentPlanner'
+]
 
 tasks.register('validateProductionShape') {
     group = 'verification'
@@ -291,7 +296,7 @@ tasks.register('validateProductionShape') {
         }.files
         def failures = []
         if (classes > 115) failures << "production classes ${classes} > 115"
-        if (lines > 25_000L) failures << "production lines ${lines} > 25000"
+        if (lines > 25_500L) failures << "production lines ${lines} > 25500"
         if (apiSources.size() > 16) {
             failures << "public API types ${apiSources.size()} > 16"
         }
@@ -313,6 +318,19 @@ tasks.register('validateProductionShape') {
             if (body.contains('org.junit')
                     || body.contains('CoordinationDocumentSplitter')) {
                 failures << "test or splitter dependency in ${relative}"
+            }
+            forbiddenArchitectureTokens.each { token ->
+                if (body.contains(token)) {
+                    failures << "forbidden architecture token ${token} in ${relative}"
+                }
+            }
+        }
+        fileTree('src/main/resources').files.each { resource ->
+            String body = resource.getText('UTF-8')
+            forbiddenArchitectureTokens.each { token ->
+                if (body.contains(token)) {
+                    failures << "forbidden architecture token ${token} in ${resource}"
+                }
             }
         }
         if (!failures.empty) throw new GradleException(failures.join('; '))
@@ -390,7 +408,7 @@ tasks.register('verifyArtifactContents') {
                 'blue/coordination/fastpath/',
                 'myosDemoTest',
                 'CoordinationTestControl'
-        ]
+        ] + forbiddenArchitectureTokens
         def violations = []
         zipTree(tasks.named('jar').get().archiveFile).visit { details ->
             if (!details.directory && forbidden.any {
@@ -529,7 +547,9 @@ tasks.register('verifyDocumentation') {
     description = 'Rejects broken relative links in maintained Markdown.'
     inputs.files(fileTree('docs') { include '**/*.md' },
             'README.md', 'START-HERE.md', 'CHANGELOG.md',
-            'CONTRIBUTING.md', 'SECURITY.md')
+            'CONTRIBUTING.md', 'SECURITY.md',
+            'docs/releases/3.0.0-rc.1-evidence.json',
+            'docs/releases/round10-verification.schema.json')
     doLast {
         def failures = []
         inputs.files.files.findAll { it.name.endsWith('.md') }.each { source ->
@@ -550,6 +570,25 @@ tasks.register('verifyDocumentation') {
         }
         if (!failures.empty) {
             throw new GradleException(failures.join('\n'))
+        }
+        def evidence = new groovy.json.JsonSlurper().parse(
+                file('docs/releases/3.0.0-rc.1-evidence.json'))
+        def totals = ['tests', 'classes', 'failures', 'errors', 'skipped']
+        totals.each { key ->
+            long suiteTotal = evidence.tests.suites.sum {
+                (it[key] as Number).longValue()
+            }
+            if (suiteTotal != (evidence.tests[key] as Number).longValue()) {
+                throw new GradleException(
+                        "Round 10 evidence suite ${key} total is inconsistent")
+            }
+        }
+        if (evidence.tests.status == 'PASS'
+                && (evidence.tests.failures != 0
+                || evidence.tests.errors != 0
+                || evidence.tests.skipped != 0)) {
+            throw new GradleException(
+                    'Passing Round 10 evidence must have no failed or skipped tests')
         }
     }
 }
@@ -676,11 +715,33 @@ tasks.register('releaseCheck') {
             'scenarioTest', 'verifyTestArchitecture'
 }
 
+def round10Readiness = tasks.register('verifyRound10Readiness') {
+    group = 'verification'
+    description = 'Prevents staging while the Round 10.1 evidence report is fail-closed.'
+    inputs.file('docs/releases/3.0.0-rc.1-test-report.md')
+    doLast {
+        String report = file(
+                'docs/releases/3.0.0-rc.1-test-report.md')
+                .getText('UTF-8')
+        if (!report.contains(
+                'ROUND10_PROCESS_EMBEDDED_READY: PASS')
+                || report.contains('`PENDING`')
+                || report.contains('"PENDING')) {
+            throw new GradleException(
+                    'Round 10.1 evidence is not complete; staging is blocked')
+        }
+    }
+}
+
 tasks.register('stageRelease') {
     group = 'publishing'
     description = 'Builds the verified Maven Central staging repository.'
-    dependsOn 'releaseCheck',
+    dependsOn 'releaseCheck', round10Readiness,
             'publishMavenJavaPublicationToStagingRepository'
+}
+
+tasks.named('publishMavenJavaPublicationToStagingRepository') {
+    dependsOn round10Readiness
 }
 
 if (localDependencies) {

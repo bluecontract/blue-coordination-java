@@ -57,8 +57,8 @@ final class WholeObjectFailureHygieneTest {
                     metricsBefore, engine.metricsSnapshot());
             assertEquals(ATTEMPTS, failures.counter(
                     "process.frozenContractsInvocations"));
-            assertEquals(ATTEMPTS, failures.counter("transactionRetries"));
-            assertEquals(ATTEMPTS, failures.counter("journal.rollbacks"));
+            assertEquals(0L, failures.counter("journal.rollbacks"),
+                    "failed processing never rewrites the external journal");
 
             engine.clearFailureInjection();
             EngineMetrics.MetricsSnapshot beforeCommit =
@@ -79,9 +79,6 @@ final class WholeObjectFailureHygieneTest {
             assertEquals(entry.globalSequence() + 1L,
                     next.globalSequence());
 
-            System.out.println("whole-object retry counts: before="
-                    + objectsBefore + ", attempts=" + retainedCounts
-                    + ", afterCommit=" + engine.wholeObjectCount());
         }
     }
 }

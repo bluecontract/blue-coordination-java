@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Set;
 
 import static blue.coordination.integration.EngineTestSupport.assertNoGenericSplitting;
+import static blue.coordination.integration.EngineTestSupport.assertProcessingTimeAttribution;
 import static blue.coordination.integration.EngineTestSupport.delta;
 import static blue.coordination.integration.EngineTestSupport.integer;
 import static blue.coordination.integration.EngineTestSupport.resource;
@@ -51,7 +52,7 @@ final class CoreBehaviorIntegrationTest {
             assertEquals(2L, work.counter(
                     "process.commitCompanionDeltasApplied"));
             assertEquals(2L, work.counter("process.routingSurfaceReused"));
-            assertEquals(0L, work.counter("process.routingSurfaceChanges"));
+            assertProcessingTimeAttribution(work);
             assertNoGenericSplitting(work);
         }
     }
@@ -185,7 +186,8 @@ final class CoreBehaviorIntegrationTest {
                     "process.frozenContractsInvocations"));
             assertFalse(engine.history("nba-statistics").get(
                     engine.history("nba-statistics").size() - 1)
-                    .catchUpCause().isEmpty());
+                    .causalEntryBlueId().isEmpty());
+            assertProcessingTimeAttribution(live);
             assertNoGenericSplitting(live);
         }
     }

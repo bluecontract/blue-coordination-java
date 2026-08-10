@@ -8,6 +8,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Focused helpers for the clean basic-engine acceptance tests. */
 final class EngineTestSupport {
@@ -66,17 +67,31 @@ final class EngineTestSupport {
     }
 
     static void assertNoGenericSplitting(MetricDelta delta) {
-        assertEquals(0L, delta.counter("append.requestFragments"));
-        assertEquals(0L, delta.counter("append.eventFragments"));
-        assertEquals(0L, delta.counter("layout.ordinaryNodeFragments"));
-        assertEquals(0L, delta.counter("requestSplitterCalls"));
-        assertEquals(0L, delta.counter("entrySplitterCalls"));
-        assertEquals(0L, delta.counter("ordinaryNodeSplitterCalls"));
-        assertEquals(0L, delta.counter("broadSubscriptionProjectionCalls"));
-        assertEquals(0L, delta.counter(
-                "process.concreteSubscriptionProjections"));
-        assertEquals(0L, delta.counter("workflowBodiesScannedOnHotPath"));
-        assertEquals(0L, delta.counter("parentOwnedChildSourceCalls"));
+        assertEquals(0L, delta.counter("UNRELATED_DOCUMENT_READS"));
+        assertEquals(0L, delta.counter("REQUEST_FRAGMENTS"));
+        assertEquals(0L, delta.counter("TIMELINE_ENTRY_FRAGMENTS"));
+        assertEquals(0L, delta.counter("ORDINARY_NODE_FRAGMENTS"));
+        assertEquals(0L, delta.counter("FULL_ENVIRONMENT_SCANS"));
+        assertEquals(0L, delta.counter("SOURCE_REPLAYS_PER_PARENT"));
+        assertEquals(0L, delta.counter("POST_PROCESS_FULL_PROJECTIONS"));
+    }
+
+    /** Proves that user-visible frozen time is neither lost nor called host work. */
+    static void assertProcessingTimeAttribution(MetricDelta delta) {
+        long frozen = delta.nanos("process.frozen");
+        assertTrue(frozen > 0L, "PROCESS must record frozen semantic time");
+        assertEquals(frozen,
+                delta.nanos("process.frozenContractsOnce")
+                        + delta.nanos("process.embeddedFrozen"),
+                "aggregate frozen time must include direct and embedded lanes");
+        long frozenInternals = delta.nanos("process.deliveryPlanDerivation")
+                + delta.nanos("process.platformCommit");
+        assertTrue(frozenInternals > 0L,
+                "frozen PROCESS must expose its two upstream macro phases");
+        assertTrue(frozenInternals <= frozen,
+                "nested frozen timers cannot exceed their parent timer");
+        assertTrue(delta.nanos("process.hostBeforeFrozen") > 0L);
+        assertTrue(delta.nanos("process.hostAfterFrozen") > 0L);
     }
 
     record MetricDelta(

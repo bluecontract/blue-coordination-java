@@ -6,9 +6,11 @@ import blue.coordination.api.DocumentId;
 
 import blue.language.model.Node;
 import blue.language.model.wire.JsonPointer;
+import blue.language.merge.ResolvedSnapshot;
 import blue.language.processor.EffectiveFragmentationCatalog;
 import blue.language.processor.EmbeddedScopePlanView;
 import blue.language.processor.util.PointerUtils;
+import blue.language.processor.registry.RuntimeBlueIds;
 import blue.language.snapshot.FrozenNode;
 
 import java.util.ArrayList;
@@ -48,7 +50,9 @@ final class EmbeddedOnlyLayoutBuilder {
             EffectiveFragmentationCatalog catalog =
                     runtime.effectiveFragmentationCatalog(exactRoot.blueId());
             EmbeddedLayoutPlan plan = EmbeddedLayoutPlan.compile(
-                    exactRoot, catalog);
+                    exactRoot,
+                    catalog,
+                    path -> exactScopeAt(exactRoot, path));
             metrics.increment("layout.catalogCompilations");
             return buildWithPlan(
                     exactRoot,
@@ -62,42 +66,47 @@ final class EmbeddedOnlyLayoutBuilder {
             EmbeddedOnlyLayout previous) {
         Objects.requireNonNull(exactRoot, "exactRoot");
         Objects.requireNonNull(previous, "previous");
-        if (!previous.plan().reusableFor(exactRoot)) {
-            throw new IllegalStateException(
-                    "The compact basic lane freezes type/contracts and explicit "
-                            + "Process Embedded declarations at admission");
+        if (!previous.plan().reusableFor(
+                path -> exactScopeAt(exactRoot, path))) {
+            metrics.increment("layout.plansRecompiledAfterContractChange");
+            return build(exactRoot);
         }
         metrics.increment("layout.plansReused");
+        List<ConcreteBoundary> concreteBoundaries = previous.plan()
+                .hasCollections()
+                ? concreteFromCurrentCatalog(exactRoot)
+                : concreteFromFixedDeclarations(exactRoot, previous.plan());
         return buildWithPlan(
                 exactRoot,
                 previous.plan(),
-                concreteFromFixedDeclarations(exactRoot, previous.plan()));
-    }
-
-    /** Structurally shares the parent Root while advancing one child boundary. */
-    public EmbeddedOnlyLayout replaceEmbeddedState(
-            EmbeddedOnlyLayout previous,
-            String occurrencePath,
-            ExactValue childState) {
-        Objects.requireNonNull(previous, "previous");
-        Objects.requireNonNull(occurrencePath, "occurrencePath");
-        Objects.requireNonNull(childState, "childState");
-        FrozenNode updated = replaceAt(
-                previous.semanticRoot().frozen(),
-                JsonPointer.split(occurrencePath),
-                childState.frozen());
-        return rebuild(objects.put(updated, "embedded-materialized-revision"),
-                previous);
+                concreteBoundaries);
     }
 
     /**
-     * Restores autonomous child states after one parent-local frozen call.
+     * Refreshes only invocation-frozen collection membership. The immutable
+     * plan still owns declaration and routing identity; the catalog contributes
+     * the current stable-key occurrences and their canonical escaped paths.
+     */
+    private List<ConcreteBoundary> concreteFromCurrentCatalog(
+            ExactValue exactRoot) {
+        return metrics.timed("layout.refreshCollectionCatalog", () -> {
+            metrics.increment("layout.referenceOnlyCatalogInputs");
+            EffectiveFragmentationCatalog catalog =
+                    runtime.effectiveFragmentationCatalog(exactRoot.blueId());
+            metrics.increment("layout.catalogCompilations");
+            metrics.increment("layout.collectionCatalogRefreshes");
+            return concreteFromCatalog(catalog);
+        });
+    }
+
+    /**
+     * Restores managed child states after one parent-local frozen call.
      * External parent operations may detach a child or replace it with another
-     * document, but they may not mutate an existing autonomous child's state.
+     * document, but they may not mutate an existing managed child's state.
      * Processor-managed child-revision delivery is the only allowed same-child
      * state advance.
      */
-    public ExactValue restoreAutonomousChildren(
+    public ExactValue restoreManagedChildren(
             Node processedRoot,
             EmbeddedOnlyLayout previous,
             boolean processorManagedRevision) {
@@ -110,17 +119,17 @@ final class EmbeddedOnlyLayoutBuilder {
                     .at(occurrence.scopePath());
             if (executionChild == null) {
                 throw new IllegalStateException(
-                        "Missing autonomous PROCESS boundary at "
+                        "Missing managed PROCESS boundary at "
                                 + occurrence.scopePath());
             }
             if (processedChild == null) {
-                metrics.increment("layout.autonomousChildrenRemoved");
+                metrics.increment("layout.managedChildrenRemoved");
                 continue;
             }
             if (processedChild.blueId().equals(executionChild.blueId())) {
                 restored = replaceAt(restored, path,
                         occurrence.suppliedState().frozen());
-                metrics.increment("layout.autonomousChildrenRestored");
+                metrics.increment("layout.managedChildrenRestored");
                 continue;
             }
             if (processorManagedRevision) {
@@ -134,15 +143,100 @@ final class EmbeddedOnlyLayoutBuilder {
                     proposed);
             if (occurrence.childDocumentId().equals(proposedId)) {
                 metrics.increment(
-                        "layout.externalAutonomousChildMutationsRejected");
+                        "layout.externalManagedChildMutationsRejected");
                 throw new IllegalStateException(
-                        "External parent operation attempted to mutate autonomous "
+                        "External parent operation attempted to mutate managed "
                                 + "child " + proposedId + " at "
                                 + occurrence.scopePath());
             }
-            metrics.increment("layout.autonomousChildrenReplaced");
+            metrics.increment("layout.managedChildrenReplaced");
         }
         return objects.put(restored, "document-revision");
+    }
+
+    /**
+     * Enforces the pre-initialization ownership cut: frozen Contracts may
+     * inspect an embedded reference, but any recursive child initialization
+     * is discarded so Coordination can create the child's own epoch 0.
+     */
+    public ExactValue restoreAuthoredChildrenAfterInitialization(
+            Node initializedRoot,
+            EmbeddedOnlyLayout authoredLayout) {
+        FrozenNode restored = FrozenNode.fromNode(Objects.requireNonNull(
+                initializedRoot, "initializedRoot"));
+        for (EmbeddedOccurrence occurrence
+                : authoredLayout.directOccurrences()) {
+            List<String> path = JsonPointer.split(occurrence.scopePath());
+            if (restored.at(occurrence.scopePath()) == null) {
+                throw new IllegalStateException(
+                        "Initialization removed Process Embedded child at "
+                                + occurrence.scopePath());
+            }
+            restored = replaceAt(
+                    restored, path, occurrence.suppliedState().frozen());
+            metrics.increment("layout.initializationOwnershipRestorations");
+        }
+        return objects.put(restored, "initialized-document");
+    }
+
+    /**
+     * Keeps managed children opaque in both snapshot lanes during parent
+     * initialization. The canonical ownership projection alone is not enough:
+     * an effective resolved child would still be recursively initialized by
+     * frozen Contracts before Coordination can create its own epoch 0.
+     */
+    public ResolvedSnapshot isolateManagedInitializationScopes(
+            ResolvedSnapshot snapshot,
+            EmbeddedOnlyLayout authoredLayout) {
+        Objects.requireNonNull(snapshot, "snapshot");
+        Node resolvedNode = snapshot.resolvedRoot();
+        for (String scopePath : authoredLayout.plan()
+                .rulesByScope().keySet()) {
+            Node scope = nodeAt(resolvedNode, scopePath);
+            Node contracts = scope != null ? scope.getContracts() : null;
+            if (contracts == null || contracts.getProperties() == null) {
+                continue;
+            }
+            contracts.getProperties().entrySet().removeIf(entry -> {
+                FrozenNode contract = FrozenNode.fromResolvedNode(
+                        entry.getValue());
+                FrozenNode type = contract.getType();
+                return type != null
+                        && (RuntimeBlueIds.PROCESS_EMBEDDED.equals(
+                        type.getReferenceBlueId())
+                        || RuntimeBlueIds.PROCESS_EMBEDDED.equals(
+                        type.blueId()));
+            });
+        }
+        FrozenNode resolved = FrozenNode.fromResolvedNode(resolvedNode);
+        for (EmbeddedOccurrence occurrence
+                : authoredLayout.directOccurrences()) {
+            FrozenNode opaque = authoredLayout.processingFrozen().at(
+                    occurrence.scopePath());
+            if (opaque == null) {
+                throw new IllegalStateException(
+                        "Missing managed initialization scope at "
+                                + occurrence.scopePath());
+            }
+            resolved = replaceAt(
+                    resolved,
+                    JsonPointer.split(occurrence.scopePath()),
+                    opaque);
+        }
+        return new ResolvedSnapshot(
+                snapshot.frozenCanonicalRoot(),
+                resolved,
+                snapshot.blueId());
+    }
+
+    private static Node nodeAt(Node root, String pointer) {
+        Node current = root;
+        for (String segment : JsonPointer.split(pointer)) {
+            Map<String, Node> properties = current != null
+                    ? current.getProperties() : null;
+            current = properties != null ? properties.get(segment) : null;
+        }
+        return current;
     }
 
     private EmbeddedOnlyLayout buildWithPlan(
@@ -239,16 +333,16 @@ final class EmbeddedOnlyLayoutBuilder {
                 processingRoot = replaceAt(
                         processingRoot,
                         JsonPointer.split(occurrence.scopePath()),
-                        autonomousOwnershipProjection(
+                        managedOwnershipProjection(
                                 occurrence.suppliedState().copyNode()));
             }
             objects.put(processingRoot, "processing-ownership-view");
-            metrics.increment("layout.autonomousOwnershipViewsBuilt");
+            metrics.increment("layout.managedOwnershipViewsBuilt");
 
             metrics.add("layout.embeddedDocuments",
                     Math.max(0L, rootFirst.size() - 1L));
-            metrics.add("layout.splitterCreatedEdges", boundaries.stream()
-                    .filter(EmbeddedBoundary::splitterCreated).count());
+            metrics.add("layout.processEmbeddedCuts", boundaries.stream()
+                    .filter(EmbeddedBoundary::physicalCutCreated).count());
             metrics.increment("layout.semanticRootsRetained");
             return new EmbeddedOnlyLayout(
                     semanticRoot,
@@ -309,6 +403,11 @@ final class EmbeddedOnlyLayoutBuilder {
             }
         }
         return materializeReference(current);
+    }
+
+    private FrozenNode exactScopeAt(ExactValue root, String path) {
+        return resolveThroughReferences(
+                root.frozen(), JsonPointer.split(path));
     }
 
     private FrozenNode materializeReference(FrozenNode value) {
@@ -439,7 +538,7 @@ final class EmbeddedOnlyLayoutBuilder {
     }
 
     /** Contract-free child data view required by the frozen ownership check. */
-    private static FrozenNode autonomousOwnershipProjection(Node source) {
+    private static FrozenNode managedOwnershipProjection(Node source) {
         Node result = new Node()
                 .name(source.getName())
                 .description(source.getDescription())
@@ -448,7 +547,7 @@ final class EmbeddedOnlyLayoutBuilder {
         if (source.getItems() != null) {
             List<Node> items = new ArrayList<>(source.getItems().size());
             source.getItems().forEach(item ->
-                    items.add(autonomousOwnershipProjection(item).toNode()));
+                    items.add(managedOwnershipProjection(item).toNode()));
             result.items(items);
         }
         if (source.getProperties() != null) {
@@ -456,7 +555,7 @@ final class EmbeddedOnlyLayoutBuilder {
             source.getProperties().forEach((key, value) ->
                     properties.put(
                             key,
-                            autonomousOwnershipProjection(value).toNode()));
+                            managedOwnershipProjection(value).toNode()));
             result.properties(properties);
         }
         return FrozenNode.fromNode(result);
@@ -477,8 +576,7 @@ final class EmbeddedOnlyLayoutBuilder {
             result.add(new EmbeddedOccurrence(
                     boundary.childScopePath(),
                     DocumentIdentityReader.requireDocumentId(child),
-                    child,
-                    DocumentIdentityReader.activationMode(child)));
+                    child));
         }
         result.sort(Comparator.comparing(EmbeddedOccurrence::scopePath));
         return List.copyOf(result);

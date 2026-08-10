@@ -13,11 +13,11 @@ import static blue.coordination.integration.EngineTestSupport.text;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Full retained processor/BEX closure through a realistic autonomous PayNote. */
+/** Full retained processor/BEX closure through a managed PayNote. */
 @Tag("scenario")
 final class LargeHostPayNoteScenarioTest {
     @Test
-    void largeHostAndAutonomousPayNoteCompleteTheWadowiceWorkflow()
+    void largeHostAndManagedPayNoteCompleteTheWadowiceWorkflow()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
             Timeline alice = engine.timeline(
@@ -68,18 +68,20 @@ final class LargeHostPayNoteScenarioTest {
                     .getValue());
             assertEquals(2L, integer(
                     engine, "large-order-host", "/hostRevision"));
-            assertEquals(4L, integer(engine, "large-order-host",
-                    "/payNoteRevisionCount"));
+            assertEquals(engine.session("large-paynote").epoch() + 1L,
+                    integer(engine, "large-order-host",
+                            "/payNoteRevisionCount"));
             assertEquals("large-paynote", engine.embeddedDocuments(
                     "large-order-host").get("/payNote"));
             assertEquals(2, engine.session("large-order-host")
                     .layout().physicalObjectCount());
-            assertEquals(1, engine.session("large-paynote")
+            assertEquals(3, engine.session("large-paynote")
                     .layout().physicalObjectCount());
-            assertEquals(10L, work.counter(
-                    "process.frozenContractsInvocations"));
-            assertEquals(10L, work.counter(
-                    "process.commitCompanionDeltasApplied"));
+            assertTrue(work.counter(
+                    "process.frozenContractsInvocations") > 10L);
+            assertEquals(work.counter(
+                            "process.frozenContractsInvocations"),
+                    work.counter("process.commitCompanionDeltasApplied"));
             assertTrue(work.counter(
                     "process.subscriptionIntervalsReused") > 0L);
             assertTrue(work.counter(

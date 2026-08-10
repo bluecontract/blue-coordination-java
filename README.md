@@ -1,9 +1,10 @@
 # Blue Coordination Java
 
-Blue Coordination is a deterministic Java 17 runtime for autonomous Blue
+Blue Coordination is a deterministic Java 17 runtime for managed Blue
 documents. It keeps ordinary values whole, cuts only effective `Process
-Embedded` document boundaries, journals each exact Timeline Entry once, and
-executes one frozen Contracts call per selected autonomous root.
+Embedded` document boundaries, stores each exact Timeline Entry once, and lets
+the environment select canonical processing order across the resulting
+document graph.
 
 ## Install
 
@@ -30,10 +31,13 @@ try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
     var counter = DocumentId.of("counter");
 
     engine.startDocument(counter, counterYaml);
-    engine.appendAndDispatch(
+    engine.append(
             alice, Operation.yaml("increment", "aliceChannel", "amount: 3"));
-    engine.appendAndDispatch(
+    engine.append(
             bob, Operation.yaml("decrement", "bobChannel", "amount: 1"));
+
+    var receipt = engine.drain();
+    assert receipt.quiescent();
 
     long value = ((java.math.BigInteger) engine.document(counter)
             .valueAt("/counter").copyNode().getValue()).longValueExact();
@@ -42,7 +46,15 @@ try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
 ```
 
 `Operation.exact(...)` and `CoordinationEngine.referenceRequest(...)` expose the
-optimized whole-object request path without YAML reserialization.
+optimized whole-object request path without YAML reserialization. For a
+provider-supplied exact Timeline Entry, use `appendTimelineEntry(Node)`; append
+never names document recipients and never invokes PROCESS. `drain()` derives
+targets from the active Channel index and processes canonical work to
+quiescence. Latency-sensitive hosts can call `drain(new DrainBudget(...))` and
+resume a paused receipt at deterministic PROCESS boundaries; this bounds work,
+not the duration of one non-preemptible frozen call. `document(id)` is READY-only
+by design, while `auditDocument(id)` explicitly exposes intermediate committed
+state to operational tooling.
 
 ## Build and verification
 
@@ -58,15 +70,19 @@ realistic convergence scenarios. It does not read or execute `../blue-basic`.
 That sibling is retained only as a historical performance/metrics laboratory.
 
 Start with [START-HERE.md](START-HERE.md), then see the compact architecture,
-autonomous-document semantics, catch-up rules, performance interpretation, and
-limitations under `docs/`.
+managed `Process Embedded` semantics, catch-up rules, performance
+interpretation, and limitations under `docs/`.
 
 ## Release-candidate status
 
-The source and local semantic gates target `3.0.0-rc.1`. Publication is
-fail-closed until Repository `3.0.0-rc.19` and BEX `1.1.0-rc.3` are available as
-published Maven artifacts. See the [RC readiness note](docs/releases/3.0.0-rc.1.md)
-and [release procedure](docs/development/releasing.md).
+The source targets `3.0.0-rc.1` with the Round 10.1 Process Embedded temporal
+profile. Release readiness is fail-closed until the same-source temporal,
+restart/store, scenario, locality, performance, consumer, and artifact gates in
+the [RC test report](docs/releases/3.0.0-rc.1-test-report.md) have verified
+results. Publication also waits for Repository `3.0.0-rc.19` and BEX
+`1.1.0-rc.3` to be available as published Maven artifacts. See the
+[RC readiness note](docs/releases/3.0.0-rc.1.md) and
+[release procedure](docs/development/releasing.md).
 
 Developer references:
 
