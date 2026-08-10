@@ -29,6 +29,16 @@ consumed only inside the graph-publication savepoint. Failure before publication
 restores it; failure after a durable document transition retains the committed
 state and reconciles only the missing publication/cursor work.
 
+A document transition that may change its managed `Process Embedded` graph is
+committed as `CATCHING_UP`, not `READY`. The session records separate committed,
+ready, and graph-published epochs. Graph and route publication may then succeed,
+pause, or fail without making the new state application-readable. `document()`
+requires all of the following: `READY`, ready epoch equal to committed epoch,
+graph-published epoch equal to committed epoch, no open barrier, no pending
+admission, exact graph/state agreement, and every child cursor at the child
+current epoch. `auditDocument()` remains the explicit way to inspect a committed
+but not-yet-ready state.
+
 `drain(DrainBudget)` uses the same retained state as failure recovery. Reaching
 a selected-entry or committed-PROCESS limit is a normal paused receipt, not a
 failure. The receipt owns only outcomes committed during that call, and a later

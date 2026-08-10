@@ -1,7 +1,10 @@
 package blue.coordination.integration;
 
+import blue.coordination.api.CoordinationErrorCode;
+import blue.coordination.api.CoordinationException;
 import blue.coordination.api.DocumentRevision;
 import blue.coordination.api.Operation;
+import blue.coordination.api.SessionStatus;
 import blue.coordination.api.Timeline;
 import org.junit.jupiter.api.Test;
 
@@ -193,6 +196,12 @@ final class SharedManagedChildTwoParentsTest {
             assertEquals(0L, plan(
                     engine, "embedded-parent-two").link()
                     .appliedChildEpoch());
+            assertEquals(SessionStatus.CATCHING_UP,
+                    engine.session("embedded-parent-one").status());
+            assertEquals(SessionStatus.CATCHING_UP,
+                    engine.session("embedded-parent-two").status());
+            assertNotReady(engine, "embedded-parent-one");
+            assertNotReady(engine, "embedded-parent-two");
 
             engine.clearFailureInjection();
             EngineMetrics.MetricsSnapshot beforeRetry =
@@ -230,7 +239,21 @@ final class SharedManagedChildTwoParentsTest {
             assertEquals(1L, plan(
                     engine, "embedded-parent-two").link()
                     .appliedChildEpoch());
+            assertEquals(SessionStatus.READY,
+                    engine.readyDocument("embedded-parent-one").status());
+            assertEquals(SessionStatus.READY,
+                    engine.readyDocument("embedded-parent-two").status());
         }
+    }
+
+    private static void assertNotReady(
+            TestEngine engine,
+            String documentId) {
+        CoordinationException failure = assertThrows(
+                CoordinationException.class,
+                () -> engine.readyDocument(documentId));
+        assertEquals(CoordinationErrorCode.DOCUMENT_NOT_READY,
+                failure.code());
     }
 
     private static long revisionsCausedBy(

@@ -1,28 +1,41 @@
 {
-  "$schema": "round10-verification.schema.json",
-  "schemaVersion": "1.0.0",
+  "$schema": "round11-verification.schema.json",
+  "schemaVersion": "2.0.0",
   "release": "3.0.0-rc.1",
-  "profile": "ROUND10_PROCESS_EMBEDDED",
-  "verdict": "BLOCKED",
+  "profile": "ROUND11_READINESS_CLOSURE",
   "evidenceDate": "2026-08-10",
+  "verdict": "BLOCKED",
   "source": {
-    "baseCommit": "5348428ffba1bedaf5368df72364233f21c6b7b0",
+    "baseCommit": "4f8d76f5f9958d206ffe7f10ee92271e69c26f1c",
+    "candidateCommit": null,
+    "worktree": "DIRTY",
+    "dirtyReason": "The exact candidate commit and source archive are not frozen yet; the pre-existing Archive.zip is preserved and export-ignored",
     "mainSourceManifestAlgorithm": "src/main/java files sorted by project-relative path; each record is path, one ASCII space, and lowercase SHA-256 of file bytes; records are LF-joined without a trailing LF",
-    "mainSourceManifestSha256": "2c970f1149774333ed635b0018d8f82976aaa13262edf5703736ffe0569e018a",
-    "worktreeDirty": true
+    "mainSourceManifestSha256": "6db75b8b9dfb1279b64f90370cb9e3d8f0ff9f836f01a5d60cb0f1518973006b"
+  },
+  "status": {
+    "temporalArchitectureReady": "PASS",
+    "inMemoryEngineWorkingReady": "PASS",
+    "providerBackedReady": "BLOCKED_SCOPE",
+    "mandateAgentReady": "BLOCKED_UPSTREAM",
+    "playgroundLatencyReady": "PASS_HARD_GATE",
+    "publicRcReady": "BLOCKED"
   },
   "shape": {
-    "classes": 107,
-    "lines": 25289,
-    "publicApiTypes": 16
+    "status": "PASS",
+    "limits": {
+      "productionClasses": 115,
+      "productionLines": 25700,
+      "publicApiSourceTypes": 16
+    },
+    "productionClasses": 108,
+    "productionLines": 25700,
+    "publicApiSourceTypes": 16,
+    "newProductionClassesMaximum": 1,
+    "newPublicApiTypes": 0
   },
-  "artifacts": [
-    { "file": "blue-coordination-java-3.0.0-rc.1.jar", "sha256": "6f3d71ac4c1ad15667ad2cdf5d83fb62f73bf872b695397fa08e14358dab1c1f" },
-    { "file": "blue-coordination-java-3.0.0-rc.1-sources.jar", "sha256": "8c9d20cc7f55b0c433b7fb3fe8df4c5e9c660b01b038f7187f7aa77e2279080c" },
-    { "file": "blue-coordination-java-3.0.0-rc.1-javadoc.jar", "sha256": "677fe1066f3a2b7318505efa22cb91cb9446cf47d015ab3fea25268c56cba4a9" },
-    { "file": "blue-coordination-java-3.0.0-rc.1-test-fixtures.jar", "sha256": "1b971870300027340058894f0baede49d0c338a4b7b36e163811e1aa8a432e8f" }
-  ],
-  "tests": {
+  "baseline": {
+    "profile": "ROUND10_PROCESS_EMBEDDED",
     "status": "PASS",
     "tests": 282,
     "classes": 62,
@@ -36,59 +49,204 @@
       { "name": "scenarioTest", "tests": 7, "classes": 4, "failures": 0, "errors": 0, "skipped": 0 }
     ]
   },
+  "tests": {
+    "status": "PASS",
+    "tests": 302,
+    "classes": 65,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "suites": [
+      { "name": "test", "status": "PASS", "tests": 217, "classes": 29, "failures": 0, "errors": 0, "skipped": 0 },
+      { "name": "integrationTest", "status": "PASS", "tests": 73, "classes": 31, "failures": 0, "errors": 0, "skipped": 0 },
+      { "name": "consumerTest", "status": "PASS", "tests": 5, "classes": 1, "failures": 0, "errors": 0, "skipped": 0 },
+      { "name": "scenarioTest", "status": "PASS", "tests": 7, "classes": 4, "failures": 0, "errors": 0, "skipped": 0 }
+    ]
+  },
   "runtimes": [
-    { "java": "17.0.10", "gradle": "9.6.0", "gate": "releaseCheck --rerun-tasks", "status": "PASS" },
-    { "java": "21.0.2", "gradle": "9.6.0", "gate": "integrationTest --rerun-tasks; releaseCheck", "status": "PASS" }
+    { "java": "17", "gate": "test integrationTest consumerTest scenarioTest releaseCheck --rerun-tasks", "status": "PASS", "durationSeconds": 722 },
+    { "java": "21", "gate": "test integrationTest consumerTest scenarioTest releaseCheck --rerun-tasks", "status": "PASS", "durationSeconds": 694 }
   ],
-  "gates": [
-    { "id": "local-runtime", "status": "PASS", "summary": "All library-owned unit, integration, consumer, and scenario suites pass." },
-    { "id": "production-shape", "status": "PASS", "summary": "107 classes, 25,289 lines, and 16 public API source types remain within limits of 115, 25,500, and 16." },
-    { "id": "occurrence-specific-admission", "status": "PASS", "summary": "Exact occurrence plans bind parent, path, child, state, epoch, frontier, proof, and attachment-entry identity; recurrent states fail closed without an epoch and failed publication preserves the plan for retry." },
-    { "id": "ready-audit-read-boundary", "status": "PASS", "summary": "Application reads expose only READY snapshots; explicit audit reads expose committed CATCHING_UP or BLOCKED state." },
-    { "id": "bounded-resumable-drain", "status": "PASS", "summary": "Entry and PROCESS work budgets pause at deterministic retained boundaries and resume without repeating committed frozen PROCESS." },
-    { "id": "full-wadowice-acceptance", "status": "PASS", "summary": "Standalone and embedded completion converge; cancellation, adjustment, authentic late-refusal, and exactly-once duplicate handling pass with per-step timing attribution." },
-    { "id": "published-dependencies", "status": "BLOCKED", "summary": "Three exact runtime coordinates do not resolve from Maven Central." },
-    { "id": "local-source-inputs", "status": "PASS", "summary": "Repository HEAD and workspace diff match the committed source lock." },
-    { "id": "staging", "status": "BLOCKED", "summary": "Fail-closed readiness remains blocked only by unresolved upstream semantic capabilities and unpublished runtime artifacts." }
+  "readinessProofs": [
+    { "id": "committed-parent-graph-publication-failure", "status": "PASS", "parentProcessReruns": 0 },
+    { "id": "child-commit-lagging-parents", "status": "PASS", "childProcessReruns": 0 },
+    { "id": "recovery-normalizes-stale-readiness", "status": "PASS", "childReplays": 0 },
+    { "id": "independent-application-read-preconditions", "status": "PASS" }
+  ],
+  "sourceSurfaceIdentity": {
+    "algorithm": "domain-separated SHA-256 over structurally length-prefixed immutable source-surface fields",
+    "mutableBusinessBlueIdExcludedByDesign": true,
+    "businessOnlyTransitionReusesIdentity": "PASS",
+    "realSourceSurfaceChangeInvalidatesIdentity": "PASS",
+    "canonicalOrderingAndDelimiterSafety": "PASS"
+  },
+  "performance": {
+    "status": "PASS_HARD_GATE",
+    "preferredHostP95RegressionPercent": 10.0,
+    "hardHostP95RegressionPercent": 20.0,
+    "baselineSingleRunMs": {
+      "warmOrdinary": { "total": 3358.363, "frozen": 3342.792, "host": 15.571 },
+      "warmPayNotePlusParent": { "total": 5258.647, "frozen": 5212.002, "host": 46.645 },
+      "threeLayerRestaurantProduct": { "total": 6262.097, "frozen": 6207.401, "host": 54.696 }
+    },
+    "round11SingleRunMs": {
+      "warmOrdinary": { "total": 3327.170791, "frozen": 3307.632958, "host": 19.537833 },
+      "warmPayNotePlusParent": { "total": 5318.566083, "frozen": 5264.846500, "host": 53.719583 },
+      "threeLayerRestaurantProduct": { "total": 6314.884208, "frozen": 6253.343416, "host": 61.540792 }
+    },
+    "repeatedP95Rows": {
+      "hostOverheadAroundOneProcess": {
+        "baselineP95Ms": 0.636791,
+        "round11P50Ms": 0.621750,
+        "round11P95Ms": 0.725749,
+        "round11P99Ms": 0.768583,
+        "round11MaxMs": 0.768583,
+        "regressionPercent": 13.9697,
+        "preferredGate": "MISS",
+        "hardGate": "PASS"
+      },
+      "existingChildCatchUpP95Ms": 99.233627,
+      "nbaCatchUpP95Ms": 87.689082
+    },
+    "baselineRuntimeEvidenceSha256": "5cd3ba34437f92de9a5efd4e12954aca3b94c82710164aaf507c2257fbcee213",
+    "baselineProvenanceSha256": "d9a819b69c4fa529299f80ba29f0df61458d1dcf19c4dc1fe6ab795be2afabef",
+    "baselineTimingEvidenceSha256": "f230aee7f6db4e3d29c8831d1c7654236af6b8e4af3cbb6253daa2e545c23ca2",
+    "round11RuntimeEvidenceSha256": "905f40b44c690fa3a964c5a01c47005659f1c2acf590a4243ad5ac363d24bc64",
+    "round11ProvenanceSha256": "267259f74cbe941b23aa81dbe850a56004d07522bed1e54f9a2f213ed01925b2",
+    "round11TimingEvidenceSha256": "9cc8eec2f2c51b43ad776d6c4b65ee86114c66f6116bcf6880cd0ddda2f8be94",
+    "evidenceFiles": {
+      "baselineRuntimeComparison": "evidence/round11/baseline-runtime-comparison.json",
+      "baselineRuntimeProvenance": "evidence/round11/baseline-runtime-provenance.json",
+      "baselineLargeHostTimings": "evidence/round11/baseline-large-host-timings.json",
+      "round11RuntimeComparison": "evidence/round11/final-runtime-comparison.json",
+      "round11RuntimeProvenance": "evidence/round11/final-runtime-provenance.json",
+      "round11LargeHostTimings": "evidence/round11/final-large-host-timings.json"
+    }
+  },
+  "structuralEvidence": {
+    "status": "PASS",
+    "requiredZeroCounters": {
+      "REQUEST_FRAGMENTS": 0,
+      "TIMELINE_ENTRY_FRAGMENTS": 0,
+      "ORDINARY_NODE_FRAGMENTS": 0,
+      "FULL_ENVIRONMENT_SCANS": 0,
+      "SOURCE_REPLAYS_PER_PARENT": 0,
+      "POST_PROCESS_FULL_PROJECTIONS": 0,
+      "PARENT_PROCESS_RERUNS_ON_GRAPH_RETRY": 0,
+      "CHILD_PROCESS_RERUNS_ON_PARENT_RETRY": 0
+    }
+  },
+  "scenarios": {
+    "wadowiceStressOracle": "PASS",
+    "nba": "PASS",
+    "canonicalRepositoryWadowice": "NOT_PROVEN"
+  },
+  "blueBasic": {
+    "status": "PASS",
+    "gate": "clean allBasicTests --refresh-dependencies --rerun-tasks --no-parallel",
+    "durationSeconds": 1087,
+    "tests": 40,
+    "classes": 27,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "suites": [
+      { "name": "test", "status": "PASS", "tests": 28, "classes": 19, "failures": 0, "errors": 0, "skipped": 0 },
+      { "name": "consumerTest", "status": "PASS", "tests": 5, "classes": 1, "failures": 0, "errors": 0, "skipped": 0 },
+      { "name": "performanceTest", "status": "PASS", "tests": 4, "classes": 4, "failures": 0, "errors": 0, "skipped": 0 },
+      { "name": "runtimeCampaign", "status": "PASS", "tests": 1, "classes": 1, "failures": 0, "errors": 0, "skipped": 0 },
+      { "name": "scenarioTest", "status": "PASS", "tests": 2, "classes": 2, "failures": 0, "errors": 0, "skipped": 0 }
+    ]
+  },
+  "playground": {
+    "status": "PASS",
+    "gate": "compileJava check",
+    "durationSeconds": 8,
+    "dependencyBoundary": "local included Blue Coordination candidate"
+  },
+  "publicationEvidence": {
+    "status": "BLOCKED_UPSTREAM",
+    "gate": "dependencyPreflight -PblueDependencyMode=published-artifact",
+    "durationSeconds": 28,
+    "resolvedCoordinates": [
+      "blue.repo:blue-repo-java:3.0.0-rc.19",
+      "blue.language:blue-contracts-core:3.1.0-rc.20"
+    ],
+    "missingCoordinates": [
+      "blue.bex:blue-bex-core:1.1.0-rc.3",
+      "blue.bex:blue-bex-contracts:1.1.0-rc.3"
+    ],
+    "versionConflict": "commons-codec:commons-codec 1.15 versus 1.11",
+    "externalConsumerSmokeBuild": "BLOCKED_UPSTREAM"
+  },
+  "artifacts": {
+    "status": "PASS",
+    "mainJarSha256": "c68fbd36aa35827eddb0066560d10bdfb6b3b302eb7cf6da70d386a72c72a22e",
+    "sourcesJarSha256": "7e881754ce4bf9d6abcbda9f82a1d9b9f9222b0d68b60e4363f29866fcfeb1ee",
+    "javadocJarSha256": "677fe1066f3a2b7318505efa22cb91cb9446cf47d015ab3fea25268c56cba4a9",
+    "testFixturesJarSha256": "d5cd13543675f365674eb22bb059fa5f43424cf3ef36c2ea41e87206a0d046c6"
+  },
+  "sourceArchive": {
+    "configuration": "CONFIGURED",
+    "authoritativeVersionFile": ".cz.toml",
+    "authoritativeVersionFileIncluded": true,
+    "exportIgnored": [
+      "nested ZIPs",
+      "build and Gradle output",
+      "__MACOSX and AppleDouble files",
+      "JFR and heap dumps"
+    ],
+    "extractedConfiguration": "PENDING_VERIFICATION",
+    "publishedArtifactSmokeBuild": "BLOCKED_UPSTREAM",
+    "sha256": null,
+    "pendingReason": "The source archive can be generated and extracted only after the exact candidate commit is frozen"
+  },
+  "capabilities": [
+    {
+      "id": "generic-timeline-entry-document-target",
+      "classification": "OPTIONAL_GENERALIZED_PROFILE",
+      "blocker": false,
+      "summary": "A universal literal documentId is optional for the append-once, environment-derived engine; concrete profiles may require exact target derivation."
+    }
   ],
   "blockers": [
     {
-      "id": "timeline-entry-document-target",
-      "category": "semantic-upstream",
-      "owner": "blue-repository-java",
-      "summary": "The pinned public Timeline Entry model has no literal documentId target or target hook.",
-      "requiredAction": "Publish a target-capable upstream entry/provider model and run the mandatory per-document routing campaign."
-    },
-    {
       "id": "provider-mandate-resolver",
       "category": "semantic-upstream",
-      "owner": "blue-language-java/provider",
-      "summary": "The provider boundary has no exact Mandate-state resolver at source order.",
-      "requiredAction": "Expose and verify provider-backed target-specific Mandate eligibility."
+      "summary": "No exact provider-backed Mandate eligibility resolver exists at entry source order."
     },
     {
-      "id": "repository-artifact",
-      "category": "artifact-upstream",
-      "owner": "blue-repository-java",
-      "summary": "The pinned Repository artifact is absent from Maven Central.",
-      "requiredAction": "Publish the exact coordinate.",
-      "coordinate": "blue.repo:blue-repo-java:3.0.0-rc.19"
+      "id": "provider-backed-durability",
+      "category": "scope",
+      "summary": "Durable provider-backed completeness and fresh-process reconstruction are not implemented."
     },
     {
-      "id": "bex-core-artifact",
+      "id": "published-artifact-graph",
       "category": "artifact-upstream",
-      "owner": "blue-bex-java",
-      "summary": "The pinned BEX core artifact is absent from Maven Central.",
-      "requiredAction": "Publish the exact coordinate.",
-      "coordinate": "blue.bex:blue-bex-core:1.1.0-rc.3"
-    },
-    {
-      "id": "bex-contracts-artifact",
-      "category": "artifact-upstream",
-      "owner": "blue-bex-java",
-      "summary": "The pinned BEX Contracts artifact is absent from Maven Central.",
-      "requiredAction": "Publish the exact coordinate.",
-      "coordinate": "blue.bex:blue-bex-contracts:1.1.0-rc.3"
+      "summary": "Repository rc.19 and Language rc.20 resolve, but BEX core/contracts rc.3 are missing and commons-codec 1.15 conflicts with 1.11; the external-consumer smoke build is therefore blocked."
     }
+  ],
+  "limitations": {
+    "inMemory": "Sequential single-process in-memory engine only",
+    "provider": "No durable provider-backed fresh-process reconstruction proof",
+    "mandate": "No exact provider-backed Mandate eligibility resolver at source order",
+    "durability": "No crash-safe distributed transaction or cross-process exactly-once claim",
+    "artifactPublication": "Published preflight is blocked by missing BEX rc.3 artifacts and a commons-codec 1.15/1.11 conflict",
+    "frozenLatency": "Large frozen Contracts/Language/BEX PROCESS remains multi-second",
+    "canonicalWadowice": "The existing stress fixture is not the unimplemented canonical Repository-domain fixture"
+  },
+  "notClaimed": [
+    "production readiness",
+    "public RC readiness",
+    "stageRelease success",
+    "provider-backed durability",
+    "Mandate-backed agent authority",
+    "sub-second Wadowice frozen processing",
+    "canonical Repository-domain Wadowice compatibility",
+    "performance improvement"
+  ],
+  "mustRegenerateAfterFinalTree": [
+    "candidate commit and clean/dirty status",
+    "source archive SHA-256 and extracted configuration result"
   ]
 }

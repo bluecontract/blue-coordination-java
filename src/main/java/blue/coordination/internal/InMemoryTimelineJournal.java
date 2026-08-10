@@ -1,11 +1,8 @@
 package blue.coordination.internal;
 
-import blue.coordination.api.TimelineEntry;
-
-import blue.coordination.api.Timeline;
-
 import blue.coordination.api.Operation;
-
+import blue.coordination.api.Timeline;
+import blue.coordination.api.TimelineEntry;
 import blue.language.processor.ExternalOrderKey;
 
 import java.util.ArrayList;
@@ -17,6 +14,7 @@ import java.util.Optional;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 /** Deterministic in-memory journal; each exact entry is retained once. */
 final class InMemoryTimelineJournal {
@@ -225,15 +223,14 @@ final class InMemoryTimelineJournal {
             Predicate<TimelineEntry> eligible,
             long routeIndexGeneration,
             long graphGeneration,
-            String sourceSurfaceIdentity) {
+            Supplier<String> sourceSurfaceIdentity) {
         Objects.requireNonNull(cutoffExclusive, "cutoffExclusive");
         Objects.requireNonNull(eligible, "eligible");
+        Objects.requireNonNull(sourceSurfaceIdentity, "sourceSurfaceIdentity");
         if (routeIndexGeneration < 0L || graphGeneration < 0L) {
             throw new IllegalArgumentException(
                     "historical generations must be non-negative");
         }
-        String surfaceIdentity = requireText(
-                sourceSurfaceIdentity, "sourceSurfaceIdentity");
         metrics.increment("journal.historicalWindowsOpened");
         Optional<HistoricalStep> blocked = historicalAvailability.blockedStep();
         if (blocked.isPresent()) {
@@ -259,31 +256,27 @@ final class InMemoryTimelineJournal {
             return new HistoricalStep.EligibleEntry(
                     entry, entry.sourceOrderKey());
         }
+        metrics.increment("journal.sourceSurfaceIdentitiesResolved");
         CompletenessEvidence evidence = new CompletenessEvidence(
                 revision,
                 routeIndexGeneration,
                 graphGeneration,
                 cutoffExclusive,
-                surfaceIdentity);
+                requireText(sourceSurfaceIdentity.get(),
+                        "sourceSurfaceIdentity"));
         return sawEntryInWindow
                 ? new HistoricalStep.Complete(evidence)
                 : new HistoricalStep.CompleteEmpty(evidence);
     }
 
     public synchronized ExternalOrderKey latestExternalOrder() {
-        return externalByOrder.isEmpty()
-                ? null
-                : externalByOrder.lastKey();
+        return externalByOrder.isEmpty() ? null : externalByOrder.lastKey();
     }
 
-    public synchronized int size() {
-        return byBlueId.size();
-    }
+    public synchronized int size() { return byBlueId.size(); }
 
     /** Monotonic identity of the exact currently published journal content. */
-    synchronized long revision() {
-        return revision;
-    }
+    synchronized long revision() { return revision; }
 
     synchronized void makeHistoricalUnavailable(String diagnostic) {
         historicalAvailability.makeUnavailable(diagnostic);

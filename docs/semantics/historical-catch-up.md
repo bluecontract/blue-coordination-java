@@ -24,6 +24,13 @@ process eligible historical source entries exactly once. Entries admitted after
 a closed local frontier remain outside it even if their human timestamp is
 older; canonical provider order and completeness evidence are authoritative.
 
+Completeness evidence is bound to the exact active source surface rather than
+the child document's unrelated business-state BlueId. The identity includes the
+binding generation, active subscription intervals, source contributions,
+checkpoint domains, dependency evidence, Channel catalog membership, and
+compiled external routes. Ordinary state changes therefore reuse valid
+completeness evidence; a real source-surface or activation change invalidates it.
+
 Several children introduced by one parent transition share one extendable
 barrier. Their initialization and historical work merge by source order, depth,
 canonical path, DocumentId, and epoch identity. Replay is iterative: after each

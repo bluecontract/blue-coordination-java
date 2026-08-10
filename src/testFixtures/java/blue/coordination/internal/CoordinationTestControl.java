@@ -1,6 +1,7 @@
 package blue.coordination.internal;
 
 import blue.coordination.api.CoordinationEngine;
+import blue.coordination.api.SessionStatus;
 import blue.language.api.BlueCacheStats;
 
 import java.util.List;
@@ -42,6 +43,20 @@ public final class CoordinationTestControl {
     /** Reconstructs transient scheduling/index state from retained stores. */
     public void restartFromStores() {
         engine.restartFromStores();
+    }
+
+    /**
+     * Simulates a pre-Round-11 retained READY marker for restart-repair tests.
+     * The composite application-read proof remains authoritative.
+     */
+    public void forceLegacyReadyMarker(String documentId) {
+        DocumentSession session = engine.session(Objects.requireNonNull(
+                documentId, "documentId"));
+        session.restoreCoordinationState(
+                SessionStatus.READY,
+                session.readyThrough(),
+                session.epoch(),
+                session.epoch());
     }
 
     /** Makes bounded historical reads defer without reporting false absence. */

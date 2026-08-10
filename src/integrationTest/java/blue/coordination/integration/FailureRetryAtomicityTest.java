@@ -1,6 +1,8 @@
 package blue.coordination.integration;
 
 import blue.coordination.api.Operation;
+import blue.coordination.api.CoordinationErrorCode;
+import blue.coordination.api.CoordinationException;
 import blue.coordination.api.DocumentRevision;
 import blue.coordination.api.SessionStatus;
 import blue.coordination.api.Timeline;
@@ -49,8 +51,10 @@ final class FailureRetryAtomicityTest {
             assertEquals(1L, engine.session(
                     "embedded-state-parent").epoch(),
                     "the external parent commit is durable");
-            assertEquals(SessionStatus.READY, engine.session(
-                    "embedded-state-parent").status());
+            assertEquals(SessionStatus.CATCHING_UP, engine.session(
+                    "embedded-state-parent").status(),
+                    "a committed parent with an unpublished graph is not READY");
+            assertNotReady(engine, "embedded-state-parent");
             assertEquals(1, engine.documentCount(),
                     "the staged child is not a committed managed document");
             assertEquals(routeRowsBefore, engine.routeRowCount(),
@@ -75,6 +79,9 @@ final class FailureRetryAtomicityTest {
             assertTrue(engine.embeddedDocuments(
                     "embedded-state-parent").isEmpty());
             assertTrue(engine.catchUpPlans().isEmpty());
+            assertEquals(SessionStatus.CATCHING_UP, engine.session(
+                    "embedded-state-parent").status());
+            assertNotReady(engine, "embedded-state-parent");
             assertEquals(objectsAfterFirstFailure, engine.wholeObjectCount(),
                     "repeated terminal reconciliation has exact object rollback");
             assertEquals(1L, engine.history("embedded-state-parent").stream()
@@ -87,6 +94,11 @@ final class FailureRetryAtomicityTest {
             engine.dispatch(attachment);
 
             assertEquals(2, engine.documentCount());
+            assertEquals(SessionStatus.READY, engine.session(
+                    "embedded-state-parent").status());
+            assertEquals(engine.session(
+                    "embedded-state-parent").epoch(), engine.readyDocument(
+                    "embedded-state-parent").epoch());
             assertEquals("embedded-counter-A", engine.embeddedDocuments(
                     "embedded-state-parent").get("/child"));
             assertEquals(1L, integer(
@@ -135,6 +147,10 @@ final class FailureRetryAtomicityTest {
                     engine, "embedded-counter-A", "/counter"));
             assertEquals(0L, integer(
                     engine, "embedded-state-parent", "/child/counter"));
+            assertEquals(SessionStatus.CATCHING_UP, engine.session(
+                    "embedded-state-parent").status(),
+                    "a parent becomes non-ready as soon as its child commits");
+            assertNotReady(engine, "embedded-state-parent");
 
             engine.failOnceAt(TestEngine.FailurePoint
                     .AFTER_FROZEN_BEFORE_STAGE);
@@ -148,6 +164,9 @@ final class FailureRetryAtomicityTest {
                     engine, "embedded-state-parent", "/child/counter"));
             assertEquals(0L, engine.catchUpPlans().get(0)
                     .link().appliedChildEpoch());
+            assertEquals(SessionStatus.CATCHING_UP, engine.session(
+                    "embedded-state-parent").status());
+            assertNotReady(engine, "embedded-state-parent");
 
             engine.clearFailureInjection();
             EngineMetrics.MetricsSnapshot beforeRetry =
@@ -163,6 +182,12 @@ final class FailureRetryAtomicityTest {
                     engine, "embedded-state-parent", "/child/counter"));
             assertEquals(1L, engine.catchUpPlans().get(0)
                     .link().appliedChildEpoch());
+            assertEquals(SessionStatus.READY, engine.session(
+                    "embedded-state-parent").status());
+            assertEquals(engine.session(
+                            "embedded-state-parent").epoch(),
+                    engine.readyDocument(
+                            "embedded-state-parent").epoch());
         }
     }
 
@@ -211,7 +236,23 @@ final class FailureRetryAtomicityTest {
             assertEquals(0L, engine.catchUpPlans().get(0)
                     .link().appliedChildEpoch());
 
+            engine.forceLegacyReadyMarker("embedded-state-parent");
+            assertEquals(SessionStatus.READY, engine.session(
+                    "embedded-state-parent").status(),
+                    "simulate the stale marker retained by a pre-Round-11 "
+                            + "crash boundary");
+            assertNotReady(engine, "embedded-state-parent");
+            EngineMetrics.MetricsSnapshot beforeRestart =
+                    engine.metricsSnapshot();
             engine.restartFromStores();
+            EngineTestSupport.MetricDelta restart = delta(
+                    beforeRestart, engine.metricsSnapshot());
+            assertEquals(SessionStatus.CATCHING_UP, engine.session(
+                    "embedded-state-parent").status(),
+                    "restart must normalize stale READY evidence");
+            assertEquals(1L, restart.counter(
+                    "temporal.recoveredReadinessRepairs"));
+            assertNotReady(engine, "embedded-state-parent");
             EngineMetrics.MetricsSnapshot beforeResume =
                     engine.metricsSnapshot();
             engine.dispatch(childEntry);
@@ -222,11 +263,23 @@ final class FailureRetryAtomicityTest {
                     engine, "embedded-state-parent", "/child/counter"));
             assertEquals(2, engine.history("embedded-counter-A").size(),
                     "recovery must not reinitialize or reprocess the child");
-            assertEquals(0L, resume.counter("temporal.externalProcessCalls"));
+            assertEquals(0L, resume.counter("temporal.externalProcessCalls"),
+                    "the committed child PROCESS must not replay");
+            assertEquals(1L, resume.counter(
+                    "process.embeddedEpochProcessCalls"),
+                    "resume executes exactly the missing parent application");
+            assertEquals(1L, resume.counter(
+                    "process.frozenContractsInvocations"));
             assertEquals(1L, resume.counter(
                     "temporal.parentEpochApplications"));
             assertEquals(1L, engine.catchUpPlans().get(0)
                     .link().appliedChildEpoch());
+            assertEquals(SessionStatus.READY, engine.session(
+                    "embedded-state-parent").status());
+            assertEquals(engine.session(
+                            "embedded-state-parent").epoch(),
+                    engine.readyDocument(
+                            "embedded-state-parent").epoch());
             assertEquals(1L, engine.history("embedded-counter-A").stream()
                     .filter(revision -> revision.kind()
                             == DocumentRevision.Kind.INITIALIZATION)
@@ -389,6 +442,16 @@ final class FailureRetryAtomicityTest {
             assertEquals(attachment.globalSequence() + 1L,
                     next.globalSequence());
         }
+    }
+
+    private static void assertNotReady(
+            TestEngine engine,
+            String documentId) {
+        CoordinationException failure = assertThrows(
+                CoordinationException.class,
+                () -> engine.readyDocument(documentId));
+        assertEquals(CoordinationErrorCode.DOCUMENT_NOT_READY,
+                failure.code());
     }
 
 }

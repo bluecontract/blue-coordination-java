@@ -12,6 +12,8 @@ import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -43,6 +45,11 @@ final class InMemoryTimelineJournalHistoricalStepTest {
             TimelineEntry first = journal.append(timeline, operation, 100L);
             TimelineEntry second = journal.append(timeline, operation, 200L);
             TimelineEntry cutoff = journal.append(timeline, operation, 300L);
+            AtomicInteger surfaceResolutions = new AtomicInteger();
+            Supplier<String> sourceSurface = () -> {
+                surfaceResolutions.incrementAndGet();
+                return "alice-owner-surface";
+            };
 
             HistoricalStep.EligibleEntry eligible = assertInstanceOf(
                     HistoricalStep.EligibleEntry.class,
@@ -53,9 +60,11 @@ final class InMemoryTimelineJournalHistoricalStepTest {
                             ignored -> true,
                             7L,
                             11L,
-                            "alice-owner-surface"));
+                            sourceSurface));
             assertEquals(first, eligible.entry());
             assertEquals(first.sourceOrderKey(), eligible.nextExclusive());
+            assertEquals(0, surfaceResolutions.get(),
+                    "eligible rows must not calculate completeness identity");
 
             HistoricalStep.Complete complete = assertInstanceOf(
                     HistoricalStep.Complete.class,
@@ -66,8 +75,9 @@ final class InMemoryTimelineJournalHistoricalStepTest {
                             ignored -> false,
                             7L,
                             11L,
-                            "alice-owner-surface"));
+                            sourceSurface));
             assertEquals(3L, complete.evidence().journalRevision());
+            assertEquals(1, surfaceResolutions.get());
 
             HistoricalStep.CompleteEmpty empty = assertInstanceOf(
                     HistoricalStep.CompleteEmpty.class,
@@ -78,9 +88,11 @@ final class InMemoryTimelineJournalHistoricalStepTest {
                             ignored -> true,
                             7L,
                             11L,
-                            "alice-owner-surface"));
+                            sourceSurface));
             assertEquals(cutoff.sourceOrderKey(),
                     empty.evidence().cutoffExclusive());
+            assertEquals(2, surfaceResolutions.get(),
+                    "each completeness proof resolves identity exactly once");
 
             availability.makeUnavailable("provider maintenance");
             HistoricalStep.Unavailable unavailable = assertInstanceOf(
@@ -92,8 +104,9 @@ final class InMemoryTimelineJournalHistoricalStepTest {
                             ignored -> true,
                             7L,
                             11L,
-                            "alice-owner-surface"));
+                            sourceSurface));
             assertEquals("provider maintenance", unavailable.diagnostic());
+            assertEquals(2, surfaceResolutions.get());
 
             availability.invalidateEvidence("provider cursor mismatch");
             assertInstanceOf(
@@ -105,7 +118,8 @@ final class InMemoryTimelineJournalHistoricalStepTest {
                             ignored -> true,
                             7L,
                             11L,
-                            "alice-owner-surface"));
+                            sourceSurface));
+            assertEquals(2, surfaceResolutions.get());
             availability.makeAvailable();
             assertInstanceOf(
                     HistoricalStep.EligibleEntry.class,
@@ -116,7 +130,10 @@ final class InMemoryTimelineJournalHistoricalStepTest {
                             ignored -> true,
                             7L,
                             11L,
-                            "alice-owner-surface"));
+                            sourceSurface));
+            assertEquals(2, surfaceResolutions.get());
+            assertEquals(2L, metrics.snapshot().counters().getOrDefault(
+                    "journal.sourceSurfaceIdentitiesResolved", 0L));
         }
     }
 
@@ -220,7 +237,7 @@ final class InMemoryTimelineJournalHistoricalStepTest {
                         entry -> entry.timestampMicros() % 31L == 0L,
                         7L,
                         11L,
-                        "large-sparse-surface");
+                        () -> "large-sparse-surface");
                 if (step instanceof HistoricalStep.EligibleEntry eligible) {
                     if (sparseCursor != null) {
                         assertTrue(eligible.nextExclusive().compareTo(

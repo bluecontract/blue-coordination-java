@@ -627,13 +627,21 @@ public final class DefaultCoordinationEngine
     @Override
     public synchronized DocumentSnapshot document(DocumentId documentId) {
         DocumentSession session = requireDocument(documentId);
-        if (session.status() != SessionStatus.READY) {
+        String readinessFailure = drainCoordinator.applicationReadinessFailure(
+                session);
+        if (readinessFailure != null) {
+            metrics.increment("temporal.applicationReadsRejected");
             throw new CoordinationException(
                     CoordinationErrorCode.DOCUMENT_NOT_READY,
-                    "Document " + documentId + " is " + session.status(),
+                    "Document " + documentId + " is not application-ready: "
+                            + readinessFailure,
                     null,
                     Map.of("documentId", documentId.value(),
-                            "status", session.status().name()));
+                            "status", session.status().name(),
+                            "epoch", Long.toString(session.epoch()),
+                            "readyEpoch", Long.toString(session.readyEpoch()),
+                            "graphPublishedEpoch", Long.toString(
+                                    session.graphPublishedEpoch())));
         }
         return snapshot(session);
     }

@@ -8,3 +8,20 @@
 *.yml text eol=lf
 *.jar binary
 *.zip binary
+
+# Keep release source archives self-contained and free of local artifacts.
+*.zip export-ignore
+build/** export-ignore
+**/build/** export-ignore
+.gradle/** export-ignore
+**/.gradle/** export-ignore
+__MACOSX/** export-ignore
+**/__MACOSX/** export-ignore
+._* export-ignore
+**/._* export-ignore
+.DS_Store export-ignore
+**/.DS_Store export-ignore
+*.jfr export-ignore
+*.hprof export-ignore
+hs_err_pid*.log export-ignore
+replay_pid*.log export-ignore

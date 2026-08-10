@@ -1,14 +1,19 @@
 package blue.coordination.internal;
 
+import blue.coordination.api.CoordinationErrorCode;
+import blue.coordination.api.CoordinationEngine;
+import blue.coordination.api.CoordinationException;
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.DocumentRevision;
 import blue.coordination.api.ExactValue;
+import blue.coordination.api.SessionStatus;
 import blue.language.model.Node;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -72,6 +77,120 @@ final class DocumentSessionStateEpochsTest {
             assertThrows(IllegalStateException.class,
                     () -> session.resolveAdmissionEpoch(x.blueId(), null));
         }
+    }
+
+    @Test
+    void readyPublicationRequiresTheCurrentGraphEpoch() {
+        try (DefaultCoordinationEngine engine =
+                DefaultCoordinationEngine.create()) {
+            DocumentSession session = engine.start(CHILD, """
+                    documentId: recurrent-child
+                    state: initial
+                    """);
+
+            assertEquals(0L, session.epoch());
+            assertEquals(0L, session.readyEpoch());
+            assertEquals(0L, session.graphPublishedEpoch());
+            assertTrue(session.isLocallyReady());
+
+            ExactValue current = session.currentRevision().after();
+            session.commit(
+                    revision(1L, current, current),
+                    session.layout(),
+                    null,
+                    session.activeSubscriptions(),
+                    "synthetic|readiness");
+            session.markCatchingUp();
+
+            assertEquals(1L, session.epoch());
+            assertEquals(0L, session.readyEpoch());
+            assertEquals(0L, session.graphPublishedEpoch());
+            assertFalse(session.isLocallyReady());
+            assertThrows(IllegalStateException.class,
+                    () -> session.markReady(session.readyThrough()));
+
+            session.markGraphPublished();
+            assertFalse(session.isLocallyReady(),
+                    "graph publication alone must not expose the state");
+            session.markReady(session.readyThrough());
+
+            assertEquals(SessionStatus.READY, session.status());
+            assertEquals(1L, session.readyEpoch());
+            assertEquals(1L, session.graphPublishedEpoch());
+            assertTrue(session.isLocallyReady());
+        }
+    }
+
+    @Test
+    void applicationReadRejectsEachStaleLocalPublicationEpoch() {
+        try (DefaultCoordinationEngine engine =
+                DefaultCoordinationEngine.create()) {
+            DocumentSession session = engine.start(CHILD, """
+                    documentId: recurrent-child
+                    state: initial
+                    """);
+            ExactValue current = session.currentRevision().after();
+            session.commit(
+                    revision(1L, current, current),
+                    session.layout(),
+                    null,
+                    session.activeSubscriptions(),
+                    "synthetic|application-read");
+
+            session.restoreCoordinationState(
+                    SessionStatus.READY, session.readyThrough(), 0L, 1L);
+            assertNotReady(engine);
+
+            session.restoreCoordinationState(
+                    SessionStatus.READY, session.readyThrough(), 1L, 0L);
+            assertNotReady(engine);
+
+            session.restoreCoordinationState(
+                    SessionStatus.READY, session.readyThrough(), 1L, 1L);
+            assertEquals(1L, engine.document(CHILD).epoch());
+        }
+    }
+
+    @Test
+    void restartNormalizesLegacyReadyWithPendingTopLevelAdmission() {
+        try (DefaultCoordinationEngine engine =
+                DefaultCoordinationEngine.create()) {
+            engine.makeHistoricalUnavailable("provider window pending");
+            engine.startDocument(
+                    CHILD,
+                    """
+                    documentId: recurrent-child
+                    state: initial
+                    """,
+                    CoordinationEngine.AdmissionPolicy.FULL_HISTORY,
+                    null);
+            DocumentSession session = engine.session(CHILD.value());
+            assertEquals(SessionStatus.CATCHING_UP, session.status());
+
+            session.restoreCoordinationState(
+                    SessionStatus.READY,
+                    session.readyThrough(),
+                    session.epoch(),
+                    session.epoch());
+            assertEquals(SessionStatus.READY, session.status(),
+                    "simulate the legacy marker retained before Round 11");
+
+            engine.restartFromStores();
+
+            assertEquals(SessionStatus.CATCHING_UP, session.status());
+            assertNotReady(engine);
+            engine.makeHistoricalAvailable();
+            assertTrue(engine.drain().quiescent());
+            assertEquals(SessionStatus.READY, engine.document(CHILD).status());
+        }
+    }
+
+    private static void assertNotReady(DefaultCoordinationEngine engine) {
+        CoordinationException failure = assertThrows(
+                CoordinationException.class,
+                () -> engine.document(CHILD));
+        assertEquals(CoordinationErrorCode.DOCUMENT_NOT_READY,
+                failure.code());
     }
 
     private static DocumentRevision revision(long epoch, ExactValue after) {

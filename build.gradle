@@ -296,7 +296,9 @@ tasks.register('validateProductionShape') {
         }.files
         def failures = []
         if (classes > 115) failures << "production classes ${classes} > 115"
-        if (lines > 25_500L) failures << "production lines ${lines} > 25500"
+        // Round 11B adds one canonical source-surface identity helper. Keep
+        // the narrowly revised budget explicit rather than minifying it.
+        if (lines > 25_700L) failures << "production lines ${lines} > 25700"
         if (apiSources.size() > 16) {
             failures << "public API types ${apiSources.size()} > 16"
         }
@@ -514,6 +516,8 @@ tasks.register('verifyReleaseMetadata') {
                 'docs/development/test-strategy.md',
                 'docs/development/releasing.md',
                 'docs/releases/3.0.0-rc.1-test-report.md',
+                'docs/releases/3.0.0-rc.1-evidence.json',
+                'docs/releases/round11-verification.schema.json',
                 'docs/reference/public-api.md',
                 'docs/reference/metrics.md',
                 'docs/operations/failure-model.md'
@@ -544,12 +548,13 @@ tasks.register('verifyReleaseMetadata') {
 
 tasks.register('verifyDocumentation') {
     group = 'verification'
-    description = 'Rejects broken relative links in maintained Markdown.'
+    description = 'Validates maintained docs and canonical release evidence.'
     inputs.files(fileTree('docs') { include '**/*.md' },
             'README.md', 'START-HERE.md', 'CHANGELOG.md',
             'CONTRIBUTING.md', 'SECURITY.md',
             'docs/releases/3.0.0-rc.1-evidence.json',
-            'docs/releases/round10-verification.schema.json')
+            'docs/releases/round11-verification.schema.json',
+            productionSources)
     doLast {
         def failures = []
         inputs.files.files.findAll { it.name.endsWith('.md') }.each { source ->
@@ -571,24 +576,430 @@ tasks.register('verifyDocumentation') {
         if (!failures.empty) {
             throw new GradleException(failures.join('\n'))
         }
-        def evidence = new groovy.json.JsonSlurper().parse(
-                file('docs/releases/3.0.0-rc.1-evidence.json'))
-        def totals = ['tests', 'classes', 'failures', 'errors', 'skipped']
-        totals.each { key ->
-            long suiteTotal = evidence.tests.suites.sum {
-                (it[key] as Number).longValue()
-            }
-            if (suiteTotal != (evidence.tests[key] as Number).longValue()) {
-                throw new GradleException(
-                        "Round 10 evidence suite ${key} total is inconsistent")
+        def evidenceFile = file(
+                'docs/releases/3.0.0-rc.1-evidence.json')
+        def evidence = new groovy.json.JsonSlurper().parse(evidenceFile)
+        if (evidence.schemaVersion != '2.0.0'
+                || evidence.profile != 'ROUND11_READINESS_CLOSURE') {
+            throw new GradleException(
+                    'Canonical evidence must use the Round 11 profile')
+        }
+        def expectedStatuses = [
+                'temporalArchitectureReady',
+                'inMemoryEngineWorkingReady',
+                'providerBackedReady',
+                'mandateAgentReady',
+                'playgroundLatencyReady',
+                'publicRcReady'
+        ] as Set
+        if ((evidence.status.keySet() as Set) != expectedStatuses) {
+            throw new GradleException(
+                    'Round 11 evidence must contain the six readiness statuses')
+        }
+        def allowedStatuses = [
+                'PASS', 'PASS_HARD_GATE',
+                'BLOCKED', 'BLOCKED_SCOPE', 'BLOCKED_UPSTREAM', 'FAIL'
+        ] as Set
+        evidence.status.each { key, value ->
+            if (!allowedStatuses.contains(value)) {
+                failures << "Invalid readiness status ${key}=${value}"
             }
         }
-        if (evidence.tests.status == 'PASS'
-                && (evidence.tests.failures != 0
-                || evidence.tests.errors != 0
-                || evidence.tests.skipped != 0)) {
+        def requiredFinalStatuses = [
+                temporalArchitectureReady: 'PASS',
+                inMemoryEngineWorkingReady: 'PASS',
+                providerBackedReady: 'BLOCKED_SCOPE',
+                mandateAgentReady: 'BLOCKED_UPSTREAM',
+                playgroundLatencyReady: 'PASS_HARD_GATE',
+                publicRcReady: 'BLOCKED'
+        ]
+        if (evidence.verdict != 'BLOCKED') {
+            failures << 'Final Round 11 verdict must remain BLOCKED'
+        }
+        requiredFinalStatuses.each { key, expected ->
+            if (evidence.status[key] != expected) {
+                failures << "Final Round 11 status ${key} must be ${expected}"
+            }
+        }
+
+        // Candidate identity and the extracted source archive are finalized
+        // only after the evidence-producing tree is committed. Every other
+        // result must be complete before this report can call itself final.
+        def allowedNullPaths = [
+                'source.candidateCommit',
+                'source.dirtyReason',
+                'sourceArchive.sha256',
+                'sourceArchive.pendingReason'
+        ] as Set
+        def allowedPendingPaths = [
+                'sourceArchive.extractedConfiguration'
+        ] as Set
+        Closure rejectUnfinalized
+        rejectUnfinalized = { value, String path ->
+            if (value == null) {
+                if (!allowedNullPaths.contains(path)) {
+                    failures << "Final evidence is unfinalized at ${path}"
+                }
+                return
+            }
+            if (value == 'PENDING_VERIFICATION') {
+                if (!allowedPendingPaths.contains(path)) {
+                    failures << "Final evidence is unfinalized at ${path}"
+                }
+                return
+            }
+            if (value instanceof Map) {
+                value.each { childKey, childValue ->
+                    String childPath = path
+                            ? "${path}.${childKey}" : childKey.toString()
+                    rejectUnfinalized(childValue, childPath)
+                }
+            } else if (value instanceof List) {
+                value.eachWithIndex { childValue, index ->
+                    rejectUnfinalized(childValue, "${path}.${index}")
+                }
+            }
+        }
+        rejectUnfinalized(evidence, '')
+
+        def actualShape = [
+                productionClasses: productionSources.files.size(),
+                productionLines: productionSources.files.sum {
+                    it.readLines('UTF-8').size()
+                } ?: 0L,
+                publicApiSourceTypes: fileTree(
+                        'src/main/java/blue/coordination/api') {
+                    include '**/*.java'
+                }.files.size()
+        ]
+        if (evidence.shape.status != 'PASS') {
+            failures << 'Final production-shape evidence must PASS'
+        }
+        actualShape.each { key, actual ->
+            if (evidence.shape[key] != actual) {
+                failures << "Production shape ${key} is "
+                        + "${evidence.shape[key]}; actual is ${actual}"
+            }
+        }
+        def timelineCapability = evidence.capabilities.find {
+            it.id == 'generic-timeline-entry-document-target'
+        }
+        if (timelineCapability == null
+                || timelineCapability.blocker != false) {
+            failures << 'Generic Timeline Entry documentId must be optional, not a blocker'
+        }
+        if (evidence.blockers.any {
+            it.id == 'generic-timeline-entry-document-target'
+        }) {
+            failures << 'Optional generic Timeline target appears in blockers'
+        }
+        if (!evidence.blockers.any {
+            it.id == 'provider-mandate-resolver'
+        }) {
+            failures << 'Provider-backed Mandate resolver must remain a blocker'
+        }
+        if (evidence.tests.status == 'PASS') {
+            def totals = [
+                    'tests', 'classes', 'failures', 'errors', 'skipped'
+            ]
+            totals.each { key ->
+                if (!(evidence.tests[key] instanceof Number)
+                        || evidence.tests.suites.any {
+                            !(it[key] instanceof Number)
+                        }) {
+                    failures << "Passing evidence lacks numeric ${key} totals"
+                    return
+                }
+                long suiteTotal = evidence.tests.suites.sum {
+                    (it[key] as Number).longValue()
+                }
+                if (suiteTotal
+                        != (evidence.tests[key] as Number).longValue()) {
+                    failures << "Round 11 suite ${key} total is inconsistent"
+                }
+            }
+            if (evidence.tests.failures != 0
+                    || evidence.tests.errors != 0
+                    || evidence.tests.skipped != 0) {
+                failures << 'Passing evidence must have no failed or skipped tests'
+            }
+        }
+        def expectedSuites = [
+                test: [tests: 217, classes: 29],
+                integrationTest: [tests: 73, classes: 31],
+                consumerTest: [tests: 5, classes: 1],
+                scenarioTest: [tests: 7, classes: 4]
+        ]
+        if (evidence.tests.status != 'PASS'
+                || evidence.tests.tests != 302
+                || evidence.tests.classes != 65) {
+            failures << 'Final library evidence must contain 302 tests in 65 classes'
+        }
+        expectedSuites.each { name, expected ->
+            def suite = evidence.tests.suites.find { it.name == name }
+            if (suite == null
+                    || suite.status != 'PASS'
+                    || suite.tests != expected.tests
+                    || suite.classes != expected.classes
+                    || suite.failures != 0
+                    || suite.errors != 0
+                    || suite.skipped != 0) {
+                failures << "Final ${name} suite evidence is inconsistent"
+            }
+        }
+        if ((evidence.runtimes.collect { it.java } as Set)
+                != (['17', '21'] as Set)
+                || evidence.runtimes.any {
+                    it.status != 'PASS'
+                            || !(it.durationSeconds instanceof Number)
+                            || it.durationSeconds <= 0
+                }) {
+            failures << 'Java 17 and Java 21 runtime evidence must be complete'
+        }
+
+        def expectedProofCounters = [
+                'committed-parent-graph-publication-failure':
+                        ['parentProcessReruns', 0],
+                'child-commit-lagging-parents':
+                        ['childProcessReruns', 0],
+                'recovery-normalizes-stale-readiness':
+                        ['childReplays', 0]
+        ]
+        evidence.readinessProofs.each { proof ->
+            if (proof.status != 'PASS') {
+                failures << "Readiness proof ${proof.id} did not PASS"
+            }
+            def expected = expectedProofCounters[proof.id]
+            if (expected != null && proof[expected[0]] != expected[1]) {
+                failures << "Readiness proof ${proof.id} repeated PROCESS work"
+            }
+        }
+        if ((evidence.readinessProofs.collect { it.id } as Set) != ([
+                'committed-parent-graph-publication-failure',
+                'child-commit-lagging-parents',
+                'recovery-normalizes-stale-readiness',
+                'independent-application-read-preconditions'
+        ] as Set)) {
+            failures << 'Round 11 readiness proof set is incomplete'
+        }
+        [
+                'businessOnlyTransitionReusesIdentity',
+                'realSourceSurfaceChangeInvalidatesIdentity',
+                'canonicalOrderingAndDelimiterSafety'
+        ].each { key ->
+            if (evidence.sourceSurfaceIdentity[key] != 'PASS') {
+                failures << "Source-surface identity proof ${key} did not PASS"
+            }
+        }
+
+        def hostRow = evidence.performance.repeatedP95Rows
+                .hostOverheadAroundOneProcess
+        double calculatedRegression =
+                ((hostRow.round11P95Ms as double)
+                        / (hostRow.baselineP95Ms as double) - 1.0d) * 100.0d
+        if (evidence.performance.status != 'PASS_HARD_GATE'
+                || hostRow.preferredGate != 'MISS'
+                || hostRow.hardGate != 'PASS'
+                || calculatedRegression
+                        > (evidence.performance
+                        .hardHostP95RegressionPercent as double)
+                || calculatedRegression
+                        <= (evidence.performance
+                        .preferredHostP95RegressionPercent as double)
+                || Math.abs(calculatedRegression
+                        - (hostRow.regressionPercent as double)) > 0.0001d) {
+            failures << 'Round 11 host p95 gate evidence is inconsistent'
+        }
+        def sha256Pattern = ~/[0-9a-f]{64}/
+        [
+                'baselineRuntimeEvidenceSha256',
+                'baselineProvenanceSha256',
+                'baselineTimingEvidenceSha256',
+                'round11RuntimeEvidenceSha256',
+                'round11ProvenanceSha256',
+                'round11TimingEvidenceSha256'
+        ].each { key ->
+            if (!(evidence.performance[key] ==~ sha256Pattern)) {
+                failures << "Performance evidence lacks valid ${key}"
+            }
+        }
+        def performanceFileHashes = [
+                baselineRuntimeComparison:
+                        evidence.performance.baselineRuntimeEvidenceSha256,
+                baselineRuntimeProvenance:
+                        evidence.performance.baselineProvenanceSha256,
+                baselineLargeHostTimings:
+                        evidence.performance.baselineTimingEvidenceSha256,
+                round11RuntimeComparison:
+                        evidence.performance.round11RuntimeEvidenceSha256,
+                round11RuntimeProvenance:
+                        evidence.performance.round11ProvenanceSha256,
+                round11LargeHostTimings:
+                        evidence.performance.round11TimingEvidenceSha256
+        ]
+        evidence.performance.evidenceFiles.each { key, relativePath ->
+            File retainedEvidence = new File(
+                    evidenceFile.parentFile, relativePath.toString())
+            if (!retainedEvidence.isFile()) {
+                failures << "Retained performance evidence is missing: "
+                        + relativePath
+            } else {
+                String actualHash = java.security.MessageDigest
+                        .getInstance('SHA-256')
+                        .digest(retainedEvidence.bytes)
+                        .encodeHex().toString()
+                if (actualHash != performanceFileHashes[key]) {
+                    failures << "Retained performance evidence hash differs: "
+                            + relativePath
+                }
+            }
+        }
+        if (evidence.structuralEvidence.status != 'PASS'
+                || evidence.structuralEvidence.requiredZeroCounters.size() != 8
+                || evidence.structuralEvidence.requiredZeroCounters.any {
+                    key, value -> value != 0
+                }) {
+            failures << 'Forbidden-work counters must contain eight exact zeroes'
+        }
+        if (evidence.scenarios.wadowiceStressOracle != 'PASS'
+                || evidence.scenarios.nba != 'PASS'
+                || evidence.scenarios.canonicalRepositoryWadowice
+                != 'NOT_PROVEN') {
+            failures << 'Scenario evidence is inconsistent'
+        }
+
+        if (evidence.blueBasic.status != 'PASS') {
+            failures << 'Historical blue-basic campaign did not PASS'
+        } else {
+            ['tests', 'classes', 'failures', 'errors', 'skipped'].each { key ->
+                long suiteTotal = evidence.blueBasic.suites.sum {
+                    (it[key] as Number).longValue()
+                }
+                if (suiteTotal != (evidence.blueBasic[key] as Number).longValue()) {
+                    failures << "blue-basic ${key} total is inconsistent"
+                }
+            }
+            if (evidence.blueBasic.tests != 40
+                    || evidence.blueBasic.classes != 27
+                    || evidence.blueBasic.failures != 0
+                    || evidence.blueBasic.errors != 0
+                    || evidence.blueBasic.skipped != 0
+                    || evidence.blueBasic.suites.any { it.status != 'PASS' }) {
+                failures << 'Historical blue-basic aggregate is inconsistent'
+            }
+        }
+        if (evidence.playground.status != 'PASS'
+                || evidence.playground.durationSeconds != 8) {
+            failures << 'Playground compile/check evidence is incomplete'
+        }
+        if (evidence.publicationEvidence.status != 'BLOCKED_UPSTREAM'
+                || evidence.publicationEvidence.missingCoordinates.size() != 2
+                || evidence.publicationEvidence.externalConsumerSmokeBuild
+                != 'BLOCKED_UPSTREAM') {
+            failures << 'Published dependency blocker evidence is incomplete'
+        }
+        if (evidence.artifacts.status != 'PASS') {
+            failures << 'Built artifact evidence did not PASS'
+        }
+        [
+                'mainJarSha256', 'sourcesJarSha256',
+                'javadocJarSha256', 'testFixturesJarSha256'
+        ].each { key ->
+            if (!(evidence.artifacts[key] ==~ sha256Pattern)) {
+                failures << "Artifact evidence lacks valid ${key}"
+            }
+        }
+
+        boolean archivePending = evidence.source.candidateCommit == null
+                || evidence.sourceArchive.sha256 == null
+        if (archivePending) {
+            if (evidence.source.candidateCommit != null
+                    || evidence.sourceArchive.sha256 != null
+                    || evidence.sourceArchive.extractedConfiguration
+                    != 'PENDING_VERIFICATION'
+                    || !evidence.sourceArchive.pendingReason) {
+                failures << 'Candidate/source-archive pending state is inconsistent'
+            }
+        } else if (!(evidence.source.candidateCommit ==~ /[0-9a-f]{40}/)
+                || !(evidence.sourceArchive.sha256 ==~ sha256Pattern)
+                || evidence.sourceArchive.extractedConfiguration != 'PASS'
+                || evidence.sourceArchive.pendingReason != null) {
+            failures << 'Final candidate/source-archive evidence is inconsistent'
+        }
+        if (!(evidence.source.mainSourceManifestSha256 ==~ sha256Pattern)
+                || evidence.sourceArchive.publishedArtifactSmokeBuild
+                != 'BLOCKED_UPSTREAM') {
+            failures << 'Source manifest/archive evidence is inconsistent'
+        }
+        String report = file(
+                'docs/releases/3.0.0-rc.1-test-report.md')
+                .getText('UTF-8')
+        expectedStatuses.each { key ->
+            if (!report.contains("`${key}`")) {
+                failures << "Canonical report omits readiness status ${key}"
+            }
+            if (!report.contains(
+                    "| `${key}` | `${evidence.status[key]}` |")) {
+                failures << "Canonical report/evidence status differs for ${key}"
+            }
+        }
+        if (!report.contains(
+                "ROUND11_FINAL_VERIFICATION: ${evidence.verdict}")) {
+            failures << 'Canonical report verdict differs from machine evidence'
+        }
+        if (archivePending) {
+            if (report.count('PENDING_VERIFICATION') != 1
+                    || !report.contains(
+                    'archive SHA-256 and extracted configuration result\n'
+                            + 'remain `PENDING_VERIFICATION`')) {
+                failures << 'Only candidate source-archive finalization may remain pending'
+            }
+        } else if (report.contains('PENDING_VERIFICATION')) {
+            failures << 'Finalized report still contains pending evidence'
+        }
+        [
+                'docs/releases/3.0.0-rc.1-round11-test-report.md',
+                'docs/releases/3.0.0-rc.1-round11-evidence.json'
+        ].each { duplicate ->
+            if (file(duplicate).exists()) {
+                failures << "Duplicate release evidence surface remains: ${duplicate}"
+            }
+        }
+        if (!failures.empty) {
+            throw new GradleException(failures.join('\n'))
+        }
+    }
+}
+
+tasks.register('verifySourceArchiveHygiene') {
+    group = 'verification'
+    description = 'Protects the self-contained source-release boundary.'
+    inputs.files('.cz.toml', '.gitattributes', 'build.gradle')
+    String configuredArchiveVersion = version.toString()
+    doLast {
+        String versionSource = file('.cz.toml').getText('UTF-8')
+        def declaredVersions = versionSource =~
+                /(?m)^version = "([^"]+)"$/
+        if (!declaredVersions.find()
+                || declaredVersions.group(1) != configuredArchiveVersion
+                || declaredVersions.find()) {
             throw new GradleException(
-                    'Passing Round 10 evidence must have no failed or skipped tests')
+                    '.cz.toml must contain one authoritative project version')
+        }
+        String attributes = file('.gitattributes').getText('UTF-8')
+        [
+                '*.zip export-ignore',
+                'build/** export-ignore',
+                '.gradle/** export-ignore',
+                '__MACOSX/** export-ignore',
+                '._* export-ignore',
+                '*.jfr export-ignore',
+                '*.hprof export-ignore'
+        ].each { rule ->
+            if (!attributes.contains(rule)) {
+                throw new GradleException(
+                        "Source archive rule is missing: ${rule}")
+            }
         }
     }
 }
@@ -702,7 +1113,8 @@ tasks.register('productionizationCheck') {
             'verifyPublicApiBoundary', 'verifyArtifactContents',
             'verifyPublicationPom', 'verifyPublishedModeIsolation',
             'verifyReleaseMetadata', 'verifyDocumentation',
-            'scenarioTest', 'verifyTestArchitecture'
+            'verifySourceArchiveHygiene', 'scenarioTest',
+            'verifyTestArchitecture'
 }
 
 tasks.register('releaseCheck') {
@@ -711,24 +1123,43 @@ tasks.register('releaseCheck') {
     dependsOn 'build', 'validateProductionShape', 'verifyPublicApiBoundary',
             'verifyArtifactContents', 'verifyPublicationPom',
             'verifyPublishedModeIsolation', 'verifyReleaseMetadata',
-            'verifyDocumentation', 'test', 'integrationTest', 'consumerTest',
-            'scenarioTest', 'verifyTestArchitecture'
+            'verifyDocumentation', 'verifySourceArchiveHygiene', 'test',
+            'integrationTest', 'consumerTest', 'scenarioTest',
+            'verifyTestArchitecture'
 }
 
-def round10Readiness = tasks.register('verifyRound10Readiness') {
+def round11Readiness = tasks.register('verifyRound11Readiness') {
     group = 'verification'
-    description = 'Prevents staging while the Round 10.1 evidence report is fail-closed.'
-    inputs.file('docs/releases/3.0.0-rc.1-test-report.md')
+    description = 'Prevents staging until canonical Round 11 evidence permits it.'
+    inputs.files('docs/releases/3.0.0-rc.1-test-report.md',
+            'docs/releases/3.0.0-rc.1-evidence.json')
     doLast {
         String report = file(
                 'docs/releases/3.0.0-rc.1-test-report.md')
                 .getText('UTF-8')
-        if (!report.contains(
-                'ROUND10_PROCESS_EMBEDDED_READY: PASS')
-                || report.contains('`PENDING`')
-                || report.contains('"PENDING')) {
+        def evidence = new groovy.json.JsonSlurper().parse(
+                file('docs/releases/3.0.0-rc.1-evidence.json'))
+        def publishableLatency = ['PASS', 'PASS_HARD_GATE'] as Set
+        if (evidence.status.temporalArchitectureReady != 'PASS'
+                || evidence.status.inMemoryEngineWorkingReady != 'PASS'
+                || evidence.status.mandateAgentReady != 'PASS'
+                || !publishableLatency.contains(
+                        evidence.status.playgroundLatencyReady)
+                || evidence.status.publicRcReady != 'PASS'
+                || evidence.tests.status != 'PASS'
+                || evidence.shape.status != 'PASS'
+                || evidence.artifacts.status != 'PASS'
+                || !publishableLatency.contains(evidence.performance.status)
+                || evidence.runtimes.any { it.status != 'PASS' }
+                || evidence.sourceArchive.extractedConfiguration != 'PASS'
+                || evidence.sourceArchive.publishedArtifactSmokeBuild != 'PASS'
+                || evidence.blockers.any { it.category != 'scope' }
+                || evidence.status.values().any {
+                    it.toString().startsWith('PENDING')
+                }
+                || report.contains('PENDING_VERIFICATION')) {
             throw new GradleException(
-                    'Round 10.1 evidence is not complete; staging is blocked')
+                    'Canonical Round 11 evidence does not permit staging')
         }
     }
 }
@@ -736,12 +1167,12 @@ def round10Readiness = tasks.register('verifyRound10Readiness') {
 tasks.register('stageRelease') {
     group = 'publishing'
     description = 'Builds the verified Maven Central staging repository.'
-    dependsOn 'releaseCheck', round10Readiness,
+    dependsOn 'releaseCheck', round11Readiness,
             'publishMavenJavaPublicationToStagingRepository'
 }
 
 tasks.named('publishMavenJavaPublicationToStagingRepository') {
-    dependsOn round10Readiness
+    dependsOn round11Readiness
 }
 
 if (localDependencies) {

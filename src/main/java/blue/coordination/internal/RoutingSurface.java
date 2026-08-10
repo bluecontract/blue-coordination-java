@@ -25,6 +25,10 @@ import java.util.Set;
  * sessions compile their own routing surfaces.
  */
 final class RoutingSurface {
+    private static final Comparator<SourceAddress> SOURCE_ORDER = Comparator
+            .comparing(SourceAddress::timelineId)
+            .thenComparing(SourceAddress::actorId);
+
     public record SourceAddress(String timelineId, String actorId) {
         public SourceAddress {
             timelineId = requireText(timelineId, "timelineId");
@@ -47,9 +51,7 @@ final class RoutingSurface {
                 throw new NullPointerException("source address");
             }
             sources = unique.stream()
-                    .sorted(Comparator
-                            .comparing(SourceAddress::timelineId)
-                            .thenComparing(SourceAddress::actorId))
+                    .sorted(SOURCE_ORDER)
                     .toList();
         }
 
@@ -76,9 +78,22 @@ final class RoutingSurface {
                 .comparing(Definition::scopePath)
                 .thenComparing(Definition::operation)
                 .thenComparing(Definition::channelKey)
-                .thenComparing(definition -> definition.sources().toString()));
+                .thenComparing(Definition::sources,
+                        RoutingSurface::compareSources));
         this.definitions = Collections.unmodifiableList(ordered);
         this.embeddedRevisionHandler = embeddedRevisionHandler;
+    }
+
+    private static int compareSources(
+            List<SourceAddress> left,
+            List<SourceAddress> right) {
+        int shared = Math.min(left.size(), right.size());
+        for (int index = 0; index < shared; index++) {
+            int comparison = SOURCE_ORDER.compare(
+                    left.get(index), right.get(index));
+            if (comparison != 0) return comparison;
+        }
+        return Integer.compare(left.size(), right.size());
     }
 
     public static RoutingSurface from(

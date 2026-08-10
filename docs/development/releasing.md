@@ -37,12 +37,18 @@ preflight, staging, signing and publication path as an RC.
 
 - `releaseCheck` passes all library-owned unit, integration, built-JAR consumer
   and end-to-end scenario suites without `../blue-basic`.
+- The one canonical Round 11 report and JSON evidence contain final results;
+  `verifyRound11Readiness` permits staging and no duplicate evidence sidecar
+  remains.
 - Java 17 and Java 21 CI jobs pass.
 - POM dependencies and scopes match `docs/reference/public-api.md`.
 - Main, sources and Javadoc JAR hashes reproduce across two clean builds.
 - Staged POM, checksum and signature inventory is complete.
 - Changelog, migration notes, limitations and RC notes are current.
 - The external Maven consumer resolves without adjacent sibling repositories.
+- The exported source archive contains the authoritative `.cz.toml`, configures
+  from its own contents, and excludes nested ZIPs, build output, macOS metadata,
+  profiler recordings, and heap dumps.
 
 Historical `blue-basic` metrics may be captured for performance comparison,
 but they are not an RC correctness prerequisite and are never substituted for

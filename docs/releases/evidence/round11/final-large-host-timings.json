@@ -1,0 +1,669 @@
+{
+  "schema" : "blue.coordination/basic-test-timings/2.0",
+  "scenario" : "large-host-embedded-paynote",
+  "title" : "Large host with autonomous Wadowice PayNote",
+  "unit" : "nanoseconds",
+  "steps" : [ {
+    "step" : "01 start environment",
+    "nanos" : 352760291
+  }, {
+    "step" : "02 add Alice timeline",
+    "nanos" : 27625
+  }, {
+    "step" : "03 add Bob timeline",
+    "nanos" : 3250
+  }, {
+    "step" : "04 add guarantor timeline",
+    "nanos" : 2500
+  }, {
+    "step" : "05 add restaurant provider timeline",
+    "nanos" : 2417
+  }, {
+    "step" : "06 start 60 KB host with 43 workflows",
+    "nanos" : 1399850041
+  }, {
+    "step" : "07 retain real PayNote as one whole request value",
+    "nanos" : 162334500
+  }, {
+    "step" : "08 attach and initialize autonomous PayNote",
+    "nanos" : 19726741125
+  }, {
+    "step" : "09 host operation with embedded PayNote present",
+    "nanos" : 3418861166
+  }, {
+    "step" : "10 PayNote authorize #1 plus parent propagation",
+    "nanos" : 5669663625
+  }, {
+    "step" : "11 PayNote authorize #2 plus parent propagation",
+    "nanos" : 5350693334
+  }, {
+    "step" : "12 PayNote restaurant confirmation plus parent propagation",
+    "nanos" : 6348130958
+  }, {
+    "step" : "13 warm host operation after PayNote changes",
+    "nanos" : 3358734583
+  }, {
+    "step" : "14 verify exact state and work shape",
+    "nanos" : 5955291
+  }, {
+    "step" : "15 publish exact phase comparison",
+    "nanos" : 1801458
+  }, {
+    "step" : "16 close environment",
+    "nanos" : 138750
+  } ],
+  "totalNanos" : 45798860375,
+  "details" : [ {
+    "id" : "attach-paynote",
+    "parentStep" : "08 attach and initialize autonomous PayNote",
+    "parentNanos" : 19726741125,
+    "phases" : [ {
+      "phase" : "append exact whole entry",
+      "nanos" : 27798625
+    }, {
+      "phase" : "indexed route selection",
+      "nanos" : 477500
+    }, {
+      "phase" : "Coordination before frozen PROCESS",
+      "nanos" : 82980251
+    }, {
+      "phase" : "all frozen Contracts PROCESS",
+      "nanos" : 18501098956
+    }, {
+      "phase" : "Coordination after frozen PROCESS",
+      "nanos" : 145660457
+    }, {
+      "phase" : "unattributed drain residual",
+      "nanos" : 967805294
+    } ],
+    "attributedNanos" : 19725821083,
+    "unattributedNanos" : 920042,
+    "remainderLabel" : "unattributed outer-call overhead",
+    "counters" : [ {
+      "counter" : "committed document transitions",
+      "value" : 6
+    }, {
+      "counter" : "frozen PROCESS calls",
+      "value" : 6
+    }, {
+      "counter" : "generic fragments",
+      "value" : 0
+    }, {
+      "counter" : "catalog compilations",
+      "value" : 3
+    }, {
+      "counter" : "concrete ownership Root inputs",
+      "value" : 6
+    }, {
+      "counter" : "reference-only event inputs",
+      "value" : 6
+    }, {
+      "counter" : "post-PROCESS full projections",
+      "value" : 0
+    }, {
+      "counter" : "commit companion deltas applied",
+      "value" : 6
+    }, {
+      "counter" : "subscription intervals reused",
+      "value" : 24
+    } ]
+  }, {
+    "id" : "attach-paynote-frozen-lanes",
+    "parentStep" : "08 attach and initialize autonomous PayNote",
+    "parentNanos" : 19726741125,
+    "phases" : [ {
+      "phase" : "external frozen Contracts PROCESS",
+      "nanos" : 3721004958
+    }, {
+      "phase" : "embedded parent frozen PROCESS",
+      "nanos" : 14780093998
+    } ],
+    "attributedNanos" : 18501098956,
+    "unattributedNanos" : 1225642169,
+    "remainderLabel" : "other work in parent step",
+    "counters" : [ ]
+  }, {
+    "id" : "attach-paynote-frozen-internals",
+    "parentStep" : "08 attach and initialize autonomous PayNote",
+    "parentNanos" : 19726741125,
+    "phases" : [ {
+      "phase" : "delivery-plan derivation",
+      "nanos" : 9031332791
+    }, {
+      "phase" : "platform commit",
+      "nanos" : 9468089458
+    } ],
+    "attributedNanos" : 18499422249,
+    "unattributedNanos" : 1227318876,
+    "remainderLabel" : "other work in parent step",
+    "counters" : [ ]
+  }, {
+    "id" : "attach-paynote-host-internals",
+    "parentStep" : "08 attach and initialize autonomous PayNote",
+    "parentNanos" : 19726741125,
+    "phases" : [ {
+      "phase" : "embedded-only structural-sharing layout",
+      "nanos" : 18144667
+    }, {
+      "phase" : "commit companion delta application",
+      "nanos" : 1316000
+    }, {
+      "phase" : "embedded input preparation",
+      "nanos" : 70768166
+    } ],
+    "attributedNanos" : 90228833,
+    "unattributedNanos" : 19636512292,
+    "remainderLabel" : "other work in parent step",
+    "counters" : [ ]
+  }, {
+    "id" : "host-cold",
+    "parentStep" : "09 host operation with embedded PayNote present",
+    "parentNanos" : 3418861166,
+    "phases" : [ {
+      "phase" : "append exact whole entry",
+      "nanos" : 32707917
+    }, {
+      "phase" : "indexed route selection",
+      "nanos" : 76542
+    }, {
+      "phase" : "Coordination before frozen PROCESS",
+      "nanos" : 2209
+    }, {
+      "phase" : "all frozen Contracts PROCESS",
+      "nanos" : 3366187416
+    }, {
+      "phase" : "Coordination after frozen PROCESS",
+      "nanos" : 15707625
+    }, {
+      "phase" : "unattributed drain residual",
+      "nanos" : 3908833
+    } ],
+    "attributedNanos" : 3418590542,
+    "unattributedNanos" : 270624,
+    "remainderLabel" : "unattributed outer-call overhead",
+    "counters" : [ {
+      "counter" : "committed document transitions",
+      "value" : 1
+    }, {
+      "counter" : "frozen PROCESS calls",
+      "value" : 1
+    }, {
+      "counter" : "generic fragments",
+      "value" : 0
+    }, {
+      "counter" : "catalog compilations",
+      "value" : 0
+    }, {
+      "counter" : "concrete ownership Root inputs",
+      "value" : 1
+    }, {
+      "counter" : "reference-only event inputs",
+      "value" : 1
+    }, {
+      "counter" : "post-PROCESS full projections",
+      "value" : 0
+    }, {
+      "counter" : "commit companion deltas applied",
+      "value" : 1
+    }, {
+      "counter" : "subscription intervals reused",
+      "value" : 3
+    } ]
+  }, {
+    "id" : "host-cold-frozen-lanes",
+    "parentStep" : "09 host operation with embedded PayNote present",
+    "parentNanos" : 3418861166,
+    "phases" : [ {
+      "phase" : "external frozen Contracts PROCESS",
+      "nanos" : 3366187416
+    }, {
+      "phase" : "embedded parent frozen PROCESS",
+      "nanos" : 0
+    } ],
+    "attributedNanos" : 3366187416,
+    "unattributedNanos" : 52673750,
+    "remainderLabel" : "other work in parent step",
+    "counters" : [ ]
+  }, {
+    "id" : "host-cold-frozen-internals",
+    "parentStep" : "09 host operation with embedded PayNote present",
+    "parentNanos" : 3418861166,
+    "phases" : [ {
+      "phase" : "delivery-plan derivation",
+      "nanos" : 2084136583
+    }, {
+      "phase" : "platform commit",
+      "nanos" : 1281820125
+    } ],
+    "attributedNanos" : 3365956708,
+    "unattributedNanos" : 52904458,
+    "remainderLabel" : "other work in parent step",
+    "counters" : [ ]
+  }, {
+    "id" : "host-cold-host-internals",
+    "parentStep" : "09 host operation with embedded PayNote present",
+    "parentNanos" : 3418861166,
+    "phases" : [ {
+      "phase" : "embedded-only structural-sharing layout",
+      "nanos" : 3890917
+    }, {
+      "phase" : "commit companion delta application",
+      "nanos" : 64542
+    }, {
+      "phase" : "embedded input preparation",
+      "nanos" : 0
+    } ],
+    "attributedNanos" : 3955459,
+    "unattributedNanos" : 3414905707,
+    "remainderLabel" : "other work in parent step",
+    "counters" : [ ]
+  }, {
+    "id" : "paynote-auth-first",
+    "parentStep" : "10 PayNote authorize #1 plus parent propagation",
+    "parentNanos" : 5669663625,
+    "phases" : [ {
+      "phase" : "append exact whole entry",
+      "nanos" : 30510958
+    }, {
+      "phase" : "indexed route selection",
+      "nanos" : 67500
+    }, {
+      "phase" : "Coordination before frozen PROCESS",
+      "nanos" : 4024042
+    }, {
+      "phase" : "all frozen Contracts PROCESS",
+      "nanos" : 5582175791
+    }, {
+      "phase" : "Coordination after frozen PROCESS",
+      "nanos" : 45565834
+    }, {
+      "phase" : "unattributed drain residual",
+      "nanos" : 6968291
+    } ],
+    "attributedNanos" : 5669312416,
+    "unattributedNanos" : 351209,
+    "remainderLabel" : "unattributed outer-call overhead",
+    "counters" : [ {
+      "counter" : "committed document transitions",
+      "value" : 2
+    }, {
+      "counter" : "frozen PROCESS calls",
+      "value" : 2
+    }, {
+      "counter" : "generic fragments",
+      "value" : 0
+    }, {
+      "counter" : "catalog compilations",
+      "value" : 0
+    }, {
+      "counter" : "concrete ownership Root inputs",
+      "value" : 2
+    }, {
+      "counter" : "reference-only event inputs",
+      "value" : 2
+    }, {
+      "counter" : "post-PROCESS full projections",
+      "value" : 0
+    }, {
+      "counter" : "commit companion deltas applied",
+      "value" : 2
+    }, {
+      "counter" : "subscription intervals reused",
+      "value" : 9
+    } ]
+  }, {
+    "id" : "paynote-auth-first-frozen-lanes",
+    "parentStep" : "10 PayNote authorize #1 plus parent propagation",
+    "parentNanos" : 5669663625,
+    "phases" : [ {
+      "phase" : "external frozen Contracts PROCESS",
+      "nanos" : 1013750750
+    }, {
+      "phase" : "embedded parent frozen PROCESS",
+      "nanos" : 4568425041
+    } ],
+    "attributedNanos" : 5582175791,
+    "unattributedNanos" : 87487834,
+    "remainderLabel" : "other work in parent step",
+    "counters" : [ ]
+  }, {
+    "id" : "paynote-auth-first-frozen-internals",
+    "parentStep" : "10 PayNote authorize #1 plus parent propagation",
+    "parentNanos" : 5669663625,
+    "phases" : [ {
+      "phase" : "delivery-plan derivation",
+      "nanos" : 2483003916
+    }, {
+      "phase" : "platform commit",
+      "nanos" : 3098826251
+    } ],
+    "attributedNanos" : 5581830167,
+    "unattributedNanos" : 87833458,
+    "remainderLabel" : "other work in parent step",
+    "counters" : [ ]
+  }, {
+    "id" : "paynote-auth-first-host-internals",
+    "parentStep" : "10 PayNote authorize #1 plus parent propagation",
+    "parentNanos" : 5669663625,
+    "phases" : [ {
+      "phase" : "embedded-only structural-sharing layout",
+      "nanos" : 4832333
+    }, {
+      "phase" : "commit companion delta application",
+      "nanos" : 204708
+    }, {
+      "phase" : "embedded input preparation",
+      "nanos" : 372209
+    } ],
+    "attributedNanos" : 5409250,
+    "unattributedNanos" : 5664254375,
+    "remainderLabel" : "other work in parent step",
+    "counters" : [ ]
+  }, {
+    "id" : "paynote-auth-warm",
+    "parentStep" : "11 PayNote authorize #2 plus parent propagation",
+    "parentNanos" : 5350693334,
+    "phases" : [ {
+      "phase" : "append exact whole entry",
+      "nanos" : 31929333
+    }, {
+      "phase" : "indexed route selection",
+      "nanos" : 54667
+    }, {
+      "phase" : "Coordination before frozen PROCESS",
+      "nanos" : 4068417
+    }, {
+      "phase" : "all frozen Contracts PROCESS",
+      "nanos" : 5264846500
+    }, {
+      "phase" : "Coordination after frozen PROCESS",
+      "nanos" : 42806041
+    }, {
+      "phase" : "unattributed drain residual",
+      "nanos" : 6790458
+    } ],
+    "attributedNanos" : 5350495416,
+    "unattributedNanos" : 197918,
+    "remainderLabel" : "unattributed outer-call overhead",
+    "counters" : [ {
+      "counter" : "committed document transitions",
+      "value" : 2
+    }, {
+      "counter" : "frozen PROCESS calls",
+      "value" : 2
+    }, {
+      "counter" : "generic fragments",
+      "value" : 0
+    }, {
+      "counter" : "catalog compilations",
+      "value" : 0
+    }, {
+      "counter" : "concrete ownership Root inputs",
+      "value" : 2
+    }, {
+      "counter" : "reference-only event inputs",
+      "value" : 2
+    }, {
+      "counter" : "post-PROCESS full projections",
+      "value" : 0
+    }, {
+      "counter" : "commit companion deltas applied",
+      "value" : 2
+    }, {
+      "counter" : "subscription intervals reused",
+      "value" : 9
+    } ]
+  }, {
+    "id" : "paynote-auth-warm-frozen-lanes",
+    "parentStep" : "11 PayNote authorize #2 plus parent propagation",
+    "parentNanos" : 5350693334,
+    "phases" : [ {
+      "phase" : "external frozen Contracts PROCESS",
+      "nanos" : 1027128375
+    }, {
+      "phase" : "embedded parent frozen PROCESS",
+      "nanos" : 4237718125
+    } ],
+    "attributedNanos" : 5264846500,
+    "unattributedNanos" : 85846834,
+    "remainderLabel" : "other work in parent step",
+    "counters" : [ ]
+  }, {
+    "id" : "paynote-auth-warm-frozen-internals",
+    "parentStep" : "11 PayNote authorize #2 plus parent propagation",
+    "parentNanos" : 5350693334,
+    "phases" : [ {
+      "phase" : "delivery-plan derivation",
+      "nanos" : 2483260334
+    }, {
+      "phase" : "platform commit",
+      "nanos" : 2781245125
+    } ],
+    "attributedNanos" : 5264505459,
+    "unattributedNanos" : 86187875,
+    "remainderLabel" : "other work in parent step",
+    "counters" : [ ]
+  }, {
+    "id" : "paynote-auth-warm-host-internals",
+    "parentStep" : "11 PayNote authorize #2 plus parent propagation",
+    "parentNanos" : 5350693334,
+    "phases" : [ {
+      "phase" : "embedded-only structural-sharing layout",
+      "nanos" : 4987833
+    }, {
+      "phase" : "commit companion delta application",
+      "nanos" : 246833
+    }, {
+      "phase" : "embedded input preparation",
+      "nanos" : 286583
+    } ],
+    "attributedNanos" : 5521249,
+    "unattributedNanos" : 5345172085,
+    "remainderLabel" : "other work in parent step",
+    "counters" : [ ]
+  }, {
+    "id" : "paynote-restaurant-confirmation",
+    "parentStep" : "12 PayNote restaurant confirmation plus parent propagation",
+    "parentNanos" : 6348130958,
+    "phases" : [ {
+      "phase" : "append exact whole entry",
+      "nanos" : 33077750
+    }, {
+      "phase" : "indexed route selection",
+      "nanos" : 55834
+    }, {
+      "phase" : "Coordination before frozen PROCESS",
+      "nanos" : 5896835
+    }, {
+      "phase" : "all frozen Contracts PROCESS",
+      "nanos" : 6253343416
+    }, {
+      "phase" : "Coordination after frozen PROCESS",
+      "nanos" : 48651916
+    }, {
+      "phase" : "unattributed drain residual",
+      "nanos" : 6936207
+    } ],
+    "attributedNanos" : 6347961958,
+    "unattributedNanos" : 169000,
+    "remainderLabel" : "unattributed outer-call overhead",
+    "counters" : [ {
+      "counter" : "committed document transitions",
+      "value" : 3
+    }, {
+      "counter" : "frozen PROCESS calls",
+      "value" : 3
+    }, {
+      "counter" : "generic fragments",
+      "value" : 0
+    }, {
+      "counter" : "catalog compilations",
+      "value" : 0
+    }, {
+      "counter" : "concrete ownership Root inputs",
+      "value" : 3
+    }, {
+      "counter" : "reference-only event inputs",
+      "value" : 3
+    }, {
+      "counter" : "post-PROCESS full projections",
+      "value" : 0
+    }, {
+      "counter" : "commit companion deltas applied",
+      "value" : 3
+    }, {
+      "counter" : "subscription intervals reused",
+      "value" : 11
+    } ]
+  }, {
+    "id" : "paynote-restaurant-confirmation-frozen-lanes",
+    "parentStep" : "12 PayNote restaurant confirmation plus parent propagation",
+    "parentNanos" : 6348130958,
+    "phases" : [ {
+      "phase" : "external frozen Contracts PROCESS",
+      "nanos" : 304913291
+    }, {
+      "phase" : "embedded parent frozen PROCESS",
+      "nanos" : 5948430125
+    } ],
+    "attributedNanos" : 6253343416,
+    "unattributedNanos" : 94787542,
+    "remainderLabel" : "other work in parent step",
+    "counters" : [ ]
+  }, {
+    "id" : "paynote-restaurant-confirmation-frozen-internals",
+    "parentStep" : "12 PayNote restaurant confirmation plus parent propagation",
+    "parentNanos" : 6348130958,
+    "phases" : [ {
+      "phase" : "delivery-plan derivation",
+      "nanos" : 2617440875
+    }, {
+      "phase" : "platform commit",
+      "nanos" : 3635565959
+    } ],
+    "attributedNanos" : 6253006834,
+    "unattributedNanos" : 95124124,
+    "remainderLabel" : "other work in parent step",
+    "counters" : [ ]
+  }, {
+    "id" : "paynote-restaurant-confirmation-host-internals",
+    "parentStep" : "12 PayNote restaurant confirmation plus parent propagation",
+    "parentNanos" : 6348130958,
+    "phases" : [ {
+      "phase" : "embedded-only structural-sharing layout",
+      "nanos" : 5280417
+    }, {
+      "phase" : "commit companion delta application",
+      "nanos" : 224917
+    }, {
+      "phase" : "embedded input preparation",
+      "nanos" : 431292
+    } ],
+    "attributedNanos" : 5936626,
+    "unattributedNanos" : 6342194332,
+    "remainderLabel" : "other work in parent step",
+    "counters" : [ ]
+  }, {
+    "id" : "host-warm",
+    "parentStep" : "13 warm host operation after PayNote changes",
+    "parentNanos" : 3358734583,
+    "phases" : [ {
+      "phase" : "append exact whole entry",
+      "nanos" : 31395667
+    }, {
+      "phase" : "indexed route selection",
+      "nanos" : 54083
+    }, {
+      "phase" : "Coordination before frozen PROCESS",
+      "nanos" : 2125
+    }, {
+      "phase" : "all frozen Contracts PROCESS",
+      "nanos" : 3307632958
+    }, {
+      "phase" : "Coordination after frozen PROCESS",
+      "nanos" : 15683292
+    }, {
+      "phase" : "unattributed drain residual",
+      "nanos" : 3798333
+    } ],
+    "attributedNanos" : 3358566458,
+    "unattributedNanos" : 168125,
+    "remainderLabel" : "unattributed outer-call overhead",
+    "counters" : [ {
+      "counter" : "committed document transitions",
+      "value" : 1
+    }, {
+      "counter" : "frozen PROCESS calls",
+      "value" : 1
+    }, {
+      "counter" : "generic fragments",
+      "value" : 0
+    }, {
+      "counter" : "catalog compilations",
+      "value" : 0
+    }, {
+      "counter" : "concrete ownership Root inputs",
+      "value" : 1
+    }, {
+      "counter" : "reference-only event inputs",
+      "value" : 1
+    }, {
+      "counter" : "post-PROCESS full projections",
+      "value" : 0
+    }, {
+      "counter" : "commit companion deltas applied",
+      "value" : 1
+    }, {
+      "counter" : "subscription intervals reused",
+      "value" : 3
+    } ]
+  }, {
+    "id" : "host-warm-frozen-lanes",
+    "parentStep" : "13 warm host operation after PayNote changes",
+    "parentNanos" : 3358734583,
+    "phases" : [ {
+      "phase" : "external frozen Contracts PROCESS",
+      "nanos" : 3307632958
+    }, {
+      "phase" : "embedded parent frozen PROCESS",
+      "nanos" : 0
+    } ],
+    "attributedNanos" : 3307632958,
+    "unattributedNanos" : 51101625,
+    "remainderLabel" : "other work in parent step",
+    "counters" : [ ]
+  }, {
+    "id" : "host-warm-frozen-internals",
+    "parentStep" : "13 warm host operation after PayNote changes",
+    "parentNanos" : 3358734583,
+    "phases" : [ {
+      "phase" : "delivery-plan derivation",
+      "nanos" : 2093292541
+    }, {
+      "phase" : "platform commit",
+      "nanos" : 1213856833
+    } ],
+    "attributedNanos" : 3307149374,
+    "unattributedNanos" : 51585209,
+    "remainderLabel" : "other work in parent step",
+    "counters" : [ ]
+  }, {
+    "id" : "host-warm-host-internals",
+    "parentStep" : "13 warm host operation after PayNote changes",
+    "parentNanos" : 3358734583,
+    "phases" : [ {
+      "phase" : "embedded-only structural-sharing layout",
+      "nanos" : 3880541
+    }, {
+      "phase" : "commit companion delta application",
+      "nanos" : 53750
+    }, {
+      "phase" : "embedded input preparation",
+      "nanos" : 0
+    } ],
+    "attributedNanos" : 3934291,
+    "unattributedNanos" : 3354800292,
+    "remainderLabel" : "other work in parent step",
+    "counters" : [ ]
+  } ]
+}

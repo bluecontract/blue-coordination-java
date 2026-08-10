@@ -37,30 +37,30 @@ promises.
 
 | Operation | Append ms | Drain ms | Frozen ms | Non-frozen residual ms | Of which unattributed ms |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Attach PayNote and initialize its two managed products | 27.176 | 19,537.991 | 18,358.915 | 1,179.076 | 951.410 |
-| Warm host operation | 31.520 | 3,358.363 | 3,342.792 | 15.571 | 0.117 |
-| Warm PayNote plus parent propagation | 32.600 | 5,258.647 | 5,212.002 | 46.645 | 0.179 |
-| Restaurant child through PayNote and host | 31.343 | 6,262.097 | 6,207.401 | 54.696 | 0.246 |
+| Attach PayNote and initialize its two managed products | 27.799 | 19,698.022 | 18,501.099 | 1,196.924 | 967.805 |
+| Warm host operation | 31.396 | 3,327.171 | 3,307.633 | 19.538 | 3.798 |
+| Warm PayNote plus parent propagation | 31.929 | 5,318.566 | 5,264.847 | 53.720 | 6.790 |
+| Restaurant child through PayNote and host | 33.078 | 6,314.884 | 6,253.343 | 61.541 | 6.936 |
 
 Values are rounded independently from nanosecond measurements; displayed
 rounded operands may therefore differ by 0.001 ms.
 
-For the warm PayNote frame, the frozen lanes were 1,027.286 ms for the PayNote
-and 4,184.716 ms for the parent. Nested frozen diagnostics attributed 2,476.561
-ms to delivery-plan derivation and 2,735.113 ms to platform commit; the wrapper
-remainder was 0.328 ms. Cached canonical embedded-input shape reuse kept warm
-input preparation to 0.276 ms. The one-time attach now admits the PayNote plus
+For the warm PayNote frame, the frozen lanes were 1,027.128 ms for the PayNote
+and 4,237.718 ms for the parent. Nested frozen diagnostics attributed 2,483.260
+ms to delivery-plan derivation and 2,781.245 ms to platform commit; the wrapper
+remainder was 0.341 ms. Cached canonical embedded-input shape reuse kept warm
+input preparation to 0.287 ms. The one-time attach now admits the PayNote plus
 two real managed product documents; its residual includes their initialization,
 barrier, and scheduler work outside the steady PROCESS phase model.
 
-The steady-state distinction is decisive: frozen work was 99.54% of the warm
-host drain and 99.11% of the warm PayNote-plus-parent drain. Coordination's
-non-frozen residual was respectively 0.46% and 0.89%. The scheduler therefore
+The steady-state distinction is decisive: frozen work was 99.41% of the warm
+host drain and 98.99% of the warm PayNote-plus-parent drain. Coordination's
+non-frozen residual was respectively 0.59% and 1.01%. The scheduler therefore
 passes its host-work budget, but the complete operation does **not** meet an
 interactive-latency objective. This release evidence must not be summarized as
 "fast" merely because the host lane is fast.
 
-## Round 10.1 hot-path audit
+## Round 11 hot-path audit
 
 The occurrence-admission, exact-epoch, READY-read, and bounded-drain corrections
 do not add a history scan or graph scan to a steady unchanged-topology PROCESS:
@@ -96,9 +96,9 @@ Root/event/revision/order-bound plan through the core verifier before semantic
 execution. Those checks deliberately reject forged, stale, incomplete, or
 non-deterministic execution evidence. Coordination must not bypass them.
 
-The warm PayNote frame placed 5,211.674 ms of its 5,212.002 ms frozen lane in
+The warm PayNote frame placed 5,264.505 ms of its 5,264.847 ms frozen lane in
 those two upstream boundaries. That is 99.99% of frozen time and leaves only
-0.328 ms in the surrounding wrapper. A safe improvement therefore needs an
+0.341 ms in the surrounding wrapper. A safe improvement therefore needs an
 upstream Language/Contracts/BEX change with the following acceptance contract:
 
 1. retain identical resulting state, ordered events, portable gas, and commit
@@ -124,9 +124,9 @@ the same Root later and no latency was removed. That experiment was reverted;
 the figures are engineering diagnostics, not a benchmark comparison or release
 claim.
 
-The final repeated runtime campaign observed p95 values of 98.777 ms for
-existing-child catch-up, 156.083 ms for late-child admission, 78.820 ms for
-nested catch-up, and 87.100 ms for NBA catch-up. Existing-child catch-up passes
+The final repeated runtime campaign observed p95 values of 99.234 ms for
+existing-child catch-up, 157.939 ms for late-child admission, 79.914 ms for
+nested catch-up, and 87.689 ms for NBA catch-up. Existing-child catch-up passes
 its hard 150 ms gate but remains above the preferred 80 ms target. All nine
 enforced rows pass; three diagnostic-only rows remain `OBSERVE` because no
 release threshold is assigned. No authoritative historical baseline is claimed.

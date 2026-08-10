@@ -297,7 +297,7 @@ final class DocumentTransitionProcessor {
         session.commit(
                 revision,
                 prepared.afterLayout(),
-                entry.sourceOrderKey(),
+                null,
                 prepared.activeSubscriptionsAfter(),
                 "external|" + entry.blueId());
         metrics.increment("process.routingSurfaceReused");
@@ -309,7 +309,6 @@ final class DocumentTransitionProcessor {
                 prepared.afterLayout(),
                 prepared.preparationNanos());
     }
-
     private static void verifyCommitCompanion(
             PlatformCommitCompanion companion,
             String expectedProcessingRootBlueId,

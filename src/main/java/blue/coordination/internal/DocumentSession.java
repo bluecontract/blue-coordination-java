@@ -30,6 +30,8 @@ final class DocumentSession {
     private SessionStatus status;
     private ExternalOrderKey readyThrough;
     private long epoch;
+    private long readyEpoch;
+    private long graphPublishedEpoch;
     private long applicationSequence;
 
     public DocumentSession(
@@ -50,6 +52,8 @@ final class DocumentSession {
         this.readyThrough = Objects.requireNonNull(
                 admissionFrontier, "admissionFrontier");
         this.epoch = 0L;
+        this.readyEpoch = 0L;
+        this.graphPublishedEpoch = -1L;
         this.applicationSequence = 0L;
         this.revisions.add(Objects.requireNonNull(
                 initializationRevision, "initializationRevision"));
@@ -76,6 +80,20 @@ final class DocumentSession {
 
     public synchronized long epoch() {
         return epoch;
+    }
+
+    public synchronized long readyEpoch() {
+        return readyEpoch;
+    }
+
+    public synchronized long graphPublishedEpoch() {
+        return graphPublishedEpoch;
+    }
+
+    public synchronized boolean isLocallyReady() {
+        return status == SessionStatus.READY
+                && readyEpoch == epoch
+                && graphPublishedEpoch == epoch;
     }
 
     public synchronized long nextApplicationOrder() {
@@ -179,13 +197,23 @@ final class DocumentSession {
         status = SessionStatus.BLOCKED;
     }
 
+    public synchronized void markGraphPublished() {
+        graphPublishedEpoch = epoch;
+    }
+
     public synchronized void markReady(ExternalOrderKey frontier) {
         if (status == SessionStatus.BLOCKED
                 || status == SessionStatus.TERMINATED) {
             throw new IllegalStateException(
                     "Cannot become ready from " + status);
         }
+        if (graphPublishedEpoch != epoch) {
+            throw new IllegalStateException(
+                    "Cannot publish READY before graph epoch " + epoch
+                            + " is published for " + documentId);
+        }
         status = SessionStatus.READY;
+        readyEpoch = epoch;
         if (readyThrough == null || frontier.compareTo(readyThrough) > 0) {
             readyThrough = frontier;
         }
@@ -193,11 +221,21 @@ final class DocumentSession {
 
     synchronized void restoreCoordinationState(
             SessionStatus restoredStatus,
-            ExternalOrderKey restoredReadyThrough) {
+            ExternalOrderKey restoredReadyThrough,
+            long restoredReadyEpoch,
+            long restoredGraphPublishedEpoch) {
+        if (restoredReadyEpoch < 0L || restoredReadyEpoch > epoch
+                || restoredGraphPublishedEpoch < -1L
+                || restoredGraphPublishedEpoch > epoch) {
+            throw new IllegalArgumentException(
+                    "Invalid restored readiness evidence for " + documentId);
+        }
         this.status = Objects.requireNonNull(
                 restoredStatus, "restoredStatus");
         this.readyThrough = Objects.requireNonNull(
                 restoredReadyThrough, "restoredReadyThrough");
+        this.readyEpoch = restoredReadyEpoch;
+        this.graphPublishedEpoch = restoredGraphPublishedEpoch;
     }
 
     public synchronized void commit(
@@ -235,6 +273,7 @@ final class DocumentSession {
         this.activeSubscriptions = subscriptions;
         this.epoch = expectedEpoch;
         this.applicationSequence = revision.rootApplicationOrder();
+        this.status = SessionStatus.CATCHING_UP;
         this.revisions.add(revision);
         transitionReceipts.add(receipt);
         stateEpochs.record(revision);

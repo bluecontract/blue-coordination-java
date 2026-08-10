@@ -161,6 +161,10 @@ final class TestEngine implements AutoCloseable {
                 DocumentId.of(documentId)));
     }
 
+    DocumentView readyDocument(String documentId) {
+        return new DocumentView(engine.document(DocumentId.of(documentId)));
+    }
+
     Node value(String documentId, String pointer) {
         return session(documentId).snapshot().valueAt(pointer).copyNode();
     }
@@ -245,6 +249,10 @@ final class TestEngine implements AutoCloseable {
 
     void restartFromStores() {
         control.restartFromStores();
+    }
+
+    void forceLegacyReadyMarker(String documentId) {
+        control.forceLegacyReadyMarker(documentId);
     }
 
     void makeHistoricalUnavailable(String diagnostic) {

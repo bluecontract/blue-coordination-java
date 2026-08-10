@@ -1,0 +1,584 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "round11-verification.schema.json",
+  "title": "Blue Coordination Round 11 release evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "release",
+    "profile",
+    "evidenceDate",
+    "verdict",
+    "source",
+    "status",
+    "shape",
+    "baseline",
+    "tests",
+    "runtimes",
+    "readinessProofs",
+    "sourceSurfaceIdentity",
+    "performance",
+    "structuralEvidence",
+    "scenarios",
+    "blueBasic",
+    "playground",
+    "publicationEvidence",
+    "artifacts",
+    "sourceArchive",
+    "capabilities",
+    "blockers",
+    "limitations",
+    "notClaimed",
+    "mustRegenerateAfterFinalTree"
+  ],
+  "properties": {
+    "$schema": { "const": "round11-verification.schema.json" },
+    "schemaVersion": { "const": "2.0.0" },
+    "release": { "const": "3.0.0-rc.1" },
+    "profile": { "const": "ROUND11_READINESS_CLOSURE" },
+    "evidenceDate": { "type": "string", "format": "date" },
+    "verdict": { "$ref": "#/$defs/finalStatus" },
+    "source": { "$ref": "#/$defs/sourceEvidence" },
+    "status": { "$ref": "#/$defs/readinessStatuses" },
+    "shape": { "$ref": "#/$defs/shapeEvidence" },
+    "baseline": { "$ref": "#/$defs/testEvidence" },
+    "tests": { "$ref": "#/$defs/finalTestEvidence" },
+    "runtimes": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "$ref": "#/$defs/runtimeEvidence" }
+    },
+    "readinessProofs": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": { "$ref": "#/$defs/readinessProof" }
+    },
+    "sourceSurfaceIdentity": { "$ref": "#/$defs/sourceSurfaceEvidence" },
+    "performance": { "$ref": "#/$defs/performanceEvidence" },
+    "structuralEvidence": { "$ref": "#/$defs/structuralEvidence" },
+    "scenarios": { "$ref": "#/$defs/scenarioEvidence" },
+    "blueBasic": { "$ref": "#/$defs/blueBasicEvidence" },
+    "playground": { "$ref": "#/$defs/playgroundEvidence" },
+    "publicationEvidence": { "$ref": "#/$defs/publicationEvidence" },
+    "artifacts": { "$ref": "#/$defs/artifactEvidence" },
+    "sourceArchive": { "$ref": "#/$defs/sourceArchiveEvidence" },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "classification", "blocker", "summary"],
+        "properties": {
+          "id": { "$ref": "#/$defs/id" },
+          "classification": { "type": "string", "minLength": 1 },
+          "blocker": { "type": "boolean" },
+          "summary": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "category", "summary"],
+        "properties": {
+          "id": { "$ref": "#/$defs/id" },
+          "category": {
+            "enum": ["semantic-upstream", "artifact-upstream", "scope"]
+          },
+          "summary": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "limitations": { "$ref": "#/$defs/nonemptyObject" },
+    "notClaimed": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "mustRegenerateAfterFinalTree": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "sha1": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "nullableSha1": {
+      "oneOf": [
+        { "$ref": "#/$defs/sha1" },
+        { "type": "null" }
+      ]
+    },
+    "nullableSha256": {
+      "oneOf": [
+        { "$ref": "#/$defs/sha256" },
+        { "type": "null" }
+      ]
+    },
+    "finalStatus": {
+      "enum": [
+        "PASS",
+        "PASS_HARD_GATE",
+        "BLOCKED",
+        "BLOCKED_SCOPE",
+        "BLOCKED_UPSTREAM",
+        "FAIL"
+      ]
+    },
+    "nonnegativeInteger": { "type": "integer", "minimum": 0 },
+    "nonnegativeNumber": { "type": "number", "minimum": 0 },
+    "nonemptyObject": { "type": "object", "minProperties": 1 },
+    "sourceEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseCommit",
+        "candidateCommit",
+        "worktree",
+        "dirtyReason",
+        "mainSourceManifestAlgorithm",
+        "mainSourceManifestSha256"
+      ],
+      "properties": {
+        "baseCommit": { "$ref": "#/$defs/sha1" },
+        "candidateCommit": { "$ref": "#/$defs/nullableSha1" },
+        "worktree": { "enum": ["CLEAN", "DIRTY"] },
+        "dirtyReason": { "type": ["string", "null"] },
+        "mainSourceManifestAlgorithm": { "type": "string", "minLength": 1 },
+        "mainSourceManifestSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "readinessStatuses": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "temporalArchitectureReady",
+        "inMemoryEngineWorkingReady",
+        "providerBackedReady",
+        "mandateAgentReady",
+        "playgroundLatencyReady",
+        "publicRcReady"
+      ],
+      "properties": {
+        "temporalArchitectureReady": { "$ref": "#/$defs/finalStatus" },
+        "inMemoryEngineWorkingReady": { "$ref": "#/$defs/finalStatus" },
+        "providerBackedReady": { "$ref": "#/$defs/finalStatus" },
+        "mandateAgentReady": { "$ref": "#/$defs/finalStatus" },
+        "playgroundLatencyReady": { "$ref": "#/$defs/finalStatus" },
+        "publicRcReady": { "$ref": "#/$defs/finalStatus" }
+      }
+    },
+    "shapeEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "limits",
+        "productionClasses",
+        "productionLines",
+        "publicApiSourceTypes",
+        "newProductionClassesMaximum",
+        "newPublicApiTypes"
+      ],
+      "properties": {
+        "status": { "$ref": "#/$defs/finalStatus" },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["productionClasses", "productionLines", "publicApiSourceTypes"],
+          "properties": {
+            "productionClasses": { "$ref": "#/$defs/nonnegativeInteger" },
+            "productionLines": { "$ref": "#/$defs/nonnegativeInteger" },
+            "publicApiSourceTypes": { "$ref": "#/$defs/nonnegativeInteger" }
+          }
+        },
+        "productionClasses": { "$ref": "#/$defs/nonnegativeInteger" },
+        "productionLines": { "$ref": "#/$defs/nonnegativeInteger" },
+        "publicApiSourceTypes": { "$ref": "#/$defs/nonnegativeInteger" },
+        "newProductionClassesMaximum": { "$ref": "#/$defs/nonnegativeInteger" },
+        "newPublicApiTypes": { "$ref": "#/$defs/nonnegativeInteger" }
+      }
+    },
+    "suite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "tests", "classes", "failures", "errors", "skipped"],
+      "properties": {
+        "name": {
+          "enum": ["test", "integrationTest", "consumerTest", "scenarioTest"]
+        },
+        "status": { "$ref": "#/$defs/finalStatus" },
+        "tests": { "$ref": "#/$defs/nonnegativeInteger" },
+        "classes": { "$ref": "#/$defs/nonnegativeInteger" },
+        "failures": { "$ref": "#/$defs/nonnegativeInteger" },
+        "errors": { "$ref": "#/$defs/nonnegativeInteger" },
+        "skipped": { "$ref": "#/$defs/nonnegativeInteger" }
+      }
+    },
+    "finalSuite": {
+      "allOf": [
+        { "$ref": "#/$defs/suite" },
+        { "required": ["status"] }
+      ]
+    },
+    "testEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status", "tests", "classes", "failures", "errors", "skipped", "suites"
+      ],
+      "properties": {
+        "profile": { "type": "string", "minLength": 1 },
+        "status": { "$ref": "#/$defs/finalStatus" },
+        "tests": { "$ref": "#/$defs/nonnegativeInteger" },
+        "classes": { "$ref": "#/$defs/nonnegativeInteger" },
+        "failures": { "$ref": "#/$defs/nonnegativeInteger" },
+        "errors": { "$ref": "#/$defs/nonnegativeInteger" },
+        "skipped": { "$ref": "#/$defs/nonnegativeInteger" },
+        "suites": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/suite" }
+        }
+      }
+    },
+    "finalTestEvidence": {
+      "allOf": [
+        { "$ref": "#/$defs/testEvidence" },
+        {
+          "properties": {
+            "suites": {
+              "type": "array",
+              "minItems": 4,
+              "maxItems": 4,
+              "items": { "$ref": "#/$defs/finalSuite" }
+            }
+          }
+        }
+      ]
+    },
+    "runtimeEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["java", "gate", "status", "durationSeconds"],
+      "properties": {
+        "java": { "enum": ["17", "21"] },
+        "gate": { "type": "string", "minLength": 1 },
+        "status": { "$ref": "#/$defs/finalStatus" },
+        "durationSeconds": { "$ref": "#/$defs/nonnegativeInteger" }
+      }
+    },
+    "readinessProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "status": { "$ref": "#/$defs/finalStatus" },
+        "parentProcessReruns": { "$ref": "#/$defs/nonnegativeInteger" },
+        "childProcessReruns": { "$ref": "#/$defs/nonnegativeInteger" },
+        "childReplays": { "$ref": "#/$defs/nonnegativeInteger" }
+      }
+    },
+    "sourceSurfaceEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algorithm",
+        "mutableBusinessBlueIdExcludedByDesign",
+        "businessOnlyTransitionReusesIdentity",
+        "realSourceSurfaceChangeInvalidatesIdentity",
+        "canonicalOrderingAndDelimiterSafety"
+      ],
+      "properties": {
+        "algorithm": { "type": "string", "minLength": 1 },
+        "mutableBusinessBlueIdExcludedByDesign": { "const": true },
+        "businessOnlyTransitionReusesIdentity": { "$ref": "#/$defs/finalStatus" },
+        "realSourceSurfaceChangeInvalidatesIdentity": { "$ref": "#/$defs/finalStatus" },
+        "canonicalOrderingAndDelimiterSafety": { "$ref": "#/$defs/finalStatus" }
+      }
+    },
+    "latencySplit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "frozen", "host"],
+      "properties": {
+        "total": { "$ref": "#/$defs/nonnegativeNumber" },
+        "frozen": { "$ref": "#/$defs/nonnegativeNumber" },
+        "host": { "$ref": "#/$defs/nonnegativeNumber" }
+      }
+    },
+    "singleRunEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["warmOrdinary", "warmPayNotePlusParent", "threeLayerRestaurantProduct"],
+      "properties": {
+        "warmOrdinary": { "$ref": "#/$defs/latencySplit" },
+        "warmPayNotePlusParent": { "$ref": "#/$defs/latencySplit" },
+        "threeLayerRestaurantProduct": { "$ref": "#/$defs/latencySplit" }
+      }
+    },
+    "performanceEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "preferredHostP95RegressionPercent",
+        "hardHostP95RegressionPercent",
+        "baselineSingleRunMs",
+        "round11SingleRunMs",
+        "repeatedP95Rows",
+        "baselineRuntimeEvidenceSha256",
+        "baselineProvenanceSha256",
+        "baselineTimingEvidenceSha256",
+        "round11RuntimeEvidenceSha256",
+        "round11ProvenanceSha256",
+        "round11TimingEvidenceSha256",
+        "evidenceFiles"
+      ],
+      "properties": {
+        "status": { "$ref": "#/$defs/finalStatus" },
+        "preferredHostP95RegressionPercent": { "$ref": "#/$defs/nonnegativeNumber" },
+        "hardHostP95RegressionPercent": { "$ref": "#/$defs/nonnegativeNumber" },
+        "baselineSingleRunMs": { "$ref": "#/$defs/singleRunEvidence" },
+        "round11SingleRunMs": { "$ref": "#/$defs/singleRunEvidence" },
+        "repeatedP95Rows": { "$ref": "#/$defs/repeatedP95Evidence" },
+        "baselineRuntimeEvidenceSha256": { "$ref": "#/$defs/sha256" },
+        "baselineProvenanceSha256": { "$ref": "#/$defs/sha256" },
+        "baselineTimingEvidenceSha256": { "$ref": "#/$defs/sha256" },
+        "round11RuntimeEvidenceSha256": { "$ref": "#/$defs/sha256" },
+        "round11ProvenanceSha256": { "$ref": "#/$defs/sha256" },
+        "round11TimingEvidenceSha256": { "$ref": "#/$defs/sha256" },
+        "evidenceFiles": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "baselineRuntimeComparison",
+            "baselineRuntimeProvenance",
+            "baselineLargeHostTimings",
+            "round11RuntimeComparison",
+            "round11RuntimeProvenance",
+            "round11LargeHostTimings"
+          ],
+          "properties": {
+            "baselineRuntimeComparison": { "type": "string", "minLength": 1 },
+            "baselineRuntimeProvenance": { "type": "string", "minLength": 1 },
+            "baselineLargeHostTimings": { "type": "string", "minLength": 1 },
+            "round11RuntimeComparison": { "type": "string", "minLength": 1 },
+            "round11RuntimeProvenance": { "type": "string", "minLength": 1 },
+            "round11LargeHostTimings": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "repeatedP95Evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hostOverheadAroundOneProcess",
+        "existingChildCatchUpP95Ms",
+        "nbaCatchUpP95Ms"
+      ],
+      "properties": {
+        "hostOverheadAroundOneProcess": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "baselineP95Ms",
+            "round11P50Ms",
+            "round11P95Ms",
+            "round11P99Ms",
+            "round11MaxMs",
+            "regressionPercent",
+            "preferredGate",
+            "hardGate"
+          ],
+          "properties": {
+            "baselineP95Ms": { "$ref": "#/$defs/nonnegativeNumber" },
+            "round11P50Ms": { "$ref": "#/$defs/nonnegativeNumber" },
+            "round11P95Ms": { "$ref": "#/$defs/nonnegativeNumber" },
+            "round11P99Ms": { "$ref": "#/$defs/nonnegativeNumber" },
+            "round11MaxMs": { "$ref": "#/$defs/nonnegativeNumber" },
+            "regressionPercent": { "type": "number" },
+            "preferredGate": { "enum": ["PASS", "MISS"] },
+            "hardGate": { "enum": ["PASS", "FAIL"] }
+          }
+        },
+        "existingChildCatchUpP95Ms": { "$ref": "#/$defs/nonnegativeNumber" },
+        "nbaCatchUpP95Ms": { "$ref": "#/$defs/nonnegativeNumber" }
+      }
+    },
+    "zeroCounters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "REQUEST_FRAGMENTS",
+        "TIMELINE_ENTRY_FRAGMENTS",
+        "ORDINARY_NODE_FRAGMENTS",
+        "FULL_ENVIRONMENT_SCANS",
+        "SOURCE_REPLAYS_PER_PARENT",
+        "POST_PROCESS_FULL_PROJECTIONS",
+        "PARENT_PROCESS_RERUNS_ON_GRAPH_RETRY",
+        "CHILD_PROCESS_RERUNS_ON_PARENT_RETRY"
+      ],
+      "properties": {
+        "REQUEST_FRAGMENTS": { "const": 0 },
+        "TIMELINE_ENTRY_FRAGMENTS": { "const": 0 },
+        "ORDINARY_NODE_FRAGMENTS": { "const": 0 },
+        "FULL_ENVIRONMENT_SCANS": { "const": 0 },
+        "SOURCE_REPLAYS_PER_PARENT": { "const": 0 },
+        "POST_PROCESS_FULL_PROJECTIONS": { "const": 0 },
+        "PARENT_PROCESS_RERUNS_ON_GRAPH_RETRY": { "const": 0 },
+        "CHILD_PROCESS_RERUNS_ON_PARENT_RETRY": { "const": 0 }
+      }
+    },
+    "structuralEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "requiredZeroCounters"],
+      "properties": {
+        "status": { "$ref": "#/$defs/finalStatus" },
+        "requiredZeroCounters": { "$ref": "#/$defs/zeroCounters" }
+      }
+    },
+    "scenarioEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wadowiceStressOracle", "nba", "canonicalRepositoryWadowice"],
+      "properties": {
+        "wadowiceStressOracle": { "$ref": "#/$defs/finalStatus" },
+        "nba": { "$ref": "#/$defs/finalStatus" },
+        "canonicalRepositoryWadowice": { "const": "NOT_PROVEN" }
+      }
+    },
+    "basicSuite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "status", "tests", "classes", "failures", "errors", "skipped"],
+      "properties": {
+        "name": {
+          "enum": ["test", "consumerTest", "performanceTest", "runtimeCampaign", "scenarioTest"]
+        },
+        "status": { "$ref": "#/$defs/finalStatus" },
+        "tests": { "$ref": "#/$defs/nonnegativeInteger" },
+        "classes": { "$ref": "#/$defs/nonnegativeInteger" },
+        "failures": { "$ref": "#/$defs/nonnegativeInteger" },
+        "errors": { "$ref": "#/$defs/nonnegativeInteger" },
+        "skipped": { "$ref": "#/$defs/nonnegativeInteger" }
+      }
+    },
+    "blueBasicEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status", "gate", "durationSeconds", "tests", "classes", "failures", "errors", "skipped", "suites"
+      ],
+      "properties": {
+        "status": { "$ref": "#/$defs/finalStatus" },
+        "gate": { "type": "string", "minLength": 1 },
+        "durationSeconds": { "$ref": "#/$defs/nonnegativeInteger" },
+        "tests": { "$ref": "#/$defs/nonnegativeInteger" },
+        "classes": { "$ref": "#/$defs/nonnegativeInteger" },
+        "failures": { "$ref": "#/$defs/nonnegativeInteger" },
+        "errors": { "$ref": "#/$defs/nonnegativeInteger" },
+        "skipped": { "$ref": "#/$defs/nonnegativeInteger" },
+        "suites": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": { "$ref": "#/$defs/basicSuite" }
+        }
+      }
+    },
+    "playgroundEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "gate", "durationSeconds", "dependencyBoundary"],
+      "properties": {
+        "status": { "$ref": "#/$defs/finalStatus" },
+        "gate": { "type": "string", "minLength": 1 },
+        "durationSeconds": { "$ref": "#/$defs/nonnegativeInteger" },
+        "dependencyBoundary": { "type": "string", "minLength": 1 }
+      }
+    },
+    "publicationEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "gate",
+        "durationSeconds",
+        "resolvedCoordinates",
+        "missingCoordinates",
+        "versionConflict",
+        "externalConsumerSmokeBuild"
+      ],
+      "properties": {
+        "status": { "$ref": "#/$defs/finalStatus" },
+        "gate": { "type": "string", "minLength": 1 },
+        "durationSeconds": { "$ref": "#/$defs/nonnegativeInteger" },
+        "resolvedCoordinates": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "missingCoordinates": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "versionConflict": { "type": "string", "minLength": 1 },
+        "externalConsumerSmokeBuild": { "$ref": "#/$defs/finalStatus" }
+      }
+    },
+    "artifactEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status", "mainJarSha256", "sourcesJarSha256", "javadocJarSha256", "testFixturesJarSha256"
+      ],
+      "properties": {
+        "status": { "$ref": "#/$defs/finalStatus" },
+        "mainJarSha256": { "$ref": "#/$defs/sha256" },
+        "sourcesJarSha256": { "$ref": "#/$defs/sha256" },
+        "javadocJarSha256": { "$ref": "#/$defs/sha256" },
+        "testFixturesJarSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "sourceArchiveEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "configuration",
+        "authoritativeVersionFile",
+        "authoritativeVersionFileIncluded",
+        "exportIgnored",
+        "extractedConfiguration",
+        "publishedArtifactSmokeBuild",
+        "sha256",
+        "pendingReason"
+      ],
+      "properties": {
+        "configuration": { "const": "CONFIGURED" },
+        "authoritativeVersionFile": { "const": ".cz.toml" },
+        "authoritativeVersionFileIncluded": { "const": true },
+        "exportIgnored": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "extractedConfiguration": {
+          "enum": ["PASS", "PENDING_VERIFICATION"]
+        },
+        "publishedArtifactSmokeBuild": { "$ref": "#/$defs/finalStatus" },
+        "sha256": { "$ref": "#/$defs/nullableSha256" },
+        "pendingReason": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

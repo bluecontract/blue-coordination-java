@@ -2,9 +2,11 @@ package blue.coordination.integration;
 
 import blue.coordination.api.ActivationMode;
 import blue.coordination.api.CoordinationEngine;
+import blue.coordination.api.CoordinationErrorCode;
 import blue.coordination.api.CoordinationException;
 import blue.coordination.api.ExactValue;
 import blue.coordination.api.Operation;
+import blue.coordination.api.SessionStatus;
 import blue.coordination.api.Timeline;
 import blue.coordination.api.TimelineEntry;
 import blue.language.processor.ExternalOrderKey;
@@ -205,9 +207,18 @@ final class TemporalAdmissionPolicyIntegrationTest {
             engine.failOnceAt(TestEngine.FailurePoint.AFTER_STAGING_CHILD_SESSION);
             assertThrows(TestEngine.InjectedFailureException.class,
                     () -> engine.dispatch(attachment));
+            assertEquals(SessionStatus.CATCHING_UP,
+                    engine.session("parent-retry-plan").status());
+            CoordinationException notReady = assertThrows(
+                    CoordinationException.class,
+                    () -> engine.readyDocument("parent-retry-plan"));
+            assertEquals(CoordinationErrorCode.DOCUMENT_NOT_READY,
+                    notReady.code());
             engine.clearFailureInjection();
 
             engine.dispatch(attachment);
+            assertEquals(SessionStatus.READY,
+                    engine.session("parent-retry-plan").status());
 
             assertEquals(2L, engine.session("parent-retry-plan").epoch());
             assertEquals(0L, integer(

@@ -68,11 +68,16 @@ that exact current state is eligible. With a false or absent flag, any retained
 known epoch of that candidate is eligible. An absent document leaves routing
 unrestricted.
 
-The pinned public Timeline Entry model has no literal `documentId` target, and
-the pinned provider boundary has no general Mandate-state resolver for
-per-target eligibility. This RC does not infer or simulate either capability;
-authority-bearing `onBehalfOf` entries fail closed. Both remain explicit Round
-10.1 upstream release blockers.
+The pinned generic Timeline Entry model has no universal literal `documentId`
+target. That is an optional generalized-profile capability, not a blocker for
+environment-derived routing; concrete Channel/message profiles may define exact
+target derivation and must continue to fail closed when their evidence is
+missing.
+
+The pinned provider boundary separately has no general Mandate-state resolver
+for per-target eligibility. This RC does not infer or simulate authority;
+authority-bearing `onBehalfOf` entries fail closed. Exact provider-backed
+Mandate resolution remains an upstream blocker.
 
 ## Immutable results
 

@@ -76,19 +76,21 @@ interpretation, and limitations under `docs/`.
 ## Release-candidate status
 
 The source targets `3.0.0-rc.1` with the Round 10.1 Process Embedded temporal
-profile. Release readiness is fail-closed until the same-source temporal,
-restart/store, scenario, locality, performance, consumer, and artifact gates in
-the [RC test report](docs/releases/3.0.0-rc.1-test-report.md) have verified
-results. Publication also waits for Repository `3.0.0-rc.19` and BEX
-`1.1.0-rc.3` to be available as published Maven artifacts. See the
-[RC readiness note](docs/releases/3.0.0-rc.1.md) and
+profile plus the focused Round 11 readiness closure. Release status is split
+into temporal architecture, in-memory engine, provider, Mandate, latency, and
+public-RC evidence. The generic Timeline Entry's missing universal literal
+`documentId` is an optional profile capability; exact provider-backed Mandate
+eligibility remains a real blocker. Publication stays fail-closed until the
+same-source, performance, consumer, source-archive, and published-artifact gates
+in the [canonical RC report](docs/releases/3.0.0-rc.1-test-report.md) have final
+results. See the [RC readiness note](docs/releases/3.0.0-rc.1.md) and
 [release procedure](docs/development/releasing.md).
 
 Developer references:
 
 - [Build and test](docs/development/build-and-test.md)
 - [Test strategy](docs/development/test-strategy.md)
-- [RC test report](docs/releases/3.0.0-rc.1-test-report.md)
+- [Canonical RC evidence report](docs/releases/3.0.0-rc.1-test-report.md)
 - [Public API](docs/reference/public-api.md)
 - [Metrics](docs/reference/metrics.md)
 - [Failure and retry model](docs/operations/failure-model.md)

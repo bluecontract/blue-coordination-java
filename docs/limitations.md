@@ -9,11 +9,12 @@
   subscription surface remains a frozen-API gap.
 - Journal completeness is proven only for the current in-memory journal. There
   is no durable or distributed transaction protocol.
-- The pinned Repository Timeline Entry has no `documentId` field, and the
-  pinned external-Channel API has no managed-DocumentId target hook. The host
-  can enforce Repository-native `OperationRequest.document` version targeting,
-  but it cannot honestly claim a literal Timeline-Entry DocumentId target
-  profile until that public model/runtime exists.
+- The pinned generic Timeline Entry has no universal literal `documentId`
+  field. This is an optional generalized targeting-profile gap, not a blocker
+  for append-once/environment-derived routing: concrete Channel/message types
+  may define exact target derivation, and Repository-native
+  `OperationRequest.document` version targeting is supported. A universal
+  Timeline-Entry target profile requires an upstream field or runtime hook.
 - General provider-backed Mandate eligibility requires an exact Mandate-state
   resolver at the entry's source order. The in-memory engine does not invent
   that evidence; authority-bearing entries fail closed until a host adapter can

@@ -265,6 +265,7 @@ final class SequentialDrainCoordinator {
                     session.layout().directOccurrences(),
                     cause);
             publishGraphDeltaAtomically(session, delta, cause);
+            session.markGraphPublished();
             if (policy == CoordinationEngine.AdmissionPolicy.FROM_NOW) {
                 if (!settleBarrierFor(session.documentId())) {
                     return;
@@ -273,12 +274,14 @@ final class SequentialDrainCoordinator {
                 completeAdmissionInitializationBarrier(
                         session.documentId());
             }
+        } else {
+            session.markGraphPublished();
         }
         if (policy != CoordinationEngine.AdmissionPolicy.FROM_NOW
                 && !resumeTopLevelAdmissions()) {
             return;
         }
-        session.markReady(cutoff);
+        publishReadyIfSynchronized(session, cutoff);
     }
 
     /**
@@ -401,6 +404,77 @@ final class SequentialDrainCoordinator {
 
     synchronized ProcessEmbeddedGraphSnapshot graphSnapshot() {
         return graph;
+    }
+
+    synchronized String applicationReadinessFailure(DocumentSession session) {
+        Objects.requireNonNull(session, "session");
+        if (!session.isLocallyReady()) {
+            return "session status/epoch publication is incomplete: status="
+                    + session.status() + ", epoch=" + session.epoch()
+                    + ", readyEpoch=" + session.readyEpoch()
+                    + ", graphPublishedEpoch="
+                    + session.graphPublishedEpoch();
+        }
+        return synchronizationFailure(session);
+    }
+
+    /**
+     * Verifies the current graph, barriers, cursors, and embedded states
+     * without consulting the public READY flag. The same proof is used before
+     * publishing READY and at the application-read boundary.
+     */
+    private String synchronizationFailure(DocumentSession session) {
+        DocumentId documentId = session.documentId();
+        if (openBarrierByParent.containsKey(documentId)) {
+            return "an embedded catch-up barrier remains open";
+        }
+        if (pendingTopLevelAdmissions.containsKey(documentId)) {
+            return "top-level historical admission remains pending";
+        }
+        List<EmbeddingBinding> bindings = graph.children(documentId);
+        if (bindings.isEmpty()
+                && session.layout().directOccurrences().isEmpty()) {
+            return null;
+        }
+        Map<String, EmbeddedOccurrence> occurrences = byPath(
+                session.layout().directOccurrences());
+        if (occurrences.size() != bindings.size()) {
+            return "published graph does not match current Process Embedded "
+                    + "occurrence count";
+        }
+        for (EmbeddingBinding binding : bindings) {
+            EmbeddedOccurrence occurrence = occurrences.get(
+                    binding.absolutePath());
+            if (occurrence == null || !occurrence.childDocumentId().equals(
+                    binding.childDocumentId())) {
+                return "published graph does not match current occurrence at "
+                        + binding.absolutePath();
+            }
+            EmbeddedEpochCursor cursor = cursors.get(binding.bindingId());
+            if (cursor == null) {
+                return "missing embedded epoch cursor for "
+                        + binding.bindingId();
+            }
+            DocumentSession child = documents.find(
+                    binding.childDocumentId()).orElse(null);
+            if (child == null) {
+                return "missing managed child " + binding.childDocumentId();
+            }
+            if (cursor.appliedChildEpoch() != child.epoch()) {
+                return "parent cursor " + cursor.appliedChildEpoch()
+                        + " is behind child epoch " + child.epoch()
+                        + " at " + binding.absolutePath();
+            }
+            String expected = child.revision(
+                    cursor.appliedChildEpoch()).after().blueId();
+            String actual = session.currentRevision().after()
+                    .canonicalBlueIdAt(binding.absolutePath());
+            if (!expected.equals(actual)) {
+                return "parent state/cursor mismatch at "
+                        + binding.absolutePath();
+            }
+        }
+        return null;
     }
 
     synchronized List<EmbeddingBinding> bindingsForParent(DocumentId parent) {
@@ -579,6 +653,7 @@ final class SequentialDrainCoordinator {
         failureInjector.accept(DefaultCoordinationEngine.FailurePoint
                 .BEFORE_COMMIT_VALIDATION);
         InternalProcessOutcome outcome = processor.commit(prepared);
+        markContainingDocumentsCatchingUp(session.documentId());
         if (!graph.parents(session.documentId()).isEmpty()) {
             metrics.increment("temporal.childEpochsCommitted");
         }
@@ -590,6 +665,7 @@ final class SequentialDrainCoordinator {
         metrics.increment("deliveryReceiptsCommitted");
         publishCommittedTransition(
                 session, delta, cause, routePublicationRequired);
+        publishReadyIfSynchronized(session, cause.cutoff());
         failureInjector.accept(DefaultCoordinationEngine.FailurePoint
                 .AFTER_STATE_SWAP_BEFORE_RETURN);
         outcomes.add(outcome);
@@ -597,6 +673,40 @@ final class SequentialDrainCoordinator {
         requireBarrierReady(session.documentId());
     }
 
+    private void publishReadyIfSynchronized(
+            DocumentSession session,
+            ExternalOrderKey cutoff) {
+        String failure = synchronizationFailure(session);
+        if (failure != null) {
+            session.markCatchingUp();
+            metrics.increment("temporal.readyPublicationDeferred");
+            return;
+        }
+        session.markReady(cutoff);
+    }
+    /** Marks every containing document non-ready as soon as a child commits. */
+    private void markContainingDocumentsCatchingUp(DocumentId childId) {
+        List<EmbeddingBinding> parents = graph.parents(childId);
+        if (parents.isEmpty()) {
+            return;
+        }
+        DocumentSession child = documents.require(childId);
+        for (EmbeddingBinding binding : parents) {
+            EmbeddedEpochCursor cursor = cursors.get(binding.bindingId());
+            if (cursor == null || cursor.appliedChildEpoch() >= child.epoch()) {
+                continue;
+            }
+            DocumentSession parent = documents.require(
+                    binding.parentDocumentId());
+            if (parent.status() == SessionStatus.BLOCKED
+                    || parent.status() == SessionStatus.TERMINATED) {
+                metrics.increment("temporal.parentLagRetainedWhileNonReady");
+                continue;
+            }
+            parent.markCatchingUp();
+            metrics.increment("temporal.parentsMarkedBehind");
+        }
+    }
     private void requireBarrierReady(DocumentId parent) {
         if (!settleBarrierFor(parent)) {
             throw DeferredWorkException.INSTANCE;
@@ -667,11 +777,12 @@ final class SequentialDrainCoordinator {
         metrics.addNanos("process.hostBeforeFrozen", inputNanos);
         EmbeddedEpochCursor current = cursors.get(binding.bindingId());
         if (parent.hasTransitionReceipt(input.inputId())) {
-            reconcileCommittedTransition(
-                    parent, TransitionCause.embedded(input));
+            TransitionCause cause = TransitionCause.embedded(input);
+            reconcileCommittedTransition(parent, cause);
             recordCursor(binding.bindingId());
             cursors.put(binding.bindingId(),
                     current.advanceTo(childRevision.epoch()));
+            publishReadyIfSynchronized(parent, cause.cutoff());
             metrics.increment("temporal.embeddedCommitCompanionRecoveries");
             return;
         }
@@ -689,6 +800,7 @@ final class SequentialDrainCoordinator {
                 prepared.afterLayout(), prepared.activeSubscriptionsAfter());
         preflightGraphDelta(delta, cause);
         InternalProcessOutcome outcome = processor.commitEmbedded(prepared);
+        markContainingDocumentsCatchingUp(parent.documentId());
         committedTransitionSequence = Math.addExact(
                 committedTransitionSequence, 1L);
         recoveryState.committedTransitionSequence =
@@ -705,6 +817,7 @@ final class SequentialDrainCoordinator {
         recordCursor(binding.bindingId());
         cursors.put(binding.bindingId(),
                 current.advanceTo(childRevision.epoch()));
+        publishReadyIfSynchronized(parent, cause.cutoff());
         outcomes.add(outcome);
         metrics.increment("temporal.parentEpochApplications");
         metrics.increment("catchUp.parentRevisionApplications");
@@ -894,7 +1007,9 @@ final class SequentialDrainCoordinator {
                 session.layout().directOccurrences(),
                 cause);
         preflightGraphDelta(delta, cause);
+        markContainingDocumentsCatchingUp(session.documentId());
         publishCommittedTransition(session, delta, cause, true);
+        publishReadyIfSynchronized(session, cause.cutoff());
     }
 
     private void publishCommittedTransition(
@@ -911,6 +1026,7 @@ final class SequentialDrainCoordinator {
             metrics.increment("routing.surfacePublicationsSkipped");
         }
         publishGraphDeltaAtomically(session, delta, cause);
+        session.markGraphPublished();
     }
 
     private void publishGraphDeltaAtomically(
@@ -994,7 +1110,10 @@ final class SequentialDrainCoordinator {
         checkpoint.sessionProgressBefore().forEach((documentId, progress) ->
                 documents.find(documentId).ifPresent(session ->
                         session.restoreCoordinationState(
-                                progress.status(), progress.readyThrough())));
+                                progress.status(),
+                                progress.readyThrough(),
+                                progress.readyEpoch(),
+                                progress.graphPublishedEpoch())));
         for (DocumentId childId : checkpoint.newChildIds()) {
             DocumentSession child = documents.find(childId).orElse(null);
             if (child == null) {
@@ -1066,6 +1185,11 @@ final class SequentialDrainCoordinator {
             DocumentSession parent,
             GraphDelta delta,
             TransitionCause cause) {
+        if (delta.requiresSynchronization()
+                && parent.status() != SessionStatus.CATCHING_UP) {
+            recordSessionProgress(parent);
+            parent.markCatchingUp();
+        }
         for (OccurrenceKey key : delta.admissionsToConsume()) {
             consumeExactAdmission(key);
         }
@@ -1101,8 +1225,6 @@ final class SequentialDrainCoordinator {
         for (AdmittedChild admitted : admittedChildren) {
             publishNestedChild(admitted, cause, barrier);
         }
-        recordSessionProgress(parent);
-        parent.markCatchingUp();
     }
 
     private AdmittedChild admitOrReuseChild(
@@ -1129,6 +1251,9 @@ final class SequentialDrainCoordinator {
             created = true;
             metrics.increment("embedding.childSessionsCreated");
             metrics.increment("sessionsCreated");
+            if (child.layout().directOccurrences().isEmpty()) {
+                child.markGraphPublished();
+            }
             failureInjector.accept(DefaultCoordinationEngine.FailurePoint
                     .AFTER_STAGING_CHILD_SESSION);
         } else {
@@ -1167,6 +1292,7 @@ final class SequentialDrainCoordinator {
                         child.layout().directOccurrences(),
                         nestedCause);
                 publishGraphDeltaAtomically(child, nested, nestedCause);
+                child.markGraphPublished();
                 String nestedBarrierId = openBarrierByParent.get(
                         child.documentId());
                 if (nestedBarrierId != null) {
@@ -1317,7 +1443,7 @@ final class SequentialDrainCoordinator {
             if (parent.documentId().equals(rootId)) {
                 parent.markCatchingUp();
             } else {
-                parent.markReady(parent.readyThrough());
+                publishReadyIfSynchronized(parent, parent.readyThrough());
             }
         }
     }
@@ -1519,7 +1645,7 @@ final class SequentialDrainCoordinator {
                         binding.childDocumentId(), candidate),
                 routes.generation(),
                 graph.generation(),
-                sourceSurfaceIdentity(binding));
+                () -> sourceSurfaceIdentity(binding));
         if (step instanceof HistoricalStep.EligibleEntry eligible) {
             return Optional.of(BarrierCandidate.history(
                     barrier.barrierId(), depth, binding, eligible.entry()));
@@ -1617,7 +1743,7 @@ final class SequentialDrainCoordinator {
                     parent.documentId())) {
                 parent.markCatchingUp();
             } else {
-                parent.markReady(barrier.cutoffExclusive());
+                publishReadyIfSynchronized(parent, barrier.cutoffExclusive());
             }
             metrics.increment("temporal.catchUpBarriersCompleted");
         }
@@ -1680,11 +1806,13 @@ final class SequentialDrainCoordinator {
         }
     }
 
-    private String sourceSurfaceIdentity(EmbeddingBinding binding) {
+    String sourceSurfaceIdentity(EmbeddingBinding binding) {
         DocumentSession child = documents.require(
                 binding.childDocumentId());
-        return binding.bindingId() + "|"
-                + child.currentRevision().after().blueId();
+        return SourceSurfaceIdentity.calculate(
+                binding,
+                child.activeSubscriptions(),
+                child.layout().routingSurface());
     }
 
     private boolean resumeTopLevelAdmissions() {
@@ -1709,9 +1837,9 @@ final class SequentialDrainCoordinator {
                 complete = false;
                 continue;
             }
+            pendingTopLevelAdmissions.remove(item.getKey());
             markTopLevelSubtreeReady(
                     session.documentId(), admission.cutoffInclusive());
-            pendingTopLevelAdmissions.remove(item.getKey());
         }
         return complete;
     }
@@ -1737,7 +1865,7 @@ final class SequentialDrainCoordinator {
                             .anyMatch(admittedSubtree::contains),
                     routes.generation(),
                     entryGraph.generation(),
-                    "top-level|" + session.documentId() + "|"
+                    () -> "top-level|" + session.documentId() + "|"
                             + session.currentRevision().after().blueId());
             if (step instanceof HistoricalStep.Complete
                     || step instanceof HistoricalStep.CompleteEmpty) {
@@ -1780,9 +1908,11 @@ final class SequentialDrainCoordinator {
             ExternalOrderKey cutoffInclusive) {
         List<DocumentId> subtree = new ArrayList<>(subtree(graph, rootId));
         subtree.remove(rootId);
-        subtree.stream().sorted().forEach(documentId -> documents.require(
-                documentId).markReady(cutoffInclusive));
-        documents.require(rootId).markReady(cutoffInclusive);
+        subtree.stream().sorted().forEach(documentId ->
+                publishReadyIfSynchronized(
+                        documents.require(documentId), cutoffInclusive));
+        publishReadyIfSynchronized(
+                documents.require(rootId), cutoffInclusive);
     }
 
     /** Frozen direct Process Embedded subtree rooted at one admitted Root. */
@@ -1896,8 +2026,8 @@ final class SequentialDrainCoordinator {
             DocumentSession session = documents.find(documentId).orElseThrow(
                     () -> new IllegalStateException(
                             "Pending admission has no document " + documentId));
-            if (session.status() != SessionStatus.CATCHING_UP
-                    && session.status() != SessionStatus.BLOCKED) {
+            if (session.status() == SessionStatus.PENDING_INITIALIZATION
+                    || session.status() == SessionStatus.TERMINATED) {
                 throw new IllegalStateException(
                         "Pending admission has invalid status "
                                 + session.status() + " for " + documentId);
@@ -1916,6 +2046,27 @@ final class SequentialDrainCoordinator {
                                 + documentId);
             }
         });
+        for (DocumentSession session : documents.sessions()) {
+            reconcileRecoveredReadiness(session);
+        }
+    }
+
+    /**
+     * Repairs a recoverable READY marker after a crash boundary. Structural
+     * corruption was rejected above; lagging cursors, open barriers, and an
+     * unpublished current graph require deterministic continuation instead of
+     * exposing the document to applications.
+     */
+    private void reconcileRecoveredReadiness(DocumentSession session) {
+        if (session.status() != SessionStatus.READY) {
+            return;
+        }
+        String failure = applicationReadinessFailure(session);
+        if (failure == null) {
+            return;
+        }
+        session.markCatchingUp();
+        metrics.increment("temporal.recoveredReadinessRepairs");
     }
 
     private static DocumentRevision.CatchUpCause catchUpCause(
@@ -2037,6 +2188,9 @@ final class SequentialDrainCoordinator {
             List<EmbeddingBinding> removed,
             List<ProposedBinding> additions,
             List<OccurrenceKey> admissionsToConsume) {
+        private boolean requiresSynchronization() {
+            return !additions.isEmpty();
+        }
     }
 
     private record BarrierLevel(CatchUpBarrier barrier, int depth) {
@@ -2072,11 +2226,17 @@ final class SequentialDrainCoordinator {
 
     private record SessionProgress(
             SessionStatus status,
-            ExternalOrderKey readyThrough) {
+            ExternalOrderKey readyThrough,
+            long readyEpoch,
+            long graphPublishedEpoch) {
         private SessionProgress {
             status = Objects.requireNonNull(status, "status");
             readyThrough = Objects.requireNonNull(
                     readyThrough, "readyThrough");
+            if (readyEpoch < 0L || graphPublishedEpoch < -1L) {
+                throw new IllegalArgumentException(
+                        "Invalid session publication evidence");
+            }
         }
     }
 
@@ -2256,7 +2416,10 @@ final class SequentialDrainCoordinator {
             sessionProgressBefore.putIfAbsent(
                     session.documentId(),
                     new SessionProgress(
-                            session.status(), session.readyThrough()));
+                            session.status(),
+                            session.readyThrough(),
+                            session.readyEpoch(),
+                            session.graphPublishedEpoch()));
         }
 
         private void recordNewChild(DocumentId childId) {
