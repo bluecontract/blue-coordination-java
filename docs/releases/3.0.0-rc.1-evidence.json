@@ -7,9 +7,9 @@
   "verdict": "BLOCKED",
   "source": {
     "baseCommit": "4f8d76f5f9958d206ffe7f10ee92271e69c26f1c",
-    "candidateCommit": null,
+    "candidateCommit": "eabdf43dca5b14a37872b759ec1adabf2fd73f08",
     "worktree": "DIRTY",
-    "dirtyReason": "The exact candidate commit and source archive are not frozen yet; the pre-existing Archive.zip is preserved and export-ignored",
+    "dirtyReason": "Only the pre-existing untracked Archive.zip remains; it is preserved, export-ignored, and is not the release archive",
     "mainSourceManifestAlgorithm": "src/main/java files sorted by project-relative path; each record is path, one ASCII space, and lowercase SHA-256 of file bytes; records are LF-joined without a trailing LF",
     "mainSourceManifestSha256": "6db75b8b9dfb1279b64f90370cb9e3d8f0ff9f836f01a5d60cb0f1518973006b"
   },
@@ -196,10 +196,10 @@
       "__MACOSX and AppleDouble files",
       "JFR and heap dumps"
     ],
-    "extractedConfiguration": "PENDING_VERIFICATION",
+    "extractedConfiguration": "PASS",
     "publishedArtifactSmokeBuild": "BLOCKED_UPSTREAM",
-    "sha256": null,
-    "pendingReason": "The source archive can be generated and extracted only after the exact candidate commit is frozen"
+    "sha256": "a23914c62c80b65968f78adac096cb374d957d0b407f6c054296e8d33061f9df",
+    "pendingReason": null
   },
   "capabilities": [
     {
@@ -246,7 +246,6 @@
     "performance improvement"
   ],
   "mustRegenerateAfterFinalTree": [
-    "candidate commit and clean/dirty status",
-    "source archive SHA-256 and extracted configuration result"
+    "all source-, artifact-, archive-, test-, and performance-bound evidence after any candidate-tree change"
   ]
 }
