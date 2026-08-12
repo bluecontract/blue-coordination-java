@@ -41,19 +41,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
 
-/**
- * In-memory Process Embedded temporal-profile engine.
- *
- * <p>Its execution boundary is intentionally sequential:</p>
- * <ul>
- *   <li>one whole request and one whole Timeline Entry;</li>
- *   <li>operation-aware managed-document routing;</li>
- *   <li>exactly one frozen Contracts call per selected Root;</li>
- *   <li>only Process Embedded documents are cut;</li>
- *   <li>embedded sessions process source history once;</li>
- *   <li>parents consume exact child revisions under a catch-up barrier.</li>
- * </ul>
- */
+/** Sequential in-memory Process Embedded temporal-profile engine. */
 public final class DefaultCoordinationEngine
         implements CoordinationEngine {
     enum FailurePoint {
@@ -181,8 +169,8 @@ public final class DefaultCoordinationEngine
             DocumentSession candidate = processor.admit(
                     documentId,
                     authoredYaml,
-                    admissionFrontier);
-
+                    admissionFrontier,
+                    policy);
             documents.insert(candidate);
             routeIndex.replace(
                     candidate.documentId(),
@@ -193,7 +181,8 @@ public final class DefaultCoordinationEngine
                     Objects.requireNonNull(policy, "policy"),
                     verifiedFrontier);
             metrics.increment("sessionsCreated");
-            objects.commit(objectMark);
+            metrics.timed("process.commitReadinessPublication",
+                    () -> objects.commit(objectMark));
             return candidate;
         } catch (RuntimeException failure) {
             boolean retainAdmission = documents.find(documentId).isPresent()
@@ -268,7 +257,6 @@ public final class DefaultCoordinationEngine
     }
 
 
-    /** Registers one exact test type in the same whole-object provider. */
     synchronized ExactValue registerType(String sourceYaml) {
         ensureOpen();
         return runtime.exactSource(sourceYaml, objects, "test-type");
@@ -286,17 +274,11 @@ public final class DefaultCoordinationEngine
                 sourceYaml, objects, "external-exact-value");
     }
 
-    /**
-     * Retains one managed document whole and returns one whole request that
-     * points to it. Attachment never serializes or copies the document through
-     * the request/Compute boundary.
-     */
     synchronized ExactValue embeddedDocumentRequest(
             String exactDocumentYaml) {
         return referencedValueRequest("document", exactDocumentYaml);
     }
 
-    /** Returns one whole request containing one exact whole-value reference. */
     synchronized ExactValue referencedValueRequest(
             String field,
             String exactValueYaml) {
@@ -422,7 +404,6 @@ public final class DefaultCoordinationEngine
         }
     }
 
-    /** Measures the already-compiled exact route index without execution. */
     @Override
     public synchronized int routeTargetCount(TimelineEntry entry) {
         ensureOpen();
@@ -479,17 +460,13 @@ public final class DefaultCoordinationEngine
         failureInjector = ignored -> { };
     }
 
-    /**
-     * Reconstructs the coordinator and route index from the retained in-memory
-     * document, journal, graph, cursor, barrier, and entry-frame stores.
-     * Runtime caches and exact immutable objects remain reusable.
-     */
     synchronized void restartFromStores() {
         ensureOpen();
         clearFailureInjection();
         routeIndex.clear();
         documents.sessions().stream()
-                .sorted(Comparator.comparing(DocumentSession::documentId))
+                .sorted(Comparator.comparing(DocumentSession::documentId,
+                        EmbeddingBinding.DOCUMENT_ORDER))
                 .forEach(session -> routeIndex.replace(
                         session.documentId(),
                         session.layout().routingSurface(),
@@ -558,7 +535,6 @@ public final class DefaultCoordinationEngine
                 .toList();
     }
 
-    /** External source Timelines reachable through this Root and its links. */
     synchronized Set<String> effectiveTimelineIds(String documentId) {
         ensureOpen();
         LinkedHashSet<String> result = new LinkedHashSet<>();
@@ -567,7 +543,6 @@ public final class DefaultCoordinationEngine
         return Collections.unmodifiableSet(result);
     }
 
-    /** Direct Process Embedded path to managed child DocumentId. */
     synchronized Map<String, String> embeddedDocuments(
             String documentId) {
         ensureOpen();
@@ -582,8 +557,10 @@ public final class DefaultCoordinationEngine
     synchronized EngineMetrics.MetricsSnapshot metricsSnapshot() {
         return metrics.snapshot();
     }
-
-    /** Language's bounded high-throughput cache evidence for diagnostics. */
+    synchronized void observeTransitions(
+            Consumer<SequentialDrainCoordinator.TransitionTrace> observer) {
+        drainCoordinator.observeTransitions(observer);
+    }
     synchronized BlueCacheStats languageCacheStats() {
         ensureOpen();
         return runtime.cacheStats();
@@ -597,17 +574,14 @@ public final class DefaultCoordinationEngine
         return objects.size();
     }
 
-    /** Package migration diagnostic; represented by metrics after promotion. */
     synchronized int documentCount() {
         return documents.size();
     }
 
-    /** Package migration diagnostic; represented by metrics after promotion. */
     synchronized int routeRowCount() {
         return routeIndex.rowCount();
     }
 
-    /** Package migration diagnostic for append publication atomicity. */
     synchronized long logicalClockMicros() {
         return logicalClockMicros;
     }
@@ -615,6 +589,8 @@ public final class DefaultCoordinationEngine
     synchronized InMemoryDocumentStore documents() {
         return documents;
     }
+
+    synchronized WholeObjectStore objects() { return objects; }
 
     synchronized void inject(FailurePoint point) {
         failureInjector.accept(Objects.requireNonNull(point, "point"));

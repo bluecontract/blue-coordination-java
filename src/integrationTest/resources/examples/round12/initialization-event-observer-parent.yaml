@@ -1,0 +1,96 @@
+documentId: r12-initialization-event-parent
+name: Round 12 Initialization Event Observer
+initializationApplications: 0
+observedEventCount: -1
+firstOccurrenceIndex: -1
+secondOccurrenceIndex: -1
+firstEventBlueId: unset
+secondEventBlueId: unset
+firstEventKind: unset
+secondEventKind: unset
+contracts:
+  parentChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/round12/initialization-events/parent
+    actor:
+      type: MyOS/Principal Actor
+      accountId: round12-initialization-event-observer
+  coordinationEmbeddedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: coordination/internal/r12-initialization-event-parent
+    actor:
+      type: MyOS/Principal Actor
+      accountId: coordination
+  embedded:
+    type: Process Embedded
+    paths: [/child]
+  attachChild:
+    type: Coordination/Sequential Workflow Operation
+    channel: parentChannel
+    request:
+      document:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: add
+              path: /child
+              val: {$binding: event/message/request/document}
+          - $return: true
+  coordinationApplyEmbeddedRevision:
+    type: Coordination/Sequential Workflow Operation
+    channel: coordinationEmbeddedChannel
+    request:
+      after:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /initializationApplications
+              val: {$add: [$document: /initializationApplications, 1]}
+          - $appendChange:
+              op: replace
+              path: /observedEventCount
+              val: {$binding: event/message/request/emittedEventCount}
+          - $if:
+              cond:
+                $eq:
+                  - $binding: event/message/request/emittedEventCount
+                  - 2
+              then:
+                - $appendChange:
+                    op: replace
+                    path: /firstOccurrenceIndex
+                    val: {$binding: event/message/request/eventOccurrences/0/occurrenceIndex}
+                - $appendChange:
+                    op: replace
+                    path: /secondOccurrenceIndex
+                    val: {$binding: event/message/request/eventOccurrences/1/occurrenceIndex}
+                - $appendChange:
+                    op: replace
+                    path: /firstEventBlueId
+                    val: {$binding: event/message/request/eventOccurrences/0/eventBlueId}
+                - $appendChange:
+                    op: replace
+                    path: /secondEventBlueId
+                    val: {$binding: event/message/request/eventOccurrences/1/eventBlueId}
+                - $appendChange:
+                    op: replace
+                    path: /firstEventKind
+                    val: {$binding: event/message/request/emittedEvents/0/kind}
+                - $appendChange:
+                    op: replace
+                    path: /secondEventKind
+                    val: {$binding: event/message/request/emittedEvents/1/kind}
+          - $appendChange:
+              op: replace
+              path: /child
+              val: {$binding: event/message/request/after}
+          - $return: true

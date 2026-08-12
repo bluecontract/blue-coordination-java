@@ -76,7 +76,8 @@ interpretation, and limitations under `docs/`.
 ## Release-candidate status
 
 The source targets `3.0.0-rc.1` with the Round 10.1 Process Embedded temporal
-profile plus the focused Round 11 readiness closure. Release status is split
+profile, the Round 11 readiness closure, and Round 12 initialization lifecycle
+and dynamic-activation proofs. Release status is split
 into temporal architecture, in-memory engine, provider, Mandate, latency, and
 public-RC evidence. The generic Timeline Entry's missing universal literal
 `documentId` is an optional profile capability; exact provider-backed Mandate
@@ -90,6 +91,9 @@ Developer references:
 
 - [Build and test](docs/development/build-and-test.md)
 - [Test strategy](docs/development/test-strategy.md)
+- [Initialization causality](docs/semantics/initialization-causality.md)
+- [Shared NBA Game lifecycle](docs/examples/nba-shared-game-lifecycle.md)
+- [Five-occurrence Playground API example](docs/examples/playground-five-occurrence.md)
 - [Canonical RC evidence report](docs/releases/3.0.0-rc.1-test-report.md)
 - [Public API](docs/reference/public-api.md)
 - [Metrics](docs/reference/metrics.md)

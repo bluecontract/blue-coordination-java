@@ -1,5 +1,7 @@
 package blue.coordination.api;
 
+import blue.language.processor.ExternalOrderKey;
+
 import java.util.Objects;
 
 /** Stable identity of one independently managed document process. */
@@ -16,7 +18,8 @@ public record DocumentId(String value) implements Comparable<DocumentId> {
 
     @Override
     public int compareTo(DocumentId other) {
-        return value.compareTo(Objects.requireNonNull(other, "other").value);
+        return ExternalOrderKey.compareTextCodePoints(value,
+                Objects.requireNonNull(other, "other").value);
     }
 
     @Override

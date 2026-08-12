@@ -28,6 +28,12 @@ the new 3.x API before the first stable 3.0.0 release.
   realistic scenario suites enforced by `releaseCheck`.
 - Standalone `blue-basic` historical performance and metrics evidence,
   explicitly isolated from release correctness.
+- Causally exact initialization revisions whose ordered lifecycle events are
+  retained once and applied to every current or later containing document.
+- Dynamic `Process Embedded.paths` and `collectionPaths` activation with
+  code-point-canonical occurrence order, nested settlement, and retry proofs.
+- A reproducible extracted-source archive smoke that runs focused tests using
+  its own executable Gradle wrapper and authoritative `.cz.toml`.
 
 ### Changed
 

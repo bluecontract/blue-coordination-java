@@ -10,21 +10,13 @@ import blue.language.snapshot.FrozenNode;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Function;
 
-/**
- * Reusable embedded-only cut and routing plan for one managed document.
- * Ordinary values and request payloads do not participate in this plan.
- *
- * <p>Plan reuse is checked from memoized immutable type/contracts subtree
- * identities. A committed contract-surface change recompiles this plan once;
- * ordinary state transitions keep the O(1) reuse path.</p>
- */
+/** Reusable embedded-only cut and route plan keyed by exact contract identity. */
 final class EmbeddedLayoutPlan {
     private static final String ABSENT = "<absent>";
 
@@ -79,11 +71,11 @@ final class EmbeddedLayoutPlan {
             EmbeddedScopePlanView view = entry.getValue();
             List<String> explicit = view.explicitDeclarationPaths().stream()
                     .map(path -> PointerUtils.resolvePointer(scopePath, path))
-                    .sorted()
+                    .sorted(EmbeddingBinding.TEXT_ORDER)
                     .toList();
             List<String> collections = view.collectionDeclarationPaths().stream()
                     .map(path -> PointerUtils.resolvePointer(scopePath, path))
-                    .sorted()
+                    .sorted(EmbeddingBinding.TEXT_ORDER)
                     .toList();
             rules.put(scopePath, new ScopeRule(
                     scopePath, explicit, collections));
@@ -115,11 +107,7 @@ final class EmbeddedLayoutPlan {
         return rulesByScope;
     }
 
-    /**
-     * Checks only authored scopes owned by this processing Root. Managed child
-     * subtrees have independent plans and must not invalidate their containing
-     * Root when a child epoch replaces ordinary or contract state.
-     */
+    /** Checks only authored scopes owned by this processing Root. */
     public boolean reusableFor(Function<String, FrozenNode> exactScopeAt) {
         Objects.requireNonNull(exactScopeAt, "exactScopeAt");
         for (Map.Entry<String, AuthoredScopeIdentity> entry
@@ -142,7 +130,7 @@ final class EmbeddedLayoutPlan {
         return catalog.scopePlansByScope().values().stream()
                 .flatMap(view -> view.concreteChildPaths().stream())
                 .distinct()
-                .sorted()
+                .sorted(EmbeddingBinding.TEXT_ORDER)
                 .toList();
     }
 
@@ -184,7 +172,7 @@ final class EmbeddedLayoutPlan {
     private static List<String> immutable(List<String> source) {
         List<String> copy = new ArrayList<>(Objects.requireNonNull(
                 source, "source"));
-        copy.sort(Comparator.naturalOrder());
+        copy.sort(EmbeddingBinding.TEXT_ORDER);
         return Collections.unmodifiableList(copy);
     }
 

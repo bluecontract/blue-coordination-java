@@ -1,6 +1,7 @@
 package blue.coordination.processor;
 
 import blue.coordination.processor.bex.BexProcessingMetrics;
+import blue.language.processor.ChannelEvaluation;
 import blue.language.processor.ContractProcessorRegistry;
 import blue.language.processor.ContractProcessorRegistryBuilder;
 import blue.language.processor.DocumentProcessor;
@@ -34,6 +35,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -112,6 +114,33 @@ final class CoordinationProcessorsTest {
         // then
         assertTrue(registry.lookupChannel(
                 MyOSTimelineChannel.blueId()).isPresent());
+    }
+
+    @Test
+    void unionChannelTieBreaksUseUnicodeCodePointOrder() {
+        String privateUse = "\uE000";
+        String supplementary = "\uD800\uDC00";
+        assertTrue(privateUse.compareTo(supplementary) > 0,
+                "the fixture must oppose Java UTF-16 ordering");
+        ChannelEvaluation evaluation = ChannelEvaluation.match(new Node());
+
+        AllTimelinesChannelProcessor.MatchingTimeline allPrivate =
+                new AllTimelinesChannelProcessor.MatchingTimeline(
+                        privateUse, 0, evaluation);
+        AllTimelinesChannelProcessor.MatchingTimeline allSupplementary =
+                new AllTimelinesChannelProcessor.MatchingTimeline(
+                        supplementary, 0, evaluation);
+        assertTrue(allPrivate.precedes(allSupplementary));
+        assertFalse(allSupplementary.precedes(allPrivate));
+
+        CompositeTimelineChannelProcessor.MatchingChild compositePrivate =
+                new CompositeTimelineChannelProcessor.MatchingChild(
+                        privateUse, 0, evaluation);
+        CompositeTimelineChannelProcessor.MatchingChild compositeSupplementary =
+                new CompositeTimelineChannelProcessor.MatchingChild(
+                        supplementary, 0, evaluation);
+        assertTrue(compositePrivate.precedes(compositeSupplementary));
+        assertFalse(compositeSupplementary.precedes(compositePrivate));
     }
 
     @Test

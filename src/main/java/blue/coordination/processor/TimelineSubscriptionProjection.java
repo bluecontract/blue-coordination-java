@@ -2,6 +2,7 @@ package blue.coordination.processor;
 
 import blue.language.model.Node;
 import blue.language.processor.ExternalChannelFunctionContext;
+import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.GasChargeContext;
 import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.mapping.TypeClassResolver;
@@ -491,8 +492,8 @@ final class TimelineSubscriptionProjection {
                                     ? -1
                                     : 1;
                         }
-                        return left.getKey().compareTo(
-                                right.getKey());
+                        return ExternalOrderKey.compareTextCodePoints(
+                                left.getKey(), right.getKey());
                     }
                 });
         List<String> result =

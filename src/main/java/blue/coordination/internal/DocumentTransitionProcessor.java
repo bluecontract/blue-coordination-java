@@ -1,13 +1,10 @@
 package blue.coordination.internal;
 
 import blue.coordination.api.TimelineEntry;
-
 import blue.coordination.api.ExactValue;
-
 import blue.coordination.api.DocumentRevision;
-
 import blue.coordination.api.DocumentId;
-
+import blue.coordination.api.CoordinationEngine;
 import blue.language.merge.ResolvedSnapshot;
 import blue.language.model.Node;
 import blue.language.model.wire.JsonPointer;
@@ -18,7 +15,6 @@ import blue.language.processor.PlatformCommitCompanion;
 import blue.language.processor.PlatformProcessingResult;
 import blue.language.processor.ProcessorStatus;
 import blue.language.processor.SubscriptionDelta;
-
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -30,14 +26,12 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
 
-/** One frozen call and one staged semantic revision per selected Root. */
 final class DocumentTransitionProcessor {
     private final BlueRuntime runtime;
     private final WholeObjectStore objects;
     private final EmbeddedOnlyLayoutBuilder layoutBuilder;
     private final EngineMetrics metrics;
     private final Consumer<DefaultCoordinationEngine.FailurePoint> failureInjector;
-
     public DocumentTransitionProcessor(
             BlueRuntime runtime,
             WholeObjectStore objects,
@@ -52,11 +46,11 @@ final class DocumentTransitionProcessor {
         this.failureInjector = Objects.requireNonNull(
                 failureInjector, "failureInjector");
     }
-
     public DocumentSession admit(
             DocumentId documentId,
             String authoredYaml,
-            ExternalOrderKey admissionFrontier) {
+            ExternalOrderKey admissionFrontier,
+            CoordinationEngine.AdmissionPolicy admissionPolicy) {
         Objects.requireNonNull(authoredYaml, "authoredYaml");
         Node source = metrics.timed(
                 "documentStart.parseSource",
@@ -71,10 +65,9 @@ final class DocumentTransitionProcessor {
                 Objects.requireNonNull(documentId, "documentId"),
                 snapshot,
                 admissionFrontier,
-                null);
+                null,
+                Objects.requireNonNull(admissionPolicy, "admissionPolicy"));
     }
-
-    /** Admits one already exact immutable child without YAML or clone churn. */
     public DocumentSession admitExact(
             DocumentId documentId,
             ExactValue authoredExact,
@@ -94,25 +87,22 @@ final class DocumentTransitionProcessor {
                 Objects.requireNonNull(documentId, "documentId"),
                 snapshot,
                 admissionFrontier,
-                cause);
+                cause,
+                null);
     }
-
     private DocumentSession admitSnapshot(
             DocumentId documentId,
             ResolvedSnapshot snapshot,
             ExternalOrderKey admissionFrontier,
-            DocumentRevision.CatchUpCause cause) {
+            DocumentRevision.CatchUpCause cause,
+            CoordinationEngine.AdmissionPolicy admissionPolicy) {
+        long started = System.nanoTime();
         Objects.requireNonNull(snapshot, "snapshot");
         Objects.requireNonNull(admissionFrontier, "admissionFrontier");
         ExactValue authoredExact = objects.put(
                 runtime.cache(snapshot), "authored-document");
         DocumentIdentityReader.verifyOptionalDocumentId(
                 authoredExact, documentId);
-
-        // Freeze Process Embedded ownership before INITIALIZE. Otherwise the
-        // frozen Contracts 1.0 initializer recursively initializes an inline
-        // descendant as owned state, and Coordination cannot give that child
-        // its own epoch-0 session without initializing it twice.
         EmbeddedOnlyLayout authoredLayout = layoutBuilder.build(authoredExact);
         ResolvedSnapshot initializationInput;
         if (authoredLayout.directOccurrences().isEmpty()) {
@@ -128,12 +118,13 @@ final class DocumentTransitionProcessor {
                     layoutBuilder.isolateManagedInitializationScopes(
                             ownership, authoredLayout);
         }
-        // The frozen initialization marker references this exact input. Keep
-        // the body available to later PROCESS validation and replay.
         objects.put(initializationInput, "initialization-input");
+        long frozenStarted = System.nanoTime();
+        metrics.addNanos("documentStart.hostBeforeFrozen", frozenStarted - started);
         DocumentProcessingResult initialized = metrics.timed(
                 "documentStart.contractsInitialize",
                 () -> runtime.initialize(initializationInput));
+        long hostAfterStarted = System.nanoTime();
         requireSuccess("initialize " + documentId, initialized);
         ExactValue initializedExact = authoredLayout.directOccurrences()
                 .isEmpty()
@@ -143,7 +134,6 @@ final class DocumentTransitionProcessor {
                         initialized.document(), authoredLayout);
         EmbeddedOnlyLayout layout = layoutBuilder.rebuild(
                 initializedExact, authoredLayout);
-
         metrics.increment("documentStart.initialSubscriptionProjections");
         List<SubscriptionDelta.Entry> ownedSubscriptions = metrics.timed(
                 "documentStart.projectInitialOwnedSubscriptions",
@@ -153,7 +143,6 @@ final class DocumentTransitionProcessor {
                         admissionFrontier));
         requireOwnedSubscriptionSurface(ownedSubscriptions, layout);
         CheckpointDomainEvidence.retainAll(ownedSubscriptions, objects);
-
         DocumentRevision initializationRevision = new DocumentRevision(
                 documentId,
                 0L,
@@ -164,7 +153,9 @@ final class DocumentTransitionProcessor {
                 null,
                 admissionFrontier,
                 cause == null
-                        ? "admission|" + documentId.value()
+                        ? retainAdmissionCause(
+                                objects, documentId, authoredExact,
+                                admissionPolicy, admissionFrontier)
                         : cause.attachmentEntryBlueId(),
                 cause,
                 initialized.events(),
@@ -178,10 +169,28 @@ final class DocumentTransitionProcessor {
                 initializationRevision);
         metrics.increment("documentStart.sessionsInitialized");
         metrics.increment("preparedRuntimeCompilations");
+        metrics.addNanos("documentStart.hostAfterFrozen",
+                System.nanoTime() - hostAfterStarted);
         return session;
     }
-
-    /** Performs one pure frozen invocation without mutating the session. */
+    static String retainAdmissionCause(
+            WholeObjectStore objects, DocumentId documentId,
+            ExactValue authoredExact,
+            CoordinationEngine.AdmissionPolicy policy,
+            ExternalOrderKey frontier) {
+        Node cause = new Node().properties(new LinkedHashMap<>(Map.of(
+                        "causeType", new Node().value(
+                                "Coordination/Document Admission Cause/v1"),
+                        "documentId", new Node().value(documentId.value()),
+                        "authoredState", authoredExact.referenceNode(),
+                        "admissionPolicy", new Node().value(policy.name()),
+                        "admissionFrontier", new Node().items(
+                                Objects.requireNonNull(frontier, "frontier")
+                                        .components().stream().map(value ->
+                                                new Node().value(value))
+                                        .toList()))));
+        return objects.put(cause, "document-admission-cause").blueId();
+    }
     public Prepared prepare(
             DocumentSession session,
             TimelineEntry entry) {
@@ -203,6 +212,7 @@ final class DocumentTransitionProcessor {
         metrics.increment("process.referenceOnlyEventInputs");
         long frozenStarted = System.nanoTime();
         metrics.addNanos("process.hostBeforeFrozen", frozenStarted - started);
+        metrics.increment("process.externalInvocationsStarted");
         PlatformProcessingResult platform = runtime.process(
                 beforeLayout.processingFrozen().toNode(),
                 entry.blueId(),
@@ -234,9 +244,6 @@ final class DocumentTransitionProcessor {
                 processed.document(), beforeLayout, false);
         EmbeddedOnlyLayout afterLayout = layoutBuilder.rebuild(
                 processedAfter, beforeLayout);
-        // Revision history and API reads always retain the fully materialized
-        // semantic Root. The provider may independently expose an identity-
-        // equivalent shell with managed children represented by references.
         ExactValue after = afterLayout.semanticRoot();
 
         PlatformCommitCompanion companion = platform.commitCompanion();
@@ -273,7 +280,6 @@ final class DocumentTransitionProcessor {
                 System.nanoTime() - started);
     }
 
-    /** Commits a previously prepared transition at the exact expected epoch. */
     public InternalProcessOutcome commit(Prepared prepared) {
         Objects.requireNonNull(prepared, "prepared");
         DocumentSession session = prepared.session();
@@ -417,7 +423,9 @@ final class DocumentTransitionProcessor {
                     resultingRootRevision,
                     transitionOrder);
             requireSameOwnedTransition(
-                    companionDelta, effective, beforeLayout, afterLayout);
+                    companionDelta, effective,
+                    managedBoundaries(beforeLayout),
+                    managedBoundaries(afterLayout));
             targetMetrics.increment(
                     "process.incrementalSubscriptionReprojections");
             return applyActiveSubscriptionDelta(
@@ -435,7 +443,6 @@ final class DocumentTransitionProcessor {
                 resultingRootRevision, transitionOrder, targetMetrics);
     }
 
-    /** Narrow re-projection inputs derived from the frozen companion. */
     private static Set<String> changedSurfacePointers(
             SubscriptionDelta delta) {
         Set<String> result = new LinkedHashSet<>();
@@ -454,37 +461,55 @@ final class DocumentTransitionProcessor {
                 entry.channelKey());
     }
 
-    private static void requireSameOwnedTransition(
+    static void requireSameOwnedTransition(
             SubscriptionDelta companion,
             SubscriptionDelta projected,
-            EmbeddedOnlyLayout before,
-            EmbeddedOnlyLayout after) {
-        if (!ownedKeys(companion.added(), managedBoundaries(after)).equals(
-                ownedKeys(projected.added(), managedBoundaries(after)))
-                || !ownedKeys(
-                companion.removed(), managedBoundaries(before)).equals(
-                ownedKeys(projected.removed(), managedBoundaries(before)))) {
+            List<String> prior,
+            List<String> next) {
+        Set<SubscriptionIdentity> companionAdded = ownedSubscriptions(companion.added(), next);
+        Set<SubscriptionIdentity> companionRemoved = ownedSubscriptions(companion.removed(), prior);
+        Set<SubscriptionIdentity> projectedAdded = ownedSubscriptions(projected.added(), next);
+        Set<SubscriptionIdentity> projectedRemoved = ownedSubscriptions(projected.removed(), prior);
+        cancelReplacements(companionAdded, companionRemoved);
+        cancelReplacements(projectedAdded, projectedRemoved);
+        if (!companionAdded.equals(projectedAdded)
+                || !companionRemoved.equals(projectedRemoved)) {
             throw new InvalidExecutionEvidenceException(
                     "Incremental subscription projection disagrees with "
                             + "the frozen commit companion");
         }
     }
 
-    private static Set<OccurrenceKey> ownedKeys(
+    private static void cancelReplacements(
+            Set<SubscriptionIdentity> added,
+            Set<SubscriptionIdentity> removed) {
+        Set<SubscriptionIdentity> paired = new LinkedHashSet<>(added);
+        paired.retainAll(removed);
+        added.removeAll(paired);
+        removed.removeAll(paired);
+    }
+
+    private static Set<SubscriptionIdentity> ownedSubscriptions(
             List<SubscriptionDelta.Entry> entries,
             List<String> boundaries) {
-        Set<OccurrenceKey> result = new LinkedHashSet<>();
+        Set<SubscriptionIdentity> result = new LinkedHashSet<>();
         entries.stream().filter(entry -> owned(entry.scopePath(), boundaries))
-                .map(DocumentTransitionProcessor::occurrenceKey)
+                .map(SubscriptionIdentity::new)
                 .forEach(result::add);
         return result;
     }
 
-    /**
-     * Applies one frozen commit companion to the retained active interval set.
-     * Boundary lists are supplied separately so the evidence algorithm remains
-     * independently testable without constructing a complete document layout.
-     */
+    private record SubscriptionIdentity(
+            OccurrenceKey occurrence, String effectiveTypeBlueId,
+            List<String> sourceContributionNodeBlueIds, int order,
+            List<String> subscriptionKeys) {
+        private SubscriptionIdentity(SubscriptionDelta.Entry entry) {
+            this(occurrenceKey(entry), entry.effectiveTypeBlueId(),
+                    entry.sourceContributionNodeBlueIds(), entry.order(),
+                    entry.subscriptionKeys());
+        }
+    }
+
     static List<SubscriptionDelta.Entry> applyActiveSubscriptionDelta(
             List<SubscriptionDelta.Entry> previous,
             SubscriptionDelta delta,
@@ -711,13 +736,6 @@ final class DocumentTransitionProcessor {
                 && left.dependencies().equals(right.dependencies());
     }
 
-    /**
-     * The frozen companion may conservatively retire and re-add an unchanged
-     * route because processor-owned checkpoint/dependency headers changed in
-     * the invocation-local result. Those headers are re-established after a
-     * real authored-contract change; otherwise the already verified interval
-     * remains the exact input expected by the next Root invocation.
-     */
     private static boolean sameStableSubscriptionIdentity(
             SubscriptionDelta.Entry left,
             SubscriptionDelta.Entry right) {
@@ -767,11 +785,6 @@ final class DocumentTransitionProcessor {
                 documentId.value()));
     }
 
-    /**
-     * Performs one frozen parent transition from the old child state using an
-     * exact processor-owned embedded epoch input. No parent state is changed
-     * before the frozen processor returns a successful commit companion.
-     */
     public PreparedEmbedded prepareEmbedded(
             DocumentSession parent,
             EmbeddedEpochInput input) {
@@ -817,9 +830,6 @@ final class DocumentTransitionProcessor {
         metrics.addNanos("process.embeddedFrozen", frozenNanos);
         metrics.addNanos("process.frozen", frozenNanos);
         metrics.increment("process.embeddedEpochProcessCalls");
-        // Preserve the aggregate PROCESS counter used by the public
-        // diagnostics: an embedded-epoch application is a real frozen
-        // Contracts invocation, not host-side materialization.
         metrics.increment("process.frozenContractsInvocations");
         metrics.increment("frozenProcessCalls");
         DocumentProcessingResult processed = platform.processResult();
@@ -831,8 +841,9 @@ final class DocumentTransitionProcessor {
         long hostAfterFrozenStarted = System.nanoTime();
         ExactValue processedAfter = layoutBuilder.restoreManagedChildren(
                 processed.document(), beforeLayout, true);
-        EmbeddedOnlyLayout afterLayout = layoutBuilder.rebuild(
-                processedAfter, beforeLayout);
+        EmbeddedOnlyLayout afterLayout = layoutBuilder
+                .rebuildAfterManagedChildRevision(
+                        processedAfter, beforeLayout);
         ExactValue after = afterLayout.semanticRoot();
         String actualAfter = after.canonicalBlueIdAt(
                 input.binding().absolutePath());
@@ -879,7 +890,6 @@ final class DocumentTransitionProcessor {
                 System.nanoTime() - started);
     }
 
-    /** Atomically publishes parent state, subscriptions, and idempotency receipt. */
     public InternalProcessOutcome commitEmbedded(PreparedEmbedded prepared) {
         Objects.requireNonNull(prepared, "prepared");
         DocumentSession parent = prepared.parent();
@@ -900,7 +910,12 @@ final class DocumentTransitionProcessor {
                 prepared.input().originalEntryBlueId() == null
                         ? prepared.input().binding().attachmentEntryBlueId()
                         : prepared.input().originalEntryBlueId(),
-                null,
+                new DocumentRevision.CatchUpCause(
+                        parent.documentId(),
+                        prepared.input().binding().attachmentEntryBlueId(),
+                        prepared.input().binding().absolutePath(),
+                        prepared.input().binding()
+                                .attachmentTimestampMicros()),
                 prepared.emittedEvents(),
                 prepared.processingGas());
         parent.commit(
@@ -926,7 +941,6 @@ final class DocumentTransitionProcessor {
                 documentId.value()));
     }
 
-    /** Pure uncommitted outcome of exactly one frozen Contracts invocation. */
     public record Prepared(
             DocumentSession session,
             long expectedEpoch,
@@ -968,7 +982,6 @@ final class DocumentTransitionProcessor {
         }
     }
 
-    /** Pure uncommitted parent outcome for one processor-owned child epoch. */
     public record PreparedEmbedded(
             DocumentSession parent,
             long expectedEpoch,
@@ -1017,7 +1030,7 @@ final class DocumentTransitionProcessor {
         return layout.boundaries().stream()
                 .map(EmbeddedBoundary::childScopePath)
                 .distinct()
-                .sorted()
+                .sorted(EmbeddingBinding.TEXT_ORDER)
                 .toList();
     }
 

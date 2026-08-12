@@ -6,19 +6,13 @@ import blue.language.processor.ChannelEvaluation;
 import blue.language.processor.ChannelEvaluationContext;
 import blue.language.processor.ChannelProcessor;
 import blue.language.processor.ExternalChannelSubscriptionFunctions;
+import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.model.ChannelContract;
 import blue.repo.coordination.AllTimelinesChannel;
 import blue.repo.coordination.TimelineChannel;
 import java.util.Map;
 
-/**
- * Evaluates an All Timelines Channel as the union of every effective
- * same-scope Timeline Channel, including registered Timeline subtypes.
- *
- * <p>Member discovery and dependency identity are supplied by the immutable
- * Language catalog. This processor delegates concrete acceptance to each
- * member and returns at most one logical delivery for the union.</p>
- */
+/** Evaluates the deterministic union of every same-scope Timeline Channel. */
 public final class AllTimelinesChannelProcessor implements ChannelProcessor<AllTimelinesChannel> {
     private final CoordinationSemanticTypeIdentities identities;
     private final ExternalChannelSubscriptionFunctions<
@@ -113,21 +107,23 @@ public final class AllTimelinesChannelProcessor implements ChannelProcessor<AllT
         return contract.getOrder() != null ? contract.getOrder() : 0;
     }
 
-    private static final class MatchingTimeline {
+    static final class MatchingTimeline {
         private final String channelKey;
         private final int order;
         private final ChannelEvaluation evaluation;
 
-        private MatchingTimeline(String channelKey, int order, ChannelEvaluation evaluation) {
+        MatchingTimeline(String channelKey, int order, ChannelEvaluation evaluation) {
             this.channelKey = channelKey;
             this.order = order;
             this.evaluation = evaluation;
         }
 
-        private boolean precedes(MatchingTimeline other) {
+        boolean precedes(MatchingTimeline other) {
             int orderComparison = Integer.compare(order, other.order);
             return orderComparison < 0
-                    || (orderComparison == 0 && channelKey.compareTo(other.channelKey) < 0);
+                    || (orderComparison == 0
+                    && ExternalOrderKey.compareTextCodePoints(
+                            channelKey, other.channelKey) < 0);
         }
     }
 }

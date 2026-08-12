@@ -4,9 +4,12 @@ import blue.coordination.api.CoordinationEngine;
 import blue.coordination.api.SessionStatus;
 import blue.language.api.BlueCacheStats;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.LongStream;
 
 /**
  * Failure-injection and deep diagnostic controls published only in the test
@@ -14,6 +17,7 @@ import java.util.Objects;
  */
 public final class CoordinationTestControl {
     private final DefaultCoordinationEngine engine;
+    private final List<TransitionTrace> transitionTraces = new ArrayList<>();
 
     private CoordinationTestControl(DefaultCoordinationEngine engine) {
         this.engine = Objects.requireNonNull(engine, "engine");
@@ -92,6 +96,34 @@ public final class CoordinationTestControl {
                 snapshot.counters(), snapshot.phaseNanos());
     }
 
+    /** Starts a closed, in-memory trace of successful document transitions. */
+    public void beginTransitionTrace() {
+        transitionTraces.clear();
+        engine.observeTransitions(this::recordTransition);
+    }
+
+    /** Returns the successful transitions observed since tracing began. */
+    public List<TransitionTrace> transitionTrace() {
+        return List.copyOf(transitionTraces);
+    }
+
+    private void recordTransition(
+            SequentialDrainCoordinator.TransitionTrace trace) {
+        Map<String, Long> phases = new LinkedHashMap<>();
+        trace.after().phaseNanos().forEach((name, value) -> phases.put(
+                name,
+                value - trace.before().phaseNanos().getOrDefault(name, 0L)));
+        transitionTraces.add(new TransitionTrace(
+                trace.documentId().value(),
+                trace.revision().epoch(),
+                trace.revision().kind().name(),
+                trace.revision().sourceEntry()
+                        .map(entry -> entry.blueId()).orElse(null),
+                trace.revision().causalEntryBlueId().orElse(null),
+                phases,
+                trace.totalNanos()));
+    }
+
     /** Returns immutable catch-up evidence without exposing mutable plans. */
     public List<CatchUpEvidence> catchUpEvidence() {
         return engine.catchUpEvidence().stream()
@@ -102,6 +134,43 @@ public final class CoordinationTestControl {
                         evidence.appliedChildEpoch(),
                         evidence.status(),
                         evidence.activationGeneration()))
+                .toList();
+    }
+
+    /**
+     * Returns active occurrence identities and their committed embedded-input
+     * receipts. This derives the receipt identity from the production binding
+     * contract without exposing mutable graph or cursor objects.
+     */
+    public List<EmbeddedOccurrenceEvidence> embeddedOccurrenceEvidence() {
+        return engine.catchUpEvidence().stream()
+                .map(evidence -> {
+                    String bindingId = SequentialDrainCoordinator.bindingId(
+                            evidence.parentDocumentId(),
+                            evidence.occurrencePath(),
+                            evidence.activationGeneration());
+                    List<String> committedReceipts = evidence.appliedChildEpoch()
+                            < 0L
+                            ? List.of()
+                            : LongStream.rangeClosed(
+                                            0L, evidence.appliedChildEpoch())
+                                    .mapToObj(epoch ->
+                                            SequentialDrainCoordinator
+                                                    .embeddedTransitionReceiptId(
+                                                            bindingId, epoch))
+                                    .filter(engine.session(
+                                            evidence.parentDocumentId().value())
+                                            ::hasTransitionReceipt)
+                                    .toList();
+                    return new EmbeddedOccurrenceEvidence(
+                            evidence.parentDocumentId().value(),
+                            evidence.childDocumentId().value(),
+                            evidence.occurrencePath(),
+                            bindingId,
+                            evidence.appliedChildEpoch(),
+                            evidence.activationGeneration(),
+                            committedReceipts);
+                })
                 .toList();
     }
 
@@ -125,6 +194,28 @@ public final class CoordinationTestControl {
             long activationGeneration) {
     }
 
+    /** Immutable binding/cursor/receipt evidence for one active occurrence. */
+    public record EmbeddedOccurrenceEvidence(
+            String parentDocumentId,
+            String childDocumentId,
+            String occurrencePath,
+            String bindingId,
+            long appliedChildEpoch,
+            long activationGeneration,
+            List<String> committedReceiptIds) {
+        public EmbeddedOccurrenceEvidence {
+            parentDocumentId = Objects.requireNonNull(
+                    parentDocumentId, "parentDocumentId");
+            childDocumentId = Objects.requireNonNull(
+                    childDocumentId, "childDocumentId");
+            occurrencePath = Objects.requireNonNull(
+                    occurrencePath, "occurrencePath");
+            bindingId = Objects.requireNonNull(bindingId, "bindingId");
+            committedReceiptIds = List.copyOf(Objects.requireNonNull(
+                    committedReceiptIds, "committedReceiptIds"));
+        }
+    }
+
     /** Immutable raw metrics used only by test-fixture consumers. */
     public record MetricsSnapshot(
             Map<String, Long> counters,
@@ -132,6 +223,21 @@ public final class CoordinationTestControl {
         public MetricsSnapshot {
             counters = Map.copyOf(Objects.requireNonNull(
                     counters, "counters"));
+            phaseNanos = Map.copyOf(Objects.requireNonNull(
+                    phaseNanos, "phaseNanos"));
+        }
+    }
+
+    /** Immutable test-only timing projection; production API stays closed. */
+    public record TransitionTrace(
+            String documentId,
+            long epoch,
+            String kind,
+            String sourceEntryBlueId,
+            String causalEntryBlueId,
+            Map<String, Long> phaseNanos,
+            long totalNanos) {
+        public TransitionTrace {
             phaseNanos = Map.copyOf(Objects.requireNonNull(
                     phaseNanos, "phaseNanos"));
         }

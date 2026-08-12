@@ -152,6 +152,12 @@ final class EngineMetrics {
                 List.of("temporal.sourceReplaysPerParent"));
         result.put(CoordinationMetrics.Counter.POST_PROCESS_FULL_PROJECTIONS,
                 List.of("process.postProcessFullProjections"));
+        result.put(CoordinationMetrics.Counter
+                        .PARENT_PROCESS_RERUNS_ON_GRAPH_RETRY,
+                List.of("temporal.parentProcessRerunsOnGraphRetry"));
+        result.put(CoordinationMetrics.Counter
+                        .CHILD_PROCESS_RERUNS_ON_PARENT_RETRY,
+                List.of("temporal.childProcessRerunsOnParentRetry"));
         if (result.size() != CoordinationMetrics.Counter.values().length) {
             throw new IllegalStateException(
                     "Every public counter requires an explicit work source");

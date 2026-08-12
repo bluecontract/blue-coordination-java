@@ -26,8 +26,8 @@ import java.util.Set;
  */
 final class RoutingSurface {
     private static final Comparator<SourceAddress> SOURCE_ORDER = Comparator
-            .comparing(SourceAddress::timelineId)
-            .thenComparing(SourceAddress::actorId);
+            .comparing(SourceAddress::timelineId, EmbeddingBinding.TEXT_ORDER)
+            .thenComparing(SourceAddress::actorId, EmbeddingBinding.TEXT_ORDER);
 
     public record SourceAddress(String timelineId, String actorId) {
         public SourceAddress {
@@ -75,16 +75,16 @@ final class RoutingSurface {
         List<Definition> ordered = new ArrayList<>(Objects.requireNonNull(
                 definitions, "definitions"));
         ordered.sort(Comparator
-                .comparing(Definition::scopePath)
-                .thenComparing(Definition::operation)
-                .thenComparing(Definition::channelKey)
+                .comparing(Definition::scopePath, EmbeddingBinding.TEXT_ORDER)
+                .thenComparing(Definition::operation, EmbeddingBinding.TEXT_ORDER)
+                .thenComparing(Definition::channelKey, EmbeddingBinding.TEXT_ORDER)
                 .thenComparing(Definition::sources,
                         RoutingSurface::compareSources));
         this.definitions = Collections.unmodifiableList(ordered);
         this.embeddedRevisionHandler = embeddedRevisionHandler;
     }
 
-    private static int compareSources(
+    static int compareSources(
             List<SourceAddress> left,
             List<SourceAddress> right) {
         int shared = Math.min(left.size(), right.size());
@@ -102,7 +102,7 @@ final class RoutingSurface {
         Objects.requireNonNull(catalog, "catalog");
         Map<Definition, Definition> unique = new LinkedHashMap<>();
         catalog.effectiveContractsByScope().entrySet().stream()
-                .sorted(Map.Entry.comparingByKey())
+                .sorted(Map.Entry.comparingByKey(EmbeddingBinding.TEXT_ORDER))
                 .filter(entry -> owned(
                         entry.getKey(), managedBoundaries))
                 .forEach(entry -> collect(
@@ -128,7 +128,7 @@ final class RoutingSurface {
                 .flatMap(definition -> definition.sources().stream())
                 .map(SourceAddress::timelineId)
                 .distinct()
-                .sorted()
+                .sorted(EmbeddingBinding.TEXT_ORDER)
                 .toList();
     }
 

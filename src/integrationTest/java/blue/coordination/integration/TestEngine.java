@@ -107,6 +107,10 @@ final class TestEngine implements AutoCloseable {
         return engine.exactValue(sourceYaml);
     }
 
+    ExactValue exactValue(String sourceYaml) {
+        return engine.exactValue(sourceYaml);
+    }
+
     ExactValue embeddedDocumentRequest(String exactDocumentYaml) {
         return embeddedDocumentRequest(engine.exactValue(exactDocumentYaml));
     }
@@ -152,6 +156,10 @@ final class TestEngine implements AutoCloseable {
         return engine.drain();
     }
 
+    ProcessingDrainReceipt drain(CoordinationEngine.DrainBudget budget) {
+        return engine.drain(budget);
+    }
+
     int routeTargetCount(TimelineEntry entry) {
         return engine.routeTargetCount(entry);
     }
@@ -191,6 +199,14 @@ final class TestEngine implements AutoCloseable {
                 metrics.counters(), metrics.phaseNanos());
     }
 
+    void beginTransitionTrace() {
+        control.beginTransitionTrace();
+    }
+
+    List<CoordinationTestControl.TransitionTrace> transitionTrace() {
+        return control.transitionTrace();
+    }
+
     int journalSize() {
         return engine.metrics().journalEntryCount();
     }
@@ -226,6 +242,11 @@ final class TestEngine implements AutoCloseable {
                                 evidence.activationGeneration()),
                         catchUpStatus(evidence.status())))
                 .toList();
+    }
+
+    List<CoordinationTestControl.EmbeddedOccurrenceEvidence>
+            embeddedOccurrenceEvidence() {
+        return control.embeddedOccurrenceEvidence();
     }
 
     private static CatchUpPlan.Status catchUpStatus(String status) {

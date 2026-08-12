@@ -97,6 +97,7 @@ jobs:
           name: coordination-rc-release
           path: |
             build/libs/**
+            build/distributions/**
             build/publications/**
             build/reports/**
             build/test-results/**

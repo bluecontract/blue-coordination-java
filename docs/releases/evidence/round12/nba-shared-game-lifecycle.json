@@ -1,0 +1,288 @@
+{
+  "schemaVersion": "round12-nba-evidence-v1",
+  "status": "MEASURED_SINGLE_SCENARIO",
+  "spanSemantics": "Logical operation spans are inclusive; nested initialization and parent-application spans are reported independently and must not be summed.",
+  "sourceState": {
+    "mainSourceManifestAlgorithm": "SHA-256 of LF-joined sorted repository path, ASCII space, file SHA-256; no trailing LF",
+    "mainSourceManifestSha256": "b3a78f551809d377db3a7c50002cc942470dade26b5b4bd14e361085862e92ac",
+    "mainSourceFiles": 108,
+    "mainSourceLines": 25700,
+    "campaignSourcesSha256": "2535b2f31f0c275ac23b0cbe512251534073e804af70865d4f499925a8abf111",
+    "campaignSourceFiles": 12
+  },
+  "runtime": {
+    "javaVersion": "21.0.2",
+    "javaVendor": "Oracle Corporation",
+    "osName": "Mac OS X",
+    "osArch": "aarch64"
+  },
+  "spans": [
+    {
+      "name": "Host 1 admission",
+      "documentId": "round12-host-one",
+      "epoch": 0,
+      "transitionKind": "INITIALIZATION",
+      "sourceEntryBlueId": null,
+      "causalEntryBlueId": "EBYAFsmQKRwHeXSvC93mw7jVRU1toZM9y7tGCrDXU2DM",
+      "nanos": {
+        "append": 0,
+        "routeLookup": 0,
+        "hostBeforeFrozen": 29429833,
+        "frozenProcess": 76591541,
+        "hostAfterFrozen": 29401625,
+        "graphPublication": 541,
+        "embeddedInputPreparation": 0,
+        "commitReadinessPublication": 9416,
+        "total": 164292083
+      }
+    },
+    {
+      "name": "Host 1 attachment",
+      "documentId": "round12-host-one",
+      "epoch": 1,
+      "transitionKind": "TIMELINE_ENTRY",
+      "sourceEntryBlueId": "7MuWK9MZVWAFCD9ZF33gsF6sVVgBufYnmVPdramA56hJ",
+      "causalEntryBlueId": "7MuWK9MZVWAFCD9ZF33gsF6sVVgBufYnmVPdramA56hJ",
+      "nanos": {
+        "append": 16737292,
+        "routeLookup": 73416,
+        "hostBeforeFrozen": 16656208,
+        "frozenProcess": 817551709,
+        "hostAfterFrozen": 4794791,
+        "graphPublication": 193399666,
+        "embeddedInputPreparation": 16405333,
+        "commitReadinessPublication": 431333,
+        "total": 1050308041
+      }
+    },
+    {
+      "name": "Game initialization",
+      "documentId": "round12-shared-game",
+      "epoch": 0,
+      "transitionKind": "INITIALIZATION",
+      "sourceEntryBlueId": null,
+      "causalEntryBlueId": "7MuWK9MZVWAFCD9ZF33gsF6sVVgBufYnmVPdramA56hJ",
+      "nanos": {
+        "append": 0,
+        "routeLookup": 0,
+        "hostBeforeFrozen": 33248875,
+        "frozenProcess": 108726792,
+        "hostAfterFrozen": 31367375,
+        "graphPublication": 500,
+        "embeddedInputPreparation": 0,
+        "commitReadinessPublication": 62042,
+        "total": 192920334
+      }
+    },
+    {
+      "name": "Host 1 initialization application",
+      "documentId": "round12-host-one",
+      "epoch": 2,
+      "transitionKind": "EMBEDDED_REVISION_APPLICATION",
+      "sourceEntryBlueId": null,
+      "causalEntryBlueId": "7MuWK9MZVWAFCD9ZF33gsF6sVVgBufYnmVPdramA56hJ",
+      "nanos": {
+        "append": 0,
+        "routeLookup": 0,
+        "hostBeforeFrozen": 16653833,
+        "frozenProcess": 522297542,
+        "hostAfterFrozen": 2792750,
+        "graphPublication": 1125,
+        "embeddedInputPreparation": 16405333,
+        "commitReadinessPublication": 12291,
+        "total": 541794875
+      }
+    },
+    {
+      "name": "Game start",
+      "documentId": "round12-shared-game",
+      "epoch": 1,
+      "transitionKind": "TIMELINE_ENTRY",
+      "sourceEntryBlueId": "HzArzmnASxsibUvvKsEwrastueNUFMcLrXxzJ2vLcpRU",
+      "causalEntryBlueId": "HzArzmnASxsibUvvKsEwrastueNUFMcLrXxzJ2vLcpRU",
+      "nanos": {
+        "append": 30649958,
+        "routeLookup": 68000,
+        "hostBeforeFrozen": 17896042,
+        "frozenProcess": 715417542,
+        "hostAfterFrozen": 3940501,
+        "graphPublication": 2792,
+        "embeddedInputPreparation": 17429250,
+        "commitReadinessPublication": 405292,
+        "total": 768704750
+      }
+    },
+    {
+      "name": "Game first scoring operation",
+      "documentId": "round12-shared-game",
+      "epoch": 2,
+      "transitionKind": "TIMELINE_ENTRY",
+      "sourceEntryBlueId": "JCrHF9TkYdJrqoVQ7Bu2j1jKdn5Ve42d7DaE5AkjPkn",
+      "causalEntryBlueId": "JCrHF9TkYdJrqoVQ7Bu2j1jKdn5Ve42d7DaE5AkjPkn",
+      "nanos": {
+        "append": 32087458,
+        "routeLookup": 81417,
+        "hostBeforeFrozen": 584958,
+        "frozenProcess": 738926500,
+        "hostAfterFrozen": 4057125,
+        "graphPublication": 2125,
+        "embeddedInputPreparation": 204792,
+        "commitReadinessPublication": 422293,
+        "total": 776469459
+      }
+    },
+    {
+      "name": "Host 2 admission",
+      "documentId": "round12-host-two",
+      "epoch": 0,
+      "transitionKind": "INITIALIZATION",
+      "sourceEntryBlueId": null,
+      "causalEntryBlueId": "Hw2rsy1Jx1pxmG41j42RKQ28J64J2QfneDZ5Z2jQADNR",
+      "nanos": {
+        "append": 0,
+        "routeLookup": 0,
+        "hostBeforeFrozen": 28800000,
+        "frozenProcess": 74040583,
+        "hostAfterFrozen": 27709917,
+        "graphPublication": 583,
+        "embeddedInputPreparation": 0,
+        "commitReadinessPublication": 5042,
+        "total": 158528375
+      }
+    },
+    {
+      "name": "Host 2 attachment/catch-up",
+      "documentId": "round12-host-two",
+      "epoch": 1,
+      "transitionKind": "TIMELINE_ENTRY",
+      "sourceEntryBlueId": "3JPBWa7wAcBUfckDwKCuNTYvuZ9vFU899JWto6uLhBsT",
+      "causalEntryBlueId": "3JPBWa7wAcBUfckDwKCuNTYvuZ9vFU899JWto6uLhBsT",
+      "nanos": {
+        "append": 17831750,
+        "routeLookup": 162875,
+        "hostBeforeFrozen": 34879082,
+        "frozenProcess": 1732094709,
+        "hostAfterFrozen": 11114208,
+        "graphPublication": 60373,
+        "embeddedInputPreparation": 33713541,
+        "commitReadinessPublication": 418915,
+        "total": 1797973500
+      }
+    },
+    {
+      "name": "Game second scoring operation",
+      "documentId": "round12-shared-game",
+      "epoch": 3,
+      "transitionKind": "TIMELINE_ENTRY",
+      "sourceEntryBlueId": "DesqdwiyAWGbZRMuHux8GmJE8qwRv6yYMWP6k91ifR1K",
+      "causalEntryBlueId": "DesqdwiyAWGbZRMuHux8GmJE8qwRv6yYMWP6k91ifR1K",
+      "nanos": {
+        "append": 31771750,
+        "routeLookup": 67625,
+        "hostBeforeFrozen": 1401751,
+        "frozenProcess": 1183422791,
+        "hostAfterFrozen": 7022666,
+        "graphPublication": 3625,
+        "embeddedInputPreparation": 475208,
+        "commitReadinessPublication": 815042,
+        "total": 1224973792
+      }
+    },
+    {
+      "name": "Game end",
+      "documentId": "round12-shared-game",
+      "epoch": 4,
+      "transitionKind": "TIMELINE_ENTRY",
+      "sourceEntryBlueId": "EBQvdJ3tQgT5C3oWzRhr8AdMAkmokkZD7RT1wrHydhN5",
+      "causalEntryBlueId": "EBQvdJ3tQgT5C3oWzRhr8AdMAkmokkZD7RT1wrHydhN5",
+      "nanos": {
+        "append": 29776083,
+        "routeLookup": 51750,
+        "hostBeforeFrozen": 1326209,
+        "frozenProcess": 1317993916,
+        "hostAfterFrozen": 7407042,
+        "graphPublication": 7459,
+        "embeddedInputPreparation": 471417,
+        "commitReadinessPublication": 789792,
+        "total": 1357757708
+      }
+    },
+    {
+      "name": "Host 1 end application",
+      "documentId": "round12-host-one",
+      "epoch": 6,
+      "transitionKind": "EMBEDDED_REVISION_APPLICATION",
+      "sourceEntryBlueId": null,
+      "causalEntryBlueId": "EBQvdJ3tQgT5C3oWzRhr8AdMAkmokkZD7RT1wrHydhN5",
+      "nanos": {
+        "append": 0,
+        "routeLookup": 0,
+        "hostBeforeFrozen": 620208,
+        "frozenProcess": 519248041,
+        "hostAfterFrozen": 3175250,
+        "graphPublication": 1167,
+        "embeddedInputPreparation": 208958,
+        "commitReadinessPublication": 393625,
+        "total": 523484000
+      }
+    },
+    {
+      "name": "Host 2 end application",
+      "documentId": "round12-host-two",
+      "epoch": 6,
+      "transitionKind": "EMBEDDED_REVISION_APPLICATION",
+      "sourceEntryBlueId": null,
+      "causalEntryBlueId": "EBQvdJ3tQgT5C3oWzRhr8AdMAkmokkZD7RT1wrHydhN5",
+      "nanos": {
+        "append": 0,
+        "routeLookup": 0,
+        "hostBeforeFrozen": 704168,
+        "frozenProcess": 533066500,
+        "hostAfterFrozen": 3407250,
+        "graphPublication": 5333,
+        "embeddedInputPreparation": 262459,
+        "commitReadinessPublication": 381958,
+        "total": 537606125
+      }
+    }
+  ],
+  "hardEvidence": {
+    "gameSessionsCreated": 1,
+    "gameSessionsReused": 1,
+    "gameInitializationRevisions": 1,
+    "gameInitializationCount": 1,
+    "host1InitializationEventCount": 1,
+    "host2InitializationEventCount": 1,
+    "host1EndingEventCount": 1,
+    "host2EndingEventCount": 1,
+    "gameSourceProcessCalls": {
+      "start": 1,
+      "firstScore": 1,
+      "secondScore": 1,
+      "end": 1
+    },
+    "initializationEpochApplications": 2,
+    "initializationEventOccurrencesForwarded": 2,
+    "parentEpochApplications": 10,
+    "gameRevisions": 5
+  },
+  "forbiddenCounters": {
+    "REQUEST_FRAGMENTS": 0,
+    "TIMELINE_ENTRY_FRAGMENTS": 0,
+    "ORDINARY_NODE_FRAGMENTS": 0,
+    "FULL_ENVIRONMENT_SCANS": 0,
+    "SOURCE_REPLAYS_PER_PARENT": 0,
+    "POST_PROCESS_FULL_PROJECTIONS": 0
+  },
+  "repeatedThreeScenarioP95": {
+    "status": "PENDING_VERIFICATION",
+    "historicalBaselineHostMs": {
+      "warmOrdinary": 15.571,
+      "warmPayNotePlusParent": 46.645,
+      "threeLayerRestaurantProduct": 54.696
+    },
+    "round12CandidateP95Ms": null,
+    "regressionPercent": null,
+    "reason": "This artifact is one NBA lifecycle run, not the required repeated same-source three-scenario host p95 campaign."
+  }
+}

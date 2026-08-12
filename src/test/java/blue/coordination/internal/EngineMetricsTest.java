@@ -135,7 +135,13 @@ final class EngineMetricsTest {
                 "temporal.sourceReplaysPerParent",
                 CoordinationMetrics.Counter.SOURCE_REPLAYS_PER_PARENT,
                 "process.postProcessFullProjections",
-                CoordinationMetrics.Counter.POST_PROCESS_FULL_PROJECTIONS);
+                CoordinationMetrics.Counter.POST_PROCESS_FULL_PROJECTIONS,
+                "temporal.parentProcessRerunsOnGraphRetry",
+                CoordinationMetrics.Counter
+                        .PARENT_PROCESS_RERUNS_ON_GRAPH_RETRY,
+                "temporal.childProcessRerunsOnParentRetry",
+                CoordinationMetrics.Counter
+                        .CHILD_PROCESS_RERUNS_ON_PARENT_RETRY);
 
         sources.forEach((source, ignored) -> metrics.increment(source));
         Map<String, Long> snapshot = metrics.publicSnapshot().counters();

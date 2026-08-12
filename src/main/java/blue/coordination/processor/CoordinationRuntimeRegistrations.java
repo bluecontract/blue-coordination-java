@@ -3,6 +3,7 @@ package blue.coordination.processor;
 import blue.language.model.Node;
 import blue.language.processor.ContractProcessor;
 import blue.language.processor.DocumentProcessor;
+import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.model.Contract;
 import blue.language.identity.DirectBlueIdCalculator;
 import blue.repo.coordination.TimelineChannel;
@@ -59,7 +60,7 @@ final class CoordinationRuntimeRegistrations {
             }
             result.add(registration.getKey());
         }
-        Collections.sort(result);
+        result.sort(ExternalOrderKey::compareTextCodePoints);
         return Collections.unmodifiableList(
                 result);
     }
@@ -104,7 +105,7 @@ final class CoordinationRuntimeRegistrations {
                                 .profileIdentity());
             }
         }
-        Collections.sort(types);
+        types.sort(ExternalOrderKey::compareTextCodePoints);
         types.add(
                 "projection\u0000"
                         + TimelineSubscriptionProjection.VERSION);

@@ -4,6 +4,8 @@ import blue.coordination.api.ActivationMode;
 import blue.coordination.api.DocumentId;
 import blue.language.processor.ExternalOrderKey;
 
+import java.math.BigInteger;
+import java.util.Comparator;
 import java.util.Objects;
 
 /** Immutable topology and activation identity for one Process Embedded occurrence. */
@@ -20,6 +22,18 @@ record EmbeddingBinding(
         String admissionProofIdentity,
         String attachmentEntryBlueId,
         ExternalOrderKey attachmentOrder) {
+    static final Comparator<String> TEXT_ORDER =
+            ExternalOrderKey::compareTextCodePoints;
+    static final Comparator<DocumentId> DOCUMENT_ORDER =
+            Comparator.comparing(DocumentId::value, TEXT_ORDER);
+    static final Comparator<EmbeddingBinding> WITHIN_PARENT_ORDER = Comparator
+            .comparing(EmbeddingBinding::absolutePath, TEXT_ORDER)
+            .thenComparing(b -> b.childDocumentId().value(), TEXT_ORDER)
+            .thenComparingLong(EmbeddingBinding::activationGeneration);
+    static final Comparator<EmbeddingBinding> GLOBAL_ORDER = Comparator
+            .comparing((EmbeddingBinding b) -> b.parentDocumentId().value(),
+                    TEXT_ORDER)
+            .thenComparing(WITHIN_PARENT_ORDER);
     EmbeddingBinding {
         bindingId = requireText(bindingId, "bindingId");
         parentDocumentId = Objects.requireNonNull(
@@ -57,6 +71,19 @@ record EmbeddingBinding(
                 attachmentEntryBlueId, "attachmentEntryBlueId");
         attachmentOrder = Objects.requireNonNull(
                 attachmentOrder, "attachmentOrder");
+    }
+
+    long attachmentTimestampMicros() {
+        if (!attachmentOrder.components().isEmpty()
+                && attachmentOrder.components().get(0)
+                instanceof BigInteger timestamp) {
+            try {
+                return Math.max(1L, timestamp.longValueExact());
+            } catch (ArithmeticException ignored) {
+                return 1L;
+            }
+        }
+        return 1L;
     }
 
     private static String requirePath(String value) {

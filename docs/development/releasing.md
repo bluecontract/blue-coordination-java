@@ -37,9 +37,16 @@ preflight, staging, signing and publication path as an RC.
 
 - `releaseCheck` passes all library-owned unit, integration, built-JAR consumer
   and end-to-end scenario suites without `../blue-basic`.
-- The one canonical Round 11 report and JSON evidence contain final results;
-  `verifyRound11Readiness` permits staging and no duplicate evidence sidecar
-  remains.
+- The one canonical Round 13 report and JSON evidence use the Round 13
+  Playground schema. `releaseCheck` may validate an honest `INTERIM` record
+  whose unrun outcomes remain unset. `verifyRound13Readiness` permits staging
+  only for complete `FINAL`, clean-commit evidence, the seven exact proof rows,
+  eight measured zero counters, the 30-sample same-machine campaign, final
+  artifact hashes, a valid detached source-archive checksum sidecar, and
+  published-mode evidence; no duplicate canonical report or JSON surface
+  remains. The tested implementation commit may precede the clean evidence
+  commit, but it must be an ancestor and the current main-source manifest must
+  still match exactly.
 - Java 17 and Java 21 CI jobs pass.
 - POM dependencies and scopes match `docs/reference/public-api.md`.
 - Main, sources and Javadoc JAR hashes reproduce across two clean builds.
@@ -55,3 +62,27 @@ but they are not an RC correctness prerequisite and are never substituted for
 the library-owned suites.
 
 Never bypass dependency preflight or publish from local composite resolution.
+
+## Round 13 A/B evidence import
+
+After the interleaved runner has written exactly 30 numbered JSON rows under
+each of `/private/tmp/round13-ab/baseline` and `candidate`, assemble and verify
+the canonical receipts with:
+
+```bash
+node scripts/round13-ab-evidence.mjs \
+  --raw /private/tmp/round13-ab \
+  --baseline /private/tmp/round13-baseline-project \
+  --candidate /Users/piotr/data/blue-contract-java \
+  --archive /Users/piotr/data/blue-contract-java/Archive.zip \
+  --runner /private/tmp/run-round13-same-machine-ab-local.sh \
+  --output /Users/piotr/data/blue-contract-java/docs/releases/evidence/round13
+```
+
+The importer validates every raw row, preserves raw and canonical hashes,
+records the odd A/B and even B/A sequence, and binds Java 17, the wrapper,
+locks, fixtures, composite dependency commits, the exact baseline archive, and
+the candidate production manifest. It recomputes p50, p95, maximum, and the
+preferred/hard append, route, Coordination-host, and total gates. The tracked
+source-archive evidence intentionally leaves its digest `null`; the generated
+detached `.sha256` sidecar is the checksum authority.

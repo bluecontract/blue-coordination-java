@@ -1,0 +1,31 @@
+documentId: round12-duplicate-initialization-events
+name: Round 12 Duplicate Initialization Events
+initializationCount: 0
+contracts:
+  lifecycleChannel:
+    type:
+      blueId: 2ukJitzzDKQWHJ5EVUtn3t4FXieGmNA1NdwFSqG8qcfo
+    order: 0
+    event:
+      type:
+        blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
+  onProcessingInitiated:
+    type: Coordination/Sequential Workflow
+    channel: lifecycleChannel
+    order: 0
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /initializationCount
+              val: {$add: [$document: /initializationCount, 1]}
+          - $appendEvent:
+              type: Coordination/Event
+              kind: Round12/Identical Initialization Event
+              evidence: exact-duplicate
+          - $appendEvent:
+              type: Coordination/Event
+              kind: Round12/Identical Initialization Event
+              evidence: exact-duplicate
+          - $return: true

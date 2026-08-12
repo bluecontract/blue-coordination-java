@@ -5,6 +5,7 @@ import blue.language.model.Node;
 import java.math.BigInteger;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -74,6 +75,10 @@ final class EngineTestSupport {
         assertEquals(0L, delta.counter("FULL_ENVIRONMENT_SCANS"));
         assertEquals(0L, delta.counter("SOURCE_REPLAYS_PER_PARENT"));
         assertEquals(0L, delta.counter("POST_PROCESS_FULL_PROJECTIONS"));
+        assertEquals(0L, delta.counter(
+                "PARENT_PROCESS_RERUNS_ON_GRAPH_RETRY"));
+        assertEquals(0L, delta.counter(
+                "CHILD_PROCESS_RERUNS_ON_PARENT_RETRY"));
     }
 
     /** Proves that user-visible frozen time is neither lost nor called host work. */
@@ -97,16 +102,50 @@ final class EngineTestSupport {
     record MetricDelta(
             Map<String, Long> counters,
             Map<String, Long> phaseNanos) {
+        /*
+         * Raw diagnostic metrics are sparse: production creates their map
+         * entry only when the corresponding work happens. These names have
+         * real production sites and are intentionally asserted as zero on
+         * paths that must avoid that work. Keep this exception list closed so
+         * a misspelling cannot become an accidental zero.
+         */
+        private static final Set<String> SPARSE_ZERO_COUNTERS = Set.of(
+                "childHistoricalProcessCalls",
+                "journal.rollbacks",
+                "layout.externalManagedChildMutationsRejected",
+                "temporal.graphGenerationsPublished");
+        private static final Set<String> SPARSE_ZERO_PHASES = Set.of(
+                "process.embeddedFrozen");
+
         long counter(String name) {
-            return counters.getOrDefault(name, 0L);
+            return requireMeasurement(
+                    counters, SPARSE_ZERO_COUNTERS, name, "counter");
         }
 
         long nanos(String phase) {
-            return phaseNanos.getOrDefault(phase, 0L);
+            return requireMeasurement(
+                    phaseNanos, SPARSE_ZERO_PHASES, phase, "phase timer");
         }
 
         double millis(String phase) {
             return nanos(phase) / 1_000_000.0;
+        }
+
+        private static long requireMeasurement(
+                Map<String, Long> measurements,
+                Set<String> sparseZeroVocabulary,
+                String name,
+                String kind) {
+            if (measurements.containsKey(name)) {
+                return measurements.get(name);
+            }
+            if (sparseZeroVocabulary.contains(name)) {
+                return 0L;
+            }
+            throw new AssertionError("Unknown or unproduced " + kind
+                    + " '" + name + "'. Structural metric assertions "
+                    + "must use a name present in the engine snapshot or "
+                    + "the closed sparse-zero vocabulary.");
         }
     }
 }

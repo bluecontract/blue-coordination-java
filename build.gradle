@@ -179,6 +179,156 @@ scenarioTest.configure {
     shouldRunAfter integrationTest, consumerTest
 }
 
+def playgroundSmokeTest = tasks.register('playgroundSmokeTest', Test) {
+    group = 'verification'
+    description = 'Runs the fast Counter, whole-request, embedded, and five-occurrence Playground smoke lane.'
+    testClassesDirs = files(
+            sourceSets.integrationTest.output.classesDirs,
+            sourceSets.scenarioTest.output.classesDirs)
+    classpath = sourceSets.scenarioTest.runtimeClasspath
+    dependsOn tasks.named(sourceSets.integrationTest.classesTaskName),
+            tasks.named(sourceSets.scenarioTest.classesTaskName)
+    filter {
+        includeTestsMatching(
+                'blue.coordination.integration.CoreBehaviorIntegrationTest.counterRoutesAliceAndBobExactlyOnceWithoutGenericSplitting')
+        includeTestsMatching(
+                'blue.coordination.integration.CoreBehaviorIntegrationTest.ordinaryPayNoteIsOneWholeInlineValue')
+        includeTestsMatching(
+                'blue.coordination.integration.ProcessEmbeddedCollectionPathsIntegrationTest.discoversAddsAndRemovesCanonicalMapMembersWithoutOrdinarySplitting')
+        includeTestsMatching(
+                'blue.coordination.integration.PlaygroundFiveOccurrenceInitializationTest.fiveOccurrencesReuseThreeSessionsAndForwardFiveInitializationEvents')
+    }
+}
+
+def round13SourceArchiveUnitTest = tasks.register(
+        'round13SourceArchiveUnitTest', Test) {
+    group = 'verification'
+    description = 'Runs the four focused Round 13 source-archive unit proofs.'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    dependsOn tasks.named(sourceSets.test.classesTaskName)
+    filter {
+        includeTestsMatching(
+                'blue.coordination.api.DocumentRevisionInitializationCausalityTest')
+        includeTestsMatching(
+                'blue.coordination.internal.DocumentAdmissionCauseTest')
+        includeTestsMatching(
+                'blue.coordination.internal.EmbeddedEpochInputInitializationCausalityTest')
+        includeTestsMatching(
+                'blue.coordination.internal.EmbeddingBindingCanonicalOrderTest')
+    }
+}
+
+def round13SourceArchiveIntegrationTest = tasks.register(
+        'round13SourceArchiveIntegrationTest', Test) {
+    group = 'verification'
+    description = 'Runs the focused Round 13 recovery, retry, and five-occurrence correctness proofs.'
+    testClassesDirs = sourceSets.integrationTest.output.classesDirs
+    classpath = sourceSets.integrationTest.runtimeClasspath
+    dependsOn tasks.named(sourceSets.integrationTest.classesTaskName)
+    filter {
+        includeTestsMatching(
+                'blue.coordination.internal.EmbeddedReceiptRetryIdentityIntegrationTest')
+        includeTestsMatching(
+                'blue.coordination.integration.PlaygroundFiveOccurrenceCorrectnessIntegrationTest')
+        includeTestsMatching(
+                'blue.coordination.integration.PlaygroundFiveOccurrenceRetryTest.retryCompletesFiveOccurrenceFanoutWithoutReinitializingChildren')
+    }
+}
+
+def round13SourceArchiveScenarioTest = tasks.register(
+        'round13SourceArchiveScenarioTest', Test) {
+    group = 'verification'
+    description = 'Runs the focused Round 13 five-occurrence scenario proof.'
+    testClassesDirs = sourceSets.scenarioTest.output.classesDirs
+    classpath = sourceSets.scenarioTest.runtimeClasspath
+    dependsOn tasks.named(sourceSets.scenarioTest.classesTaskName)
+    filter {
+        includeTestsMatching(
+                'blue.coordination.integration.PlaygroundFiveOccurrenceInitializationTest.fiveOccurrencesReuseThreeSessionsAndForwardFiveInitializationEvents')
+    }
+}
+
+def round13SourceArchiveConsumerTest = tasks.register(
+        'round13SourceArchiveConsumerTest', Test) {
+    group = 'verification'
+    description = 'Runs the public-JAR five-occurrence consumer proof.'
+    testClassesDirs = sourceSets.consumerTest.output.classesDirs
+    classpath = sourceSets.consumerTest.runtimeClasspath
+    dependsOn tasks.named(sourceSets.consumerTest.classesTaskName),
+            tasks.named('jar')
+    filter {
+        includeTestsMatching(
+                'blue.coordination.consumer.PublishedArtifactConsumerTest.fiveEmbeddedOccurrencesReuseThreeManagedDocuments')
+    }
+}
+
+tasks.register('round13SourceArchiveSmoke') {
+    group = 'verification'
+    description = 'Runs all focused Round 13 proofs required after archive extraction.'
+    dependsOn round13SourceArchiveUnitTest,
+            round13SourceArchiveIntegrationTest,
+            round13SourceArchiveScenarioTest,
+            round13SourceArchiveConsumerTest
+}
+
+def configureRound13EvidenceRuntime = { JavaExec task ->
+    task.group = 'verification'
+    task.classpath = sourceSets.scenarioTest.runtimeClasspath
+    task.mainClass =
+            'blue.coordination.integration.PlaygroundFiveOccurrenceEvidence'
+    task.dependsOn tasks.named(sourceSets.scenarioTest.classesTaskName)
+    task.javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(
+                providers.gradleProperty('testJavaVersion')
+                        .getOrElse('17') as int)
+    }
+    task.jvmArgs '-Xmx2g'
+    task.outputs.upToDateWhen { false }
+}
+
+tasks.register('round13PlaygroundSample', JavaExec) {
+    configureRound13EvidenceRuntime(delegate)
+    description = 'Writes one warmed five-occurrence JSON sample to -Dblue.coordination.round13.sample.'
+    args 'sample'
+    doFirst {
+        def output = providers.systemProperty(
+                'blue.coordination.round13.sample').orNull
+        if (output == null || output.isBlank()) {
+            throw new GradleException(
+                    'round13PlaygroundSample requires '
+                            + '-Dblue.coordination.round13.sample=/path/sample.json')
+        }
+        systemProperty 'blue.coordination.round13.sample', output
+        systemProperty 'blue.coordination.round13.warmups',
+                providers.systemProperty(
+                        'blue.coordination.round13.warmups')
+                        .getOrElse('3')
+    }
+}
+
+tasks.register('playgroundRuntimeCampaign', JavaExec) {
+    configureRound13EvidenceRuntime(delegate)
+    description = 'Runs the opt-in 30-sample five-occurrence candidate campaign.'
+    args 'campaign'
+    doFirst {
+        systemProperty 'blue.coordination.round13.campaign',
+                providers.systemProperty(
+                        'blue.coordination.round13.campaign')
+                        .getOrElse(layout.buildDirectory.dir(
+                                'reports/round13/playground-runtime')
+                                .get().asFile.absolutePath)
+        systemProperty 'blue.coordination.round13.warmups',
+                providers.systemProperty(
+                        'blue.coordination.round13.warmups')
+                        .getOrElse('3')
+        systemProperty 'blue.coordination.round13.samples',
+                providers.systemProperty(
+                        'blue.coordination.round13.samples')
+                        .getOrElse('30')
+    }
+}
+
 publishing {
     publications {
         mavenJava(MavenPublication) {
@@ -296,9 +446,13 @@ tasks.register('validateProductionShape') {
         }.files
         def failures = []
         if (classes > 115) failures << "production classes ${classes} > 115"
-        // Round 11B adds one canonical source-surface identity helper. Keep
-        // the narrowly revised budget explicit rather than minifying it.
-        if (lines > 25_700L) failures << "production lines ${lines} > 25700"
+        // Round 13 transparently retains a bounded 252-line revision for the
+        // occurrence-path audit receipt, closed retry-counter vocabulary and
+        // retry-monitor producers, timestamp-consumption and attachment-
+        // timestamp guards, committed-input recovery evidence, deterministic
+        // invalid-entry preflight and terminalization, and injective binding
+        // identities. Do not minify or hide this deliberate semantic work.
+        if (lines > 25_952L) failures << "production lines ${lines} > 25952"
         if (apiSources.size() > 16) {
             failures << "public API types ${apiSources.size()} > 16"
         }
@@ -518,6 +672,9 @@ tasks.register('verifyReleaseMetadata') {
                 'docs/releases/3.0.0-rc.1-test-report.md',
                 'docs/releases/3.0.0-rc.1-evidence.json',
                 'docs/releases/round11-verification.schema.json',
+                'docs/releases/round12-verification.schema.json',
+                'docs/releases/round13-verification.schema.json',
+                'scripts/round13-ab-evidence.mjs',
                 'docs/reference/public-api.md',
                 'docs/reference/metrics.md',
                 'docs/operations/failure-model.md'
@@ -554,6 +711,9 @@ tasks.register('verifyDocumentation') {
             'CONTRIBUTING.md', 'SECURITY.md',
             'docs/releases/3.0.0-rc.1-evidence.json',
             'docs/releases/round11-verification.schema.json',
+            'docs/releases/round12-verification.schema.json',
+            'docs/releases/round13-verification.schema.json',
+            'scripts/round13-ab-evidence.mjs',
             productionSources)
     doLast {
         def failures = []
@@ -579,392 +739,1313 @@ tasks.register('verifyDocumentation') {
         def evidenceFile = file(
                 'docs/releases/3.0.0-rc.1-evidence.json')
         def evidence = new groovy.json.JsonSlurper().parse(evidenceFile)
-        if (evidence.schemaVersion != '2.0.0'
-                || evidence.profile != 'ROUND11_READINESS_CLOSURE') {
-            throw new GradleException(
-                    'Canonical evidence must use the Round 11 profile')
-        }
-        def expectedStatuses = [
-                'temporalArchitectureReady',
-                'inMemoryEngineWorkingReady',
-                'providerBackedReady',
-                'mandateAgentReady',
-                'playgroundLatencyReady',
-                'publicRcReady'
-        ] as Set
-        if ((evidence.status.keySet() as Set) != expectedStatuses) {
-            throw new GradleException(
-                    'Round 11 evidence must contain the six readiness statuses')
-        }
-        def allowedStatuses = [
-                'PASS', 'PASS_HARD_GATE',
-                'BLOCKED', 'BLOCKED_SCOPE', 'BLOCKED_UPSTREAM', 'FAIL'
-        ] as Set
-        evidence.status.each { key, value ->
-            if (!allowedStatuses.contains(value)) {
-                failures << "Invalid readiness status ${key}=${value}"
+        if (evidence.schemaVersion == '4.0.0'
+                && evidence.profile
+                == 'ROUND13_PLAYGROUND_FIVE_OCCURRENCE') {
+            def schemaFile = file(
+                    'docs/releases/round13-verification.schema.json')
+            def schema = new groovy.json.JsonSlurper().parse(schemaFile)
+            if (evidence.'$schema' != 'round13-verification.schema.json'
+                    || !['INTERIM', 'FINAL'].contains(
+                    evidence.evidenceState)
+                    || schema.'$id' != 'round13-verification.schema.json'
+                    || schema.properties.profile.const
+                    != 'ROUND13_PLAYGROUND_FIVE_OCCURRENCE'
+                    || schema.properties.status.properties
+                            .providerBackedReady.const != 'OUT_OF_SCOPE'
+                    || schema.properties.status.properties
+                            .mandateAgentReady.const != 'OUT_OF_SCOPE') {
+                failures << 'Canonical evidence has an invalid Round 13 profile or schema'
             }
-        }
-        def requiredFinalStatuses = [
-                temporalArchitectureReady: 'PASS',
-                inMemoryEngineWorkingReady: 'PASS',
-                providerBackedReady: 'BLOCKED_SCOPE',
-                mandateAgentReady: 'BLOCKED_UPSTREAM',
-                playgroundLatencyReady: 'PASS_HARD_GATE',
-                publicRcReady: 'BLOCKED'
-        ]
-        if (evidence.verdict != 'BLOCKED') {
-            failures << 'Final Round 11 verdict must remain BLOCKED'
-        }
-        requiredFinalStatuses.each { key, expected ->
-            if (evidence.status[key] != expected) {
-                failures << "Final Round 11 status ${key} must be ${expected}"
-            }
-        }
 
-        // Candidate identity and the extracted source archive are finalized
-        // only after the evidence-producing tree is committed. Every other
-        // result must be complete before this report can call itself final.
-        def allowedNullPaths = [
-                'source.candidateCommit',
-                'source.dirtyReason',
-                'sourceArchive.sha256',
-                'sourceArchive.pendingReason'
-        ] as Set
-        def allowedPendingPaths = [
-                'sourceArchive.extractedConfiguration'
-        ] as Set
-        Closure rejectUnfinalized
-        rejectUnfinalized = { value, String path ->
-            if (value == null) {
-                if (!allowedNullPaths.contains(path)) {
-                    failures << "Final evidence is unfinalized at ${path}"
+            def expectedStatuses = [
+                    'temporalArchitectureReady',
+                    'inMemoryEngineWorkingReady',
+                    'playgroundCoreReady',
+                    'playgroundLatencyReady',
+                    'providerBackedReady',
+                    'mandateAgentReady',
+                    'publicRcReady'
+            ] as Set
+            def allowedReadiness = [
+                    'PASS', 'PASS_HARD_GATE', 'PENDING_VERIFICATION',
+                    'BLOCKED', 'FAIL', 'OUT_OF_SCOPE'
+            ] as Set
+            def allowedExecution = [
+                    'PASS', 'PENDING_VERIFICATION', 'FAIL'
+            ] as Set
+            if ((evidence.status.keySet() as Set) != expectedStatuses) {
+                failures << 'Round 13 evidence must contain exactly seven readiness statuses'
+            } else {
+                evidence.status.each { key, value ->
+                    if (!allowedReadiness.contains(value)) {
+                        failures << "Invalid Round 13 readiness ${key}=${value}"
+                    }
                 }
-                return
-            }
-            if (value == 'PENDING_VERIFICATION') {
-                if (!allowedPendingPaths.contains(path)) {
-                    failures << "Final evidence is unfinalized at ${path}"
-                }
-                return
-            }
-            if (value instanceof Map) {
-                value.each { childKey, childValue ->
-                    String childPath = path
-                            ? "${path}.${childKey}" : childKey.toString()
-                    rejectUnfinalized(childValue, childPath)
-                }
-            } else if (value instanceof List) {
-                value.eachWithIndex { childValue, index ->
-                    rejectUnfinalized(childValue, "${path}.${index}")
+                if (evidence.status.providerBackedReady != 'OUT_OF_SCOPE'
+                        || evidence.status.mandateAgentReady
+                        != 'OUT_OF_SCOPE') {
+                    failures << 'Round 13 provider and Mandate readiness must be OUT_OF_SCOPE'
                 }
             }
-        }
-        rejectUnfinalized(evidence, '')
+            if (!allowedReadiness.contains(evidence.verdict)) {
+                failures << "Invalid Round 13 verdict ${evidence.verdict}"
+            }
 
-        def actualShape = [
-                productionClasses: productionSources.files.size(),
-                productionLines: productionSources.files.sum {
-                    it.readLines('UTF-8').size()
-                } ?: 0L,
-                publicApiSourceTypes: fileTree(
-                        'src/main/java/blue/coordination/api') {
-                    include '**/*.java'
-                }.files.size()
-        ]
-        if (evidence.shape.status != 'PASS') {
-            failures << 'Final production-shape evidence must PASS'
-        }
-        actualShape.each { key, actual ->
-            if (evidence.shape[key] != actual) {
-                failures << "Production shape ${key} is "
-                        + "${evidence.shape[key]}; actual is ${actual}"
+            Closure<String> sha256 = { byte[] bytes ->
+                java.security.MessageDigest.getInstance('SHA-256')
+                        .digest(bytes).encodeHex().toString()
             }
-        }
-        def timelineCapability = evidence.capabilities.find {
-            it.id == 'generic-timeline-entry-document-target'
-        }
-        if (timelineCapability == null
-                || timelineCapability.blocker != false) {
-            failures << 'Generic Timeline Entry documentId must be optional, not a blocker'
-        }
-        if (evidence.blockers.any {
-            it.id == 'generic-timeline-entry-document-target'
-        }) {
-            failures << 'Optional generic Timeline target appears in blockers'
-        }
-        if (!evidence.blockers.any {
-            it.id == 'provider-mandate-resolver'
-        }) {
-            failures << 'Provider-backed Mandate resolver must remain a blocker'
-        }
-        if (evidence.tests.status == 'PASS') {
-            def totals = [
-                    'tests', 'classes', 'failures', 'errors', 'skipped'
+            Closure<String> relativePath = { File source ->
+                rootDir.toPath().relativize(source.toPath()).toString()
+                        .replace(File.separator, '/')
+            }
+            List<File> manifestSources = productionSources.files.sort {
+                source -> relativePath(source)
+            }
+            String manifest = manifestSources.collect { source ->
+                "${relativePath(source)} ${sha256(source.bytes)}"
+            }.join('\n')
+            String actualManifestSha256 = sha256(
+                    manifest.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+            if (evidence.source.mainSourceManifestSha256
+                    != actualManifestSha256
+                    || evidence.executionBinding.mainSourceManifestSha256
+                    != actualManifestSha256) {
+                failures << 'Round 13 main-source manifest is stale or execution binding differs'
+            }
+
+            def actualShape = [
+                    productionClasses: productionSources.files.size(),
+                    productionLines: productionSources.files.sum {
+                        it.readLines('UTF-8').size()
+                    } ?: 0L,
+                    publicApiSourceTypes: fileTree(
+                            'src/main/java/blue/coordination/api') {
+                        include '**/*.java'
+                    }.files.size()
             ]
-            totals.each { key ->
-                if (!(evidence.tests[key] instanceof Number)
-                        || evidence.tests.suites.any {
-                            !(it[key] instanceof Number)
+            def expectedLimits = [
+                    productionClasses: 115,
+                    productionLines: 25_952,
+                    publicApiSourceTypes: 16
+            ]
+            if (evidence.shape.status != 'PASS'
+                    || evidence.shape.basis != 'STATIC_WORKTREE_SNAPSHOT'
+                    || evidence.shape.limits != expectedLimits) {
+                failures << 'Round 13 static shape or declared limits are invalid'
+            }
+            actualShape.each { key, actual ->
+                if (evidence.shape[key] != actual) {
+                    failures << "Round 13 shape ${key} is ${evidence.shape[key]}; actual is ${actual}"
+                }
+                if (actual > evidence.shape.limits[key]) {
+                    failures << "Round 13 shape ${key} exceeds its declared limit"
+                }
+            }
+            String limitReason = evidence.shape.limitRevisionReason ?: ''
+            ['25,700', '25,952', 'occurrence-path', 'retry-counter',
+             'retry-monitor', 'timestamp-consumption',
+             'attachment-timestamp', 'committed-input recovery',
+             'invalid-entry preflight', 'terminalization',
+             'injective binding identities'].each { marker ->
+                if (!limitReason.contains(marker)) {
+                    failures << "Round 13 line-limit reason lacks ${marker}"
+                }
+            }
+
+            def suiteRoots = [
+                    'test': 'src/test/java',
+                    'integrationTest': 'src/integrationTest/java',
+                    'consumerTest': 'src/consumerTest/java',
+                    'scenarioTest': 'src/scenarioTest/java'
+            ]
+            def actualSuites = suiteRoots.collectEntries { name, path ->
+                def annotated = fileTree(path) { include '**/*.java' }.files
+                        .collect { source ->
+                            [file: source, tests: (source.getText('UTF-8')
+                                    =~ /(?m)^\s*@Test\b/).count]
+                        }.findAll { it.tests > 0 }
+                [(name): [
+                        tests: annotated.sum { it.tests } ?: 0,
+                        classes: annotated.size()
+                ]]
+            }
+            if (evidence.tests.inventoryBasis != 'STATIC_SOURCE_INVENTORY'
+                    || evidence.tests.finalTreeRequired != true
+                    || !allowedExecution.contains(
+                    evidence.tests.executionStatus)
+                    || (evidence.tests.suites.collect { it.name } as Set)
+                    != (suiteRoots.keySet() as Set)) {
+                failures << 'Round 13 test inventory has an invalid shape'
+            }
+            actualSuites.each { name, actual ->
+                def recorded = evidence.tests.suites.find {
+                    it.name == name.toString()
+                }
+                if (recorded == null
+                        || recorded.tests != actual.tests
+                        || recorded.classes != actual.classes
+                        || !allowedExecution.contains(recorded.status)) {
+                    failures << "Round 13 ${name} source inventory is stale"
+                }
+            }
+            long actualTests = actualSuites.values().sum { it.tests } ?: 0L
+            long actualClasses = actualSuites.values().sum {
+                it.classes
+            } ?: 0L
+            if (evidence.tests.tests != actualTests
+                    || evidence.tests.classes != actualClasses) {
+                failures << 'Round 13 aggregate source inventory is stale'
+            }
+            def outcomeFields = ['failures', 'errors', 'skipped']
+            if (evidence.tests.executionStatus == 'PENDING_VERIFICATION') {
+                if (outcomeFields.any { evidence.tests[it] != null }
+                        || evidence.tests.suites.any { suite ->
+                            outcomeFields.any { suite[it] != null }
+                                    || suite.status != 'PENDING_VERIFICATION'
                         }) {
-                    failures << "Passing evidence lacks numeric ${key} totals"
-                    return
+                    failures << 'Pending Round 13 tests must not contain outcome claims'
                 }
-                long suiteTotal = evidence.tests.suites.sum {
-                    (it[key] as Number).longValue()
-                }
-                if (suiteTotal
-                        != (evidence.tests[key] as Number).longValue()) {
-                    failures << "Round 11 suite ${key} total is inconsistent"
+            } else {
+                outcomeFields.each { field ->
+                    if (!(evidence.tests[field] instanceof Number)
+                            || evidence.tests.suites.any {
+                                !(it[field] instanceof Number)
+                            }
+                            || evidence.tests.suites.sum {
+                                (it[field] as Number).longValue()
+                            } != (evidence.tests[field]
+                                    as Number).longValue()) {
+                        failures << "Round 13 ${field} outcomes are incomplete or inconsistent"
+                    }
                 }
             }
-            if (evidence.tests.failures != 0
-                    || evidence.tests.errors != 0
-                    || evidence.tests.skipped != 0) {
-                failures << 'Passing evidence must have no failed or skipped tests'
+
+            if ((evidence.runtimes.collect { it.java } as Set)
+                    != (['17', '21'] as Set)) {
+                failures << 'Round 13 requires exactly Java 17 and Java 21 lanes'
             }
-        }
-        def expectedSuites = [
-                test: [tests: 217, classes: 29],
-                integrationTest: [tests: 73, classes: 31],
-                consumerTest: [tests: 5, classes: 1],
-                scenarioTest: [tests: 7, classes: 4]
-        ]
-        if (evidence.tests.status != 'PASS'
-                || evidence.tests.tests != 302
-                || evidence.tests.classes != 65) {
-            failures << 'Final library evidence must contain 302 tests in 65 classes'
-        }
-        expectedSuites.each { name, expected ->
-            def suite = evidence.tests.suites.find { it.name == name }
-            if (suite == null
-                    || suite.status != 'PASS'
-                    || suite.tests != expected.tests
-                    || suite.classes != expected.classes
-                    || suite.failures != 0
-                    || suite.errors != 0
-                    || suite.skipped != 0) {
-                failures << "Final ${name} suite evidence is inconsistent"
+            evidence.runtimes.each { runtime ->
+                ['test', 'integrationTest', 'consumerTest', 'scenarioTest',
+                 'releaseCheck', '--rerun-tasks',
+                 "-PtestJavaVersion=${runtime.java}"].each { marker ->
+                    if (!runtime.gate.contains(marker)) {
+                        failures << "Java ${runtime.java} gate lacks ${marker}"
+                    }
+                }
+                if (!allowedExecution.contains(runtime.status)
+                        || (runtime.status == 'PENDING_VERIFICATION'
+                        && runtime.durationSeconds != null)
+                        || (runtime.status == 'PASS'
+                        && !(runtime.durationSeconds instanceof Number))) {
+                    failures << "Java ${runtime.java} execution record is inconsistent"
+                }
             }
+
+            def expectedProofs = [
+                    'five-occurrence-three-session-reuse': [
+                            'scenarioTest',
+                            'blue.coordination.integration.PlaygroundFiveOccurrenceInitializationTest',
+                            'fiveOccurrencesReuseThreeSessionsAndForwardFiveInitializationEvents',
+                            'scenarioTest'],
+                    'five-occurrence-five-parent-events': [
+                            'scenarioTest',
+                            'blue.coordination.integration.PlaygroundFiveOccurrenceInitializationTest',
+                            'fiveOccurrencesReuseThreeSessionsAndForwardFiveInitializationEvents',
+                            'scenarioTest'],
+                    'five-occurrence-canonical-path-order': [
+                            'scenarioTest',
+                            'blue.coordination.integration.PlaygroundFiveOccurrenceDeterminismScenarioTest',
+                            'reverseRequestInsertionOrderPreservesBlueIdsHistoriesAndEvents',
+                            'scenarioTest'],
+                    'five-occurrence-retry-exactly-once': [
+                            'integrationTest',
+                            'blue.coordination.integration.PlaygroundFiveOccurrenceRetryTest',
+                            'retryCompletesFiveOccurrenceFanoutWithoutReinitializingChildren',
+                            'integrationTest'],
+                    'five-occurrence-public-JAR-consumer': [
+                            'consumerTest',
+                            'blue.coordination.consumer.PublishedArtifactConsumerTest',
+                            'fiveEmbeddedOccurrencesReuseThreeManagedDocuments',
+                            'consumerTest'],
+                    'five-occurrence-no-generic-fragmentation': [
+                            'scenarioTest',
+                            'blue.coordination.integration.PlaygroundFiveOccurrenceInitializationTest',
+                            'fiveOccurrencesReuseThreeSessionsAndForwardFiveInitializationEvents',
+                            'scenarioTest'],
+                    'five-occurrence-host-versus-frozen-time': [
+                            'performance', null, null,
+                            'round13PlaygroundSample']
+            ]
+            if ((evidence.proofs.collect { it.id } as Set)
+                    != (expectedProofs.keySet() as Set)) {
+                failures << 'Round 13 proof set must contain the exact seven rows'
+            }
+            String buildText = file('build.gradle').getText('UTF-8')
+            evidence.proofs.each { proof ->
+                def expected = expectedProofs[proof.id]
+                if (expected != null
+                        && [proof.sourceSet, proof.testClass,
+                            proof.testMethod, proof.task] != expected) {
+                    failures << "Round 13 proof binding differs: ${proof.id}"
+                }
+                if (proof.sourceSet == 'performance') {
+                    if (!buildText.contains(
+                            "tasks.register('round13PlaygroundSample'")
+                            || !file('src/scenarioTest/java/blue/coordination/integration/PlaygroundFiveOccurrenceEvidence.java')
+                                    .isFile()) {
+                        failures << 'Round 13 performance proof target is missing'
+                    }
+                } else {
+                    String proofRoot = suiteRoots[proof.sourceSet]
+                    File proofSource = proofRoot == null ? null : file(
+                            proofRoot + '/'
+                                    + proof.testClass.replace('.', '/')
+                                    + '.java')
+                    if (proofSource == null || !proofSource.isFile()
+                            || !proofSource.getText('UTF-8').contains(
+                            proof.testMethod + '(')) {
+                        failures << "Round 13 proof target is missing: ${proof.id}"
+                    }
+                }
+                if (!allowedExecution.contains(proof.status)) {
+                    failures << "Round 13 proof has invalid status: ${proof.id}"
+                }
+            }
+
+            def campaign = evidence.performance.round13Campaign
+            def campaignStatuses = [
+                    'PASS', 'PASS_HARD_GATE',
+                    'PENDING_VERIFICATION', 'FAIL'
+            ] as Set
+            String expectedBaselineHash =
+                    '2f303afd9435937145ce7fe09eb655ff1a05ee6ed7484faea62d93544a3ccf3e'
+            if (!campaignStatuses.contains(campaign.status)
+                    || campaign.comparison != 'SAME_MACHINE_INTERLEAVED_AB'
+                    || campaign.baselineArchive != 'Archive.zip'
+                    || campaign.baselineSha256 != expectedBaselineHash
+                    || campaign.candidateTask != 'round13PlaygroundSample'
+                    || campaign.warmups != 3
+                    || campaign.requiredSamples < 30
+                    || campaign.measuredSamples < 0) {
+                failures << 'Round 13 performance campaign has invalid metadata'
+            }
+            def campaignOutputs = [campaign.runtimeMarkdown,
+                                   campaign.runtimeJson,
+                                   campaign.runtimeProvenanceJson]
+            if (campaign.status == 'PENDING_VERIFICATION') {
+                if (campaign.measuredSamples != 0
+                        || campaignOutputs.any { it != null }
+                        || campaign.pendingReason == null) {
+                    failures << 'Pending Round 13 campaign must not contain final outputs'
+                }
+            } else {
+                def expectedCampaignOutputs = [
+                        'docs/releases/evidence/round13/five-occurrence-runtime.md',
+                        'docs/releases/evidence/round13/five-occurrence-runtime.json',
+                        'docs/releases/evidence/round13/runtime-provenance.json'
+                ]
+                if (campaign.measuredSamples != 30
+                        || campaignOutputs != expectedCampaignOutputs
+                        || campaignOutputs.any { !file(it).isFile() }
+                        || campaign.pendingReason != null) {
+                    failures << 'Measured Round 13 campaign is incomplete'
+                } else {
+                    List<String> command = [
+                            'node',
+                            file('scripts/round13-ab-evidence.mjs')
+                                    .absolutePath,
+                            '--verify',
+                            '--candidate', rootDir.absolutePath,
+                            '--runtime', file(campaign.runtimeJson)
+                                    .absolutePath,
+                            '--provenance',
+                            file(campaign.runtimeProvenanceJson)
+                                    .absolutePath,
+                            '--markdown', file(campaign.runtimeMarkdown)
+                                    .absolutePath
+                    ]
+                    Process process = new ProcessBuilder(command)
+                            .directory(rootDir)
+                            .redirectErrorStream(true).start()
+                    String verification = process.inputStream
+                            .getText('UTF-8')
+                    if (process.waitFor() != 0
+                            || !verification.contains(
+                            "ROUND13_AB_VERIFIED=${campaign.status}")) {
+                        failures << 'Round 13 runtime receipt failed recomputation: '
+                                + verification.trim()
+                    }
+                }
+            }
+            def historical = evidence.performance.historicalRound12
+            if (historical.classification != 'HISTORICAL_ONLY'
+                    || historical.decisionBasis != false
+                    || !(historical.summary instanceof String)
+                    || historical.summary.isBlank()) {
+                failures << 'Round 12 measurements must remain historical only'
+            }
+
+            def expectedCounters = [
+                    'REQUEST_FRAGMENTS',
+                    'TIMELINE_ENTRY_FRAGMENTS',
+                    'ORDINARY_NODE_FRAGMENTS',
+                    'FULL_ENVIRONMENT_SCANS',
+                    'SOURCE_REPLAYS_PER_PARENT',
+                    'POST_PROCESS_FULL_PROJECTIONS',
+                    'PARENT_PROCESS_RERUNS_ON_GRAPH_RETRY',
+                    'CHILD_PROCESS_RERUNS_ON_PARENT_RETRY'
+            ] as Set
+            def counters = evidence.structuralEvidence.requiredZeroCounters
+            if ((counters.keySet() as Set) != expectedCounters
+                    || evidence.structuralEvidence.finalTreeRequired != true
+                    || !allowedExecution.contains(
+                    evidence.structuralEvidence.status)) {
+                failures << 'Round 13 structural evidence must contain the exact eight counters'
+            } else if (evidence.structuralEvidence.status
+                    == 'PENDING_VERIFICATION') {
+                if (counters.any { key, value -> value != null }) {
+                    failures << 'Pending Round 13 counters must remain unset'
+                }
+            } else if (evidence.structuralEvidence.status == 'PASS'
+                    && counters.any { key, value -> value != 0 }) {
+                failures << 'Passing Round 13 structural counters must all equal zero'
+            }
+
+            def artifactHashes = [
+                    'mainJarSha256', 'sourcesJarSha256',
+                    'javadocJarSha256', 'testFixturesJarSha256'
+            ]
+            String sha256Pattern = /^[0-9a-f]{64}$/
+            if (!allowedExecution.contains(evidence.artifacts.status)
+                    || evidence.artifacts.finalTreeRequired != true) {
+                failures << 'Round 13 artifact evidence has an invalid status'
+            } else if (evidence.artifacts.status
+                    == 'PENDING_VERIFICATION'
+                    && artifactHashes.any {
+                        evidence.artifacts[it] != null
+                    }) {
+                failures << 'Pending Round 13 artifacts must not retain hashes'
+            } else if (evidence.artifacts.status == 'PASS'
+                    && artifactHashes.any {
+                        !(evidence.artifacts[it] ==~ sha256Pattern)
+                    }) {
+                failures << 'Passing Round 13 artifacts require four hashes'
+            }
+
+            def archive = evidence.sourceArchive
+            def expectedArchiveFields = [
+                    configuration: 'CONFIGURED',
+                    finalTreeRequired: true,
+                    authoritativeVersionFile: '.cz.toml',
+                    authoritativeVersionFileIncluded: true,
+                    reproducibleFileOrder: true,
+                    preserveFileTimestamps: false,
+                    duplicatesStrategy: 'FAIL'
+            ]
+            expectedArchiveFields.each { key, value ->
+                if (archive[key] != value) {
+                    failures << "Round 13 source archive ${key} must be ${value}"
+                }
+            }
+            def expectedArchiveReceipt = [
+                    schemaId: 'blue-coordination-round13-source-archive-verification-v1',
+                    path: 'build/reports/round13/source-archive-verification.json'
+            ]
+            def expectedArchiveChecksum = [
+                    mode: 'DETACHED_SHA256_SIDECAR',
+                    path: 'build/distributions/blue-coordination-java-3.0.0-rc.1-source.zip.sha256',
+                    digest: null
+            ]
+            if (archive.verificationReceipt != expectedArchiveReceipt
+                    || archive.checksum != expectedArchiveChecksum) {
+                failures << 'Round 13 source archive must use external receipt and detached checksum authority'
+            }
+            def archiveExecutionFields = [
+                    'extractedConfiguration', 'focusedTestsStatus',
+                    'publishedArtifactSmokeBuild'
+            ]
+            if (archiveExecutionFields.any {
+                !['PASS', 'PENDING_VERIFICATION', 'FAIL',
+                  'BLOCKED_UPSTREAM'].contains(archive[it])
+            }) {
+                failures << 'Round 13 source archive has an invalid execution status'
+            }
+            if (archiveExecutionFields.any {
+                archive[it] == 'PENDING_VERIFICATION'
+            }) {
+                if (archive.pendingReason == null) {
+                    failures << 'Pending Round 13 archive must explain why'
+                }
+            } else if (archive.pendingReason != null) {
+                failures << 'Completed Round 13 archive must have no pending reason'
+            }
+            if (!['PASS', 'PENDING_VERIFICATION', 'FAIL',
+                  'BLOCKED_UPSTREAM'].contains(
+                    evidence.publicationEvidence.status)) {
+                failures << 'Round 13 publication evidence has an invalid status'
+            }
+
+            String report = file(
+                    'docs/releases/3.0.0-rc.1-test-report.md')
+                    .getText('UTF-8')
+            evidence.status.each { key, value ->
+                if (!report.contains("| `${key}` | `${value}` |")) {
+                    failures << "Canonical report differs from status ${key}"
+                }
+            }
+            expectedProofs.keySet().each { proofId ->
+                if (!report.contains("`${proofId}`")) {
+                    failures << "Canonical report lacks proof row ${proofId}"
+                }
+            }
+            if (!report.contains(actualManifestSha256)
+                    || !report.contains("**${actualClasses}**")
+                    || !report.contains("**${actualTests}**")) {
+                failures << 'Canonical report lacks current manifest or aggregate inventory'
+            }
+
+            if (evidence.evidenceState == 'INTERIM') {
+                def baseInterimStatuses = [
+                        temporalArchitectureReady: 'PENDING_VERIFICATION',
+                        inMemoryEngineWorkingReady: 'PENDING_VERIFICATION',
+                        playgroundCoreReady: 'PENDING_VERIFICATION',
+                        providerBackedReady: 'OUT_OF_SCOPE',
+                        mandateAgentReady: 'OUT_OF_SCOPE',
+                        publicRcReady: 'BLOCKED'
+                ]
+                boolean baseStatusesMatch = baseInterimStatuses.every {
+                    key, value -> evidence.status[key] == value
+                }
+                String expectedLatency = campaign.status
+                        == 'PENDING_VERIFICATION'
+                        ? 'PENDING_VERIFICATION' : campaign.status
+                if (!baseStatusesMatch
+                        || evidence.status.playgroundLatencyReady
+                        != expectedLatency
+                        || evidence.verdict != 'PENDING_VERIFICATION'
+                        || evidence.source.candidateCommit != null
+                        || evidence.source.binding
+                        != 'BASE_COMMIT_PLUS_DIRTY_WORKTREE_MANIFEST'
+                        || evidence.source.worktree != 'DIRTY'
+                        || evidence.source.dirtyReason == null
+                        || evidence.executionBinding.candidateCommit != null
+                        || evidence.executionBinding.reason == null
+                        || !report.contains(
+                        'ROUND13_INTERIM_VERIFICATION: PENDING_VERIFICATION')
+                        || report.contains('ROUND13_FINAL_VERIFICATION:')) {
+                    failures << 'Round 13 INTERIM evidence overclaims or lacks its marker'
+                }
+                if (evidence.executionBinding.kind == 'PENDING') {
+                    if (evidence.tests.executionStatus
+                            != 'PENDING_VERIFICATION'
+                            || evidence.runtimes.any {
+                                it.status != 'PENDING_VERIFICATION'
+                            }
+                            || evidence.proofs.any {
+                                it.status != 'PENDING_VERIFICATION'
+                            }
+                            || evidence.structuralEvidence.status
+                            != 'PENDING_VERIFICATION') {
+                        failures << 'Pending Round 13 binding cannot carry execution outcomes'
+                    }
+                } else if (evidence.executionBinding.kind
+                        == 'WORKTREE_EXECUTION') {
+                    if (evidence.tests.executionStatus
+                            == 'PENDING_VERIFICATION'
+                            || evidence.runtimes.any {
+                                it.status == 'PENDING_VERIFICATION'
+                                        || !(it.durationSeconds
+                                        instanceof Number)
+                            }
+                            || evidence.proofs.any {
+                                it.status == 'PENDING_VERIFICATION'
+                            }
+                            || evidence.structuralEvidence.status
+                            == 'PENDING_VERIFICATION') {
+                        failures << 'Round 13 WORKTREE_EXECUTION must contain complete lane outcomes'
+                    }
+                } else {
+                    failures << 'Round 13 INTERIM execution binding must be PENDING or WORKTREE_EXECUTION'
+                }
+            } else {
+                def publishableLatency = [
+                        'PASS', 'PASS_HARD_GATE'
+                ] as Set
+                if (evidence.verdict != 'PASS'
+                        || evidence.source.candidateCommit == null
+                        || evidence.source.binding != 'CANDIDATE_COMMIT'
+                        || evidence.source.worktree != 'CLEAN'
+                        || evidence.source.dirtyReason != null
+                        || evidence.executionBinding.kind
+                        != 'CANDIDATE_COMMIT_EXECUTION'
+                        || evidence.executionBinding.candidateCommit
+                        != evidence.source.candidateCommit
+                        || evidence.status.temporalArchitectureReady != 'PASS'
+                        || evidence.status.inMemoryEngineWorkingReady != 'PASS'
+                        || evidence.status.playgroundCoreReady != 'PASS'
+                        || !publishableLatency.contains(
+                        evidence.status.playgroundLatencyReady)
+                        || evidence.status.providerBackedReady != 'OUT_OF_SCOPE'
+                        || evidence.status.mandateAgentReady != 'OUT_OF_SCOPE'
+                        || evidence.status.publicRcReady != 'PASS'
+                        || evidence.tests.executionStatus != 'PASS'
+                        || evidence.tests.failures != 0
+                        || evidence.tests.errors != 0
+                        || evidence.tests.skipped != 0
+                        || evidence.tests.suites.any {
+                            it.status != 'PASS' || it.failures != 0
+                                    || it.errors != 0 || it.skipped != 0
+                        }
+                        || evidence.runtimes.any { it.status != 'PASS' }
+                        || evidence.proofs.any { it.status != 'PASS' }
+                        || campaign.status != 'PASS'
+                        || evidence.structuralEvidence.status != 'PASS'
+                        || evidence.artifacts.status != 'PASS'
+                        || archiveExecutionFields.any {
+                            archive[it] != 'PASS'
+                        }
+                        || evidence.publicationEvidence.status != 'PASS'
+                        || !report.contains(
+                        'ROUND13_FINAL_VERIFICATION: PASS')
+                        || report.contains('ROUND13_INTERIM_VERIFICATION:')) {
+                    failures << 'Round 13 FINAL evidence is incomplete'
+                }
+            }
+            [
+                    'docs/releases/3.0.0-rc.1-round13-test-report.md',
+                    'docs/releases/3.0.0-rc.1-round13-evidence.json'
+            ].each { duplicate ->
+                if (file(duplicate).exists()) {
+                    failures << "Duplicate Round 13 evidence surface remains: ${duplicate}"
+                }
+            }
+            if (!failures.empty) {
+                throw new GradleException(failures.join('\n'))
+            }
+            return
         }
-        if ((evidence.runtimes.collect { it.java } as Set)
-                != (['17', '21'] as Set)
-                || evidence.runtimes.any {
-                    it.status != 'PASS'
+        if (evidence.schemaVersion == '3.0.0'
+                && evidence.profile == 'ROUND12_INITIALIZATION_LIFECYCLE') {
+            if (evidence.'$schema' != 'round12-verification.schema.json'
+                    || !['INTERIM', 'FINAL'].contains(
+                    evidence.evidenceState)) {
+                failures << 'Canonical evidence has an invalid Round 12 profile'
+            }
+            def expectedStatuses = [
+                    'temporalArchitectureReady',
+                    'inMemoryEngineWorkingReady',
+                    'providerBackedReady',
+                    'mandateAgentReady',
+                    'playgroundLatencyReady',
+                    'publicRcReady'
+            ] as Set
+            def allowedStatuses = [
+                    'PASS', 'PASS_HARD_GATE', 'PENDING_VERIFICATION',
+                    'BLOCKED', 'BLOCKED_SCOPE', 'BLOCKED_UPSTREAM', 'FAIL'
+            ] as Set
+            def allowedExecutionStatuses = [
+                    'PASS', 'PENDING_VERIFICATION', 'FAIL'
+            ] as Set
+            if ((evidence.status.keySet() as Set) != expectedStatuses) {
+                failures << 'Round 12 evidence must contain six readiness statuses'
+            } else {
+                evidence.status.each { key, value ->
+                    if (!allowedStatuses.contains(value)) {
+                        failures << "Invalid readiness status ${key}=${value}"
+                    }
+                }
+            }
+            if (!allowedStatuses.contains(evidence.verdict)) {
+                failures << "Invalid Round 12 verdict ${evidence.verdict}"
+            }
+
+            Closure<String> sha256 = { byte[] bytes ->
+                java.security.MessageDigest.getInstance('SHA-256')
+                        .digest(bytes).encodeHex().toString()
+            }
+            Closure<String> relativePath = { File source ->
+                rootDir.toPath().relativize(source.toPath()).toString()
+                        .replace(File.separator, '/')
+            }
+            List<File> manifestSources = productionSources.files.sort {
+                source -> relativePath(source)
+            }
+            String manifest = manifestSources.collect { source ->
+                "${relativePath(source)} ${sha256(source.bytes)}"
+            }.join('\n')
+            String actualManifestSha256 = sha256(
+                    manifest.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+            if (evidence.source.mainSourceManifestSha256
+                    != actualManifestSha256) {
+                failures << 'Round 12 main-source manifest is stale'
+            }
+
+            def actualShape = [
+                    productionClasses: productionSources.files.size(),
+                    productionLines: productionSources.files.sum {
+                        it.readLines('UTF-8').size()
+                    } ?: 0L,
+                    publicApiSourceTypes: fileTree(
+                            'src/main/java/blue/coordination/api') {
+                        include '**/*.java'
+                    }.files.size()
+            ]
+            if (evidence.shape.status != 'PASS'
+                    || evidence.shape.basis != 'STATIC_WORKTREE_SNAPSHOT') {
+                failures << 'Round 12 static worktree shape must PASS'
+            }
+            actualShape.each { key, actual ->
+                if (evidence.shape[key] != actual) {
+                    failures << "Production shape ${key} is "
+                            + "${evidence.shape[key]}; actual is ${actual}"
+                }
+                if (actual > evidence.shape.limits[key]) {
+                    failures << "Production shape ${key} exceeds its limit"
+                }
+            }
+
+            def suiteRoots = [
+                    test: 'src/test/java',
+                    integrationTest: 'src/integrationTest/java',
+                    consumerTest: 'src/consumerTest/java',
+                    scenarioTest: 'src/scenarioTest/java'
+            ]
+            def actualSuites = suiteRoots.collectEntries { name, path ->
+                def annotated = fileTree(path) { include '**/*.java' }.files
+                        .collect { source ->
+                            [file: source, tests: (source.getText('UTF-8')
+                                    =~ /(?m)^\s*@Test\b/).count]
+                        }.findAll { it.tests > 0 }
+                [(name): [
+                        tests: annotated.sum { it.tests } ?: 0,
+                        classes: annotated.size()
+                ]]
+            }
+            if (evidence.tests.inventoryBasis != 'STATIC_SOURCE_INVENTORY'
+                    || evidence.tests.finalTreeRequired != true
+                    || !allowedExecutionStatuses.contains(
+                    evidence.tests.executionStatus)
+                    || (evidence.tests.suites.collect { it.name } as Set)
+                    != (suiteRoots.keySet() as Set)) {
+                failures << 'Round 12 test inventory has an invalid shape'
+            }
+            actualSuites.each { name, actual ->
+                def recorded = evidence.tests.suites.find {
+                    it.name == name.toString()
+                }
+                if (recorded == null
+                        || recorded.tests != actual.tests
+                        || recorded.classes != actual.classes) {
+                    failures << "Round 12 ${name} inventory is stale"
+                }
+            }
+            long actualTests = actualSuites.values().sum { it.tests } ?: 0L
+            long actualClasses = actualSuites.values().sum { it.classes } ?: 0L
+            if (evidence.tests.tests != actualTests
+                    || evidence.tests.classes != actualClasses) {
+                failures << 'Round 12 aggregate test inventory is stale'
+            }
+            def testOutcomeFields = ['failures', 'errors', 'skipped']
+            if (evidence.tests.executionStatus != 'PENDING_VERIFICATION') {
+                testOutcomeFields.each { field ->
+                    if (evidence.tests[field] instanceof Number
+                            && evidence.tests.suites.every {
+                                it[field] instanceof Number
+                            }) {
+                        long total = evidence.tests.suites.sum {
+                            (it[field] as Number).longValue()
+                        }
+                        if (total != (evidence.tests[field]
+                                as Number).longValue()) {
+                            failures << "Round 12 ${field} total is inconsistent"
+                        }
+                    }
+                }
+            }
+
+            if ((evidence.runtimes.collect { it.java } as Set)
+                    != (['17', '21'] as Set)) {
+                failures << 'Round 12 requires Java 17 and Java 21 lanes'
+            }
+            evidence.runtimes.each { runtime ->
+                if (!allowedExecutionStatuses.contains(runtime.status)) {
+                    failures << "Java ${runtime.java} has invalid status"
+                } else if (!runtime.gate.contains(
+                        "-PtestJavaVersion=${runtime.java}")) {
+                    failures << "Java ${runtime.java} gate lacks its toolchain"
+                }
+            }
+
+            def expectedProofs = [
+                    'shared-game-single-initialization': [
+                            'scenarioTest',
+                            'blue.coordination.integration.NbaSharedGameLifecycleAcrossHostsTest',
+                            'laterAndPostFinalHostsReuseGameAndReceiveRetainedLifecycleEvents'],
+                    'later-host-receives-initialization-event': [
+                            'scenarioTest',
+                            'blue.coordination.integration.NbaSharedGameLifecycleAcrossHostsTest',
+                            'laterAndPostFinalHostsReuseGameAndReceiveRetainedLifecycleEvents'],
+                    'dynamic-path-activation': [
+                            'integrationTest',
+                            'blue.coordination.integration.DynamicProcessEmbeddedPathActivationTest',
+                            'addingProcessEmbeddedPathInitializesExistingInlineDocument'],
+                    'dynamic-collection-activation': [
+                            'scenarioTest',
+                            'blue.coordination.integration.DynamicProcessEmbeddedCollectionActivationTest',
+                            'collectionMembersInitializeByCanonicalPathNotInsertionOrBlueIdOrder'],
+                    'canonical-code-point-order': [
+                            'test',
+                            'blue.coordination.internal.EmbeddingBindingCanonicalOrderTest',
+                            'supplementaryCodePointUsesCanonicalTextOrderRatherThanUtf16Order'],
+                    'initialization-retry-idempotency': [
+                            'integrationTest',
+                            'blue.coordination.integration.InitializationRetryIdempotencyTest',
+                            'retryPublishesOneChildInitializationWithoutRepeatingParentOperation']
+            ]
+            if ((evidence.proofs.collect { it.id } as Set)
+                    != (expectedProofs.keySet() as Set)) {
+                failures << 'Round 12 proof set must contain the exact six rows'
+            }
+            evidence.proofs.each { proof ->
+                def expected = expectedProofs[proof.id]
+                if (expected != null
+                        && [proof.sourceSet, proof.testClass,
+                            proof.testMethod] != expected) {
+                    failures << "Round 12 proof binding differs: ${proof.id}"
+                }
+                String proofRoot = suiteRoots[proof.sourceSet]
+                File proofSource = proofRoot == null ? null : file(
+                        proofRoot + '/' + proof.testClass.replace('.', '/')
+                                + '.java')
+                if (proofSource == null || !proofSource.isFile()
+                        || !proofSource.getText('UTF-8').contains(
+                        proof.testMethod + '(')) {
+                    failures << "Round 12 proof target is missing: ${proof.id}"
+                }
+                if (!allowedExecutionStatuses.contains(proof.status)) {
+                    failures << "Round 12 proof has invalid status: ${proof.id}"
+                }
+            }
+
+            def historical = evidence.performance.historicalRound11Baseline
+            def campaign = evidence.performance.round12Campaign
+            def nbaEvidence = campaign.nbaLifecycleEvidence
+            def sameScenarioP95 = campaign.sameScenarioP95
+            def performanceStatuses = [
+                    'PASS', 'PASS_HARD_GATE', 'PENDING_VERIFICATION', 'FAIL'
+            ] as Set
+            if (!performanceStatuses.contains(campaign.status)
+                    || !allowedExecutionStatuses.contains(nbaEvidence.status)
+                    || !performanceStatuses.contains(sameScenarioP95.status)
+                    || campaign.preferredHostP95RegressionPercent
+                    > campaign.hardHostP95RegressionPercent) {
+                failures << 'Round 12 performance has invalid status'
+            }
+            def publishablePerformance = ['PASS', 'PASS_HARD_GATE'] as Set
+            String expectedCampaignStatus
+            if (nbaEvidence.status == 'FAIL'
+                    || sameScenarioP95.status == 'FAIL') {
+                expectedCampaignStatus = 'FAIL'
+            } else if (nbaEvidence.status == 'PASS'
+                    && publishablePerformance.contains(
+                    sameScenarioP95.status)) {
+                expectedCampaignStatus = sameScenarioP95.status
+            } else {
+                expectedCampaignStatus = 'PENDING_VERIFICATION'
+            }
+            if (campaign.status != expectedCampaignStatus) {
+                failures << 'Round 12 aggregate performance status is inconsistent'
+            }
+            if (historical.classification != 'HISTORICAL_BASELINE_ONLY'
+                    || historical.profile != 'ROUND11_READINESS_CLOSURE'
+                    || historical.sameSourceAsRound12 != false) {
+                failures << 'Round 11 performance must remain historical baseline only'
+            }
+            def retainedHostBaselines = [
+                    warmOrdinary: 15.571d,
+                    warmPayNotePlusParent: 46.645d,
+                    threeLayerRestaurantProduct: 54.696d
+            ]
+            def round11ObservedHosts = [
+                    warmOrdinary: 19.537833d,
+                    warmPayNotePlusParent: 53.719583d,
+                    threeLayerRestaurantProduct: 61.540792d
+            ]
+            retainedHostBaselines.each { key, baseline ->
+                if (Math.abs((historical
+                        .promptRetainedBaselineSingleRunMs[key].host as double)
+                        - baseline) > 0.000001d
+                        || Math.abs((historical
+                        .round11ObservedSingleRunMs[key].host as double)
+                        - round11ObservedHosts[key]) > 0.000001d) {
+                    failures << "Historical host baseline differs: ${key}"
+                }
+            }
+            if (sameScenarioP95.repeatedP95Rows != null) {
+                if ((sameScenarioP95.repeatedP95Rows.keySet() as Set)
+                        != (retainedHostBaselines.keySet() as Set)) {
+                    failures << 'Round 12 p95 requires the exact three scenarios'
+                }
+                boolean preferredPass = true
+                boolean hardPass = true
+                retainedHostBaselines.each { key, baseline ->
+                    def row = sameScenarioP95.repeatedP95Rows[key]
+                    if (row == null || !(row.round12P95Ms instanceof Number)
+                            || !(row.baselineHostMs instanceof Number)
+                            || Math.abs((row.baselineHostMs as double)
+                            - baseline) > 0.000001d) {
+                        failures << "Round 12 p95 row is incomplete: ${key}"
+                        preferredPass = false
+                        hardPass = false
+                    } else {
+                        double regression = ((row.round12P95Ms as double)
+                                / baseline - 1.0d) * 100.0d
+                        String preferred = regression
+                                <= campaign.preferredHostP95RegressionPercent
+                                ? 'PASS' : 'MISS'
+                        String hard = regression
+                                <= campaign.hardHostP95RegressionPercent
+                                ? 'PASS' : 'FAIL'
+                        if (!(row.regressionPercent instanceof Number)
+                                || Math.abs(regression
+                                - (row.regressionPercent as double)) > 0.0001d
+                                || row.preferredGate != preferred
+                                || row.hardGate != hard) {
+                            failures << "Round 12 p95 gate differs: ${key}"
+                        }
+                        preferredPass &= preferred == 'PASS'
+                        hardPass &= hard == 'PASS'
+                    }
+                }
+                String measuredStatus = !hardPass ? 'FAIL'
+                        : preferredPass ? 'PASS' : 'PASS_HARD_GATE'
+                if (sameScenarioP95.status != measuredStatus) {
+                    failures << 'Round 12 p95 aggregate status differs'
+                }
+            }
+            historical.evidenceFiles.each { key, reference ->
+                File retained = new File(evidenceFile.parentFile,
+                        reference.path.toString())
+                if (!retained.isFile()
+                        || sha256(retained.bytes)
+                        != reference.sha256) {
+                    failures << "Historical Round 11 evidence differs: "
+                            + reference.path
+                }
+            }
+            Closure<List<File>> verifyEvidenceFiles = {
+                references, String label ->
+                    references.collect { reference ->
+                        File measured = new File(evidenceFile.parentFile,
+                                reference.path.toString())
+                        if (!measured.isFile()
+                                || sha256(measured.bytes)
+                                != reference.sha256) {
+                            failures << "${label} evidence differs: "
+                                    + reference.path
+                        }
+                        measured
+                    }
+            }
+            List<File> nbaFiles = verifyEvidenceFiles(
+                    nbaEvidence.evidenceFiles, 'Round 12 NBA')
+            verifyEvidenceFiles(sameScenarioP95.evidenceFiles,
+                    'Round 12 p95')
+            if (nbaEvidence.status != 'PENDING_VERIFICATION') {
+                nbaFiles.findAll { it.isFile() }.each { measured ->
+                    def nba = new groovy.json.JsonSlurper().parse(measured)
+                    if (nba.schemaVersion != 'round12-nba-evidence-v1'
+                            || nba.status != 'MEASURED_SINGLE_SCENARIO'
+                            || nba.sourceState.mainSourceManifestSha256
+                            != evidence.source.mainSourceManifestSha256
+                            || (nbaEvidence.status == 'PASS'
+                            && nba.forbiddenCounters.any {
+                                key, value -> value != 0
+                            })) {
+                        failures << 'Round 12 NBA evidence is inconsistent: '
+                                + measured
+                    }
+                }
+            }
+
+            def expectedZeroCounters = [
+                    'REQUEST_FRAGMENTS', 'TIMELINE_ENTRY_FRAGMENTS',
+                    'ORDINARY_NODE_FRAGMENTS', 'FULL_ENVIRONMENT_SCANS',
+                    'SOURCE_REPLAYS_PER_PARENT',
+                    'POST_PROCESS_FULL_PROJECTIONS',
+                    'PARENT_PROCESS_RERUNS_ON_GRAPH_RETRY',
+                    'CHILD_PROCESS_RERUNS_ON_PARENT_RETRY'
+            ] as Set
+            if ((evidence.structuralEvidence.requiredZeroCounters.keySet()
+                    as Set) != expectedZeroCounters) {
+                failures << 'Round 12 structural evidence needs eight counters'
+            }
+            if (!allowedExecutionStatuses.contains(
+                    evidence.structuralEvidence.status)
+                    || !allowedExecutionStatuses.contains(
+                    evidence.artifacts.status)) {
+                failures << 'Round 12 structural/artifact status is invalid'
+            }
+            def artifactHashes = [
+                    'mainJarSha256', 'sourcesJarSha256',
+                    'javadocJarSha256', 'testFixturesJarSha256'
+            ]
+            def sha256Pattern = ~/[0-9a-f]{64}/
+            def expectedArchiveTests = [
+                    'blue.coordination.api.DocumentRevisionInitializationCausalityTest',
+                    'blue.coordination.internal.DocumentAdmissionCauseTest',
+                    'blue.coordination.internal.EmbeddedEpochInputInitializationCausalityTest',
+                    'blue.coordination.internal.EmbeddingBindingCanonicalOrderTest'
+            ] as Set
+            if (evidence.sourceArchive.configuration != 'CONFIGURED'
+                    || evidence.sourceArchive.authoritativeVersionFile
+                    != '.cz.toml'
+                    || evidence.sourceArchive.authoritativeVersionFileIncluded
+                    != true
+                    || evidence.sourceArchive.reproducibleFileOrder != true
+                    || evidence.sourceArchive.preserveFileTimestamps != false
+                    || evidence.sourceArchive.duplicatesStrategy != 'FAIL'
+                    || (evidence.sourceArchive.focusedTests as Set)
+                    != expectedArchiveTests
+                    || evidence.sourceArchive.detachedHashEvidence.mode
+                    != 'DETACHED_POST_BUILD_SIDECAR'
+                    || evidence.sourceArchive.detachedHashEvidence
+                    .embeddedInSourceArchive != false
+                    || evidence.sourceArchive.detachedHashEvidence.sidecarPath
+                    != "build/distributions/blue-coordination-java-${version}"
+                    + '-source.zip.sha256') {
+                failures << 'Round 12 source-archive configuration is incomplete'
+            }
+
+            def timelineCapability = evidence.capabilities.find {
+                it.id == 'generic-timeline-entry-document-target'
+            }
+            if (timelineCapability == null
+                    || timelineCapability.blocker != false
+                    || evidence.blockers.any {
+                        it.id == 'generic-timeline-entry-document-target'
+                    }) {
+                failures << 'Generic Timeline targeting must remain optional'
+            }
+            if (!evidence.blockers.any {
+                it.id == 'provider-mandate-resolver'
+            }) {
+                failures << 'Provider-backed Mandate resolver must remain a blocker'
+            }
+
+            String report = file(
+                    'docs/releases/3.0.0-rc.1-test-report.md')
+                    .getText('UTF-8')
+            expectedStatuses.each { key ->
+                if (!report.contains(
+                        "| `${key}` | `${evidence.status[key]}` |")) {
+                    failures << "Canonical report/evidence status differs for ${key}"
+                }
+            }
+            expectedProofs.keySet().each { proof ->
+                if (!report.contains("`${proof}`")) {
+                    failures << "Canonical report omits proof ${proof}"
+                }
+            }
+            List<String> reportLines = report.readLines()
+            evidence.proofs.each { proof ->
+                String row = reportLines.find {
+                    it.contains("| `${proof.id}` |")
+                }
+                if (row == null
+                        || !row.endsWith("| `${proof.status}` |")) {
+                    failures << "Canonical proof status differs: ${proof.id}"
+                }
+            }
+            evidence.runtimes.each { runtime ->
+                String row = reportLines.find {
+                    it.startsWith("| Java ${runtime.java} |")
+                }
+                if (row == null || !row.contains("| `${runtime.status}` |")) {
+                    failures << "Canonical runtime status differs: Java "
+                            + runtime.java
+                }
+            }
+            evidence.tests.suites.each { suite ->
+                String row = reportLines.find {
+                    it.contains("(`${suite.name}`)")
+                }
+                if (row == null
+                        || !row.contains("| ${suite.classes} | ${suite.tests} |")
+                        || !row.endsWith("| `${suite.status}` |")) {
+                    failures << "Canonical test inventory differs: ${suite.name}"
+                }
+            }
+            String totalRow = reportLines.find { it.startsWith('| **Total** |') }
+            if (totalRow == null
+                    || !totalRow.contains("**${evidence.tests.classes}**")
+                    || !totalRow.contains("**${evidence.tests.tests}**")
+                    || !totalRow.contains(
+                    "**`${evidence.tests.executionStatus}`**")) {
+                failures << 'Canonical aggregate test inventory differs'
+            }
+            if (!report.contains(evidence.source.mainSourceManifestSha256)) {
+                failures << 'Canonical report omits the main-source manifest'
+            }
+
+            boolean interim = evidence.evidenceState == 'INTERIM'
+            if (interim) {
+                def requiredInterimStatuses = [
+                        temporalArchitectureReady: 'PENDING_VERIFICATION',
+                        inMemoryEngineWorkingReady: 'PENDING_VERIFICATION',
+                        providerBackedReady: 'BLOCKED_SCOPE',
+                        mandateAgentReady: 'BLOCKED_UPSTREAM',
+                        playgroundLatencyReady: 'PENDING_VERIFICATION',
+                        publicRcReady: 'BLOCKED'
+                ]
+                if (evidence.verdict != 'PENDING_VERIFICATION'
+                        || evidence.status != requiredInterimStatuses) {
+                    failures << 'Round 12 INTERIM verdict/status set is inconsistent'
+                }
+                if (evidence.source.candidateCommit != null
+                        || evidence.source.binding
+                        != 'BASE_COMMIT_PLUS_DIRTY_WORKTREE_MANIFEST'
+                        || evidence.source.worktree != 'DIRTY'
+                        || !evidence.source.dirtyReason) {
+                    failures << 'Round 12 INTERIM source binding is inconsistent'
+                }
+                def executionStatuses = [
+                        evidence.tests.executionStatus,
+                        evidence.performance.round12Campaign.status,
+                        evidence.performance.round12Campaign
+                                .nbaLifecycleEvidence.status,
+                        evidence.performance.round12Campaign
+                                .sameScenarioP95.status,
+                        evidence.structuralEvidence.status,
+                        evidence.artifacts.status,
+                        evidence.sourceArchive.extractedConfiguration,
+                        evidence.sourceArchive.focusedTestsStatus,
+                        evidence.sourceArchive.publishedArtifactSmokeBuild,
+                        evidence.sourceArchive.detachedHashEvidence.status,
+                        evidence.publicationEvidence.status
+                ] + evidence.runtimes.collect { it.status }
+                executionStatuses.addAll(evidence.proofs.collect { it.status })
+                boolean hasWorktreeResults = executionStatuses.any {
+                    it != 'PENDING_VERIFICATION'
+                }
+                if (evidence.executionBinding.kind == 'PENDING') {
+                    if (hasWorktreeResults
+                            || evidence.executionBinding
+                            .mainSourceManifestSha256 != null
+                            || evidence.executionBinding.candidateCommit != null) {
+                        failures << 'Pending execution binding contains results'
+                    }
+                } else if (evidence.executionBinding.kind
+                        == 'WORKTREE_EXECUTION') {
+                    if (evidence.executionBinding.mainSourceManifestSha256
+                            != evidence.source.mainSourceManifestSha256
+                            || evidence.executionBinding.candidateCommit != null) {
+                        failures << 'Worktree results are not manifest-bound'
+                    }
+                } else {
+                    failures << 'INTERIM evidence has an invalid execution binding'
+                }
+                def resultFields = ['failures', 'errors', 'skipped']
+                if (evidence.tests.executionStatus
+                        == 'PENDING_VERIFICATION') {
+                    if (resultFields.any { evidence.tests[it] != null }
+                            || evidence.tests.suites.any {
+                                it.status != 'PENDING_VERIFICATION'
+                                        || resultFields.any { field ->
+                                            it[field] != null
+                                        }
+                            }) {
+                        failures << 'Pending test results contain measurements'
+                    }
+                } else if (resultFields.any {
+                    !(evidence.tests[it] instanceof Number)
+                } || evidence.tests.suites.any { suite ->
+                    suite.status == 'PENDING_VERIFICATION'
+                            || resultFields.any {
+                                !(suite[it] instanceof Number)
+                            }
+                }) {
+                    failures << 'Measured worktree test results are incomplete'
+                } else if (evidence.tests.executionStatus == 'PASS'
+                        && (resultFields.any { evidence.tests[it] != 0 }
+                        || evidence.tests.suites.any { suite ->
+                            suite.status != 'PASS'
+                                    || resultFields.any { suite[it] != 0 }
+                        })) {
+                    failures << 'Passing worktree test results are inconsistent'
+                }
+                if (evidence.runtimes.any { runtime ->
+                    runtime.status == 'PENDING_VERIFICATION'
+                            ? runtime.durationSeconds != null
+                            : !(runtime.durationSeconds instanceof Number)
+                            || runtime.durationSeconds <= 0
+                }) {
+                    failures << 'Worktree runtime duration/status is inconsistent'
+                }
+                if (nbaEvidence.status == 'PENDING_VERIFICATION'
+                        ? !nbaEvidence.evidenceFiles.empty
+                        : nbaEvidence.evidenceFiles.empty) {
+                    failures << 'Round 12 NBA evidence status is inconsistent'
+                }
+                if (sameScenarioP95.status == 'PENDING_VERIFICATION') {
+                    if (sameScenarioP95.singleRunMs != null
+                            || sameScenarioP95.repeatedP95Rows != null
+                            || !sameScenarioP95.evidenceFiles.empty) {
+                        failures << 'Pending Round 12 p95 evidence is not empty'
+                    }
+                } else if (sameScenarioP95.singleRunMs == null
+                        || sameScenarioP95.repeatedP95Rows == null
+                        || sameScenarioP95.evidenceFiles.empty) {
+                    failures << 'Measured Round 12 p95 evidence is incomplete'
+                }
+                if (evidence.structuralEvidence.status
+                        == 'PENDING_VERIFICATION') {
+                    if (evidence.structuralEvidence.requiredZeroCounters.any {
+                        key, value -> value != null
+                    }) {
+                        failures << 'Pending structural counters are not null'
+                    }
+                } else if (evidence.structuralEvidence
+                        .requiredZeroCounters.any {
+                            key, value -> !(value instanceof Number)
+                        }) {
+                    failures << 'Measured structural counters are incomplete'
+                } else if (evidence.structuralEvidence.status == 'PASS'
+                        && evidence.structuralEvidence.requiredZeroCounters.any {
+                            key, value -> value != 0
+                        }) {
+                    failures << 'Passing structural counters are not zero'
+                }
+                if (evidence.artifacts.status == 'PENDING_VERIFICATION') {
+                    if (artifactHashes.any {
+                        evidence.artifacts[it] != null
+                    }) {
+                        failures << 'Pending artifact hashes are not null'
+                    }
+                } else if (artifactHashes.any {
+                    !(evidence.artifacts[it] ==~ sha256Pattern)
+                }) {
+                    failures << 'Measured artifact hashes are incomplete'
+                }
+                def archiveStatuses = [
+                        evidence.sourceArchive.extractedConfiguration,
+                        evidence.sourceArchive.focusedTestsStatus,
+                        evidence.sourceArchive.publishedArtifactSmokeBuild,
+                        evidence.sourceArchive.detachedHashEvidence.status
+                ]
+                if (archiveStatuses.any { it == 'PENDING_VERIFICATION' }
+                        ? !evidence.sourceArchive.pendingReason
+                        : evidence.sourceArchive.pendingReason != null) {
+                    failures << 'Worktree source-archive state is inconsistent'
+                }
+                if (evidence.publicationEvidence.status
+                        == 'PENDING_VERIFICATION'
+                        ? evidence.publicationEvidence.durationSeconds != null
+                        : !(evidence.publicationEvidence.durationSeconds
+                        instanceof Number)) {
+                    failures << 'Worktree publication result is inconsistent'
+                }
+                if (!report.contains(
+                        'ROUND12_INTERIM_VERIFICATION: PENDING_VERIFICATION')
+                        || report.contains('ROUND12_FINAL_VERIFICATION:')) {
+                    failures << 'Canonical report lacks the INTERIM marker'
+                }
+            } else {
+                def sha1Pattern = ~/[0-9a-f]{40}/
+                if (!(evidence.source.candidateCommit ==~ sha1Pattern)
+                        || evidence.source.binding != 'CANDIDATE_COMMIT'
+                        || evidence.source.worktree != 'CLEAN'
+                        || evidence.source.dirtyReason != null
+                        || evidence.executionBinding.kind
+                        != 'CANDIDATE_COMMIT_EXECUTION'
+                        || evidence.executionBinding.candidateCommit
+                        != evidence.source.candidateCommit
+                        || evidence.executionBinding.mainSourceManifestSha256
+                        != evidence.source.mainSourceManifestSha256) {
+                    failures << 'Round 12 FINAL source binding is inconsistent'
+                }
+                def resultFields = ['failures', 'errors', 'skipped']
+                if (evidence.tests.executionStatus
+                        == 'PENDING_VERIFICATION'
+                        || resultFields.any {
+                            !(evidence.tests[it] instanceof Number)
+                        } || evidence.tests.suites.any { suite ->
+                            suite.status == 'PENDING_VERIFICATION'
+                                    || resultFields.any {
+                                        !(suite[it] instanceof Number)
+                                    }
+                        }) {
+                    failures << 'Round 12 FINAL test results are incomplete'
+                }
+                if (evidence.runtimes.any {
+                    it.status == 'PENDING_VERIFICATION'
                             || !(it.durationSeconds instanceof Number)
                             || it.durationSeconds <= 0
+                } || evidence.proofs.any {
+                    it.status == 'PENDING_VERIFICATION'
                 }) {
-            failures << 'Java 17 and Java 21 runtime evidence must be complete'
-        }
-
-        def expectedProofCounters = [
-                'committed-parent-graph-publication-failure':
-                        ['parentProcessReruns', 0],
-                'child-commit-lagging-parents':
-                        ['childProcessReruns', 0],
-                'recovery-normalizes-stale-readiness':
-                        ['childReplays', 0]
-        ]
-        evidence.readinessProofs.each { proof ->
-            if (proof.status != 'PASS') {
-                failures << "Readiness proof ${proof.id} did not PASS"
-            }
-            def expected = expectedProofCounters[proof.id]
-            if (expected != null && proof[expected[0]] != expected[1]) {
-                failures << "Readiness proof ${proof.id} repeated PROCESS work"
-            }
-        }
-        if ((evidence.readinessProofs.collect { it.id } as Set) != ([
-                'committed-parent-graph-publication-failure',
-                'child-commit-lagging-parents',
-                'recovery-normalizes-stale-readiness',
-                'independent-application-read-preconditions'
-        ] as Set)) {
-            failures << 'Round 11 readiness proof set is incomplete'
-        }
-        [
-                'businessOnlyTransitionReusesIdentity',
-                'realSourceSurfaceChangeInvalidatesIdentity',
-                'canonicalOrderingAndDelimiterSafety'
-        ].each { key ->
-            if (evidence.sourceSurfaceIdentity[key] != 'PASS') {
-                failures << "Source-surface identity proof ${key} did not PASS"
-            }
-        }
-
-        def hostRow = evidence.performance.repeatedP95Rows
-                .hostOverheadAroundOneProcess
-        double calculatedRegression =
-                ((hostRow.round11P95Ms as double)
-                        / (hostRow.baselineP95Ms as double) - 1.0d) * 100.0d
-        if (evidence.performance.status != 'PASS_HARD_GATE'
-                || hostRow.preferredGate != 'MISS'
-                || hostRow.hardGate != 'PASS'
-                || calculatedRegression
-                        > (evidence.performance
-                        .hardHostP95RegressionPercent as double)
-                || calculatedRegression
-                        <= (evidence.performance
-                        .preferredHostP95RegressionPercent as double)
-                || Math.abs(calculatedRegression
-                        - (hostRow.regressionPercent as double)) > 0.0001d) {
-            failures << 'Round 11 host p95 gate evidence is inconsistent'
-        }
-        def sha256Pattern = ~/[0-9a-f]{64}/
-        [
-                'baselineRuntimeEvidenceSha256',
-                'baselineProvenanceSha256',
-                'baselineTimingEvidenceSha256',
-                'round11RuntimeEvidenceSha256',
-                'round11ProvenanceSha256',
-                'round11TimingEvidenceSha256'
-        ].each { key ->
-            if (!(evidence.performance[key] ==~ sha256Pattern)) {
-                failures << "Performance evidence lacks valid ${key}"
-            }
-        }
-        def performanceFileHashes = [
-                baselineRuntimeComparison:
-                        evidence.performance.baselineRuntimeEvidenceSha256,
-                baselineRuntimeProvenance:
-                        evidence.performance.baselineProvenanceSha256,
-                baselineLargeHostTimings:
-                        evidence.performance.baselineTimingEvidenceSha256,
-                round11RuntimeComparison:
-                        evidence.performance.round11RuntimeEvidenceSha256,
-                round11RuntimeProvenance:
-                        evidence.performance.round11ProvenanceSha256,
-                round11LargeHostTimings:
-                        evidence.performance.round11TimingEvidenceSha256
-        ]
-        evidence.performance.evidenceFiles.each { key, relativePath ->
-            File retainedEvidence = new File(
-                    evidenceFile.parentFile, relativePath.toString())
-            if (!retainedEvidence.isFile()) {
-                failures << "Retained performance evidence is missing: "
-                        + relativePath
-            } else {
-                String actualHash = java.security.MessageDigest
-                        .getInstance('SHA-256')
-                        .digest(retainedEvidence.bytes)
-                        .encodeHex().toString()
-                if (actualHash != performanceFileHashes[key]) {
-                    failures << "Retained performance evidence hash differs: "
-                            + relativePath
+                    failures << 'Round 12 FINAL lanes/proofs are incomplete'
+                }
+                if (campaign.status == 'PENDING_VERIFICATION'
+                        || nbaEvidence.status == 'PENDING_VERIFICATION'
+                        || nbaEvidence.evidenceFiles.empty
+                        || sameScenarioP95.status == 'PENDING_VERIFICATION'
+                        || sameScenarioP95.singleRunMs == null
+                        || sameScenarioP95.repeatedP95Rows == null
+                        || sameScenarioP95.evidenceFiles.empty) {
+                    failures << 'Round 12 FINAL performance is incomplete'
+                }
+                if (evidence.structuralEvidence.status
+                        == 'PENDING_VERIFICATION'
+                        || evidence.structuralEvidence.requiredZeroCounters.any {
+                            key, value -> !(value instanceof Number)
+                        }) {
+                    failures << 'Round 12 FINAL counters are incomplete'
+                }
+                if (evidence.artifacts.status == 'PENDING_VERIFICATION'
+                        || artifactHashes.any {
+                            !(evidence.artifacts[it] ==~ sha256Pattern)
+                        }) {
+                    failures << 'Round 12 FINAL artifact hashes are incomplete'
+                }
+                if ([evidence.sourceArchive.extractedConfiguration,
+                     evidence.sourceArchive.focusedTestsStatus,
+                     evidence.sourceArchive.publishedArtifactSmokeBuild,
+                     evidence.sourceArchive.detachedHashEvidence.status]
+                        .any { it == 'PENDING_VERIFICATION' }
+                        || evidence.sourceArchive.pendingReason != null) {
+                    failures << 'Round 12 FINAL source archive is incomplete'
+                }
+                if (evidence.publicationEvidence.status
+                        == 'PENDING_VERIFICATION'
+                        || !(evidence.publicationEvidence.durationSeconds
+                        instanceof Number)) {
+                    failures << 'Round 12 FINAL publication is incomplete'
+                }
+                if (!report.contains(
+                        "ROUND12_FINAL_VERIFICATION: ${evidence.verdict}")
+                        || report.contains('ROUND12_INTERIM_VERIFICATION:')) {
+                    failures << 'Canonical report lacks the FINAL marker'
                 }
             }
-        }
-        if (evidence.structuralEvidence.status != 'PASS'
-                || evidence.structuralEvidence.requiredZeroCounters.size() != 8
-                || evidence.structuralEvidence.requiredZeroCounters.any {
-                    key, value -> value != 0
-                }) {
-            failures << 'Forbidden-work counters must contain eight exact zeroes'
-        }
-        if (evidence.scenarios.wadowiceStressOracle != 'PASS'
-                || evidence.scenarios.nba != 'PASS'
-                || evidence.scenarios.canonicalRepositoryWadowice
-                != 'NOT_PROVEN') {
-            failures << 'Scenario evidence is inconsistent'
-        }
-
-        if (evidence.blueBasic.status != 'PASS') {
-            failures << 'Historical blue-basic campaign did not PASS'
-        } else {
-            ['tests', 'classes', 'failures', 'errors', 'skipped'].each { key ->
-                long suiteTotal = evidence.blueBasic.suites.sum {
-                    (it[key] as Number).longValue()
-                }
-                if (suiteTotal != (evidence.blueBasic[key] as Number).longValue()) {
-                    failures << "blue-basic ${key} total is inconsistent"
+            [
+                    'docs/releases/3.0.0-rc.1-round11-test-report.md',
+                    'docs/releases/3.0.0-rc.1-round11-evidence.json',
+                    'docs/releases/3.0.0-rc.1-round12-test-report.md',
+                    'docs/releases/3.0.0-rc.1-round12-evidence.json'
+            ].each { duplicate ->
+                if (file(duplicate).exists()) {
+                    failures << "Duplicate release evidence surface remains: ${duplicate}"
                 }
             }
-            if (evidence.blueBasic.tests != 40
-                    || evidence.blueBasic.classes != 27
-                    || evidence.blueBasic.failures != 0
-                    || evidence.blueBasic.errors != 0
-                    || evidence.blueBasic.skipped != 0
-                    || evidence.blueBasic.suites.any { it.status != 'PASS' }) {
-                failures << 'Historical blue-basic aggregate is inconsistent'
+            if (!failures.empty) {
+                throw new GradleException(failures.join('\n'))
             }
+            return
         }
-        if (evidence.playground.status != 'PASS'
-                || evidence.playground.durationSeconds != 8) {
-            failures << 'Playground compile/check evidence is incomplete'
-        }
-        if (evidence.publicationEvidence.status != 'BLOCKED_UPSTREAM'
-                || evidence.publicationEvidence.missingCoordinates.size() != 2
-                || evidence.publicationEvidence.externalConsumerSmokeBuild
-                != 'BLOCKED_UPSTREAM') {
-            failures << 'Published dependency blocker evidence is incomplete'
-        }
-        if (evidence.artifacts.status != 'PASS') {
-            failures << 'Built artifact evidence did not PASS'
-        }
-        [
-                'mainJarSha256', 'sourcesJarSha256',
-                'javadocJarSha256', 'testFixturesJarSha256'
-        ].each { key ->
-            if (!(evidence.artifacts[key] ==~ sha256Pattern)) {
-                failures << "Artifact evidence lacks valid ${key}"
-            }
-        }
-
-        boolean archivePending = evidence.source.candidateCommit == null
-                || evidence.sourceArchive.sha256 == null
-        if (archivePending) {
-            if (evidence.source.candidateCommit != null
-                    || evidence.sourceArchive.sha256 != null
-                    || evidence.sourceArchive.extractedConfiguration
-                    != 'PENDING_VERIFICATION'
-                    || !evidence.sourceArchive.pendingReason) {
-                failures << 'Candidate/source-archive pending state is inconsistent'
-            }
-        } else if (!(evidence.source.candidateCommit ==~ /[0-9a-f]{40}/)
-                || !(evidence.sourceArchive.sha256 ==~ sha256Pattern)
-                || evidence.sourceArchive.extractedConfiguration != 'PASS'
-                || evidence.sourceArchive.pendingReason != null) {
-            failures << 'Final candidate/source-archive evidence is inconsistent'
-        }
-        if (!(evidence.source.mainSourceManifestSha256 ==~ sha256Pattern)
-                || evidence.sourceArchive.publishedArtifactSmokeBuild
-                != 'BLOCKED_UPSTREAM') {
-            failures << 'Source manifest/archive evidence is inconsistent'
-        }
-        String report = file(
-                'docs/releases/3.0.0-rc.1-test-report.md')
-                .getText('UTF-8')
-        expectedStatuses.each { key ->
-            if (!report.contains("`${key}`")) {
-                failures << "Canonical report omits readiness status ${key}"
-            }
-            if (!report.contains(
-                    "| `${key}` | `${evidence.status[key]}` |")) {
-                failures << "Canonical report/evidence status differs for ${key}"
-            }
-        }
-        if (!report.contains(
-                "ROUND11_FINAL_VERIFICATION: ${evidence.verdict}")) {
-            failures << 'Canonical report verdict differs from machine evidence'
-        }
-        if (archivePending) {
-            if (report.count('PENDING_VERIFICATION') != 1
-                    || !report.contains(
-                    'archive SHA-256 and extracted configuration result\n'
-                            + 'remain `PENDING_VERIFICATION`')) {
-                failures << 'Only candidate source-archive finalization may remain pending'
-            }
-        } else if (report.contains('PENDING_VERIFICATION')) {
-            failures << 'Finalized report still contains pending evidence'
-        }
-        [
-                'docs/releases/3.0.0-rc.1-round11-test-report.md',
-                'docs/releases/3.0.0-rc.1-round11-evidence.json'
-        ].each { duplicate ->
-            if (file(duplicate).exists()) {
-                failures << "Duplicate release evidence surface remains: ${duplicate}"
-            }
-        }
+        failures << 'Canonical evidence must use the Round 12 profile'
         if (!failures.empty) {
             throw new GradleException(failures.join('\n'))
         }
@@ -1001,6 +2082,197 @@ tasks.register('verifySourceArchiveHygiene') {
                         "Source archive rule is missing: ${rule}")
             }
         }
+    }
+}
+
+def sourceArchiveIncludes = [
+        '.cz.toml', '.gitattributes', '.github/**', '.gitignore',
+        'CHANGELOG.md', 'CONTRIBUTING.md', 'LICENSE', 'README.md',
+        'SECURITY.md', 'START-HERE.md', 'build.gradle', 'docs/**',
+        'gradle/**', 'gradle.lockfile', 'gradle.properties', 'gradlew',
+        'gradlew.bat', 'scripts/**', 'settings.gradle', 'src/**'
+]
+def sourceArchiveExcludes = [
+        '**/.git/**', '**/.gradle/**', '**/.idea/**', '**/build/**',
+        '**/out/**', '**/*.zip', '**/__MACOSX/**', '**/._*',
+        '**/.DS_Store', '**/*.class', '**/*.jfr', '**/*.hprof',
+        '**/hs_err_pid*.log', '**/replay_pid*.log'
+]
+
+def coordinationSourceArchive = tasks.register(
+        'coordinationSourceArchive', Zip) {
+    group = 'distribution'
+    description = 'Creates the self-contained Coordination source archive.'
+    archiveFileName = "blue-coordination-java-${version}-source.zip"
+    destinationDirectory = layout.buildDirectory.dir('distributions')
+    includeEmptyDirs = false
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+    duplicatesStrategy = org.gradle.api.file.DuplicatesStrategy.FAIL
+    into("blue-coordination-java-${version}") {
+        from(rootDir) {
+            include sourceArchiveIncludes
+            exclude sourceArchiveExcludes
+            filesMatching('gradlew') { permissions { unix(0755) } }
+        }
+    }
+}
+
+def sourceArchiveChecksum = tasks.register(
+        'coordinationSourceArchiveChecksum') {
+    group = 'distribution'
+    description = 'Writes the source archive SHA-256 sidecar.'
+    dependsOn coordinationSourceArchive
+    def archive = coordinationSourceArchive.flatMap { it.archiveFile }
+    def sidecar = archive.map { it.asFile.toPath().resolveSibling(
+            it.asFile.name + '.sha256').toFile() }
+    inputs.file(archive)
+    outputs.file(sidecar)
+    doLast {
+        File sourceArchive = archive.get().asFile
+        String hash = java.security.MessageDigest.getInstance('SHA-256')
+                .digest(sourceArchive.bytes).encodeHex().toString()
+        sidecar.get().setText("${hash}  ${sourceArchive.name}\n", 'UTF-8')
+    }
+}
+
+def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
+    group = 'verification'
+    description = 'Extracts, configures, and runs the focused Round 13 archive proofs.'
+    dependsOn sourceArchiveChecksum
+    inputs.file(coordinationSourceArchive.flatMap { it.archiveFile })
+    inputs.property('dependencyMode', dependencyMode)
+    inputs.property('testJavaVersion', providers.gradleProperty(
+            'testJavaVersion').getOrElse('17'))
+    outputs.dir(layout.buildDirectory.dir('source-archive-smoke'))
+    def verificationReceipt = layout.buildDirectory.file(
+            'reports/round13/source-archive-verification.json')
+    outputs.file(verificationReceipt)
+    doLast {
+        File sourceArchive = coordinationSourceArchive.get()
+                .archiveFile.get().asFile
+        def zip = new java.util.zip.ZipFile(sourceArchive)
+        try {
+            java.util.Collections.list(zip.entries()).each { entry ->
+                String path = entry.name.replace('\\', '/')
+                List<String> segments = path.split('/').findAll()
+                String leaf = segments.empty ? '' : segments.last()
+                String lower = path.toLowerCase(java.util.Locale.ROOT)
+                if (lower.endsWith('.zip')
+                        || lower.endsWith('.class')
+                        || segments.any { segment ->
+                            ['build', 'out', '.gradle', '__macosx'].contains(
+                                    segment.toLowerCase(
+                                            java.util.Locale.ROOT))
+                        }
+                        || leaf.startsWith('._')
+                        || leaf.equalsIgnoreCase('.DS_Store')) {
+                    throw new GradleException(
+                            "Forbidden source-archive entry: ${path}")
+                }
+            }
+        } finally {
+            zip.close()
+        }
+        File smokeRoot = layout.buildDirectory.dir(
+                'source-archive-smoke').get().asFile
+        delete smokeRoot
+        copy {
+            from zipTree(coordinationSourceArchive.get()
+                    .archiveFile.get().asFile)
+            into smokeRoot
+        }
+        File extracted = new File(
+                smokeRoot, "blue-coordination-java-${version}")
+        if (!new File(extracted, '.cz.toml').isFile()) {
+            throw new GradleException(
+                    'Extracted source archive is missing .cz.toml')
+        }
+        def forbidden = fileTree(extracted) {
+            include '**/*.zip', '**/__MACOSX/**', '**/._*',
+                    '**/.DS_Store', '**/build/**'
+        }.files
+        if (!forbidden.empty) {
+            throw new GradleException(
+                    "Forbidden source-archive entries: ${forbidden}")
+        }
+        boolean windows = System.getProperty('os.name').toLowerCase(
+                java.util.Locale.ROOT).contains('windows')
+        File wrapper = new File(extracted, windows ? 'gradlew.bat' : 'gradlew')
+        if (!windows && !wrapper.canExecute()) {
+            throw new GradleException(
+                    'Extracted source archive gradlew is not executable')
+        }
+        List<String> command = windows
+                ? ['cmd', '/d', '/c', wrapper.absolutePath]
+                : [wrapper.absolutePath]
+        command.addAll([
+                '--no-daemon', '--max-workers=1',
+                'help', 'round13SourceArchiveSmoke',
+                '-PtestJavaVersion=' + providers.gradleProperty(
+                        'testJavaVersion').getOrElse('17')
+        ])
+        if (localDependencies) {
+            command.addAll([
+                    '-PblueDependencyMode=local-composite',
+                    '-PblueBexCompositePath=' + file(providers.gradleProperty(
+                            'blueBexCompositePath').getOrElse(
+                            '../blue-bex-java')).canonicalPath,
+                    '-PblueRepositoryCompositePath=' + file(
+                            providers.gradleProperty(
+                                    'blueRepositoryCompositePath').getOrElse(
+                                    '../blue-repository-java')).canonicalPath
+            ])
+        } else {
+            command.add('-PblueDependencyMode=published-artifact')
+            if (publishedRepository != null) {
+                command.add('-PbluePublishedRepository='
+                        + uri(publishedRepository).toString())
+            }
+        }
+        Process process = new ProcessBuilder(command)
+                .directory(extracted).redirectErrorStream(true).start()
+        process.inputStream.eachLine { logger.lifecycle(it) }
+        if (process.waitFor() != 0) {
+            throw new GradleException(
+                    'Extracted source archive smoke build failed')
+        }
+        File sidecar = new File(
+                sourceArchive.parentFile, sourceArchive.name + '.sha256')
+        String archiveHash = java.security.MessageDigest
+                .getInstance('SHA-256').digest(sourceArchive.bytes)
+                .encodeHex().toString()
+        if (!sidecar.isFile() || !sidecar.getText('UTF-8')
+                .startsWith(archiveHash + '  ' + sourceArchive.name)) {
+            throw new GradleException(
+                    'Extracted source archive detached checksum differs')
+        }
+        File receipt = verificationReceipt.get().asFile
+        receipt.parentFile.mkdirs()
+        def receiptValue = [
+                schemaId: 'blue-coordination-round13-source-archive-verification-v1',
+                archiveName: sourceArchive.name,
+                archiveSha256: archiveHash,
+                checksumMode: 'DETACHED_SHA256_SIDECAR',
+                checksumPath: rootDir.toPath().relativize(
+                        sidecar.toPath()).toString().replace('\\', '/'),
+                dependencyMode: dependencyMode,
+                java: providers.gradleProperty(
+                        'testJavaVersion').getOrElse('17'),
+                extractedConfiguration: 'PASS',
+                focusedTestsStatus: 'PASS',
+                publishedArtifactSmokeBuild: localDependencies
+                        ? 'PENDING_VERIFICATION' : 'PASS',
+                focusedTasks: [
+                        'round13SourceArchiveUnitTest',
+                        'round13SourceArchiveIntegrationTest',
+                        'round13SourceArchiveScenarioTest',
+                        'round13SourceArchiveConsumerTest'
+                ]
+        ]
+        receipt.setText(groovy.json.JsonOutput.prettyPrint(
+                groovy.json.JsonOutput.toJson(receiptValue)) + '\n',
+                'UTF-8')
     }
 }
 
@@ -1114,7 +2386,7 @@ tasks.register('productionizationCheck') {
             'verifyPublicationPom', 'verifyPublishedModeIsolation',
             'verifyReleaseMetadata', 'verifyDocumentation',
             'verifySourceArchiveHygiene', 'scenarioTest',
-            'verifyTestArchitecture'
+            'verifyTestArchitecture', extractedSourceArchive
 }
 
 tasks.register('releaseCheck') {
@@ -1125,41 +2397,185 @@ tasks.register('releaseCheck') {
             'verifyPublishedModeIsolation', 'verifyReleaseMetadata',
             'verifyDocumentation', 'verifySourceArchiveHygiene', 'test',
             'integrationTest', 'consumerTest', 'scenarioTest',
-            'verifyTestArchitecture'
+            'verifyTestArchitecture', extractedSourceArchive
 }
 
-def round11Readiness = tasks.register('verifyRound11Readiness') {
+def round13Readiness = tasks.register('verifyRound13Readiness') {
     group = 'verification'
-    description = 'Prevents staging until canonical Round 11 evidence permits it.'
+    description = 'Requires FINAL, complete Round 13 Playground evidence before staging.'
     inputs.files('docs/releases/3.0.0-rc.1-test-report.md',
-            'docs/releases/3.0.0-rc.1-evidence.json')
+            'docs/releases/3.0.0-rc.1-evidence.json',
+            'docs/releases/round13-verification.schema.json')
+    dependsOn sourceArchiveChecksum, extractedSourceArchive,
+            'verifyDocumentation',
+            'jar', 'sourcesJar', 'javadocJar', 'testFixturesJar'
     doLast {
         String report = file(
                 'docs/releases/3.0.0-rc.1-test-report.md')
                 .getText('UTF-8')
         def evidence = new groovy.json.JsonSlurper().parse(
                 file('docs/releases/3.0.0-rc.1-evidence.json'))
+        File sourceArchive = coordinationSourceArchive.get()
+                .archiveFile.get().asFile
+        File sourceArchiveSidecar = new File(
+                sourceArchive.parentFile, sourceArchive.name + '.sha256')
+        String sourceArchiveHash = java.security.MessageDigest
+                .getInstance('SHA-256').digest(sourceArchive.bytes)
+                .encodeHex().toString()
+        boolean detachedHashMatches = sourceArchiveSidecar.isFile()
+                && sourceArchiveSidecar.getText('UTF-8')
+                .startsWith(sourceArchiveHash + '  ' + sourceArchive.name)
         def publishableLatency = ['PASS', 'PASS_HARD_GATE'] as Set
-        if (evidence.status.temporalArchitectureReady != 'PASS'
+        Closure<Boolean> containsUnfinalized
+        containsUnfinalized = { value ->
+            if (['PENDING_VERIFICATION', 'FAIL', 'BLOCKED',
+                 'BLOCKED_UPSTREAM'].contains(value)) {
+                return true
+            }
+            if (value instanceof Map) {
+                return value.values().any { containsUnfinalized(it) }
+            }
+            if (value instanceof List) {
+                return value.any { containsUnfinalized(it) }
+            }
+            return false
+        }
+
+        Closure<String> gitOutput = { String... arguments ->
+            def command = ['git']
+            command.addAll(arguments as List)
+            Process process = new ProcessBuilder(command)
+                    .directory(rootDir).start()
+            String stdout = process.inputStream.getText('UTF-8')
+            String stderr = process.errorStream.getText('UTF-8')
+            if (process.waitFor() != 0) {
+                throw new GradleException("Git failed: ${stderr}")
+            }
+            stdout.trim()
+        }
+        String actualHead = gitOutput('rev-parse', 'HEAD')
+        String actualStatus = gitOutput(
+                'status', '--porcelain', '--untracked-files=normal')
+        Process ancestorProcess = new ProcessBuilder(
+                'git', 'merge-base', '--is-ancestor',
+                evidence.source.candidateCommit ?: 'INVALID', actualHead)
+                .directory(rootDir).start()
+        boolean testedCommitIsAncestor = ancestorProcess.waitFor() == 0
+        String sha256Pattern = /^[0-9a-f]{64}$/
+        def artifactTasks = [
+                mainJarSha256: 'jar',
+                sourcesJarSha256: 'sourcesJar',
+                javadocJarSha256: 'javadocJar',
+                testFixturesJarSha256: 'testFixturesJar'
+        ]
+        boolean artifactHashesMatch = artifactTasks.every {
+            evidenceKey, taskName ->
+                File artifact = tasks.named(taskName).get()
+                        .archiveFile.get().asFile
+                String actualHash = java.security.MessageDigest
+                        .getInstance('SHA-256').digest(artifact.bytes)
+                        .encodeHex().toString()
+                (evidence.artifacts[evidenceKey] ==~ sha256Pattern)
+                        && evidence.artifacts[evidenceKey] == actualHash
+        }
+        def campaign = evidence.performance.round13Campaign
+        def campaignProvenance = campaign.runtimeProvenanceJson
+                && file(campaign.runtimeProvenanceJson).isFile()
+                ? new groovy.json.JsonSlurper().parse(
+                file(campaign.runtimeProvenanceJson)) : [:]
+        File archiveReceiptFile = file(
+                'build/reports/round13/source-archive-verification.json')
+        def archiveReceipt = archiveReceiptFile.isFile()
+                ? new groovy.json.JsonSlurper().parse(archiveReceiptFile)
+                : [:]
+        boolean archiveReceiptMatches = archiveReceipt.schemaId
+                == 'blue-coordination-round13-source-archive-verification-v1'
+                && archiveReceipt.archiveName == sourceArchive.name
+                && archiveReceipt.archiveSha256 == sourceArchiveHash
+                && archiveReceipt.dependencyMode == 'published-artifact'
+                && archiveReceipt.extractedConfiguration == 'PASS'
+                && archiveReceipt.focusedTestsStatus == 'PASS'
+                && archiveReceipt.publishedArtifactSmokeBuild == 'PASS'
+        if (evidence.schemaVersion != '4.0.0'
+                || evidence.profile
+                != 'ROUND13_PLAYGROUND_FIVE_OCCURRENCE'
+                || evidence.evidenceState != 'FINAL'
+                || evidence.verdict != 'PASS'
+                || evidence.source.candidateCommit == null
+                || !testedCommitIsAncestor
+                || evidence.source.binding != 'CANDIDATE_COMMIT'
+                || evidence.source.worktree != 'CLEAN'
+                || evidence.source.dirtyReason != null
+                || !actualStatus.isEmpty()
+                || evidence.executionBinding.kind
+                != 'CANDIDATE_COMMIT_EXECUTION'
+                || evidence.executionBinding.candidateCommit
+                != evidence.source.candidateCommit
+                || evidence.executionBinding.mainSourceManifestSha256
+                != evidence.source.mainSourceManifestSha256
+                || evidence.executionBinding.reason != null
+                || evidence.status.temporalArchitectureReady != 'PASS'
                 || evidence.status.inMemoryEngineWorkingReady != 'PASS'
-                || evidence.status.mandateAgentReady != 'PASS'
+                || evidence.status.playgroundCoreReady != 'PASS'
                 || !publishableLatency.contains(
                         evidence.status.playgroundLatencyReady)
+                || evidence.status.providerBackedReady != 'OUT_OF_SCOPE'
+                || evidence.status.mandateAgentReady != 'OUT_OF_SCOPE'
                 || evidence.status.publicRcReady != 'PASS'
-                || evidence.tests.status != 'PASS'
+                || evidence.tests.executionStatus != 'PASS'
+                || evidence.tests.failures != 0
+                || evidence.tests.errors != 0
+                || evidence.tests.skipped != 0
+                || evidence.tests.suites.any {
+                    it.status != 'PASS' || it.failures != 0
+                            || it.errors != 0 || it.skipped != 0
+                }
                 || evidence.shape.status != 'PASS'
                 || evidence.artifacts.status != 'PASS'
-                || !publishableLatency.contains(evidence.performance.status)
-                || evidence.runtimes.any { it.status != 'PASS' }
-                || evidence.sourceArchive.extractedConfiguration != 'PASS'
-                || evidence.sourceArchive.publishedArtifactSmokeBuild != 'PASS'
-                || evidence.blockers.any { it.category != 'scope' }
-                || evidence.status.values().any {
-                    it.toString().startsWith('PENDING')
+                || !artifactHashesMatch
+                || !publishableLatency.contains(campaign.status)
+                || campaignProvenance.candidate?.implementationHead
+                != evidence.source.candidateCommit
+                || campaignProvenance.candidate?.worktreeStatusSha256
+                != java.security.MessageDigest.getInstance('SHA-256')
+                        .digest(new byte[0]).encodeHex().toString()
+                || campaign.comparison != 'SAME_MACHINE_INTERLEAVED_AB'
+                || campaign.requiredSamples < 30
+                || campaign.measuredSamples < campaign.requiredSamples
+                || [campaign.runtimeMarkdown, campaign.runtimeJson,
+                    campaign.runtimeProvenanceJson].any {
+                        !(it instanceof String) || !file(it).isFile()
                 }
-                || report.contains('PENDING_VERIFICATION')) {
+                || campaign.pendingReason != null
+                || evidence.runtimes.any { it.status != 'PASS' }
+                || evidence.proofs.any { it.status != 'PASS' }
+                || evidence.structuralEvidence.status != 'PASS'
+                || evidence.structuralEvidence.requiredZeroCounters.any {
+                    key, value -> value != 0
+                }
+                || evidence.sourceArchive.extractedConfiguration != 'PASS'
+                || evidence.sourceArchive.focusedTestsStatus != 'PASS'
+                || evidence.sourceArchive.publishedArtifactSmokeBuild != 'PASS'
+                || evidence.sourceArchive.verificationReceipt.path
+                != 'build/reports/round13/source-archive-verification.json'
+                || evidence.sourceArchive.checksum.mode
+                != 'DETACHED_SHA256_SIDECAR'
+                || evidence.sourceArchive.checksum.path
+                != 'build/distributions/' + sourceArchive.name + '.sha256'
+                || evidence.sourceArchive.checksum.digest != null
+                || evidence.sourceArchive.pendingReason != null
+                || !archiveReceiptMatches
+                || !detachedHashMatches
+                || evidence.publicationEvidence.status != 'PASS'
+                || !(evidence.publicationEvidence.durationSeconds
+                        instanceof Number)
+                || !evidence.blockers.empty
+                || containsUnfinalized(evidence)
+                || report.contains('PENDING_VERIFICATION')
+                || report.contains('ROUND13_INTERIM_VERIFICATION:')
+                || !report.contains('ROUND13_FINAL_VERIFICATION: PASS')) {
             throw new GradleException(
-                    'Canonical Round 11 evidence does not permit staging')
+                    'Canonical Round 13 evidence does not permit staging')
         }
     }
 }
@@ -1167,12 +2583,12 @@ def round11Readiness = tasks.register('verifyRound11Readiness') {
 tasks.register('stageRelease') {
     group = 'publishing'
     description = 'Builds the verified Maven Central staging repository.'
-    dependsOn 'releaseCheck', round11Readiness,
+    dependsOn 'releaseCheck', round13Readiness,
             'publishMavenJavaPublicationToStagingRepository'
 }
 
 tasks.named('publishMavenJavaPublicationToStagingRepository') {
-    dependsOn round11Readiness
+    dependsOn round13Readiness
 }
 
 if (localDependencies) {

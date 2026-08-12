@@ -1,130 +1,192 @@
 {
-  "$schema": "round11-verification.schema.json",
-  "schemaVersion": "2.0.0",
+  "$schema": "round13-verification.schema.json",
+  "schemaVersion": "4.0.0",
   "release": "3.0.0-rc.1",
-  "profile": "ROUND11_READINESS_CLOSURE",
-  "evidenceDate": "2026-08-10",
-  "verdict": "BLOCKED",
-  "source": {
-    "baseCommit": "4f8d76f5f9958d206ffe7f10ee92271e69c26f1c",
-    "candidateCommit": "eabdf43dca5b14a37872b759ec1adabf2fd73f08",
-    "worktree": "DIRTY",
-    "dirtyReason": "Only the pre-existing untracked Archive.zip remains; it is preserved, export-ignored, and is not the release archive",
-    "mainSourceManifestAlgorithm": "src/main/java files sorted by project-relative path; each record is path, one ASCII space, and lowercase SHA-256 of file bytes; records are LF-joined without a trailing LF",
-    "mainSourceManifestSha256": "6db75b8b9dfb1279b64f90370cb9e3d8f0ff9f836f01a5d60cb0f1518973006b"
-  },
+  "profile": "ROUND13_PLAYGROUND_FIVE_OCCURRENCE",
+  "evidenceState": "INTERIM",
+  "evidenceDate": "2026-08-11",
   "status": {
-    "temporalArchitectureReady": "PASS",
-    "inMemoryEngineWorkingReady": "PASS",
-    "providerBackedReady": "BLOCKED_SCOPE",
-    "mandateAgentReady": "BLOCKED_UPSTREAM",
-    "playgroundLatencyReady": "PASS_HARD_GATE",
+    "temporalArchitectureReady": "PENDING_VERIFICATION",
+    "inMemoryEngineWorkingReady": "PENDING_VERIFICATION",
+    "playgroundCoreReady": "PENDING_VERIFICATION",
+    "playgroundLatencyReady": "FAIL",
+    "providerBackedReady": "OUT_OF_SCOPE",
+    "mandateAgentReady": "OUT_OF_SCOPE",
     "publicRcReady": "BLOCKED"
+  },
+  "verdict": "PENDING_VERIFICATION",
+  "source": {
+    "baseCommit": "699f019cb9fa1d484a070a5d46a2335fd1cd2dce",
+    "candidateCommit": null,
+    "binding": "BASE_COMMIT_PLUS_DIRTY_WORKTREE_MANIFEST",
+    "worktree": "DIRTY",
+    "dirtyReason": "Round 13 implementation, coverage, documentation, and release-evidence changes are uncommitted in the current shared worktree.",
+    "mainSourceManifestAlgorithm": "SHA-256 over LF-joined rows of repository-relative src/main/java path, one ASCII space, and file SHA-256, sorted by path, with no trailing LF",
+    "mainSourceManifestSha256": "d0dad91fe3c2d5627c3b1900543b2a82cc9ea323afbb85ad06256da4e2cf3124"
+  },
+  "executionBinding": {
+    "kind": "WORKTREE_EXECUTION",
+    "mainSourceManifestSha256": "d0dad91fe3c2d5627c3b1900543b2a82cc9ea323afbb85ad06256da4e2cf3124",
+    "candidateCommit": null,
+    "reason": "The complete fresh Java 17 and Java 21 local-composite lanes, all seven proofs, structural counters, artifacts, extracted-archive configuration and focused smoke, and same-machine campaign are bound to this dirty-worktree main-source manifest; clean-candidate final reruns, detached final checksum verification, and published-artifact smoke remain pending."
   },
   "shape": {
     "status": "PASS",
+    "basis": "STATIC_WORKTREE_SNAPSHOT",
+    "productionClasses": 109,
+    "productionLines": 25952,
+    "publicApiSourceTypes": 16,
     "limits": {
       "productionClasses": 115,
-      "productionLines": 25700,
+      "productionLines": 25952,
       "publicApiSourceTypes": 16
     },
-    "productionClasses": 108,
-    "productionLines": 25700,
-    "publicApiSourceTypes": 16,
-    "newProductionClassesMaximum": 1,
-    "newPublicApiTypes": 0
-  },
-  "baseline": {
-    "profile": "ROUND10_PROCESS_EMBEDDED",
-    "status": "PASS",
-    "tests": 282,
-    "classes": 62,
-    "failures": 0,
-    "errors": 0,
-    "skipped": 0,
-    "suites": [
-      { "name": "test", "tests": 203, "classes": 28, "failures": 0, "errors": 0, "skipped": 0 },
-      { "name": "integrationTest", "tests": 67, "classes": 29, "failures": 0, "errors": 0, "skipped": 0 },
-      { "name": "consumerTest", "tests": 5, "classes": 1, "failures": 0, "errors": 0, "skipped": 0 },
-      { "name": "scenarioTest", "tests": 7, "classes": 4, "failures": 0, "errors": 0, "skipped": 0 }
-    ]
+    "limitRevisionReason": "The bounded revision from 25,700 to 25,952 transparently covers the occurrence-path audit receipt, closed retry-counter vocabulary and canonical mappings, real retry-monitor producers, the bounded-drain timestamp-consumption fix, the attachment-timestamp robustness guard, retained committed-input recovery evidence, deterministic invalid-entry preflight and terminalization, and injective binding identities; it adds one bounded production evidence type but no public API type or architecture subsystem."
   },
   "tests": {
-    "status": "PASS",
-    "tests": 302,
-    "classes": 65,
+    "inventoryBasis": "STATIC_SOURCE_INVENTORY",
+    "executionStatus": "PASS",
+    "finalTreeRequired": true,
+    "tests": 342,
+    "classes": 85,
     "failures": 0,
     "errors": 0,
     "skipped": 0,
     "suites": [
-      { "name": "test", "status": "PASS", "tests": 217, "classes": 29, "failures": 0, "errors": 0, "skipped": 0 },
-      { "name": "integrationTest", "status": "PASS", "tests": 73, "classes": 31, "failures": 0, "errors": 0, "skipped": 0 },
-      { "name": "consumerTest", "status": "PASS", "tests": 5, "classes": 1, "failures": 0, "errors": 0, "skipped": 0 },
-      { "name": "scenarioTest", "status": "PASS", "tests": 7, "classes": 4, "failures": 0, "errors": 0, "skipped": 0 }
+      {
+        "name": "test",
+        "status": "PASS",
+        "tests": 231,
+        "classes": 33,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "integrationTest",
+        "status": "PASS",
+        "tests": 91,
+        "classes": 41,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "consumerTest",
+        "status": "PASS",
+        "tests": 6,
+        "classes": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "scenarioTest",
+        "status": "PASS",
+        "tests": 14,
+        "classes": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
     ]
   },
   "runtimes": [
-    { "java": "17", "gate": "test integrationTest consumerTest scenarioTest releaseCheck --rerun-tasks", "status": "PASS", "durationSeconds": 722 },
-    { "java": "21", "gate": "test integrationTest consumerTest scenarioTest releaseCheck --rerun-tasks", "status": "PASS", "durationSeconds": 694 }
+    {
+      "java": "17",
+      "gate": "test integrationTest consumerTest scenarioTest releaseCheck -x verifyDocumentation --rerun-tasks -PblueDependencyMode=local-composite -PtestJavaVersion=17",
+      "status": "PASS",
+      "durationSeconds": 912
+    },
+    {
+      "java": "21",
+      "gate": "test integrationTest consumerTest scenarioTest releaseCheck -x verifyDocumentation --rerun-tasks -PblueDependencyMode=local-composite -PtestJavaVersion=21",
+      "status": "PASS",
+      "durationSeconds": 877
+    }
   ],
-  "readinessProofs": [
-    { "id": "committed-parent-graph-publication-failure", "status": "PASS", "parentProcessReruns": 0 },
-    { "id": "child-commit-lagging-parents", "status": "PASS", "childProcessReruns": 0 },
-    { "id": "recovery-normalizes-stale-readiness", "status": "PASS", "childReplays": 0 },
-    { "id": "independent-application-read-preconditions", "status": "PASS" }
+  "proofs": [
+    {
+      "id": "five-occurrence-three-session-reuse",
+      "sourceSet": "scenarioTest",
+      "testClass": "blue.coordination.integration.PlaygroundFiveOccurrenceInitializationTest",
+      "testMethod": "fiveOccurrencesReuseThreeSessionsAndForwardFiveInitializationEvents",
+      "task": "scenarioTest",
+      "status": "PASS"
+    },
+    {
+      "id": "five-occurrence-five-parent-events",
+      "sourceSet": "scenarioTest",
+      "testClass": "blue.coordination.integration.PlaygroundFiveOccurrenceInitializationTest",
+      "testMethod": "fiveOccurrencesReuseThreeSessionsAndForwardFiveInitializationEvents",
+      "task": "scenarioTest",
+      "status": "PASS"
+    },
+    {
+      "id": "five-occurrence-canonical-path-order",
+      "sourceSet": "scenarioTest",
+      "testClass": "blue.coordination.integration.PlaygroundFiveOccurrenceDeterminismScenarioTest",
+      "testMethod": "reverseRequestInsertionOrderPreservesBlueIdsHistoriesAndEvents",
+      "task": "scenarioTest",
+      "status": "PASS"
+    },
+    {
+      "id": "five-occurrence-retry-exactly-once",
+      "sourceSet": "integrationTest",
+      "testClass": "blue.coordination.integration.PlaygroundFiveOccurrenceRetryTest",
+      "testMethod": "retryCompletesFiveOccurrenceFanoutWithoutReinitializingChildren",
+      "task": "integrationTest",
+      "status": "PASS"
+    },
+    {
+      "id": "five-occurrence-public-JAR-consumer",
+      "sourceSet": "consumerTest",
+      "testClass": "blue.coordination.consumer.PublishedArtifactConsumerTest",
+      "testMethod": "fiveEmbeddedOccurrencesReuseThreeManagedDocuments",
+      "task": "consumerTest",
+      "status": "PASS"
+    },
+    {
+      "id": "five-occurrence-no-generic-fragmentation",
+      "sourceSet": "scenarioTest",
+      "testClass": "blue.coordination.integration.PlaygroundFiveOccurrenceInitializationTest",
+      "testMethod": "fiveOccurrencesReuseThreeSessionsAndForwardFiveInitializationEvents",
+      "task": "scenarioTest",
+      "status": "PASS"
+    },
+    {
+      "id": "five-occurrence-host-versus-frozen-time",
+      "sourceSet": "performance",
+      "testClass": null,
+      "testMethod": null,
+      "task": "round13PlaygroundSample",
+      "status": "PASS"
+    }
   ],
-  "sourceSurfaceIdentity": {
-    "algorithm": "domain-separated SHA-256 over structurally length-prefixed immutable source-surface fields",
-    "mutableBusinessBlueIdExcludedByDesign": true,
-    "businessOnlyTransitionReusesIdentity": "PASS",
-    "realSourceSurfaceChangeInvalidatesIdentity": "PASS",
-    "canonicalOrderingAndDelimiterSafety": "PASS"
-  },
   "performance": {
-    "status": "PASS_HARD_GATE",
-    "preferredHostP95RegressionPercent": 10.0,
-    "hardHostP95RegressionPercent": 20.0,
-    "baselineSingleRunMs": {
-      "warmOrdinary": { "total": 3358.363, "frozen": 3342.792, "host": 15.571 },
-      "warmPayNotePlusParent": { "total": 5258.647, "frozen": 5212.002, "host": 46.645 },
-      "threeLayerRestaurantProduct": { "total": 6262.097, "frozen": 6207.401, "host": 54.696 }
+    "round13Campaign": {
+      "status": "FAIL",
+      "comparison": "SAME_MACHINE_INTERLEAVED_AB",
+      "baselineArchive": "Archive.zip",
+      "baselineSha256": "2f303afd9435937145ce7fe09eb655ff1a05ee6ed7484faea62d93544a3ccf3e",
+      "candidateTask": "round13PlaygroundSample",
+      "warmups": 3,
+      "requiredSamples": 30,
+      "measuredSamples": 30,
+      "runtimeMarkdown": "docs/releases/evidence/round13/five-occurrence-runtime.md",
+      "runtimeJson": "docs/releases/evidence/round13/five-occurrence-runtime.json",
+      "runtimeProvenanceJson": "docs/releases/evidence/round13/runtime-provenance.json",
+      "pendingReason": null
     },
-    "round11SingleRunMs": {
-      "warmOrdinary": { "total": 3327.170791, "frozen": 3307.632958, "host": 19.537833 },
-      "warmPayNotePlusParent": { "total": 5318.566083, "frozen": 5264.846500, "host": 53.719583 },
-      "threeLayerRestaurantProduct": { "total": 6314.884208, "frozen": 6253.343416, "host": 61.540792 }
-    },
-    "repeatedP95Rows": {
-      "hostOverheadAroundOneProcess": {
-        "baselineP95Ms": 0.636791,
-        "round11P50Ms": 0.621750,
-        "round11P95Ms": 0.725749,
-        "round11P99Ms": 0.768583,
-        "round11MaxMs": 0.768583,
-        "regressionPercent": 13.9697,
-        "preferredGate": "MISS",
-        "hardGate": "PASS"
-      },
-      "existingChildCatchUpP95Ms": 99.233627,
-      "nbaCatchUpP95Ms": 87.689082
-    },
-    "baselineRuntimeEvidenceSha256": "5cd3ba34437f92de9a5efd4e12954aca3b94c82710164aaf507c2257fbcee213",
-    "baselineProvenanceSha256": "d9a819b69c4fa529299f80ba29f0df61458d1dcf19c4dc1fe6ab795be2afabef",
-    "baselineTimingEvidenceSha256": "f230aee7f6db4e3d29c8831d1c7654236af6b8e4af3cbb6253daa2e545c23ca2",
-    "round11RuntimeEvidenceSha256": "905f40b44c690fa3a964c5a01c47005659f1c2acf590a4243ad5ac363d24bc64",
-    "round11ProvenanceSha256": "267259f74cbe941b23aa81dbe850a56004d07522bed1e54f9a2f213ed01925b2",
-    "round11TimingEvidenceSha256": "9cc8eec2f2c51b43ad776d6c4b65ee86114c66f6116bcf6880cd0ddda2f8be94",
-    "evidenceFiles": {
-      "baselineRuntimeComparison": "evidence/round11/baseline-runtime-comparison.json",
-      "baselineRuntimeProvenance": "evidence/round11/baseline-runtime-provenance.json",
-      "baselineLargeHostTimings": "evidence/round11/baseline-large-host-timings.json",
-      "round11RuntimeComparison": "evidence/round11/final-runtime-comparison.json",
-      "round11RuntimeProvenance": "evidence/round11/final-runtime-provenance.json",
-      "round11LargeHostTimings": "evidence/round11/final-large-host-timings.json"
+    "historicalRound12": {
+      "classification": "HISTORICAL_ONLY",
+      "decisionBasis": false,
+      "summary": "The retained Round 12 measurements describe a different source profile and are comparison context only; they do not decide Round 13 latency readiness."
     }
   },
   "structuralEvidence": {
     "status": "PASS",
+    "finalTreeRequired": true,
     "requiredZeroCounters": {
       "REQUEST_FRAGMENTS": 0,
       "TIMELINE_ENTRY_FRAGMENTS": 0,
@@ -136,116 +198,120 @@
       "CHILD_PROCESS_RERUNS_ON_PARENT_RETRY": 0
     }
   },
-  "scenarios": {
-    "wadowiceStressOracle": "PASS",
-    "nba": "PASS",
-    "canonicalRepositoryWadowice": "NOT_PROVEN"
-  },
-  "blueBasic": {
-    "status": "PASS",
-    "gate": "clean allBasicTests --refresh-dependencies --rerun-tasks --no-parallel",
-    "durationSeconds": 1087,
-    "tests": 40,
-    "classes": 27,
-    "failures": 0,
-    "errors": 0,
-    "skipped": 0,
-    "suites": [
-      { "name": "test", "status": "PASS", "tests": 28, "classes": 19, "failures": 0, "errors": 0, "skipped": 0 },
-      { "name": "consumerTest", "status": "PASS", "tests": 5, "classes": 1, "failures": 0, "errors": 0, "skipped": 0 },
-      { "name": "performanceTest", "status": "PASS", "tests": 4, "classes": 4, "failures": 0, "errors": 0, "skipped": 0 },
-      { "name": "runtimeCampaign", "status": "PASS", "tests": 1, "classes": 1, "failures": 0, "errors": 0, "skipped": 0 },
-      { "name": "scenarioTest", "status": "PASS", "tests": 2, "classes": 2, "failures": 0, "errors": 0, "skipped": 0 }
-    ]
-  },
-  "playground": {
-    "status": "PASS",
-    "gate": "compileJava check",
-    "durationSeconds": 8,
-    "dependencyBoundary": "local included Blue Coordination candidate"
-  },
-  "publicationEvidence": {
-    "status": "BLOCKED_UPSTREAM",
-    "gate": "dependencyPreflight -PblueDependencyMode=published-artifact",
-    "durationSeconds": 28,
-    "resolvedCoordinates": [
-      "blue.repo:blue-repo-java:3.0.0-rc.19",
-      "blue.language:blue-contracts-core:3.1.0-rc.20"
-    ],
-    "missingCoordinates": [
-      "blue.bex:blue-bex-core:1.1.0-rc.3",
-      "blue.bex:blue-bex-contracts:1.1.0-rc.3"
-    ],
-    "versionConflict": "commons-codec:commons-codec 1.15 versus 1.11",
-    "externalConsumerSmokeBuild": "BLOCKED_UPSTREAM"
-  },
   "artifacts": {
     "status": "PASS",
-    "mainJarSha256": "c68fbd36aa35827eddb0066560d10bdfb6b3b302eb7cf6da70d386a72c72a22e",
-    "sourcesJarSha256": "7e881754ce4bf9d6abcbda9f82a1d9b9f9222b0d68b60e4363f29866fcfeb1ee",
-    "javadocJarSha256": "677fe1066f3a2b7318505efa22cb91cb9446cf47d015ab3fea25268c56cba4a9",
-    "testFixturesJarSha256": "d5cd13543675f365674eb22bb059fa5f43424cf3ef36c2ea41e87206a0d046c6"
+    "finalTreeRequired": true,
+    "mainJarSha256": "af211bbd2a8ca50424f7a9b0ac0056705f5a3d6bafe0a8cd3a8d02e8b164f0ff",
+    "sourcesJarSha256": "6e23e4e21286a7394f8d4904c8ad01f811f14025648c360b5b68c52341857da8",
+    "javadocJarSha256": "b6cc39927e4aabf945054100ab33c7fcf45589e78feed739e9b3a1351f37a6f3",
+    "testFixturesJarSha256": "d4393f58502f81583792af01b50f5350d5f8cafa3a9ba4d9752f039661f9cccb"
   },
   "sourceArchive": {
     "configuration": "CONFIGURED",
+    "finalTreeRequired": true,
     "authoritativeVersionFile": ".cz.toml",
     "authoritativeVersionFileIncluded": true,
+    "reproducibleFileOrder": true,
+    "preserveFileTimestamps": false,
+    "duplicatesStrategy": "FAIL",
     "exportIgnored": [
-      "nested ZIPs",
-      "build and Gradle output",
-      "__MACOSX and AppleDouble files",
-      "JFR and heap dumps"
+      "*.zip",
+      "build/**",
+      ".gradle/**",
+      "__MACOSX/**",
+      "._*",
+      "*.jfr",
+      "*.hprof"
     ],
     "extractedConfiguration": "PASS",
-    "publishedArtifactSmokeBuild": "BLOCKED_UPSTREAM",
-    "sha256": "a23914c62c80b65968f78adac096cb374d957d0b407f6c054296e8d33061f9df",
-    "pendingReason": null
+    "focusedTestsStatus": "PASS",
+    "publishedArtifactSmokeBuild": "PENDING_VERIFICATION",
+    "verificationReceipt": {
+      "schemaId": "blue-coordination-round13-source-archive-verification-v1",
+      "path": "build/reports/round13/source-archive-verification.json"
+    },
+    "checksum": {
+      "mode": "DETACHED_SHA256_SIDECAR",
+      "path": "build/distributions/blue-coordination-java-3.0.0-rc.1-source.zip.sha256",
+      "digest": null
+    },
+    "pendingReason": "Both fresh worktree lanes produced source ZIP SHA-256 48d8694cd2a88e78c1d242fa35dcd80131f54b9a41fae9950b0ca7f79abc88d1 and sidecar-file SHA-256 858222629e2a47f5f5217e28c0bd999562bb8a2b02f564eb19a6ded28b2debce; extracted configuration and focused smoke passed, while published-artifact smoke, clean-candidate rebuild, and final detached-checksum verification remain pending."
+  },
+  "publicationEvidence": {
+    "status": "BLOCKED_UPSTREAM",
+    "gate": "publishedArtifactPreflight and extractedArchivePublishedArtifactSmoke",
+    "durationSeconds": null,
+    "notes": "Fresh dependencyPreflight reconfirmed BLOCKED_UPSTREAM: blue.bex:blue-bex-core:1.1.0-rc.3 and blue.bex:blue-bex-contracts:1.1.0-rc.3 are missing from Maven Central, and commons-codec 1.15 versus 1.11 conflicts via blue.repo and blue.language. Published archive smoke cannot proceed, and local-composite execution cannot substitute for published resolution."
   },
   "capabilities": [
     {
-      "id": "generic-timeline-entry-document-target",
-      "classification": "OPTIONAL_GENERALIZED_PROFILE",
-      "blocker": false,
-      "summary": "A universal literal documentId is optional for the append-once, environment-derived engine; concrete profiles may require exact target derivation."
+      "id": "single-process-playground",
+      "category": "capability",
+      "summary": "Round 13 targets one warmed runtime, one in-memory Coordination engine, a closed local Timeline journal, synchronous drain, and public Java 17 API use."
+    },
+    {
+      "id": "five-occurrence-shared-document-shape",
+      "category": "capability",
+      "summary": "The target profile reuses three unique managed child sessions across five Process Embedded occurrences and exposes five parent initialization-event occurrences."
+    },
+    {
+      "id": "provider-backed",
+      "category": "scope",
+      "summary": "External provider adapters and provider-backed fresh-process durability are explicitly outside this Playground profile."
+    },
+    {
+      "id": "mandate-agent",
+      "category": "scope",
+      "summary": "Mandate-backed delegated operations are explicitly outside Round 13 and unsupported Mandate-backed entries must still be rejected."
     }
   ],
   "blockers": [
     {
-      "id": "provider-mandate-resolver",
-      "category": "semantic-upstream",
-      "summary": "No exact provider-backed Mandate eligibility resolver exists at entry source order."
+      "id": "final-candidate-execution",
+      "category": "verification",
+      "summary": "Both complete fresh Java 17 and Java 21 worktree gates passed against the hardened manifest, but the dirty worktree must become a clean candidate commit and rerun those gates for final evidence."
     },
     {
-      "id": "provider-backed-durability",
-      "category": "scope",
-      "summary": "Durable provider-backed completeness and fresh-process reconstruction are not implemented."
+      "id": "round13-performance-campaign",
+      "category": "verification",
+      "summary": "The fresh hardened same-machine 30+30 campaign failed append p95 at 18.680667 ms versus 1.000000 ms hard and coordination-host p95 at 872.356126 ms versus 250.000000 ms hard; route p95 at 0.097583 ms and total p95 at 3,998.664166 ms passed hard, while all four preferred targets were missed."
     },
     {
-      "id": "published-artifact-graph",
+      "id": "final-artifacts-and-source-archive",
+      "category": "verification",
+      "summary": "Fresh worktree JAR hashes and extracted-source configuration and focused smoke passed; clean-candidate rebuild, final detached-checksum verification, and published-artifact archive smoke remain pending."
+    },
+    {
+      "id": "published-dependency-graph",
       "category": "artifact-upstream",
-      "summary": "Repository rc.19 and Language rc.20 resolve, but BEX core/contracts rc.3 are missing and commons-codec 1.15 conflicts with 1.11; the external-consumer smoke build is therefore blocked."
+      "summary": "Fresh dependencyPreflight is BLOCKED_UPSTREAM by missing blue.bex:blue-bex-core:1.1.0-rc.3 and blue.bex:blue-bex-contracts:1.1.0-rc.3 on Maven Central plus commons-codec 1.15 versus 1.11 via blue.repo and blue.language; extracted-archive published smoke remains blocked."
     }
   ],
-  "limitations": {
-    "inMemory": "Sequential single-process in-memory engine only",
-    "provider": "No durable provider-backed fresh-process reconstruction proof",
-    "mandate": "No exact provider-backed Mandate eligibility resolver at source order",
-    "durability": "No crash-safe distributed transaction or cross-process exactly-once claim",
-    "artifactPublication": "Published preflight is blocked by missing BEX rc.3 artifacts and a commons-codec 1.15/1.11 conflict",
-    "frozenLatency": "Large frozen Contracts/Language/BEX PROCESS remains multi-second",
-    "canonicalWadowice": "The existing stress fixture is not the unimplemented canonical Repository-domain fixture"
-  },
-  "notClaimed": [
-    "production readiness",
-    "public RC readiness",
-    "stageRelease success",
-    "provider-backed durability",
-    "Mandate-backed agent authority",
-    "sub-second Wadowice frozen processing",
-    "canonical Repository-domain Wadowice compatibility",
-    "performance improvement"
+  "finalizationRequirements": [
+    "Commit the exact candidate and bind both source and execution to its clean commit and source manifest.",
+    "Rerun test, integrationTest, consumerTest, scenarioTest, and releaseCheck with reruns on Java 17 and Java 21 from the clean candidate.",
+    "Pass all seven exact Round 13 proof rows and all eight exact-zero structural counters.",
+    "Remediate the measured hard-gate failures, rerun the same-machine interleaved Archive.zip versus candidate campaign with at least 30 measured samples, and retain Markdown, JSON, and provenance JSON for a PASS or PASS_HARD_GATE decision.",
+    "Rebuild and hash all four JARs and the reproducible source archive from the candidate.",
+    "Extract the source archive, configure it, run focused tests, and complete the published-artifact smoke.",
+    "Change INTERIM to FINAL only when every final gate is complete and the canonical report contains no pending claim."
   ],
-  "mustRegenerateAfterFinalTree": [
-    "all source-, artifact-, archive-, test-, and performance-bound evidence after any candidate-tree change"
+  "limitations": [
+    "Complete fresh Java 17 and Java 21 worktree lanes, proofs, structural counters, artifact hashes, and extracted/focused archive results passed and are manifest-bound, but no clean candidate commit or final clean-candidate rerun exists.",
+    "The engine remains sequential, single-process, synchronous, and in-memory.",
+    "The fresh Round 13 campaign failed append p95 (18.680667 ms > 1.000000 ms hard) and coordination-host p95 (872.356126 ms > 250.000000 ms hard); route p95 (0.097583 ms) and total p95 (3,998.664166 ms) passed hard, while all four preferred targets were missed.",
+    "Round13B was not applied: candidate embedded-input preparation p95 was 36.940292 ms versus 872.356126 ms coordination-host p95 (about 4.2%), so the optional cache would not address the measured hard misses.",
+    "NO_POSTFLIGHT_TOOLING_CHANGES binds one frozen importer and receipt generator, the current Round12NbaEvidence, runner, execution and harness surfaces, fixtures, locks, wrapper, composites, baseline, Java runtime, and physical host exactly from preflight through independent verification; no substitution was permitted.",
+    "Fresh dependencyPreflight remains BLOCKED_UPSTREAM on missing blue.bex core/contracts 1.1.0-rc.3 artifacts and the commons-codec 1.15 versus 1.11 conflict via blue.repo and blue.language."
+  ],
+  "notClaimed": [
+    "provider-backed fresh-process durability",
+    "database-backed or distributed processing",
+    "cross-process exactly-once behavior",
+    "Mandate-backed delegated authority",
+    "final public release-candidate readiness",
+    "a passing Round 13 latency campaign",
+    "compliance with the Round 13 append or coordination-host hard p95 limits",
+    "compliance with all four Round 13 preferred p95 targets"
   ]
 }

@@ -35,7 +35,9 @@ public record CoordinationMetrics(
         ORDINARY_NODE_FRAGMENTS,
         FULL_ENVIRONMENT_SCANS,
         SOURCE_REPLAYS_PER_PARENT,
-        POST_PROCESS_FULL_PROJECTIONS
+        POST_PROCESS_FULL_PROJECTIONS,
+        PARENT_PROCESS_RERUNS_ON_GRAPH_RETRY,
+        CHILD_PROCESS_RERUNS_ON_PARENT_RETRY
     }
 
     /** Closed, documented phase-timer vocabulary. */

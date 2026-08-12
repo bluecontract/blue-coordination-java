@@ -1,6 +1,7 @@
 package blue.coordination.integration;
 
 import blue.coordination.api.Operation;
+import blue.coordination.api.DocumentRevision;
 import blue.coordination.api.SessionStatus;
 import blue.coordination.api.Timeline;
 import org.junit.jupiter.api.Test;
@@ -14,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class RemovalCycleAndReattachmentTest {
     @Test
-    void detachedParentStopsMovingAndReattachConsumesOnlyNewRevision()
+    void detachedParentStopsMovingAndReattachUsesFreshCursorWithoutReplay()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
             String childInitial = resource(
@@ -38,6 +39,7 @@ final class RemovalCycleAndReattachmentTest {
                             "attachChild",
                             "ownerChannel",
                             engine.embeddedDocumentRequest(childInitial)));
+            long firstGeneration = activationGeneration(engine);
             engine.appendAndDispatch(
                     parentTimeline,
                     Operation.yaml(
@@ -52,6 +54,8 @@ final class RemovalCycleAndReattachmentTest {
             assertTrue(engine.embeddedDocuments(
                     "embedded-state-parent").isEmpty(),
                     "removed inverse edge must not receive live revisions");
+            int childHistorySize = engine.history(
+                    "embedded-counter-A").size();
 
             EngineMetrics.MetricsSnapshot before = engine.metricsSnapshot();
             engine.appendAndDispatch(
@@ -68,6 +72,13 @@ final class RemovalCycleAndReattachmentTest {
                     "reattachment creates a fresh generation and applies "
                             + "initialization plus both known child epochs");
             assertEquals(0L, work.counter("childHistoricalProcessCalls"));
+            assertTrue(activationGeneration(engine) > firstGeneration);
+            assertEquals(childHistorySize,
+                    engine.history("embedded-counter-A").size());
+            assertEquals(1L, engine.history("embedded-counter-A").stream()
+                    .filter(revision -> revision.kind()
+                            == DocumentRevision.Kind.INITIALIZATION)
+                    .count());
         }
     }
 
@@ -145,6 +156,15 @@ final class RemovalCycleAndReattachmentTest {
             assertEquals(0L, work.counter(
                     "revisionApplicationReceiptsCommitted"));
         }
+    }
+
+    private static long activationGeneration(TestEngine engine) {
+        return engine.catchUpPlans().stream()
+                .filter(plan -> plan.link().parentDocumentId().value().equals(
+                        "embedded-state-parent"))
+                .filter(plan -> plan.link().occurrencePath().equals("/child"))
+                .mapToLong(plan -> plan.link().activationGeneration())
+                .max().orElseThrow();
     }
 
     private static String parent(String template, String suffix) {

@@ -13,12 +13,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 
-/**
- * Stable identity of the exact external source surface used by catch-up.
- *
- * <p>It excludes mutable business state and changes only with binding lineage,
- * subscriptions, dependencies, or compiled external routing.</p>
- */
+/** Stable identity of the exact external source surface used by catch-up. */
 final class SourceSurfaceIdentity {
     private static final String DOMAIN = "blue.coordination/source-surface/1";
     private static final Comparator<List<String>> TEXT_LIST_ORDER =
@@ -36,16 +31,16 @@ final class SourceSurfaceIdentity {
                             .wholeSameScopeChannelCatalog() ? 1 : 0)
                     .thenComparing(ExternalChannelDependencySnapshot
                             ::channelCatalogContractKeys, TEXT_LIST_ORDER);
-    private static final Comparator<Entry> ENTRY_ORDER =
-            Comparator.comparing(Entry::scopePath)
+    static final Comparator<Entry> ENTRY_ORDER =
+            Comparator.comparing(Entry::scopePath, EmbeddingBinding.TEXT_ORDER)
                     .thenComparingInt(Entry::order)
-                    .thenComparing(Entry::channelKey)
-                    .thenComparing(Entry::effectiveTypeBlueId)
+                    .thenComparing(Entry::channelKey, EmbeddingBinding.TEXT_ORDER)
+                    .thenComparing(Entry::effectiveTypeBlueId, EmbeddingBinding.TEXT_ORDER)
                     .thenComparing(Entry::sourceContributionNodeBlueIds,
                             TEXT_LIST_ORDER)
                     .thenComparing(Entry::subscriptionKeys,
                             TEXT_LIST_ORDER)
-                    .thenComparing(Entry::checkpointDomainBlueId)
+                    .thenComparing(Entry::checkpointDomainBlueId, EmbeddingBinding.TEXT_ORDER)
                     .thenComparing(Entry::dependencies, DEPENDENCY_ORDER)
                     .thenComparing(Entry::activationRootRevision,
                             Comparator.nullsFirst(Comparator.naturalOrder()))
@@ -94,7 +89,8 @@ final class SourceSurfaceIdentity {
     private static int compareTexts(List<String> left, List<String> right) {
         int shared = Math.min(left.size(), right.size());
         for (int index = 0; index < shared; index++) {
-            int compared = left.get(index).compareTo(right.get(index));
+            int compared = EmbeddingBinding.TEXT_ORDER.compare(
+                    left.get(index), right.get(index));
             if (compared != 0) {
                 return compared;
             }

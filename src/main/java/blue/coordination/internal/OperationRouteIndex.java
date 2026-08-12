@@ -156,6 +156,7 @@ final class OperationRouteIndex {
                 entry.timeline().timelineId(), entry.timeline().actorId())) {
             for (RouteRow row : rows.getOrDefault(new RouteKey(
                     entry.operation(), entry.channel(), eventKey), List.of())) {
+                metrics.increment("routing.rowsInspected");
                 if (row.accepts(entry)
                         && target.accepts(
                         row.documentId(), sessionResolver)) {
@@ -163,7 +164,8 @@ final class OperationRouteIndex {
                 }
             }
         }
-        List<DocumentId> targets = selected.stream().sorted().toList();
+        List<DocumentId> targets = selected.stream().sorted(
+                EmbeddingBinding.DOCUMENT_ORDER).toList();
         metrics.add("routing.targetsSelected", targets.size());
         metrics.addNanos("process.routeLookup", System.nanoTime() - started);
         return Collections.unmodifiableList(new ArrayList<>(targets));
@@ -245,11 +247,10 @@ final class OperationRouteIndex {
             ExternalOrderKey startAfter,
             List<RoutingSurface.SourceAddress> sources) {
         private static final Comparator<RouteRow> ORDER = Comparator
-                .comparing(RouteRow::documentId)
-                .thenComparing(row -> row.startAfter() == null
-                        ? ""
-                        : row.startAfter().toString())
-                .thenComparing(row -> row.sources().toString());
+                .comparing(RouteRow::documentId, EmbeddingBinding.DOCUMENT_ORDER)
+                .thenComparing(RouteRow::startAfter,
+                        Comparator.nullsFirst(Comparator.naturalOrder()))
+                .thenComparing(RouteRow::sources, RoutingSurface::compareSources);
 
         private RouteRow {
             documentId = Objects.requireNonNull(documentId, "documentId");

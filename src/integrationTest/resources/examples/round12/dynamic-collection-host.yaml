@@ -1,0 +1,119 @@
+documentId: dynamic-collection-host
+name: Dynamic Process Embedded Collection Host
+hostInitializationCount: 0
+initializationEventCount: 0
+nextInitializationOrdinal: 0
+alphaInitializationOrdinal: 0
+middleInitializationOrdinal: 0
+zuluInitializationOrdinal: 0
+revisionApplications: 0
+games: __GAME_COLLECTION__
+contracts:
+  lifecycleChannel:
+    type:
+      blueId: 2ukJitzzDKQWHJ5EVUtn3t4FXieGmNA1NdwFSqG8qcfo
+    order: 0
+    event:
+      type:
+        blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
+  onProcessingInitiated:
+    type: Coordination/Sequential Workflow
+    channel: lifecycleChannel
+    order: 0
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /hostInitializationCount
+              val: {$add: [$document: /hostInitializationCount, 1]}
+          - $return: true
+  ownerChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/round12/dynamic/collection/host
+    actor:
+      type: MyOS/Principal Actor
+      accountId: collection-owner
+  coordinationEmbeddedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: coordination/internal/dynamic-collection-host
+    actor:
+      type: MyOS/Principal Actor
+      accountId: coordination
+  embedded:
+    type: Process Embedded
+    collectionPaths: [/_round12Inactive]
+  activateGameCollection:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /contracts/embedded/collectionPaths/0
+              val: /games
+          - $return: true
+  coordinationApplyEmbeddedRevision:
+    type: Coordination/Sequential Workflow Operation
+    channel: coordinationEmbeddedChannel
+    request:
+      occurrencePath: {type: Text}
+      after:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: {$binding: event/message/request/occurrencePath}
+              val: {$binding: event/message/request/after}
+          - $appendChange:
+              op: replace
+              path: /revisionApplications
+              val: {$add: [$document: /revisionApplications, 1]}
+          - $if:
+              cond:
+                $some:
+                  in: {$binding: event/message/request/emittedEvents}
+                  item: emittedEvent
+                  where:
+                    $eq:
+                      - $var: {name: emittedEvent, path: /kind}
+                      - NBA/Game Initialized
+              then:
+                - $appendChange:
+                    op: replace
+                    path: /initializationEventCount
+                    val: {$add: [$document: /initializationEventCount, 1]}
+                - $appendChange:
+                    op: replace
+                    path: /nextInitializationOrdinal
+                    val: {$add: [$document: /nextInitializationOrdinal, 1]}
+                - $if:
+                    cond: {$eq: [$binding: event/message/request/after/documentId, round12-game-alpha]}
+                    then:
+                      - $appendChange:
+                          op: replace
+                          path: /alphaInitializationOrdinal
+                          val: {$add: [$document: /nextInitializationOrdinal, 1]}
+                - $if:
+                    cond: {$eq: [$binding: event/message/request/after/documentId, round12-game-middle]}
+                    then:
+                      - $appendChange:
+                          op: replace
+                          path: /middleInitializationOrdinal
+                          val: {$add: [$document: /nextInitializationOrdinal, 1]}
+                - $if:
+                    cond: {$eq: [$binding: event/message/request/after/documentId, round12-game-zulu]}
+                    then:
+                      - $appendChange:
+                          op: replace
+                          path: /zuluInitializationOrdinal
+                          val: {$add: [$document: /nextInitializationOrdinal, 1]}
+          - $return: true

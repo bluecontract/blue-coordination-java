@@ -98,6 +98,23 @@ final class DocumentTransitionProcessorSubscriptionDeltaTest {
     }
 
     @Test
+    void rejectsSameOccurrenceSemanticReplacementMissingFromProjection() {
+        SubscriptionDelta.Entry before = active(
+                "ownerChannel", "old-key", "old-domain", 0L, ADMISSION);
+        SubscriptionDelta.Entry after = active(
+                "ownerChannel", "new-key", "new-domain", 1L, TRANSITION);
+        SubscriptionDelta companion = new SubscriptionDelta(
+                List.of(after), List.of(retired(before, 1L)));
+
+        assertThrows(InvalidExecutionEvidenceException.class, () ->
+                DocumentTransitionProcessor.requireSameOwnedTransition(
+                        companion,
+                        new SubscriptionDelta(List.of(), List.of()),
+                        List.of(),
+                        List.of()));
+    }
+
+    @Test
     void rejectsUnknownOrForgedIntervalEvidenceWithoutPublishingMetrics() {
         SubscriptionDelta.Entry established = active(
                 "ownerChannel", "stable-key", "verified-domain", 0L,

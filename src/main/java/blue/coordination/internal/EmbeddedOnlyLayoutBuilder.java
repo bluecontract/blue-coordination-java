@@ -1,9 +1,7 @@
 package blue.coordination.internal;
 
 import blue.coordination.api.ExactValue;
-
 import blue.coordination.api.DocumentId;
-
 import blue.language.model.Node;
 import blue.language.model.wire.JsonPointer;
 import blue.language.merge.ResolvedSnapshot;
@@ -22,18 +20,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-
-/**
- * Cuts only effective Process Embedded paths and otherwise retains whole exact
- * values. All edits use Language's immutable {@link FrozenNode} structural
- * sharing; no generic graph splitter, mutable clone walk, or post-cut rehash
- * loop exists in this lane.
- */
+/** Cuts only effective Process Embedded paths from whole exact values. */
 final class EmbeddedOnlyLayoutBuilder {
     private final BlueRuntime runtime;
     private final WholeObjectStore objects;
     private final EngineMetrics metrics;
-
     public EmbeddedOnlyLayoutBuilder(
             BlueRuntime runtime,
             WholeObjectStore objects,
@@ -42,7 +33,6 @@ final class EmbeddedOnlyLayoutBuilder {
         this.objects = Objects.requireNonNull(objects, "objects");
         this.metrics = Objects.requireNonNull(metrics, "metrics");
     }
-
     public EmbeddedOnlyLayout build(ExactValue exactRoot) {
         Objects.requireNonNull(exactRoot, "exactRoot");
         return metrics.timed("layout.compileFrozenCatalog", () -> {
@@ -60,10 +50,20 @@ final class EmbeddedOnlyLayoutBuilder {
                     concreteFromCatalog(catalog));
         });
     }
-
     public EmbeddedOnlyLayout rebuild(
             ExactValue exactRoot,
             EmbeddedOnlyLayout previous) {
+        return rebuild(exactRoot, previous, false);
+    }
+    public EmbeddedOnlyLayout rebuildAfterManagedChildRevision(
+            ExactValue exactRoot,
+            EmbeddedOnlyLayout previous) {
+        return rebuild(exactRoot, previous, true);
+    }
+    private EmbeddedOnlyLayout rebuild(
+            ExactValue exactRoot,
+            EmbeddedOnlyLayout previous,
+            boolean managedChildRevision) {
         Objects.requireNonNull(exactRoot, "exactRoot");
         Objects.requireNonNull(previous, "previous");
         if (!previous.plan().reusableFor(
@@ -72,21 +72,40 @@ final class EmbeddedOnlyLayoutBuilder {
             return build(exactRoot);
         }
         metrics.increment("layout.plansReused");
-        List<ConcreteBoundary> concreteBoundaries = previous.plan()
+        List<ConcreteBoundary> concreteBoundaries = managedChildRevision
+                && previous.plan().hasCollections()
+                ? concreteFromOwnedCatalog(exactRoot, previous)
+                : previous.plan()
                 .hasCollections()
                 ? concreteFromCurrentCatalog(exactRoot)
-                : concreteFromFixedDeclarations(exactRoot, previous.plan());
-        return buildWithPlan(
-                exactRoot,
-                previous.plan(),
-                concreteBoundaries);
+                : concreteFromFixedDeclarations(exactRoot, previous.plan(),
+                managedChildRevision ? previous.directOccurrences() : List.of());
+        return buildWithPlan(exactRoot, previous.plan(), concreteBoundaries);
     }
-
-    /**
-     * Refreshes only invocation-frozen collection membership. The immutable
-     * plan still owns declaration and routing identity; the catalog contributes
-     * the current stable-key occurrences and their canonical escaped paths.
-     */
+    private List<ConcreteBoundary> concreteFromOwnedCatalog(
+            ExactValue exactRoot,
+            EmbeddedOnlyLayout previous) {
+        return metrics.timed("layout.refreshOwnedCatalog", () -> {
+            FrozenNode opaque = exactRoot.frozen();
+            for (EmbeddedOccurrence occurrence : previous.directOccurrences()) {
+                List<String> path = JsonPointer.split(occurrence.scopePath());
+                FrozenNode child = resolveThroughReferences(opaque, path);
+                if (child != null) {
+                    opaque = replaceAt(opaque, path,
+                            managedOwnershipProjection(child.toNode()));
+                }
+            }
+            ExactValue validationRoot = objects.put(
+                    opaque, "owned-membership-validation-root");
+            metrics.increment("layout.referenceOnlyCatalogInputs");
+            metrics.increment("layout.ownedMembershipRefreshes");
+            EffectiveFragmentationCatalog catalog =
+                    runtime.effectiveFragmentationCatalog(
+                            validationRoot.blueId());
+            metrics.increment("layout.catalogCompilations");
+            return concreteFromCatalog(catalog);
+        });
+    }
     private List<ConcreteBoundary> concreteFromCurrentCatalog(
             ExactValue exactRoot) {
         return metrics.timed("layout.refreshCollectionCatalog", () -> {
@@ -98,14 +117,6 @@ final class EmbeddedOnlyLayoutBuilder {
             return concreteFromCatalog(catalog);
         });
     }
-
-    /**
-     * Restores managed child states after one parent-local frozen call.
-     * External parent operations may detach a child or replace it with another
-     * document, but they may not mutate an existing managed child's state.
-     * Processor-managed child-revision delivery is the only allowed same-child
-     * state advance.
-     */
     public ExactValue restoreManagedChildren(
             Node processedRoot,
             EmbeddedOnlyLayout previous,
@@ -153,12 +164,6 @@ final class EmbeddedOnlyLayoutBuilder {
         }
         return objects.put(restored, "document-revision");
     }
-
-    /**
-     * Enforces the pre-initialization ownership cut: frozen Contracts may
-     * inspect an embedded reference, but any recursive child initialization
-     * is discarded so Coordination can create the child's own epoch 0.
-     */
     public ExactValue restoreAuthoredChildrenAfterInitialization(
             Node initializedRoot,
             EmbeddedOnlyLayout authoredLayout) {
@@ -178,13 +183,6 @@ final class EmbeddedOnlyLayoutBuilder {
         }
         return objects.put(restored, "initialized-document");
     }
-
-    /**
-     * Keeps managed children opaque in both snapshot lanes during parent
-     * initialization. The canonical ownership projection alone is not enough:
-     * an effective resolved child would still be recursively initialized by
-     * frozen Contracts before Coordination can create its own epoch 0.
-     */
     public ResolvedSnapshot isolateManagedInitializationScopes(
             ResolvedSnapshot snapshot,
             EmbeddedOnlyLayout authoredLayout) {
@@ -228,7 +226,6 @@ final class EmbeddedOnlyLayoutBuilder {
                 resolved,
                 snapshot.blueId());
     }
-
     private static Node nodeAt(Node root, String pointer) {
         Node current = root;
         for (String segment : JsonPointer.split(pointer)) {
@@ -238,7 +235,6 @@ final class EmbeddedOnlyLayoutBuilder {
         }
         return current;
     }
-
     private EmbeddedOnlyLayout buildWithPlan(
             ExactValue suppliedRoot,
             EmbeddedLayoutPlan plan,
@@ -252,13 +248,11 @@ final class EmbeddedOnlyLayoutBuilder {
                 throw new IllegalStateException(
                         "Process Embedded materialization changed Root identity");
             }
-
             Set<String> scopePaths = new LinkedHashSet<>();
             scopePaths.add(JsonPointer.ROOT);
             for (ConcreteBoundary boundary : concreteBoundaries) {
                 scopePaths.add(boundary.childPath());
             }
-
             Map<String, ExactValue> exactByScope = new LinkedHashMap<>();
             for (String scopePath : depthOrdered(scopePaths, false)) {
                 FrozenNode selected = selectMaterialized(
@@ -267,7 +261,6 @@ final class EmbeddedOnlyLayoutBuilder {
                         scopePath,
                         objects.put(selected, "managed-document-exact"));
             }
-
             Map<String, ExactValue> shellsByScope = new LinkedHashMap<>();
             List<EmbeddedBoundary> boundaries = new ArrayList<>();
             for (String scopePath : depthOrdered(scopePaths, true)) {
@@ -316,20 +309,18 @@ final class EmbeddedOnlyLayoutBuilder {
                 }
                 shellsByScope.put(scopePath, stored);
             }
-
             Map<String, ExactValue> rootFirst = new LinkedHashMap<>();
             depthOrdered(shellsByScope.keySet(), false).forEach(path ->
                     rootFirst.put(path, shellsByScope.get(path)));
-            boundaries.sort(Comparator
-                    .comparing(EmbeddedBoundary::parentScopePath)
-                    .thenComparing(EmbeddedBoundary::childScopePath));
+            boundaries.sort(Comparator.comparing(
+                    EmbeddedBoundary::parentScopePath,
+                    EmbeddingBinding.TEXT_ORDER).thenComparing(
+                    EmbeddedBoundary::childScopePath,
+                    EmbeddingBinding.TEXT_ORDER));
             List<EmbeddedOccurrence> directOccurrences = directOccurrences(
                     exactByScope, boundaries);
             FrozenNode processingRoot = materializedRoot;
             for (EmbeddedOccurrence occurrence : directOccurrences) {
-                // Keep semantic/provider identity in the stored shell while the
-                // frozen ownership check receives a separate contract-free child
-                // data view rather than the child's executable contract surface.
                 processingRoot = replaceAt(
                         processingRoot,
                         JsonPointer.split(occurrence.scopePath()),
@@ -353,7 +344,6 @@ final class EmbeddedOnlyLayoutBuilder {
                     plan);
         });
     }
-
     private FrozenNode materializeDeclaredChildren(
             FrozenNode suppliedRoot,
             List<ConcreteBoundary> boundaries) {
@@ -376,7 +366,6 @@ final class EmbeddedOnlyLayoutBuilder {
         }
         return result;
     }
-
     private FrozenNode resolveThroughReferences(
             FrozenNode root,
             List<String> segments) {
@@ -404,25 +393,28 @@ final class EmbeddedOnlyLayoutBuilder {
         }
         return materializeReference(current);
     }
-
     private FrozenNode exactScopeAt(ExactValue root, String path) {
         return resolveThroughReferences(
                 root.frozen(), JsonPointer.split(path));
     }
-
     private FrozenNode materializeReference(FrozenNode value) {
         if (value == null || !value.isReferenceOnly()) {
             return value;
         }
         return objects.require(value.getReferenceBlueId()).frozen();
     }
-
     private List<ConcreteBoundary> concreteFromFixedDeclarations(
             ExactValue exactRoot,
-            EmbeddedLayoutPlan plan) {
+            EmbeddedLayoutPlan plan,
+            List<EmbeddedOccurrence> opaqueScopes) {
         List<ConcreteBoundary> result = new ArrayList<>();
         for (EmbeddedLayoutPlan.ScopeRule rule
                 : plan.rulesByScope().values()) {
+            if (opaqueScopes.stream().anyMatch(occurrence ->
+                    PointerUtils.descendantOrEqual(
+                            rule.scopePath(), occurrence.scopePath()))) {
+                continue;
+            }
             for (String childPath : rule.explicitAbsolutePaths()) {
                 FrozenNode selected = resolveThroughReferences(
                         exactRoot.frozen(), JsonPointer.split(childPath));
@@ -436,7 +428,6 @@ final class EmbeddedOnlyLayoutBuilder {
         }
         return canonicalBoundaries(result);
     }
-
     private static List<ConcreteBoundary> concreteFromCatalog(
             EffectiveFragmentationCatalog catalog) {
         List<ConcreteBoundary> result = new ArrayList<>();
@@ -455,32 +446,31 @@ final class EmbeddedOnlyLayoutBuilder {
         }
         return canonicalBoundaries(result);
     }
-
     private static List<ConcreteBoundary> canonicalBoundaries(
             Collection<ConcreteBoundary> source) {
         Map<String, ConcreteBoundary> unique = new LinkedHashMap<>();
         source.stream()
-                .sorted(Comparator
-                        .comparing(ConcreteBoundary::parentPath)
-                        .thenComparing(ConcreteBoundary::childPath))
+                .sorted(Comparator.comparing(
+                        ConcreteBoundary::parentPath,
+                        EmbeddingBinding.TEXT_ORDER).thenComparing(
+                        ConcreteBoundary::childPath,
+                        EmbeddingBinding.TEXT_ORDER))
                 .forEach(boundary -> unique.putIfAbsent(
                         boundary.parentPath() + "|" + boundary.childPath(),
                         boundary));
         return List.copyOf(unique.values());
     }
-
     private static List<String> depthOrdered(
             Collection<String> paths,
             boolean deepestFirst) {
         Comparator<String> order = Comparator
                 .comparingInt((String path) -> JsonPointer.split(path).size())
-                .thenComparing(Comparator.naturalOrder());
+                .thenComparing(EmbeddingBinding.TEXT_ORDER);
         if (deepestFirst) {
             order = order.reversed();
         }
         return paths.stream().sorted(order).toList();
     }
-
     private static FrozenNode selectMaterialized(
             FrozenNode materializedRoot,
             String path) {
@@ -492,7 +482,6 @@ final class EmbeddedOnlyLayoutBuilder {
         }
         return selected;
     }
-
     private static FrozenNode replaceAt(
             FrozenNode root,
             List<String> segments,
@@ -537,7 +526,6 @@ final class EmbeddedOnlyLayoutBuilder {
                 Objects.requireNonNull(blueId, "blueId")));
     }
 
-    /** Contract-free child data view required by the frozen ownership check. */
     private static FrozenNode managedOwnershipProjection(Node source) {
         Node result = new Node()
                 .name(source.getName())
@@ -578,7 +566,8 @@ final class EmbeddedOnlyLayoutBuilder {
                     DocumentIdentityReader.requireDocumentId(child),
                     child));
         }
-        result.sort(Comparator.comparing(EmbeddedOccurrence::scopePath));
+        result.sort(Comparator.comparing(
+                EmbeddedOccurrence::scopePath, EmbeddingBinding.TEXT_ORDER));
         return List.copyOf(result);
     }
 

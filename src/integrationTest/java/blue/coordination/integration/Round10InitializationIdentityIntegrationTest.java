@@ -117,7 +117,7 @@ final class Round10InitializationIdentityIntegrationTest {
                             .map(DocumentRevision::kind)
                             .toList());
             assertEquals(List.of(
-                            "admission|initial-embedded-parent",
+                            history.get(0).causalEntryBlueId().orElseThrow(),
                             rootFirst.blueId(),
                             childSecond.blueId()),
                     history.subList(1, history.size()).stream()

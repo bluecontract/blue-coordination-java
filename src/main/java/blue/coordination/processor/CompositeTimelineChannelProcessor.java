@@ -6,6 +6,7 @@ import blue.language.processor.ChannelEvaluation;
 import blue.language.processor.ChannelEvaluationContext;
 import blue.language.processor.ChannelProcessor;
 import blue.language.processor.ExternalChannelSubscriptionFunctions;
+import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.model.ChannelContract;
 import blue.repo.coordination.CompositeTimelineChannel;
 import blue.repo.coordination.TimelineChannel;
@@ -13,14 +14,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/**
- * Evaluates the deterministic union of the Timeline Channels explicitly
- * listed by a Composite Timeline Channel.
- *
- * <p>Duplicate member keys are evaluated once. Concrete member processors
- * retain authority over Timeline acceptance, while this processor coalesces
- * successful members into one logical external delivery.</p>
- */
+/** Evaluates the deterministic union of explicitly listed Timeline Channels. */
 public final class CompositeTimelineChannelProcessor implements ChannelProcessor<CompositeTimelineChannel> {
     private final ExternalChannelSubscriptionFunctions<
             CompositeTimelineChannel> subscriptionFunctions;
@@ -127,21 +121,23 @@ public final class CompositeTimelineChannelProcessor implements ChannelProcessor
         return contract.getOrder() != null ? contract.getOrder() : 0;
     }
 
-    private static final class MatchingChild {
+    static final class MatchingChild {
         private final String channelKey;
         private final int order;
         private final ChannelEvaluation evaluation;
 
-        private MatchingChild(String channelKey, int order, ChannelEvaluation evaluation) {
+        MatchingChild(String channelKey, int order, ChannelEvaluation evaluation) {
             this.channelKey = channelKey;
             this.order = order;
             this.evaluation = evaluation;
         }
 
-        private boolean precedes(MatchingChild other) {
+        boolean precedes(MatchingChild other) {
             int orderComparison = Integer.compare(order, other.order);
             return orderComparison < 0
-                    || (orderComparison == 0 && channelKey.compareTo(other.channelKey) < 0);
+                    || (orderComparison == 0
+                    && ExternalOrderKey.compareTextCodePoints(
+                            channelKey, other.channelKey) < 0);
         }
     }
 }

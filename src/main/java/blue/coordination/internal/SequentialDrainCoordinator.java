@@ -27,13 +27,6 @@ import java.util.function.LongSupplier;
 import java.util.function.Consumer;
 
 final class SequentialDrainCoordinator {
-    private static final Comparator<EmbeddingBinding> BINDING_ORDER =
-            Comparator.comparing(EmbeddingBinding::absolutePath)
-                    .thenComparing(binding ->
-                            binding.childDocumentId().value())
-                    .thenComparingLong(
-                            EmbeddingBinding::activationGeneration);
-
     private final BlueRuntime runtime;
     private final WholeObjectStore objects;
     private final WholeRequestEntryFactory entryFactory;
@@ -45,6 +38,7 @@ final class SequentialDrainCoordinator {
     private final LongSupplier applicationTimestamp;
     private final Consumer<DefaultCoordinationEngine.FailurePoint>
             failureInjector;
+    private Consumer<TransitionTrace> transitionObserver;
     private final RecoveryState recoveryState;
     private final Map<String, EmbeddedEpochCursor> cursors;
     private final Map<DocumentId, EmbeddedAdmissionEvidence>
@@ -55,11 +49,13 @@ final class SequentialDrainCoordinator {
     private final Map<DocumentId, String> openBarrierByParent;
     private final Map<OccurrenceKey, Long> activationGenerations;
     private final Map<String, EntryFrame> openFrames;
+    private final Set<String> rejectedExternalEntryIds;
     private final Map<DocumentId, PendingTopLevelAdmission>
             pendingTopLevelAdmissions;
     private final Map<String, List<InternalProcessOutcome>> outcomesByEntry =
             new LinkedHashMap<>();
     private final Map<DocumentId, String> embeddedInputHeadByParent;
+    private final Map<String, EmbeddedEpochInput> committedEmbeddedInputs;
     private final List<PublicationCheckpoint> publicationCheckpoints =
             new ArrayList<>();
     private ProcessEmbeddedGraphSnapshot graph =
@@ -131,10 +127,13 @@ final class SequentialDrainCoordinator {
         this.openBarrierByParent = recoveryState.openBarrierByParent;
         this.activationGenerations = recoveryState.activationGenerations;
         this.openFrames = recoveryState.openFrames;
+        this.rejectedExternalEntryIds =
+                recoveryState.rejectedExternalEntryIds;
         this.pendingTopLevelAdmissions =
                 recoveryState.pendingTopLevelAdmissions;
         this.embeddedInputHeadByParent =
                 recoveryState.embeddedInputHeadByParent;
+        this.committedEmbeddedInputs = recoveryState.committedEmbeddedInputs;
         this.graph = recoveryState.graph;
         this.processedThrough = recoveryState.processedThrough;
         this.committedTransitionSequence =
@@ -164,6 +163,9 @@ final class SequentialDrainCoordinator {
                 recoveryState);
     }
 
+    synchronized void observeTransitions(Consumer<TransitionTrace> observer) {
+        transitionObserver = Objects.requireNonNull(observer, "observer");
+    }
     synchronized ProcessingDrainReceipt drain(
             ExternalOrderKey inclusiveCutoff, DrainBudget budget) {
         long started = System.nanoTime();
@@ -199,6 +201,9 @@ final class SequentialDrainCoordinator {
                 } catch (DeferredWorkException deferred) {
                     prerequisitesReady = false;
                     break;
+                } catch (RejectableExternalEntryException rejected) {
+                    rejectExternalEntry(entry, rejected);
+                    throw rejected.failure();
                 }
                 outcomesByEntry.put(entry.blueId(), List.copyOf(outcomes));
                 processedThrough = entry.sourceOrderKey();
@@ -235,6 +240,28 @@ final class SequentialDrainCoordinator {
                 elapsed);
     }
 
+    private void rejectExternalEntry(
+            TimelineEntry entry,
+            RejectableExternalEntryException rejected) {
+        if (!entry.blueId().equals(rejected.entryBlueId())) {
+            throw new IllegalStateException(
+                    "Rejected-entry identity does not match selected entry");
+        }
+        EntryFrame frame = openFrames.get(entry.blueId());
+        if (frame == null || frame.directTargets().size() != 1) {
+            return;
+        }
+        if (!rejectedExternalEntryIds.add(entry.blueId())) {
+            throw new IllegalStateException(
+                    "External entry was already rejected " + entry.blueId());
+        }
+        processedThrough = entry.sourceOrderKey();
+        recoveryState.processedThrough = processedThrough;
+        openFrames.remove(entry.blueId());
+        outcomesByEntry.remove(entry.blueId());
+        metrics.increment("temporal.externalEntriesRejected");
+    }
+
     synchronized void admitTopLevel(
             DocumentSession session,
             CoordinationEngine.AdmissionPolicy policy,
@@ -258,14 +285,12 @@ final class SequentialDrainCoordinator {
             session.markCatchingUp();
         }
         if (!session.layout().directOccurrences().isEmpty()) {
-            TransitionCause cause = TransitionCause.admission(
-                    session.documentId(), cutoff);
+            TransitionCause cause = TransitionCause.admission(session, cutoff);
             GraphDelta delta = previewGraphDelta(
                     session,
                     session.layout().directOccurrences(),
                     cause);
-            publishGraphDeltaAtomically(session, delta, cause);
-            session.markGraphPublished();
+            publishGraph(session, delta, cause);
             if (policy == CoordinationEngine.AdmissionPolicy.FROM_NOW) {
                 if (!settleBarrierFor(session.documentId())) {
                     return;
@@ -275,7 +300,8 @@ final class SequentialDrainCoordinator {
                         session.documentId());
             }
         } else {
-            session.markGraphPublished();
+            metrics.timed("temporal.graphPublication",
+                    session::markGraphPublished);
         }
         if (policy != CoordinationEngine.AdmissionPolicy.FROM_NOW
                 && !resumeTopLevelAdmissions()) {
@@ -284,11 +310,6 @@ final class SequentialDrainCoordinator {
         publishReadyIfSynchronized(session, cutoff);
     }
 
-    /**
-     * Retains a failed admission only after some recoverable state crossed a
-     * document-transition or graph-publication boundary. A pending marker by
-     * itself is staging state and must not outlive removal of its document.
-     */
     synchronized boolean retainFailedAdmission(DocumentId documentId) {
         DocumentId id = Objects.requireNonNull(documentId, "documentId");
         DocumentSession session = documents.find(id).orElse(null);
@@ -418,11 +439,6 @@ final class SequentialDrainCoordinator {
         return synchronizationFailure(session);
     }
 
-    /**
-     * Verifies the current graph, barriers, cursors, and embedded states
-     * without consulting the public READY flag. The same proof is used before
-     * publishing READY and at the application-read boundary.
-     */
     private String synchronizationFailure(DocumentSession session) {
         DocumentId documentId = session.documentId();
         if (openBarrierByParent.containsKey(documentId)) {
@@ -539,13 +555,6 @@ final class SequentialDrainCoordinator {
         return processEntryFrame(frame, null);
     }
 
-    /**
-     * Processes one exact entry against its frozen pre-entry graph. When a
-     * top-level document is importing history, {@code admittedSubtree}
-     * restricts propagation to that Root and the descendants that existed at
-     * the start of this entry. A child introduced by the entry is therefore
-     * eligible only for a later entry frame.
-     */
     private List<InternalProcessOutcome> processEntryFrame(
             EntryFrame frame,
             Set<DocumentId> admittedSubtree) {
@@ -617,8 +626,23 @@ final class SequentialDrainCoordinator {
                     new IllegalStateException(
                             "Committed entry receipt has no revision "
                                     + entry.blueId()));
-            reconcileCommittedTransition(
-                    session, externalCause);
+            String retryCounter = session.graphPublishedEpoch()
+                    < session.epoch()
+                    ? "temporal.parentProcessRerunsOnGraphRetry"
+                    : graph.parents(session.documentId()).isEmpty()
+                            ? null
+                            : "temporal.childProcessRerunsOnParentRetry";
+            long processCallsBefore = metrics.counter(
+                    "process.externalInvocationsStarted");
+            try {
+                reconcileCommittedTransition(session, externalCause);
+            } finally {
+                if (retryCounter != null) {
+                    metrics.add(retryCounter, metrics.counter(
+                            "process.externalInvocationsStarted")
+                            - processCallsBefore);
+                }
+            }
             outcomes.add(new InternalProcessOutcome(
                     session,
                     committed,
@@ -638,6 +662,9 @@ final class SequentialDrainCoordinator {
                             + session.status());
         }
         requireTransitionBudget();
+        EngineMetrics.MetricsSnapshot traceBefore = transitionObserver == null
+                ? null : metrics.snapshot();
+        long traceStarted = traceBefore == null ? 0L : System.nanoTime();
         DocumentTransitionProcessor.Prepared prepared =
                 processor.prepare(session, entry);
         TransitionCause cause = externalCause;
@@ -649,10 +676,16 @@ final class SequentialDrainCoordinator {
         boolean routePublicationRequired = routesChanged(
                 prepared.beforeLayout(), session.activeSubscriptions(),
                 prepared.afterLayout(), prepared.activeSubscriptionsAfter());
-        preflightGraphDelta(delta, cause);
+        try {
+            preflightGraphDelta(delta, cause);
+        } catch (InvalidAdmissionEvidenceException invalid) {
+            throw RejectableExternalEntryException.forEntry(entry, invalid);
+        }
         failureInjector.accept(DefaultCoordinationEngine.FailurePoint
                 .BEFORE_COMMIT_VALIDATION);
-        InternalProcessOutcome outcome = processor.commit(prepared);
+        InternalProcessOutcome outcome = metrics.timed(
+                "process.commitReadinessPublication",
+                () -> processor.commit(prepared));
         markContainingDocumentsCatchingUp(session.documentId());
         if (!graph.parents(session.documentId()).isEmpty()) {
             metrics.increment("temporal.childEpochsCommitted");
@@ -671,20 +704,25 @@ final class SequentialDrainCoordinator {
         outcomes.add(outcome);
         metrics.increment("temporal.externalProcessCalls");
         requireBarrierReady(session.documentId());
+        trace(outcome.session(), outcome.revision(), traceBefore, traceStarted);
     }
 
     private void publishReadyIfSynchronized(
             DocumentSession session,
             ExternalOrderKey cutoff) {
+        long started = System.nanoTime();
         String failure = synchronizationFailure(session);
         if (failure != null) {
             session.markCatchingUp();
             metrics.increment("temporal.readyPublicationDeferred");
+            metrics.addNanos("process.commitReadinessPublication",
+                    System.nanoTime() - started);
             return;
         }
         session.markReady(cutoff);
+        metrics.addNanos("process.commitReadinessPublication",
+                System.nanoTime() - started);
     }
-    /** Marks every containing document non-ready as soon as a child commits. */
     private void markContainingDocumentsCatchingUp(DocumentId childId) {
         List<EmbeddingBinding> parents = graph.parents(childId);
         if (parents.isEmpty()) {
@@ -763,21 +801,15 @@ final class SequentialDrainCoordinator {
             List<InternalProcessOutcome> outcomes) {
         DocumentSession parent = documents.require(
                 binding.parentDocumentId());
-        long inputStarted = System.nanoTime();
-        EmbeddedEpochInput input = EmbeddedEpochInput.create(
-                entryFactory,
-                objects,
-                binding,
-                childRevision,
-                applicationTimestamp.getAsLong(),
-                embeddedInputHeadByParent.get(
-                        binding.parentDocumentId()));
-        long inputNanos = System.nanoTime() - inputStarted;
-        metrics.addNanos("process.embeddedInputPreparation", inputNanos);
-        metrics.addNanos("process.hostBeforeFrozen", inputNanos);
+        String inputId = embeddedTransitionReceiptId(
+                binding.bindingId(), childRevision.epoch());
         EmbeddedEpochCursor current = cursors.get(binding.bindingId());
-        if (parent.hasTransitionReceipt(input.inputId())) {
-            TransitionCause cause = TransitionCause.embedded(input);
+        if (parent.hasTransitionReceipt(inputId)) {
+            EmbeddedEpochInput committedInput = committedEmbeddedInputs.get(
+                    inputId);
+            requireCommittedEmbeddedInput(
+                    parent, binding, childRevision, committedInput, inputId);
+            TransitionCause cause = TransitionCause.embedded(committedInput);
             reconcileCommittedTransition(parent, cause);
             recordCursor(binding.bindingId());
             cursors.put(binding.bindingId(),
@@ -787,6 +819,25 @@ final class SequentialDrainCoordinator {
             return;
         }
         requireTransitionBudget();
+        EngineMetrics.MetricsSnapshot traceBefore = transitionObserver == null
+                ? null : metrics.snapshot();
+        long traceStarted = traceBefore == null ? 0L : System.nanoTime();
+        long inputStarted = System.nanoTime();
+        EmbeddedEpochInput input = EmbeddedEpochInput.create(
+                entryFactory,
+                objects,
+                binding,
+                childRevision,
+                applicationTimestamp.getAsLong(),
+                embeddedInputHeadByParent.get(
+                        binding.parentDocumentId()));
+        if (!inputId.equals(input.inputId())) {
+            throw new IllegalStateException(
+                    "Embedded input identity does not match its receipt");
+        }
+        long inputNanos = System.nanoTime() - inputStarted;
+        metrics.addNanos("process.embeddedInputPreparation", inputNanos);
+        metrics.addNanos("process.hostBeforeFrozen", inputNanos);
         DocumentTransitionProcessor.PreparedEmbedded prepared =
                 processor.prepareEmbedded(parent, input);
         TransitionCause cause = TransitionCause.embedded(input);
@@ -799,7 +850,20 @@ final class SequentialDrainCoordinator {
                 prepared.beforeLayout(), parent.activeSubscriptions(),
                 prepared.afterLayout(), prepared.activeSubscriptionsAfter());
         preflightGraphDelta(delta, cause);
-        InternalProcessOutcome outcome = processor.commitEmbedded(prepared);
+        InternalProcessOutcome outcome = metrics.timed(
+                "process.commitReadinessPublication",
+                () -> processor.commitEmbedded(prepared));
+        EmbeddedEpochInput duplicate = committedEmbeddedInputs.putIfAbsent(
+                inputId, input);
+        if (duplicate != null) {
+            throw new IllegalStateException(
+                    "Duplicate committed embedded input evidence " + inputId);
+        }
+        if (childRevision.kind() == DocumentRevision.Kind.INITIALIZATION) {
+            metrics.increment("temporal.initializationEpochApplications");
+            metrics.add("temporal.initializationEventOccurrencesForwarded",
+                    childRevision.emittedEvents().size());
+        }
         markContainingDocumentsCatchingUp(parent.documentId());
         committedTransitionSequence = Math.addExact(
                 committedTransitionSequence, 1L);
@@ -822,6 +886,69 @@ final class SequentialDrainCoordinator {
         metrics.increment("temporal.parentEpochApplications");
         metrics.increment("catchUp.parentRevisionApplications");
         metrics.increment("childRevisionApplications");
+        trace(outcome.session(), outcome.revision(), traceBefore, traceStarted);
+    }
+
+    private static void requireCommittedEmbeddedInput(
+            DocumentSession parent,
+            EmbeddingBinding binding,
+            DocumentRevision childRevision,
+            EmbeddedEpochInput committedInput,
+            String inputId) {
+        if (committedInput == null) {
+            throw new IllegalStateException(
+                    "Committed embedded receipt has no retained input evidence "
+                            + inputId);
+        }
+        String expectedBefore = childRevision.before()
+                .map(value -> value.blueId())
+                .orElse(binding.admittedChildBlueId());
+        ExternalOrderKey expectedOrder = childRevision.sourceOrderKey()
+                .orElse(binding.attachmentOrder());
+        String expectedOriginalEntry = childRevision.causalEntryBlueId()
+                .orElse(null);
+        if (!inputId.equals(committedInput.inputId())
+                || !binding.equals(committedInput.binding())
+                || committedInput.fromChildEpoch()
+                        != childRevision.epoch() - 1L
+                || committedInput.toChildEpoch() != childRevision.epoch()
+                || !expectedBefore.equals(
+                        committedInput.beforeChildBlueId())
+                || !childRevision.after().blueId().equals(
+                        committedInput.afterChildBlueId())
+                || !expectedOrder.equals(committedInput.sourceOrder())
+                || !Objects.equals(expectedOriginalEntry,
+                        committedInput.originalEntryBlueId())) {
+            throw new IllegalStateException(
+                    "Committed embedded input evidence does not match receipt "
+                            + inputId);
+        }
+        DocumentRevision committed = parent.currentRevision();
+        String expectedCausalEntry = expectedOriginalEntry == null
+                ? binding.attachmentEntryBlueId()
+                : expectedOriginalEntry;
+        DocumentRevision.CatchUpCause catchUpCause = committed.catchUpCause()
+                .orElseThrow(() -> new IllegalStateException(
+                        "Committed embedded revision has no catch-up cause "
+                                + inputId));
+        if (committed.kind()
+                    != DocumentRevision.Kind.EMBEDDED_REVISION_APPLICATION
+                || !expectedOrder.equals(
+                        committed.sourceOrderKey().orElse(null))
+                || !expectedCausalEntry.equals(
+                        committed.causalEntryBlueId().orElse(null))
+                || !binding.parentDocumentId().equals(
+                        catchUpCause.parentDocumentId())
+                || !binding.attachmentEntryBlueId().equals(
+                        catchUpCause.attachmentEntryBlueId())
+                || !binding.absolutePath().equals(
+                        catchUpCause.occurrencePath())
+                || binding.attachmentTimestampMicros()
+                        != catchUpCause.attachmentTimestampMicros()) {
+            throw new IllegalStateException(
+                    "Committed parent revision does not match embedded receipt "
+                            + inputId);
+        }
     }
 
     private GraphDelta previewGraphDelta(
@@ -848,7 +975,9 @@ final class SequentialDrainCoordinator {
             }
         }
         for (EmbeddedOccurrence occurrence : after.values().stream()
-                .sorted(Comparator.comparing(EmbeddedOccurrence::scopePath))
+                .sorted(Comparator.comparing(
+                        EmbeddedOccurrence::scopePath,
+                        EmbeddingBinding.TEXT_ORDER))
                 .toList()) {
             OccurrenceKey key = new OccurrenceKey(
                     parent.documentId(), occurrence.scopePath());
@@ -870,8 +999,8 @@ final class SequentialDrainCoordinator {
             }
             long generation = Math.addExact(
                     activationGenerations.getOrDefault(key, 0L), 1L);
-            String bindingId = parent.documentId().value() + "|"
-                    + occurrence.scopePath() + "|" + generation;
+            String bindingId = bindingId(
+                    parent.documentId(), occurrence.scopePath(), generation);
             EmbeddingBinding binding = new EmbeddingBinding(
                     bindingId,
                     parent.documentId(),
@@ -889,7 +1018,7 @@ final class SequentialDrainCoordinator {
             additions.add(new ProposedBinding(
                     binding, occurrence, mode, key));
         }
-        retained.sort(BINDING_ORDER);
+        retained.sort(EmbeddingBinding.WITHIN_PARENT_ORDER);
         ProcessEmbeddedGraphSnapshot proposed = graph.reconcileParent(
                 parent.documentId(), retained, metrics);
         return new GraphDelta(
@@ -948,11 +1077,22 @@ final class SequentialDrainCoordinator {
     private void preflightGraphDelta(
             GraphDelta delta,
             TransitionCause cause) {
+        Map<DocumentId, String> newChildStates = new LinkedHashMap<>();
+        Map<DocumentId, Long> existingChildEpochs = new LinkedHashMap<>();
         for (ProposedBinding proposed : delta.additions()) {
             EmbeddingBinding binding = proposed.binding();
             DocumentSession child = documents.find(
                     binding.childDocumentId()).orElse(null);
             if (child == null) {
+                String priorState = newChildStates.putIfAbsent(
+                        binding.childDocumentId(),
+                        binding.admittedChildBlueId());
+                if (priorState != null && !priorState.equals(
+                        binding.admittedChildBlueId())) {
+                    throw new InvalidAdmissionEvidenceException(
+                            "conflicting supplied states for new child "
+                                    + binding.childDocumentId());
+                }
                 if (binding.activationMode()
                         == ActivationMode.ATTACH_CURRENT_STATE) {
                     throw new IllegalStateException(
@@ -972,6 +1112,13 @@ final class SequentialDrainCoordinator {
             long suppliedEpoch = child.resolveAdmissionEpoch(
                     binding.admittedChildBlueId(),
                     binding.admittedChildEpoch());
+            Long priorEpoch = existingChildEpochs.putIfAbsent(
+                    binding.childDocumentId(), suppliedEpoch);
+            if (priorEpoch != null && priorEpoch != suppliedEpoch) {
+                throw new InvalidAdmissionEvidenceException(
+                        "conflicting admitted epochs for child "
+                                + binding.childDocumentId());
+            }
             if (binding.activationMode()
                     == ActivationMode.ATTACH_CURRENT_STATE
                     && suppliedEpoch != child.epoch()) {
@@ -1025,10 +1172,18 @@ final class SequentialDrainCoordinator {
         } else {
             metrics.increment("routing.surfacePublicationsSkipped");
         }
-        publishGraphDeltaAtomically(session, delta, cause);
-        session.markGraphPublished();
+        publishGraph(session, delta, cause);
     }
 
+    private void publishGraph(
+            DocumentSession session,
+            GraphDelta delta,
+            TransitionCause cause) {
+        metrics.timed("temporal.graphPublication", () -> {
+            publishGraphDeltaAtomically(session, delta, cause);
+            session.markGraphPublished();
+        });
+    }
     private void publishGraphDeltaAtomically(
             DocumentSession parent,
             GraphDelta delta,
@@ -1237,11 +1392,15 @@ final class SequentialDrainCoordinator {
         long suppliedEpoch;
         boolean created = false;
         if (child == null) {
+            EngineMetrics.MetricsSnapshot traceBefore = transitionObserver == null
+                    ? null : metrics.snapshot();
+            long traceStarted = traceBefore == null ? 0L : System.nanoTime();
             child = processor.admitExact(
                     binding.childDocumentId(),
                     proposed.occurrence().suppliedState(),
                     childAdmissionFrontier(binding),
                     catchUpCause(binding, cause.timestampMicros()));
+            long commitStarted = System.nanoTime();
             documents.insert(child);
             recordNewChild(child.documentId());
             routes.replace(child.documentId(),
@@ -1251,11 +1410,15 @@ final class SequentialDrainCoordinator {
             created = true;
             metrics.increment("embedding.childSessionsCreated");
             metrics.increment("sessionsCreated");
+            metrics.addNanos("process.commitReadinessPublication",
+                    System.nanoTime() - commitStarted);
             if (child.layout().directOccurrences().isEmpty()) {
-                child.markGraphPublished();
+                metrics.timed("temporal.graphPublication",
+                        child::markGraphPublished);
             }
             failureInjector.accept(DefaultCoordinationEngine.FailurePoint
                     .AFTER_STAGING_CHILD_SESSION);
+            trace(child, child.revision(0L), traceBefore, traceStarted);
         } else {
             try {
                 suppliedEpoch = child.resolveAdmissionEpoch(
@@ -1291,8 +1454,7 @@ final class SequentialDrainCoordinator {
                         child,
                         child.layout().directOccurrences(),
                         nestedCause);
-                publishGraphDeltaAtomically(child, nested, nestedCause);
-                child.markGraphPublished();
+                publishGraph(child, nested, nestedCause);
                 String nestedBarrierId = openBarrierByParent.get(
                         child.documentId());
                 if (nestedBarrierId != null) {
@@ -1400,10 +1562,6 @@ final class SequentialDrainCoordinator {
         return ready;
     }
 
-    /**
-     * Admission-authored descendants must initialize before historical work,
-     * but their external history belongs to the pending top-level merge.
-     */
     private void completePendingAdmissionInitializations() {
         for (DocumentId documentId : new ArrayList<>(
                 pendingTopLevelAdmissions.keySet())) {
@@ -1418,7 +1576,8 @@ final class SequentialDrainCoordinator {
         }
         CatchUpBarrier rootBarrier = barriers.get(barrierId);
         if (rootBarrier == null || !rootBarrier.attachmentEntryBlueId().equals(
-                "admission|" + rootId.value())) {
+                documents.require(rootId).revision(0L).causalEntryBlueId()
+                        .orElseThrow())) {
             return;
         }
         List<InternalProcessOutcome> ignoredOutcomes = new ArrayList<>();
@@ -1601,6 +1760,19 @@ final class SequentialDrainCoordinator {
         }
     }
 
+    private void trace(
+            DocumentSession session,
+            DocumentRevision revision,
+            EngineMetrics.MetricsSnapshot before,
+            long started) {
+        if (before == null) {
+            return;
+        }
+        long totalNanos = System.nanoTime() - started;
+        transitionObserver.accept(new TransitionTrace(
+                session.documentId(), revision, before, metrics.snapshot(),
+                totalNanos));
+    }
     private List<BarrierCandidate> candidates(BarrierLevel level) {
         CatchUpBarrier barrier = level.barrier();
         List<BarrierCandidate> candidates = new ArrayList<>();
@@ -1705,7 +1877,8 @@ final class SequentialDrainCoordinator {
             throw new IllegalStateException(
                     "Missing nested catch-up barrier " + barrierId);
         }
-        barrier.nestedBarrierIds().stream().sorted().forEach(nested ->
+        barrier.nestedBarrierIds().stream()
+                .sorted(EmbeddingBinding.TEXT_ORDER).forEach(nested ->
                 collectBarrierTree(
                         nested, depth + 1, visited, active, result));
         active.remove(barrierId);
@@ -1908,14 +2081,14 @@ final class SequentialDrainCoordinator {
             ExternalOrderKey cutoffInclusive) {
         List<DocumentId> subtree = new ArrayList<>(subtree(graph, rootId));
         subtree.remove(rootId);
-        subtree.stream().sorted().forEach(documentId ->
+        subtree.stream().sorted(EmbeddingBinding.DOCUMENT_ORDER)
+                .forEach(documentId ->
                 publishReadyIfSynchronized(
                         documents.require(documentId), cutoffInclusive));
         publishReadyIfSynchronized(
                 documents.require(rootId), cutoffInclusive);
     }
 
-    /** Frozen direct Process Embedded subtree rooted at one admitted Root. */
     private static Set<DocumentId> subtree(
             ProcessEmbeddedGraphSnapshot snapshot,
             DocumentId root) {
@@ -1946,7 +2119,7 @@ final class SequentialDrainCoordinator {
     private List<EmbeddingBinding> barrierBindings(CatchUpBarrier barrier) {
         return barrier.bindingIds().stream()
                 .map(graph::binding)
-                .sorted(BINDING_ORDER)
+                .sorted(EmbeddingBinding.WITHIN_PARENT_ORDER)
                 .toList();
     }
 
@@ -1964,7 +2137,6 @@ final class SequentialDrainCoordinator {
         }
     }
 
-    /** Fails closed before a reconstructed coordinator can select new work. */
     private void validateRecoveredState() {
         if (committedTransitionSequence < 0L) {
             throw new IllegalStateException(
@@ -2051,12 +2223,6 @@ final class SequentialDrainCoordinator {
         }
     }
 
-    /**
-     * Repairs a recoverable READY marker after a crash boundary. Structural
-     * corruption was rejected above; lagging cursors, open barriers, and an
-     * unpublished current graph require deterministic continuation instead of
-     * exposing the document to applications.
-     */
     private void reconcileRecoveredReadiness(DocumentSession session) {
         if (session.status() != SessionStatus.READY) {
             return;
@@ -2077,6 +2243,41 @@ final class SequentialDrainCoordinator {
                 binding.attachmentEntryBlueId(),
                 binding.absolutePath(),
                 Math.max(1L, timestampMicros));
+    }
+
+    static String bindingId(
+            DocumentId parentDocumentId,
+            String absolutePath,
+            long activationGeneration) {
+        String parent = Objects.requireNonNull(
+                parentDocumentId, "parentDocumentId").value();
+        String path = Objects.requireNonNull(absolutePath, "absolutePath");
+        if (path.isBlank() || !path.startsWith("/")) {
+            throw new IllegalArgumentException(
+                    "absolutePath must be a non-blank JSON Pointer");
+        }
+        if (activationGeneration < 1L) {
+            throw new IllegalArgumentException(
+                    "activationGeneration must be positive");
+        }
+        String generation = Long.toString(activationGeneration);
+        return "binding:v1:p" + parent.length() + ":" + parent
+                + "o" + path.length() + ":" + path
+                + "g" + generation.length() + ":" + generation;
+    }
+
+    static String embeddedTransitionReceiptId(
+            String bindingId,
+            long childEpoch) {
+        String binding = Objects.requireNonNull(bindingId, "bindingId");
+        if (binding.isBlank()) {
+            throw new IllegalArgumentException("bindingId must not be blank");
+        }
+        if (childEpoch < 0L) {
+            throw new IllegalArgumentException(
+                    "childEpoch must be non-negative");
+        }
+        return "embedded|" + binding + "|" + childEpoch;
     }
 
     private static Map<String, EmbeddedOccurrence> byPath(
@@ -2193,6 +2394,13 @@ final class SequentialDrainCoordinator {
         }
     }
 
+    record TransitionTrace(
+            DocumentId documentId,
+            DocumentRevision revision,
+            EngineMetrics.MetricsSnapshot before,
+            EngineMetrics.MetricsSnapshot after,
+            long totalNanos) { }
+
     private record BarrierLevel(CatchUpBarrier barrier, int depth) {
         private BarrierLevel {
             barrier = Objects.requireNonNull(barrier, "barrier");
@@ -2213,6 +2421,35 @@ final class SequentialDrainCoordinator {
 
         private DeferredWorkException() {
             super(null, null, false, false);
+        }
+    }
+
+    private static final class RejectableExternalEntryException
+            extends RuntimeException {
+        private final String entryBlueId;
+        private final InvalidAdmissionEvidenceException failure;
+
+        private RejectableExternalEntryException(
+                String entryBlueId,
+                InvalidAdmissionEvidenceException failure) {
+            super(null, failure, false, false);
+            this.entryBlueId = requireText(entryBlueId, "entryBlueId");
+            this.failure = Objects.requireNonNull(failure, "failure");
+        }
+
+        private static RejectableExternalEntryException forEntry(
+                TimelineEntry entry,
+                InvalidAdmissionEvidenceException failure) {
+            return new RejectableExternalEntryException(
+                    Objects.requireNonNull(entry, "entry").blueId(), failure);
+        }
+
+        private String entryBlueId() {
+            return entryBlueId;
+        }
+
+        private InvalidAdmissionEvidenceException failure() {
+            return failure;
         }
     }
 
@@ -2281,9 +2518,13 @@ final class SequentialDrainCoordinator {
                 exactEmbeddedAdmissions = new LinkedHashMap<>();
         private final Map<String, EntryFrame> openFrames =
                 new LinkedHashMap<>();
+        private final Set<String> rejectedExternalEntryIds =
+                new LinkedHashSet<>();
         private final Map<DocumentId, PendingTopLevelAdmission>
                 pendingTopLevelAdmissions = new LinkedHashMap<>();
         private final Map<DocumentId, String> embeddedInputHeadByParent =
+                new LinkedHashMap<>();
+        private final Map<String, EmbeddedEpochInput> committedEmbeddedInputs =
                 new LinkedHashMap<>();
         private ProcessEmbeddedGraphSnapshot graph =
                 ProcessEmbeddedGraphSnapshot.empty();
@@ -2480,10 +2721,10 @@ final class SequentialDrainCoordinator {
         }
 
         static TransitionCause admission(
-                DocumentId documentId,
+                DocumentSession session,
                 ExternalOrderKey cutoff) {
             return new TransitionCause(
-                    "admission|" + documentId.value(),
+                    session.revision(0L).causalEntryBlueId().orElseThrow(),
                     cutoff,
                     cutoff,
                     timestamp(cutoff));
@@ -2512,28 +2753,30 @@ final class SequentialDrainCoordinator {
         }
     }
 
-    private record BarrierCandidate(
+    record BarrierCandidate(
             String barrierId,
             int depth,
             EmbeddingBinding binding,
             DocumentRevision revision,
             TimelineEntry entry,
             ExternalOrderKey order) {
-        private static final Comparator<BarrierCandidate> ORDER = Comparator
+        static final Comparator<BarrierCandidate> ORDER = Comparator
                 .comparing(BarrierCandidate::order)
                 .thenComparing(Comparator.comparingInt(
                         BarrierCandidate::depth).reversed())
                 .thenComparing(candidate ->
                         candidate.revision() == null ? 1 : 0)
-                .thenComparing(candidate ->
-                        candidate.binding().parentDocumentId().value())
-                .thenComparing(candidate ->
-                        candidate.binding().absolutePath())
-                .thenComparing(candidate ->
-                        candidate.binding().childDocumentId().value())
+                .thenComparing(c -> c.binding().parentDocumentId().value(),
+                        EmbeddingBinding.TEXT_ORDER)
+                .thenComparing(c -> c.binding().absolutePath(),
+                        EmbeddingBinding.TEXT_ORDER)
+                .thenComparing(c -> c.binding().childDocumentId().value(),
+                        EmbeddingBinding.TEXT_ORDER)
+                .thenComparingLong(c -> c.binding().activationGeneration())
                 .thenComparing(candidate -> candidate.revision() == null
-                        ? candidate.entry().blueId()
-                        : Long.toString(candidate.revision().epoch()));
+                        ? candidate.entry().blueId() : "", EmbeddingBinding.TEXT_ORDER)
+                .thenComparingLong(candidate -> candidate.revision() == null
+                        ? 0L : candidate.revision().epoch());
 
         static BarrierCandidate revision(
                 String barrierId,

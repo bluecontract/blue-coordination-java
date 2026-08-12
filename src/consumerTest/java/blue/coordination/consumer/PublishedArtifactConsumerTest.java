@@ -204,6 +204,105 @@ final class PublishedArtifactConsumerTest {
         }
     }
 
+    @Test
+    void fiveEmbeddedOccurrencesReuseThreeManagedDocuments() throws Exception {
+        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+            Timeline owner = engine.registerTimeline(
+                    "examples/playground/five-occurrence/host",
+                    "playground-owner");
+            engine.registerTimeline(
+                    "examples/playground/five-occurrence/alpha",
+                    "playground-feed-alpha");
+            engine.registerTimeline(
+                    "examples/playground/five-occurrence/beta",
+                    "playground-feed-beta");
+            engine.registerTimeline(
+                    "examples/playground/five-occurrence/gamma",
+                    "playground-feed-gamma");
+            DocumentId host = DocumentId.of(
+                    "playground-five-occurrence-host");
+            engine.startDocument(host, resource(
+                    "examples/playground/five-occurrence-initialization-host.yaml"));
+
+            int wholeObjectsBeforeRequest =
+                    engine.metrics().wholeObjectCount();
+            ExactValue request = engine.exactValue(
+                    fiveDocumentRequest(engine));
+            assertEquals(4,
+                    engine.metrics().wholeObjectCount()
+                            - wholeObjectsBeforeRequest,
+                    "three unique child bodies plus one whole request");
+            appendAndDrain(engine, owner, Operation.exact(
+                    "attachFiveDocuments",
+                    "ownerChannel",
+                    request));
+
+            assertEquals(4, engine.metrics().documentCount());
+            assertEquals(5, engine.document(host).embeddedChildren().size());
+            assertEquals(5L, integer(
+                    engine, host, "/initializationEventCount"));
+            assertEquals(2L, integer(
+                    engine, host, "/alphaInitializationEventCount"));
+            assertEquals(2L, integer(
+                    engine, host, "/betaInitializationEventCount"));
+            assertEquals(1L, integer(
+                    engine, host, "/gammaInitializationEventCount"));
+            assertEquals(1, engine.history(
+                    DocumentId.of("playground-game-alpha")).size());
+            assertEquals(1, engine.history(
+                    DocumentId.of("playground-game-beta")).size());
+            assertEquals(1, engine.history(
+                    DocumentId.of("playground-game-gamma")).size());
+        }
+    }
+
+    private static String fiveDocumentRequest(
+            CoordinationEngine engine) throws IOException {
+        String template = resource(
+                "examples/round12/nba-lifecycle-game.yaml");
+        ExactValue alpha = engine.exactValue(gameDefinition(
+                template,
+                "playground-game-alpha",
+                "examples/playground/five-occurrence/alpha",
+                "playground-feed-alpha"));
+        ExactValue beta = engine.exactValue(gameDefinition(
+                template,
+                "playground-game-beta",
+                "examples/playground/five-occurrence/beta",
+                "playground-feed-beta"));
+        ExactValue gamma = engine.exactValue(gameDefinition(
+                template,
+                "playground-game-gamma",
+                "examples/playground/five-occurrence/gamma",
+                "playground-feed-gamma"));
+        return "documents:\n"
+                + childReference("betaSecond", beta)
+                + childReference("alphaSecond", alpha)
+                + childReference("gamma", gamma)
+                + childReference("betaFirst", beta)
+                + childReference("alphaFirst", alpha);
+    }
+
+    private static String childReference(String key, ExactValue value) {
+        return "  " + key + ":\n"
+                + "    blueId: " + value.blueId() + "\n";
+    }
+
+    private static String gameDefinition(
+            String template,
+            String documentId,
+            String timelineId,
+            String actorId) {
+        return template
+                .replace("documentId: nba-lifecycle-game",
+                        "documentId: " + documentId)
+                .replace("timelineId: examples/round12/nba/game",
+                        "timelineId: " + timelineId)
+                .replace("accountId: nba-feed",
+                        "accountId: " + actorId);
+    }
+
+
     private static void dispatch(
             CoordinationEngine engine,
             Timeline timeline,

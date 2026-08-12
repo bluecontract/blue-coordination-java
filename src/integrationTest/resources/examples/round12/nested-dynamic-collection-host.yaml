@@ -1,0 +1,148 @@
+documentId: nested-dynamic-collection-host
+name: Nested Dynamic Collection Host
+childRevisionApplications: 0
+childInitializationEventCount: 0
+children:
+  alpha:
+    documentId: nested-dynamic-collection-child
+    name: Nested Dynamic Collection Child
+    childInitializationCount: 0
+    grandchildRevisionApplications: 0
+    grandchildInitializationEventCount: 0
+    game: __GAME_DOCUMENT__
+    contracts:
+      lifecycleChannel:
+        type:
+          blueId: 2ukJitzzDKQWHJ5EVUtn3t4FXieGmNA1NdwFSqG8qcfo
+        order: 0
+        event:
+          type:
+            blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
+      embedded:
+        type: Process Embedded
+        paths: [/_round12Inactive]
+      onProcessingInitiated:
+        type: Coordination/Sequential Workflow
+        channel: lifecycleChannel
+        order: 0
+        steps:
+          - type: Coordination/Compute
+            do:
+              - $appendChange:
+                  op: replace
+                  path: /childInitializationCount
+                  val: {$add: [$document: /childInitializationCount, 1]}
+              - $appendChange:
+                  op: replace
+                  path: /contracts/embedded/paths/0
+                  val: /game
+              - $appendEvent:
+                  type: Coordination/Event
+                  kind: Round12/Nested Child Initialized
+              - $return: true
+      coordinationEmbeddedChannel:
+        type: Coordination/Timeline Channel
+        timeline:
+          type: MyOS/MyOS Timeline
+          timelineId: coordination/internal/nested-dynamic-collection-child
+        actor:
+          type: MyOS/Principal Actor
+          accountId: coordination
+      coordinationApplyEmbeddedRevision:
+        type: Coordination/Sequential Workflow Operation
+        channel: coordinationEmbeddedChannel
+        request:
+          occurrencePath: {type: Text}
+          after:
+            documentId: {type: Text}
+        steps:
+          - type: Coordination/Compute
+            do:
+              - $appendChange:
+                  op: replace
+                  path: {$binding: event/message/request/occurrencePath}
+                  val: {$binding: event/message/request/after}
+              - $appendChange:
+                  op: replace
+                  path: /grandchildRevisionApplications
+                  val: {$add: [$document: /grandchildRevisionApplications, 1]}
+              - $if:
+                  cond:
+                    $some:
+                      in: {$binding: event/message/request/emittedEvents}
+                      item: emittedEvent
+                      where:
+                        $eq:
+                          - $var: {name: emittedEvent, path: /kind}
+                          - NBA/Game Initialized
+                  then:
+                    - $appendChange:
+                        op: replace
+                        path: /grandchildInitializationEventCount
+                        val: {$add: [$document: /grandchildInitializationEventCount, 1]}
+              - $return: true
+contracts:
+  ownerChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/round12/dynamic/nested/host
+    actor:
+      type: MyOS/Principal Actor
+      accountId: nested-host-owner
+  embedded:
+    type: Process Embedded
+    collectionPaths: [/_round12Inactive]
+  activateChildren:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /contracts/embedded/collectionPaths/0
+              val: /children
+          - $return: true
+  coordinationEmbeddedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: coordination/internal/nested-dynamic-collection-host
+    actor:
+      type: MyOS/Principal Actor
+      accountId: coordination
+  coordinationApplyEmbeddedRevision:
+    type: Coordination/Sequential Workflow Operation
+    channel: coordinationEmbeddedChannel
+    request:
+      occurrencePath: {type: Text}
+      after:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: {$binding: event/message/request/occurrencePath}
+              val: {$binding: event/message/request/after}
+          - $appendChange:
+              op: replace
+              path: /childRevisionApplications
+              val: {$add: [$document: /childRevisionApplications, 1]}
+          - $if:
+              cond:
+                $some:
+                  in: {$binding: event/message/request/emittedEvents}
+                  item: emittedEvent
+                  where:
+                    $eq:
+                      - $var: {name: emittedEvent, path: /kind}
+                      - Round12/Nested Child Initialized
+              then:
+                - $appendChange:
+                    op: replace
+                    path: /childInitializationEventCount
+                    val: {$add: [$document: /childInitializationEventCount, 1]}
+          - $return: true

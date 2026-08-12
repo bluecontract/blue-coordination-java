@@ -1,5 +1,6 @@
 package blue.coordination.api;
 
+import blue.language.identity.BlueIds;
 import blue.language.model.Node;
 import blue.language.processor.ExternalOrderKey;
 
@@ -83,7 +84,15 @@ public final class DocumentRevision {
         this.after = Objects.requireNonNull(after, "after");
         this.sourceEntry = sourceEntry;
         this.causalOrder = causalOrder;
-        this.causalEntryBlueId = causalEntryBlueId;
+        if (sourceEntry != null && causalEntryBlueId != null
+                && !sourceEntry.blueId().equals(causalEntryBlueId)) {
+            throw new IllegalArgumentException(
+                    "Timeline source and causal BlueId must match");
+        }
+        this.causalEntryBlueId = sourceEntry != null ? sourceEntry.blueId()
+                : causalEntryBlueId == null ? null
+                : BlueIds.requirePlainBlueId(
+                        causalEntryBlueId, "/causalEntryBlueId");
         this.catchUpCause = catchUpCause;
         List<Node> events = new ArrayList<>();
         for (Node event : Objects.requireNonNull(emittedEvents, "emittedEvents")) {
@@ -91,9 +100,11 @@ public final class DocumentRevision {
         }
         this.emittedEvents = Collections.unmodifiableList(events);
         this.processingGas = processingGas;
-        if (kind == DocumentRevision.Kind.INITIALIZATION && sourceEntry != null) {
+        if (kind == DocumentRevision.Kind.INITIALIZATION
+                && (sourceEntry != null || causalOrder == null
+                || causalEntryBlueId == null)) {
             throw new IllegalArgumentException(
-                    "Initialization revision cannot have a Timeline Entry");
+                    "Initialization requires no Timeline Entry and exact cause");
         }
         if (kind == DocumentRevision.Kind.TIMELINE_ENTRY && sourceEntry == null) {
             throw new IllegalArgumentException(
@@ -136,12 +147,12 @@ public final class DocumentRevision {
         return Optional.ofNullable(sourceEntry);
     }
 
-    /** Returns the deterministic source order when a source entry exists. */
+    /** Returns the deterministic causal/source order for this revision. */
     public Optional<ExternalOrderKey> sourceOrderKey() {
         return Optional.ofNullable(causalOrder);
     }
 
-    /** Exact external entry identity that causally owns this epoch segment. */
+    /** Exact cause BlueId that owns this epoch segment. */
     public Optional<String> causalEntryBlueId() {
         return Optional.ofNullable(causalEntryBlueId);
     }

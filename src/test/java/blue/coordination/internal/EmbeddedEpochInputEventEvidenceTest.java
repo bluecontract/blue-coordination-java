@@ -45,7 +45,7 @@ final class EmbeddedEpochInputEventEvidenceTest {
                     childState,
                     null,
                     ATTACHMENT_ORDER,
-                    "attachment-entry",
+                    childState.blueId(),
                     null,
                     List.of(eventWithoutType),
                     0L);
@@ -60,7 +60,7 @@ final class EmbeddedEpochInputEventEvidenceTest {
                     childState.blueId(),
                     null,
                     "test-admission-proof",
-                    "attachment-entry",
+                    childState.blueId(),
                     ATTACHMENT_ORDER);
 
             IllegalStateException failure = assertThrows(

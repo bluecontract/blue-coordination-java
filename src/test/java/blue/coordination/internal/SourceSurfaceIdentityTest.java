@@ -8,11 +8,13 @@ import blue.language.processor.SubscriptionDelta;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigInteger;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class SourceSurfaceIdentityTest {
     @Test
@@ -70,6 +72,37 @@ final class SourceSurfaceIdentityTest {
         assertEquals(
                 identity(binding, List.of(first, second), routing()),
                 identity(binding, List.of(second, first), routing()));
+    }
+
+    @Test
+    void subscriptionTextDimensionsUseUnicodeCodePointOrder() {
+        String privateUse = "\uE000";
+        String supplementary = "\uD800\uDC00";
+        assertTrue(privateUse.compareTo(supplementary) > 0,
+                "the fixture must oppose Java UTF-16 ordering");
+
+        List<SubscriptionDelta.Entry> channelKeys = new ArrayList<>(List.of(
+                subscription("/", supplementary, "type", "source", 0,
+                        "key", "checkpoint", dependencies("intrinsic"),
+                        0L, order(100L), null),
+                subscription("/", privateUse, "type", "source", 0,
+                        "key", "checkpoint", dependencies("intrinsic"),
+                        0L, order(100L), null)));
+        channelKeys.sort(SourceSurfaceIdentity.ENTRY_ORDER);
+        assertEquals(List.of(privateUse, supplementary), channelKeys.stream()
+                .map(SubscriptionDelta.Entry::channelKey).toList());
+
+        List<SubscriptionDelta.Entry> sourceLists = new ArrayList<>(List.of(
+                subscription("/", "channel", "type", supplementary, 0,
+                        "key", "checkpoint", dependencies("intrinsic"),
+                        0L, order(100L), null),
+                subscription("/", "channel", "type", privateUse, 0,
+                        "key", "checkpoint", dependencies("intrinsic"),
+                        0L, order(100L), null)));
+        sourceLists.sort(SourceSurfaceIdentity.ENTRY_ORDER);
+        assertEquals(List.of(privateUse, supplementary), sourceLists.stream()
+                .map(entry -> entry.sourceContributionNodeBlueIds().get(0))
+                .toList());
     }
 
     @Test

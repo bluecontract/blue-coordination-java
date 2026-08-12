@@ -52,8 +52,9 @@ Unknown constructor keys and string lookups fail instead of reading as zero.
 - `UNRELATED_DOCUMENT_READS`, `REQUEST_FRAGMENTS`,
   `TIMELINE_ENTRY_FRAGMENTS`, `ORDINARY_NODE_FRAGMENTS`,
   `FULL_ENVIRONMENT_SCANS`, `SOURCE_REPLAYS_PER_PARENT`, and
-  `POST_PROCESS_FULL_PROJECTIONS` are structural release gates and remain zero
-  only while those forbidden work classes remain absent.
+  `POST_PROCESS_FULL_PROJECTIONS`, `PARENT_PROCESS_RERUNS_ON_GRAPH_RETRY`, and
+  `CHILD_PROCESS_RERUNS_ON_PARENT_RETRY` are structural release gates and
+  remain zero only while those forbidden work classes remain absent.
 
 Detailed implementation counters and phase timers used for integration-test
 deltas are exposed only by the test-fixture `CoordinationTestControl`; they are

@@ -1,0 +1,115 @@
+documentId: nba-lifecycle-host
+name: NBA Lifecycle Host
+hostInitializationCount: 0
+gameInitialized: false
+gameInitializationEventCount: 0
+gameInitializationEventBlueId: None
+gameEnded: false
+gameEndedEventCount: 0
+gameEndedEventBlueId: None
+observedHomeScore: 0
+observedAwayScore: 0
+observedPlayCount: 0
+observedStatus: None
+revisionApplications: 0
+contracts:
+  lifecycleChannel:
+    type:
+      blueId: 2ukJitzzDKQWHJ5EVUtn3t4FXieGmNA1NdwFSqG8qcfo
+    order: 0
+    event:
+      type:
+        blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
+  onProcessingInitiated:
+    type: Coordination/Sequential Workflow
+    channel: lifecycleChannel
+    order: 0
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /hostInitializationCount
+              val: {$add: [$document: /hostInitializationCount, 1]}
+          - $return: true
+  hostChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/round12/nba/host
+    actor:
+      type: MyOS/Principal Actor
+      accountId: host-owner
+  coordinationEmbeddedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: coordination/internal/round12/nba-host
+    actor:
+      type: MyOS/Principal Actor
+      accountId: coordination
+  embedded:
+    type: Process Embedded
+    paths: [/game]
+  attachGame:
+    type: Coordination/Sequential Workflow Operation
+    channel: hostChannel
+    request:
+      document:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange: {op: add, path: /game, val: {$binding: event/message/request/document}}
+          - $return: true
+  coordinationApplyEmbeddedRevision:
+    type: Coordination/Sequential Workflow Operation
+    channel: coordinationEmbeddedChannel
+    request:
+      after:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange: {op: replace, path: /game, val: {$binding: event/message/request/after}}
+          - $appendChange: {op: replace, path: /observedHomeScore, val: {$binding: event/message/request/after/homeScore}}
+          - $appendChange: {op: replace, path: /observedAwayScore, val: {$binding: event/message/request/after/awayScore}}
+          - $appendChange: {op: replace, path: /observedPlayCount, val: {$binding: event/message/request/after/playCount}}
+          - $appendChange: {op: replace, path: /observedStatus, val: {$binding: event/message/request/after/status}}
+          - $appendChange:
+              op: replace
+              path: /revisionApplications
+              val: {$add: [$document: /revisionApplications, 1]}
+          - $if:
+              cond:
+                $some:
+                  in: {$binding: event/message/request/emittedEvents}
+                  item: emittedEvent
+                  where:
+                    $eq:
+                      - $var: {name: emittedEvent, path: /kind}
+                      - NBA/Game Initialized
+              then:
+                - $appendChange: {op: replace, path: /gameInitialized, val: true}
+                - $appendChange:
+                    op: replace
+                    path: /gameInitializationEventCount
+                    val: {$add: [$document: /gameInitializationEventCount, 1]}
+                - $appendChange: {op: replace, path: /gameInitializationEventBlueId, val: {$binding: event/message/request/eventOccurrences/0/eventBlueId}}
+          - $if:
+              cond:
+                $some:
+                  in: {$binding: event/message/request/emittedEvents}
+                  item: emittedEvent
+                  where:
+                    $eq:
+                      - $var: {name: emittedEvent, path: /kind}
+                      - NBA/Game Ended
+              then:
+                - $appendChange: {op: replace, path: /gameEnded, val: true}
+                - $appendChange:
+                    op: replace
+                    path: /gameEndedEventCount
+                    val: {$add: [$document: /gameEndedEventCount, 1]}
+                - $appendChange: {op: replace, path: /gameEndedEventBlueId, val: {$binding: event/message/request/eventOccurrences/0/eventBlueId}}
+          - $return: true

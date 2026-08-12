@@ -34,6 +34,8 @@ Read next:
 - [Process Embedded documents](docs/semantics/process-embedded-documents.md)
 - [Historical catch-up](docs/semantics/historical-catch-up.md)
 - [Identity and revisions](docs/semantics/identity-and-revisions.md)
+- [Initialization causality](docs/semantics/initialization-causality.md)
+- [Shared NBA Game lifecycle](docs/examples/nba-shared-game-lifecycle.md)
 - [Host vs frozen time](docs/performance/host-vs-frozen-time.md)
 - [Known limitations](docs/limitations.md)
 - [Migration from 2.x](docs/migration-from-2.x.md)

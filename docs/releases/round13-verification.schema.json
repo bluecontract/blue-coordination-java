@@ -1,0 +1,504 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "round13-verification.schema.json",
+  "title": "Blue Coordination Round 13 Playground verification evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schemaVersion",
+    "release",
+    "profile",
+    "evidenceState",
+    "evidenceDate",
+    "status",
+    "verdict",
+    "source",
+    "executionBinding",
+    "shape",
+    "tests",
+    "runtimes",
+    "proofs",
+    "performance",
+    "structuralEvidence",
+    "artifacts",
+    "sourceArchive",
+    "publicationEvidence",
+    "capabilities",
+    "blockers",
+    "finalizationRequirements",
+    "limitations",
+    "notClaimed"
+  ],
+  "properties": {
+    "$schema": { "const": "round13-verification.schema.json" },
+    "schemaVersion": { "const": "4.0.0" },
+    "release": { "const": "3.0.0-rc.1" },
+    "profile": { "const": "ROUND13_PLAYGROUND_FIVE_OCCURRENCE" },
+    "evidenceState": { "enum": ["INTERIM", "FINAL"] },
+    "evidenceDate": { "type": "string", "format": "date" },
+    "status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "temporalArchitectureReady",
+        "inMemoryEngineWorkingReady",
+        "playgroundCoreReady",
+        "playgroundLatencyReady",
+        "providerBackedReady",
+        "mandateAgentReady",
+        "publicRcReady"
+      ],
+      "properties": {
+        "temporalArchitectureReady": { "$ref": "#/$defs/readiness" },
+        "inMemoryEngineWorkingReady": { "$ref": "#/$defs/readiness" },
+        "playgroundCoreReady": { "$ref": "#/$defs/readiness" },
+        "playgroundLatencyReady": { "$ref": "#/$defs/readiness" },
+        "providerBackedReady": { "const": "OUT_OF_SCOPE" },
+        "mandateAgentReady": { "const": "OUT_OF_SCOPE" },
+        "publicRcReady": { "$ref": "#/$defs/readiness" }
+      }
+    },
+    "verdict": { "$ref": "#/$defs/readiness" },
+    "source": { "$ref": "#/$defs/source" },
+    "executionBinding": { "$ref": "#/$defs/executionBinding" },
+    "shape": { "$ref": "#/$defs/shape" },
+    "tests": { "$ref": "#/$defs/tests" },
+    "runtimes": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "$ref": "#/$defs/runtime" }
+    },
+    "proofs": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "items": { "$ref": "#/$defs/proof" }
+    },
+    "performance": { "$ref": "#/$defs/performance" },
+    "structuralEvidence": { "$ref": "#/$defs/structuralEvidence" },
+    "artifacts": { "$ref": "#/$defs/artifacts" },
+    "sourceArchive": { "$ref": "#/$defs/sourceArchive" },
+    "publicationEvidence": { "$ref": "#/$defs/publicationEvidence" },
+    "capabilities": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/classification" }
+    },
+    "blockers": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/classification" }
+    },
+    "finalizationRequirements": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "limitations": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "notClaimed": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "$defs": {
+    "readiness": {
+      "enum": [
+        "PASS",
+        "PASS_HARD_GATE",
+        "PENDING_VERIFICATION",
+        "BLOCKED",
+        "FAIL",
+        "OUT_OF_SCOPE"
+      ]
+    },
+    "executionStatus": {
+      "enum": ["PASS", "PENDING_VERIFICATION", "FAIL", "BLOCKED_UPSTREAM"]
+    },
+    "campaignStatus": {
+      "enum": [
+        "PASS",
+        "PASS_HARD_GATE",
+        "PENDING_VERIFICATION",
+        "FAIL"
+      ]
+    },
+    "sha256": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseCommit",
+        "candidateCommit",
+        "binding",
+        "worktree",
+        "dirtyReason",
+        "mainSourceManifestAlgorithm",
+        "mainSourceManifestSha256"
+      ],
+      "properties": {
+        "baseCommit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "candidateCommit": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{40}$",
+          "description": "The tested implementation/source commit. FINAL permits a later evidence-only HEAD when this commit is its ancestor and the current main-source manifest still matches."
+        },
+        "binding": {
+          "enum": [
+            "BASE_COMMIT_PLUS_DIRTY_WORKTREE_MANIFEST",
+            "CANDIDATE_COMMIT"
+          ]
+        },
+        "worktree": { "enum": ["DIRTY", "CLEAN"] },
+        "dirtyReason": { "type": ["string", "null"] },
+        "mainSourceManifestAlgorithm": { "type": "string", "minLength": 1 },
+        "mainSourceManifestSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "executionBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "mainSourceManifestSha256",
+        "candidateCommit",
+        "reason"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "PENDING",
+            "WORKTREE_EXECUTION",
+            "CANDIDATE_COMMIT_EXECUTION"
+          ]
+        },
+        "mainSourceManifestSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "candidateCommit": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "reason": { "type": ["string", "null"] }
+      }
+    },
+    "shape": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "basis",
+        "productionClasses",
+        "productionLines",
+        "publicApiSourceTypes",
+        "limits",
+        "limitRevisionReason"
+      ],
+      "properties": {
+        "status": { "enum": ["PASS", "FAIL"] },
+        "basis": { "const": "STATIC_WORKTREE_SNAPSHOT" },
+        "productionClasses": { "type": "integer", "minimum": 0 },
+        "productionLines": { "type": "integer", "minimum": 0 },
+        "publicApiSourceTypes": { "type": "integer", "minimum": 0 },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "productionClasses",
+            "productionLines",
+            "publicApiSourceTypes"
+          ],
+          "properties": {
+            "productionClasses": { "type": "integer", "minimum": 1 },
+            "productionLines": { "type": "integer", "minimum": 1 },
+            "publicApiSourceTypes": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "limitRevisionReason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "tests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inventoryBasis",
+        "executionStatus",
+        "finalTreeRequired",
+        "tests",
+        "classes",
+        "failures",
+        "errors",
+        "skipped",
+        "suites"
+      ],
+      "properties": {
+        "inventoryBasis": { "const": "STATIC_SOURCE_INVENTORY" },
+        "executionStatus": { "$ref": "#/$defs/executionStatus" },
+        "finalTreeRequired": { "const": true },
+        "tests": { "type": "integer", "minimum": 0 },
+        "classes": { "type": "integer", "minimum": 0 },
+        "failures": { "type": ["integer", "null"], "minimum": 0 },
+        "errors": { "type": ["integer", "null"], "minimum": 0 },
+        "skipped": { "type": ["integer", "null"], "minimum": 0 },
+        "suites": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/suite" }
+        }
+      }
+    },
+    "suite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "status",
+        "tests",
+        "classes",
+        "failures",
+        "errors",
+        "skipped"
+      ],
+      "properties": {
+        "name": {
+          "enum": ["test", "integrationTest", "consumerTest", "scenarioTest"]
+        },
+        "status": { "$ref": "#/$defs/executionStatus" },
+        "tests": { "type": "integer", "minimum": 0 },
+        "classes": { "type": "integer", "minimum": 0 },
+        "failures": { "type": ["integer", "null"], "minimum": 0 },
+        "errors": { "type": ["integer", "null"], "minimum": 0 },
+        "skipped": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["java", "gate", "status", "durationSeconds"],
+      "properties": {
+        "java": { "enum": ["17", "21"] },
+        "gate": { "type": "string", "minLength": 1 },
+        "status": { "$ref": "#/$defs/executionStatus" },
+        "durationSeconds": { "type": ["number", "null"], "exclusiveMinimum": 0 }
+      }
+    },
+    "proof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "sourceSet",
+        "testClass",
+        "testMethod",
+        "task",
+        "status"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "sourceSet": {
+          "enum": ["test", "integrationTest", "consumerTest", "scenarioTest", "performance"]
+        },
+        "testClass": { "type": ["string", "null"] },
+        "testMethod": { "type": ["string", "null"] },
+        "task": { "type": "string", "minLength": 1 },
+        "status": { "$ref": "#/$defs/executionStatus" }
+      }
+    },
+    "performance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["round13Campaign", "historicalRound12"],
+      "properties": {
+        "round13Campaign": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "comparison",
+            "baselineArchive",
+            "baselineSha256",
+            "candidateTask",
+            "warmups",
+            "requiredSamples",
+            "measuredSamples",
+            "runtimeMarkdown",
+            "runtimeJson",
+            "runtimeProvenanceJson",
+            "pendingReason"
+          ],
+          "properties": {
+            "status": { "$ref": "#/$defs/campaignStatus" },
+            "comparison": { "const": "SAME_MACHINE_INTERLEAVED_AB" },
+            "baselineArchive": { "const": "Archive.zip" },
+            "baselineSha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "candidateTask": { "const": "round13PlaygroundSample" },
+            "warmups": { "type": "integer", "minimum": 0 },
+            "requiredSamples": { "type": "integer", "minimum": 30 },
+            "measuredSamples": { "type": "integer", "minimum": 0 },
+            "runtimeMarkdown": {
+              "enum": [
+                null,
+                "docs/releases/evidence/round13/five-occurrence-runtime.md"
+              ]
+            },
+            "runtimeJson": {
+              "enum": [
+                null,
+                "docs/releases/evidence/round13/five-occurrence-runtime.json"
+              ]
+            },
+            "runtimeProvenanceJson": {
+              "enum": [
+                null,
+                "docs/releases/evidence/round13/runtime-provenance.json"
+              ]
+            },
+            "pendingReason": { "type": ["string", "null"] }
+          }
+        },
+        "historicalRound12": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["classification", "decisionBasis", "summary"],
+          "properties": {
+            "classification": { "const": "HISTORICAL_ONLY" },
+            "decisionBasis": { "const": false },
+            "summary": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "structuralEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "finalTreeRequired", "requiredZeroCounters"],
+      "properties": {
+        "status": { "$ref": "#/$defs/executionStatus" },
+        "finalTreeRequired": { "const": true },
+        "requiredZeroCounters": {
+          "type": "object",
+          "minProperties": 8,
+          "maxProperties": 8,
+          "additionalProperties": { "type": ["integer", "null"], "minimum": 0 }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "finalTreeRequired",
+        "mainJarSha256",
+        "sourcesJarSha256",
+        "javadocJarSha256",
+        "testFixturesJarSha256"
+      ],
+      "properties": {
+        "status": { "$ref": "#/$defs/executionStatus" },
+        "finalTreeRequired": { "const": true },
+        "mainJarSha256": { "$ref": "#/$defs/sha256" },
+        "sourcesJarSha256": { "$ref": "#/$defs/sha256" },
+        "javadocJarSha256": { "$ref": "#/$defs/sha256" },
+        "testFixturesJarSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "sourceArchive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "configuration",
+        "finalTreeRequired",
+        "authoritativeVersionFile",
+        "authoritativeVersionFileIncluded",
+        "reproducibleFileOrder",
+        "preserveFileTimestamps",
+        "duplicatesStrategy",
+        "exportIgnored",
+        "extractedConfiguration",
+        "focusedTestsStatus",
+        "publishedArtifactSmokeBuild",
+        "verificationReceipt",
+        "checksum",
+        "pendingReason"
+      ],
+      "properties": {
+        "configuration": { "const": "CONFIGURED" },
+        "finalTreeRequired": { "const": true },
+        "authoritativeVersionFile": { "const": ".cz.toml" },
+        "authoritativeVersionFileIncluded": { "const": true },
+        "reproducibleFileOrder": { "const": true },
+        "preserveFileTimestamps": { "const": false },
+        "duplicatesStrategy": { "const": "FAIL" },
+        "exportIgnored": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "extractedConfiguration": { "$ref": "#/$defs/executionStatus" },
+        "focusedTestsStatus": { "$ref": "#/$defs/executionStatus" },
+        "publishedArtifactSmokeBuild": { "$ref": "#/$defs/executionStatus" },
+        "verificationReceipt": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schemaId", "path"],
+          "properties": {
+            "schemaId": {
+              "const": "blue-coordination-round13-source-archive-verification-v1"
+            },
+            "path": {
+              "const": "build/reports/round13/source-archive-verification.json"
+            }
+          }
+        },
+        "checksum": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "path", "digest"],
+          "properties": {
+            "mode": { "const": "DETACHED_SHA256_SIDECAR" },
+            "path": {
+              "const": "build/distributions/blue-coordination-java-3.0.0-rc.1-source.zip.sha256"
+            },
+            "digest": { "type": "null" }
+          }
+        },
+        "pendingReason": { "type": ["string", "null"] }
+      }
+    },
+    "publicationEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "gate", "durationSeconds", "notes"],
+      "properties": {
+        "status": { "$ref": "#/$defs/executionStatus" },
+        "gate": { "type": "string", "minLength": 1 },
+        "durationSeconds": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+        "notes": { "type": "string", "minLength": 1 }
+      }
+    },
+    "classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "category", "summary"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "category": {
+          "enum": ["scope", "verification", "artifact-upstream", "capability"]
+        },
+        "summary": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

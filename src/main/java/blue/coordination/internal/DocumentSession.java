@@ -327,8 +327,8 @@ final class DocumentSession {
         }
     }
 
-    private static IllegalStateException invalidAdmission(String diagnostic) {
-        return new IllegalStateException(
-                "Invalid admission evidence: " + diagnostic);
+    private static InvalidAdmissionEvidenceException invalidAdmission(
+            String diagnostic) {
+        return new InvalidAdmissionEvidenceException(diagnostic);
     }
 }

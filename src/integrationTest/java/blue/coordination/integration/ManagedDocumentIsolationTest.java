@@ -84,6 +84,7 @@ final class ManagedDocumentIsolationTest {
             assertEquals(0L, work.counter(
                     "routing.surfaceCompilations"));
             assertEquals(3L, work.counter("layout.plansReused"));
+            assertEquals(0L, work.counter("layout.catalogCompilations"));
             assertEquals(3L, work.counter("GRAPH_SNAPSHOTS_REUSED"));
             assertNoGenericSplitting(work);
         }

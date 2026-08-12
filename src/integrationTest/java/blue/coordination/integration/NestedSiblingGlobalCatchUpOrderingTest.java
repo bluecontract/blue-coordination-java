@@ -57,6 +57,9 @@ final class NestedSiblingGlobalCatchUpOrderingTest {
             engine.start(
                     "nested-sibling-history-root",
                     resource("examples/clean/nested-sibling-history-root.yaml"));
+            String rootInitializationCause = engine.history(
+                    "nested-sibling-history-root").get(0)
+                    .causalEntryBlueId().orElseThrow();
             TimelineEntry attachment = engine.appendAt(
                     rootTimeline,
                     Operation.exact(
@@ -94,8 +97,8 @@ final class NestedSiblingGlobalCatchUpOrderingTest {
             List<String> rootTrace = trace(engine.history(
                     "nested-sibling-history-root"));
             assertEquals(List.of(
-                            DocumentRevision.Kind.INITIALIZATION
-                                    + "|admission|nested-sibling-history-root",
+                            DocumentRevision.Kind.INITIALIZATION + "|"
+                                    + rootInitializationCause,
                             trace(DocumentRevision.Kind.TIMELINE_ENTRY,
                                     attachment),
                             trace(

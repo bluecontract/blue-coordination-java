@@ -5,7 +5,6 @@ import blue.coordination.api.DocumentId;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -16,13 +15,6 @@ import java.util.Set;
 
 /** Immutable indexed snapshot derived only from effective Process Embedded occurrences. */
 final class ProcessEmbeddedGraphSnapshot {
-    private static final Comparator<EmbeddingBinding> BINDING_ORDER =
-            Comparator.comparing((EmbeddingBinding binding) ->
-                    binding.parentDocumentId().value())
-                    .thenComparing(EmbeddingBinding::absolutePath)
-                    .thenComparing(binding -> binding.childDocumentId().value())
-                    .thenComparingLong(EmbeddingBinding::activationGeneration);
-
     private final long generation;
     private final Map<DocumentId, List<EmbeddingBinding>> childrenByParent;
     private final Map<DocumentId, List<EmbeddingBinding>> parentsByChild;
@@ -41,7 +33,7 @@ final class ProcessEmbeddedGraphSnapshot {
         Map<DocumentId, List<EmbeddingBinding>> parents =
                 new LinkedHashMap<>();
         Map<String, EmbeddingBinding> identities = new LinkedHashMap<>();
-        bindings.stream().sorted(BINDING_ORDER).forEach(binding -> {
+        bindings.stream().sorted(EmbeddingBinding.GLOBAL_ORDER).forEach(binding -> {
             EmbeddingBinding duplicate = identities.putIfAbsent(
                     binding.bindingId(), binding);
             if (duplicate != null) {
@@ -56,8 +48,8 @@ final class ProcessEmbeddedGraphSnapshot {
                     binding.childDocumentId(), ignored -> new ArrayList<>())
                     .add(binding);
         });
-        children.values().forEach(list -> list.sort(BINDING_ORDER));
-        parents.values().forEach(list -> list.sort(BINDING_ORDER));
+        children.values().forEach(list -> list.sort(EmbeddingBinding.GLOBAL_ORDER));
+        parents.values().forEach(list -> list.sort(EmbeddingBinding.GLOBAL_ORDER));
         this.childrenByParent = immutableIndex(children);
         this.parentsByChild = immutableIndex(parents);
         this.byId = Collections.unmodifiableMap(identities);
@@ -109,7 +101,7 @@ final class ProcessEmbeddedGraphSnapshot {
     }
 
     List<EmbeddingBinding> bindings() {
-        return byId.values().stream().sorted(BINDING_ORDER).toList();
+        return byId.values().stream().sorted(EmbeddingBinding.GLOBAL_ORDER).toList();
     }
 
     ProcessEmbeddedGraphSnapshot reconcileParent(
@@ -130,7 +122,7 @@ final class ProcessEmbeddedGraphSnapshot {
                                 "Replacement binding belongs to another parent");
                     }
                 })
-                .sorted(BINDING_ORDER)
+                .sorted(EmbeddingBinding.GLOBAL_ORDER)
                 .toList();
         if (children(parent).equals(canonical)) {
             return this;
@@ -159,7 +151,7 @@ final class ProcessEmbeddedGraphSnapshot {
             updated.removeIf(binding ->
                     binding.parentDocumentId().equals(parent));
             updated.addAll(newByChild.getOrDefault(child, List.of()));
-            updated.sort(BINDING_ORDER);
+            updated.sort(EmbeddingBinding.GLOBAL_ORDER);
             if (updated.isEmpty()) {
                 parents.remove(child);
             } else {
@@ -208,7 +200,7 @@ final class ProcessEmbeddedGraphSnapshot {
                     new ArrayList<>()).add(binding);
         }
         result.replaceAll((ignored, grouped) -> grouped.stream()
-                .sorted(BINDING_ORDER).toList());
+                .sorted(EmbeddingBinding.GLOBAL_ORDER).toList());
         return result;
     }
 
@@ -255,7 +247,8 @@ final class ProcessEmbeddedGraphSnapshot {
         }
         List<DocumentId> result = new ArrayList<>();
         Set<DocumentId> emitted = new LinkedHashSet<>();
-        closure.stream().sorted().forEach(document -> appendChildFirst(
+        closure.stream().sorted(EmbeddingBinding.DOCUMENT_ORDER)
+                .forEach(document -> appendChildFirst(
                 document, closure, emitted, result));
         return List.copyOf(result);
     }

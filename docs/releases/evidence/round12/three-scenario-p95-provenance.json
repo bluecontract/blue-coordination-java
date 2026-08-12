@@ -1,0 +1,912 @@
+{
+  "schemaVersion": "round12-three-scenario-p95-provenance-v1",
+  "status": "MEASURED_HARD_GATE_FAILURE",
+  "generatedAt": "2026-08-11T02:37:59+01:00",
+  "sourceBinding": {
+    "mainSourceManifestAlgorithm": "SHA-256 of LF-joined sorted repository path, ASCII space, file SHA-256; no trailing LF",
+    "mainSourceManifestSha256": "b3a78f551809d377db3a7c50002cc942470dade26b5b4bd14e361085862e92ac",
+    "mainSourceFiles": 108,
+    "mainSourceLines": 25700,
+    "consumedMavenLocalArtifacts": [
+      {
+        "file": "blue-coordination-java-3.0.0-rc.1.jar",
+        "sha256": "495aded16ce33bf6631800d9f6173c70d9081b378621c87a591afb0ae7cb340c"
+      },
+      {
+        "file": "blue-coordination-java-3.0.0-rc.1-test-fixtures.jar",
+        "sha256": "18ce86ff3d1207ca0af133a984a8f93b117170e960a88276bede2c32549c65cb"
+      }
+    ],
+    "blueBasicSourceManifestAlgorithm": "SHA-256 of LF-joined sorted blue-basic src Java/YAML path, ASCII space, file SHA-256; no trailing LF",
+    "blueBasicSourceManifestSha256": "011e48b9c17681afee813e6eefe5dac5c79dedc2258b68a20636ef87e22fccde",
+    "blueBasicSourceFiles": 52,
+    "blueBasicDependencyLockSha256": "2fd586ab9a6b636fd37a82c58db5b985836ea5a93576314ac4e2bec57d3b010e",
+    "harnessSha256": "3566460a537f5a048a59b2660a19d8a5bf59edbdcf703ed25004b539a5af8349"
+  },
+  "environment": {
+    "javaVersion": "17.0.10",
+    "javaVendor": "Oracle Corporation",
+    "javaVm": "Java HotSpot(TM) 64-Bit Server VM",
+    "gradleVersion": "9.6.0",
+    "osName": "Mac OS X",
+    "osVersion": "26.5.2",
+    "kernel": "Darwin 25.5.0",
+    "architecture": "aarch64"
+  },
+  "campaign": {
+    "scenario": "large-host-embedded-paynote",
+    "reportSchema": "blue.coordination/basic-test-timings/2.0",
+    "startedAt": "2026-08-11T02:15:08+01:00",
+    "completedAt": "2026-08-11T02:37:59+01:00",
+    "samples": 30,
+    "successfulSamples": 30,
+    "isolation": "30 independent Gradle Test tasks, one fork per sample, maxParallelForks=1, --max-workers=1",
+    "strictPerformanceAssertions": true
+  },
+  "measurementAlgorithm": {
+    "units": "milliseconds",
+    "nanosecondsPerMillisecond": 1000000,
+    "scenarioDetails": {
+      "warmOrdinary": "host-warm",
+      "warmPayNotePlusParent": "paynote-auth-warm",
+      "threeLayerRestaurantProduct": "paynote-restaurant-confirmation"
+    },
+    "append": "append exact whole entry; reported separately and excluded from total",
+    "host": "indexed route selection + Coordination before frozen PROCESS + Coordination after frozen PROCESS + unattributed drain residual",
+    "frozen": "all frozen Contracts PROCESS",
+    "total": "host + frozen",
+    "percentile": "nearest-rank p95 over 30 samples: ceil(0.95 * 30) = rank 29, sorted zero-based index 28",
+    "p95Components": "Each append, host, frozen, and total p95 is calculated independently from its own 30-value distribution."
+  },
+  "gates": {
+    "preferredMaximumRegressionPercent": 10,
+    "hardMaximumRegressionPercent": 20,
+    "comparisonMetric": "hostP95Ms"
+  },
+  "samples": [
+    {
+      "sample": 1,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-01/large-host-embedded-paynote-timings.json",
+        "sha256": "87c9d8c2fb76d55f12cfcfe71f75fbe0ce3cb417d0a70e7c40d9076041e8b7ed"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 29.739166,
+          "hostMs": 20.199792,
+          "frozenMs": 3377.944,
+          "totalMs": 3398.143792
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 31.023458,
+          "hostMs": 57.601042,
+          "frozenMs": 5451.952458,
+          "totalMs": 5509.5535
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 32.99875,
+          "hostMs": 62.275292,
+          "frozenMs": 6457.020833,
+          "totalMs": 6519.296125
+        }
+      }
+    },
+    {
+      "sample": 2,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-02/large-host-embedded-paynote-timings.json",
+        "sha256": "56d1b111194ee223a4e5ab5b5f69debe3867c370dc4235f4c4303e606e6ab79d"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 33.333625,
+          "hostMs": 20.660417,
+          "frozenMs": 3380.52875,
+          "totalMs": 3401.189167
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 32.266583,
+          "hostMs": 55.293001,
+          "frozenMs": 5389.353708,
+          "totalMs": 5444.646709
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 34.774583,
+          "hostMs": 61.880792,
+          "frozenMs": 6407.110083,
+          "totalMs": 6468.990875
+        }
+      }
+    },
+    {
+      "sample": 3,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-03/large-host-embedded-paynote-timings.json",
+        "sha256": "11ae5859181a3709ab0f8549a2db166db1cdee3b752ffc2c0b3023247cda0fe3"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 29.405709,
+          "hostMs": 20.738125,
+          "frozenMs": 3366.340292,
+          "totalMs": 3387.078417
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 33.832042,
+          "hostMs": 56.742293,
+          "frozenMs": 5456.172666,
+          "totalMs": 5512.914959
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 32.823583,
+          "hostMs": 62.995624,
+          "frozenMs": 6525.422542,
+          "totalMs": 6588.418166
+        }
+      }
+    },
+    {
+      "sample": 4,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-04/large-host-embedded-paynote-timings.json",
+        "sha256": "a1cf46d1e7166af986cb312bd083f089d07e84e0a9b38bf2202f04e10535d1dd"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 30.284208,
+          "hostMs": 20.259625,
+          "frozenMs": 3370.196208,
+          "totalMs": 3390.455833
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 33.696083,
+          "hostMs": 55.553917,
+          "frozenMs": 5353.408999,
+          "totalMs": 5408.962916
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 33.272,
+          "hostMs": 64.153541,
+          "frozenMs": 6411.849167,
+          "totalMs": 6476.002708
+        }
+      }
+    },
+    {
+      "sample": 5,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-05/large-host-embedded-paynote-timings.json",
+        "sha256": "0e0540753bb9b86f518bfca82df69da6df40322ef5f882a17098347f61714330"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 30.276375,
+          "hostMs": 20.765958,
+          "frozenMs": 3369.539959,
+          "totalMs": 3390.305917
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 31.066375,
+          "hostMs": 58.508709,
+          "frozenMs": 5425.807583,
+          "totalMs": 5484.316292
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 29.967834,
+          "hostMs": 62.482625,
+          "frozenMs": 6364.113125,
+          "totalMs": 6426.59575
+        }
+      }
+    },
+    {
+      "sample": 6,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-06/large-host-embedded-paynote-timings.json",
+        "sha256": "d3b95217304cc53ec7644c35142bc8cfcb1e4232d883573a5dab2f51db60cb28"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 33.138375,
+          "hostMs": 20.051625,
+          "frozenMs": 3396.2695,
+          "totalMs": 3416.321125
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 29.114458,
+          "hostMs": 58.768375,
+          "frozenMs": 5432.230625,
+          "totalMs": 5490.999
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 33.091167,
+          "hostMs": 61.618126,
+          "frozenMs": 6428.602291,
+          "totalMs": 6490.220417
+        }
+      }
+    },
+    {
+      "sample": 7,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-07/large-host-embedded-paynote-timings.json",
+        "sha256": "49e0282fdf6e95762e8e4535b6bbc51700e2a73f42f9c990f77860279f3e95c8"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 34.777417,
+          "hostMs": 20.901999,
+          "frozenMs": 3417.466709,
+          "totalMs": 3438.368708
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 32.057125,
+          "hostMs": 57.747041,
+          "frozenMs": 5408.577875,
+          "totalMs": 5466.324916
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 32.495917,
+          "hostMs": 63.501792,
+          "frozenMs": 6317.980958,
+          "totalMs": 6381.48275
+        }
+      }
+    },
+    {
+      "sample": 8,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-08/large-host-embedded-paynote-timings.json",
+        "sha256": "924e1fc5f86ec2a413fe3e6d6ad6df5857300c6edb288604187e2d02f0d6e3de"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 32.543209,
+          "hostMs": 20.480541,
+          "frozenMs": 3347.143292,
+          "totalMs": 3367.623833
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 32.954417,
+          "hostMs": 58.445958,
+          "frozenMs": 5297.809333,
+          "totalMs": 5356.255291
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 31.619334,
+          "hostMs": 65.541792,
+          "frozenMs": 6346.317917,
+          "totalMs": 6411.859709
+        }
+      }
+    },
+    {
+      "sample": 9,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-09/large-host-embedded-paynote-timings.json",
+        "sha256": "651e1b004de6fdd9a47d99dad22effdcfafff2f746f5a8a8a7864d4053dd5b68"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 33.354041,
+          "hostMs": 21.102875,
+          "frozenMs": 3445.635542,
+          "totalMs": 3466.738417
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 34.861583,
+          "hostMs": 57.040291,
+          "frozenMs": 5471.673417,
+          "totalMs": 5528.713708
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 35.987458,
+          "hostMs": 63.985624,
+          "frozenMs": 6577.393626,
+          "totalMs": 6641.37925
+        }
+      }
+    },
+    {
+      "sample": 10,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-10/large-host-embedded-paynote-timings.json",
+        "sha256": "c9b05ffbb6d8907e815e34cae2d1f519e920b24e117f8a4faec7239c065a553c"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 31.693292,
+          "hostMs": 20.368083,
+          "frozenMs": 3438.223958,
+          "totalMs": 3458.592041
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 33.829125,
+          "hostMs": 58.722125,
+          "frozenMs": 5445.174458,
+          "totalMs": 5503.896583
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 32.83325,
+          "hostMs": 65.97775,
+          "frozenMs": 6506.583208,
+          "totalMs": 6572.560958
+        }
+      }
+    },
+    {
+      "sample": 11,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-11/large-host-embedded-paynote-timings.json",
+        "sha256": "32989a0f0c43ea909fccfcec1ef2547f1d4a4cdf447c931ede516f30b5b2cf78"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 30.632125,
+          "hostMs": 20.929833,
+          "frozenMs": 3356.444375,
+          "totalMs": 3377.374208
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 32.739916,
+          "hostMs": 55.945917,
+          "frozenMs": 5297.190625,
+          "totalMs": 5353.136542
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 33.576333,
+          "hostMs": 63.61104,
+          "frozenMs": 6332.591626,
+          "totalMs": 6396.202666
+        }
+      }
+    },
+    {
+      "sample": 12,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-12/large-host-embedded-paynote-timings.json",
+        "sha256": "0ad48cdca6481e2432073d81fe7a5e14ab4a31b866a4e49df4d0e37121627b6d"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 28.88225,
+          "hostMs": 20.223208,
+          "frozenMs": 3324.283042,
+          "totalMs": 3344.50625
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 32.640542,
+          "hostMs": 58.202334,
+          "frozenMs": 5353.009208,
+          "totalMs": 5411.211542
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 30.35525,
+          "hostMs": 62.1175,
+          "frozenMs": 6387.858833,
+          "totalMs": 6449.976333
+        }
+      }
+    },
+    {
+      "sample": 13,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-13/large-host-embedded-paynote-timings.json",
+        "sha256": "555096c568acfb8ccf8064b8c86334bd443841f911dc502ac2484d8bae2da524"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 30.14375,
+          "hostMs": 20.550833,
+          "frozenMs": 3423.54625,
+          "totalMs": 3444.097083
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 32.475333,
+          "hostMs": 55.58975,
+          "frozenMs": 5419.207333,
+          "totalMs": 5474.797083
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 34.384791,
+          "hostMs": 65.396584,
+          "frozenMs": 6424.270208,
+          "totalMs": 6489.666792
+        }
+      }
+    },
+    {
+      "sample": 14,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-14/large-host-embedded-paynote-timings.json",
+        "sha256": "ed5623613e950f6eb5e302c6daef35286c3a74365879559e47d224d5d165298c"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 33.76925,
+          "hostMs": 20.810708,
+          "frozenMs": 3344.13625,
+          "totalMs": 3364.946958
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 32.349125,
+          "hostMs": 54.684125,
+          "frozenMs": 5353.751583,
+          "totalMs": 5408.435708
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 32.416375,
+          "hostMs": 62.142749,
+          "frozenMs": 6360.761084,
+          "totalMs": 6422.903833
+        }
+      }
+    },
+    {
+      "sample": 15,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-15/large-host-embedded-paynote-timings.json",
+        "sha256": "3bdb6ab3ea71facc8bd970671511d318a4a74865d6e320107e2e51ca487f0565"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 32.272167,
+          "hostMs": 21.212084,
+          "frozenMs": 3356.32675,
+          "totalMs": 3377.538834
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 34.795417,
+          "hostMs": 56.621291,
+          "frozenMs": 5431.872459,
+          "totalMs": 5488.49375
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 33.185375,
+          "hostMs": 65.074167,
+          "frozenMs": 6479.756208,
+          "totalMs": 6544.830375
+        }
+      }
+    },
+    {
+      "sample": 16,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-16/large-host-embedded-paynote-timings.json",
+        "sha256": "7adfcf9ced0a93bf8b7c9d01a92ef0ffda281c8c768f49500a864b0f132831ff"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 31.161917,
+          "hostMs": 19.964499,
+          "frozenMs": 3388.130792,
+          "totalMs": 3408.095291
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 31.881708,
+          "hostMs": 54.500958,
+          "frozenMs": 5306.475083,
+          "totalMs": 5360.976041
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 33.812,
+          "hostMs": 62.324915,
+          "frozenMs": 6317.298251,
+          "totalMs": 6379.623166
+        }
+      }
+    },
+    {
+      "sample": 17,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-17/large-host-embedded-paynote-timings.json",
+        "sha256": "77ee55ca6ec37b29c6fe318925ceb42d7be1197a3cf8b35c924da75619bc148b"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 31.603084,
+          "hostMs": 20.195458,
+          "frozenMs": 3336.737417,
+          "totalMs": 3356.932875
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 33.825834,
+          "hostMs": 55.454916,
+          "frozenMs": 5286.913459,
+          "totalMs": 5342.368375
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 32.84825,
+          "hostMs": 61.23725,
+          "frozenMs": 6292.062375,
+          "totalMs": 6353.299625
+        }
+      }
+    },
+    {
+      "sample": 18,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-18/large-host-embedded-paynote-timings.json",
+        "sha256": "e95a20561ef19cb81aa70eb721b733a72ca92dc5796ef2899e3ee243578b106a"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 30.76925,
+          "hostMs": 20.105084,
+          "frozenMs": 3319.570875,
+          "totalMs": 3339.675959
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 34.453959,
+          "hostMs": 54.923333,
+          "frozenMs": 5302.645125,
+          "totalMs": 5357.568458
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 32.388542,
+          "hostMs": 62.772875,
+          "frozenMs": 6316.145833,
+          "totalMs": 6378.918708
+        }
+      }
+    },
+    {
+      "sample": 19,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-19/large-host-embedded-paynote-timings.json",
+        "sha256": "70246de5ea415003573978289b5f92b25db0ee65bcdac44036173b805acb44fe"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 32.467542,
+          "hostMs": 20.563376,
+          "frozenMs": 3410.253458,
+          "totalMs": 3430.816834
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 32.477042,
+          "hostMs": 55.886291,
+          "frozenMs": 5491.474584,
+          "totalMs": 5547.360875
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 32.182958,
+          "hostMs": 63.699292,
+          "frozenMs": 6501.608917,
+          "totalMs": 6565.308209
+        }
+      }
+    },
+    {
+      "sample": 20,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-20/large-host-embedded-paynote-timings.json",
+        "sha256": "65af289750dedc4a7df7d07aa877114e8ac9375a13c6b1fa3d3abe67d10d6c2d"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 33.012041,
+          "hostMs": 21.649084,
+          "frozenMs": 3497.891708,
+          "totalMs": 3519.540792
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 36.949458,
+          "hostMs": 60.756292,
+          "frozenMs": 5526.919625,
+          "totalMs": 5587.675917
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 33.95725,
+          "hostMs": 65.651375,
+          "frozenMs": 6688.500958,
+          "totalMs": 6754.152333
+        }
+      }
+    },
+    {
+      "sample": 21,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-21/large-host-embedded-paynote-timings.json",
+        "sha256": "55115496a00ce7f8bfeb1d1f773913713b64e1ae5aabda240d3cdea72db8ad7d"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 31.042792,
+          "hostMs": 20.515958,
+          "frozenMs": 3352.75975,
+          "totalMs": 3373.275708
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 31.25125,
+          "hostMs": 56.922959,
+          "frozenMs": 5418.151833,
+          "totalMs": 5475.074792
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 30.3045,
+          "hostMs": 62.872833,
+          "frozenMs": 6476.231083,
+          "totalMs": 6539.103916
+        }
+      }
+    },
+    {
+      "sample": 22,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-22/large-host-embedded-paynote-timings.json",
+        "sha256": "a366d898759a8ae5873c76979403dfcdc173713d47637b612d3c4f8d88e83883"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 33.586375,
+          "hostMs": 20.206958,
+          "frozenMs": 3370.110167,
+          "totalMs": 3390.317125
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 30.952334,
+          "hostMs": 55.060042,
+          "frozenMs": 5354.820667,
+          "totalMs": 5409.880709
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 29.071875,
+          "hostMs": 63.734626,
+          "frozenMs": 6409.206249,
+          "totalMs": 6472.940875
+        }
+      }
+    },
+    {
+      "sample": 23,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-23/large-host-embedded-paynote-timings.json",
+        "sha256": "55f3c4bd4bf1bd7c97743511ad844a1699f2b707c3269fe67083eafa9746c5a7"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 29.427417,
+          "hostMs": 20.965834,
+          "frozenMs": 3376.86425,
+          "totalMs": 3397.830084
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 29.364292,
+          "hostMs": 56.776583,
+          "frozenMs": 5344.271333,
+          "totalMs": 5401.047916
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 28.385333,
+          "hostMs": 63.431375,
+          "frozenMs": 6332.865125,
+          "totalMs": 6396.2965
+        }
+      }
+    },
+    {
+      "sample": 24,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-24/large-host-embedded-paynote-timings.json",
+        "sha256": "b625440c2f536944d2513a5455a01255b15e225d6d0621f011036538dacb0c99"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 33.404416,
+          "hostMs": 20.938917,
+          "frozenMs": 3348.865458,
+          "totalMs": 3369.804375
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 35.346625,
+          "hostMs": 58.712,
+          "frozenMs": 5354.21575,
+          "totalMs": 5412.92775
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 30.417917,
+          "hostMs": 63.354167,
+          "frozenMs": 6402.55875,
+          "totalMs": 6465.912917
+        }
+      }
+    },
+    {
+      "sample": 25,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-25/large-host-embedded-paynote-timings.json",
+        "sha256": "6f45023325bbbdf7b097856054b12232892658bc84360210778aca53a03bcaeb"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 34.235667,
+          "hostMs": 20.285125,
+          "frozenMs": 3388.7895,
+          "totalMs": 3409.074625
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 31.10075,
+          "hostMs": 56.482415,
+          "frozenMs": 5450.440251,
+          "totalMs": 5506.922666
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 29.939375,
+          "hostMs": 62.176458,
+          "frozenMs": 6461.451834,
+          "totalMs": 6523.628292
+        }
+      }
+    },
+    {
+      "sample": 26,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-26/large-host-embedded-paynote-timings.json",
+        "sha256": "678b7d1536eb9e637ddae85320d2d77131670ca78b593cc83872ae5c88f2bf3b"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 32.619625,
+          "hostMs": 20.475959,
+          "frozenMs": 3351.853458,
+          "totalMs": 3372.329417
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 32.263833,
+          "hostMs": 56.358125,
+          "frozenMs": 5404.480208,
+          "totalMs": 5460.838333
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 30.10825,
+          "hostMs": 61.892875,
+          "frozenMs": 6440.315333,
+          "totalMs": 6502.208208
+        }
+      }
+    },
+    {
+      "sample": 27,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-27/large-host-embedded-paynote-timings.json",
+        "sha256": "0c06f89b0f7fa054a5180f53be470cc12048ed76b3192afe30765bbf636bc84c"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 29.072375,
+          "hostMs": 20.185958,
+          "frozenMs": 3372.32075,
+          "totalMs": 3392.506708
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 34.097875,
+          "hostMs": 55.393583,
+          "frozenMs": 5431.400084,
+          "totalMs": 5486.793667
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 32.777,
+          "hostMs": 61.747209,
+          "frozenMs": 6357.189958,
+          "totalMs": 6418.937167
+        }
+      }
+    },
+    {
+      "sample": 28,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-28/large-host-embedded-paynote-timings.json",
+        "sha256": "f73951283a1bc90fac9aba0f7e4f21db42bb8b1b7bf79b78cc7842d0c86acd4b"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 32.194042,
+          "hostMs": 19.883416,
+          "frozenMs": 3406.832959,
+          "totalMs": 3426.716375
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 35.513791,
+          "hostMs": 54.901542,
+          "frozenMs": 5381.810208,
+          "totalMs": 5436.71175
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 32.426292,
+          "hostMs": 61.897544,
+          "frozenMs": 6418.51879,
+          "totalMs": 6480.416334
+        }
+      }
+    },
+    {
+      "sample": 29,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-29/large-host-embedded-paynote-timings.json",
+        "sha256": "ffca302156dd2f0fa6c922af693e7555bf8776536c2689293e264bd534f601a8"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 32.291958,
+          "hostMs": 19.964457,
+          "frozenMs": 3367.729334,
+          "totalMs": 3387.693791
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 32.953,
+          "hostMs": 55.742665,
+          "frozenMs": 5382.842751,
+          "totalMs": 5438.585416
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 28.702709,
+          "hostMs": 62.570459,
+          "frozenMs": 6358.265833,
+          "totalMs": 6420.836292
+        }
+      }
+    },
+    {
+      "sample": 30,
+      "report": {
+        "path": "/tmp/blue-round12-p95/sample-30/large-host-embedded-paynote-timings.json",
+        "sha256": "6129e8327caf47c0f36984c43499481dd61d6a4c3b2b25af92838c788511f2ba"
+      },
+      "scenarios": {
+        "warmOrdinary": {
+          "appendMs": 30.173541,
+          "hostMs": 20.500792,
+          "frozenMs": 3414.020625,
+          "totalMs": 3434.521417
+        },
+        "warmPayNotePlusParent": {
+          "appendMs": 32.5965,
+          "hostMs": 58.733625,
+          "frozenMs": 5490.24825,
+          "totalMs": 5548.981875
+        },
+        "threeLayerRestaurantProduct": {
+          "appendMs": 31.740542,
+          "hostMs": 63.071542,
+          "frozenMs": 6642.383958,
+          "totalMs": 6705.4555
+        }
+      }
+    }
+  ],
+  "results": {
+    "warmOrdinary": {
+      "baselineHostMs": 15.571,
+      "appendP95Ms": 34.235667,
+      "hostP95Ms": 21.212084,
+      "frozenP95Ms": 3445.635542,
+      "totalP95Ms": 3466.738417,
+      "regressionPercent": 36.228142,
+      "preferredGate": "MISS",
+      "hardGate": "FAIL"
+    },
+    "warmPayNotePlusParent": {
+      "baselineHostMs": 46.645,
+      "appendP95Ms": 35.513791,
+      "hostP95Ms": 58.768375,
+      "frozenP95Ms": 5491.474584,
+      "totalP95Ms": 5548.981875,
+      "regressionPercent": 25.990728,
+      "preferredGate": "MISS",
+      "hardGate": "FAIL"
+    },
+    "threeLayerRestaurantProduct": {
+      "baselineHostMs": 54.696,
+      "appendP95Ms": 34.774583,
+      "hostP95Ms": 65.651375,
+      "frozenP95Ms": 6642.383958,
+      "totalP95Ms": 6705.4555,
+      "regressionPercent": 20.029573,
+      "preferredGate": "MISS",
+      "hardGate": "FAIL"
+    }
+  },
+  "overallPreferredGate": "MISS",
+  "overallHardGate": "FAIL"
+}
