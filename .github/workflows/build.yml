@@ -29,7 +29,6 @@ jobs:
         test-java: ['17', '21']
     env:
       CI: true
-      GRADLE_USER_HOME: ${{ runner.temp }}/coordination-gradle-${{ matrix.test-java }}
     defaults:
       run:
         working-directory: blue-coordination-java
@@ -39,6 +38,9 @@ jobs:
         with:
           path: blue-coordination-java
           fetch-depth: 0
+
+      - name: Configure Gradle user home
+        run: echo "GRADLE_USER_HOME=$RUNNER_TEMP/coordination-gradle-${{ matrix.test-java }}" >> "$GITHUB_ENV"
 
       - name: Set up test JDK
         uses: actions/setup-java@v4

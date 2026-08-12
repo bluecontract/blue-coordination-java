@@ -15,12 +15,14 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CI: true
-      GRADLE_USER_HOME: ${{ runner.temp }}/coordination-release-gradle
     steps:
       - name: Check out
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Configure Gradle user home
+        run: echo "GRADLE_USER_HOME=$RUNNER_TEMP/coordination-release-gradle" >> "$GITHUB_ENV"
 
       - name: Require main and a stable version
         shell: bash
