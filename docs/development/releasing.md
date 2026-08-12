@@ -3,12 +3,12 @@
 ## Candidate prerequisites
 
 An RC is releasable only when all exact coordinates in `build.gradle` resolve
-from Maven Central. In particular, 3.0.0-rc.1 requires Repository rc.19 and BEX
+from Maven Central. In particular, 3.0.0-rc.1 requires Repository rc.21 and BEX
 rc.3. Local composite success is semantic evidence, but it is not proof that an
 external consumer can resolve the release.
 
-Repository rc.18 is not suitable: it is already published against the legacy
-Language 3.0.0 API. The modular Repository must use rc.19 or newer.
+Repository rc.21 is the first pinned release containing the Repository surface
+required by this Coordination candidate.
 
 ## RC workflow
 
@@ -65,9 +65,39 @@ Never bypass dependency preflight or publish from local composite resolution.
 
 ## Round 13 A/B evidence import
 
-After the interleaved runner has written exactly 30 numbered JSON rows under
-each of `/private/tmp/round13-ab/baseline` and `candidate`, assemble and verify
-the canonical receipts with:
+Round 13 uses Maven Central resolution for both variants. Before preflight,
+update the already-prepared `Archive.zip` baseline shim by replacing every
+`3.0.0-rc.19` Repository coordinate in its `build.gradle` with
+`3.0.0-rc.21`, then copy the candidate
+`gradle/published-artifact.lockfile` into the baseline. The resulting baseline
+`build.gradle` SHA-256 must be
+`8138b85771895cbd36c3f8a8f2e6eda7672d0f13aedf2208b51c91c1acdf8732` and
+the published lock SHA-256 must be
+`34d91fc93d0123477bcab36d52462e27f3dacd0586ad0afa7072f303d4d7fc12`.
+Do not modify either project after preflight.
+
+Validate the tracked runner, resolver, and candidate published classpath
+without starting the campaign:
+
+```bash
+node scripts/round13-ab-evidence.mjs --self-test \
+  --candidate /Users/piotr/data/blue-contract-java \
+  --runner /Users/piotr/data/blue-contract-java/scripts/run-round13-same-machine-ab.sh
+```
+
+Run the frozen 3-warmup, 30+30 interleaved campaign with:
+
+```bash
+scripts/run-round13-same-machine-ab.sh \
+  /private/tmp/round13-baseline-project \
+  /Users/piotr/data/blue-contract-java \
+  /Users/piotr/data/blue-contract-java/Archive.zip \
+  /private/tmp/round13-ab
+```
+
+After the runner has written exactly 30 numbered JSON rows under each of
+`/private/tmp/round13-ab/baseline` and `candidate`, assemble and verify the
+canonical receipts with:
 
 ```bash
 node scripts/round13-ab-evidence.mjs \
@@ -75,14 +105,16 @@ node scripts/round13-ab-evidence.mjs \
   --baseline /private/tmp/round13-baseline-project \
   --candidate /Users/piotr/data/blue-contract-java \
   --archive /Users/piotr/data/blue-contract-java/Archive.zip \
-  --runner /private/tmp/run-round13-same-machine-ab-local.sh \
+  --runner /Users/piotr/data/blue-contract-java/scripts/run-round13-same-machine-ab.sh \
   --output /Users/piotr/data/blue-contract-java/docs/releases/evidence/round13
 ```
 
 The importer validates every raw row, preserves raw and canonical hashes,
 records the odd A/B and even B/A sequence, and binds Java 17, the wrapper,
-locks, fixtures, composite dependency commits, the exact baseline archive, and
-the candidate production manifest. It recomputes p50, p95, maximum, and the
-preferred/hard append, route, Coordination-host, and total gates. The tracked
-source-archive evidence intentionally leaves its digest `null`; the generated
-detached `.sha256` sidecar is the checksum authority.
+the published lock, fixtures, the exact baseline archive, and the candidate
+production manifest. The frozen Gradle resolver rejects sibling/composite
+project components and records every selected module plus the size and SHA-256
+of every published runtime artifact. The importer recomputes p50, p95, maximum,
+and the preferred/hard append, route, Coordination-host, and total gates. The
+tracked source-archive evidence intentionally leaves its digest `null`; the
+generated detached `.sha256` sidecar is the checksum authority.

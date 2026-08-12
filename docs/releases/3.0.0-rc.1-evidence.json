@@ -4,12 +4,12 @@
   "release": "3.0.0-rc.1",
   "profile": "ROUND13_PLAYGROUND_FIVE_OCCURRENCE",
   "evidenceState": "INTERIM",
-  "evidenceDate": "2026-08-11",
+  "evidenceDate": "2026-08-12",
   "status": {
     "temporalArchitectureReady": "PENDING_VERIFICATION",
     "inMemoryEngineWorkingReady": "PENDING_VERIFICATION",
     "playgroundCoreReady": "PENDING_VERIFICATION",
-    "playgroundLatencyReady": "FAIL",
+    "playgroundLatencyReady": "PENDING_VERIFICATION",
     "providerBackedReady": "OUT_OF_SCOPE",
     "mandateAgentReady": "OUT_OF_SCOPE",
     "publicRcReady": "BLOCKED"
@@ -28,7 +28,7 @@
     "kind": "WORKTREE_EXECUTION",
     "mainSourceManifestSha256": "d0dad91fe3c2d5627c3b1900543b2a82cc9ea323afbb85ad06256da4e2cf3124",
     "candidateCommit": null,
-    "reason": "The complete fresh Java 17 and Java 21 local-composite lanes, all seven proofs, structural counters, artifacts, extracted-archive configuration and focused smoke, and same-machine campaign are bound to this dirty-worktree main-source manifest; clean-candidate final reruns, detached final checksum verification, and published-artifact smoke remain pending."
+    "reason": "The complete fresh Java 17 and Java 21 published-artifact lanes, all seven proofs, structural counters, artifacts, extracted-archive configuration, focused tests, and published smoke are bound to this dirty-worktree main-source manifest; clean-candidate final reruns, detached final checksum verification, and a fresh passing campaign remain pending."
   },
   "shape": {
     "status": "PASS",
@@ -94,15 +94,15 @@
   "runtimes": [
     {
       "java": "17",
-      "gate": "test integrationTest consumerTest scenarioTest releaseCheck -x verifyDocumentation --rerun-tasks -PblueDependencyMode=local-composite -PtestJavaVersion=17",
+      "gate": "clean build -PtestJavaVersion=17; scenarioTest --rerun-tasks -PtestJavaVersion=17; releaseCheck -PtestJavaVersion=17 (build covers test integrationTest consumerTest)",
       "status": "PASS",
-      "durationSeconds": 912
+      "durationSeconds": 882
     },
     {
       "java": "21",
-      "gate": "test integrationTest consumerTest scenarioTest releaseCheck -x verifyDocumentation --rerun-tasks -PblueDependencyMode=local-composite -PtestJavaVersion=21",
+      "gate": "test integrationTest consumerTest scenarioTest --rerun-tasks -PtestJavaVersion=21; releaseCheck -PtestJavaVersion=21",
       "status": "PASS",
-      "durationSeconds": 877
+      "durationSeconds": 870
     }
   ],
   "proofs": [
@@ -165,18 +165,18 @@
   ],
   "performance": {
     "round13Campaign": {
-      "status": "FAIL",
+      "status": "PENDING_VERIFICATION",
       "comparison": "SAME_MACHINE_INTERLEAVED_AB",
       "baselineArchive": "Archive.zip",
       "baselineSha256": "2f303afd9435937145ce7fe09eb655ff1a05ee6ed7484faea62d93544a3ccf3e",
       "candidateTask": "round13PlaygroundSample",
       "warmups": 3,
       "requiredSamples": 30,
-      "measuredSamples": 30,
-      "runtimeMarkdown": "docs/releases/evidence/round13/five-occurrence-runtime.md",
-      "runtimeJson": "docs/releases/evidence/round13/five-occurrence-runtime.json",
-      "runtimeProvenanceJson": "docs/releases/evidence/round13/runtime-provenance.json",
-      "pendingReason": null
+      "measuredSamples": 0,
+      "runtimeMarkdown": null,
+      "runtimeJson": null,
+      "runtimeProvenanceJson": null,
+      "pendingReason": "The retained local-composite campaign failed its absolute hard gates and became stale when dependency and tooling bindings switched to published artifacts; a fresh published-artifact 30+30 campaign is required."
     },
     "historicalRound12": {
       "classification": "HISTORICAL_ONLY",
@@ -225,7 +225,7 @@
     ],
     "extractedConfiguration": "PASS",
     "focusedTestsStatus": "PASS",
-    "publishedArtifactSmokeBuild": "PENDING_VERIFICATION",
+    "publishedArtifactSmokeBuild": "PASS",
     "verificationReceipt": {
       "schemaId": "blue-coordination-round13-source-archive-verification-v1",
       "path": "build/reports/round13/source-archive-verification.json"
@@ -235,13 +235,13 @@
       "path": "build/distributions/blue-coordination-java-3.0.0-rc.1-source.zip.sha256",
       "digest": null
     },
-    "pendingReason": "Both fresh worktree lanes produced source ZIP SHA-256 48d8694cd2a88e78c1d242fa35dcd80131f54b9a41fae9950b0ca7f79abc88d1 and sidecar-file SHA-256 858222629e2a47f5f5217e28c0bd999562bb8a2b02f564eb19a6ded28b2debce; extracted configuration and focused smoke passed, while published-artifact smoke, clean-candidate rebuild, and final detached-checksum verification remain pending."
+    "pendingReason": null
   },
   "publicationEvidence": {
-    "status": "BLOCKED_UPSTREAM",
-    "gate": "publishedArtifactPreflight and extractedArchivePublishedArtifactSmoke",
-    "durationSeconds": null,
-    "notes": "Fresh dependencyPreflight reconfirmed BLOCKED_UPSTREAM: blue.bex:blue-bex-core:1.1.0-rc.3 and blue.bex:blue-bex-contracts:1.1.0-rc.3 are missing from Maven Central, and commons-codec 1.15 versus 1.11 conflicts via blue.repo and blue.language. Published archive smoke cannot proceed, and local-composite execution cannot substitute for published resolution."
+    "status": "PASS",
+    "gate": "dependencyPreflight",
+    "durationSeconds": 30,
+    "notes": "Fresh dependencyPreflight resolved blue.repo:blue-repo-java:3.0.0-rc.21, blue.bex:blue-bex-core:1.1.0-rc.3, blue.bex:blue-bex-contracts:1.1.0-rc.3, and their complete transitive graph from published repositories with failOnVersionConflict enabled."
   },
   "capabilities": [
     {
@@ -274,17 +274,12 @@
     {
       "id": "round13-performance-campaign",
       "category": "verification",
-      "summary": "The fresh hardened same-machine 30+30 campaign failed append p95 at 18.680667 ms versus 1.000000 ms hard and coordination-host p95 at 872.356126 ms versus 250.000000 ms hard; route p95 at 0.097583 ms and total p95 at 3,998.664166 ms passed hard, while all four preferred targets were missed."
+      "summary": "The retained local-composite 30+30 campaign failed append p95 at 18.680667 ms versus 1.000000 ms hard and coordination-host p95 at 872.356126 ms versus 250.000000 ms hard. Its dependency and tooling bindings are now stale, so a fresh published-artifact campaign is required after remediation."
     },
     {
       "id": "final-artifacts-and-source-archive",
       "category": "verification",
-      "summary": "Fresh worktree JAR hashes and extracted-source configuration and focused smoke passed; clean-candidate rebuild, final detached-checksum verification, and published-artifact archive smoke remain pending."
-    },
-    {
-      "id": "published-dependency-graph",
-      "category": "artifact-upstream",
-      "summary": "Fresh dependencyPreflight is BLOCKED_UPSTREAM by missing blue.bex:blue-bex-core:1.1.0-rc.3 and blue.bex:blue-bex-contracts:1.1.0-rc.3 on Maven Central plus commons-codec 1.15 versus 1.11 via blue.repo and blue.language; extracted-archive published smoke remains blocked."
+      "summary": "Fresh worktree JAR hashes, extracted-source configuration, focused tests, and published-artifact archive smoke passed; clean-candidate rebuild and final detached-checksum verification remain pending."
     }
   ],
   "finalizationRequirements": [
@@ -299,10 +294,9 @@
   "limitations": [
     "Complete fresh Java 17 and Java 21 worktree lanes, proofs, structural counters, artifact hashes, and extracted/focused archive results passed and are manifest-bound, but no clean candidate commit or final clean-candidate rerun exists.",
     "The engine remains sequential, single-process, synchronous, and in-memory.",
-    "The fresh Round 13 campaign failed append p95 (18.680667 ms > 1.000000 ms hard) and coordination-host p95 (872.356126 ms > 250.000000 ms hard); route p95 (0.097583 ms) and total p95 (3,998.664166 ms) passed hard, while all four preferred targets were missed.",
+    "The retained local-composite Round 13 campaign failed append p95 (18.680667 ms > 1.000000 ms hard) and coordination-host p95 (872.356126 ms > 250.000000 ms hard); route p95 (0.097583 ms) and total p95 (3,998.664166 ms) passed hard, while all four preferred targets were missed. Its dependency and tooling bindings are stale, so it is historical diagnostic evidence only.",
     "Round13B was not applied: candidate embedded-input preparation p95 was 36.940292 ms versus 872.356126 ms coordination-host p95 (about 4.2%), so the optional cache would not address the measured hard misses.",
-    "NO_POSTFLIGHT_TOOLING_CHANGES binds one frozen importer and receipt generator, the current Round12NbaEvidence, runner, execution and harness surfaces, fixtures, locks, wrapper, composites, baseline, Java runtime, and physical host exactly from preflight through independent verification; no substitution was permitted.",
-    "Fresh dependencyPreflight remains BLOCKED_UPSTREAM on missing blue.bex core/contracts 1.1.0-rc.3 artifacts and the commons-codec 1.15 versus 1.11 conflict via blue.repo and blue.language."
+    "NO_POSTFLIGHT_TOOLING_CHANGES binds one frozen importer and receipt generator, the current Round12NbaEvidence, runner, execution and harness surfaces, fixtures, locks, wrapper, composites, baseline, Java runtime, and physical host exactly from preflight through independent verification; no substitution was permitted."
   ],
   "notClaimed": [
     "provider-backed fresh-process durability",

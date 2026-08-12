@@ -50,7 +50,7 @@ the new 3.x API before the first stable 3.0.0 release.
 
 ### Release prerequisites
 
-The RC must not be published until `blue.repo:blue-repo-java:3.0.0-rc.19` and
-`blue.bex:blue-bex-core:1.1.0-rc.3` plus
-`blue.bex:blue-bex-contracts:1.1.0-rc.3` are available from Maven Central.
-Release automation verifies this before building.
+The RC resolves `blue.repo:blue-repo-java:3.0.0-rc.21`,
+`blue.bex:blue-bex-core:1.1.0-rc.3`, and
+`blue.bex:blue-bex-contracts:1.1.0-rc.3` from Maven Central. Release automation
+verifies the complete conflict-checked graph before building.

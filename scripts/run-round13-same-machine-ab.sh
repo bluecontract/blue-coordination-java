@@ -60,9 +60,7 @@ run_one() {
     cd "$project"
     ./gradlew round13PlaygroundSample --rerun-tasks --console=plain --quiet \
       -PtestJavaVersion=17 \
-      -PblueDependencyMode=local-composite \
-      -PblueBexCompositePath=/Users/piotr/data/blue-bex-java \
-      -PblueRepositoryCompositePath=/Users/piotr/data/blue-repository-java \
+      -PblueDependencyMode=published-artifact \
       -Dblue.coordination.round13.warmups="$warmups" \
       -Dblue.coordination.round13.sample="$raw"
   )

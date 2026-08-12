@@ -6,22 +6,22 @@ Use Java 17+ and the checked-in Gradle wrapper. Production compiles with Java 17
 `-Xlint:all` and `-Werror`. Tests can run on a newer LTS with
 `-PtestJavaVersion=21`.
 
-Two dependency modes are intentional:
+Published Maven Central artifacts are the default and are used by ordinary
+development, consumer, CI, and release builds. This mode runs no Git commands
+and never reads sibling checkouts.
 
-- `local-composite` is for development. It substitutes `../blue-bex-java` and
-  `../blue-repository-java`, or paths supplied with
-  `-PblueBexCompositePath` and `-PblueRepositoryCompositePath`.
-- `published-artifact` is the clean consumer/release path. It runs no Git
-  commands and never reads sibling checkouts.
+`local-composite` remains an explicit diagnostic mode for coordinated changes
+that have not been published. It substitutes `../blue-bex-java` and
+`../blue-repository-java`, or paths supplied with `-PblueBexCompositePath` and
+`-PblueRepositoryCompositePath`; it must not be used as release evidence.
 
 ## Coordination gates
 
 ```bash
-./gradlew test -PblueDependencyMode=local-composite
-./gradlew integrationTest consumerTest scenarioTest \
-  -PblueDependencyMode=local-composite
-./gradlew releaseCheck -PblueDependencyMode=local-composite
-./gradlew stageRelease -PblueDependencyMode=local-composite
+./gradlew test
+./gradlew integrationTest consumerTest scenarioTest
+./gradlew releaseCheck
+./gradlew stageRelease
 ```
 
 The release-owned suites have distinct responsibilities:
@@ -49,11 +49,10 @@ that a changed source snapshot has passed them.
 To prove external dependency availability:
 
 ```bash
-./gradlew dependencyPreflight -PblueDependencyMode=published-artifact
+./gradlew dependencyPreflight
 ```
 
-That command is expected to fail closed until every pinned prerequisite has
-been published.
+That command fails closed unless every pinned prerequisite is published.
 
 ## Historical performance evidence
 
@@ -64,7 +63,7 @@ published library to a sibling checkout. Run it only when collecting or
 comparing performance evidence:
 
 ```bash
-./gradlew publishToMavenLocal -PblueDependencyMode=local-composite
+./gradlew publishToMavenLocal
 ../blue-basic/gradlew -p ../blue-basic performanceTest runtimeCampaign
 ```
 
@@ -81,8 +80,9 @@ Regenerate the appropriate dependency lock only after an intentional version
 change:
 
 ```bash
-./gradlew dependencies --write-locks -PblueDependencyMode=local-composite
-./gradlew dependencies --write-locks -PblueDependencyMode=published-artifact
+./gradlew dependencies --write-locks
 ```
 
 Review the entire lock diff. Never hand-wave an unexpected transitive version.
+Only regenerate the local-composite lock during an explicit cross-repository
+diagnostic by adding `-PblueDependencyMode=local-composite`.

@@ -13,22 +13,24 @@ import {
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const RUNTIME_SCHEMA = 'blue-coordination-round13-five-occurrence-runtime-v2';
-const PROVENANCE_SCHEMA = 'blue-coordination-round13-runtime-provenance-v2';
-const PREFLIGHT_SCHEMA = 'blue-coordination-round13-ab-preflight-v2';
+const RUNTIME_SCHEMA = 'blue-coordination-round13-five-occurrence-runtime-v3';
+const PROVENANCE_SCHEMA = 'blue-coordination-round13-runtime-provenance-v3';
+const PREFLIGHT_SCHEMA = 'blue-coordination-round13-ab-preflight-v3';
 const LEDGER_SCHEMA = 'blue-coordination-round13-ab-ledger-entry-v1';
-const POSTFLIGHT_SCHEMA = 'blue-coordination-round13-ab-postflight-v2';
+const POSTFLIGHT_SCHEMA = 'blue-coordination-round13-ab-postflight-v3';
 const SAMPLE_SCHEMA = 'round13-playground-sample-v3';
 const HELPER_CAMPAIGN_SCHEMA = 'round13-playground-campaign-v3';
+const PUBLISHED_DEPENDENCIES_SCHEMA =
+  'blue-coordination-round13-published-dependencies-v1';
 const NO_POSTFLIGHT_TOOLING_CHANGES_MARKER =
   'NO_POSTFLIGHT_TOOLING_CHANGES';
 const NO_POSTFLIGHT_TOOLING_CHANGES_REASON =
   'The tracked importer and receipt generator are the same frozen file, and the '
   + 'runner, current Round12NbaEvidence, candidate execution and harness surfaces, '
-  + 'fixtures, locks, wrapper, composites, baseline archive and project, Java '
-  + 'runtime, and physical host must match their exact preflight bindings through '
-  + 'postflight, receipt generation, and independent verification. No postflight '
-  + 'tooling or test-lane substitution is permitted.';
+  + 'fixtures, published lock and resolved artifact bytes, wrapper, baseline archive '
+  + 'and project, Java runtime, and physical host must match their exact preflight '
+  + 'bindings through postflight, receipt generation, and independent verification. '
+  + 'No postflight tooling or test-lane substitution is permitted.';
 const ROUND12_NBA_EVIDENCE_PATH =
   'src/scenarioTest/java/blue/coordination/integration/Round12NbaEvidence.java';
 const BASELINE_HASH =
@@ -61,15 +63,17 @@ const FIXTURE_FILES = [
 ];
 const HARNESS_HELPER =
   'src/scenarioTest/java/blue/coordination/integration/PlaygroundFiveOccurrenceEvidence.java';
-const LOCK_FILES = [
-  'gradle/bex-source.lock',
-  'gradle/repository-source.lock',
-  'gradle/published-artifact.lockfile',
-  'gradle.lockfile'
+const PUBLISHED_RESOLVER = 'scripts/round13-published-dependencies.gradle';
+const LOCK_FILES = ['gradle/published-artifact.lockfile'];
+const REQUIRED_PUBLISHED_COORDINATES = [
+  'blue.bex:blue-bex-contracts:1.1.0-rc.3',
+  'blue.bex:blue-bex-core:1.1.0-rc.3',
+  'blue.repo:blue-repo-java:3.0.0-rc.21'
 ];
 const BASELINE_ALLOWED_DIFFERENCES = {
   '.cz.toml': 'ADDED',
   'build.gradle': 'MODIFIED',
+  'gradle/published-artifact.lockfile': 'MODIFIED',
   'src/integrationTest/java/blue/coordination/integration/PlaygroundFiveOccurrenceFixtures.java':
     'ADDED',
   'src/integrationTest/java/blue/coordination/integration/TestEngine.java': 'MODIFIED',
@@ -80,7 +84,9 @@ const BASELINE_ALLOWED_DIFFERENCES = {
 };
 const BASELINE_EXPECTED_SHIM_SHA256 = {
   '.cz.toml': '2a4dc5464760ba429e99012998be2068384aefbd1d926571f45e9f24c1dca417',
-  'build.gradle': '3558f123a1c83cd50441f94af31682c6931c1d44074b20e691c9c74c21c32f1b',
+  'build.gradle': '8138b85771895cbd36c3f8a8f2e6eda7672d0f13aedf2208b51c91c1acdf8732',
+  'gradle/published-artifact.lockfile':
+    '34d91fc93d0123477bcab36d52462e27f3dacd0586ad0afa7072f303d4d7fc12',
   'src/integrationTest/java/blue/coordination/integration/PlaygroundFiveOccurrenceFixtures.java':
     'f12e892c213bbcf74d09e2b71ba1fe8f73327eead07ad3ffda3d3197a74b52f1',
   'src/integrationTest/java/blue/coordination/integration/TestEngine.java':
@@ -154,7 +160,7 @@ function fail(message) {
 function parseArgs(argv) {
   const result = {};
   const modes = new Set([
-    'verify', 'capture-preflight', 'append-ledger', 'capture-postflight'
+    'verify', 'self-test', 'capture-preflight', 'append-ledger', 'capture-postflight'
   ]);
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
@@ -346,11 +352,6 @@ function isHarnessPath(path) {
     || path === 'scripts/run-round13-same-machine-ab.sh' || isBuildInput(path);
 }
 
-function isCompositeExecutionPath(path) {
-  return path.startsWith('src/') || path.includes('/src/')
-    || path.startsWith('scripts/') || path.includes('/scripts/') || isBuildInput(path);
-}
-
 function fileBindings(project, paths) {
   return paths.map(path => {
     const file = join(project, path);
@@ -494,7 +495,7 @@ function parseRunner(runner) {
   const body = readFileSync(runner, 'utf8');
   for (const marker of [
     '-PtestJavaVersion=17',
-    '-PblueDependencyMode=local-composite',
+    '-PblueDependencyMode=published-artifact',
     'warmups=3',
     'samples=30',
     'pair % 2 == 1',
@@ -504,15 +505,19 @@ function parseRunner(runner) {
   ]) {
     if (!body.includes(marker)) fail(`Runner lacks ${marker}`);
   }
+  for (const forbidden of [
+    '-PblueDependencyMode=local-composite',
+    '-PblueBexCompositePath=',
+    '-PblueRepositoryCompositePath=',
+    '-PbluePublishedRepository='
+  ]) {
+    if (body.includes(forbidden)) fail(`Runner contains forbidden binding ${forbidden}`);
+  }
   const javaHome = body.match(/export\s+JAVA_HOME=(?:"([^"]+)"|'([^']+)'|([^\s]+))/);
-  const bex = body.match(/-PblueBexCompositePath=([^\s\\]+)/);
-  const repository = body.match(/-PblueRepositoryCompositePath=([^\s\\]+)/);
-  if (!javaHome || !bex || !repository) fail('Runner bindings are incomplete');
+  if (!javaHome) fail('Runner Java binding is incomplete');
   return {
     body,
-    javaHome: realpathSync(resolve(javaHome[1] || javaHome[2] || javaHome[3])),
-    bexPath: realpathSync(resolve(bex[1])),
-    repositoryPath: realpathSync(resolve(repository[1]))
+    javaHome: realpathSync(resolve(javaHome[1] || javaHome[2] || javaHome[3]))
   };
 }
 
@@ -524,6 +529,63 @@ function runChecked(command, arguments_, options = {}) {
     fail(`${command} ${arguments_.join(' ')} failed: ${result.stderr || result.stdout}`);
   }
   return `${result.stdout ?? ''}${result.stderr ?? ''}`.replace(/\r\n/g, '\n').trim();
+}
+
+function validatePublishedDependencyManifest(manifest, label) {
+  if (manifest?.schemaId !== PUBLISHED_DEPENDENCIES_SCHEMA
+      || manifest.dependencyMode !== 'published-artifact'
+      || manifest.configuration !== 'scenarioTestRuntimeClasspath'
+      || !Array.isArray(manifest.components) || !Array.isArray(manifest.artifacts)
+      || manifest.components.some((value, index) =>
+        typeof value !== 'string' || !value
+        || (index > 0 && manifest.components[index - 1] >= value))) {
+    fail(`${label}: malformed published dependency manifest`);
+  }
+  for (const coordinate of REQUIRED_PUBLISHED_COORDINATES) {
+    if (!manifest.components.includes(coordinate)) {
+      fail(`${label}: missing required published module ${coordinate}`);
+    }
+  }
+  let previous = '';
+  for (const artifact of manifest.artifacts) {
+    const key = `${artifact.component}\0${artifact.fileName}\0${artifact.sha256}`;
+    if (typeof artifact.component !== 'string' || !manifest.components.includes(
+      artifact.component) || typeof artifact.fileName !== 'string' || !artifact.fileName
+      || !Number.isSafeInteger(artifact.size) || artifact.size < 0
+      || !/^[0-9a-f]{64}$/.test(artifact.sha256)
+      || (previous && previous >= key)) {
+      fail(`${label}: malformed published artifact binding`);
+    }
+    previous = key;
+  }
+}
+
+function publishedDependencyManifest(project, javaHome, resolver) {
+  const output = runChecked(join(project, 'gradlew'), [
+    '--no-daemon',
+    '--max-workers=1',
+    '--console=plain',
+    '--quiet',
+    '--init-script', resolver,
+    'round13PublishedDependencyManifest',
+    '-PtestJavaVersion=17',
+    '-PblueDependencyMode=published-artifact'
+  ], {
+    cwd: project,
+    env: { ...process.env, JAVA_HOME: javaHome }
+  });
+  const rows = output.split(/\r?\n/).filter(line =>
+    line.startsWith('ROUND13_PUBLISHED_DEPENDENCIES_BASE64='));
+  if (rows.length !== 1) fail(`${project}: published dependency marker differs`);
+  let manifest;
+  try {
+    manifest = JSON.parse(Buffer.from(rows[0].slice(
+      'ROUND13_PUBLISHED_DEPENDENCIES_BASE64='.length), 'base64').toString('utf8'));
+  } catch (error) {
+    fail(`${project}: invalid published dependency manifest (${error.message})`);
+  }
+  validatePublishedDependencyManifest(manifest, project);
+  return manifest;
 }
 
 function javaPreflight(javaHome) {
@@ -569,6 +631,8 @@ function captureBindings({
   if (sha256(readFileSync(archive)) !== BASELINE_HASH) fail('Archive.zip hash differs');
   const runnerBinding = parseRunner(runner);
   const importerBinding = currentGeneratorMetadata(candidateProject);
+  const resolverBinding = trackedToolMetadata(
+    join(candidateProject, PUBLISHED_RESOLVER));
   const importer = importerBinding.path;
   if (realpathSync(join(candidateProject, 'scripts/round13-ab-evidence.mjs'))
       !== importer) fail('Campaign must use the candidate importer');
@@ -596,18 +660,11 @@ function captureBindings({
   const baselineGradle = gradlePreflight(baselineProject, runnerBinding.javaHome);
   const candidateGradle = gradlePreflight(candidateProject, runnerBinding.javaHome);
   compare('Gradle --version identity', baselineGradle, candidateGradle);
-  const dependencyPaths = [
-    ['blue-bex-java', runnerBinding.bexPath],
-    ['blue-repository-java', runnerBinding.repositoryPath],
-    ['blue-language-java', realpathSync(resolve(
-      runnerBinding.repositoryPath, '../blue-language-java'))]
-  ];
-  const compositeDependencies = dependencyPaths.map(([name, path]) => ({
-    name,
-    path,
-    commit: gitOutput(path, 'rev-parse', 'HEAD'),
-    executionSurfaceManifest: manifestFromFilter(path, isCompositeExecutionPath)
-  }));
+  const baselinePublished = publishedDependencyManifest(
+    baselineProject, runnerBinding.javaHome, resolverBinding.path);
+  const candidatePublished = publishedDependencyManifest(
+    candidateProject, runnerBinding.javaHome, resolverBinding.path);
+  compare('published dependency manifests', baselinePublished, candidatePublished);
   return {
     integrityMode: 'FULL_CONTENT_MANIFESTS_AND_OBSERVED_COMPLETION_LEDGER',
     rawRoot: realpathSync(rawRoot),
@@ -617,7 +674,7 @@ function captureBindings({
     runner: {
       path: realpathSync(runner),
       sha256: sha256(readFileSync(runner)),
-      dependencyMode: 'local-composite',
+      dependencyMode: 'published-artifact',
       testJavaVersion: 17
     },
     importer: importerBinding,
@@ -660,7 +717,14 @@ function captureBindings({
       round12NbaEvidence: fileEntry(
         candidateProject, ROUND12_NBA_EVIDENCE_PATH, true)
     },
-    compositeDependencies
+    publishedDependencies: {
+      resolver: resolverBinding,
+      requiredCoordinates: REQUIRED_PUBLISHED_COORDINATES,
+      baseline: baselinePublished,
+      candidate: candidatePublished,
+      sameResolution: true,
+      bindingSha256: sha256(canonicalJson(candidatePublished))
+    }
   };
 }
 
@@ -1036,11 +1100,8 @@ function validateCampaignBundle(preflightBytes, ledgerBytes, postflightBytes, ra
   return { preflight, postflight, records, runtime };
 }
 
-function currentGeneratorMetadata(candidateProject) {
-  const path = realpathSync(fileURLToPath(import.meta.url));
-  const expectedPath = realpathSync(
-    join(candidateProject, 'scripts/round13-ab-evidence.mjs'));
-  if (path !== expectedPath) fail('Receipt generation must use the candidate generator');
+function trackedToolMetadata(file) {
+  const path = realpathSync(file);
   const bytes = readFileSync(path);
   const stat = lstatSync(path);
   return {
@@ -1051,6 +1112,14 @@ function currentGeneratorMetadata(candidateProject) {
     nodeVersion: process.version,
     nodeExecutable: realpathSync(process.execPath)
   };
+}
+
+function currentGeneratorMetadata(candidateProject) {
+  const path = realpathSync(fileURLToPath(import.meta.url));
+  const expectedPath = realpathSync(
+    join(candidateProject, 'scripts/round13-ab-evidence.mjs'));
+  if (path !== expectedPath) fail('Receipt generation must use the candidate generator');
+  return trackedToolMetadata(path);
 }
 
 function exactToolingDisclosure(bindings, candidateProject) {
@@ -1066,6 +1135,8 @@ function exactToolingDisclosure(bindings, candidateProject) {
     reason: NO_POSTFLIGHT_TOOLING_CHANGES_REASON,
     postflightToolingChanges: false,
     importerAndReceiptGenerator,
+    publishedDependencyResolver: trackedToolMetadata(
+      join(candidateProject, PUBLISHED_RESOLVER)),
     round12NbaEvidence
   };
 }
@@ -1089,6 +1160,7 @@ function toolingDisclosureSummary(disclosure) {
     importerSha256: disclosure.importerAndReceiptGenerator.sha256,
     receiptGeneratorPath: disclosure.importerAndReceiptGenerator.path,
     receiptGeneratorSha256: disclosure.importerAndReceiptGenerator.sha256,
+    publishedDependencyResolver: disclosure.publishedDependencyResolver,
     round12NbaEvidence: disclosure.round12NbaEvidence
   };
 }
@@ -1106,7 +1178,10 @@ function isAncestor(project, commit) {
 function verifyCurrentBindings(bindings, candidateOverride, toolingDisclosure) {
   if (bindings.integrityMode !== 'FULL_CONTENT_MANIFESTS_AND_OBSERVED_COMPLETION_LEDGER'
       || bindings.samplesPerVariant !== 30 || bindings.warmups !== 3
-      || bindings.baseline.archiveSha256 !== BASELINE_HASH) fail('Binding profile differs');
+      || bindings.baseline.archiveSha256 !== BASELINE_HASH
+      || bindings.runner.dependencyMode !== 'published-artifact') {
+    fail('Binding profile differs');
+  }
   const candidate = realpathSync(candidateOverride);
   if (candidate !== bindings.candidate.projectPath) fail('Candidate project path differs');
   validateToolingDisclosure(toolingDisclosure, bindings, candidate);
@@ -1116,6 +1191,9 @@ function verifyCurrentBindings(bindings, candidateOverride, toolingDisclosure) {
       || realpathSync(process.execPath) !== bindings.importer.nodeExecutable) {
     fail('Current runner/importer/Node runtime differs from campaign');
   }
+  const resolver = trackedToolMetadata(join(candidate, PUBLISHED_RESOLVER));
+  compare('current published dependency resolver', resolver,
+    bindings.publishedDependencies.resolver);
   if (sha256(readFileSync(bindings.baseline.archivePath)) !== BASELINE_HASH) {
     fail('Current Archive.zip differs');
   }
@@ -1146,23 +1224,35 @@ function verifyCurrentBindings(bindings, candidateOverride, toolingDisclosure) {
         walkFiles(bindings.baseline.projectPath), false),
       bindings.baseline.projectManifest);
   }
-  for (const dependency of bindings.compositeDependencies) {
-    verifyCurrentManifest(`${dependency.name} execution surface`, dependency.path,
-      isCompositeExecutionPath, dependency.executionSurfaceManifest);
-    if (!isAncestor(dependency.path, dependency.commit)) {
-      fail(`${dependency.name}: campaign commit is not an ancestor of HEAD`);
-    }
+  const runnerBinding = parseRunner(bindings.runner.path);
+  const currentCandidatePublished = publishedDependencyManifest(
+    candidate, runnerBinding.javaHome, resolver.path);
+  compare('current candidate published dependencies', currentCandidatePublished,
+    bindings.publishedDependencies.candidate);
+  if (existsSync(bindings.baseline.projectPath)) {
+    const currentBaselinePublished = publishedDependencyManifest(
+      bindings.baseline.projectPath, runnerBinding.javaHome, resolver.path);
+    compare('current baseline published dependencies', currentBaselinePublished,
+      bindings.publishedDependencies.baseline);
   }
-  const java = javaPreflight(bindings.runner.path.includes('/')
-    ? parseRunner(bindings.runner.path).javaHome
-    : bindings.runtimePreflight.identity.javaHome);
+  compare('required published dependency coordinates',
+    bindings.publishedDependencies.requiredCoordinates,
+    REQUIRED_PUBLISHED_COORDINATES);
+  if (bindings.publishedDependencies.sameResolution !== true
+      || bindings.publishedDependencies.bindingSha256
+      !== sha256(canonicalJson(bindings.publishedDependencies.candidate))) {
+    fail('Published dependency binding differs');
+  }
+  compare('baseline/candidate published dependencies',
+    bindings.publishedDependencies.baseline,
+    bindings.publishedDependencies.candidate);
+  const java = javaPreflight(runnerBinding.javaHome);
   compare('current Java preflight identity',
     java.identity, bindings.runtimePreflight.identity);
   compare('current host identity', hostIdentity(), bindings.hostIdentity);
   for (const manifest of [
     bindings.candidate.executionSurfaceManifest,
-    bindings.candidate.harnessSurfaceManifest,
-    ...bindings.compositeDependencies.map(value => value.executionSurfaceManifest)
+    bindings.candidate.harnessSurfaceManifest
   ]) validateStoredManifest('execution surface', manifest);
   if (bindingHash(bindings.fixture.candidate) !== bindings.fixture.bindingSha256
       || bindingHash(bindings.locks.candidate) !== bindings.locks.bindingSha256
@@ -1247,6 +1337,12 @@ function validateCanonical(runtime, provenance, candidateProject, verifyBindings
     fail('Embedded campaign chain differs');
   }
   compare('embedded preflight/postflight bindings', preflight.bindings, postflight.bindings);
+  compare('published dependency provenance', provenance.publishedDependencies,
+    preflight.bindings.publishedDependencies);
+  if (preflight.bindings.runner.dependencyMode !== 'published-artifact'
+      || preflight.bindings.publishedDependencies.sameResolution !== true) {
+    fail('Published dependency provenance differs');
+  }
   if (verifyBindings) verifyCurrentBindings(
     preflight.bindings, candidateProject, provenance.toolingDisclosure);
   compare('runtime tooling disclosure', runtime.toolingDisclosure,
@@ -1342,6 +1438,7 @@ function renderMarkdown(runtime) {
     `> **${tooling.marker}:** ${tooling.reason}`, '>',
     '> Postflight tooling changes: **no**. The campaign importer and receipt '
       + `generator are the same frozen file: \`${tooling.importerSha256}\`. `
+      + `Published dependency resolver: \`${tooling.publishedDependencyResolver.sha256}\`. `
       + `Current Round12NbaEvidence: \`${tooling.round12NbaEvidence.sha256}\` `
       + `(${tooling.round12NbaEvidence.size} bytes, mode `
       + `0${tooling.round12NbaEvidence.mode.toString(8)}).`, '',
@@ -1482,7 +1579,7 @@ function generate(args) {
     },
     locks: { ...bindings.locks, sameLocks: true },
     fixture: { ...bindings.fixture, sameFixture: true },
-    compositeDependencies: bindings.compositeDependencies,
+    publishedDependencies: bindings.publishedDependencies,
     baseline: {
       projectPath: bindings.baseline.projectPath,
       archivePath: bindings.baseline.archivePath,
@@ -1546,9 +1643,21 @@ function verify(args) {
   console.log(`ROUND13_AB_VERIFIED=${status}`);
 }
 
+function selfTest(args) {
+  const candidateProject = required(args, 'candidate');
+  const runner = required(args, 'runner');
+  currentGeneratorMetadata(candidateProject);
+  const runnerBinding = parseRunner(runner);
+  const resolver = trackedToolMetadata(join(candidateProject, PUBLISHED_RESOLVER));
+  const manifest = publishedDependencyManifest(
+    candidateProject, runnerBinding.javaHome, resolver.path);
+  console.log(`ROUND13_AB_PUBLISHED_TOOLING_VERIFIED=${sha256(canonicalJson(manifest))}`);
+}
+
 try {
   const args = parseArgs(process.argv.slice(2));
   if (args.verify) verify(args);
+  else if (args['self-test']) selfTest(args);
   else if (args['capture-preflight']) capturePreflight(args);
   else if (args['append-ledger']) appendLedger(args);
   else if (args['capture-postflight']) capturePostflight(args);

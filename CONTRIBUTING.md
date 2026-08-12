@@ -15,7 +15,7 @@ fragmentation layer, scheduler or cache hierarchy.
 Run the focused gate while developing:
 
 ```bash
-./gradlew releaseCheck -PblueDependencyMode=local-composite
+./gradlew releaseCheck
 ```
 
 The gate runs unit, integration, built-JAR consumer and end-to-end scenario
@@ -24,7 +24,7 @@ for historical timing and percentile comparisons. When a change intentionally
 affects performance, capture those optional metrics after publishing locally:
 
 ```bash
-./gradlew publishToMavenLocal -PblueDependencyMode=local-composite
+./gradlew publishToMavenLocal
 ../blue-basic/gradlew -p ../blue-basic performanceTest runtimeCampaign
 ```
 

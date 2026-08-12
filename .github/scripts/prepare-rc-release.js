@@ -4,6 +4,7 @@ const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 
 const CZ_TOML = '.cz.toml';
+const CANONICAL_EVIDENCE = 'docs/releases/3.0.0-rc.1-evidence.json';
 const MAIN_REF = process.env.RC_BASE_REF || 'origin/main';
 const VALID_BUMPS = new Set(['major', 'minor', 'patch']);
 
@@ -20,7 +21,7 @@ function readVersion(content) {
 }
 
 function parseVersion(version) {
-  const match = version.match(/^(\d+)\.(\d+)\.(\d+)(?:-rc\.\d+)?$/);
+  const match = version.match(/^(\d+)\.(\d+)\.(\d+)(?:-rc\.(\d+))?$/);
   if (!match) {
     throw new Error(`Unsupported version format: ${version}`);
   }
@@ -28,6 +29,7 @@ function parseVersion(version) {
     major: Number(match[1]),
     minor: Number(match[2]),
     patch: Number(match[3]),
+    rc: match[4] == null ? null : Number(match[4]),
   };
 }
 
@@ -98,24 +100,78 @@ function versionFromRef(ref) {
   return parseVersion(readVersion(content));
 }
 
-const currentContent = fs.readFileSync(CZ_TOML, 'utf8');
-const baseVersion = versionFromRef(MAIN_REF);
-const messages = commitMessagesSince(MAIN_REF);
-const bump = bumpFromMessages(messages);
-const targetBase = formatVersion(increment(baseVersion, bump));
-const nextVersion = `${targetBase}-rc.${latestRc(targetBase) + 1}`;
-
-const nextContent = currentContent.replace(
-  /^version\s*=\s*"[^"]+"/m,
-  `version = "${nextVersion}"`,
-);
-fs.writeFileSync(CZ_TOML, nextContent);
-
-console.log(`Base ref: ${MAIN_REF}`);
-console.log(`Base version: ${formatVersion(baseVersion)}`);
-console.log(`Aggregate bump: ${bump}`);
-console.log(`Next RC version: ${nextVersion}`);
-
-if (process.env.GITHUB_OUTPUT) {
-  fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${nextVersion}\n`);
+function nextVersionForCurrentRc(currentVersion, latestTaggedRc) {
+  const parsed = parseVersion(currentVersion);
+  if (parsed.rc == null) {
+    throw new Error(`Version is not an RC: ${currentVersion}`);
+  }
+  const nextRc = Math.max(parsed.rc, latestTaggedRc + 1);
+  return `${formatVersion(parsed)}-rc.${nextRc}`;
 }
+
+function evidenceRelease(content) {
+  const evidence = JSON.parse(content);
+  if (typeof evidence.release !== 'string' || evidence.release.length === 0) {
+    throw new Error(`Canonical evidence is missing a release: ${CANONICAL_EVIDENCE}`);
+  }
+  return evidence.release;
+}
+
+function assertEvidenceRelease(preparedVersion, content) {
+  const canonicalRelease = evidenceRelease(content);
+  if (canonicalRelease !== preparedVersion) {
+    throw new Error(
+      `Prepared RC ${preparedVersion} does not match canonical evidence release ${canonicalRelease}`,
+    );
+  }
+}
+
+function prepareRcRelease() {
+  const currentContent = fs.readFileSync(CZ_TOML, 'utf8');
+  const currentVersion = readVersion(currentContent);
+  const current = parseVersion(currentVersion);
+  let nextVersion;
+
+  if (current.rc != null) {
+    const targetBase = formatVersion(current);
+    nextVersion = nextVersionForCurrentRc(currentVersion, latestRc(targetBase));
+    console.log(`Current RC series: ${targetBase}`);
+  } else {
+    const baseVersion = versionFromRef(MAIN_REF);
+    const messages = commitMessagesSince(MAIN_REF);
+    const bump = bumpFromMessages(messages);
+    const targetBase = formatVersion(increment(baseVersion, bump));
+    nextVersion = `${targetBase}-rc.${latestRc(targetBase) + 1}`;
+    console.log(`Base ref: ${MAIN_REF}`);
+    console.log(`Base version: ${formatVersion(baseVersion)}`);
+    console.log(`Aggregate bump: ${bump}`);
+  }
+
+  assertEvidenceRelease(
+    nextVersion,
+    fs.readFileSync(CANONICAL_EVIDENCE, 'utf8'),
+  );
+
+  const nextContent = currentContent.replace(
+    /^version\s*=\s*"[^"]+"/m,
+    `version = "${nextVersion}"`,
+  );
+  fs.writeFileSync(CZ_TOML, nextContent);
+
+  console.log(`Next RC version: ${nextVersion}`);
+
+  if (process.env.GITHUB_OUTPUT) {
+    fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${nextVersion}\n`);
+  }
+}
+
+if (require.main === module) {
+  prepareRcRelease();
+}
+
+module.exports = {
+  assertEvidenceRelease,
+  evidenceRelease,
+  nextVersionForCurrentRc,
+  parseVersion,
+};

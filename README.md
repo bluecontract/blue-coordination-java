@@ -59,10 +59,14 @@ state to operational tooling.
 ## Build and verification
 
 ```bash
-./gradlew clean test -PblueDependencyMode=local-composite
-./gradlew releaseCheck -PblueDependencyMode=local-composite
-./gradlew stageRelease -PblueDependencyMode=local-composite
+./gradlew clean test
+./gradlew releaseCheck
+./gradlew stageRelease
 ```
+
+Published Maven Central artifacts are the default dependency source. Local
+composite substitution is available only as an explicit cross-repository
+diagnostic mode; it is not used by the normal build or release path.
 
 `releaseCheck` owns the library's complete verification surface: unit tests,
 compact-engine integration tests, tests compiled against the built JAR, and

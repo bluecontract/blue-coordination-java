@@ -8,7 +8,7 @@ pluginManagement {
 rootProject.name = 'blue-coordination-java'
 
 def dependencyMode = providers.gradleProperty('blueDependencyMode')
-        .getOrElse('local-composite')
+        .getOrElse('published-artifact')
         .trim()
 if (!(dependencyMode in ['local-composite', 'published-artifact'])) {
     throw new GradleException(

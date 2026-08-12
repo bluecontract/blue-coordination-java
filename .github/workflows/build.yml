@@ -54,6 +54,9 @@ jobs:
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
 
+      - name: Verify release-version selection
+        run: node --test .github/scripts/prepare-rc-release.test.js
+
       - name: Verify published dependency availability
         run: >-
           ./gradlew --no-daemon dependencyPreflight
@@ -64,13 +67,6 @@ jobs:
           ./gradlew --no-daemon clean releaseCheck
           -PblueDependencyMode=published-artifact
           -PtestJavaVersion=${{ matrix.test-java }}
-
-      - name: Stage release bundle
-        if: matrix.test-java == '17'
-        run: >-
-          ./gradlew --no-daemon stageRelease
-          -PblueDependencyMode=published-artifact
-          -PtestJavaVersion=17
 
       - name: Archive verification evidence
         uses: actions/upload-artifact@v4

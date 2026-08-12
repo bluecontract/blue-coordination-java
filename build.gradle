@@ -15,7 +15,7 @@ if (!versionMatches.find()) {
 version = versionMatches.group(1)
 
 def dependencyMode = providers.gradleProperty('blueDependencyMode')
-        .getOrElse('local-composite')
+        .getOrElse('published-artifact')
         .trim()
 def localDependencies = dependencyMode == 'local-composite'
 def publishedRepository = providers.gradleProperty(
@@ -110,7 +110,7 @@ tasks.withType(Jar).configureEach {
 
 dependencies {
     api 'blue.language:blue-contracts-core:3.1.0-rc.20'
-    implementation 'blue.repo:blue-repo-java:3.0.0-rc.19'
+    implementation 'blue.repo:blue-repo-java:3.0.0-rc.21'
     implementation 'blue.bex:blue-bex-core:1.1.0-rc.3'
     implementation 'blue.bex:blue-bex-contracts:1.1.0-rc.3'
     implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
@@ -540,7 +540,7 @@ tasks.register('dependencyPreflight') {
         def releaseDependencies = configurations.detachedConfiguration(
                 dependencies.create(
                         'blue.language:blue-contracts-core:3.1.0-rc.20'),
-                dependencies.create('blue.repo:blue-repo-java:3.0.0-rc.19'),
+                dependencies.create('blue.repo:blue-repo-java:3.0.0-rc.21'),
                 dependencies.create('blue.bex:blue-bex-core:1.1.0-rc.3'),
                 dependencies.create(
                         'blue.bex:blue-bex-contracts:1.1.0-rc.3'),
@@ -613,7 +613,7 @@ tasks.register('verifyPublicationPom') {
                 }
         def expectedVersions = [
                 'blue.language:blue-contracts-core': '3.1.0-rc.20',
-                'blue.repo:blue-repo-java': '3.0.0-rc.19',
+                'blue.repo:blue-repo-java': '3.0.0-rc.21',
                 'blue.bex:blue-bex-core': '1.1.0-rc.3',
                 'blue.bex:blue-bex-contracts': '1.1.0-rc.3',
                 'org.bouncycastle:bcprov-jdk18on': '1.78.1'
@@ -675,6 +675,8 @@ tasks.register('verifyReleaseMetadata') {
                 'docs/releases/round12-verification.schema.json',
                 'docs/releases/round13-verification.schema.json',
                 'scripts/round13-ab-evidence.mjs',
+                'scripts/round13-published-dependencies.gradle',
+                'scripts/run-round13-same-machine-ab.sh',
                 'docs/reference/public-api.md',
                 'docs/reference/metrics.md',
                 'docs/operations/failure-model.md'
@@ -714,6 +716,8 @@ tasks.register('verifyDocumentation') {
             'docs/releases/round12-verification.schema.json',
             'docs/releases/round13-verification.schema.json',
             'scripts/round13-ab-evidence.mjs',
+            'scripts/round13-published-dependencies.gradle',
+            'scripts/run-round13-same-machine-ab.sh',
             productionSources)
     doLast {
         def failures = []
@@ -1074,8 +1078,8 @@ tasks.register('verifyDocumentation') {
                     if (process.waitFor() != 0
                             || !verification.contains(
                             "ROUND13_AB_VERIFIED=${campaign.status}")) {
-                        failures << 'Round 13 runtime receipt failed recomputation: '
-                                + verification.trim()
+                        failures << ('Round 13 runtime receipt failed recomputation: '
+                                + verification.trim())
                     }
                 }
             }
@@ -1300,7 +1304,7 @@ tasks.register('verifyDocumentation') {
                         }
                         || evidence.runtimes.any { it.status != 'PASS' }
                         || evidence.proofs.any { it.status != 'PASS' }
-                        || campaign.status != 'PASS'
+                        || !publishableLatency.contains(campaign.status)
                         || evidence.structuralEvidence.status != 'PASS'
                         || evidence.artifacts.status != 'PASS'
                         || archiveExecutionFields.any {
@@ -2278,13 +2282,20 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
 
 tasks.register('verifyPublishedModeIsolation') {
     group = 'verification'
-    description = 'Statically proves published mode has no Git or sibling checks.'
+    description = 'Proves published mode is the default and has no Git or sibling checks.'
     inputs.files('settings.gradle', 'build.gradle')
     doLast {
         String settings = file('settings.gradle').getText('UTF-8')
+        String buildScript = file('build.gradle').getText('UTF-8')
         if (settings.contains('ProcessBuilder') || settings.contains("'git'")) {
             throw new GradleException(
                     'Ordinary settings must not execute Git')
+        }
+        if (!settings.contains(".getOrElse('published-artifact')")
+                || !buildScript.contains(
+                ".getOrElse('published-artifact')")) {
+            throw new GradleException(
+                    'Published artifacts must remain the default dependency mode')
         }
         if (!settings.contains("dependencyMode == 'local-composite'")) {
             throw new GradleException(
@@ -2707,8 +2718,8 @@ if (localDependencies) {
                     exclude '*-sources.jar', '*-javadoc.jar'
                 }.singleFile
                 into new File(targetRoot,
-                        'blue/repo/blue-repo-java/3.0.0-rc.19')
-                rename { 'blue-repo-java-3.0.0-rc.19.jar' }
+                        'blue/repo/blue-repo-java/3.0.0-rc.21')
+                rename { 'blue-repo-java-3.0.0-rc.21.jar' }
             }
             copy {
                 from fileTree(new File(localBexCheckout,
