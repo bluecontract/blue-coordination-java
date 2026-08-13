@@ -105,14 +105,15 @@ tasks.withType(AbstractArchiveTask).configureEach {
 }
 
 tasks.withType(Jar).configureEach {
+    includeEmptyDirs = false
     from('LICENSE') { into 'META-INF' }
 }
 
 dependencies {
     api 'blue.language:blue-contracts-core:3.1.0-rc.20'
     implementation 'blue.repo:blue-repo-java:3.0.0-rc.21'
-    implementation 'blue.bex:blue-bex-core:1.1.0-rc.3'
-    implementation 'blue.bex:blue-bex-contracts:1.1.0-rc.3'
+    api 'blue.bex:blue-bex-core:1.1.0-rc.3'
+    api 'blue.bex:blue-bex-contracts:1.1.0-rc.3'
     implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
 
     testImplementation platform('org.junit:junit-bom:5.14.1')
@@ -337,7 +338,7 @@ publishing {
             pom {
                 name = 'Blue Coordination Java'
                 description = 'Deterministic whole-object document coordination runtime.'
-                url = 'https://github.com/bluecontract/blue-contract-java'
+                url = 'https://github.com/bluecontract/blue-coordination-java'
                 licenses {
                     license {
                         name = 'MIT License'
@@ -352,13 +353,13 @@ publishing {
                     }
                 }
                 scm {
-                    url = 'https://github.com/bluecontract/blue-contract-java'
-                    connection = 'scm:git:https://github.com/bluecontract/blue-contract-java.git'
-                    developerConnection = 'scm:git:ssh://git@github.com/bluecontract/blue-contract-java.git'
+                    url = 'https://github.com/bluecontract/blue-coordination-java'
+                    connection = 'scm:git:https://github.com/bluecontract/blue-coordination-java.git'
+                    developerConnection = 'scm:git:ssh://git@github.com/bluecontract/blue-coordination-java.git'
                 }
                 issueManagement {
                     system = 'GitHub Issues'
-                    url = 'https://github.com/bluecontract/blue-contract-java/issues'
+                    url = 'https://github.com/bluecontract/blue-coordination-java/issues'
                 }
             }
         }
@@ -599,12 +600,15 @@ tasks.register('verifyPublicationPom') {
                         scope.find() ? scope.group(1) : 'compile'
             }
         }
-        if (scopes['blue.language:blue-contracts-core'] != 'compile') {
-            throw new GradleException(
-                    'blue-contracts-core must be a compile-scope API dependency')
-        }
-        ['blue.repo:blue-repo-java', 'blue.bex:blue-bex-core',
-         'blue.bex:blue-bex-contracts', 'org.bouncycastle:bcprov-jdk18on']
+        ['blue.language:blue-contracts-core', 'blue.bex:blue-bex-core',
+         'blue.bex:blue-bex-contracts']
+                .each { coordinate ->
+                    if (scopes[coordinate] != 'compile') {
+                        throw new GradleException(
+                                "${coordinate} must be compile scoped because public APIs expose its types")
+                    }
+                }
+        ['blue.repo:blue-repo-java', 'org.bouncycastle:bcprov-jdk18on']
                 .each { coordinate ->
                     if (scopes[coordinate] != 'runtime') {
                         throw new GradleException(
@@ -638,6 +642,21 @@ tasks.register('verifyPublicationPom') {
                                 "Publication POM is missing ${marker}")
                     }
                 }
+        [
+                '<url>https://github.com/bluecontract/blue-coordination-java</url>',
+                '<connection>scm:git:https://github.com/bluecontract/blue-coordination-java.git</connection>',
+                '<developerConnection>scm:git:ssh://git@github.com/bluecontract/blue-coordination-java.git</developerConnection>',
+                '<url>https://github.com/bluecontract/blue-coordination-java/issues</url>'
+        ].each { marker ->
+            if (!pom.contains(marker)) {
+                throw new GradleException(
+                        "Publication POM is missing canonical repository metadata ${marker}")
+            }
+        }
+        if (pom.contains('github.com/bluecontract/blue-contract-java')) {
+            throw new GradleException(
+                    'Publication POM contains the obsolete repository URL')
+        }
         if (pom.contains('SNAPSHOT') || pom.contains('junit')) {
             throw new GradleException(
                     'Release POM contains a snapshot or test dependency')
@@ -743,7 +762,7 @@ tasks.register('verifyDocumentation') {
         def evidenceFile = file(
                 'docs/releases/3.0.0-rc.1-evidence.json')
         def evidence = new groovy.json.JsonSlurper().parse(evidenceFile)
-        if (evidence.schemaVersion == '4.0.0'
+        if (evidence.schemaVersion == '4.1.0'
                 && evidence.profile
                 == 'ROUND13_PLAYGROUND_FIVE_OCCURRENCE') {
             def schemaFile = file(
@@ -773,6 +792,7 @@ tasks.register('verifyDocumentation') {
             ] as Set
             def allowedReadiness = [
                     'PASS', 'PASS_HARD_GATE', 'PENDING_VERIFICATION',
+                    'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION',
                     'BLOCKED', 'FAIL', 'OUT_OF_SCOPE'
             ] as Set
             def allowedExecution = [
@@ -794,6 +814,21 @@ tasks.register('verifyDocumentation') {
             }
             if (!allowedReadiness.contains(evidence.verdict)) {
                 failures << "Invalid Round 13 verdict ${evidence.verdict}"
+            }
+            def expectedLimitedRcPolicy = [
+                    mode: 'RC_WITH_KNOWN_PERFORMANCE_LIMITATION',
+                    exactRelease: '3.0.0-rc.1',
+                    decision: 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION',
+                    performanceReleaseBlocking: false,
+                    stableReleaseEligible: false,
+                    nonPerformanceGatesRequired: true,
+                    explicitWorkflowOptInRequired: true
+            ]
+            boolean limitedRcPolicy = version.toString() == '3.0.0-rc.1'
+                    && evidence.release == version.toString()
+                    && evidence.releasePolicy == expectedLimitedRcPolicy
+            if (!limitedRcPolicy) {
+                failures << 'Round 13 RC limitation policy is missing or invalid'
             }
 
             Closure<String> sha256 = { byte[] bytes ->
@@ -1277,7 +1312,38 @@ tasks.register('verifyDocumentation') {
                 def publishableLatency = [
                         'PASS', 'PASS_HARD_GATE'
                 ] as Set
-                if (evidence.verdict != 'PASS'
+                boolean normalLatencyDecision = evidence.verdict == 'PASS'
+                        && publishableLatency.contains(
+                        evidence.status.playgroundLatencyReady)
+                        && evidence.status.publicRcReady == 'PASS'
+                        && publishableLatency.contains(campaign.status)
+                        && evidence.proofs.every { it.status == 'PASS' }
+                        && report.contains(
+                        'ROUND13_FINAL_VERIFICATION: PASS')
+                boolean limitedLatencyDecision = limitedRcPolicy
+                        && evidence.verdict
+                        == 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION'
+                        && evidence.status.playgroundLatencyReady
+                        == 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION'
+                        && evidence.status.publicRcReady
+                        == 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION'
+                        && campaign.status == 'PENDING_VERIFICATION'
+                        && campaign.measuredSamples == 0
+                        && campaign.runtimeMarkdown == null
+                        && campaign.runtimeJson == null
+                        && campaign.runtimeProvenanceJson == null
+                        && campaign.pendingReason instanceof String
+                        && !campaign.pendingReason.isBlank()
+                        && evidence.proofs.every {
+                            it.status == 'PASS'
+                                    || (it.id
+                                    == 'five-occurrence-host-versus-frozen-time'
+                                    && it.status == 'PENDING_VERIFICATION')
+                        }
+                        && report.contains(
+                        'ROUND13_FINAL_VERIFICATION: '
+                                + 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION')
+                if (!(normalLatencyDecision || limitedLatencyDecision)
                         || evidence.source.candidateCommit == null
                         || evidence.source.binding != 'CANDIDATE_COMMIT'
                         || evidence.source.worktree != 'CLEAN'
@@ -1289,11 +1355,8 @@ tasks.register('verifyDocumentation') {
                         || evidence.status.temporalArchitectureReady != 'PASS'
                         || evidence.status.inMemoryEngineWorkingReady != 'PASS'
                         || evidence.status.playgroundCoreReady != 'PASS'
-                        || !publishableLatency.contains(
-                        evidence.status.playgroundLatencyReady)
                         || evidence.status.providerBackedReady != 'OUT_OF_SCOPE'
                         || evidence.status.mandateAgentReady != 'OUT_OF_SCOPE'
-                        || evidence.status.publicRcReady != 'PASS'
                         || evidence.tests.executionStatus != 'PASS'
                         || evidence.tests.failures != 0
                         || evidence.tests.errors != 0
@@ -1303,16 +1366,12 @@ tasks.register('verifyDocumentation') {
                                     || it.errors != 0 || it.skipped != 0
                         }
                         || evidence.runtimes.any { it.status != 'PASS' }
-                        || evidence.proofs.any { it.status != 'PASS' }
-                        || !publishableLatency.contains(campaign.status)
                         || evidence.structuralEvidence.status != 'PASS'
                         || evidence.artifacts.status != 'PASS'
                         || archiveExecutionFields.any {
                             archive[it] != 'PASS'
                         }
                         || evidence.publicationEvidence.status != 'PASS'
-                        || !report.contains(
-                        'ROUND13_FINAL_VERIFICATION: PASS')
                         || report.contains('ROUND13_INTERIM_VERIFICATION:')) {
                     failures << 'Round 13 FINAL evidence is incomplete'
                 }
@@ -2438,16 +2497,19 @@ def round13Readiness = tasks.register('verifyRound13Readiness') {
                 .startsWith(sourceArchiveHash + '  ' + sourceArchive.name)
         def publishableLatency = ['PASS', 'PASS_HARD_GATE'] as Set
         Closure<Boolean> containsUnfinalized
-        containsUnfinalized = { value ->
-            if (['PENDING_VERIFICATION', 'FAIL', 'BLOCKED',
-                 'BLOCKED_UPSTREAM'].contains(value)) {
+        containsUnfinalized = { value, String field = null ->
+            if (field != 'duplicatesStrategy'
+                    && ['PENDING_VERIFICATION', 'FAIL', 'BLOCKED',
+                        'BLOCKED_UPSTREAM'].contains(value)) {
                 return true
             }
             if (value instanceof Map) {
-                return value.values().any { containsUnfinalized(it) }
+                return value.any { key, nested ->
+                    containsUnfinalized(nested, key as String)
+                }
             }
             if (value instanceof List) {
-                return value.any { containsUnfinalized(it) }
+                return value.any { containsUnfinalized(it, field) }
             }
             return false
         }
@@ -2472,7 +2534,24 @@ def round13Readiness = tasks.register('verifyRound13Readiness') {
                 evidence.source.candidateCommit ?: 'INVALID', actualHead)
                 .directory(rootDir).start()
         boolean testedCommitIsAncestor = ancestorProcess.waitFor() == 0
+        Closure<String> sha256 = { byte[] bytes ->
+            java.security.MessageDigest.getInstance('SHA-256')
+                    .digest(bytes).encodeHex().toString()
+        }
+        Closure<String> relativeSourcePath = { File source ->
+            rootDir.toPath().relativize(source.toPath()).toString()
+                    .replace(File.separator, '/')
+        }
+        String currentSourceManifest = productionSources.files.sort {
+            source -> relativeSourcePath(source)
+        }.collect { source ->
+            "${relativeSourcePath(source)} ${sha256(source.bytes)}"
+        }.join('\n')
+        boolean testedSourceStillExact = sha256(currentSourceManifest.getBytes(
+                java.nio.charset.StandardCharsets.UTF_8))
+                == evidence.source.mainSourceManifestSha256
         String sha256Pattern = /^[0-9a-f]{64}$/
+        String sha1Pattern = /^[0-9a-f]{40}$/
         def artifactTasks = [
                 mainJarSha256: 'jar',
                 sourcesJarSha256: 'sourcesJar',
@@ -2494,6 +2573,75 @@ def round13Readiness = tasks.register('verifyRound13Readiness') {
                 && file(campaign.runtimeProvenanceJson).isFile()
                 ? new groovy.json.JsonSlurper().parse(
                 file(campaign.runtimeProvenanceJson)) : [:]
+        def expectedLimitedRcPolicy = [
+                mode: 'RC_WITH_KNOWN_PERFORMANCE_LIMITATION',
+                exactRelease: '3.0.0-rc.1',
+                decision: 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION',
+                performanceReleaseBlocking: false,
+                stableReleaseEligible: false,
+                nonPerformanceGatesRequired: true,
+                explicitWorkflowOptInRequired: true
+        ]
+        boolean limitedRcPolicy = version.toString() == '3.0.0-rc.1'
+                && evidence.release == version.toString()
+                && evidence.releasePolicy == expectedLimitedRcPolicy
+        boolean latencyExceptionOptIn = providers.gradleProperty(
+                'allowRound13LatencyException').orNull == 'true'
+        boolean normalLatencyDecision = evidence.verdict == 'PASS'
+                && publishableLatency.contains(
+                evidence.status.playgroundLatencyReady)
+                && evidence.status.publicRcReady == 'PASS'
+                && publishableLatency.contains(campaign.status)
+                && campaignProvenance.candidate?.implementationHead
+                == evidence.source.candidateCommit
+                && campaignProvenance.candidate?.worktreeStatusSha256
+                == java.security.MessageDigest.getInstance('SHA-256')
+                .digest(new byte[0]).encodeHex().toString()
+                && campaign.comparison == 'SAME_MACHINE_INTERLEAVED_AB'
+                && campaign.requiredSamples >= 30
+                && campaign.measuredSamples >= campaign.requiredSamples
+                && [campaign.runtimeMarkdown, campaign.runtimeJson,
+                    campaign.runtimeProvenanceJson].every {
+                    it instanceof String && file(it).isFile()
+                }
+                && campaign.pendingReason == null
+                && evidence.proofs.every { it.status == 'PASS' }
+        boolean limitedLatencyDecision = latencyExceptionOptIn
+                && limitedRcPolicy
+                && evidence.verdict
+                == 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION'
+                && evidence.status.playgroundLatencyReady
+                == 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION'
+                && evidence.status.publicRcReady
+                == 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION'
+                && campaign.status == 'PENDING_VERIFICATION'
+                && campaign.comparison == 'SAME_MACHINE_INTERLEAVED_AB'
+                && campaign.requiredSamples >= 30
+                && campaign.measuredSamples == 0
+                && campaign.runtimeMarkdown == null
+                && campaign.runtimeJson == null
+                && campaign.runtimeProvenanceJson == null
+                && campaign.pendingReason instanceof String
+                && !campaign.pendingReason.isBlank()
+                && evidence.proofs.every {
+                    it.status == 'PASS'
+                            || (it.id
+                            == 'five-occurrence-host-versus-frozen-time'
+                            && it.status == 'PENDING_VERIFICATION')
+                }
+        def finalizedEvidenceScope = evidence
+        if (limitedLatencyDecision) {
+            finalizedEvidenceScope = new LinkedHashMap(evidence)
+            finalizedEvidenceScope.status = evidence.status.findAll {
+                key, ignored -> key != 'playgroundLatencyReady'
+            }
+            finalizedEvidenceScope.performance = new LinkedHashMap(
+                    evidence.performance)
+            finalizedEvidenceScope.performance.remove('round13Campaign')
+            finalizedEvidenceScope.proofs = evidence.proofs.findAll {
+                it.id != 'five-occurrence-host-versus-frozen-time'
+            }
+        }
         File archiveReceiptFile = file(
                 'build/reports/round13/source-archive-verification.json')
         def archiveReceipt = archiveReceiptFile.isFile()
@@ -2507,13 +2655,13 @@ def round13Readiness = tasks.register('verifyRound13Readiness') {
                 && archiveReceipt.extractedConfiguration == 'PASS'
                 && archiveReceipt.focusedTestsStatus == 'PASS'
                 && archiveReceipt.publishedArtifactSmokeBuild == 'PASS'
-        if (evidence.schemaVersion != '4.0.0'
+        if (evidence.schemaVersion != '4.1.0'
                 || evidence.profile
                 != 'ROUND13_PLAYGROUND_FIVE_OCCURRENCE'
                 || evidence.evidenceState != 'FINAL'
-                || evidence.verdict != 'PASS'
-                || evidence.source.candidateCommit == null
-                || !testedCommitIsAncestor
+                || !(normalLatencyDecision || limitedLatencyDecision)
+                || !(evidence.source.candidateCommit ==~ sha1Pattern)
+                || !(testedCommitIsAncestor || testedSourceStillExact)
                 || evidence.source.binding != 'CANDIDATE_COMMIT'
                 || evidence.source.worktree != 'CLEAN'
                 || evidence.source.dirtyReason != null
@@ -2528,11 +2676,8 @@ def round13Readiness = tasks.register('verifyRound13Readiness') {
                 || evidence.status.temporalArchitectureReady != 'PASS'
                 || evidence.status.inMemoryEngineWorkingReady != 'PASS'
                 || evidence.status.playgroundCoreReady != 'PASS'
-                || !publishableLatency.contains(
-                        evidence.status.playgroundLatencyReady)
                 || evidence.status.providerBackedReady != 'OUT_OF_SCOPE'
                 || evidence.status.mandateAgentReady != 'OUT_OF_SCOPE'
-                || evidence.status.publicRcReady != 'PASS'
                 || evidence.tests.executionStatus != 'PASS'
                 || evidence.tests.failures != 0
                 || evidence.tests.errors != 0
@@ -2544,22 +2689,7 @@ def round13Readiness = tasks.register('verifyRound13Readiness') {
                 || evidence.shape.status != 'PASS'
                 || evidence.artifacts.status != 'PASS'
                 || !artifactHashesMatch
-                || !publishableLatency.contains(campaign.status)
-                || campaignProvenance.candidate?.implementationHead
-                != evidence.source.candidateCommit
-                || campaignProvenance.candidate?.worktreeStatusSha256
-                != java.security.MessageDigest.getInstance('SHA-256')
-                        .digest(new byte[0]).encodeHex().toString()
-                || campaign.comparison != 'SAME_MACHINE_INTERLEAVED_AB'
-                || campaign.requiredSamples < 30
-                || campaign.measuredSamples < campaign.requiredSamples
-                || [campaign.runtimeMarkdown, campaign.runtimeJson,
-                    campaign.runtimeProvenanceJson].any {
-                        !(it instanceof String) || !file(it).isFile()
-                }
-                || campaign.pendingReason != null
                 || evidence.runtimes.any { it.status != 'PASS' }
-                || evidence.proofs.any { it.status != 'PASS' }
                 || evidence.structuralEvidence.status != 'PASS'
                 || evidence.structuralEvidence.requiredZeroCounters.any {
                     key, value -> value != 0
@@ -2581,10 +2711,15 @@ def round13Readiness = tasks.register('verifyRound13Readiness') {
                 || !(evidence.publicationEvidence.durationSeconds
                         instanceof Number)
                 || !evidence.blockers.empty
-                || containsUnfinalized(evidence)
-                || report.contains('PENDING_VERIFICATION')
+                || containsUnfinalized(finalizedEvidenceScope)
+                || (normalLatencyDecision
+                        && report.contains('PENDING_VERIFICATION'))
                 || report.contains('ROUND13_INTERIM_VERIFICATION:')
-                || !report.contains('ROUND13_FINAL_VERIFICATION: PASS')) {
+                || (normalLatencyDecision && !report.contains(
+                        'ROUND13_FINAL_VERIFICATION: PASS'))
+                || (limitedLatencyDecision && !report.contains(
+                        'ROUND13_FINAL_VERIFICATION: '
+                                + 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION'))) {
             throw new GradleException(
                     'Canonical Round 13 evidence does not permit staging')
         }

@@ -85,10 +85,15 @@ and dynamic-activation proofs. Release status is split
 into temporal architecture, in-memory engine, provider, Mandate, latency, and
 public-RC evidence. The generic Timeline Entry's missing universal literal
 `documentId` is an optional profile capability; exact provider-backed Mandate
-eligibility remains a real blocker. Publication stays fail-closed until the
-same-source, performance, consumer, source-archive, and published-artifact gates
-in the [canonical RC report](docs/releases/3.0.0-rc.1-test-report.md) have final
-results. See the [RC readiness note](docs/releases/3.0.0-rc.1.md) and
+eligibility remains outside this in-memory profile. The exact 3.0.0-rc.1 release
+policy permits workflow publication with
+`PASS_WITH_KNOWN_PERFORMANCE_LIMITATION`: the retained Round 13 campaign failed
+append and Coordination-host hard p95 gates, and no latency pass is claimed.
+The exception requires explicit workflow opt-in, cannot apply to a stable
+release, and preserves every Java, correctness, structural, consumer, artifact,
+source-archive, published-dependency, metadata, checksum, and signature gate.
+See the [canonical RC report](docs/releases/3.0.0-rc.1-test-report.md),
+[RC readiness note](docs/releases/3.0.0-rc.1.md), and
 [release procedure](docs/development/releasing.md).
 
 Developer references:

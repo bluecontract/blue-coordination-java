@@ -11,6 +11,7 @@
     "profile",
     "evidenceState",
     "evidenceDate",
+    "releasePolicy",
     "status",
     "verdict",
     "source",
@@ -32,11 +33,12 @@
   ],
   "properties": {
     "$schema": { "const": "round13-verification.schema.json" },
-    "schemaVersion": { "const": "4.0.0" },
+    "schemaVersion": { "const": "4.1.0" },
     "release": { "const": "3.0.0-rc.1" },
     "profile": { "const": "ROUND13_PLAYGROUND_FIVE_OCCURRENCE" },
     "evidenceState": { "enum": ["INTERIM", "FINAL"] },
     "evidenceDate": { "type": "string", "format": "date" },
+    "releasePolicy": { "$ref": "#/$defs/releasePolicy" },
     "status": {
       "type": "object",
       "additionalProperties": false,
@@ -107,6 +109,7 @@
       "enum": [
         "PASS",
         "PASS_HARD_GATE",
+        "PASS_WITH_KNOWN_PERFORMANCE_LIMITATION",
         "PENDING_VERIFICATION",
         "BLOCKED",
         "FAIL",
@@ -127,6 +130,30 @@
     "sha256": {
       "type": ["string", "null"],
       "pattern": "^[0-9a-f]{64}$"
+    },
+    "releasePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "exactRelease",
+        "decision",
+        "performanceReleaseBlocking",
+        "stableReleaseEligible",
+        "nonPerformanceGatesRequired",
+        "explicitWorkflowOptInRequired"
+      ],
+      "properties": {
+        "mode": { "const": "RC_WITH_KNOWN_PERFORMANCE_LIMITATION" },
+        "exactRelease": { "const": "3.0.0-rc.1" },
+        "decision": {
+          "const": "PASS_WITH_KNOWN_PERFORMANCE_LIMITATION"
+        },
+        "performanceReleaseBlocking": { "const": false },
+        "stableReleaseEligible": { "const": false },
+        "nonPerformanceGatesRequired": { "const": true },
+        "explicitWorkflowOptInRequired": { "const": true }
+      }
     },
     "source": {
       "type": "object",

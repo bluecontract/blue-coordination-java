@@ -41,6 +41,16 @@ the new 3.x API before the first stable 3.0.0 release.
 - The compact engine replaces the 2.x general planning/fragmentation engine.
 - Only managed Process Embedded documents are cut; initial documents, requests,
   Timeline Entries and ordinary nested values remain whole.
+- The exact 3.0.0-rc.1 release policy permits explicit workflow publication as
+  `PASS_WITH_KNOWN_PERFORMANCE_LIMITATION`. All non-performance gates remain
+  mandatory, and the exception is ineligible for stable release.
+
+### Known limitations
+
+- The retained Round 13 campaign failed append p95 (18.680667 ms versus the
+  1.000000 ms hard limit) and Coordination-host p95 (872.356126 ms versus the
+  250.000000 ms hard limit). The receipts remain unchanged and no latency pass
+  is claimed; performance remediation is required before stable.
 
 ### Removed
 

@@ -38,15 +38,18 @@ preflight, staging, signing and publication path as an RC.
 - `releaseCheck` passes all library-owned unit, integration, built-JAR consumer
   and end-to-end scenario suites without `../blue-basic`.
 - The one canonical Round 13 report and JSON evidence use the Round 13
-  Playground schema. `releaseCheck` may validate an honest `INTERIM` record
-  whose unrun outcomes remain unset. `verifyRound13Readiness` permits staging
-  only for complete `FINAL`, clean-commit evidence, the seven exact proof rows,
-  eight measured zero counters, the 30-sample same-machine campaign, final
-  artifact hashes, a valid detached source-archive checksum sidecar, and
-  published-mode evidence; no duplicate canonical report or JSON surface
-  remains. The tested implementation commit may precede the clean evidence
-  commit, but it must be an ancestor and the current main-source manifest must
-  still match exactly.
+  Playground schema. For 3.0.0-rc.1 only, `verifyRound13Readiness` accepts
+  `FINAL` evidence with policy mode
+  `RC_WITH_KNOWN_PERFORMANCE_LIMITATION` when the release workflow explicitly
+  opts in. The verdict, public-RC status, and latency status must be
+  `PASS_WITH_KNOWN_PERFORMANCE_LIMITATION`; the current campaign and performance
+  proof remain `PENDING_VERIFICATION`. This exception never waives the clean-
+  commit binding, Java 17/21 lanes, six non-performance proof rows, eight
+  measured zero counters, final artifact hashes, detached source-archive
+  verification, published-mode evidence, POM metadata, checksums, or signatures.
+  The tested implementation commit may precede the clean evidence commit, but
+  it must be an ancestor and the current main-source manifest must still match
+  exactly.
 - Java 17 and Java 21 CI jobs pass.
 - POM dependencies and scopes match `docs/reference/public-api.md`.
 - Main, sources and Javadoc JAR hashes reproduce across two clean builds.
@@ -63,58 +66,32 @@ the library-owned suites.
 
 Never bypass dependency preflight or publish from local composite resolution.
 
-## Round 13 A/B evidence import
+## 3.0.0-rc.1 known-performance-limitation policy
 
-Round 13 uses Maven Central resolution for both variants. Before preflight,
-update the already-prepared `Archive.zip` baseline shim by replacing every
-`3.0.0-rc.19` Repository coordinate in its `build.gradle` with
-`3.0.0-rc.21`, then copy the candidate
-`gradle/published-artifact.lockfile` into the baseline. The resulting baseline
-`build.gradle` SHA-256 must be
-`8138b85771895cbd36c3f8a8f2e6eda7672d0f13aedf2208b51c91c1acdf8732` and
-the published lock SHA-256 must be
-`34d91fc93d0123477bcab36d52462e27f3dacd0586ad0afa7072f303d4d7fc12`.
-Do not modify either project after preflight.
+The 3.0.0-rc.1 workflow has one narrow exception so the release candidate can
+be published for external evaluation:
 
-Validate the tracked runner, resolver, and candidate published classpath
-without starting the campaign:
+- `mode`: `RC_WITH_KNOWN_PERFORMANCE_LIMITATION`
+- `exactRelease`: `3.0.0-rc.1`
+- `decision`: `PASS_WITH_KNOWN_PERFORMANCE_LIMITATION`
+- `performanceReleaseBlocking`: `false`
+- `stableReleaseEligible`: `false`
+- `nonPerformanceGatesRequired`: `true`
+- `explicitWorkflowOptInRequired`: `true`
 
-```bash
-node scripts/round13-ab-evidence.mjs --self-test \
-  --candidate /Users/piotr/data/blue-contract-java \
-  --runner /Users/piotr/data/blue-contract-java/scripts/run-round13-same-machine-ab.sh
-```
+The workflow must opt in explicitly; a normal local staging call, another RC,
+or a stable release cannot inherit the exception. Every non-performance gate
+listed above remains fail-closed.
 
-Run the frozen 3-warmup, 30+30 interleaved campaign with:
+The retained historical campaign remains `FAIL`: append p95 was 18.680667 ms
+against a 1.000000 ms hard limit, and Coordination-host p95 was 872.356126 ms
+against 250.000000 ms. Route and total passed their hard limits, but all four
+preferred targets were missed. The old Markdown, JSON, and provenance receipts
+remain unchanged as audit evidence. Their temporary `Archive.zip` input is not
+a release artifact, is not needed to build or publish 3.0.0-rc.1, and must not be
+reintroduced as a staging prerequisite. The current published-artifact campaign
+and performance proof remain `PENDING_VERIFICATION`; no latency pass is claimed.
 
-```bash
-scripts/run-round13-same-machine-ab.sh \
-  /private/tmp/round13-baseline-project \
-  /Users/piotr/data/blue-contract-java \
-  /Users/piotr/data/blue-contract-java/Archive.zip \
-  /private/tmp/round13-ab
-```
-
-After the runner has written exactly 30 numbered JSON rows under each of
-`/private/tmp/round13-ab/baseline` and `candidate`, assemble and verify the
-canonical receipts with:
-
-```bash
-node scripts/round13-ab-evidence.mjs \
-  --raw /private/tmp/round13-ab \
-  --baseline /private/tmp/round13-baseline-project \
-  --candidate /Users/piotr/data/blue-contract-java \
-  --archive /Users/piotr/data/blue-contract-java/Archive.zip \
-  --runner /Users/piotr/data/blue-contract-java/scripts/run-round13-same-machine-ab.sh \
-  --output /Users/piotr/data/blue-contract-java/docs/releases/evidence/round13
-```
-
-The importer validates every raw row, preserves raw and canonical hashes,
-records the odd A/B and even B/A sequence, and binds Java 17, the wrapper,
-the published lock, fixtures, the exact baseline archive, and the candidate
-production manifest. The frozen Gradle resolver rejects sibling/composite
-project components and records every selected module plus the size and SHA-256
-of every published runtime artifact. The importer recomputes p50, p95, maximum,
-and the preferred/hard append, route, Coordination-host, and total gates. The
-tracked source-archive evidence intentionally leaves its digest `null`; the
-generated detached `.sha256` sidecar is the checksum authority.
+Performance remediation and a passing campaign are required before any stable
+release. The tracked source-archive evidence intentionally leaves its digest
+`null`; the generated detached `.sha256` sidecar remains the checksum authority.

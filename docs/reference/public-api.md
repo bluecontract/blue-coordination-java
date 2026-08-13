@@ -103,9 +103,11 @@ commit failures and ownership violations are explicit.
 
 ## Dependency surface
 
-The POM exposes `blue-contracts-core` at compile scope because API values use
-Language nodes. Repository, BEX and Bouncy Castle are runtime-scoped
-implementation dependencies. All coordinates are exact and dependency locked.
+The POM exposes `blue-contracts-core`, `blue-bex-core` and
+`blue-bex-contracts` at compile scope because public API values and processor
+signatures expose their types. Repository and Bouncy Castle remain
+runtime-scoped implementation dependencies. All coordinates are exact and
+dependency locked.
 
 `blue.coordination.processor` is an advanced semantic integration surface used
 to assemble the retained Contracts/BEX processors. It is documented in the

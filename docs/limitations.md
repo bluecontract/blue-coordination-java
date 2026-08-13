@@ -38,6 +38,13 @@
   Coordination scheduler is measured separately and remains small; removing
   independent frozen verification or caching revision-bound delivery evidence
   would be an unacceptable semantic shortcut.
+- The retained Round 13 campaign failed append p95 (18.680667 ms against a
+  1.000000 ms hard limit) and Coordination-host p95 (872.356126 ms against a
+  250.000000 ms hard limit); route and total passed hard, while all four metrics
+  missed their preferred targets. The exact 3.0.0-rc.1 workflow policy permits
+  publication only as `PASS_WITH_KNOWN_PERFORMANCE_LIMITATION`. It does not
+  claim a latency pass, cannot apply to a stable release, and does not waive any
+  non-performance release gate.
 - Immutable graph generations structurally share unchanged forward/reverse
   buckets and binding records, but a topology-changing publication still makes
   shallow copies of the three top-level in-memory directory maps. This RC does

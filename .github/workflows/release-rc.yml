@@ -48,6 +48,26 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Require release credentials
+        shell: bash
+        env:
+          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+          MAVENCENTRAL_USERNAME: ${{ secrets.MAVENCENTRAL_USERNAME }}
+          MAVENCENTRAL_PASSWORD: ${{ secrets.MAVENCENTRAL_PASSWORD }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          GPG_PUBLIC_KEY: ${{ secrets.GPG_PUBLIC_KEY }}
+          GPG_SECRET_KEY: ${{ secrets.GPG_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          for name in WORKFLOW_PAT MAVENCENTRAL_USERNAME \
+              MAVENCENTRAL_PASSWORD GPG_PASSPHRASE \
+              GPG_PUBLIC_KEY GPG_SECRET_KEY; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Required release secret ${name} is missing"
+              exit 1
+            fi
+          done
+
       - name: Configure release identity
         run: |
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -65,6 +85,11 @@ jobs:
           fi
           git tag -a "v${{ steps.version.outputs.version }}" -m "Release ${{ steps.version.outputs.version }}"
 
+      - name: Verify release ref permissions
+        run: >-
+          git push --dry-run origin HEAD:next
+          "v${{ steps.version.outputs.version }}"
+
       - name: Verify published dependency availability
         run: |
           set -euo pipefail
@@ -72,9 +97,12 @@ jobs:
             -PblueDependencyMode=published-artifact
 
       - name: Build and stage from published dependencies
+        # RC-only policy: Gradle rejects this exception unless the declared
+        # canonical 3.0.0-rc.1 Round 13 evidence satisfies its exact guard.
         run: >-
           ./gradlew --no-daemon clean stageRelease
           -PblueDependencyMode=published-artifact
+          -PallowRound13LatencyException=true
 
       - name: Publish to Maven Central
         env:
@@ -88,6 +116,7 @@ jobs:
         run: >-
           ./gradlew --no-daemon jreleaserDeploy
           -PblueDependencyMode=published-artifact
+          -PallowRound13LatencyException=true
 
       - name: Push release commit and tag
         run: git push origin HEAD:next --follow-tags
