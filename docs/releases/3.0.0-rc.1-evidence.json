@@ -210,9 +210,9 @@
   "artifacts": {
     "status": "PASS",
     "finalTreeRequired": true,
-    "mainJarSha256": "af211bbd2a8ca50424f7a9b0ac0056705f5a3d6bafe0a8cd3a8d02e8b164f0ff",
+    "mainJarSha256": "af9299ff8945f97307a6324bbaf975090d1e60d1c70c55c3a6717268db682857",
     "sourcesJarSha256": "76451fc105dace25d01dc76dfc0813b2ddb06b255eaea374b5186bde7c56bf96",
-    "javadocJarSha256": "b6cc39927e4aabf945054100ab33c7fcf45589e78feed739e9b3a1351f37a6f3",
+    "javadocJarSha256": "4b2833c8499a7603ac3c72057648a090391896c63e3781be08043bd5385ecf0a",
     "testFixturesJarSha256": "d4393f58502f81583792af01b50f5350d5f8cafa3a9ba4d9752f039661f9cccb"
   },
   "sourceArchive": {

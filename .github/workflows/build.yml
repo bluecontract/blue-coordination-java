@@ -22,11 +22,15 @@ concurrency:
 jobs:
   verify:
     name: Java ${{ matrix.test-java }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        test-java: ['17', '21']
+        include:
+          - test-java: '17'
+            setup-java: '17.0.19+10'
+          - test-java: '21'
+            setup-java: '21.0.11+10'
     env:
       CI: true
     defaults:
@@ -42,11 +46,37 @@ jobs:
       - name: Configure Gradle user home
         run: echo "GRADLE_USER_HOME=$RUNNER_TEMP/coordination-gradle-${{ matrix.test-java }}" >> "$GITHUB_ENV"
 
-      - name: Set up test JDK
-        uses: actions/setup-java@v4
+      - name: Set up canonical build JDK
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: ${{ matrix.test-java }}
+          java-version: '17.0.19+10'
+          architecture: x64
+          check-latest: false
+
+      - name: Set up Java 21 test JDK
+        if: ${{ matrix.test-java == '21' }}
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.setup-java }}
+          architecture: x64
+          check-latest: false
+
+      - name: Restrict Gradle to the pinned JDKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          toolchain_paths="$JAVA_HOME_17_X64"
+          if [[ "${{ matrix.test-java }}" == "21" ]]; then
+            toolchain_paths="$toolchain_paths,$JAVA_HOME_21_X64"
+          fi
+          mkdir -p "$GRADLE_USER_HOME"
+          {
+            echo "org.gradle.java.installations.auto-detect=false"
+            echo "org.gradle.java.installations.auto-download=false"
+            echo "org.gradle.java.installations.paths=$toolchain_paths"
+          } >> "$GRADLE_USER_HOME/gradle.properties"
 
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@v4
@@ -66,9 +96,17 @@ jobs:
 
       - name: Run clean RC verification
         run: >-
-          ./gradlew --no-daemon clean releaseCheck
+          ./gradlew --no-daemon --no-build-cache clean releaseCheck
           -PblueDependencyMode=published-artifact
           -PtestJavaVersion=${{ matrix.test-java }}
+
+      - name: Verify RC staging readiness
+        if: ${{ matrix.test-java == '17' }}
+        run: >-
+          ./gradlew --no-daemon --no-build-cache verifyRound13Readiness
+          -PblueDependencyMode=published-artifact
+          -PallowRound13LatencyException=true
+          -PtestJavaVersion=17
 
       - name: Archive verification evidence
         uses: actions/upload-artifact@v4

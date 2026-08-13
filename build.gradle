@@ -2558,16 +2558,21 @@ def round13Readiness = tasks.register('verifyRound13Readiness') {
                 javadocJarSha256: 'javadocJar',
                 testFixturesJarSha256: 'testFixturesJar'
         ]
-        boolean artifactHashesMatch = artifactTasks.every {
-            evidenceKey, taskName ->
-                File artifact = tasks.named(taskName).get()
-                        .archiveFile.get().asFile
-                String actualHash = java.security.MessageDigest
-                        .getInstance('SHA-256').digest(artifact.bytes)
-                        .encodeHex().toString()
-                (evidence.artifacts[evidenceKey] ==~ sha256Pattern)
-                        && evidence.artifacts[evidenceKey] == actualHash
+        def artifactHashMismatches = []
+        artifactTasks.each { evidenceKey, taskName ->
+            File artifact = tasks.named(taskName).get()
+                    .archiveFile.get().asFile
+            String actualHash = java.security.MessageDigest
+                    .getInstance('SHA-256').digest(artifact.bytes)
+                    .encodeHex().toString()
+            def expectedHash = evidence.artifacts[evidenceKey]
+            if (!(expectedHash ==~ sha256Pattern)
+                    || expectedHash != actualHash) {
+                artifactHashMismatches << ("${artifact.name}: expected "
+                        + "${expectedHash}, actual ${actualHash}")
+            }
         }
+        boolean artifactHashesMatch = artifactHashMismatches.empty
         def campaign = evidence.performance.round13Campaign
         def campaignProvenance = campaign.runtimeProvenanceJson
                 && file(campaign.runtimeProvenanceJson).isFile()
@@ -2720,8 +2725,12 @@ def round13Readiness = tasks.register('verifyRound13Readiness') {
                 || (limitedLatencyDecision && !report.contains(
                         'ROUND13_FINAL_VERIFICATION: '
                                 + 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION'))) {
+            String artifactDetails = artifactHashMismatches.empty ? ''
+                    : ('\nArtifact SHA-256 mismatches:\n - '
+                    + artifactHashMismatches.join('\n - '))
             throw new GradleException(
-                    'Canonical Round 13 evidence does not permit staging')
+                    'Canonical Round 13 evidence does not permit staging'
+                            + artifactDetails)
         }
     }
 }

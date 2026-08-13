@@ -27,6 +27,15 @@ The workflow uses GitHub Actions concurrency to serialize releases. Required
 secrets are `WORKFLOW_PAT`, Maven Central username/password and the JReleaser GPG
 public key, secret key and passphrase.
 
+Release artifacts have one canonical producer: GitHub's Ubuntu 24.04 `x64`
+runner with Eclipse Temurin 17.0.19+10. The workflow disables Gradle toolchain
+auto-discovery/download and the build cache while generating and checking the
+published bytes. The pull-request Java 17 lane uses that same producer and runs
+`verifyRound13Readiness`, so toolchain or artifact-hash drift is rejected before
+merge instead of first appearing in the post-merge release job. The Java 21
+lane uses Eclipse Temurin 21.0.11+10 for test execution while production
+artifacts continue to be compiled by the canonical Java 17 toolchain.
+
 ## Stable workflow
 
 Stable release is manual, restricted to `main`, and requires an exact
@@ -50,7 +59,8 @@ preflight, staging, signing and publication path as an RC.
   The tested implementation commit may precede the clean evidence commit, but
   it must be an ancestor and the current main-source manifest must still match
   exactly.
-- Java 17 and Java 21 CI jobs pass.
+- Java 17 and Java 21 CI jobs pass, including the Java 17 pre-merge staging-
+  readiness check.
 - POM dependencies and scopes match `docs/reference/public-api.md`.
 - Main, sources and Javadoc JAR hashes reproduce across two clean builds.
 - Staged POM, checksum and signature inventory is complete.
