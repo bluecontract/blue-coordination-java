@@ -1,0 +1,71 @@
+documentId: ownership-parent
+name: Managed Document Ownership Parent
+rootCounter: 0
+childRevisionApplications: 0
+contracts:
+  ownerChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/embedded/A
+    actor:
+      type: MyOS/Principal Actor
+      accountId: alice
+  attachChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/ownership/parent
+    actor:
+      type: MyOS/Principal Actor
+      accountId: bob
+  coordinationEmbeddedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: coordination/internal/ownership-parent
+    actor:
+      type: MyOS/Principal Actor
+      accountId: coordination
+  embedded:
+    type: Process Embedded
+    paths: [/child]
+  attachChild:
+    type: Coordination/Sequential Workflow Operation
+    channel: attachChannel
+    request:
+      document:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange: {op: add, path: /child, val: {$binding: event/message/request/document}}
+          - $return: true
+  increment:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request:
+      amount: {type: Integer}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /rootCounter
+              val: {$add: [$document: /rootCounter, $binding: event/message/request/amount]}
+          - $return: true
+  coordinationApplyEmbeddedRevision:
+    type: Coordination/Sequential Workflow Operation
+    channel: coordinationEmbeddedChannel
+    request:
+      after:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange: {op: replace, path: /child, val: {$binding: event/message/request/after}}
+          - $appendChange:
+              op: replace
+              path: /childRevisionApplications
+              val: {$add: [$document: /childRevisionApplications, 1]}
+          - $return: true

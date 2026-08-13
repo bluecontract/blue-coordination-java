@@ -1,0 +1,57 @@
+documentId: nba-statistics
+name: NBA Historical Statistics Root
+observedHomeScore: 0
+observedAwayScore: 0
+observedPlayCount: 0
+observedStatus: None
+revisionApplications: 0
+contracts:
+  commissionerChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/nba/statistics
+    actor:
+      type: MyOS/Principal Actor
+      accountId: commissioner
+  coordinationEmbeddedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: coordination/internal/nba-statistics
+    actor:
+      type: MyOS/Principal Actor
+      accountId: coordination
+  embedded:
+    type: Process Embedded
+    paths: [/game]
+  attachGame:
+    type: Coordination/Sequential Workflow Operation
+    channel: commissionerChannel
+    request:
+      document:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange: {op: add, path: /game, val: {$binding: event/message/request/document}}
+          - $return: true
+  coordinationApplyEmbeddedRevision:
+    type: Coordination/Sequential Workflow Operation
+    channel: coordinationEmbeddedChannel
+    request:
+      after:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange: {op: replace, path: /game, val: {$binding: event/message/request/after}}
+          - $appendChange: {op: replace, path: /observedHomeScore, val: {$binding: event/message/request/after/homeScore}}
+          - $appendChange: {op: replace, path: /observedAwayScore, val: {$binding: event/message/request/after/awayScore}}
+          - $appendChange: {op: replace, path: /observedPlayCount, val: {$binding: event/message/request/after/playCount}}
+          - $appendChange: {op: replace, path: /observedStatus, val: {$binding: event/message/request/after/status}}
+          - $appendChange:
+              op: replace
+              path: /revisionApplications
+              val: {$add: [$document: /revisionApplications, 1]}
+          - $return: true

@@ -1,322 +1,112 @@
 # Blue Coordination Java
 
-Java processors for executable Blue Coordination repository contracts.
-
-This library lets a Java application process Blue documents that declare
-Coordination contracts in their `contracts` map: operations, sequential
-workflows, update steps, compute steps, triggered events, composite channels,
-embedded scopes, and checkpoints.
-
-The processor is deterministic. Given the same initialized document and the
-same ordered input events, it produces the same canonical output document,
-triggered events, gas accounting, and output BlueId.
+Blue Coordination is a deterministic Java 17 runtime for managed Blue
+documents. It keeps ordinary values whole, cuts only effective `Process
+Embedded` document boundaries, stores each exact Timeline Entry once, and lets
+the environment select canonical processing order across the resulting
+document graph.
 
 ## Install
 
-Gradle:
-
 ```groovy
-repositories {
-    mavenCentral()
-}
-
 dependencies {
-    implementation "blue.coordination:blue-coordination-java:2.0.0-rc.4"
+    implementation 'blue.coordination:blue-coordination-java:3.0.0-rc.1'
 }
 ```
 
-The project targets Java 8-compatible bytecode, builds with JDK 25, runs tests
-on Java 8, and depends on:
+The artifact is compiled with `--release 17`. Version 3 is a breaking API reset;
+the removed 2.x planning, fragmentation, session-store, and fast-path APIs are
+not shimmed.
 
-```groovy
-api "blue.language:blue-language-java:3.1.0-rc.18"
-api "blue.repo:blue-repo-java:3.0.0-rc.10"
-api "blue.bex:blue-bex-java:1.1.0-rc.2"
-```
-
-## Register Processors
-
-Most applications should register the Coordination processor set on a
-repository-configured `Blue` instance:
+## Counter quickstart
 
 ```java
-import blue.coordination.processor.CoordinationProcessors;
-import blue.language.Blue;
-import blue.repo.BlueRepository;
+import blue.coordination.api.CoordinationEngine;
+import blue.coordination.api.DocumentId;
+import blue.coordination.api.Operation;
 
-BlueRepository repository = BlueRepository.latest();
-Blue blue = repository.configure(new Blue());
+try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+    var alice = engine.registerTimeline("counter/alice", "alice");
+    var bob = engine.registerTimeline("counter/bob", "bob");
+    var counter = DocumentId.of("counter");
 
-CoordinationProcessors.registerWith(blue);
+    engine.startDocument(counter, counterYaml);
+    engine.append(
+            alice, Operation.yaml("increment", "aliceChannel", "amount: 3"));
+    engine.append(
+            bob, Operation.yaml("decrement", "bobChannel", "amount: 1"));
+
+    var receipt = engine.drain();
+    assert receipt.quiescent();
+
+    long value = ((java.math.BigInteger) engine.document(counter)
+            .valueAt("/counter").copyNode().getValue()).longValueExact();
+    assert value == 2L;
+}
 ```
 
-For direct `DocumentProcessor` construction:
+`Operation.exact(...)` and `CoordinationEngine.referenceRequest(...)` expose the
+optimized whole-object request path without YAML reserialization. For a
+provider-supplied exact Timeline Entry, use `appendTimelineEntry(Node)`; append
+never names document recipients and never invokes PROCESS. `drain()` derives
+targets from the active Channel index and processes canonical work to
+quiescence. Latency-sensitive hosts can call `drain(new DrainBudget(...))` and
+resume a paused receipt at deterministic PROCESS boundaries; this bounds work,
+not the duration of one non-preemptible frozen call. `document(id)` is READY-only
+by design, while `auditDocument(id)` explicitly exposes intermediate committed
+state to operational tooling.
 
-```java
-import blue.coordination.processor.CoordinationProcessors;
-import blue.language.processor.DocumentProcessor;
-
-DocumentProcessor processor =
-        CoordinationProcessors.configure(DocumentProcessor.builder())
-                .build();
-```
-
-`CoordinationProcessors` registers Timeline, Composite Timeline, and All
-Timelines channel processors. Timeline providers remain responsible for feeding
-authenticated, ordered Timeline Entries; the processors enforce the channel's
-timeline and actor identity and strict timestamp-based checkpoint semantics.
-
-## Counter Document
-
-This is a complete executable Blue document. The contracts are the program:
-
-```yaml
-name: Counter
-counter: 0
-contracts:
-  ownerChannel:
-    type: Coordination/Timeline Channel
-    timeline:
-      type: Coordination/Timeline
-      timelineId: counter-demo
-    actor:
-      type: MyOS/MyOS Principal Actor
-      accountId: counter-demo
-
-  increment:
-    type: Coordination/Sequential Workflow Operation
-    channel: ownerChannel
-    request:
-      type: Integer
-    steps:
-      - name: IncrementAndEmit
-        type: Coordination/Compute
-        do:
-          - $let:
-              name: nextCounter
-              expr:
-                $add:
-                  - $document: /counter
-                  - $binding:
-                      name: event
-                      path: /message/request
-          - $appendChange:
-              op: replace
-              path: /counter
-              val:
-                $var: nextCounter
-          - $appendEvent:
-              type: Coordination/Chat Message
-              message:
-                $concat:
-                  - Counter is now
-                  - " "
-                  - $text:
-                      $var: nextCounter
-          - $return:
-              changeset:
-                $changeset: true
-              events:
-                $events: true
-```
-
-An input event for that channel looks like this:
-
-```yaml
-type: Coordination/Timeline Entry
-timeline:
-  type: Coordination/Timeline
-  timelineId: counter-demo
-timestamp: 1
-actor:
-  type: MyOS/MyOS Principal Actor
-  accountId: counter-demo
-message:
-  type: Coordination/Operation Request
-  operation: increment
-  channel: ownerChannel
-  request: 5
-```
-
-After processing, `/counter` is `5`, the workflow emits a chat message, and the
-channel checkpoint records the delivered timeline entry so duplicates do not
-run twice.
-
-The request's required `channel` is its effective same-scope handler channel.
-The Timeline Channel that accepts the entry still owns source eligibility and
-checkpointing; routing preserves the full Timeline Entry and does not evaluate
-the target channel as another external source. This V2 repository behavior is
-outside the current Blue Contracts 1.0 conformance surface.
-
-## Processing Model
-
-Input:
-
-1. one Blue document;
-2. a delivered event, usually a timeline entry or a lifecycle/triggered event.
-
-Output:
-
-1. one canonical Blue document;
-2. zero or more triggered events;
-3. total gas usage;
-4. processing metadata, including the output BlueId.
-
-Processors operate on canonical snapshots instead of process-local mutable
-state. You can serialize a processed document, load it again, and continue
-processing from the same resolved state.
-
-## Supported Contracts
-
-This library provides executable behavior for:
-
-- `Coordination/All Timelines Channel`;
-- `Coordination/Composite Timeline Channel`;
-- `Coordination/Chat Workflow Operation`;
-- `Coordination/Sequential Workflow`;
-- `Coordination/Sequential Workflow Operation`;
-- `Coordination/Compute`;
-- `Coordination/Update Document`;
-- `Coordination/Trigger Event`.
-
-It also registers `Coordination/Operation` as a non-executable declaration
-type for operation-shaped contracts.
-
-The underlying `blue-language-java` runtime provides base behavior used by
-Coordination documents:
-
-- `Document Update Channel`;
-- `Embedded Node Channel`;
-- `Process Embedded`;
-- `Channel Event Checkpoint`;
-- `Lifecycle Event Channel`;
-- `Triggered Event Channel`;
-- initialized and terminated markers;
-- scope boundaries, patch application, snapshots, gas, and checkpointing.
-
-## BEX In Workflows
-
-`Coordination/Compute` is the BEX execution surface. A Compute step applies a
-returned `changeset` directly and emits returned `events` directly, so dynamic
-patches and events do not need follow-up Update Document or Trigger Event
-steps.
-
-Common workflow bindings:
-
-- `$binding` for `event`, the current `document`, and named step results;
-- `$document` for the current document view;
-- `$currentContract` for the active workflow contract;
-- `$appendChange` and `$changeset` for accumulated patch operations;
-- `$appendEvent` and `$events` for accumulated emitted events.
-
-`Coordination/Update Document` accepts literal patch lists only.
-`Coordination/Trigger Event` accepts literal event payloads only.
-
-## Build And Test
-
-Gradle runs on JDK 25 and uses a Java 8 toolchain for tests. If Java 8 is not
-installed locally, Gradle can provision it through the configured Foojay
-toolchain resolver.
-
-Run tests:
+## Build and verification
 
 ```bash
-./gradlew test
+./gradlew clean test
+./gradlew releaseCheck
+./gradlew stageRelease
 ```
 
-Run the focused correctness and bounded-memory suites:
+Published Maven Central artifacts are the default dependency source. Local
+composite substitution is available only as an explicit cross-repository
+diagnostic mode; it is not used by the normal build or release path.
 
-```bash
-./gradlew workflowPlanDifferentialTest
-./gradlew complexFixtureIntegrationTest
-./gradlew memoryIntegrationTest
-```
+`releaseCheck` owns the library's complete verification surface: unit tests,
+compact-engine integration tests, tests compiled against the built JAR, and
+realistic convergence scenarios. It does not read or execute `../blue-basic`.
+That sibling is retained only as a historical performance/metrics laboratory.
 
-Each focused task uses one worker capped at 2 GiB. Passing `-PtestJfr`
-runs that focused task on the current modern Gradle JVM and records under
-`build/reports/jfr/`; the normal `test` task continues to run on Java 8.
+Start with [START-HERE.md](START-HERE.md), then see the compact architecture,
+managed `Process Embedded` semantics, catch-up rules, performance
+interpretation, and limitations under `docs/`.
 
-Blue Language is pinned to the released
-`blue.language:blue-language-java:3.1.0-rc.18` artifact from Maven Central.
+## Release-candidate status
 
-Build jars:
+The source targets `3.0.0-rc.1` with the Round 10.1 Process Embedded temporal
+profile, the Round 11 readiness closure, and Round 12 initialization lifecycle
+and dynamic-activation proofs. Release status is split
+into temporal architecture, in-memory engine, provider, Mandate, latency, and
+public-RC evidence. The generic Timeline Entry's missing universal literal
+`documentId` is an optional profile capability; exact provider-backed Mandate
+eligibility remains outside this in-memory profile. The exact 3.0.0-rc.1 release
+policy permits workflow publication with
+`PASS_WITH_KNOWN_PERFORMANCE_LIMITATION`: the retained Round 13 campaign failed
+append and Coordination-host hard p95 gates, and no latency pass is claimed.
+The exception requires explicit workflow opt-in, cannot apply to a stable
+release, and preserves every Java, correctness, structural, consumer, artifact,
+source-archive, published-dependency, metadata, checksum, and signature gate.
+See the [canonical RC report](docs/releases/3.0.0-rc.1-test-report.md),
+[RC readiness note](docs/releases/3.0.0-rc.1.md), and
+[release procedure](docs/development/releasing.md).
 
-```bash
-./gradlew build
-```
+Developer references:
 
-Publish locally:
-
-```bash
-./gradlew publishToMavenLocal
-```
-
-Stage the artifact without writing outside this repository:
-
-```bash
-./gradlew stageLocalMaven
-```
-
-The staged Maven repository is `build/staging-deploy`.
-
-Run JMH and generate JSON, CSV, Markdown, and environment metadata:
-
-```bash
-./gradlew jmh
-./gradlew jmh -PtestJfr
-```
-
-Reports are written to `build/reports/jmh`. Generic JMH gates are deliberately
-reported as `NOT_CONFIGURED`; operation-level acceptance is exercised by the
-focused integration and differential suites in this repository.
-
-Create the reproducible source archive and SHA-256 sidecar:
-
-```bash
-./gradlew sourceArchive
-```
-
-Artifacts are written to `build/distributions`. The verified performance and
-correctness evidence is recorded in
-[`docs/performance/complex-operations-coordination.md`](docs/performance/complex-operations-coordination.md).
-
-## Test Coverage
-
-Current test areas:
-
-- processor registration;
-- must-understand failures;
-- test timeline provider behavior;
-- composite timeline routing;
-- operation request matching;
-- sequential workflow execution;
-- compute and BEX execution;
-- update document batch application;
-- trigger-event execution;
-- runtime channels;
-- repository-style Counter documents;
-- snapshot round-trip stress processing.
-
-## Project Layout
-
-```text
-src/main/java/blue/coordination/processor
-  CoordinationProcessors.java
-  CoordinationProcessorOptions.java
-  CoordinationBexIntrinsics.java
-  AllTimelinesChannelProcessor.java
-  CompositeTimelineChannelProcessor.java
-  ChatWorkflowOperationProcessor.java
-  OperationProcessor.java
-  SequentialWorkflowProcessor.java
-  SequentialWorkflowOperationProcessor.java
-  TimelineProviderSupport.java
-  bex/
-  merge/
-  workflow/
-```
-
-## References
-
-- [Blue Language Specification](https://github.com/bluecontract/blue-spec)
-- [blue-js open-source processor](https://github.com/bluecontract/blue-js)
+- [Build and test](docs/development/build-and-test.md)
+- [Test strategy](docs/development/test-strategy.md)
+- [Initialization causality](docs/semantics/initialization-causality.md)
+- [Shared NBA Game lifecycle](docs/examples/nba-shared-game-lifecycle.md)
+- [Five-occurrence Playground API example](docs/examples/playground-five-occurrence.md)
+- [Canonical RC evidence report](docs/releases/3.0.0-rc.1-test-report.md)
+- [Public API](docs/reference/public-api.md)
+- [Metrics](docs/reference/metrics.md)
+- [Failure and retry model](docs/operations/failure-model.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [Changelog](CHANGELOG.md)

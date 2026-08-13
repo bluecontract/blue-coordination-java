@@ -1,0 +1,79 @@
+documentId: initial-embedded-parent
+name: Parent With Authored Managed Child
+rootCounter: 0
+child:
+  documentId: initial-embedded-child
+  name: Authored Managed Child
+  counter: 0
+  contracts:
+    ownerChannel:
+      type: Coordination/Timeline Channel
+      timeline:
+        type: MyOS/MyOS Timeline
+        timelineId: examples/embedded/initial
+      actor:
+        type: MyOS/Principal Actor
+        accountId: alice
+    increment:
+      type: Coordination/Sequential Workflow Operation
+      channel: ownerChannel
+      request:
+        amount: {type: Integer}
+      steps:
+        - type: Coordination/Compute
+          do:
+            - $appendChange:
+                op: replace
+                path: /counter
+                val: {$add: [$document: /counter, $binding: event/message/request/amount]}
+            - $return: true
+contracts:
+  ownerChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/embedded/initial-parent
+    actor:
+      type: MyOS/Principal Actor
+      accountId: bob
+  incrementRoot:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request:
+      amount: {type: Integer}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /rootCounter
+              val: {$add: [$document: /rootCounter, $binding: event/message/request/amount]}
+          - $return: true
+  coordinationEmbeddedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: coordination/internal/initial-embedded-parent
+    actor:
+      type: MyOS/Principal Actor
+      accountId: coordination
+  embedded:
+    type: Process Embedded
+    paths: [/child]
+  coordinationApplyEmbeddedRevision:
+    type: Coordination/Sequential Workflow Operation
+    channel: coordinationEmbeddedChannel
+    request:
+      occurrencePath: {type: Text}
+      childDocumentId: {type: Text}
+      childEpoch: {type: Integer}
+      after:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /child
+              val: {$binding: event/message/request/after}
+          - $return: true

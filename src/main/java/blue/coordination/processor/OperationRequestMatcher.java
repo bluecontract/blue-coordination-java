@@ -1,49 +1,78 @@
 package blue.coordination.processor;
 
 import blue.language.model.Node;
+import blue.language.processor.GasChargeContext;
 import blue.language.processor.HandlerMatchContext;
 import blue.repo.coordination.SequentialWorkflowOperation;
 
+/**
+ * Matches one Sequential Workflow Operation against a direct or
+ * Timeline-wrapped Operation Request.
+ *
+ * <p>The operation key and selected channel are immutable dispatch headers.
+ * An authored {@code request} is an additional payload pattern; an empty Node
+ * intentionally means that no payload constraint was declared. All provider
+ * evidence and event matching remain owned by the supplied Contracts
+ * context.</p>
+ */
 final class OperationRequestMatcher {
+    private final CoordinationSemanticTypeIdentities identities;
+
+    OperationRequestMatcher() {
+        this(CoordinationSemanticTypeIdentities.publishedDefaults());
+    }
+
+    OperationRequestMatcher(
+            CoordinationSemanticTypeIdentities identities) {
+        this.identities = java.util.Objects.requireNonNull(
+                identities, "identities");
+    }
 
     boolean matches(SequentialWorkflowOperation contract, HandlerMatchContext context) {
         if (contract == null || context == null) {
             return false;
         }
-        if (!SequentialWorkflowEventMatcher.matches(contract.getEvent(), context)) {
-            return false;
-        }
-        CoordinationEventNodes.OperationRequestView request =
-                CoordinationEventNodes.operationRequest(context.event());
-        if (request == null || !request.routable()) {
+        CoordinationRuntimeGas.charge(
+                context.runtimeWorkSession(),
+                "operationCandidateTested",
+                1L,
+                GasChargeContext.of(
+                        context.scopePath(),
+                        context.handlerKey(),
+                        null,
+                        "test Operation candidate"));
+        boolean eventMatches =
+                SequentialWorkflowEventMatcher.matches(
+                        contract.getEvent(), context);
+        if (!eventMatches) {
             return false;
         }
         String operationKey = nonBlank(contract.getKey());
-        if (operationKey == null || !operationKey.equals(request.operation())) {
+        String channelKey = nonBlank(context.channelKey());
+        if (operationKey == null || channelKey == null) {
             return false;
         }
-        if (!request.channel().equals(context.channelKey())) {
-            return false;
-        }
-        return requestMatches(contract.getRequest(), request, context);
-    }
-
-    private boolean requestMatches(Node requestPattern,
-                                   CoordinationEventNodes.OperationRequestView request,
-                                   HandlerMatchContext context) {
-        if (requestPattern == null) {
-            return true;
-        }
-        if (isEmptyRequestPattern(requestPattern)) {
-            return true;
-        }
-        if (request.request() == null) {
-            return false;
-        }
-        return context.matchesEventPattern(request.patternFor(requestPattern));
+        Node requestPattern = contract.getRequest();
+        boolean requestMatches =
+                CoordinationEventNodes.matchesOperationRequest(
+                context.occurrenceEvent(),
+                operationKey,
+                channelKey,
+                requestPattern == null
+                        || isEmptyRequestPattern(requestPattern)
+                        ? null
+                        : requestPattern,
+                context,
+                identities);
+        return requestMatches;
     }
 
     private boolean isEmptyRequestPattern(Node requestPattern) {
+        /*
+         * Repository resolution contributes descriptive metadata from
+         * Operation.request even when the document authored request: {}.
+         * Name and description are documentation, not payload constraints.
+         */
         return requestPattern.getType() == null
                 && requestPattern.getItemType() == null
                 && requestPattern.getKeyType() == null
@@ -51,8 +80,13 @@ final class OperationRequestMatcher {
                 && requestPattern.getValue() == null
                 && requestPattern.getItems() == null
                 && (requestPattern.getProperties() == null || requestPattern.getProperties().isEmpty())
+                && requestPattern.getContracts() == null
                 && requestPattern.getBlueId() == null
-                && requestPattern.getSchema() == null;
+                && requestPattern.getSchema() == null
+                && requestPattern.getMergePolicy() == null
+                && requestPattern.getPreviousBlueId() == null
+                && requestPattern.getPosition() == null
+                && requestPattern.getBlue() == null;
     }
 
     private static String nonBlank(String value) {

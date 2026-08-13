@@ -1,0 +1,100 @@
+import groovy.json.JsonOutput
+import java.security.MessageDigest
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+
+/*
+ * Frozen Round 13 init script. It records the exact published modules and
+ * artifact bytes used by the scenario classpath without adding a project task
+ * to the historical baseline source tree.
+ */
+gradle.projectsEvaluated {
+    def project = gradle.rootProject
+    project.tasks.register('round13PublishedDependencyManifest') {
+        group = 'verification'
+        description = 'Prints the frozen Round 13 published dependency manifest.'
+
+        doLast {
+            String dependencyMode = project.providers.gradleProperty(
+                    'blueDependencyMode').orNull
+            if (dependencyMode != 'published-artifact') {
+                throw new GradleException(
+                        'Round 13 dependency capture requires published-artifact mode')
+            }
+            def configuration = project.configurations.findByName(
+                    'scenarioTestRuntimeClasspath')
+            if (configuration == null) {
+                throw new GradleException(
+                        'scenarioTestRuntimeClasspath is unavailable')
+            }
+
+            def resolution = configuration.incoming.resolutionResult
+            def foreignProjects = resolution.allComponents.findAll { component ->
+                component.id instanceof ProjectComponentIdentifier
+                        && component.id != resolution.rootComponent.get().id
+            }
+            if (!foreignProjects.empty) {
+                throw new GradleException(
+                        'Published Round 13 classpath contains project/composite dependencies: '
+                                + foreignProjects.collect { it.id.displayName })
+            }
+
+            def components = resolution.allComponents
+                    .findAll { it.id instanceof ModuleComponentIdentifier }
+                    .collect { component ->
+                        def id = component.id as ModuleComponentIdentifier
+                        "${id.group}:${id.module}:${id.version}".toString()
+                    }.unique().sort()
+            def hash = { File file ->
+                MessageDigest digest = MessageDigest.getInstance('SHA-256')
+                file.withInputStream { input ->
+                    byte[] buffer = new byte[8192]
+                    int read
+                    while ((read = input.read(buffer)) != -1) {
+                        digest.update(buffer, 0, read)
+                    }
+                }
+                digest.digest().encodeHex().toString()
+            }
+            def artifacts = configuration.incoming.artifacts.artifacts.collect {
+                artifact ->
+                    if (artifact.id.componentIdentifier
+                            == resolution.rootComponent.get().id) {
+                        return null
+                    }
+                    if (!(artifact.id.componentIdentifier
+                            instanceof ModuleComponentIdentifier)) {
+                        String buildRoot = project.layout.buildDirectory.get()
+                                .asFile.canonicalPath + File.separator
+                        if (artifact.file.canonicalPath.startsWith(buildRoot)) {
+                            return null
+                        }
+                        throw new GradleException(
+                                'Published Round 13 classpath contains an external '
+                                        + 'non-module artifact: ' + artifact.id.displayName)
+                    }
+                    def id = artifact.id.componentIdentifier as ModuleComponentIdentifier
+                    [
+                            component: "${id.group}:${id.module}:${id.version}".toString(),
+                            fileName: artifact.file.name,
+                            size: artifact.file.length(),
+                            sha256: hash(artifact.file)
+                    ]
+            }.findAll { it != null }.sort { left, right ->
+                (left.component <=> right.component)
+                        ?: (left.fileName <=> right.fileName)
+                        ?: (left.sha256 <=> right.sha256)
+            }
+            def manifest = [
+                    schemaId: 'blue-coordination-round13-published-dependencies-v1',
+                    dependencyMode: dependencyMode,
+                    configuration: configuration.name,
+                    components: components,
+                    artifacts: artifacts
+            ]
+            String encoded = Base64.encoder.encodeToString(
+                    JsonOutput.toJson(manifest).getBytes('UTF-8'))
+            println "ROUND13_PUBLISHED_DEPENDENCIES_BASE64=${encoded}"
+        }
+    }
+}

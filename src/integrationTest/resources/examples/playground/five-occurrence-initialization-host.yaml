@@ -1,0 +1,184 @@
+documentId: playground-five-occurrence-host
+name: Playground Five Occurrence Initialization Host
+hostInitializationCount: 0
+initializationEventCount: 0
+alphaInitializationEventCount: 0
+betaInitializationEventCount: 0
+gammaInitializationEventCount: 0
+alphaFirstInitializationEventBlueId: unset
+alphaSecondInitializationEventBlueId: unset
+revisionApplications: 0
+children: {}
+alphaReattachment: None
+contracts:
+  lifecycleChannel:
+    type:
+      blueId: 2ukJitzzDKQWHJ5EVUtn3t4FXieGmNA1NdwFSqG8qcfo
+    order: 0
+    event:
+      type:
+        blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
+  onProcessingInitiated:
+    type: Coordination/Sequential Workflow
+    channel: lifecycleChannel
+    order: 0
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /hostInitializationCount
+              val: {$add: [$document: /hostInitializationCount, 1]}
+          - $return: true
+  ownerChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/playground/five-occurrence/host
+    actor:
+      type: MyOS/Principal Actor
+      accountId: playground-owner
+  coordinationEmbeddedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: coordination/internal/playground-five-occurrence-host
+    actor:
+      type: MyOS/Principal Actor
+      accountId: coordination
+  embedded:
+    type: Process Embedded
+    collectionPaths: [/children]
+  attachFiveDocuments:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request:
+      documents:
+        description: Exact collection of processable child documents.
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /children
+              val: {$binding: event/message/request/documents}
+          - $return: true
+  coordinationApplyEmbeddedRevision:
+    type: Coordination/Sequential Workflow Operation
+    channel: coordinationEmbeddedChannel
+    request:
+      occurrencePath: {type: Text}
+      childDocumentId: {type: Text}
+      after:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: {$binding: event/message/request/occurrencePath}
+              val: {$binding: event/message/request/after}
+          - $appendChange:
+              op: replace
+              path: /revisionApplications
+              val: {$add: [$document: /revisionApplications, 1]}
+          - $if:
+              cond:
+                $and:
+                  - $eq:
+                      - $binding: event/message/request/occurrencePath
+                      - /children/gamma
+                  - $some:
+                      in: {$binding: event/message/request/emittedEvents}
+                      item: emittedEvent
+                      where:
+                        $eq:
+                          - $var: {name: emittedEvent, path: /kind}
+                          - NBA/Game Started
+              then:
+                - $appendChange:
+                    op: remove
+                    path: /children/alphaSecond
+          - $if:
+              cond:
+                $and:
+                  - $eq:
+                      - $binding: event/message/request/occurrencePath
+                      - /children/gamma
+                  - $some:
+                      in: {$binding: event/message/request/emittedEvents}
+                      item: emittedEvent
+                      where:
+                        $eq:
+                          - $var: {name: emittedEvent, path: /kind}
+                          - NBA/Scoring Play
+              then:
+                - $appendChange:
+                    op: add
+                    path: /children/alphaSecond
+                    val: {$document: /alphaReattachment}
+          - $if:
+              cond:
+                $some:
+                  in: {$binding: event/message/request/emittedEvents}
+                  item: emittedEvent
+                  where:
+                    $eq:
+                      - $var: {name: emittedEvent, path: /kind}
+                      - NBA/Game Initialized
+              then:
+                - $appendChange:
+                    op: replace
+                    path: /initializationEventCount
+                    val: {$add: [$document: /initializationEventCount, 1]}
+                - $if:
+                    cond:
+                      $eq:
+                        - $binding: event/message/request/occurrencePath
+                        - /children/alphaFirst
+                    then:
+                      - $appendChange:
+                          op: replace
+                          path: /alphaFirstInitializationEventBlueId
+                          val: {$binding: event/message/request/eventOccurrences/0/eventBlueId}
+                - $if:
+                    cond:
+                      $eq:
+                        - $binding: event/message/request/occurrencePath
+                        - /children/alphaSecond
+                    then:
+                      - $appendChange:
+                          op: replace
+                          path: /alphaSecondInitializationEventBlueId
+                          val: {$binding: event/message/request/eventOccurrences/0/eventBlueId}
+                - $if:
+                    cond:
+                      $eq:
+                        - $binding: event/message/request/after/documentId
+                        - playground-game-alpha
+                    then:
+                      - $appendChange:
+                          op: replace
+                          path: /alphaInitializationEventCount
+                          val: {$add: [$document: /alphaInitializationEventCount, 1]}
+                - $if:
+                    cond:
+                      $eq:
+                        - $binding: event/message/request/after/documentId
+                        - playground-game-beta
+                    then:
+                      - $appendChange:
+                          op: replace
+                          path: /betaInitializationEventCount
+                          val: {$add: [$document: /betaInitializationEventCount, 1]}
+                - $if:
+                    cond:
+                      $eq:
+                        - $binding: event/message/request/after/documentId
+                        - playground-game-gamma
+                    then:
+                      - $appendChange:
+                          op: replace
+                          path: /gammaInitializationEventCount
+                          val: {$add: [$document: /gammaInitializationEventCount, 1]}
+          - $return: true

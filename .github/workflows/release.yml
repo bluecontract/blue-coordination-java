@@ -1,10 +1,17 @@
-name: Release
+name: Release stable
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: coordination-release-stable
+  cancel-in-progress: false
+
 jobs:
-  Release:
+  release:
     runs-on: ubuntu-latest
     env:
       CI: true
@@ -13,75 +20,41 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.WORKFLOW_PAT }}
 
-      - name: Check if branch is main
+      - name: Configure Gradle user home
+        run: echo "GRADLE_USER_HOME=$RUNNER_TEMP/coordination-release-gradle" >> "$GITHUB_ENV"
+
+      - name: Require main and a stable version
+        shell: bash
         run: |
-          if [[ "${GITHUB_REF##*/}" != "main" ]]; then
-            echo "This workflow can only be triggered for the main branch."
-            exit 1
-          fi
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' .cz.toml)"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
 
-      - name: Check out blue-quickjs
-        uses: actions/checkout@v4
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
         with:
-          repository: bluecontract/blue-quickjs
-          path: blue-quickjs
-          submodules: recursive
+          distribution: temurin
+          java-version: '17'
 
-      - name: Set up Java 8 test runtime
-        uses: actions/setup-java@v3
-        with:
-          java-version: '8'
-          distribution: 'corretto'
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v4
 
-      - name: Set up JDK 25
-        uses: actions/setup-java@v3
-        with:
-          java-version: '25'
-          distribution: 'corretto'
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9.8.0
-          run_install: false
+      - name: Verify published dependency availability
+        run: >-
+          ./gradlew --no-daemon dependencyPreflight
+          -PblueDependencyMode=published-artifact
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: 'blue-quickjs/.nvmrc'
-          cache: 'pnpm'
-          cache-dependency-path: 'blue-quickjs/pnpm-lock.yaml'
+      - name: Build and stage from published dependencies
+        run: >-
+          ./gradlew --no-daemon clean stageRelease
+          -PblueDependencyMode=published-artifact
 
-      - name: Cache emsdk
-        uses: actions/cache@v4
-        with:
-          path: blue-quickjs/tools/emsdk
-          key: emsdk-${{ runner.os }}-${{ hashFiles('blue-quickjs/tools/scripts/emsdk-version.txt') }}
-
-      - name: Install blue-quickjs dependencies
-        run: pnpm install --frozen-lockfile
-        working-directory: blue-quickjs
-
-      - name: Install emsdk
-        run: bash tools/scripts/setup-emsdk.sh
-        working-directory: blue-quickjs
-
-      - name: Build blue-quickjs runtime
-        run: pnpm exec nx build quickjs-runtime
-        working-directory: blue-quickjs
-
-      - name: Setup Gradle
-        uses: gradle/gradle-build-action@v2
-
-      - name: Execute Gradle build
-        run: ./gradlew clean build -Dblue.quickjs.root="$GITHUB_WORKSPACE/blue-quickjs"
-
-      - name: Execute Gradle publish
-        run: ./gradlew publish -Dblue.quickjs.root="$GITHUB_WORKSPACE/blue-quickjs"
-
-      - name: Execute Gradle release
+      - name: Publish to Maven Central
         env:
           JRELEASER_GITHUB_TOKEN: ${{ secrets.WORKFLOW_PAT }}
           JRELEASER_MAVENCENTRAL_USERNAME: ${{ secrets.MAVENCENTRAL_USERNAME }}
@@ -89,14 +62,21 @@ jobs:
           JRELEASER_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
           JRELEASER_GPG_PUBLIC_KEY: ${{ secrets.GPG_PUBLIC_KEY }}
           JRELEASER_GPG_SECRET_KEY: ${{ secrets.GPG_SECRET_KEY }}
-        run: ./gradlew jreleaserFullRelease
+          JRELEASER_REPRODUCIBLE: true
+        run: >-
+          ./gradlew --no-daemon jreleaserDeploy
+          -PblueDependencyMode=published-artifact
 
-      - name: Archive artifacts
+      - name: Archive release evidence
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: artifacts
+          name: coordination-stable-release
           path: |
-            build/libs
-            build/publications
-            build/jreleaser
+            build/libs/**
+            build/distributions/**
+            build/publications/**
+            build/reports/**
+            build/test-results/**
+            build/staging-deploy/**
+            build/jreleaser/**

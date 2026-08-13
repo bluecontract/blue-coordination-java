@@ -1,0 +1,54 @@
+# Known limitations
+
+- Managed embedded-document epochs and historical synchronization are a
+  next-version Coordination temporal profile. They are not claimed as frozen
+  Contracts 1.0 semantics.
+- The frozen Contracts API has no managed-child ownership-mask input.
+  Coordination therefore uses an explicit ownership projection before frozen
+  processing; exact semantic-parent fidelity across every child-owned
+  subscription surface remains a frozen-API gap.
+- Journal completeness is proven only for the current in-memory journal. There
+  is no durable or distributed transaction protocol.
+- The pinned generic Timeline Entry has no universal literal `documentId`
+  field. This is an optional generalized targeting-profile gap, not a blocker
+  for append-once/environment-derived routing: concrete Channel/message types
+  may define exact target derivation, and Repository-native
+  `OperationRequest.document` version targeting is supported. A universal
+  Timeline-Entry target profile requires an upstream field or runtime hook.
+- General provider-backed Mandate eligibility requires an exact Mandate-state
+  resolver at the entry's source order. The in-memory engine does not invent
+  that evidence; authority-bearing entries fail closed until a host adapter can
+  supply it.
+- `Process Embedded.collectionPaths` covers direct stable-key members. General
+  list-position identity and arbitrary collection reshaping are not implied.
+- Coordinator reconstruction inside the same live engine is supported while
+  its typed in-memory document, journal, and scheduler state survives. A fresh
+  engine instance is not reconstructible from a serialized store. External
+  frontier import and cross-process recovery still fail closed unless exact
+  cursor, epoch, entry-frame, commit-companion, and provider-completeness
+  evidence is durably available.
+- Drain is intentionally sequential. Parallel document processing, leasing,
+  distributed scheduling, SCC planning, and caller-selected target sets are out
+  of scope.
+- `DrainBudget` bounds selected entries and committed PROCESS transitions. It
+  cannot preempt one frozen processor call, does not count epoch-zero
+  INITIALIZE inside an atomic attachment, and is not a hard latency deadline.
+- In large documents, steady drain latency is currently dominated by frozen
+  Language/Contracts/BEX delivery-plan derivation and platform commit. The
+  Coordination scheduler is measured separately and remains small; removing
+  independent frozen verification or caching revision-bound delivery evidence
+  would be an unacceptable semantic shortcut.
+- The retained Round 13 campaign failed append p95 (18.680667 ms against a
+  1.000000 ms hard limit) and Coordination-host p95 (872.356126 ms against a
+  250.000000 ms hard limit); route and total passed hard, while all four metrics
+  missed their preferred targets. The exact 3.0.0-rc.1 workflow policy permits
+  publication only as `PASS_WITH_KNOWN_PERFORMANCE_LIMITATION`. It does not
+  claim a latency pass, cannot apply to a stable release, and does not waive any
+  non-performance release gate.
+- Immutable graph generations structurally share unchanged forward/reverse
+  buckets and binding records, but a topology-changing publication still makes
+  shallow copies of the three top-level in-memory directory maps. This RC does
+  not claim persistent-map O(affected-key) allocation for those directories.
+- Deterministic failed retries stabilize whole-object cache size for the same
+  failure. Distinct failed results can leave unreachable immutable cache values;
+  retention is an in-memory host policy.

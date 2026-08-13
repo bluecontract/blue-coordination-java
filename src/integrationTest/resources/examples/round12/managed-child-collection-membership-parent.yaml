@@ -1,0 +1,77 @@
+documentId: managed-child-membership-parent
+name: Managed Child Membership Parent
+games:
+  alpha: __ALPHA_DOCUMENT__
+overflow: {}
+overflowCandidate:
+  blueId: __OVERFLOW_BLUE_ID__
+contracts:
+  embedded:
+    type: Process Embedded
+    collectionPaths: [/games, /overflow]
+  coordinationEmbeddedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: coordination/internal/managed-child-membership-parent
+    actor:
+      type: MyOS/Principal Actor
+      accountId: coordination
+  coordinationApplyEmbeddedRevision:
+    type: Coordination/Sequential Workflow Operation
+    channel: coordinationEmbeddedChannel
+    request:
+      occurrencePath: {type: Text}
+      after:
+        documentId: {type: Text}
+        counter: {type: Integer}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: {$binding: event/message/request/occurrencePath}
+              val: {$binding: event/message/request/after}
+          - $if:
+              cond:
+                $and:
+                  - $eq:
+                      - {$binding: event/message/request/occurrencePath}
+                      - /games/alpha
+                  - $eq:
+                      - {$binding: event/message/request/after/counter}
+                      - 0
+              then:
+                - $appendChange:
+                    op: add
+                    path: /games/beta
+                    val:
+                      blueId: __BETA_BLUE_ID__
+          - $if:
+              cond:
+                $and:
+                  - $eq:
+                      - {$binding: event/message/request/occurrencePath}
+                      - /games/alpha
+                  - $eq:
+                      - {$binding: event/message/request/after/counter}
+                      - 1
+              then:
+                - $appendChange:
+                    op: remove
+                    path: /games/beta
+          - $if:
+              cond:
+                $and:
+                  - $eq:
+                      - {$binding: event/message/request/occurrencePath}
+                      - /games/alpha
+                  - $eq:
+                      - {$binding: event/message/request/after/counter}
+                      - 2
+              then:
+                - $appendChange:
+                    op: replace
+                    path: /overflow
+                    val: {$document: /overflowCandidate}
+          - $return: true

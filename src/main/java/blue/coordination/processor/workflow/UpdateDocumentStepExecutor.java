@@ -2,17 +2,19 @@ package blue.coordination.processor.workflow;
 
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.model.Node;
+import blue.coordination.processor.support.CoordinationProcessHeaderSupport;
 import blue.language.processor.WorkingDocument;
-import blue.language.processor.model.FrozenJsonPatch;
+import blue.language.processor.FrozenJsonPatch;
 import blue.language.snapshot.FrozenNode;
-import blue.language.utils.MergeReverser;
 import blue.repo.coordination.SequentialWorkflowStep;
 import blue.repo.coordination.UpdateDocument;
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
+/**
+ * Converts a fixed Update Document step into frozen patches and delegates
+ * patch validation and application to the generic Contracts engine.
+ */
 public final class UpdateDocumentStepExecutor implements WorkflowStepExecutor<UpdateDocument> {
     private final BexProcessingMetrics metrics;
 
@@ -41,19 +43,15 @@ public final class UpdateDocumentStepExecutor implements WorkflowStepExecutor<Up
                 if (metrics != null) {
                     metrics.incrementUpdateStaticTemplateHits();
                 }
-                applyStaticPlan(staticPlan, context);
+                applyStaticPlan(
+                        staticPlan, step, context);
                 return WorkflowStepResult.none();
             }
             FrozenNode rawFrozenChangeset = FrozenNodeUtil.property(context.stepFrozenNode(), "changeset");
-            if (StaticPayloadValidator.rejectBexOperators(rawFrozenChangeset,
-                    context,
-                    "Update Document changeset")) {
-                return WorkflowStepResult.none();
-            }
             if (rawFrozenChangeset != null
                     && rawFrozenChangeset.getItems() == null
                     && step.getChangeset() == null) {
-                context.processorContext().throwFatal("Update Document changeset must be a static patch list");
+                context.throwFatal("Update Document changeset must be a static patch list");
                 return WorkflowStepResult.none();
             }
             List<WorkflowPatchEntry> changeset = literalChangeset(step, context);
@@ -82,13 +80,16 @@ public final class UpdateDocumentStepExecutor implements WorkflowStepExecutor<Up
         if (frozenChangeset != null && frozenChangeset.getItems() != null) {
             List<WorkflowPatchEntry> entries =
                     new ArrayList<WorkflowPatchEntry>(frozenChangeset.getItems().size());
-            MergeReverser mergeReverser = new MergeReverser();
             for (int i = 0; i < frozenChangeset.getItems().size(); i++) {
                 FrozenNode item = frozenChangeset.getItems().get(i);
-                Node literal = item == null ? null : item.toNode();
-                if (item != null && !item.isStrictCanonical()) {
-                    literal = mergeReverser.reverseToMinimizedOverlay(literal);
-                }
+                Node literal =
+                        FrozenNodeUtil.authoredOverlay(item);
+                literal =
+                        resolveReferencedLiteralValue(
+                                literal,
+                                step,
+                                i,
+                                context);
                 entries.add(literalPatchEntry(literal, i, context));
             }
             return entries;
@@ -96,7 +97,7 @@ public final class UpdateDocumentStepExecutor implements WorkflowStepExecutor<Up
         if (step == null || step.getChangeset() == null) {
             return java.util.Collections.emptyList();
         }
-        List<?> rawChangeset = step.getChangeset();
+        List<Node> rawChangeset = step.getChangeset();
         List<WorkflowPatchEntry> entries = new ArrayList<WorkflowPatchEntry>(rawChangeset.size());
         for (int i = 0; i < rawChangeset.size(); i++) {
             entries.add(literalPatchEntry(rawChangeset.get(i), i, context));
@@ -104,55 +105,24 @@ public final class UpdateDocumentStepExecutor implements WorkflowStepExecutor<Up
         return entries;
     }
 
-    private WorkflowPatchEntry literalPatchEntry(Object item, int index, StepExecutionContext context) {
+    private WorkflowPatchEntry literalPatchEntry(Node item, int index, StepExecutionContext context) {
         if (item == null) {
             return null;
         }
-        if (item instanceof WorkflowPatchEntry) {
-            return (WorkflowPatchEntry) item;
-        }
-        if (item instanceof Node) {
-            return literalPatchEntry((Node) item, index, context);
-        }
-        try {
-            if (metrics != null) {
-                metrics.incrementUpdateReflectionFallbacks();
-            }
-            String op = (String) invokeNoArg(item, "getOp");
-            String path = (String) invokeNoArg(item, "getPath");
-            if (isRemove(op)) {
-                return new WorkflowPatchEntry(op, path, (FrozenNode) null);
-            }
-            Object val = invokeNoArg(item, "getVal");
-            if (val == null || val instanceof Node) {
-                return new WorkflowPatchEntry(op, path, (Node) val);
-            }
-            if (val instanceof FrozenNode) {
-                return new WorkflowPatchEntry(op, path, (FrozenNode) val);
-            }
-            context.processorContext().throwFatal("Update Document changeset entry " + index
-                    + " field 'val' must be a node");
-            return null;
-        } catch (ReflectiveOperationException ex) {
-            context.processorContext().throwFatal("Update Document changeset entry " + index
-                    + " cannot be read as a patch entry: " + ex.getMessage());
-            return null;
-        } catch (ClassCastException ex) {
-            context.processorContext().throwFatal("Update Document changeset entry " + index
-                    + " has invalid patch entry field types");
-            return null;
-        }
-    }
-
-    private WorkflowPatchEntry literalPatchEntry(Node item, int index, StepExecutionContext context) {
         if (item.getProperties() == null) {
-            context.processorContext().throwFatal("Update Document changeset entry " + index
+            context.throwFatal("Update Document changeset entry " + index
                     + " must be a static patch object");
             return null;
         }
         String op = stringProperty(item, "op", index, context);
         String path = stringProperty(item, "path", index, context);
-        Node val = isRemove(op) ? null : item.getProperties().get("val");
+        if ("remove".equals(op)
+                && item.getProperties().containsKey("val")) {
+            context.throwFatal(
+                    "Update Document patch value must be absent for remove");
+            return null;
+        }
+        Node val = item.getProperties().get("val");
         return new WorkflowPatchEntry(op, path, val);
     }
 
@@ -163,55 +133,73 @@ public final class UpdateDocumentStepExecutor implements WorkflowStepExecutor<Up
             return null;
         }
         if (!(value instanceof String)) {
-            context.processorContext().throwFatal("Update Document changeset entry " + index
+            context.throwFatal("Update Document changeset entry " + index
                     + " field '" + key + "' must be text");
             return null;
         }
         return (String) value;
     }
 
-    private Object invokeNoArg(Object target, String methodName) throws ReflectiveOperationException {
-        Method method = target.getClass().getMethod(methodName);
-        return method.invoke(target);
-    }
-
     private FrozenJsonPatch toPatch(WorkflowPatchEntry entry, StepExecutionContext context) {
         if (entry == null) {
-            context.processorContext().throwFatal("Update Document changeset contains a null patch entry");
+            context.throwFatal("Update Document changeset contains a null patch entry");
             return null;
         }
         String op = entry.op();
         String path = entry.path();
-        if (op == null || op.trim().isEmpty()) {
-            context.processorContext().throwFatal("Update Document patch operation is required");
+        if (op == null || op.isEmpty()) {
+            context.throwFatal("Update Document patch operation is required");
             return null;
         }
-        if (path == null || path.trim().isEmpty()) {
-            context.processorContext().throwFatal("Update Document patch path is required");
+        if (path == null || path.isEmpty()) {
+            context.throwFatal("Update Document patch path is required");
             return null;
         }
         String absolutePath = context.processorContext().resolvePointer(path);
-        String normalizedOp = op.trim().toLowerCase(Locale.ROOT);
-        if ("remove".equals(normalizedOp)) {
+        if ("remove".equals(op)) {
             return FrozenJsonPatch.remove(absolutePath);
+        }
+        if (!"add".equals(op) && !"replace".equals(op)) {
+            context.throwFatal(
+                    "Unsupported Update Document patch operation: " + op);
+            return null;
         }
         FrozenNode value = entry.val();
         if (value == null) {
-            context.processorContext().throwFatal("Update Document patch value is required for operation: " + op);
+            context.throwFatal("Update Document patch value is required for operation: " + op);
             return null;
         }
-        if ("add".equals(normalizedOp)) {
+        if ("add".equals(op)) {
             return FrozenJsonPatch.add(absolutePath, value);
         }
-        if ("replace".equals(normalizedOp)) {
+        if ("replace".equals(op)) {
             return FrozenJsonPatch.replace(absolutePath, value);
         }
-        context.processorContext().throwFatal("Unsupported Update Document patch operation: " + op);
-        return null;
+        throw new IllegalStateException("Unreachable Update Document patch operation");
     }
 
-    private static boolean isRemove(String op) {
-        return op != null && "remove".equals(op.trim().toLowerCase(Locale.ROOT));
+    private Node resolveReferencedLiteralValue(
+            Node literal,
+            UpdateDocument step,
+            int index,
+            StepExecutionContext context) {
+        Node literalValue =
+                literal != null
+                        && literal.getProperties() != null
+                        ? literal.getProperties()
+                        .get("val")
+                        : null;
+        if (literalValue == null
+                || !literalValue.isReferenceOnly()) {
+            return literal;
+        }
+        FrozenNode resolved =
+                resolvedStepValue(
+                        step, index, context);
+        Node completed = literal.clone();
+        completed.getProperties().put(
+                "val", resolved.toNode());
+        return completed;
     }
 
     private void applyPatches(List<FrozenJsonPatch> patches, StepExecutionContext context) {
@@ -226,9 +214,6 @@ public final class UpdateDocumentStepExecutor implements WorkflowStepExecutor<Up
             preview = context.advanceWorkingDocumentFrozen(patches);
             if (preview == null) {
                 return;
-            }
-            if (metrics != null) {
-                metrics.addMetric("frozenPatchValuesHandedToLanguage", valuePatchCount(patches));
             }
             context.processorContext().applyPreviewedFrozenPatches(patches, preview);
             previewTransferred = true;
@@ -261,19 +246,78 @@ public final class UpdateDocumentStepExecutor implements WorkflowStepExecutor<Up
         return count;
     }
 
-    private void applyStaticPlan(StaticUpdatePlan plan, StepExecutionContext context) {
+    private void applyStaticPlan(
+            StaticUpdatePlan plan,
+            UpdateDocument step,
+            StepExecutionContext context) {
         if (plan.patches().isEmpty()) {
             return;
         }
         long conversionStart = System.nanoTime();
         List<FrozenJsonPatch> patches = new ArrayList<FrozenJsonPatch>(plan.patches().size());
-        for (StaticUpdatePlan.PatchTemplate template : plan.patches()) {
+        for (int index = 0;
+                index < plan.patches().size();
+                index++) {
+            StaticUpdatePlan.PatchTemplate template =
+                    plan.patches().get(index);
             String absolutePath = context.processorContext().resolvePointer(template.authoredPath());
-            patches.add(template.bind(absolutePath));
+            patches.add(
+                    template.bind(
+                            absolutePath,
+                            context,
+                            resolvedPatchValue(
+                                    template,
+                                    step,
+                                    index,
+                                    context)));
         }
         if (metrics != null) {
             metrics.addUpdatePatchConversionNanos(System.nanoTime() - conversionStart);
         }
         applyPatches(patches, context);
+    }
+
+    private FrozenNode resolvedPatchValue(
+            StaticUpdatePlan.PatchTemplate template,
+            UpdateDocument step,
+            int index,
+            StepExecutionContext context) {
+        if (!template.hasReferencedValue()) {
+            return null;
+        }
+        return resolvedStepValue(
+                step, index, context);
+    }
+
+    private FrozenNode resolvedStepValue(
+            UpdateDocument step,
+            int index,
+            StepExecutionContext context) {
+        List<Node> resolvedChangeset =
+                step != null
+                        ? step.getChangeset()
+                        : null;
+        Node resolvedEntry =
+                resolvedChangeset != null
+                        && index < resolvedChangeset.size()
+                        ? resolvedChangeset.get(index)
+                        : null;
+        Node resolvedValue =
+                resolvedEntry != null
+                        && resolvedEntry.getProperties() != null
+                        ? resolvedEntry.getProperties()
+                        .get("val")
+                        : null;
+        if (resolvedValue == null
+                || resolvedValue.isReferenceOnly()) {
+            context.throwFatal(
+                    "Update Document patch value reference has no "
+                            + "resolved selected-body value");
+            return null;
+        }
+        return FrozenNode.fromNode(
+                CoordinationProcessHeaderSupport
+                        .canonicalExactCopy(
+                                resolvedValue));
     }
 }

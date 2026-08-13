@@ -1,0 +1,62 @@
+documentId: counter
+name: Clean Counter
+counter: 0
+contracts:
+  aliceChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/clean-counter/alice
+    actor:
+      type: MyOS/Principal Actor
+      accountId: alice
+  bobChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/clean-counter/bob
+    actor:
+      type: MyOS/Principal Actor
+      accountId: bob
+  increment:
+    type: Coordination/Sequential Workflow Operation
+    channel: aliceChannel
+    request:
+      amount: {type: Integer}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /counter
+              val:
+                $add:
+                  - $document: /counter
+                  - $binding: event/message/request/amount
+          - $appendEvent:
+              type: Coordination/Event
+              kind: Basic/Counter Changed
+              direction: increment
+              amount: {$binding: event/message/request/amount}
+          - $return: true
+  decrement:
+    type: Coordination/Sequential Workflow Operation
+    channel: bobChannel
+    request:
+      amount: {type: Integer}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /counter
+              val:
+                $subtract:
+                  - $document: /counter
+                  - $binding: event/message/request/amount
+          - $appendEvent:
+              type: Coordination/Event
+              kind: Basic/Counter Changed
+              direction: decrement
+              amount: {$binding: event/message/request/amount}
+          - $return: true

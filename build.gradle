@@ -1,745 +1,424 @@
-buildscript {
-    dependencies {
-        classpath 'org.apache.groovy:groovy-toml:4.0.22'
-    }
-}
-
 plugins {
     id 'java-library'
+    id 'java-test-fixtures'
     id 'maven-publish'
     id 'signing'
-    id 'org.jreleaser' version '1.24.0'
-    id 'me.champeau.jmh' version '0.7.3'
+    id 'org.jreleaser' version '1.25.0'
 }
 
 group = 'blue.coordination'
-version = determineProjectVersion()
+def versionMatches = file('.cz.toml').getText('UTF-8') =~
+        /(?m)^version = "([^"]+)"$/
+if (!versionMatches.find()) {
+    throw new GradleException('Missing version in .cz.toml')
+}
+version = versionMatches.group(1)
 
-def blueLanguageVersion = '3.1.0-rc.18'
-def binaryCompatibilityBaselineVersion = providers.gradleProperty(
-        'binaryCompatibilityBaselineVersion').getOrElse('2.0.0-rc.4')
+def dependencyMode = providers.gradleProperty('blueDependencyMode')
+        .getOrElse('published-artifact')
+        .trim()
+def localDependencies = dependencyMode == 'local-composite'
+def publishedRepository = providers.gradleProperty(
+        'bluePublishedRepository').orNull
 
 base {
     archivesName = 'blue-coordination-java'
 }
 
 repositories {
-    mavenCentral()
-    exclusiveContent {
-        forRepository {
-            ivy {
-                name = 'releasedCoordinationBaseline'
-                url = uri('https://repo1.maven.org/maven2')
-                patternLayout {
-                    artifact 'blue/coordination/blue-coordination-java/[revision]/blue-coordination-java-[revision].[ext]'
-                }
-                metadataSources {
-                    artifact()
+    if (!localDependencies && publishedRepository != null) {
+        exclusiveContent {
+            forRepository {
+                maven {
+                    name = 'publishedBlueRepository'
+                    url = uri(publishedRepository)
+                    metadataSources { artifact() }
                 }
             }
-        }
-        filter {
-            includeModule 'blue.coordination.baseline', 'blue-coordination-java'
+            filter {
+                includeModule 'blue.repo', 'blue-repo-java'
+                includeModule 'blue.bex', 'blue-bex-core'
+                includeModule 'blue.bex', 'blue-bex-contracts'
+            }
         }
     }
+    mavenCentral()
 }
 
 java {
+    toolchain { languageVersion = JavaLanguageVersion.of(17) }
     withSourcesJar()
     withJavadocJar()
-    sourceCompatibility = JavaVersion.VERSION_1_8
-    targetCompatibility = JavaVersion.VERSION_1_8
+}
+
+sourceSets {
+    integrationTest
+    scenarioTest {
+        resources.setSrcDirs(['src/integrationTest/resources'])
+    }
+    consumerTest {
+        resources.setSrcDirs(['src/integrationTest/resources'])
+    }
+}
+
+configurations {
+    integrationTestImplementation.extendsFrom testImplementation
+    integrationTestRuntimeOnly.extendsFrom testRuntimeOnly
+    scenarioTestImplementation.extendsFrom testImplementation
+    scenarioTestRuntimeOnly.extendsFrom testRuntimeOnly
+}
+
+dependencyLocking {
+    lockAllConfigurations()
+    if (!localDependencies) {
+        lockFile = layout.projectDirectory.file(
+                'gradle/published-artifact.lockfile')
+    }
 }
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
-    options.release = 8
+    options.release = 17
+    options.compilerArgs.addAll([
+            '-Xlint:all',
+            '-Xlint:-serial',
+            '-Xlint:-processing',
+            '-Werror'
+    ])
 }
 
-configurations {
-    binaryCompatibilityBaseline {
-        canBeConsumed = false
-        canBeResolved = true
-        transitive = false
+tasks.withType(Javadoc).configureEach {
+    source = fileTree('src/main/java') {
+        include 'blue/coordination/api/**/*.java'
+        include 'blue/coordination/processor/**/*.java'
     }
+    options.encoding = 'UTF-8'
+    options.charSet = 'UTF-8'
+    options.docEncoding = 'UTF-8'
+    options.addBooleanOption('notimestamp', true)
+    options.addBooleanOption('Xdoclint:all,-missing', true)
+}
+
+tasks.withType(AbstractArchiveTask).configureEach {
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+
+tasks.withType(Jar).configureEach {
+    includeEmptyDirs = false
+    from('LICENSE') { into 'META-INF' }
 }
 
 dependencies {
-    api "blue.language:blue-language-java:${blueLanguageVersion}"
-    api 'blue.repo:blue-repo-java:3.0.0-rc.10'
-    api 'blue.bex:blue-bex-java:1.1.0-rc.2'
-
-    implementation 'com.fasterxml.jackson.core:jackson-databind:2.15.2'
+    api 'blue.language:blue-contracts-core:3.1.0-rc.20'
+    implementation 'blue.repo:blue-repo-java:3.0.0-rc.21'
+    api 'blue.bex:blue-bex-core:1.1.0-rc.3'
+    api 'blue.bex:blue-bex-contracts:1.1.0-rc.3'
     implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
 
-    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation platform('org.junit:junit-bom:5.14.1')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 
-    // Alias the released artifact so Gradle never substitutes the current root project.
-    binaryCompatibilityBaseline "blue.coordination.baseline:blue-coordination-java:${binaryCompatibilityBaselineVersion}"
+    integrationTestImplementation sourceSets.main.output
+    integrationTestImplementation sourceSets.testFixtures.output
+
+    scenarioTestImplementation sourceSets.main.output
+    scenarioTestImplementation sourceSets.testFixtures.output
+    scenarioTestImplementation sourceSets.integrationTest.output
+
+    consumerTestImplementation files(tasks.named('jar'))
+    consumerTestImplementation 'blue.language:blue-contracts-core:3.1.0-rc.20'
+    consumerTestImplementation platform('org.junit:junit-bom:5.14.1')
+    consumerTestImplementation 'org.junit.jupiter:junit-jupiter'
+    consumerTestRuntimeOnly files(configurations.runtimeClasspath)
+    consumerTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
-compileTestJava {
-    sourceCompatibility = JavaVersion.VERSION_1_8
-    targetCompatibility = JavaVersion.VERSION_1_8
-}
+components.java.withVariantsFromConfiguration(
+        configurations.testFixturesApiElements) { skip() }
+components.java.withVariantsFromConfiguration(
+        configurations.testFixturesRuntimeElements) { skip() }
 
-test {
-    javaLauncher = javaToolchains.launcherFor {
-        languageVersion = JavaLanguageVersion.of(8)
-    }
+tasks.withType(Test).configureEach {
     useJUnitPlatform()
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(
+                providers.gradleProperty('testJavaVersion')
+                        .getOrElse('17') as int)
+    }
+    maxParallelForks = 1
+    maxHeapSize = '2g'
     reports {
-        junitXml.required = false
-        html.required = true
-    }
-    testLogging {
-        events 'PASSED', 'FAILED', 'SKIPPED'
-        showStandardStreams = true
-    }
-}
-
-def testJfrEnabled = providers.gradleProperty('testJfr')
-        .map { !'false'.equalsIgnoreCase(it == null ? '' : it.trim()) }
-        .getOrElse(false)
-
-def configureFocusedTest = { Test focusedTest, List<String> includedTests ->
-    focusedTest.group = 'verification'
-    focusedTest.testClassesDirs = sourceSets.test.output.classesDirs
-    focusedTest.classpath = sourceSets.test.runtimeClasspath
-    focusedTest.dependsOn tasks.named('testClasses')
-    focusedTest.useJUnitPlatform()
-    focusedTest.maxHeapSize = '2g'
-    focusedTest.maxParallelForks = 1
-    focusedTest.forkEvery = 0L
-    focusedTest.filter {
-        includedTests.each { includeTestsMatching(it) }
-    }
-    focusedTest.reports {
         junitXml.required = true
         html.required = true
     }
-    focusedTest.testLogging {
-        events 'PASSED', 'FAILED', 'SKIPPED'
-        showStandardStreams = true
-    }
-    if (testJfrEnabled) {
-        def recording = layout.buildDirectory.file("reports/jfr/${focusedTest.name}.jfr").get().asFile
-        focusedTest.doFirst {
-            recording.parentFile.mkdirs()
-            if (recording.exists() && !recording.delete()) {
-                throw new GradleException("Could not replace JFR recording: ${recording}")
-            }
-        }
-        focusedTest.jvmArgs "-XX:StartFlightRecording=filename=${recording.absolutePath},settings=profile,dumponexit=true"
-    } else {
-        focusedTest.javaLauncher = javaToolchains.launcherFor {
-            languageVersion = JavaLanguageVersion.of(8)
-        }
+}
+
+def registerVerificationSuite = {
+        String taskName, SourceSet suite, String taskDescription ->
+    tasks.register(taskName, Test) {
+        group = 'verification'
+        description = taskDescription
+        testClassesDirs = suite.output.classesDirs
+        classpath = suite.runtimeClasspath
+        dependsOn tasks.named(suite.classesTaskName)
+        shouldRunAfter tasks.named('test')
     }
 }
 
-tasks.register('workflowPlanDifferentialTest', Test) { focusedTest ->
-    description = 'Runs sequential-workflow planning, execution-state, static-update, and semantic differential tests.'
-    configureFocusedTest(focusedTest, [
-            'blue.coordination.processor.CoordinationProcessorsTest',
-            'blue.coordination.processor.SequentialWorkflowExecutionTest',
-            'blue.coordination.processor.bex.BexProcessingMetricsTest',
-            'blue.coordination.processor.compute.ComputeFrozenPatchHandoffIntegrationTest',
-            'blue.coordination.processor.compute.ComputeProgramPlanIntegrationTest',
-            'blue.coordination.processor.compute.ComputeWorkflowExecutionTest',
-            'blue.coordination.processor.compute.UpdateDocumentBatchApplyIntegrationTest',
-            'blue.coordination.processor.workflow.*DifferentialTest',
-            'blue.coordination.processor.workflow.ComputeEffectPlanTest',
-            'blue.coordination.processor.workflow.SequentialWorkflowRunnerLifecycleTest',
-            'blue.coordination.processor.workflow.StaticUpdatePlanTest',
-            'blue.coordination.processor.workflow.WorkflowExecutionStateTest',
-            'blue.coordination.processor.workflow.WorkflowPatchEntryTest'
-    ])
+def integrationTest = registerVerificationSuite(
+        'integrationTest', sourceSets.integrationTest,
+        'Runs the complete compact-engine correctness and atomicity suite.')
+def consumerTest = registerVerificationSuite(
+        'consumerTest', sourceSets.consumerTest,
+        'Runs public-API scenarios compiled against the built JAR only.')
+def scenarioTest = registerVerificationSuite(
+        'scenarioTest', sourceSets.scenarioTest,
+        'Runs realistic NBA and large-host/PayNote convergence scenarios.')
+scenarioTest.configure {
+    shouldRunAfter integrationTest, consumerTest
 }
 
-tasks.register('complexFixtureIntegrationTest', Test) { focusedTest ->
-    description = 'Runs PayNote, embedded-document, mandate, and termination workflow fixtures.'
-    configureFocusedTest(focusedTest, [
-            'blue.coordination.processor.EmbeddedTerminationWorkflowTest',
-            'blue.coordination.processor.compute.*Paynote*',
-            'blue.coordination.processor.compute.*Embedded*',
-            'blue.coordination.processor.compute.*Mandate*',
-            'blue.coordination.processor.compute.*Termination*',
-            'blue.coordination.processor.compute.TerminateProcessingWorkflowTest'
-    ])
-}
-
-tasks.register('memoryIntegrationTest', Test) { focusedTest ->
-    description = 'Runs bounded-cache, round-trip, stress, and memory-oriented workflow tests in one 2 GiB worker.'
-    configureFocusedTest(focusedTest, [
-            'blue.coordination.processor.*Stress*',
-            'blue.coordination.processor.*Memory*',
-            'blue.coordination.processor.compute.*RoundTrip*',
-            'blue.coordination.processor.compute.*Memory*',
-            'blue.coordination.processor.compute.RepresentativeWorkflowLifecycleSmokeTest',
-            'blue.coordination.processor.workflow.*CacheTest'
-    ])
-}
-
-tasks.register('languageAdoptionMetricsArtifactTest', Test) { focusedTest ->
-    description = 'Runs four representative Language-adoption scenarios and writes deterministic JSON/CSV metrics evidence.'
-    configureFocusedTest(focusedTest, [
-            'blue.coordination.processor.compute.LanguageAdoptionMetricsArtifactTest'
-    ])
-    outputs.files(
-            layout.buildDirectory.file('reports/language-adoption/scenario-metrics.json'),
-            layout.buildDirectory.file('reports/language-adoption/scenario-metrics.csv'))
-}
-
-// Minimal class-file reader used by the verification tasks below. Keeping this
-// in the build avoids adding a release plugin solely for two deterministic
-// checks, and compares JVM descriptors rather than source formatting.
-def parseBinaryApiClass = { byte[] bytecode ->
-    def input = new DataInputStream(new ByteArrayInputStream(bytecode))
-    if (input.readInt() != (0xCAFEBABE as int)) {
-        throw new GradleException('Invalid class-file magic')
-    }
-    int minorVersion = input.readUnsignedShort()
-    int majorVersion = input.readUnsignedShort()
-    int constantPoolCount = input.readUnsignedShort()
-    Object[] constantPool = new Object[constantPoolCount]
-    for (int index = 1; index < constantPoolCount; index++) {
-        int tag = input.readUnsignedByte()
-        if (tag == 1) {
-            constantPool[index] = input.readUTF()
-        } else if (tag == 3 || tag == 4) {
-            input.readInt()
-        } else if (tag == 5 || tag == 6) {
-            input.readLong()
-            index++
-        } else if (tag == 7) {
-            constantPool[index] = Integer.valueOf(input.readUnsignedShort())
-        } else if (tag == 8 || tag == 16 || tag == 19 || tag == 20) {
-            input.readUnsignedShort()
-        } else if (tag == 9 || tag == 10 || tag == 11 || tag == 12
-                || tag == 17 || tag == 18) {
-            input.readUnsignedShort()
-            input.readUnsignedShort()
-        } else if (tag == 15) {
-            input.readUnsignedByte()
-            input.readUnsignedShort()
-        } else {
-            throw new GradleException("Unsupported constant-pool tag ${tag}")
-        }
-    }
-
-    def utf8 = { int index ->
-        Object value = constantPool[index]
-        if (!(value instanceof String)) {
-            throw new GradleException("Invalid UTF-8 constant-pool index ${index}")
-        }
-        (String) value
-    }
-    def className = { int index ->
-        if (index == 0) {
-            return null
-        }
-        Object nameIndex = constantPool[index]
-        if (!(nameIndex instanceof Integer)) {
-            throw new GradleException("Invalid class constant-pool index ${index}")
-        }
-        utf8(((Integer) nameIndex).intValue()).replace('/', '.')
-    }
-    def skipAttributes = { DataInputStream stream ->
-        int attributeCount = stream.readUnsignedShort()
-        for (int attributeIndex = 0; attributeIndex < attributeCount; attributeIndex++) {
-            stream.readUnsignedShort()
-            long remaining = ((long) stream.readInt()) & 0xffffffffL
-            while (remaining > 0L) {
-                long skipped = stream.skip(remaining)
-                if (skipped <= 0L) {
-                    if (stream.read() < 0) {
-                        throw new EOFException('Truncated class-file attribute')
-                    }
-                    skipped = 1L
-                }
-                remaining -= skipped
-            }
-        }
-    }
-    def readMembers = { DataInputStream stream ->
-        def members = new TreeMap<String, Integer>()
-        int memberCount = stream.readUnsignedShort()
-        for (int memberIndex = 0; memberIndex < memberCount; memberIndex++) {
-            int access = stream.readUnsignedShort()
-            String name = utf8(stream.readUnsignedShort())
-            String descriptor = utf8(stream.readUnsignedShort())
-            skipAttributes(stream)
-            if ((access & (0x0001 | 0x0004)) != 0 && name != '<clinit>') {
-                members.put(name + descriptor, Integer.valueOf(access))
-            }
-        }
-        members
-    }
-
-    int access = input.readUnsignedShort()
-    String name = className(input.readUnsignedShort())
-    String superName = className(input.readUnsignedShort())
-    int interfaceCount = input.readUnsignedShort()
-    def interfaces = new TreeSet<String>()
-    for (int interfaceIndex = 0; interfaceIndex < interfaceCount; interfaceIndex++) {
-        interfaces.add(className(input.readUnsignedShort()))
-    }
-    Map<String, Integer> fields = readMembers(input)
-    Map<String, Integer> methods = readMembers(input)
-    skipAttributes(input)
-    [
-            name        : name,
-            access      : access,
-            superName   : superName,
-            interfaces  : interfaces,
-            fields      : fields,
-            methods     : methods,
-            minorVersion: minorVersion,
-            majorVersion: majorVersion
-    ]
-}
-
-def readBinaryApi = { File archive ->
-    def classes = new TreeMap<String, Map<String, Object>>()
-    def zip = new java.util.zip.ZipFile(archive)
-    try {
-        def entries = Collections.list(zip.entries())
-                .findAll { entry ->
-                    !entry.directory
-                            && entry.name.endsWith('.class')
-                            && !entry.name.startsWith('META-INF/versions/')
-                            && !entry.name.endsWith('/module-info.class')
-                            && entry.name != 'module-info.class'
-                }
-                .sort { left, right -> left.name <=> right.name }
-        entries.each { entry ->
-            Map<String, Object> parsed = zip.getInputStream(entry).withCloseable { stream ->
-                parseBinaryApiClass(stream.bytes)
-            }
-            if ((((Integer) parsed.access).intValue() & (0x0001 | 0x0004)) != 0) {
-                classes.put((String) parsed.name, parsed)
-            }
-        }
-    } finally {
-        zip.close()
-    }
-    classes
-}
-
-def visibilityCompatible = { int oldAccess, int newAccess ->
-    boolean oldPublic = (oldAccess & 0x0001) != 0
-    boolean newPublic = (newAccess & 0x0001) != 0
-    boolean newProtected = (newAccess & 0x0004) != 0
-    oldPublic ? newPublic : (newPublic || newProtected)
-}
-
-def incompatibleModifierChanges = { int oldAccess, int newAccess, boolean method ->
-    def changes = new ArrayList<String>()
-    if (((oldAccess ^ newAccess) & 0x0008) != 0) {
-        changes.add('static modifier changed')
-    }
-    if ((oldAccess & 0x0010) == 0 && (newAccess & 0x0010) != 0) {
-        changes.add('became final')
-    }
-    if (method && (oldAccess & 0x0400) == 0 && (newAccess & 0x0400) != 0) {
-        changes.add('became abstract')
-    }
-    changes
-}
-
-def binaryCompatibilityReport = layout.buildDirectory.file(
-        'reports/binary-compatibility/blue-coordination-java.txt')
-def binaryCompatibilityCheck = tasks.register('binaryCompatibilityCheck') {
+def playgroundSmokeTest = tasks.register('playgroundSmokeTest', Test) {
     group = 'verification'
-    description = 'Checks public/protected JVM API compatibility with the previous Coordination candidate.'
-    dependsOn tasks.named('jar')
-    inputs.files(configurations.binaryCompatibilityBaseline)
-    inputs.file(tasks.named('jar').flatMap { it.archiveFile })
-    inputs.property('baselineVersion', binaryCompatibilityBaselineVersion)
-    outputs.file(binaryCompatibilityReport)
-    doLast {
-        Set<File> resolvedBaseline = configurations.binaryCompatibilityBaseline.resolve()
-        if (resolvedBaseline.size() != 1) {
-            throw new GradleException(
-                    "Expected one binary compatibility baseline JAR, found ${resolvedBaseline}")
-        }
-        File baselineJar = resolvedBaseline.iterator().next()
-        File currentJar = tasks.named('jar').get().archiveFile.get().asFile
-        Map<String, Map<String, Object>> baselineApi = readBinaryApi(baselineJar)
-        Map<String, Map<String, Object>> currentApi = readBinaryApi(currentJar)
-        def problems = new ArrayList<String>()
-
-        baselineApi.each { String className, Map<String, Object> oldClass ->
-            Map<String, Object> newClass = currentApi.get(className)
-            if (newClass == null) {
-                problems.add("${className}: public/protected class was removed")
-                return
-            }
-            int oldAccess = ((Integer) oldClass.access).intValue()
-            int newAccess = ((Integer) newClass.access).intValue()
-            if (!visibilityCompatible(oldAccess, newAccess)) {
-                problems.add("${className}: class visibility was reduced")
-            }
-            if (((oldAccess ^ newAccess) & (0x0200 | 0x2000 | 0x4000)) != 0) {
-                problems.add("${className}: class/interface/annotation/enum kind changed")
-            }
-            if ((oldAccess & 0x0010) == 0 && (newAccess & 0x0010) != 0) {
-                problems.add("${className}: class became final")
-            }
-            if ((oldAccess & 0x0400) == 0 && (newAccess & 0x0400) != 0) {
-                problems.add("${className}: class became abstract")
-            }
-            if (oldClass.superName != newClass.superName) {
-                problems.add("${className}: superclass changed from ${oldClass.superName} to ${newClass.superName}")
-            }
-            ((Set<String>) oldClass.interfaces).each { String interfaceName ->
-                if (!((Set<String>) newClass.interfaces).contains(interfaceName)) {
-                    problems.add("${className}: directly implemented interface ${interfaceName} was removed")
-                }
-            }
-
-            ['field', 'method'].each { String memberKind ->
-                Map<String, Integer> oldMembers = memberKind == 'field'
-                        ? (Map<String, Integer>) oldClass.fields
-                        : (Map<String, Integer>) oldClass.methods
-                Map<String, Integer> newMembers = memberKind == 'field'
-                        ? (Map<String, Integer>) newClass.fields
-                        : (Map<String, Integer>) newClass.methods
-                oldMembers.each { String signature, Integer oldMemberAccess ->
-                    Integer newMemberAccess = newMembers.get(signature)
-                    if (newMemberAccess == null) {
-                        problems.add("${className}: ${memberKind} ${signature} was removed or changed descriptor")
-                        return
-                    }
-                    if (!visibilityCompatible(oldMemberAccess.intValue(),
-                            newMemberAccess.intValue())) {
-                        problems.add("${className}: ${memberKind} ${signature} visibility was reduced")
-                    }
-                    incompatibleModifierChanges(oldMemberAccess.intValue(),
-                            newMemberAccess.intValue(), memberKind == 'method').each { change ->
-                        problems.add("${className}: ${memberKind} ${signature} ${change}")
-                    }
-                }
-            }
-        }
-
-        def digest = java.security.MessageDigest.getInstance('SHA-256')
-        baselineJar.withInputStream { stream ->
-            byte[] buffer = new byte[8192]
-            int read
-            while ((read = stream.read(buffer)) >= 0) {
-                if (read > 0) {
-                    digest.update(buffer, 0, read)
-                }
-            }
-        }
-        String baselineSha256 = digest.digest()
-                .collect { String.format('%02x', it & 0xff) }.join()
-        File report = binaryCompatibilityReport.get().asFile
-        report.parentFile.mkdirs()
-        report.withWriter('UTF-8') { writer ->
-            writer.writeLine("baseline=blue.coordination:blue-coordination-java:${binaryCompatibilityBaselineVersion}")
-            writer.writeLine("baselineJar=${baselineJar.name}")
-            writer.writeLine("baselineSha256=${baselineSha256}")
-            writer.writeLine("currentJar=${currentJar.name}")
-            writer.writeLine("baselineApiClasses=${baselineApi.size()}")
-            writer.writeLine("currentApiClasses=${currentApi.size()}")
-            writer.writeLine("compatible=${problems.isEmpty()}")
-            problems.sort().each { writer.writeLine("problem=${it}") }
-        }
-        if (!problems.isEmpty()) {
-            throw new GradleException(
-                    "Binary compatibility check failed with ${problems.size()} problem(s); see ${report}")
-        }
+    description = 'Runs the fast Counter, whole-request, embedded, and five-occurrence Playground smoke lane.'
+    testClassesDirs = files(
+            sourceSets.integrationTest.output.classesDirs,
+            sourceSets.scenarioTest.output.classesDirs)
+    classpath = sourceSets.scenarioTest.runtimeClasspath
+    dependsOn tasks.named(sourceSets.integrationTest.classesTaskName),
+            tasks.named(sourceSets.scenarioTest.classesTaskName)
+    filter {
+        includeTestsMatching(
+                'blue.coordination.integration.CoreBehaviorIntegrationTest.counterRoutesAliceAndBobExactlyOnceWithoutGenericSplitting')
+        includeTestsMatching(
+                'blue.coordination.integration.CoreBehaviorIntegrationTest.ordinaryPayNoteIsOneWholeInlineValue')
+        includeTestsMatching(
+                'blue.coordination.integration.ProcessEmbeddedCollectionPathsIntegrationTest.discoversAddsAndRemovesCanonicalMapMembersWithoutOrdinarySplitting')
+        includeTestsMatching(
+                'blue.coordination.integration.PlaygroundFiveOccurrenceInitializationTest.fiveOccurrencesReuseThreeSessionsAndForwardFiveInitializationEvents')
     }
 }
 
-def java8BytecodeReport = layout.buildDirectory.file(
-        'reports/bytecode/java8-bytecode.txt')
-def verifyJava8Bytecode = tasks.register('verifyJava8Bytecode') {
+def round13SourceArchiveUnitTest = tasks.register(
+        'round13SourceArchiveUnitTest', Test) {
     group = 'verification'
-    description = 'Verifies that every class in the published Coordination JAR targets Java 8 or earlier.'
-    dependsOn tasks.named('jar')
-    inputs.file(tasks.named('jar').flatMap { it.archiveFile })
-    outputs.file(java8BytecodeReport)
-    doLast {
-        File currentJar = tasks.named('jar').get().archiveFile.get().asFile
-        def versions = new TreeMap<String, Integer>()
-        def zip = new java.util.zip.ZipFile(currentJar)
-        try {
-            Collections.list(zip.entries())
-                    .findAll { entry -> !entry.directory && entry.name.endsWith('.class') }
-                    .sort { left, right -> left.name <=> right.name }
-                    .each { entry ->
-                        Map<String, Object> parsed = zip.getInputStream(entry).withCloseable { stream ->
-                            parseBinaryApiClass(stream.bytes)
-                        }
-                        versions.put(entry.name, (Integer) parsed.majorVersion)
-                    }
-        } finally {
-            zip.close()
-        }
-        def incompatible = versions.findAll { String name, Integer major -> major > 52 }
-        File report = java8BytecodeReport.get().asFile
-        report.parentFile.mkdirs()
-        report.withWriter('UTF-8') { writer ->
-            writer.writeLine("jar=${currentJar.name}")
-            writer.writeLine("classCount=${versions.size()}")
-            writer.writeLine("maximumAllowedMajorVersion=52")
-            writer.writeLine("maximumObservedMajorVersion=${versions.values().max() ?: 0}")
-            writer.writeLine("compatible=${incompatible.isEmpty()}")
-            incompatible.each { name, major ->
-                writer.writeLine("problem=${name}: major version ${major}")
-            }
-        }
-        if (!incompatible.isEmpty()) {
+    description = 'Runs the four focused Round 13 source-archive unit proofs.'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    dependsOn tasks.named(sourceSets.test.classesTaskName)
+    filter {
+        includeTestsMatching(
+                'blue.coordination.api.DocumentRevisionInitializationCausalityTest')
+        includeTestsMatching(
+                'blue.coordination.internal.DocumentAdmissionCauseTest')
+        includeTestsMatching(
+                'blue.coordination.internal.EmbeddedEpochInputInitializationCausalityTest')
+        includeTestsMatching(
+                'blue.coordination.internal.EmbeddingBindingCanonicalOrderTest')
+    }
+}
+
+def round13SourceArchiveIntegrationTest = tasks.register(
+        'round13SourceArchiveIntegrationTest', Test) {
+    group = 'verification'
+    description = 'Runs the focused Round 13 recovery, retry, and five-occurrence correctness proofs.'
+    testClassesDirs = sourceSets.integrationTest.output.classesDirs
+    classpath = sourceSets.integrationTest.runtimeClasspath
+    dependsOn tasks.named(sourceSets.integrationTest.classesTaskName)
+    filter {
+        includeTestsMatching(
+                'blue.coordination.internal.EmbeddedReceiptRetryIdentityIntegrationTest')
+        includeTestsMatching(
+                'blue.coordination.integration.PlaygroundFiveOccurrenceCorrectnessIntegrationTest')
+        includeTestsMatching(
+                'blue.coordination.integration.PlaygroundFiveOccurrenceRetryTest.retryCompletesFiveOccurrenceFanoutWithoutReinitializingChildren')
+    }
+}
+
+def round13SourceArchiveScenarioTest = tasks.register(
+        'round13SourceArchiveScenarioTest', Test) {
+    group = 'verification'
+    description = 'Runs the focused Round 13 five-occurrence scenario proof.'
+    testClassesDirs = sourceSets.scenarioTest.output.classesDirs
+    classpath = sourceSets.scenarioTest.runtimeClasspath
+    dependsOn tasks.named(sourceSets.scenarioTest.classesTaskName)
+    filter {
+        includeTestsMatching(
+                'blue.coordination.integration.PlaygroundFiveOccurrenceInitializationTest.fiveOccurrencesReuseThreeSessionsAndForwardFiveInitializationEvents')
+    }
+}
+
+def round13SourceArchiveConsumerTest = tasks.register(
+        'round13SourceArchiveConsumerTest', Test) {
+    group = 'verification'
+    description = 'Runs the public-JAR five-occurrence consumer proof.'
+    testClassesDirs = sourceSets.consumerTest.output.classesDirs
+    classpath = sourceSets.consumerTest.runtimeClasspath
+    dependsOn tasks.named(sourceSets.consumerTest.classesTaskName),
+            tasks.named('jar')
+    filter {
+        includeTestsMatching(
+                'blue.coordination.consumer.PublishedArtifactConsumerTest.fiveEmbeddedOccurrencesReuseThreeManagedDocuments')
+    }
+}
+
+tasks.register('round13SourceArchiveSmoke') {
+    group = 'verification'
+    description = 'Runs all focused Round 13 proofs required after archive extraction.'
+    dependsOn round13SourceArchiveUnitTest,
+            round13SourceArchiveIntegrationTest,
+            round13SourceArchiveScenarioTest,
+            round13SourceArchiveConsumerTest
+}
+
+def configureRound13EvidenceRuntime = { JavaExec task ->
+    task.group = 'verification'
+    task.classpath = sourceSets.scenarioTest.runtimeClasspath
+    task.mainClass =
+            'blue.coordination.integration.PlaygroundFiveOccurrenceEvidence'
+    task.dependsOn tasks.named(sourceSets.scenarioTest.classesTaskName)
+    task.javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(
+                providers.gradleProperty('testJavaVersion')
+                        .getOrElse('17') as int)
+    }
+    task.jvmArgs '-Xmx2g'
+    task.outputs.upToDateWhen { false }
+}
+
+tasks.register('round13PlaygroundSample', JavaExec) {
+    configureRound13EvidenceRuntime(delegate)
+    description = 'Writes one warmed five-occurrence JSON sample to -Dblue.coordination.round13.sample.'
+    args 'sample'
+    doFirst {
+        def output = providers.systemProperty(
+                'blue.coordination.round13.sample').orNull
+        if (output == null || output.isBlank()) {
             throw new GradleException(
-                    "Java 8 bytecode verification failed for ${incompatible.size()} class(es); see ${report}")
+                    'round13PlaygroundSample requires '
+                            + '-Dblue.coordination.round13.sample=/path/sample.json')
         }
+        systemProperty 'blue.coordination.round13.sample', output
+        systemProperty 'blue.coordination.round13.warmups',
+                providers.systemProperty(
+                        'blue.coordination.round13.warmups')
+                        .getOrElse('3')
     }
 }
 
-tasks.named('check') {
-    dependsOn binaryCompatibilityCheck, verifyJava8Bytecode
-}
-
-jmh {
-    jmhVersion = '1.37'
-    warmupIterations = 3
-    warmup = '1s'
-    iterations = 5
-    timeOnIteration = '1s'
-    fork = 2
-    profilers = testJfrEnabled
-            ? ['gc', "jfr:dir=${file("$buildDir/reports/jfr/jmh").absolutePath}"]
-            : ['gc']
-    jvmArgs = ['-Xms512m', '-Xmx2g']
-    resultFormat = 'JSON'
-    resultsFile = file("$buildDir/reports/jmh/jmh-results.json")
-}
-
-tasks.named('jmh') {
-    def jsonReport = file("$buildDir/reports/jmh/jmh-results.json")
-    def csvReport = file("$buildDir/reports/jmh/jmh-results.csv")
-    def markdownReport = file("$buildDir/reports/jmh/jmh-results.md")
-    def environmentReport = file("$buildDir/reports/jmh/environment.properties")
-    outputs.files(csvReport, markdownReport, environmentReport)
-    doLast {
-        if (!jsonReport.isFile()) {
-            throw new GradleException("JMH JSON report was not created: ${jsonReport}")
-        }
-        def results = new groovy.json.JsonSlurper().parse(jsonReport)
-        def csvCell = { Object value ->
-            '"' + String.valueOf(value == null ? '' : value).replace('"', '""') + '"'
-        }
-        def markdownCell = { Object value ->
-            String.valueOf(value == null ? '' : value).replace('|', '\\|').replace('\n', ' ')
-        }
-
-        csvReport.parentFile.mkdirs()
-        csvReport.withWriter('UTF-8') { writer ->
-            writer.writeLine('benchmark,mode,threads,forks,score,scoreError,scoreUnit,gate')
-            results.each { result ->
-                def metric = result.primaryMetric ?: [:]
-                writer.writeLine([
-                        result.benchmark,
-                        result.mode,
-                        result.threads,
-                        result.forks,
-                        metric.score,
-                        metric.scoreError,
-                        metric.scoreUnit,
-                        'NOT_CONFIGURED'
-                ].collect(csvCell).join(','))
-            }
-        }
-
-        def environment = new TreeMap<String, String>()
-        environment.put('blueCoordinationVersion', project.version.toString())
-        environment.put('blueLanguageVersion', blueLanguageVersion)
-        environment.put('gradleVersion', gradle.gradleVersion)
-        environment.put('gradleJvmMaxHeapBytes', String.valueOf(Runtime.runtime.maxMemory()))
-        environment.put('javaVendor', System.getProperty('java.vendor', 'unknown'))
-        environment.put('javaVersion', System.getProperty('java.version', 'unknown'))
-        environment.put('jmhForkJvmArgs', '-Xms512m,-Xmx2g')
-        environment.put('osArch', System.getProperty('os.arch', 'unknown'))
-        environment.put('osName', System.getProperty('os.name', 'unknown'))
-        environment.put('osVersion', System.getProperty('os.version', 'unknown'))
-        environment.put('processors', String.valueOf(Runtime.runtime.availableProcessors()))
-        environmentReport.withWriter('UTF-8') { writer ->
-            environment.each { key, value -> writer.writeLine("${key}=${value}") }
-        }
-
-        markdownReport.withWriter('UTF-8') { writer ->
-            writer.writeLine('# Coordination JMH results')
-            writer.writeLine('')
-            writer.writeLine('Environment metadata is recorded in `environment.properties`. Generic JMH hard gates are not configured; each row is marked `NOT_CONFIGURED`.')
-            writer.writeLine('')
-            writer.writeLine('| Benchmark | Mode | Threads | Forks | Score | Error | Unit | Gate |')
-            writer.writeLine('|---|---:|---:|---:|---:|---:|---|---|')
-            results.each { result ->
-                def metric = result.primaryMetric ?: [:]
-                writer.writeLine('| ' + [
-                        result.benchmark,
-                        result.mode,
-                        result.threads,
-                        result.forks,
-                        metric.score,
-                        metric.scoreError,
-                        metric.scoreUnit,
-                        'NOT_CONFIGURED'
-                ].collect(markdownCell).join(' | ') + ' |')
-            }
-        }
+tasks.register('playgroundRuntimeCampaign', JavaExec) {
+    configureRound13EvidenceRuntime(delegate)
+    description = 'Runs the opt-in 30-sample five-occurrence candidate campaign.'
+    args 'campaign'
+    doFirst {
+        systemProperty 'blue.coordination.round13.campaign',
+                providers.systemProperty(
+                        'blue.coordination.round13.campaign')
+                        .getOrElse(layout.buildDirectory.dir(
+                                'reports/round13/playground-runtime')
+                                .get().asFile.absolutePath)
+        systemProperty 'blue.coordination.round13.warmups',
+                providers.systemProperty(
+                        'blue.coordination.round13.warmups')
+                        .getOrElse('3')
+        systemProperty 'blue.coordination.round13.samples',
+                providers.systemProperty(
+                        'blue.coordination.round13.samples')
+                        .getOrElse('30')
     }
-}
-
-ext.genResourcesDir = file("$buildDir/generated-resources")
-def buildPropertiesVersion = project.version.toString()
-task generateBuildProperties {
-    ext.buildPropertiesFile = file("$genResourcesDir/blue/coordination/build.properties")
-    inputs.property('buildVersion', buildPropertiesVersion)
-    outputs.file(buildPropertiesFile)
-    doLast {
-        buildPropertiesFile.text = ("blue-coordination-java.build.version=" + buildPropertiesVersion + "\n"
-                + "blue-coordination-java.build.timestamp=" + new Date().format("yyyy-MM-dd'T'HH:mm:ssZ"))
-    }
-}
-sourceSets.main.output.dir genResourcesDir, builtBy: generateBuildProperties
-
-tasks.withType(GenerateModuleMetadata).configureEach {
-    enabled = false
 }
 
 publishing {
     publications {
-        maven(MavenPublication) {
-            groupId = 'blue.coordination'
-            artifactId = 'blue-coordination-java'
+        mavenJava(MavenPublication) {
             from components.java
-
+            artifact tasks.named('testFixturesJar')
             pom {
-                name = 'Blue Coordination Java Processor'
-                description = 'Java processors for executable Blue repository contracts.'
-                url = 'https://language.blue'
+                name = 'Blue Coordination Java'
+                description = 'Deterministic whole-object document coordination runtime.'
+                url = 'https://github.com/bluecontract/blue-coordination-java'
                 licenses {
                     license {
-                        name = 'MIT license'
-                        url = 'https://github.com/bluecontract/blue-coordination-java/blob/main/LICENSE'
+                        name = 'MIT License'
+                        url = 'https://opensource.org/license/mit'
                     }
                 }
                 developers {
                     developer {
                         name = 'Blue'
                         email = 'devsupport@timeline.blue'
+                        organization = 'Blue Company'
                     }
                 }
                 scm {
-                    url = 'https://github.com/bluecontract/blue-coordination-java.git'
-                    connection = 'scm:git:git@github.com:bluecontract/blue-coordination-java.git'
-                    developerConnection = 'scm:git:git@github.com:bluecontract/blue-coordination-java.git'
+                    url = 'https://github.com/bluecontract/blue-coordination-java'
+                    connection = 'scm:git:https://github.com/bluecontract/blue-coordination-java.git'
+                    developerConnection = 'scm:git:ssh://git@github.com/bluecontract/blue-coordination-java.git'
+                }
+                issueManagement {
+                    system = 'GitHub Issues'
+                    url = 'https://github.com/bluecontract/blue-coordination-java/issues'
                 }
             }
         }
     }
-
     repositories {
         maven {
+            name = 'staging'
             url = layout.buildDirectory.dir('staging-deploy')
-        }
-        if (!System.getenv('CI')) {
-            maven {
-                name = 'local'
-                url = uri('file:///' + new File(System.getProperty("user.home"), ".m2/repository").absolutePath)
-            }
         }
     }
 }
 
-tasks.register('sourceArchive', Zip) {
-    group = 'distribution'
-    description = 'Creates a reproducible source-only archive and SHA-256 checksum.'
-    def sourceArchiveName = "${rootProject.name}-${project.version}-source.zip"
-    def checksumFile = layout.buildDirectory.file("distributions/${sourceArchiveName}.sha256")
-    archiveFileName = sourceArchiveName
-    destinationDirectory = layout.buildDirectory.dir('distributions')
-    outputs.file(checksumFile)
-    preserveFileTimestamps = false
-    reproducibleFileOrder = true
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    from(projectDir) {
-        into("${rootProject.name}-${project.version}")
-        include '.cz.toml'
-        include '.github/**'
-        include '.gitignore'
-        include 'LICENSE'
-        include 'README.md'
-        include 'build.gradle'
-        include 'settings.gradle'
-        include 'gradle.properties'
-        include 'gradle/**'
-        include 'gradlew'
-        include 'gradlew.bat'
-        include 'docs/**'
-        include 'src/**'
-        exclude '**/.DS_Store'
-        exclude '**/*.db'
-        exclude '**/*.hprof'
-        exclude '**/*.jfr'
-        exclude '**/*.log'
-        exclude '**/*.zip'
-        exclude '**/build/**'
-        exclude '**/dumps/**'
-        exclude '**/logs/**'
-        exclude '**/node_modules/**'
-        exclude '**/recordings/**'
+tasks.named('jar') {
+    manifest {
+        attributes(
+                'Automatic-Module-Name': 'blue.coordination',
+                'Implementation-Title': 'Blue Coordination Java',
+                'Implementation-Version': project.version,
+                'Implementation-Vendor': 'Blue Company')
     }
-    doLast {
-        def archive = archiveFile.get().asFile
-        def digest = java.security.MessageDigest.getInstance('SHA-256')
-        archive.withInputStream { input ->
-            byte[] buffer = new byte[8192]
-            int read
-            while ((read = input.read(buffer)) >= 0) {
-                if (read > 0) {
-                    digest.update(buffer, 0, read)
+}
+
+signing {
+    def signingKey = providers.gradleProperty('signingKey').orNull
+    def signingPassword = providers.gradleProperty(
+            'signingPassword').orNull
+    required = { signingKey != null }
+    if (signingKey != null) {
+        useInMemoryPgpKeys(signingKey, signingPassword)
+    }
+    sign publishing.publications.mavenJava
+}
+
+if (System.getenv('CI') != null) {
+    jreleaser {
+        strict = true
+        signing {
+            pgp {
+                active = 'ALWAYS'
+                armored = true
+            }
+        }
+        project {
+            description = 'Deterministic whole-object document coordination runtime.'
+            copyright = 'Copyright 2026 Blue Company. Licensed under the MIT License'
+            languages {
+                java {
+                    version = '17'
                 }
             }
         }
-        def checksum = digest.digest().collect { String.format('%02x', it & 0xff) }.join()
-        checksumFile.get().asFile.setText(
-                "${checksum}  ${archive.name}\n", 'UTF-8')
-    }
-}
-
-def stageLocalMaven = tasks.register('stageLocalMaven') {
-    group = 'publishing'
-    description = 'Publishes the current Coordination artifact into build/staging-deploy.'
-    dependsOn tasks.named('publishMavenPublicationToMavenRepository')
-}
-
-if (System.getenv('CI')) {
-    jreleaser {
-        signing {
-            active = 'ALWAYS'
-            armored = true
-        }
-        project {
-            description = 'Java processors for executable Blue repository contracts.'
-            copyright = 'Copyright 2026 Blue Company. Licensed under the MIT License'
-        }
-
         deploy {
             maven {
                 mavenCentral {
                     sonatype {
-                        active = 'ALWAYS'
+                        active = 'RELEASE'
                         url = 'https://central.sonatype.com/api/v1/publisher'
                         applyMavenCentralRules = true
-                        snapshotSupported = true
+                        snapshotSupported = false
                         stagingRepository('build/staging-deploy')
                     }
                 }
@@ -748,11 +427,2472 @@ if (System.getenv('CI')) {
     }
 }
 
-def determineProjectVersion() {
-    def tomlFile = file('.cz.toml')
-    if (tomlFile.exists()) {
-        def toml = new groovy.toml.TomlSlurper().parse(tomlFile)
-        return toml.tool.commitizen.version + (!System.getenv('CI') ? '-SNAPSHOT' : '')
+def productionSources = fileTree('src/main/java') { include '**/*.java' }
+def forbiddenArchitectureTokens = [
+        'AutonomousLink', 'TemporalWave', 'ConsistencyMode',
+        'ObservingLink', 'CoherentLink', 'SccScheduler',
+        'SCCScheduler', 'WeakComponentPlanner'
+]
+
+tasks.register('validateProductionShape') {
+    group = 'verification'
+    description = 'Enforces the production class, line, API, and architecture budgets.'
+    inputs.files(productionSources)
+    doLast {
+        def sources = productionSources.files.sort()
+        int classes = sources.size()
+        long lines = sources.sum { it.readLines('UTF-8').size() } ?: 0L
+        def apiSources = fileTree('src/main/java/blue/coordination/api') {
+            include '**/*.java'
+        }.files
+        def failures = []
+        if (classes > 115) failures << "production classes ${classes} > 115"
+        // Round 13 transparently retains a bounded 252-line revision for the
+        // occurrence-path audit receipt, closed retry-counter vocabulary and
+        // retry-monitor producers, timestamp-consumption and attachment-
+        // timestamp guards, committed-input recovery evidence, deterministic
+        // invalid-entry preflight and terminalization, and injective binding
+        // identities. Do not minify or hide this deliberate semantic work.
+        if (lines > 25_952L) failures << "production lines ${lines} > 25952"
+        if (apiSources.size() > 16) {
+            failures << "public API types ${apiSources.size()} > 16"
+        }
+        ['engine', 'fastpath'].each { legacy ->
+            if (file("src/main/java/blue/coordination/${legacy}").exists()) {
+                failures << "legacy package remains: ${legacy}"
+            }
+        }
+        sources.each { source ->
+            String relative = projectDir.toPath().relativize(
+                    source.toPath()).toString().replace('\\', '/')
+            String body = source.getText('UTF-8')
+            if (relative.contains('/basic/') || relative.contains('/test/')) {
+                failures << "test-named production package: ${relative}"
+            }
+            if (source.name.contains('Basic') || source.name.contains('Test')) {
+                failures << "test-named production type: ${relative}"
+            }
+            if (body.contains('org.junit')
+                    || body.contains('CoordinationDocumentSplitter')) {
+                failures << "test or splitter dependency in ${relative}"
+            }
+            forbiddenArchitectureTokens.each { token ->
+                if (body.contains(token)) {
+                    failures << "forbidden architecture token ${token} in ${relative}"
+                }
+            }
+        }
+        fileTree('src/main/resources').files.each { resource ->
+            String body = resource.getText('UTF-8')
+            forbiddenArchitectureTokens.each { token ->
+                if (body.contains(token)) {
+                    failures << "forbidden architecture token ${token} in ${resource}"
+                }
+            }
+        }
+        if (!failures.empty) throw new GradleException(failures.join('; '))
+        logger.lifecycle(
+                "Production shape: ${classes} classes, ${lines} lines, "
+                        + "${apiSources.size()} public API types")
     }
-    return '0.0.0' + (!System.getenv('CI') ? '-SNAPSHOT' : '')
+}
+
+tasks.register('verifyPublicApiBoundary') {
+    group = 'verification'
+    description = 'Rejects public signatures that expose implementation packages.'
+    dependsOn tasks.named('compileJava')
+    doLast {
+        def violations = []
+        fileTree('src/main/java/blue/coordination/api') {
+            include '**/*.java'
+        }.each { source ->
+            source.eachLine('UTF-8') { line, number ->
+                if (!line.stripLeading().startsWith('import ')
+                        && line.contains('blue.coordination.internal')) {
+                    violations << "${source}:${number}"
+                }
+            }
+        }
+        fileTree('src/main/java/blue/coordination/internal') {
+            include '**/*.java'
+            exclude 'DefaultCoordinationEngine.java'
+        }.each { source ->
+            String body = source.getText('UTF-8')
+            if (body =~ /(?m)^public\s+(?:final\s+|abstract\s+)?(?:class|interface|record|enum)\s+/) {
+                violations << "public implementation type ${source}"
+            }
+        }
+        if (!violations.empty) {
+            throw new GradleException(
+                    "Internal API leakage: ${violations.join(', ')}")
+        }
+    }
+}
+
+tasks.register('dependencyPreflight') {
+    group = 'verification'
+    description = 'Resolves every release dependency from published repositories.'
+    doLast {
+        if (dependencyMode != 'published-artifact') {
+            throw new GradleException(
+                    'dependencyPreflight requires '
+                            + '-PblueDependencyMode=published-artifact')
+        }
+        def releaseDependencies = configurations.detachedConfiguration(
+                dependencies.create(
+                        'blue.language:blue-contracts-core:3.1.0-rc.20'),
+                dependencies.create('blue.repo:blue-repo-java:3.0.0-rc.21'),
+                dependencies.create('blue.bex:blue-bex-core:1.1.0-rc.3'),
+                dependencies.create(
+                        'blue.bex:blue-bex-contracts:1.1.0-rc.3'),
+                dependencies.create('org.bouncycastle:bcprov-jdk18on:1.78.1'))
+        releaseDependencies.transitive = true
+        releaseDependencies.resolutionStrategy.failOnVersionConflict()
+        releaseDependencies.resolve()
+        logger.lifecycle('All published release dependencies resolved.')
+    }
+}
+
+tasks.register('verifyArtifactContents') {
+    group = 'verification'
+    description = 'Rejects legacy, test, and fixture classes in the production JAR.'
+    dependsOn tasks.named('jar')
+    doLast {
+        def forbidden = [
+                'blue/coordination/basic/',
+                'blue/coordination/test/',
+                'blue/coordination/engine/',
+                'blue/coordination/fastpath/',
+                'myosDemoTest',
+                'CoordinationTestControl'
+        ] + forbiddenArchitectureTokens
+        def violations = []
+        zipTree(tasks.named('jar').get().archiveFile).visit { details ->
+            if (!details.directory && forbidden.any {
+                details.path.contains(it)
+            }) {
+                violations << details.path
+            }
+        }
+        if (!violations.empty) {
+            throw new GradleException(
+                    "Unsupported production JAR entries: ${violations}")
+        }
+    }
+}
+
+tasks.register('verifyPublicationPom') {
+    group = 'verification'
+    dependsOn 'generatePomFileForMavenJavaPublication'
+    doLast {
+        String pom = layout.buildDirectory.file(
+                'publications/mavenJava/pom-default.xml')
+                .get().asFile.getText('UTF-8')
+        def scopes = [:]
+        pom.split('</dependency>').each { block ->
+            def groups = (block =~ /<groupId>([^<]+)<\/groupId>/)
+                    .collect { it[1] }
+            def artifacts = (block =~ /<artifactId>([^<]+)<\/artifactId>/)
+                    .collect { it[1] }
+            def scope = (block =~ /<scope>([^<]+)<\/scope>/)
+            if (!groups.empty && !artifacts.empty) {
+                scopes[groups.last() + ':' + artifacts.last()] =
+                        scope.find() ? scope.group(1) : 'compile'
+            }
+        }
+        ['blue.language:blue-contracts-core', 'blue.bex:blue-bex-core',
+         'blue.bex:blue-bex-contracts']
+                .each { coordinate ->
+                    if (scopes[coordinate] != 'compile') {
+                        throw new GradleException(
+                                "${coordinate} must be compile scoped because public APIs expose its types")
+                    }
+                }
+        ['blue.repo:blue-repo-java', 'org.bouncycastle:bcprov-jdk18on']
+                .each { coordinate ->
+                    if (scopes[coordinate] != 'runtime') {
+                        throw new GradleException(
+                                "${coordinate} must be runtime scoped")
+                    }
+                }
+        def expectedVersions = [
+                'blue.language:blue-contracts-core': '3.1.0-rc.20',
+                'blue.repo:blue-repo-java': '3.0.0-rc.21',
+                'blue.bex:blue-bex-core': '1.1.0-rc.3',
+                'blue.bex:blue-bex-contracts': '1.1.0-rc.3',
+                'org.bouncycastle:bcprov-jdk18on': '1.78.1'
+        ]
+        expectedVersions.each { coordinate, expectedVersion ->
+            String artifact = coordinate.substring(
+                    coordinate.indexOf(':') + 1)
+            def dependency = pom.split('</dependency>').find { block ->
+                block.contains("<artifactId>${artifact}</artifactId>")
+            }
+            if (dependency == null
+                    || !dependency.contains(
+                    "<version>${expectedVersion}</version>")) {
+                throw new GradleException(
+                        "${coordinate} must use ${expectedVersion}")
+            }
+        }
+        ['MIT License', '<developers>', '<scm>', '<issueManagement>']
+                .each { marker ->
+                    if (!pom.contains(marker)) {
+                        throw new GradleException(
+                                "Publication POM is missing ${marker}")
+                    }
+                }
+        [
+                '<url>https://github.com/bluecontract/blue-coordination-java</url>',
+                '<connection>scm:git:https://github.com/bluecontract/blue-coordination-java.git</connection>',
+                '<developerConnection>scm:git:ssh://git@github.com/bluecontract/blue-coordination-java.git</developerConnection>',
+                '<url>https://github.com/bluecontract/blue-coordination-java/issues</url>'
+        ].each { marker ->
+            if (!pom.contains(marker)) {
+                throw new GradleException(
+                        "Publication POM is missing canonical repository metadata ${marker}")
+            }
+        }
+        if (pom.contains('github.com/bluecontract/blue-contract-java')) {
+            throw new GradleException(
+                    'Publication POM contains the obsolete repository URL')
+        }
+        if (pom.contains('SNAPSHOT') || pom.contains('junit')) {
+            throw new GradleException(
+                    'Release POM contains a snapshot or test dependency')
+        }
+    }
+}
+
+tasks.register('verifyReleaseMetadata') {
+    group = 'verification'
+    description = 'Validates version, legal metadata, docs, and release artifacts.'
+    dependsOn 'jar', 'sourcesJar', 'javadocJar',
+            'generatePomFileForMavenJavaPublication'
+    String configuredReleaseVersion = version.toString()
+    doLast {
+        String releaseVersion = configuredReleaseVersion
+        if (!(releaseVersion ==~ /\d+\.\d+\.\d+(?:-rc\.\d+)?/)) {
+            throw new GradleException(
+                    "Version is not a release or RC: ${releaseVersion}")
+        }
+        if (!file('LICENSE').getText('UTF-8').startsWith('MIT License')) {
+            throw new GradleException('LICENSE must contain the MIT License')
+        }
+        [
+                'README.md',
+                'START-HERE.md',
+                'CHANGELOG.md',
+                'CONTRIBUTING.md',
+                'SECURITY.md',
+                'docs/development/build-and-test.md',
+                'docs/development/test-strategy.md',
+                'docs/development/releasing.md',
+                'docs/releases/3.0.0-rc.1-test-report.md',
+                'docs/releases/3.0.0-rc.1-evidence.json',
+                'docs/releases/round11-verification.schema.json',
+                'docs/releases/round12-verification.schema.json',
+                'docs/releases/round13-verification.schema.json',
+                'scripts/round13-ab-evidence.mjs',
+                'scripts/round13-published-dependencies.gradle',
+                'scripts/run-round13-same-machine-ab.sh',
+                'docs/reference/public-api.md',
+                'docs/reference/metrics.md',
+                'docs/operations/failure-model.md'
+        ].each { required ->
+            if (!file(required).isFile()) {
+                throw new GradleException(
+                        "Required RC document is missing: ${required}")
+            }
+        }
+        def mainEntries = zipTree(tasks.named('jar').get().archiveFile)
+        if (!mainEntries.matching {
+            include 'META-INF/LICENSE'
+        }.singleFile.isFile()) {
+            throw new GradleException('Main JAR is missing META-INF/LICENSE')
+        }
+        def javadocEntries = zipTree(
+                tasks.named('javadocJar').get().archiveFile)
+        if (javadocEntries.matching {
+            include 'blue/coordination/api/CoordinationEngine.html'
+        }.isEmpty() || javadocEntries.matching {
+            include 'blue/coordination/processor/CoordinationProcessors.html'
+        }.isEmpty()) {
+            throw new GradleException(
+                    'Javadoc JAR must cover API and processor surfaces')
+        }
+    }
+}
+
+tasks.register('verifyDocumentation') {
+    group = 'verification'
+    description = 'Validates maintained docs and canonical release evidence.'
+    inputs.files(fileTree('docs') { include '**/*.md' },
+            'README.md', 'START-HERE.md', 'CHANGELOG.md',
+            'CONTRIBUTING.md', 'SECURITY.md',
+            'docs/releases/3.0.0-rc.1-evidence.json',
+            'docs/releases/round11-verification.schema.json',
+            'docs/releases/round12-verification.schema.json',
+            'docs/releases/round13-verification.schema.json',
+            'scripts/round13-ab-evidence.mjs',
+            'scripts/round13-published-dependencies.gradle',
+            'scripts/run-round13-same-machine-ab.sh',
+            productionSources)
+    doLast {
+        def failures = []
+        inputs.files.files.findAll { it.name.endsWith('.md') }.each { source ->
+            String markdown = source.getText('UTF-8')
+            def links = markdown =~ /\[[^\]]*\]\(([^)]+)\)/
+            links.each { match ->
+                String raw = match[1].trim()
+                if (raw.startsWith('http://') || raw.startsWith('https://')
+                        || raw.startsWith('mailto:') || raw.startsWith('#')) {
+                    return
+                }
+                String path = raw.split('#', 2)[0]
+                File target = new File(source.parentFile, path)
+                if (!target.exists()) {
+                    failures << "${source}: broken link ${raw}"
+                }
+            }
+        }
+        if (!failures.empty) {
+            throw new GradleException(failures.join('\n'))
+        }
+        def evidenceFile = file(
+                'docs/releases/3.0.0-rc.1-evidence.json')
+        def evidence = new groovy.json.JsonSlurper().parse(evidenceFile)
+        if (evidence.schemaVersion == '4.1.0'
+                && evidence.profile
+                == 'ROUND13_PLAYGROUND_FIVE_OCCURRENCE') {
+            def schemaFile = file(
+                    'docs/releases/round13-verification.schema.json')
+            def schema = new groovy.json.JsonSlurper().parse(schemaFile)
+            if (evidence.'$schema' != 'round13-verification.schema.json'
+                    || !['INTERIM', 'FINAL'].contains(
+                    evidence.evidenceState)
+                    || schema.'$id' != 'round13-verification.schema.json'
+                    || schema.properties.profile.const
+                    != 'ROUND13_PLAYGROUND_FIVE_OCCURRENCE'
+                    || schema.properties.status.properties
+                            .providerBackedReady.const != 'OUT_OF_SCOPE'
+                    || schema.properties.status.properties
+                            .mandateAgentReady.const != 'OUT_OF_SCOPE') {
+                failures << 'Canonical evidence has an invalid Round 13 profile or schema'
+            }
+
+            def expectedStatuses = [
+                    'temporalArchitectureReady',
+                    'inMemoryEngineWorkingReady',
+                    'playgroundCoreReady',
+                    'playgroundLatencyReady',
+                    'providerBackedReady',
+                    'mandateAgentReady',
+                    'publicRcReady'
+            ] as Set
+            def allowedReadiness = [
+                    'PASS', 'PASS_HARD_GATE', 'PENDING_VERIFICATION',
+                    'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION',
+                    'BLOCKED', 'FAIL', 'OUT_OF_SCOPE'
+            ] as Set
+            def allowedExecution = [
+                    'PASS', 'PENDING_VERIFICATION', 'FAIL'
+            ] as Set
+            if ((evidence.status.keySet() as Set) != expectedStatuses) {
+                failures << 'Round 13 evidence must contain exactly seven readiness statuses'
+            } else {
+                evidence.status.each { key, value ->
+                    if (!allowedReadiness.contains(value)) {
+                        failures << "Invalid Round 13 readiness ${key}=${value}"
+                    }
+                }
+                if (evidence.status.providerBackedReady != 'OUT_OF_SCOPE'
+                        || evidence.status.mandateAgentReady
+                        != 'OUT_OF_SCOPE') {
+                    failures << 'Round 13 provider and Mandate readiness must be OUT_OF_SCOPE'
+                }
+            }
+            if (!allowedReadiness.contains(evidence.verdict)) {
+                failures << "Invalid Round 13 verdict ${evidence.verdict}"
+            }
+            def expectedLimitedRcPolicy = [
+                    mode: 'RC_WITH_KNOWN_PERFORMANCE_LIMITATION',
+                    exactRelease: '3.0.0-rc.1',
+                    decision: 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION',
+                    performanceReleaseBlocking: false,
+                    stableReleaseEligible: false,
+                    nonPerformanceGatesRequired: true,
+                    explicitWorkflowOptInRequired: true
+            ]
+            boolean limitedRcPolicy = version.toString() == '3.0.0-rc.1'
+                    && evidence.release == version.toString()
+                    && evidence.releasePolicy == expectedLimitedRcPolicy
+            if (!limitedRcPolicy) {
+                failures << 'Round 13 RC limitation policy is missing or invalid'
+            }
+
+            Closure<String> sha256 = { byte[] bytes ->
+                java.security.MessageDigest.getInstance('SHA-256')
+                        .digest(bytes).encodeHex().toString()
+            }
+            Closure<String> relativePath = { File source ->
+                rootDir.toPath().relativize(source.toPath()).toString()
+                        .replace(File.separator, '/')
+            }
+            List<File> manifestSources = productionSources.files.sort {
+                source -> relativePath(source)
+            }
+            String manifest = manifestSources.collect { source ->
+                "${relativePath(source)} ${sha256(source.bytes)}"
+            }.join('\n')
+            String actualManifestSha256 = sha256(
+                    manifest.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+            if (evidence.source.mainSourceManifestSha256
+                    != actualManifestSha256
+                    || evidence.executionBinding.mainSourceManifestSha256
+                    != actualManifestSha256) {
+                failures << 'Round 13 main-source manifest is stale or execution binding differs'
+            }
+
+            def actualShape = [
+                    productionClasses: productionSources.files.size(),
+                    productionLines: productionSources.files.sum {
+                        it.readLines('UTF-8').size()
+                    } ?: 0L,
+                    publicApiSourceTypes: fileTree(
+                            'src/main/java/blue/coordination/api') {
+                        include '**/*.java'
+                    }.files.size()
+            ]
+            def expectedLimits = [
+                    productionClasses: 115,
+                    productionLines: 25_952,
+                    publicApiSourceTypes: 16
+            ]
+            if (evidence.shape.status != 'PASS'
+                    || evidence.shape.basis != 'STATIC_WORKTREE_SNAPSHOT'
+                    || evidence.shape.limits != expectedLimits) {
+                failures << 'Round 13 static shape or declared limits are invalid'
+            }
+            actualShape.each { key, actual ->
+                if (evidence.shape[key] != actual) {
+                    failures << "Round 13 shape ${key} is ${evidence.shape[key]}; actual is ${actual}"
+                }
+                if (actual > evidence.shape.limits[key]) {
+                    failures << "Round 13 shape ${key} exceeds its declared limit"
+                }
+            }
+            String limitReason = evidence.shape.limitRevisionReason ?: ''
+            ['25,700', '25,952', 'occurrence-path', 'retry-counter',
+             'retry-monitor', 'timestamp-consumption',
+             'attachment-timestamp', 'committed-input recovery',
+             'invalid-entry preflight', 'terminalization',
+             'injective binding identities'].each { marker ->
+                if (!limitReason.contains(marker)) {
+                    failures << "Round 13 line-limit reason lacks ${marker}"
+                }
+            }
+
+            def suiteRoots = [
+                    'test': 'src/test/java',
+                    'integrationTest': 'src/integrationTest/java',
+                    'consumerTest': 'src/consumerTest/java',
+                    'scenarioTest': 'src/scenarioTest/java'
+            ]
+            def actualSuites = suiteRoots.collectEntries { name, path ->
+                def annotated = fileTree(path) { include '**/*.java' }.files
+                        .collect { source ->
+                            [file: source, tests: (source.getText('UTF-8')
+                                    =~ /(?m)^\s*@Test\b/).count]
+                        }.findAll { it.tests > 0 }
+                [(name): [
+                        tests: annotated.sum { it.tests } ?: 0,
+                        classes: annotated.size()
+                ]]
+            }
+            if (evidence.tests.inventoryBasis != 'STATIC_SOURCE_INVENTORY'
+                    || evidence.tests.finalTreeRequired != true
+                    || !allowedExecution.contains(
+                    evidence.tests.executionStatus)
+                    || (evidence.tests.suites.collect { it.name } as Set)
+                    != (suiteRoots.keySet() as Set)) {
+                failures << 'Round 13 test inventory has an invalid shape'
+            }
+            actualSuites.each { name, actual ->
+                def recorded = evidence.tests.suites.find {
+                    it.name == name.toString()
+                }
+                if (recorded == null
+                        || recorded.tests != actual.tests
+                        || recorded.classes != actual.classes
+                        || !allowedExecution.contains(recorded.status)) {
+                    failures << "Round 13 ${name} source inventory is stale"
+                }
+            }
+            long actualTests = actualSuites.values().sum { it.tests } ?: 0L
+            long actualClasses = actualSuites.values().sum {
+                it.classes
+            } ?: 0L
+            if (evidence.tests.tests != actualTests
+                    || evidence.tests.classes != actualClasses) {
+                failures << 'Round 13 aggregate source inventory is stale'
+            }
+            def outcomeFields = ['failures', 'errors', 'skipped']
+            if (evidence.tests.executionStatus == 'PENDING_VERIFICATION') {
+                if (outcomeFields.any { evidence.tests[it] != null }
+                        || evidence.tests.suites.any { suite ->
+                            outcomeFields.any { suite[it] != null }
+                                    || suite.status != 'PENDING_VERIFICATION'
+                        }) {
+                    failures << 'Pending Round 13 tests must not contain outcome claims'
+                }
+            } else {
+                outcomeFields.each { field ->
+                    if (!(evidence.tests[field] instanceof Number)
+                            || evidence.tests.suites.any {
+                                !(it[field] instanceof Number)
+                            }
+                            || evidence.tests.suites.sum {
+                                (it[field] as Number).longValue()
+                            } != (evidence.tests[field]
+                                    as Number).longValue()) {
+                        failures << "Round 13 ${field} outcomes are incomplete or inconsistent"
+                    }
+                }
+            }
+
+            if ((evidence.runtimes.collect { it.java } as Set)
+                    != (['17', '21'] as Set)) {
+                failures << 'Round 13 requires exactly Java 17 and Java 21 lanes'
+            }
+            evidence.runtimes.each { runtime ->
+                ['test', 'integrationTest', 'consumerTest', 'scenarioTest',
+                 'releaseCheck', '--rerun-tasks',
+                 "-PtestJavaVersion=${runtime.java}"].each { marker ->
+                    if (!runtime.gate.contains(marker)) {
+                        failures << "Java ${runtime.java} gate lacks ${marker}"
+                    }
+                }
+                if (!allowedExecution.contains(runtime.status)
+                        || (runtime.status == 'PENDING_VERIFICATION'
+                        && runtime.durationSeconds != null)
+                        || (runtime.status == 'PASS'
+                        && !(runtime.durationSeconds instanceof Number))) {
+                    failures << "Java ${runtime.java} execution record is inconsistent"
+                }
+            }
+
+            def expectedProofs = [
+                    'five-occurrence-three-session-reuse': [
+                            'scenarioTest',
+                            'blue.coordination.integration.PlaygroundFiveOccurrenceInitializationTest',
+                            'fiveOccurrencesReuseThreeSessionsAndForwardFiveInitializationEvents',
+                            'scenarioTest'],
+                    'five-occurrence-five-parent-events': [
+                            'scenarioTest',
+                            'blue.coordination.integration.PlaygroundFiveOccurrenceInitializationTest',
+                            'fiveOccurrencesReuseThreeSessionsAndForwardFiveInitializationEvents',
+                            'scenarioTest'],
+                    'five-occurrence-canonical-path-order': [
+                            'scenarioTest',
+                            'blue.coordination.integration.PlaygroundFiveOccurrenceDeterminismScenarioTest',
+                            'reverseRequestInsertionOrderPreservesBlueIdsHistoriesAndEvents',
+                            'scenarioTest'],
+                    'five-occurrence-retry-exactly-once': [
+                            'integrationTest',
+                            'blue.coordination.integration.PlaygroundFiveOccurrenceRetryTest',
+                            'retryCompletesFiveOccurrenceFanoutWithoutReinitializingChildren',
+                            'integrationTest'],
+                    'five-occurrence-public-JAR-consumer': [
+                            'consumerTest',
+                            'blue.coordination.consumer.PublishedArtifactConsumerTest',
+                            'fiveEmbeddedOccurrencesReuseThreeManagedDocuments',
+                            'consumerTest'],
+                    'five-occurrence-no-generic-fragmentation': [
+                            'scenarioTest',
+                            'blue.coordination.integration.PlaygroundFiveOccurrenceInitializationTest',
+                            'fiveOccurrencesReuseThreeSessionsAndForwardFiveInitializationEvents',
+                            'scenarioTest'],
+                    'five-occurrence-host-versus-frozen-time': [
+                            'performance', null, null,
+                            'round13PlaygroundSample']
+            ]
+            if ((evidence.proofs.collect { it.id } as Set)
+                    != (expectedProofs.keySet() as Set)) {
+                failures << 'Round 13 proof set must contain the exact seven rows'
+            }
+            String buildText = file('build.gradle').getText('UTF-8')
+            evidence.proofs.each { proof ->
+                def expected = expectedProofs[proof.id]
+                if (expected != null
+                        && [proof.sourceSet, proof.testClass,
+                            proof.testMethod, proof.task] != expected) {
+                    failures << "Round 13 proof binding differs: ${proof.id}"
+                }
+                if (proof.sourceSet == 'performance') {
+                    if (!buildText.contains(
+                            "tasks.register('round13PlaygroundSample'")
+                            || !file('src/scenarioTest/java/blue/coordination/integration/PlaygroundFiveOccurrenceEvidence.java')
+                                    .isFile()) {
+                        failures << 'Round 13 performance proof target is missing'
+                    }
+                } else {
+                    String proofRoot = suiteRoots[proof.sourceSet]
+                    File proofSource = proofRoot == null ? null : file(
+                            proofRoot + '/'
+                                    + proof.testClass.replace('.', '/')
+                                    + '.java')
+                    if (proofSource == null || !proofSource.isFile()
+                            || !proofSource.getText('UTF-8').contains(
+                            proof.testMethod + '(')) {
+                        failures << "Round 13 proof target is missing: ${proof.id}"
+                    }
+                }
+                if (!allowedExecution.contains(proof.status)) {
+                    failures << "Round 13 proof has invalid status: ${proof.id}"
+                }
+            }
+
+            def campaign = evidence.performance.round13Campaign
+            def campaignStatuses = [
+                    'PASS', 'PASS_HARD_GATE',
+                    'PENDING_VERIFICATION', 'FAIL'
+            ] as Set
+            String expectedBaselineHash =
+                    '2f303afd9435937145ce7fe09eb655ff1a05ee6ed7484faea62d93544a3ccf3e'
+            if (!campaignStatuses.contains(campaign.status)
+                    || campaign.comparison != 'SAME_MACHINE_INTERLEAVED_AB'
+                    || campaign.baselineArchive != 'Archive.zip'
+                    || campaign.baselineSha256 != expectedBaselineHash
+                    || campaign.candidateTask != 'round13PlaygroundSample'
+                    || campaign.warmups != 3
+                    || campaign.requiredSamples < 30
+                    || campaign.measuredSamples < 0) {
+                failures << 'Round 13 performance campaign has invalid metadata'
+            }
+            def campaignOutputs = [campaign.runtimeMarkdown,
+                                   campaign.runtimeJson,
+                                   campaign.runtimeProvenanceJson]
+            if (campaign.status == 'PENDING_VERIFICATION') {
+                if (campaign.measuredSamples != 0
+                        || campaignOutputs.any { it != null }
+                        || campaign.pendingReason == null) {
+                    failures << 'Pending Round 13 campaign must not contain final outputs'
+                }
+            } else {
+                def expectedCampaignOutputs = [
+                        'docs/releases/evidence/round13/five-occurrence-runtime.md',
+                        'docs/releases/evidence/round13/five-occurrence-runtime.json',
+                        'docs/releases/evidence/round13/runtime-provenance.json'
+                ]
+                if (campaign.measuredSamples != 30
+                        || campaignOutputs != expectedCampaignOutputs
+                        || campaignOutputs.any { !file(it).isFile() }
+                        || campaign.pendingReason != null) {
+                    failures << 'Measured Round 13 campaign is incomplete'
+                } else {
+                    List<String> command = [
+                            'node',
+                            file('scripts/round13-ab-evidence.mjs')
+                                    .absolutePath,
+                            '--verify',
+                            '--candidate', rootDir.absolutePath,
+                            '--runtime', file(campaign.runtimeJson)
+                                    .absolutePath,
+                            '--provenance',
+                            file(campaign.runtimeProvenanceJson)
+                                    .absolutePath,
+                            '--markdown', file(campaign.runtimeMarkdown)
+                                    .absolutePath
+                    ]
+                    Process process = new ProcessBuilder(command)
+                            .directory(rootDir)
+                            .redirectErrorStream(true).start()
+                    String verification = process.inputStream
+                            .getText('UTF-8')
+                    if (process.waitFor() != 0
+                            || !verification.contains(
+                            "ROUND13_AB_VERIFIED=${campaign.status}")) {
+                        failures << ('Round 13 runtime receipt failed recomputation: '
+                                + verification.trim())
+                    }
+                }
+            }
+            def historical = evidence.performance.historicalRound12
+            if (historical.classification != 'HISTORICAL_ONLY'
+                    || historical.decisionBasis != false
+                    || !(historical.summary instanceof String)
+                    || historical.summary.isBlank()) {
+                failures << 'Round 12 measurements must remain historical only'
+            }
+
+            def expectedCounters = [
+                    'REQUEST_FRAGMENTS',
+                    'TIMELINE_ENTRY_FRAGMENTS',
+                    'ORDINARY_NODE_FRAGMENTS',
+                    'FULL_ENVIRONMENT_SCANS',
+                    'SOURCE_REPLAYS_PER_PARENT',
+                    'POST_PROCESS_FULL_PROJECTIONS',
+                    'PARENT_PROCESS_RERUNS_ON_GRAPH_RETRY',
+                    'CHILD_PROCESS_RERUNS_ON_PARENT_RETRY'
+            ] as Set
+            def counters = evidence.structuralEvidence.requiredZeroCounters
+            if ((counters.keySet() as Set) != expectedCounters
+                    || evidence.structuralEvidence.finalTreeRequired != true
+                    || !allowedExecution.contains(
+                    evidence.structuralEvidence.status)) {
+                failures << 'Round 13 structural evidence must contain the exact eight counters'
+            } else if (evidence.structuralEvidence.status
+                    == 'PENDING_VERIFICATION') {
+                if (counters.any { key, value -> value != null }) {
+                    failures << 'Pending Round 13 counters must remain unset'
+                }
+            } else if (evidence.structuralEvidence.status == 'PASS'
+                    && counters.any { key, value -> value != 0 }) {
+                failures << 'Passing Round 13 structural counters must all equal zero'
+            }
+
+            def artifactHashes = [
+                    'mainJarSha256', 'sourcesJarSha256',
+                    'javadocJarSha256', 'testFixturesJarSha256'
+            ]
+            String sha256Pattern = /^[0-9a-f]{64}$/
+            if (!allowedExecution.contains(evidence.artifacts.status)
+                    || evidence.artifacts.finalTreeRequired != true) {
+                failures << 'Round 13 artifact evidence has an invalid status'
+            } else if (evidence.artifacts.status
+                    == 'PENDING_VERIFICATION'
+                    && artifactHashes.any {
+                        evidence.artifacts[it] != null
+                    }) {
+                failures << 'Pending Round 13 artifacts must not retain hashes'
+            } else if (evidence.artifacts.status == 'PASS'
+                    && artifactHashes.any {
+                        !(evidence.artifacts[it] ==~ sha256Pattern)
+                    }) {
+                failures << 'Passing Round 13 artifacts require four hashes'
+            }
+
+            def archive = evidence.sourceArchive
+            def expectedArchiveFields = [
+                    configuration: 'CONFIGURED',
+                    finalTreeRequired: true,
+                    authoritativeVersionFile: '.cz.toml',
+                    authoritativeVersionFileIncluded: true,
+                    reproducibleFileOrder: true,
+                    preserveFileTimestamps: false,
+                    duplicatesStrategy: 'FAIL'
+            ]
+            expectedArchiveFields.each { key, value ->
+                if (archive[key] != value) {
+                    failures << "Round 13 source archive ${key} must be ${value}"
+                }
+            }
+            def expectedArchiveReceipt = [
+                    schemaId: 'blue-coordination-round13-source-archive-verification-v1',
+                    path: 'build/reports/round13/source-archive-verification.json'
+            ]
+            def expectedArchiveChecksum = [
+                    mode: 'DETACHED_SHA256_SIDECAR',
+                    path: 'build/distributions/blue-coordination-java-3.0.0-rc.1-source.zip.sha256',
+                    digest: null
+            ]
+            if (archive.verificationReceipt != expectedArchiveReceipt
+                    || archive.checksum != expectedArchiveChecksum) {
+                failures << 'Round 13 source archive must use external receipt and detached checksum authority'
+            }
+            def archiveExecutionFields = [
+                    'extractedConfiguration', 'focusedTestsStatus',
+                    'publishedArtifactSmokeBuild'
+            ]
+            if (archiveExecutionFields.any {
+                !['PASS', 'PENDING_VERIFICATION', 'FAIL',
+                  'BLOCKED_UPSTREAM'].contains(archive[it])
+            }) {
+                failures << 'Round 13 source archive has an invalid execution status'
+            }
+            if (archiveExecutionFields.any {
+                archive[it] == 'PENDING_VERIFICATION'
+            }) {
+                if (archive.pendingReason == null) {
+                    failures << 'Pending Round 13 archive must explain why'
+                }
+            } else if (archive.pendingReason != null) {
+                failures << 'Completed Round 13 archive must have no pending reason'
+            }
+            if (!['PASS', 'PENDING_VERIFICATION', 'FAIL',
+                  'BLOCKED_UPSTREAM'].contains(
+                    evidence.publicationEvidence.status)) {
+                failures << 'Round 13 publication evidence has an invalid status'
+            }
+
+            String report = file(
+                    'docs/releases/3.0.0-rc.1-test-report.md')
+                    .getText('UTF-8')
+            evidence.status.each { key, value ->
+                if (!report.contains("| `${key}` | `${value}` |")) {
+                    failures << "Canonical report differs from status ${key}"
+                }
+            }
+            expectedProofs.keySet().each { proofId ->
+                if (!report.contains("`${proofId}`")) {
+                    failures << "Canonical report lacks proof row ${proofId}"
+                }
+            }
+            if (!report.contains(actualManifestSha256)
+                    || !report.contains("**${actualClasses}**")
+                    || !report.contains("**${actualTests}**")) {
+                failures << 'Canonical report lacks current manifest or aggregate inventory'
+            }
+
+            if (evidence.evidenceState == 'INTERIM') {
+                def baseInterimStatuses = [
+                        temporalArchitectureReady: 'PENDING_VERIFICATION',
+                        inMemoryEngineWorkingReady: 'PENDING_VERIFICATION',
+                        playgroundCoreReady: 'PENDING_VERIFICATION',
+                        providerBackedReady: 'OUT_OF_SCOPE',
+                        mandateAgentReady: 'OUT_OF_SCOPE',
+                        publicRcReady: 'BLOCKED'
+                ]
+                boolean baseStatusesMatch = baseInterimStatuses.every {
+                    key, value -> evidence.status[key] == value
+                }
+                String expectedLatency = campaign.status
+                        == 'PENDING_VERIFICATION'
+                        ? 'PENDING_VERIFICATION' : campaign.status
+                if (!baseStatusesMatch
+                        || evidence.status.playgroundLatencyReady
+                        != expectedLatency
+                        || evidence.verdict != 'PENDING_VERIFICATION'
+                        || evidence.source.candidateCommit != null
+                        || evidence.source.binding
+                        != 'BASE_COMMIT_PLUS_DIRTY_WORKTREE_MANIFEST'
+                        || evidence.source.worktree != 'DIRTY'
+                        || evidence.source.dirtyReason == null
+                        || evidence.executionBinding.candidateCommit != null
+                        || evidence.executionBinding.reason == null
+                        || !report.contains(
+                        'ROUND13_INTERIM_VERIFICATION: PENDING_VERIFICATION')
+                        || report.contains('ROUND13_FINAL_VERIFICATION:')) {
+                    failures << 'Round 13 INTERIM evidence overclaims or lacks its marker'
+                }
+                if (evidence.executionBinding.kind == 'PENDING') {
+                    if (evidence.tests.executionStatus
+                            != 'PENDING_VERIFICATION'
+                            || evidence.runtimes.any {
+                                it.status != 'PENDING_VERIFICATION'
+                            }
+                            || evidence.proofs.any {
+                                it.status != 'PENDING_VERIFICATION'
+                            }
+                            || evidence.structuralEvidence.status
+                            != 'PENDING_VERIFICATION') {
+                        failures << 'Pending Round 13 binding cannot carry execution outcomes'
+                    }
+                } else if (evidence.executionBinding.kind
+                        == 'WORKTREE_EXECUTION') {
+                    if (evidence.tests.executionStatus
+                            == 'PENDING_VERIFICATION'
+                            || evidence.runtimes.any {
+                                it.status == 'PENDING_VERIFICATION'
+                                        || !(it.durationSeconds
+                                        instanceof Number)
+                            }
+                            || evidence.proofs.any {
+                                it.status == 'PENDING_VERIFICATION'
+                            }
+                            || evidence.structuralEvidence.status
+                            == 'PENDING_VERIFICATION') {
+                        failures << 'Round 13 WORKTREE_EXECUTION must contain complete lane outcomes'
+                    }
+                } else {
+                    failures << 'Round 13 INTERIM execution binding must be PENDING or WORKTREE_EXECUTION'
+                }
+            } else {
+                def publishableLatency = [
+                        'PASS', 'PASS_HARD_GATE'
+                ] as Set
+                boolean normalLatencyDecision = evidence.verdict == 'PASS'
+                        && publishableLatency.contains(
+                        evidence.status.playgroundLatencyReady)
+                        && evidence.status.publicRcReady == 'PASS'
+                        && publishableLatency.contains(campaign.status)
+                        && evidence.proofs.every { it.status == 'PASS' }
+                        && report.contains(
+                        'ROUND13_FINAL_VERIFICATION: PASS')
+                boolean limitedLatencyDecision = limitedRcPolicy
+                        && evidence.verdict
+                        == 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION'
+                        && evidence.status.playgroundLatencyReady
+                        == 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION'
+                        && evidence.status.publicRcReady
+                        == 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION'
+                        && campaign.status == 'PENDING_VERIFICATION'
+                        && campaign.measuredSamples == 0
+                        && campaign.runtimeMarkdown == null
+                        && campaign.runtimeJson == null
+                        && campaign.runtimeProvenanceJson == null
+                        && campaign.pendingReason instanceof String
+                        && !campaign.pendingReason.isBlank()
+                        && evidence.proofs.every {
+                            it.status == 'PASS'
+                                    || (it.id
+                                    == 'five-occurrence-host-versus-frozen-time'
+                                    && it.status == 'PENDING_VERIFICATION')
+                        }
+                        && report.contains(
+                        'ROUND13_FINAL_VERIFICATION: '
+                                + 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION')
+                if (!(normalLatencyDecision || limitedLatencyDecision)
+                        || evidence.source.candidateCommit == null
+                        || evidence.source.binding != 'CANDIDATE_COMMIT'
+                        || evidence.source.worktree != 'CLEAN'
+                        || evidence.source.dirtyReason != null
+                        || evidence.executionBinding.kind
+                        != 'CANDIDATE_COMMIT_EXECUTION'
+                        || evidence.executionBinding.candidateCommit
+                        != evidence.source.candidateCommit
+                        || evidence.status.temporalArchitectureReady != 'PASS'
+                        || evidence.status.inMemoryEngineWorkingReady != 'PASS'
+                        || evidence.status.playgroundCoreReady != 'PASS'
+                        || evidence.status.providerBackedReady != 'OUT_OF_SCOPE'
+                        || evidence.status.mandateAgentReady != 'OUT_OF_SCOPE'
+                        || evidence.tests.executionStatus != 'PASS'
+                        || evidence.tests.failures != 0
+                        || evidence.tests.errors != 0
+                        || evidence.tests.skipped != 0
+                        || evidence.tests.suites.any {
+                            it.status != 'PASS' || it.failures != 0
+                                    || it.errors != 0 || it.skipped != 0
+                        }
+                        || evidence.runtimes.any { it.status != 'PASS' }
+                        || evidence.structuralEvidence.status != 'PASS'
+                        || evidence.artifacts.status != 'PASS'
+                        || archiveExecutionFields.any {
+                            archive[it] != 'PASS'
+                        }
+                        || evidence.publicationEvidence.status != 'PASS'
+                        || report.contains('ROUND13_INTERIM_VERIFICATION:')) {
+                    failures << 'Round 13 FINAL evidence is incomplete'
+                }
+            }
+            [
+                    'docs/releases/3.0.0-rc.1-round13-test-report.md',
+                    'docs/releases/3.0.0-rc.1-round13-evidence.json'
+            ].each { duplicate ->
+                if (file(duplicate).exists()) {
+                    failures << "Duplicate Round 13 evidence surface remains: ${duplicate}"
+                }
+            }
+            if (!failures.empty) {
+                throw new GradleException(failures.join('\n'))
+            }
+            return
+        }
+        if (evidence.schemaVersion == '3.0.0'
+                && evidence.profile == 'ROUND12_INITIALIZATION_LIFECYCLE') {
+            if (evidence.'$schema' != 'round12-verification.schema.json'
+                    || !['INTERIM', 'FINAL'].contains(
+                    evidence.evidenceState)) {
+                failures << 'Canonical evidence has an invalid Round 12 profile'
+            }
+            def expectedStatuses = [
+                    'temporalArchitectureReady',
+                    'inMemoryEngineWorkingReady',
+                    'providerBackedReady',
+                    'mandateAgentReady',
+                    'playgroundLatencyReady',
+                    'publicRcReady'
+            ] as Set
+            def allowedStatuses = [
+                    'PASS', 'PASS_HARD_GATE', 'PENDING_VERIFICATION',
+                    'BLOCKED', 'BLOCKED_SCOPE', 'BLOCKED_UPSTREAM', 'FAIL'
+            ] as Set
+            def allowedExecutionStatuses = [
+                    'PASS', 'PENDING_VERIFICATION', 'FAIL'
+            ] as Set
+            if ((evidence.status.keySet() as Set) != expectedStatuses) {
+                failures << 'Round 12 evidence must contain six readiness statuses'
+            } else {
+                evidence.status.each { key, value ->
+                    if (!allowedStatuses.contains(value)) {
+                        failures << "Invalid readiness status ${key}=${value}"
+                    }
+                }
+            }
+            if (!allowedStatuses.contains(evidence.verdict)) {
+                failures << "Invalid Round 12 verdict ${evidence.verdict}"
+            }
+
+            Closure<String> sha256 = { byte[] bytes ->
+                java.security.MessageDigest.getInstance('SHA-256')
+                        .digest(bytes).encodeHex().toString()
+            }
+            Closure<String> relativePath = { File source ->
+                rootDir.toPath().relativize(source.toPath()).toString()
+                        .replace(File.separator, '/')
+            }
+            List<File> manifestSources = productionSources.files.sort {
+                source -> relativePath(source)
+            }
+            String manifest = manifestSources.collect { source ->
+                "${relativePath(source)} ${sha256(source.bytes)}"
+            }.join('\n')
+            String actualManifestSha256 = sha256(
+                    manifest.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+            if (evidence.source.mainSourceManifestSha256
+                    != actualManifestSha256) {
+                failures << 'Round 12 main-source manifest is stale'
+            }
+
+            def actualShape = [
+                    productionClasses: productionSources.files.size(),
+                    productionLines: productionSources.files.sum {
+                        it.readLines('UTF-8').size()
+                    } ?: 0L,
+                    publicApiSourceTypes: fileTree(
+                            'src/main/java/blue/coordination/api') {
+                        include '**/*.java'
+                    }.files.size()
+            ]
+            if (evidence.shape.status != 'PASS'
+                    || evidence.shape.basis != 'STATIC_WORKTREE_SNAPSHOT') {
+                failures << 'Round 12 static worktree shape must PASS'
+            }
+            actualShape.each { key, actual ->
+                if (evidence.shape[key] != actual) {
+                    failures << "Production shape ${key} is "
+                            + "${evidence.shape[key]}; actual is ${actual}"
+                }
+                if (actual > evidence.shape.limits[key]) {
+                    failures << "Production shape ${key} exceeds its limit"
+                }
+            }
+
+            def suiteRoots = [
+                    test: 'src/test/java',
+                    integrationTest: 'src/integrationTest/java',
+                    consumerTest: 'src/consumerTest/java',
+                    scenarioTest: 'src/scenarioTest/java'
+            ]
+            def actualSuites = suiteRoots.collectEntries { name, path ->
+                def annotated = fileTree(path) { include '**/*.java' }.files
+                        .collect { source ->
+                            [file: source, tests: (source.getText('UTF-8')
+                                    =~ /(?m)^\s*@Test\b/).count]
+                        }.findAll { it.tests > 0 }
+                [(name): [
+                        tests: annotated.sum { it.tests } ?: 0,
+                        classes: annotated.size()
+                ]]
+            }
+            if (evidence.tests.inventoryBasis != 'STATIC_SOURCE_INVENTORY'
+                    || evidence.tests.finalTreeRequired != true
+                    || !allowedExecutionStatuses.contains(
+                    evidence.tests.executionStatus)
+                    || (evidence.tests.suites.collect { it.name } as Set)
+                    != (suiteRoots.keySet() as Set)) {
+                failures << 'Round 12 test inventory has an invalid shape'
+            }
+            actualSuites.each { name, actual ->
+                def recorded = evidence.tests.suites.find {
+                    it.name == name.toString()
+                }
+                if (recorded == null
+                        || recorded.tests != actual.tests
+                        || recorded.classes != actual.classes) {
+                    failures << "Round 12 ${name} inventory is stale"
+                }
+            }
+            long actualTests = actualSuites.values().sum { it.tests } ?: 0L
+            long actualClasses = actualSuites.values().sum { it.classes } ?: 0L
+            if (evidence.tests.tests != actualTests
+                    || evidence.tests.classes != actualClasses) {
+                failures << 'Round 12 aggregate test inventory is stale'
+            }
+            def testOutcomeFields = ['failures', 'errors', 'skipped']
+            if (evidence.tests.executionStatus != 'PENDING_VERIFICATION') {
+                testOutcomeFields.each { field ->
+                    if (evidence.tests[field] instanceof Number
+                            && evidence.tests.suites.every {
+                                it[field] instanceof Number
+                            }) {
+                        long total = evidence.tests.suites.sum {
+                            (it[field] as Number).longValue()
+                        }
+                        if (total != (evidence.tests[field]
+                                as Number).longValue()) {
+                            failures << "Round 12 ${field} total is inconsistent"
+                        }
+                    }
+                }
+            }
+
+            if ((evidence.runtimes.collect { it.java } as Set)
+                    != (['17', '21'] as Set)) {
+                failures << 'Round 12 requires Java 17 and Java 21 lanes'
+            }
+            evidence.runtimes.each { runtime ->
+                if (!allowedExecutionStatuses.contains(runtime.status)) {
+                    failures << "Java ${runtime.java} has invalid status"
+                } else if (!runtime.gate.contains(
+                        "-PtestJavaVersion=${runtime.java}")) {
+                    failures << "Java ${runtime.java} gate lacks its toolchain"
+                }
+            }
+
+            def expectedProofs = [
+                    'shared-game-single-initialization': [
+                            'scenarioTest',
+                            'blue.coordination.integration.NbaSharedGameLifecycleAcrossHostsTest',
+                            'laterAndPostFinalHostsReuseGameAndReceiveRetainedLifecycleEvents'],
+                    'later-host-receives-initialization-event': [
+                            'scenarioTest',
+                            'blue.coordination.integration.NbaSharedGameLifecycleAcrossHostsTest',
+                            'laterAndPostFinalHostsReuseGameAndReceiveRetainedLifecycleEvents'],
+                    'dynamic-path-activation': [
+                            'integrationTest',
+                            'blue.coordination.integration.DynamicProcessEmbeddedPathActivationTest',
+                            'addingProcessEmbeddedPathInitializesExistingInlineDocument'],
+                    'dynamic-collection-activation': [
+                            'scenarioTest',
+                            'blue.coordination.integration.DynamicProcessEmbeddedCollectionActivationTest',
+                            'collectionMembersInitializeByCanonicalPathNotInsertionOrBlueIdOrder'],
+                    'canonical-code-point-order': [
+                            'test',
+                            'blue.coordination.internal.EmbeddingBindingCanonicalOrderTest',
+                            'supplementaryCodePointUsesCanonicalTextOrderRatherThanUtf16Order'],
+                    'initialization-retry-idempotency': [
+                            'integrationTest',
+                            'blue.coordination.integration.InitializationRetryIdempotencyTest',
+                            'retryPublishesOneChildInitializationWithoutRepeatingParentOperation']
+            ]
+            if ((evidence.proofs.collect { it.id } as Set)
+                    != (expectedProofs.keySet() as Set)) {
+                failures << 'Round 12 proof set must contain the exact six rows'
+            }
+            evidence.proofs.each { proof ->
+                def expected = expectedProofs[proof.id]
+                if (expected != null
+                        && [proof.sourceSet, proof.testClass,
+                            proof.testMethod] != expected) {
+                    failures << "Round 12 proof binding differs: ${proof.id}"
+                }
+                String proofRoot = suiteRoots[proof.sourceSet]
+                File proofSource = proofRoot == null ? null : file(
+                        proofRoot + '/' + proof.testClass.replace('.', '/')
+                                + '.java')
+                if (proofSource == null || !proofSource.isFile()
+                        || !proofSource.getText('UTF-8').contains(
+                        proof.testMethod + '(')) {
+                    failures << "Round 12 proof target is missing: ${proof.id}"
+                }
+                if (!allowedExecutionStatuses.contains(proof.status)) {
+                    failures << "Round 12 proof has invalid status: ${proof.id}"
+                }
+            }
+
+            def historical = evidence.performance.historicalRound11Baseline
+            def campaign = evidence.performance.round12Campaign
+            def nbaEvidence = campaign.nbaLifecycleEvidence
+            def sameScenarioP95 = campaign.sameScenarioP95
+            def performanceStatuses = [
+                    'PASS', 'PASS_HARD_GATE', 'PENDING_VERIFICATION', 'FAIL'
+            ] as Set
+            if (!performanceStatuses.contains(campaign.status)
+                    || !allowedExecutionStatuses.contains(nbaEvidence.status)
+                    || !performanceStatuses.contains(sameScenarioP95.status)
+                    || campaign.preferredHostP95RegressionPercent
+                    > campaign.hardHostP95RegressionPercent) {
+                failures << 'Round 12 performance has invalid status'
+            }
+            def publishablePerformance = ['PASS', 'PASS_HARD_GATE'] as Set
+            String expectedCampaignStatus
+            if (nbaEvidence.status == 'FAIL'
+                    || sameScenarioP95.status == 'FAIL') {
+                expectedCampaignStatus = 'FAIL'
+            } else if (nbaEvidence.status == 'PASS'
+                    && publishablePerformance.contains(
+                    sameScenarioP95.status)) {
+                expectedCampaignStatus = sameScenarioP95.status
+            } else {
+                expectedCampaignStatus = 'PENDING_VERIFICATION'
+            }
+            if (campaign.status != expectedCampaignStatus) {
+                failures << 'Round 12 aggregate performance status is inconsistent'
+            }
+            if (historical.classification != 'HISTORICAL_BASELINE_ONLY'
+                    || historical.profile != 'ROUND11_READINESS_CLOSURE'
+                    || historical.sameSourceAsRound12 != false) {
+                failures << 'Round 11 performance must remain historical baseline only'
+            }
+            def retainedHostBaselines = [
+                    warmOrdinary: 15.571d,
+                    warmPayNotePlusParent: 46.645d,
+                    threeLayerRestaurantProduct: 54.696d
+            ]
+            def round11ObservedHosts = [
+                    warmOrdinary: 19.537833d,
+                    warmPayNotePlusParent: 53.719583d,
+                    threeLayerRestaurantProduct: 61.540792d
+            ]
+            retainedHostBaselines.each { key, baseline ->
+                if (Math.abs((historical
+                        .promptRetainedBaselineSingleRunMs[key].host as double)
+                        - baseline) > 0.000001d
+                        || Math.abs((historical
+                        .round11ObservedSingleRunMs[key].host as double)
+                        - round11ObservedHosts[key]) > 0.000001d) {
+                    failures << "Historical host baseline differs: ${key}"
+                }
+            }
+            if (sameScenarioP95.repeatedP95Rows != null) {
+                if ((sameScenarioP95.repeatedP95Rows.keySet() as Set)
+                        != (retainedHostBaselines.keySet() as Set)) {
+                    failures << 'Round 12 p95 requires the exact three scenarios'
+                }
+                boolean preferredPass = true
+                boolean hardPass = true
+                retainedHostBaselines.each { key, baseline ->
+                    def row = sameScenarioP95.repeatedP95Rows[key]
+                    if (row == null || !(row.round12P95Ms instanceof Number)
+                            || !(row.baselineHostMs instanceof Number)
+                            || Math.abs((row.baselineHostMs as double)
+                            - baseline) > 0.000001d) {
+                        failures << "Round 12 p95 row is incomplete: ${key}"
+                        preferredPass = false
+                        hardPass = false
+                    } else {
+                        double regression = ((row.round12P95Ms as double)
+                                / baseline - 1.0d) * 100.0d
+                        String preferred = regression
+                                <= campaign.preferredHostP95RegressionPercent
+                                ? 'PASS' : 'MISS'
+                        String hard = regression
+                                <= campaign.hardHostP95RegressionPercent
+                                ? 'PASS' : 'FAIL'
+                        if (!(row.regressionPercent instanceof Number)
+                                || Math.abs(regression
+                                - (row.regressionPercent as double)) > 0.0001d
+                                || row.preferredGate != preferred
+                                || row.hardGate != hard) {
+                            failures << "Round 12 p95 gate differs: ${key}"
+                        }
+                        preferredPass &= preferred == 'PASS'
+                        hardPass &= hard == 'PASS'
+                    }
+                }
+                String measuredStatus = !hardPass ? 'FAIL'
+                        : preferredPass ? 'PASS' : 'PASS_HARD_GATE'
+                if (sameScenarioP95.status != measuredStatus) {
+                    failures << 'Round 12 p95 aggregate status differs'
+                }
+            }
+            historical.evidenceFiles.each { key, reference ->
+                File retained = new File(evidenceFile.parentFile,
+                        reference.path.toString())
+                if (!retained.isFile()
+                        || sha256(retained.bytes)
+                        != reference.sha256) {
+                    failures << "Historical Round 11 evidence differs: "
+                            + reference.path
+                }
+            }
+            Closure<List<File>> verifyEvidenceFiles = {
+                references, String label ->
+                    references.collect { reference ->
+                        File measured = new File(evidenceFile.parentFile,
+                                reference.path.toString())
+                        if (!measured.isFile()
+                                || sha256(measured.bytes)
+                                != reference.sha256) {
+                            failures << "${label} evidence differs: "
+                                    + reference.path
+                        }
+                        measured
+                    }
+            }
+            List<File> nbaFiles = verifyEvidenceFiles(
+                    nbaEvidence.evidenceFiles, 'Round 12 NBA')
+            verifyEvidenceFiles(sameScenarioP95.evidenceFiles,
+                    'Round 12 p95')
+            if (nbaEvidence.status != 'PENDING_VERIFICATION') {
+                nbaFiles.findAll { it.isFile() }.each { measured ->
+                    def nba = new groovy.json.JsonSlurper().parse(measured)
+                    if (nba.schemaVersion != 'round12-nba-evidence-v1'
+                            || nba.status != 'MEASURED_SINGLE_SCENARIO'
+                            || nba.sourceState.mainSourceManifestSha256
+                            != evidence.source.mainSourceManifestSha256
+                            || (nbaEvidence.status == 'PASS'
+                            && nba.forbiddenCounters.any {
+                                key, value -> value != 0
+                            })) {
+                        failures << 'Round 12 NBA evidence is inconsistent: '
+                                + measured
+                    }
+                }
+            }
+
+            def expectedZeroCounters = [
+                    'REQUEST_FRAGMENTS', 'TIMELINE_ENTRY_FRAGMENTS',
+                    'ORDINARY_NODE_FRAGMENTS', 'FULL_ENVIRONMENT_SCANS',
+                    'SOURCE_REPLAYS_PER_PARENT',
+                    'POST_PROCESS_FULL_PROJECTIONS',
+                    'PARENT_PROCESS_RERUNS_ON_GRAPH_RETRY',
+                    'CHILD_PROCESS_RERUNS_ON_PARENT_RETRY'
+            ] as Set
+            if ((evidence.structuralEvidence.requiredZeroCounters.keySet()
+                    as Set) != expectedZeroCounters) {
+                failures << 'Round 12 structural evidence needs eight counters'
+            }
+            if (!allowedExecutionStatuses.contains(
+                    evidence.structuralEvidence.status)
+                    || !allowedExecutionStatuses.contains(
+                    evidence.artifacts.status)) {
+                failures << 'Round 12 structural/artifact status is invalid'
+            }
+            def artifactHashes = [
+                    'mainJarSha256', 'sourcesJarSha256',
+                    'javadocJarSha256', 'testFixturesJarSha256'
+            ]
+            def sha256Pattern = ~/[0-9a-f]{64}/
+            def expectedArchiveTests = [
+                    'blue.coordination.api.DocumentRevisionInitializationCausalityTest',
+                    'blue.coordination.internal.DocumentAdmissionCauseTest',
+                    'blue.coordination.internal.EmbeddedEpochInputInitializationCausalityTest',
+                    'blue.coordination.internal.EmbeddingBindingCanonicalOrderTest'
+            ] as Set
+            if (evidence.sourceArchive.configuration != 'CONFIGURED'
+                    || evidence.sourceArchive.authoritativeVersionFile
+                    != '.cz.toml'
+                    || evidence.sourceArchive.authoritativeVersionFileIncluded
+                    != true
+                    || evidence.sourceArchive.reproducibleFileOrder != true
+                    || evidence.sourceArchive.preserveFileTimestamps != false
+                    || evidence.sourceArchive.duplicatesStrategy != 'FAIL'
+                    || (evidence.sourceArchive.focusedTests as Set)
+                    != expectedArchiveTests
+                    || evidence.sourceArchive.detachedHashEvidence.mode
+                    != 'DETACHED_POST_BUILD_SIDECAR'
+                    || evidence.sourceArchive.detachedHashEvidence
+                    .embeddedInSourceArchive != false
+                    || evidence.sourceArchive.detachedHashEvidence.sidecarPath
+                    != "build/distributions/blue-coordination-java-${version}"
+                    + '-source.zip.sha256') {
+                failures << 'Round 12 source-archive configuration is incomplete'
+            }
+
+            def timelineCapability = evidence.capabilities.find {
+                it.id == 'generic-timeline-entry-document-target'
+            }
+            if (timelineCapability == null
+                    || timelineCapability.blocker != false
+                    || evidence.blockers.any {
+                        it.id == 'generic-timeline-entry-document-target'
+                    }) {
+                failures << 'Generic Timeline targeting must remain optional'
+            }
+            if (!evidence.blockers.any {
+                it.id == 'provider-mandate-resolver'
+            }) {
+                failures << 'Provider-backed Mandate resolver must remain a blocker'
+            }
+
+            String report = file(
+                    'docs/releases/3.0.0-rc.1-test-report.md')
+                    .getText('UTF-8')
+            expectedStatuses.each { key ->
+                if (!report.contains(
+                        "| `${key}` | `${evidence.status[key]}` |")) {
+                    failures << "Canonical report/evidence status differs for ${key}"
+                }
+            }
+            expectedProofs.keySet().each { proof ->
+                if (!report.contains("`${proof}`")) {
+                    failures << "Canonical report omits proof ${proof}"
+                }
+            }
+            List<String> reportLines = report.readLines()
+            evidence.proofs.each { proof ->
+                String row = reportLines.find {
+                    it.contains("| `${proof.id}` |")
+                }
+                if (row == null
+                        || !row.endsWith("| `${proof.status}` |")) {
+                    failures << "Canonical proof status differs: ${proof.id}"
+                }
+            }
+            evidence.runtimes.each { runtime ->
+                String row = reportLines.find {
+                    it.startsWith("| Java ${runtime.java} |")
+                }
+                if (row == null || !row.contains("| `${runtime.status}` |")) {
+                    failures << "Canonical runtime status differs: Java "
+                            + runtime.java
+                }
+            }
+            evidence.tests.suites.each { suite ->
+                String row = reportLines.find {
+                    it.contains("(`${suite.name}`)")
+                }
+                if (row == null
+                        || !row.contains("| ${suite.classes} | ${suite.tests} |")
+                        || !row.endsWith("| `${suite.status}` |")) {
+                    failures << "Canonical test inventory differs: ${suite.name}"
+                }
+            }
+            String totalRow = reportLines.find { it.startsWith('| **Total** |') }
+            if (totalRow == null
+                    || !totalRow.contains("**${evidence.tests.classes}**")
+                    || !totalRow.contains("**${evidence.tests.tests}**")
+                    || !totalRow.contains(
+                    "**`${evidence.tests.executionStatus}`**")) {
+                failures << 'Canonical aggregate test inventory differs'
+            }
+            if (!report.contains(evidence.source.mainSourceManifestSha256)) {
+                failures << 'Canonical report omits the main-source manifest'
+            }
+
+            boolean interim = evidence.evidenceState == 'INTERIM'
+            if (interim) {
+                def requiredInterimStatuses = [
+                        temporalArchitectureReady: 'PENDING_VERIFICATION',
+                        inMemoryEngineWorkingReady: 'PENDING_VERIFICATION',
+                        providerBackedReady: 'BLOCKED_SCOPE',
+                        mandateAgentReady: 'BLOCKED_UPSTREAM',
+                        playgroundLatencyReady: 'PENDING_VERIFICATION',
+                        publicRcReady: 'BLOCKED'
+                ]
+                if (evidence.verdict != 'PENDING_VERIFICATION'
+                        || evidence.status != requiredInterimStatuses) {
+                    failures << 'Round 12 INTERIM verdict/status set is inconsistent'
+                }
+                if (evidence.source.candidateCommit != null
+                        || evidence.source.binding
+                        != 'BASE_COMMIT_PLUS_DIRTY_WORKTREE_MANIFEST'
+                        || evidence.source.worktree != 'DIRTY'
+                        || !evidence.source.dirtyReason) {
+                    failures << 'Round 12 INTERIM source binding is inconsistent'
+                }
+                def executionStatuses = [
+                        evidence.tests.executionStatus,
+                        evidence.performance.round12Campaign.status,
+                        evidence.performance.round12Campaign
+                                .nbaLifecycleEvidence.status,
+                        evidence.performance.round12Campaign
+                                .sameScenarioP95.status,
+                        evidence.structuralEvidence.status,
+                        evidence.artifacts.status,
+                        evidence.sourceArchive.extractedConfiguration,
+                        evidence.sourceArchive.focusedTestsStatus,
+                        evidence.sourceArchive.publishedArtifactSmokeBuild,
+                        evidence.sourceArchive.detachedHashEvidence.status,
+                        evidence.publicationEvidence.status
+                ] + evidence.runtimes.collect { it.status }
+                executionStatuses.addAll(evidence.proofs.collect { it.status })
+                boolean hasWorktreeResults = executionStatuses.any {
+                    it != 'PENDING_VERIFICATION'
+                }
+                if (evidence.executionBinding.kind == 'PENDING') {
+                    if (hasWorktreeResults
+                            || evidence.executionBinding
+                            .mainSourceManifestSha256 != null
+                            || evidence.executionBinding.candidateCommit != null) {
+                        failures << 'Pending execution binding contains results'
+                    }
+                } else if (evidence.executionBinding.kind
+                        == 'WORKTREE_EXECUTION') {
+                    if (evidence.executionBinding.mainSourceManifestSha256
+                            != evidence.source.mainSourceManifestSha256
+                            || evidence.executionBinding.candidateCommit != null) {
+                        failures << 'Worktree results are not manifest-bound'
+                    }
+                } else {
+                    failures << 'INTERIM evidence has an invalid execution binding'
+                }
+                def resultFields = ['failures', 'errors', 'skipped']
+                if (evidence.tests.executionStatus
+                        == 'PENDING_VERIFICATION') {
+                    if (resultFields.any { evidence.tests[it] != null }
+                            || evidence.tests.suites.any {
+                                it.status != 'PENDING_VERIFICATION'
+                                        || resultFields.any { field ->
+                                            it[field] != null
+                                        }
+                            }) {
+                        failures << 'Pending test results contain measurements'
+                    }
+                } else if (resultFields.any {
+                    !(evidence.tests[it] instanceof Number)
+                } || evidence.tests.suites.any { suite ->
+                    suite.status == 'PENDING_VERIFICATION'
+                            || resultFields.any {
+                                !(suite[it] instanceof Number)
+                            }
+                }) {
+                    failures << 'Measured worktree test results are incomplete'
+                } else if (evidence.tests.executionStatus == 'PASS'
+                        && (resultFields.any { evidence.tests[it] != 0 }
+                        || evidence.tests.suites.any { suite ->
+                            suite.status != 'PASS'
+                                    || resultFields.any { suite[it] != 0 }
+                        })) {
+                    failures << 'Passing worktree test results are inconsistent'
+                }
+                if (evidence.runtimes.any { runtime ->
+                    runtime.status == 'PENDING_VERIFICATION'
+                            ? runtime.durationSeconds != null
+                            : !(runtime.durationSeconds instanceof Number)
+                            || runtime.durationSeconds <= 0
+                }) {
+                    failures << 'Worktree runtime duration/status is inconsistent'
+                }
+                if (nbaEvidence.status == 'PENDING_VERIFICATION'
+                        ? !nbaEvidence.evidenceFiles.empty
+                        : nbaEvidence.evidenceFiles.empty) {
+                    failures << 'Round 12 NBA evidence status is inconsistent'
+                }
+                if (sameScenarioP95.status == 'PENDING_VERIFICATION') {
+                    if (sameScenarioP95.singleRunMs != null
+                            || sameScenarioP95.repeatedP95Rows != null
+                            || !sameScenarioP95.evidenceFiles.empty) {
+                        failures << 'Pending Round 12 p95 evidence is not empty'
+                    }
+                } else if (sameScenarioP95.singleRunMs == null
+                        || sameScenarioP95.repeatedP95Rows == null
+                        || sameScenarioP95.evidenceFiles.empty) {
+                    failures << 'Measured Round 12 p95 evidence is incomplete'
+                }
+                if (evidence.structuralEvidence.status
+                        == 'PENDING_VERIFICATION') {
+                    if (evidence.structuralEvidence.requiredZeroCounters.any {
+                        key, value -> value != null
+                    }) {
+                        failures << 'Pending structural counters are not null'
+                    }
+                } else if (evidence.structuralEvidence
+                        .requiredZeroCounters.any {
+                            key, value -> !(value instanceof Number)
+                        }) {
+                    failures << 'Measured structural counters are incomplete'
+                } else if (evidence.structuralEvidence.status == 'PASS'
+                        && evidence.structuralEvidence.requiredZeroCounters.any {
+                            key, value -> value != 0
+                        }) {
+                    failures << 'Passing structural counters are not zero'
+                }
+                if (evidence.artifacts.status == 'PENDING_VERIFICATION') {
+                    if (artifactHashes.any {
+                        evidence.artifacts[it] != null
+                    }) {
+                        failures << 'Pending artifact hashes are not null'
+                    }
+                } else if (artifactHashes.any {
+                    !(evidence.artifacts[it] ==~ sha256Pattern)
+                }) {
+                    failures << 'Measured artifact hashes are incomplete'
+                }
+                def archiveStatuses = [
+                        evidence.sourceArchive.extractedConfiguration,
+                        evidence.sourceArchive.focusedTestsStatus,
+                        evidence.sourceArchive.publishedArtifactSmokeBuild,
+                        evidence.sourceArchive.detachedHashEvidence.status
+                ]
+                if (archiveStatuses.any { it == 'PENDING_VERIFICATION' }
+                        ? !evidence.sourceArchive.pendingReason
+                        : evidence.sourceArchive.pendingReason != null) {
+                    failures << 'Worktree source-archive state is inconsistent'
+                }
+                if (evidence.publicationEvidence.status
+                        == 'PENDING_VERIFICATION'
+                        ? evidence.publicationEvidence.durationSeconds != null
+                        : !(evidence.publicationEvidence.durationSeconds
+                        instanceof Number)) {
+                    failures << 'Worktree publication result is inconsistent'
+                }
+                if (!report.contains(
+                        'ROUND12_INTERIM_VERIFICATION: PENDING_VERIFICATION')
+                        || report.contains('ROUND12_FINAL_VERIFICATION:')) {
+                    failures << 'Canonical report lacks the INTERIM marker'
+                }
+            } else {
+                def sha1Pattern = ~/[0-9a-f]{40}/
+                if (!(evidence.source.candidateCommit ==~ sha1Pattern)
+                        || evidence.source.binding != 'CANDIDATE_COMMIT'
+                        || evidence.source.worktree != 'CLEAN'
+                        || evidence.source.dirtyReason != null
+                        || evidence.executionBinding.kind
+                        != 'CANDIDATE_COMMIT_EXECUTION'
+                        || evidence.executionBinding.candidateCommit
+                        != evidence.source.candidateCommit
+                        || evidence.executionBinding.mainSourceManifestSha256
+                        != evidence.source.mainSourceManifestSha256) {
+                    failures << 'Round 12 FINAL source binding is inconsistent'
+                }
+                def resultFields = ['failures', 'errors', 'skipped']
+                if (evidence.tests.executionStatus
+                        == 'PENDING_VERIFICATION'
+                        || resultFields.any {
+                            !(evidence.tests[it] instanceof Number)
+                        } || evidence.tests.suites.any { suite ->
+                            suite.status == 'PENDING_VERIFICATION'
+                                    || resultFields.any {
+                                        !(suite[it] instanceof Number)
+                                    }
+                        }) {
+                    failures << 'Round 12 FINAL test results are incomplete'
+                }
+                if (evidence.runtimes.any {
+                    it.status == 'PENDING_VERIFICATION'
+                            || !(it.durationSeconds instanceof Number)
+                            || it.durationSeconds <= 0
+                } || evidence.proofs.any {
+                    it.status == 'PENDING_VERIFICATION'
+                }) {
+                    failures << 'Round 12 FINAL lanes/proofs are incomplete'
+                }
+                if (campaign.status == 'PENDING_VERIFICATION'
+                        || nbaEvidence.status == 'PENDING_VERIFICATION'
+                        || nbaEvidence.evidenceFiles.empty
+                        || sameScenarioP95.status == 'PENDING_VERIFICATION'
+                        || sameScenarioP95.singleRunMs == null
+                        || sameScenarioP95.repeatedP95Rows == null
+                        || sameScenarioP95.evidenceFiles.empty) {
+                    failures << 'Round 12 FINAL performance is incomplete'
+                }
+                if (evidence.structuralEvidence.status
+                        == 'PENDING_VERIFICATION'
+                        || evidence.structuralEvidence.requiredZeroCounters.any {
+                            key, value -> !(value instanceof Number)
+                        }) {
+                    failures << 'Round 12 FINAL counters are incomplete'
+                }
+                if (evidence.artifacts.status == 'PENDING_VERIFICATION'
+                        || artifactHashes.any {
+                            !(evidence.artifacts[it] ==~ sha256Pattern)
+                        }) {
+                    failures << 'Round 12 FINAL artifact hashes are incomplete'
+                }
+                if ([evidence.sourceArchive.extractedConfiguration,
+                     evidence.sourceArchive.focusedTestsStatus,
+                     evidence.sourceArchive.publishedArtifactSmokeBuild,
+                     evidence.sourceArchive.detachedHashEvidence.status]
+                        .any { it == 'PENDING_VERIFICATION' }
+                        || evidence.sourceArchive.pendingReason != null) {
+                    failures << 'Round 12 FINAL source archive is incomplete'
+                }
+                if (evidence.publicationEvidence.status
+                        == 'PENDING_VERIFICATION'
+                        || !(evidence.publicationEvidence.durationSeconds
+                        instanceof Number)) {
+                    failures << 'Round 12 FINAL publication is incomplete'
+                }
+                if (!report.contains(
+                        "ROUND12_FINAL_VERIFICATION: ${evidence.verdict}")
+                        || report.contains('ROUND12_INTERIM_VERIFICATION:')) {
+                    failures << 'Canonical report lacks the FINAL marker'
+                }
+            }
+            [
+                    'docs/releases/3.0.0-rc.1-round11-test-report.md',
+                    'docs/releases/3.0.0-rc.1-round11-evidence.json',
+                    'docs/releases/3.0.0-rc.1-round12-test-report.md',
+                    'docs/releases/3.0.0-rc.1-round12-evidence.json'
+            ].each { duplicate ->
+                if (file(duplicate).exists()) {
+                    failures << "Duplicate release evidence surface remains: ${duplicate}"
+                }
+            }
+            if (!failures.empty) {
+                throw new GradleException(failures.join('\n'))
+            }
+            return
+        }
+        failures << 'Canonical evidence must use the Round 12 profile'
+        if (!failures.empty) {
+            throw new GradleException(failures.join('\n'))
+        }
+    }
+}
+
+tasks.register('verifySourceArchiveHygiene') {
+    group = 'verification'
+    description = 'Protects the self-contained source-release boundary.'
+    inputs.files('.cz.toml', '.gitattributes', 'build.gradle')
+    String configuredArchiveVersion = version.toString()
+    doLast {
+        String versionSource = file('.cz.toml').getText('UTF-8')
+        def declaredVersions = versionSource =~
+                /(?m)^version = "([^"]+)"$/
+        if (!declaredVersions.find()
+                || declaredVersions.group(1) != configuredArchiveVersion
+                || declaredVersions.find()) {
+            throw new GradleException(
+                    '.cz.toml must contain one authoritative project version')
+        }
+        String attributes = file('.gitattributes').getText('UTF-8')
+        [
+                '*.zip export-ignore',
+                'build/** export-ignore',
+                '.gradle/** export-ignore',
+                '__MACOSX/** export-ignore',
+                '._* export-ignore',
+                '*.jfr export-ignore',
+                '*.hprof export-ignore'
+        ].each { rule ->
+            if (!attributes.contains(rule)) {
+                throw new GradleException(
+                        "Source archive rule is missing: ${rule}")
+            }
+        }
+    }
+}
+
+def sourceArchiveIncludes = [
+        '.cz.toml', '.gitattributes', '.github/**', '.gitignore',
+        'CHANGELOG.md', 'CONTRIBUTING.md', 'LICENSE', 'README.md',
+        'SECURITY.md', 'START-HERE.md', 'build.gradle', 'docs/**',
+        'gradle/**', 'gradle.lockfile', 'gradle.properties', 'gradlew',
+        'gradlew.bat', 'scripts/**', 'settings.gradle', 'src/**'
+]
+def sourceArchiveExcludes = [
+        '**/.git/**', '**/.gradle/**', '**/.idea/**', '**/build/**',
+        '**/out/**', '**/*.zip', '**/__MACOSX/**', '**/._*',
+        '**/.DS_Store', '**/*.class', '**/*.jfr', '**/*.hprof',
+        '**/hs_err_pid*.log', '**/replay_pid*.log'
+]
+
+def coordinationSourceArchive = tasks.register(
+        'coordinationSourceArchive', Zip) {
+    group = 'distribution'
+    description = 'Creates the self-contained Coordination source archive.'
+    archiveFileName = "blue-coordination-java-${version}-source.zip"
+    destinationDirectory = layout.buildDirectory.dir('distributions')
+    includeEmptyDirs = false
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+    duplicatesStrategy = org.gradle.api.file.DuplicatesStrategy.FAIL
+    into("blue-coordination-java-${version}") {
+        from(rootDir) {
+            include sourceArchiveIncludes
+            exclude sourceArchiveExcludes
+            filesMatching('gradlew') { permissions { unix(0755) } }
+        }
+    }
+}
+
+def sourceArchiveChecksum = tasks.register(
+        'coordinationSourceArchiveChecksum') {
+    group = 'distribution'
+    description = 'Writes the source archive SHA-256 sidecar.'
+    dependsOn coordinationSourceArchive
+    def archive = coordinationSourceArchive.flatMap { it.archiveFile }
+    def sidecar = archive.map { it.asFile.toPath().resolveSibling(
+            it.asFile.name + '.sha256').toFile() }
+    inputs.file(archive)
+    outputs.file(sidecar)
+    doLast {
+        File sourceArchive = archive.get().asFile
+        String hash = java.security.MessageDigest.getInstance('SHA-256')
+                .digest(sourceArchive.bytes).encodeHex().toString()
+        sidecar.get().setText("${hash}  ${sourceArchive.name}\n", 'UTF-8')
+    }
+}
+
+def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
+    group = 'verification'
+    description = 'Extracts, configures, and runs the focused Round 13 archive proofs.'
+    dependsOn sourceArchiveChecksum
+    inputs.file(coordinationSourceArchive.flatMap { it.archiveFile })
+    inputs.property('dependencyMode', dependencyMode)
+    inputs.property('testJavaVersion', providers.gradleProperty(
+            'testJavaVersion').getOrElse('17'))
+    outputs.dir(layout.buildDirectory.dir('source-archive-smoke'))
+    def verificationReceipt = layout.buildDirectory.file(
+            'reports/round13/source-archive-verification.json')
+    outputs.file(verificationReceipt)
+    doLast {
+        File sourceArchive = coordinationSourceArchive.get()
+                .archiveFile.get().asFile
+        def zip = new java.util.zip.ZipFile(sourceArchive)
+        try {
+            java.util.Collections.list(zip.entries()).each { entry ->
+                String path = entry.name.replace('\\', '/')
+                List<String> segments = path.split('/').findAll()
+                String leaf = segments.empty ? '' : segments.last()
+                String lower = path.toLowerCase(java.util.Locale.ROOT)
+                if (lower.endsWith('.zip')
+                        || lower.endsWith('.class')
+                        || segments.any { segment ->
+                            ['build', 'out', '.gradle', '__macosx'].contains(
+                                    segment.toLowerCase(
+                                            java.util.Locale.ROOT))
+                        }
+                        || leaf.startsWith('._')
+                        || leaf.equalsIgnoreCase('.DS_Store')) {
+                    throw new GradleException(
+                            "Forbidden source-archive entry: ${path}")
+                }
+            }
+        } finally {
+            zip.close()
+        }
+        File smokeRoot = layout.buildDirectory.dir(
+                'source-archive-smoke').get().asFile
+        delete smokeRoot
+        copy {
+            from zipTree(coordinationSourceArchive.get()
+                    .archiveFile.get().asFile)
+            into smokeRoot
+        }
+        File extracted = new File(
+                smokeRoot, "blue-coordination-java-${version}")
+        if (!new File(extracted, '.cz.toml').isFile()) {
+            throw new GradleException(
+                    'Extracted source archive is missing .cz.toml')
+        }
+        def forbidden = fileTree(extracted) {
+            include '**/*.zip', '**/__MACOSX/**', '**/._*',
+                    '**/.DS_Store', '**/build/**'
+        }.files
+        if (!forbidden.empty) {
+            throw new GradleException(
+                    "Forbidden source-archive entries: ${forbidden}")
+        }
+        boolean windows = System.getProperty('os.name').toLowerCase(
+                java.util.Locale.ROOT).contains('windows')
+        File wrapper = new File(extracted, windows ? 'gradlew.bat' : 'gradlew')
+        if (!windows && !wrapper.canExecute()) {
+            throw new GradleException(
+                    'Extracted source archive gradlew is not executable')
+        }
+        List<String> command = windows
+                ? ['cmd', '/d', '/c', wrapper.absolutePath]
+                : [wrapper.absolutePath]
+        command.addAll([
+                '--no-daemon', '--max-workers=1',
+                'help', 'round13SourceArchiveSmoke',
+                '-PtestJavaVersion=' + providers.gradleProperty(
+                        'testJavaVersion').getOrElse('17')
+        ])
+        if (localDependencies) {
+            command.addAll([
+                    '-PblueDependencyMode=local-composite',
+                    '-PblueBexCompositePath=' + file(providers.gradleProperty(
+                            'blueBexCompositePath').getOrElse(
+                            '../blue-bex-java')).canonicalPath,
+                    '-PblueRepositoryCompositePath=' + file(
+                            providers.gradleProperty(
+                                    'blueRepositoryCompositePath').getOrElse(
+                                    '../blue-repository-java')).canonicalPath
+            ])
+        } else {
+            command.add('-PblueDependencyMode=published-artifact')
+            if (publishedRepository != null) {
+                command.add('-PbluePublishedRepository='
+                        + uri(publishedRepository).toString())
+            }
+        }
+        Process process = new ProcessBuilder(command)
+                .directory(extracted).redirectErrorStream(true).start()
+        process.inputStream.eachLine { logger.lifecycle(it) }
+        if (process.waitFor() != 0) {
+            throw new GradleException(
+                    'Extracted source archive smoke build failed')
+        }
+        File sidecar = new File(
+                sourceArchive.parentFile, sourceArchive.name + '.sha256')
+        String archiveHash = java.security.MessageDigest
+                .getInstance('SHA-256').digest(sourceArchive.bytes)
+                .encodeHex().toString()
+        if (!sidecar.isFile() || !sidecar.getText('UTF-8')
+                .startsWith(archiveHash + '  ' + sourceArchive.name)) {
+            throw new GradleException(
+                    'Extracted source archive detached checksum differs')
+        }
+        File receipt = verificationReceipt.get().asFile
+        receipt.parentFile.mkdirs()
+        def receiptValue = [
+                schemaId: 'blue-coordination-round13-source-archive-verification-v1',
+                archiveName: sourceArchive.name,
+                archiveSha256: archiveHash,
+                checksumMode: 'DETACHED_SHA256_SIDECAR',
+                checksumPath: rootDir.toPath().relativize(
+                        sidecar.toPath()).toString().replace('\\', '/'),
+                dependencyMode: dependencyMode,
+                java: providers.gradleProperty(
+                        'testJavaVersion').getOrElse('17'),
+                extractedConfiguration: 'PASS',
+                focusedTestsStatus: 'PASS',
+                publishedArtifactSmokeBuild: localDependencies
+                        ? 'PENDING_VERIFICATION' : 'PASS',
+                focusedTasks: [
+                        'round13SourceArchiveUnitTest',
+                        'round13SourceArchiveIntegrationTest',
+                        'round13SourceArchiveScenarioTest',
+                        'round13SourceArchiveConsumerTest'
+                ]
+        ]
+        receipt.setText(groovy.json.JsonOutput.prettyPrint(
+                groovy.json.JsonOutput.toJson(receiptValue)) + '\n',
+                'UTF-8')
+    }
+}
+
+tasks.register('verifyPublishedModeIsolation') {
+    group = 'verification'
+    description = 'Proves published mode is the default and has no Git or sibling checks.'
+    inputs.files('settings.gradle', 'build.gradle')
+    doLast {
+        String settings = file('settings.gradle').getText('UTF-8')
+        String buildScript = file('build.gradle').getText('UTF-8')
+        if (settings.contains('ProcessBuilder') || settings.contains("'git'")) {
+            throw new GradleException(
+                    'Ordinary settings must not execute Git')
+        }
+        if (!settings.contains(".getOrElse('published-artifact')")
+                || !buildScript.contains(
+                ".getOrElse('published-artifact')")) {
+            throw new GradleException(
+                    'Published artifacts must remain the default dependency mode')
+        }
+        if (!settings.contains("dependencyMode == 'local-composite'")) {
+            throw new GradleException(
+                    'Local composite inclusion is not mode-gated')
+        }
+    }
+}
+
+tasks.register('verifyTestArchitecture') {
+    group = 'verification'
+    description = 'Protects release-owned test depth and JAR-only consumer isolation.'
+    def suites = [
+            unit: fileTree('src/test/java') { include '**/*Test.java' },
+            integration: fileTree('src/integrationTest/java') {
+                include '**/*Test.java'
+            },
+            consumer: fileTree('src/consumerTest/java') {
+                include '**/*Test.java'
+            },
+            scenario: fileTree('src/scenarioTest/java') {
+                include '**/*Test.java'
+            }
+    ]
+    inputs.files(suites.values())
+    inputs.file('build.gradle')
+    dependsOn tasks.named('jar')
+    doLast {
+        def minimumTests = [unit: 175, integration: 24,
+                            consumer: 5, scenario: 2]
+        def failures = []
+        suites.each { name, sources ->
+            int methods = sources.files.sum { source ->
+                (source.getText('UTF-8') =~ /(?m)^\s*@Test\b/).count
+            } ?: 0
+            if (methods < minimumTests[name]) {
+                failures << "${name} has ${methods} @Test methods; "
+                        + "minimum is ${minimumTests[name]}"
+            }
+            logger.lifecycle(
+                    "${name} tests: ${sources.files.size()} classes, "
+                            + "${methods} methods")
+        }
+
+        String integrationSources = fileTree('src/integrationTest/java') {
+            include '**/*.java'
+        }.files.collect { it.getText('UTF-8') }.join('\n')
+        ['BasicTestMetrics', 'RuntimeComparisonWriter', 'LatencySeries']
+                .each { historical ->
+                    if (integrationSources.contains(historical)) {
+                        failures << "release tests depend on historical metric "
+                                + "support ${historical}"
+                    }
+                }
+        if (integrationSources.contains('blue.coordination.basic')) {
+            failures << 'release tests retain the historical basic package'
+        }
+
+        fileTree('src/consumerTest/java') { include '**/*.java' }
+                .each { source ->
+                    String body = source.getText('UTF-8')
+                    ['blue.coordination.internal',
+                     'blue.coordination.processor',
+                     'blue.coordination.integration']
+                            .each { forbidden ->
+                                if (body.contains(forbidden)) {
+                                    failures << "consumer imports ${forbidden}: "
+                                            + source
+                                }
+                            }
+                }
+        Set<File> mainOutputs = sourceSets.main.output.files.collect {
+            it.canonicalFile
+        } as Set
+        Set<File> consumerClasspath = sourceSets.consumerTest
+                .compileClasspath.files.collect { it.canonicalFile } as Set
+        if (!mainOutputs.intersect(consumerClasspath).empty) {
+            failures << 'consumer compile classpath contains main source outputs'
+        }
+        File mainJar = tasks.named('jar').get().archiveFile.get().asFile
+                .canonicalFile
+        if (!consumerClasspath.contains(mainJar)) {
+            failures << 'consumer compile classpath does not contain the built JAR'
+        }
+        String historicalProject = '../blue-' + 'basic'
+        if (file('build.gradle').getText('UTF-8').contains(
+                historicalProject)) {
+            failures << "release build depends on ${historicalProject}"
+        }
+        if (!failures.empty) {
+            throw new GradleException(failures.join('; '))
+        }
+    }
+}
+
+tasks.register('productionizationCheck') {
+    group = 'verification'
+    dependsOn 'build', 'validateProductionShape',
+            'verifyPublicApiBoundary', 'verifyArtifactContents',
+            'verifyPublicationPom', 'verifyPublishedModeIsolation',
+            'verifyReleaseMetadata', 'verifyDocumentation',
+            'verifySourceArchiveHygiene', 'scenarioTest',
+            'verifyTestArchitecture', extractedSourceArchive
+}
+
+tasks.register('releaseCheck') {
+    group = 'verification'
+    description = 'Runs the production, API, artifact, and publication gates.'
+    dependsOn 'build', 'validateProductionShape', 'verifyPublicApiBoundary',
+            'verifyArtifactContents', 'verifyPublicationPom',
+            'verifyPublishedModeIsolation', 'verifyReleaseMetadata',
+            'verifyDocumentation', 'verifySourceArchiveHygiene', 'test',
+            'integrationTest', 'consumerTest', 'scenarioTest',
+            'verifyTestArchitecture', extractedSourceArchive
+}
+
+def round13Readiness = tasks.register('verifyRound13Readiness') {
+    group = 'verification'
+    description = 'Requires FINAL, complete Round 13 Playground evidence before staging.'
+    inputs.files('docs/releases/3.0.0-rc.1-test-report.md',
+            'docs/releases/3.0.0-rc.1-evidence.json',
+            'docs/releases/round13-verification.schema.json')
+    dependsOn sourceArchiveChecksum, extractedSourceArchive,
+            'verifyDocumentation',
+            'jar', 'sourcesJar', 'javadocJar', 'testFixturesJar'
+    doLast {
+        String report = file(
+                'docs/releases/3.0.0-rc.1-test-report.md')
+                .getText('UTF-8')
+        def evidence = new groovy.json.JsonSlurper().parse(
+                file('docs/releases/3.0.0-rc.1-evidence.json'))
+        File sourceArchive = coordinationSourceArchive.get()
+                .archiveFile.get().asFile
+        File sourceArchiveSidecar = new File(
+                sourceArchive.parentFile, sourceArchive.name + '.sha256')
+        String sourceArchiveHash = java.security.MessageDigest
+                .getInstance('SHA-256').digest(sourceArchive.bytes)
+                .encodeHex().toString()
+        boolean detachedHashMatches = sourceArchiveSidecar.isFile()
+                && sourceArchiveSidecar.getText('UTF-8')
+                .startsWith(sourceArchiveHash + '  ' + sourceArchive.name)
+        def publishableLatency = ['PASS', 'PASS_HARD_GATE'] as Set
+        Closure<Boolean> containsUnfinalized
+        containsUnfinalized = { value, String field = null ->
+            if (field != 'duplicatesStrategy'
+                    && ['PENDING_VERIFICATION', 'FAIL', 'BLOCKED',
+                        'BLOCKED_UPSTREAM'].contains(value)) {
+                return true
+            }
+            if (value instanceof Map) {
+                return value.any { key, nested ->
+                    containsUnfinalized(nested, key as String)
+                }
+            }
+            if (value instanceof List) {
+                return value.any { containsUnfinalized(it, field) }
+            }
+            return false
+        }
+
+        Closure<String> gitOutput = { String... arguments ->
+            def command = ['git']
+            command.addAll(arguments as List)
+            Process process = new ProcessBuilder(command)
+                    .directory(rootDir).start()
+            String stdout = process.inputStream.getText('UTF-8')
+            String stderr = process.errorStream.getText('UTF-8')
+            if (process.waitFor() != 0) {
+                throw new GradleException("Git failed: ${stderr}")
+            }
+            stdout.trim()
+        }
+        String actualHead = gitOutput('rev-parse', 'HEAD')
+        String actualStatus = gitOutput(
+                'status', '--porcelain', '--untracked-files=normal')
+        Process ancestorProcess = new ProcessBuilder(
+                'git', 'merge-base', '--is-ancestor',
+                evidence.source.candidateCommit ?: 'INVALID', actualHead)
+                .directory(rootDir).start()
+        boolean testedCommitIsAncestor = ancestorProcess.waitFor() == 0
+        Closure<String> sha256 = { byte[] bytes ->
+            java.security.MessageDigest.getInstance('SHA-256')
+                    .digest(bytes).encodeHex().toString()
+        }
+        Closure<String> relativeSourcePath = { File source ->
+            rootDir.toPath().relativize(source.toPath()).toString()
+                    .replace(File.separator, '/')
+        }
+        String currentSourceManifest = productionSources.files.sort {
+            source -> relativeSourcePath(source)
+        }.collect { source ->
+            "${relativeSourcePath(source)} ${sha256(source.bytes)}"
+        }.join('\n')
+        boolean testedSourceStillExact = sha256(currentSourceManifest.getBytes(
+                java.nio.charset.StandardCharsets.UTF_8))
+                == evidence.source.mainSourceManifestSha256
+        String sha256Pattern = /^[0-9a-f]{64}$/
+        String sha1Pattern = /^[0-9a-f]{40}$/
+        def artifactTasks = [
+                mainJarSha256: 'jar',
+                sourcesJarSha256: 'sourcesJar',
+                javadocJarSha256: 'javadocJar',
+                testFixturesJarSha256: 'testFixturesJar'
+        ]
+        boolean artifactHashesMatch = artifactTasks.every {
+            evidenceKey, taskName ->
+                File artifact = tasks.named(taskName).get()
+                        .archiveFile.get().asFile
+                String actualHash = java.security.MessageDigest
+                        .getInstance('SHA-256').digest(artifact.bytes)
+                        .encodeHex().toString()
+                (evidence.artifacts[evidenceKey] ==~ sha256Pattern)
+                        && evidence.artifacts[evidenceKey] == actualHash
+        }
+        def campaign = evidence.performance.round13Campaign
+        def campaignProvenance = campaign.runtimeProvenanceJson
+                && file(campaign.runtimeProvenanceJson).isFile()
+                ? new groovy.json.JsonSlurper().parse(
+                file(campaign.runtimeProvenanceJson)) : [:]
+        def expectedLimitedRcPolicy = [
+                mode: 'RC_WITH_KNOWN_PERFORMANCE_LIMITATION',
+                exactRelease: '3.0.0-rc.1',
+                decision: 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION',
+                performanceReleaseBlocking: false,
+                stableReleaseEligible: false,
+                nonPerformanceGatesRequired: true,
+                explicitWorkflowOptInRequired: true
+        ]
+        boolean limitedRcPolicy = version.toString() == '3.0.0-rc.1'
+                && evidence.release == version.toString()
+                && evidence.releasePolicy == expectedLimitedRcPolicy
+        boolean latencyExceptionOptIn = providers.gradleProperty(
+                'allowRound13LatencyException').orNull == 'true'
+        boolean normalLatencyDecision = evidence.verdict == 'PASS'
+                && publishableLatency.contains(
+                evidence.status.playgroundLatencyReady)
+                && evidence.status.publicRcReady == 'PASS'
+                && publishableLatency.contains(campaign.status)
+                && campaignProvenance.candidate?.implementationHead
+                == evidence.source.candidateCommit
+                && campaignProvenance.candidate?.worktreeStatusSha256
+                == java.security.MessageDigest.getInstance('SHA-256')
+                .digest(new byte[0]).encodeHex().toString()
+                && campaign.comparison == 'SAME_MACHINE_INTERLEAVED_AB'
+                && campaign.requiredSamples >= 30
+                && campaign.measuredSamples >= campaign.requiredSamples
+                && [campaign.runtimeMarkdown, campaign.runtimeJson,
+                    campaign.runtimeProvenanceJson].every {
+                    it instanceof String && file(it).isFile()
+                }
+                && campaign.pendingReason == null
+                && evidence.proofs.every { it.status == 'PASS' }
+        boolean limitedLatencyDecision = latencyExceptionOptIn
+                && limitedRcPolicy
+                && evidence.verdict
+                == 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION'
+                && evidence.status.playgroundLatencyReady
+                == 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION'
+                && evidence.status.publicRcReady
+                == 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION'
+                && campaign.status == 'PENDING_VERIFICATION'
+                && campaign.comparison == 'SAME_MACHINE_INTERLEAVED_AB'
+                && campaign.requiredSamples >= 30
+                && campaign.measuredSamples == 0
+                && campaign.runtimeMarkdown == null
+                && campaign.runtimeJson == null
+                && campaign.runtimeProvenanceJson == null
+                && campaign.pendingReason instanceof String
+                && !campaign.pendingReason.isBlank()
+                && evidence.proofs.every {
+                    it.status == 'PASS'
+                            || (it.id
+                            == 'five-occurrence-host-versus-frozen-time'
+                            && it.status == 'PENDING_VERIFICATION')
+                }
+        def finalizedEvidenceScope = evidence
+        if (limitedLatencyDecision) {
+            finalizedEvidenceScope = new LinkedHashMap(evidence)
+            finalizedEvidenceScope.status = evidence.status.findAll {
+                key, ignored -> key != 'playgroundLatencyReady'
+            }
+            finalizedEvidenceScope.performance = new LinkedHashMap(
+                    evidence.performance)
+            finalizedEvidenceScope.performance.remove('round13Campaign')
+            finalizedEvidenceScope.proofs = evidence.proofs.findAll {
+                it.id != 'five-occurrence-host-versus-frozen-time'
+            }
+        }
+        File archiveReceiptFile = file(
+                'build/reports/round13/source-archive-verification.json')
+        def archiveReceipt = archiveReceiptFile.isFile()
+                ? new groovy.json.JsonSlurper().parse(archiveReceiptFile)
+                : [:]
+        boolean archiveReceiptMatches = archiveReceipt.schemaId
+                == 'blue-coordination-round13-source-archive-verification-v1'
+                && archiveReceipt.archiveName == sourceArchive.name
+                && archiveReceipt.archiveSha256 == sourceArchiveHash
+                && archiveReceipt.dependencyMode == 'published-artifact'
+                && archiveReceipt.extractedConfiguration == 'PASS'
+                && archiveReceipt.focusedTestsStatus == 'PASS'
+                && archiveReceipt.publishedArtifactSmokeBuild == 'PASS'
+        if (evidence.schemaVersion != '4.1.0'
+                || evidence.profile
+                != 'ROUND13_PLAYGROUND_FIVE_OCCURRENCE'
+                || evidence.evidenceState != 'FINAL'
+                || !(normalLatencyDecision || limitedLatencyDecision)
+                || !(evidence.source.candidateCommit ==~ sha1Pattern)
+                || !(testedCommitIsAncestor || testedSourceStillExact)
+                || evidence.source.binding != 'CANDIDATE_COMMIT'
+                || evidence.source.worktree != 'CLEAN'
+                || evidence.source.dirtyReason != null
+                || !actualStatus.isEmpty()
+                || evidence.executionBinding.kind
+                != 'CANDIDATE_COMMIT_EXECUTION'
+                || evidence.executionBinding.candidateCommit
+                != evidence.source.candidateCommit
+                || evidence.executionBinding.mainSourceManifestSha256
+                != evidence.source.mainSourceManifestSha256
+                || evidence.executionBinding.reason != null
+                || evidence.status.temporalArchitectureReady != 'PASS'
+                || evidence.status.inMemoryEngineWorkingReady != 'PASS'
+                || evidence.status.playgroundCoreReady != 'PASS'
+                || evidence.status.providerBackedReady != 'OUT_OF_SCOPE'
+                || evidence.status.mandateAgentReady != 'OUT_OF_SCOPE'
+                || evidence.tests.executionStatus != 'PASS'
+                || evidence.tests.failures != 0
+                || evidence.tests.errors != 0
+                || evidence.tests.skipped != 0
+                || evidence.tests.suites.any {
+                    it.status != 'PASS' || it.failures != 0
+                            || it.errors != 0 || it.skipped != 0
+                }
+                || evidence.shape.status != 'PASS'
+                || evidence.artifacts.status != 'PASS'
+                || !artifactHashesMatch
+                || evidence.runtimes.any { it.status != 'PASS' }
+                || evidence.structuralEvidence.status != 'PASS'
+                || evidence.structuralEvidence.requiredZeroCounters.any {
+                    key, value -> value != 0
+                }
+                || evidence.sourceArchive.extractedConfiguration != 'PASS'
+                || evidence.sourceArchive.focusedTestsStatus != 'PASS'
+                || evidence.sourceArchive.publishedArtifactSmokeBuild != 'PASS'
+                || evidence.sourceArchive.verificationReceipt.path
+                != 'build/reports/round13/source-archive-verification.json'
+                || evidence.sourceArchive.checksum.mode
+                != 'DETACHED_SHA256_SIDECAR'
+                || evidence.sourceArchive.checksum.path
+                != 'build/distributions/' + sourceArchive.name + '.sha256'
+                || evidence.sourceArchive.checksum.digest != null
+                || evidence.sourceArchive.pendingReason != null
+                || !archiveReceiptMatches
+                || !detachedHashMatches
+                || evidence.publicationEvidence.status != 'PASS'
+                || !(evidence.publicationEvidence.durationSeconds
+                        instanceof Number)
+                || !evidence.blockers.empty
+                || containsUnfinalized(finalizedEvidenceScope)
+                || (normalLatencyDecision
+                        && report.contains('PENDING_VERIFICATION'))
+                || report.contains('ROUND13_INTERIM_VERIFICATION:')
+                || (normalLatencyDecision && !report.contains(
+                        'ROUND13_FINAL_VERIFICATION: PASS'))
+                || (limitedLatencyDecision && !report.contains(
+                        'ROUND13_FINAL_VERIFICATION: '
+                                + 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION'))) {
+            throw new GradleException(
+                    'Canonical Round 13 evidence does not permit staging')
+        }
+    }
+}
+
+tasks.register('stageRelease') {
+    group = 'publishing'
+    description = 'Builds the verified Maven Central staging repository.'
+    dependsOn 'releaseCheck', round13Readiness,
+            'publishMavenJavaPublicationToStagingRepository'
+}
+
+tasks.named('publishMavenJavaPublicationToStagingRepository') {
+    dependsOn round13Readiness
+}
+
+if (localDependencies) {
+    File localBexCheckout = file(providers.gradleProperty(
+            'blueBexCompositePath').getOrElse('../blue-bex-java'))
+    File localRepositoryCheckout = file(providers.gradleProperty(
+            'blueRepositoryCompositePath')
+            .getOrElse('../blue-repository-java'))
+    def localSourceInputs = tasks.register('verifyLocalSourceInputs') {
+        group = 'verification'
+        description = 'Verifies the exact local Repository, BEX, and Language inputs.'
+        inputs.files('gradle/bex-source.lock',
+                'gradle/repository-source.lock')
+        doLast {
+            def readLock = { File lock ->
+                lock.readLines('UTF-8')
+                        .findAll { !it.startsWith('#') && it.contains('=') }
+                        .collectEntries { line ->
+                            int separator = line.indexOf('=')
+                            [(line.substring(0, separator)):
+                                     line.substring(separator + 1)]
+                        }
+            }
+            def gitBytes = { File root, String... arguments ->
+                def command = ['git', '-C', root.absolutePath]
+                command.addAll(arguments as List)
+                Process process = new ProcessBuilder(command).start()
+                byte[] stdout = process.inputStream.bytes
+                String stderr = process.errorStream.getText('UTF-8')
+                if (process.waitFor() != 0) {
+                    throw new GradleException(
+                            "Git failed in ${root}: ${stderr}")
+                }
+                stdout
+            }
+            def sha256 = { byte[] bytes ->
+                java.security.MessageDigest.getInstance('SHA-256')
+                        .digest(bytes).encodeHex().toString()
+            }
+            def bexLock = readLock(file('gradle/bex-source.lock'))
+            def repositoryLock = readLock(
+                    file('gradle/repository-source.lock'))
+            File bex = localBexCheckout
+            File repository = localRepositoryCheckout
+            File language = new File(repository, '../blue-language-java')
+                    .canonicalFile
+            String bexHead = new String(
+                    gitBytes(bex, 'rev-parse', 'HEAD'), 'UTF-8').trim()
+            String repositoryHead = new String(
+                    gitBytes(repository, 'rev-parse', 'HEAD'), 'UTF-8').trim()
+            String languageHead = new String(
+                    gitBytes(language, 'rev-parse', 'HEAD'), 'UTF-8').trim()
+            if (bexHead != bexLock.commit
+                    || repositoryHead != repositoryLock.baseCommit
+                    || languageHead != repositoryLock.languageCommit) {
+                throw new GradleException('Local dependency commit drift')
+            }
+            if (new String(gitBytes(bex, 'status', '--porcelain'),
+                    'UTF-8').trim()
+                    || new String(gitBytes(language, 'status', '--porcelain'),
+                    'UTF-8').trim()) {
+                throw new GradleException(
+                        'Pinned BEX and Language inputs must be clean')
+            }
+            byte[] repositoryDiff = gitBytes(repository, 'diff', '--binary',
+                    'HEAD', '--', 'build.gradle', 'settings.gradle',
+                    '.cz.toml', 'src/main/java', 'src/main/resources')
+            if (sha256(repositoryDiff)
+                    != repositoryLock.workspaceDiffSha256) {
+                throw new GradleException(
+                        'Local Repository production diff fingerprint drift')
+            }
+            logger.lifecycle('Local source inputs match pinned fingerprints.')
+        }
+    }
+    tasks.named('releaseCheck') {
+        dependsOn localSourceInputs
+    }
+
+    def localPrerequisites = tasks.register(
+            'stageLocalPrerequisiteArtifacts') {
+        group = 'publishing'
+        description = 'Stages source-built prerequisites for local artifact verification.'
+        dependsOn gradle.includedBuild('blue-repository-java').task(':jar')
+        dependsOn gradle.includedBuild('blue-bex-java')
+                .task(':blue-bex-core:jar')
+        dependsOn gradle.includedBuild('blue-bex-java')
+                .task(':blue-bex-contracts:jar')
+        inputs.files(
+                fileTree(new File(localRepositoryCheckout, 'build/libs')) {
+                    include 'blue-repo-java-*-SNAPSHOT.jar'
+                    exclude '*-sources.jar', '*-javadoc.jar'
+                },
+                fileTree(new File(localBexCheckout,
+                        'blue-bex-core/build/libs')) {
+                    include 'blue-bex-core-*-SNAPSHOT.jar'
+                    exclude '*-sources.jar', '*-javadoc.jar'
+                },
+                fileTree(new File(localBexCheckout,
+                        'blue-bex-contracts/build/libs')) {
+                    include 'blue-bex-contracts-*-SNAPSHOT.jar'
+                    exclude '*-sources.jar', '*-javadoc.jar'
+                })
+        outputs.dir(layout.buildDirectory.dir('local-prerequisites'))
+        doLast {
+            def targetRoot = layout.buildDirectory
+                    .dir('local-prerequisites').get().asFile
+            if (targetRoot.exists() && !targetRoot.deleteDir()) {
+                throw new GradleException(
+                        "Cannot refresh generated artifacts at ${targetRoot}")
+            }
+            copy {
+                from fileTree(new File(
+                        localRepositoryCheckout, 'build/libs')) {
+                    include 'blue-repo-java-*-SNAPSHOT.jar'
+                    exclude '*-sources.jar', '*-javadoc.jar'
+                }.singleFile
+                into new File(targetRoot,
+                        'blue/repo/blue-repo-java/3.0.0-rc.21')
+                rename { 'blue-repo-java-3.0.0-rc.21.jar' }
+            }
+            copy {
+                from fileTree(new File(localBexCheckout,
+                        'blue-bex-core/build/libs')) {
+                    include 'blue-bex-core-*-SNAPSHOT.jar'
+                    exclude '*-sources.jar', '*-javadoc.jar'
+                }.singleFile
+                into new File(targetRoot,
+                        'blue/bex/blue-bex-core/1.1.0-rc.3')
+                rename { 'blue-bex-core-1.1.0-rc.3.jar' }
+            }
+            copy {
+                from fileTree(
+                        new File(localBexCheckout,
+                                'blue-bex-contracts/build/libs')) {
+                    include 'blue-bex-contracts-*-SNAPSHOT.jar'
+                    exclude '*-sources.jar', '*-javadoc.jar'
+                }.singleFile
+                into new File(targetRoot,
+                        'blue/bex/blue-bex-contracts/1.1.0-rc.3')
+                rename { 'blue-bex-contracts-1.1.0-rc.3.jar' }
+            }
+        }
+    }
+    tasks.named('publishToMavenLocal') {
+        dependsOn localPrerequisites
+    }
+}
+
+tasks.matching {
+    it.name in ['jreleaserDeploy',
+                'jreleaserUpload', 'jreleaserRelease']
+}.configureEach {
+    dependsOn tasks.named('stageRelease')
+}
+
+tasks.named('check') {
+    dependsOn 'validateProductionShape', 'verifyPublicApiBoundary',
+            'verifyArtifactContents', 'integrationTest', 'consumerTest',
+            'verifyTestArchitecture'
 }

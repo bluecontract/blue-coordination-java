@@ -1,0 +1,83 @@
+documentId: deep-same-entry-a1
+name: Deep Same-Entry Middle A1
+directCount: 0
+childApplications: 0
+childDirectCountSeenByDirect: -1
+contracts:
+  setupChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/deep-same-entry/a1-setup
+    actor:
+      type: MyOS/Principal Actor
+      accountId: a1-owner
+  sharedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/deep-same-entry/shared
+    actor:
+      type: MyOS/Principal Actor
+      accountId: shared-actor
+  coordinationEmbeddedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: coordination/internal/deep-same-entry-a1
+    actor:
+      type: MyOS/Principal Actor
+      accountId: coordination
+  embedded:
+    type: Process Embedded
+    paths: [/child]
+  attachChild:
+    type: Coordination/Sequential Workflow Operation
+    channel: setupChannel
+    request:
+      document:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: add
+              path: /child
+              val: {$binding: event/message/request/document}
+          - $return: true
+  advance:
+    type: Coordination/Sequential Workflow Operation
+    channel: sharedChannel
+    request:
+      amount: {type: Integer}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /childDirectCountSeenByDirect
+              val: {$document: /child/directCount}
+          - $appendChange:
+              op: replace
+              path: /directCount
+              val: {$add: [$document: /directCount, $binding: event/message/request/amount]}
+          - $return: true
+  coordinationApplyEmbeddedRevision:
+    type: Coordination/Sequential Workflow Operation
+    channel: coordinationEmbeddedChannel
+    request:
+      occurrencePath: {type: Text}
+      after:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: {$binding: event/message/request/occurrencePath}
+              val: {$binding: event/message/request/after}
+          - $appendChange:
+              op: replace
+              path: /childApplications
+              val: {$add: [$document: /childApplications, 1]}
+          - $return: true

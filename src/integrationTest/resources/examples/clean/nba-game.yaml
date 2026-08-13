@@ -1,0 +1,93 @@
+documentId: nba-game-2016-lal-min
+name: Lakers at Timberwolves 2016 Historical Game
+status: Scheduled
+homeTeam: MIN
+awayTeam: LAL
+homeScore: 0
+awayScore: 0
+playCount: 0
+contracts:
+  gameFeed:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/nba/game-2016-lal-min
+    actor:
+      type: MyOS/Principal Actor
+      accountId: nba-feed
+  startGame:
+    type: Coordination/Sequential Workflow Operation
+    channel: gameFeed
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange: {op: replace, path: /status, val: Live}
+          - $appendEvent:
+              type: Coordination/Event
+              kind: NBA/Game Started
+          - $return: true
+  homeScores:
+    type: Coordination/Sequential Workflow Operation
+    channel: gameFeed
+    request:
+      points: {type: Integer}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /homeScore
+              val:
+                $add:
+                  - $document: /homeScore
+                  - $binding: event/message/request/points
+          - $appendChange:
+              op: replace
+              path: /playCount
+              val: {$add: [$document: /playCount, 1]}
+          - $appendEvent:
+              type: Coordination/Event
+              kind: NBA/Scoring Play
+              team: MIN
+              points: {$binding: event/message/request/points}
+          - $return: true
+  awayScores:
+    type: Coordination/Sequential Workflow Operation
+    channel: gameFeed
+    request:
+      points: {type: Integer}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /awayScore
+              val:
+                $add:
+                  - $document: /awayScore
+                  - $binding: event/message/request/points
+          - $appendChange:
+              op: replace
+              path: /playCount
+              val: {$add: [$document: /playCount, 1]}
+          - $appendEvent:
+              type: Coordination/Event
+              kind: NBA/Scoring Play
+              team: LAL
+              points: {$binding: event/message/request/points}
+          - $return: true
+  endGame:
+    type: Coordination/Sequential Workflow Operation
+    channel: gameFeed
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange: {op: replace, path: /status, val: Final}
+          - $appendEvent:
+              type: Coordination/Event
+              kind: NBA/Game Ended
+              homeScore: {$document: /homeScore}
+              awayScore: {$document: /awayScore}
+          - $return: true

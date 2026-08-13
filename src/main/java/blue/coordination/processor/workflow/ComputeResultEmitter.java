@@ -3,22 +3,44 @@ package blue.coordination.processor.workflow;
 import blue.bex.result.BexChangeset;
 import blue.bex.result.BexExecutionResult;
 import blue.bex.result.BexPatchEntry;
+import blue.bex.value.BexBlueNodeWriter;
 import blue.bex.value.BexFrozenWriter;
-import blue.bex.value.BexNodeWriter;
 import blue.bex.value.BexValue;
 import blue.bex.value.BexValues;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.model.Node;
+import blue.coordination.processor.support.CoordinationProcessHeaderSupport;
 import blue.language.processor.WorkingDocument;
-import blue.language.processor.model.FrozenJsonPatch;
+import blue.language.processor.FrozenJsonPatch;
 import blue.language.snapshot.FrozenNode;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Objects;
 
+/**
+ * Validates hosted-BEX output and translates it into processor-owned effects.
+ *
+ * <p>{@link #plan(BexExecutionResult, StepExecutionContext, boolean)} performs
+ * every structural conversion before the document is mutated. Only the
+ * resulting immutable {@link ComputeEffectPlan} may cross into
+ * {@link #buffer(ComputeEffectPlan, StepExecutionContext)}, where its one-shot
+ * claim prevents duplicate patch, event, or termination delivery.</p>
+ */
 final class ComputeResultEmitter {
+    private static final String CHANGESET_FIELD = "changeset";
+    private static final String EVENTS_FIELD = "events";
+    private static final String TERMINATION_FIELD = "termination";
+    private static final String CAUSE_FIELD = "cause";
+    private static final String REASON_FIELD = "reason";
+    private static final String PATCH_OPERATION_FIELD = "op";
+    private static final String PATCH_PATH_FIELD = "path";
+    private static final String PATCH_VALUE_FIELD = "val";
+    private static final String TEXT_KIND = "text";
+    private static final String ADD_OPERATION = "add";
+    private static final String REPLACE_OPERATION = "replace";
+    private static final String REMOVE_OPERATION = "remove";
+
     private final BexProcessingMetrics metrics;
 
     ComputeResultEmitter() {
@@ -43,7 +65,7 @@ final class ComputeResultEmitter {
             } catch (ComputeResultValidationException ex) {
                 throw ex;
             } catch (RuntimeException ex) {
-                throw conversionFailure("changeset", ex);
+                throw conversionFailure(CHANGESET_FIELD, ex);
             }
             List<Node> events = emitEvents
                     ? validatedEventNodes(result)
@@ -52,11 +74,18 @@ final class ComputeResultEmitter {
             return new ComputeEffectPlan(patches,
                     events,
                     termination.requested,
+                    termination.cause,
                     termination.reason,
                     returnedChangeset || !patches.isEmpty());
-        } catch (ComputeResultValidationException ex) {
-            throw ex;
         } catch (RuntimeException ex) {
+            RuntimeException classified =
+                    ComputeStepExecutor.classifiedBoundaryFailure(ex);
+            if (classified != null) {
+                throw classified;
+            }
+            if (ex instanceof ComputeResultValidationException) {
+                throw ex;
+            }
             throw new ComputeResultValidationException(
                     "Compute result effects could not be converted: " + boundedDetail(ex), ex);
         }
@@ -68,7 +97,7 @@ final class ComputeResultEmitter {
         } catch (ComputeResultValidationException ex) {
             throw ex;
         } catch (RuntimeException ex) {
-            throw conversionFailure("events", ex);
+            throw conversionFailure(EVENTS_FIELD, ex);
         }
     }
 
@@ -88,7 +117,9 @@ final class ComputeResultEmitter {
             }
         }
         if (plan.terminationRequested()) {
-            context.processorContext().terminateGracefully(plan.terminationReason());
+            context.processorContext().terminate(
+                    plan.terminationCause(),
+                    plan.terminationReason());
             if (metrics != null) {
                 metrics.incrementSuccessfulComputeTerminationRequests();
             }
@@ -96,12 +127,18 @@ final class ComputeResultEmitter {
     }
 
     private boolean hasReturnedChangeset(BexExecutionResult result) {
-        BexValue changeset = result.value() != null ? result.value().get("changeset") : BexValues.undefined();
+        BexValue value = executionValue(result);
+        BexValue changeset = value != null
+                ? value.get(CHANGESET_FIELD)
+                : BexValues.undefined();
         return !changeset.isUndefined() && !changeset.isNull();
     }
 
     private List<Node> eventNodes(BexExecutionResult result) {
-        BexValue events = result.value() != null ? result.value().get("events") : BexValues.undefined();
+        BexValue value = executionValue(result);
+        BexValue events = value != null
+                ? value.get(EVENTS_FIELD)
+                : BexValues.undefined();
         if (events.isUndefined() || events.isNull()) {
             events = result.events().asValue();
         }
@@ -117,22 +154,21 @@ final class ComputeResultEmitter {
             if (event == null || event.isUndefined() || event.isNull()) {
                 throw invalid("Compute result events cannot contain undefined/null entries");
             }
-            if (!event.isObject()) {
-                throw invalid("Compute result events must contain object entries");
-            }
             try {
-                converted.add(BexNodeWriter.toNode(event));
+                converted.add(semanticOutputNode(event));
             } catch (RuntimeException ex) {
                 throw new ComputeResultValidationException(
-                        "Compute result event entry could not be converted", ex);
+                        "Compute result event entry could not be converted",
+                        ex);
             }
         }
         return converted;
     }
 
     private Termination termination(BexExecutionResult result) {
-        BexValue termination = result.value() != null
-                ? result.value().get("termination")
+        BexValue value = executionValue(result);
+        BexValue termination = value != null
+                ? value.get(TERMINATION_FIELD)
                 : BexValues.undefined();
         if (termination == null || termination.isUndefined() || termination.isNull()) {
             return Termination.absent();
@@ -141,23 +177,34 @@ final class ComputeResultEmitter {
             throw invalid("Compute result termination must be an object");
         }
         for (String key : termination.keys()) {
-            if (!"reason".equals(key)) {
+            if (!CAUSE_FIELD.equals(key)
+                    && !REASON_FIELD.equals(key)) {
                 throw invalid("Compute result termination contains unsupported properties");
             }
         }
-        BexValue reason = termination.get("reason");
-        if (reason == null || reason.isUndefined() || reason.isNull()) {
-            return Termination.requested(null);
+        BexValue cause = termination.get(CAUSE_FIELD);
+        if (cause == null || cause.isUndefined() || cause.isNull()
+                || !TEXT_KIND.equals(BexValues.kind(cause))
+                || cause.asText().isEmpty()) {
+            throw invalid(
+                    "Compute result termination cause must be non-empty Text");
         }
-        if (!"text".equals(BexValues.kind(reason))) {
+        BexValue reason = termination.get(REASON_FIELD);
+        if (reason == null || reason.isUndefined() || reason.isNull()) {
+            return Termination.requested(cause.asText(), null);
+        }
+        if (!TEXT_KIND.equals(BexValues.kind(reason))) {
             throw invalid("Compute result termination reason must be Text");
         }
-        return Termination.requested(reason.asText());
+        return Termination.requested(cause.asText(), reason.asText());
     }
 
     private List<FrozenJsonPatch> changesetPatches(BexExecutionResult result,
                                                    StepExecutionContext context) {
-        BexValue changeset = result.value() != null ? result.value().get("changeset") : BexValues.undefined();
+        BexValue value = executionValue(result);
+        BexValue changeset = value != null
+                ? value.get(CHANGESET_FIELD)
+                : BexValues.undefined();
         BexChangeset accumulated = result.changeset();
         if (changeset.isUndefined() || changeset.isNull()) {
             return patchesFromBexChangeset(accumulated, context);
@@ -209,18 +256,31 @@ final class ComputeResultEmitter {
         if (item == null || item.isUndefined() || item.isNull() || !item.isObject()) {
             throw invalid("Compute result changeset entry " + index + " must be an object");
         }
-        String op = textValue(item.get("op"));
-        String path = textValue(item.get("path"));
-        if (!"add".equals(op) && !"replace".equals(op) && !"remove".equals(op)) {
+        String op = patchTextValue(
+                item.get(PATCH_OPERATION_FIELD),
+                index,
+                PATCH_OPERATION_FIELD);
+        String path = patchTextValue(
+                item.get(PATCH_PATH_FIELD),
+                index,
+                PATCH_PATH_FIELD);
+        if (!ADD_OPERATION.equals(op)
+                && !REPLACE_OPERATION.equals(op)
+                && !REMOVE_OPERATION.equals(op)) {
             throw invalid("Invalid patch op in Compute result changeset");
         }
         if (path == null || path.trim().isEmpty()) {
             throw invalid("Compute result changeset entry " + index + " missing path");
         }
         FrozenNode nodeValue = null;
-        if (!"remove".equals(op)) {
-            BexValue val = item.get("val");
-            if (val.isUndefined()) {
+        BexValue val = item.get(PATCH_VALUE_FIELD);
+        if (REMOVE_OPERATION.equals(op)) {
+            if (item.keys().contains(PATCH_VALUE_FIELD)) {
+                throw invalid("Compute result changeset entry " + index
+                        + " val must be absent for remove");
+            }
+        } else {
+            if (val == null || val.isUndefined()) {
                 throw invalid("Compute result changeset entry " + index + " missing val");
             }
             nodeValue = freezePatchValue(val);
@@ -228,14 +288,26 @@ final class ComputeResultEmitter {
         return new WorkflowPatchEntry(op, path, nodeValue);
     }
 
+    private String patchTextValue(BexValue value,
+                                  int index,
+                                  String field) {
+        if (value == null || value.isUndefined() || value.isNull()) {
+            return null;
+        }
+        if (!TEXT_KIND.equals(BexValues.kind(value))) {
+            throw invalid("Compute result changeset entry " + index
+                    + " field '" + field + "' must be Text");
+        }
+        return value.asText();
+    }
+
     private FrozenJsonPatch toPatch(WorkflowPatchEntry entry,
                                     StepExecutionContext context) {
-        String normalizedOp = entry.op().trim().toLowerCase();
         String path = resolvedPointer(entry.path(), context);
-        if ("remove".equals(normalizedOp)) {
+        if (REMOVE_OPERATION.equals(entry.op())) {
             return FrozenJsonPatch.remove(path);
         }
-        if ("add".equals(normalizedOp)) {
+        if (ADD_OPERATION.equals(entry.op())) {
             return FrozenJsonPatch.add(path, entry.val());
         }
         // patchEntry has already restricted this branch to replace.
@@ -247,8 +319,16 @@ final class ComputeResultEmitter {
         if (entry == null) {
             throw invalid("Compute result accumulated patch is incomplete");
         }
-        String normalizedOp = entry.op().trim().toLowerCase();
-        boolean remove = "remove".equals(normalizedOp);
+        String op = entry.op();
+        boolean remove = REMOVE_OPERATION.equals(op);
+        if (!remove
+                && !ADD_OPERATION.equals(op)
+                && !REPLACE_OPERATION.equals(op)) {
+            throw invalid("Invalid accumulated patch op in Compute result");
+        }
+        if (remove && entry.val() != null && !entry.val().isUndefined()) {
+            throw invalid("Compute result accumulated remove patch val must be absent");
+        }
         if (!remove && (entry.val() == null || entry.val().isUndefined())) {
             throw invalid("Compute result patch value is required");
         }
@@ -257,7 +337,7 @@ final class ComputeResultEmitter {
             return FrozenJsonPatch.remove(path);
         }
         FrozenNode value = freezePatchValue(entry.val());
-        if ("add".equals(normalizedOp)) {
+        if (ADD_OPERATION.equals(op)) {
             return FrozenJsonPatch.add(path, value);
         }
         // BexPatchEntry has already restricted this branch to replace.
@@ -280,20 +360,33 @@ final class ComputeResultEmitter {
         WorkingDocument.Preview preview = null;
         long frozenValueCount = frozenValueCount(patches);
         try {
-            preview = context.advanceWorkingDocumentFrozen(patches);
+            /*
+             * Keep provider/evidence exceptions visible to the Compute
+             * executor. StepExecutionContext's convenience wrapper maps every
+             * RuntimeException to runtime-fatal, which would erase Language's
+             * deterministic InvalidExecutionEvidence category.
+             */
+            preview = context.workingDocument()
+                    .previewAndApplyFrozenPatches(patches);
             if (preview == null) {
                 return;
-            }
-            if (metrics != null) {
-                metrics.addMetric("frozenPatchesHandedToLanguage", patches.size());
-                metrics.addMetric("frozenPatchValuesHandedToLanguage", frozenValueCount);
             }
             context.processorContext().applyPreviewedFrozenPatches(patches, preview);
             previewTransferred = true;
             if (metrics != null) {
+                metrics.addMetric("frozenPatchesHandedToLanguage", patches.size());
                 metrics.addMetric("frozenPatchValuesHandedToLanguage", frozenValueCount);
             }
             applied = true;
+        } catch (RuntimeException ex) {
+            RuntimeException classified =
+                    ComputeStepExecutor.classifiedBoundaryFailure(ex);
+            if (classified != null) {
+                throw classified;
+            }
+            context.throwFatal(
+                    "Working document preview failed: "
+                            + boundedDetail(ex));
         } finally {
             if (!previewTransferred && preview != null) {
                 preview.close();
@@ -331,62 +424,270 @@ final class ComputeResultEmitter {
             if (item == null || !item.isObject()) {
                 return false;
             }
-            if (!entry.op().equals(textValue(item.get("op")))) {
+            if (!entry.op().equals(
+                    textValue(item.get(PATCH_OPERATION_FIELD)))) {
                 return false;
             }
-            String path = textValue(item.get("path"));
+            String path = textValue(
+                    item.get(PATCH_PATH_FIELD));
             if (!entry.authoredPath().equals(path) && !entry.absolutePath().equals(path)) {
                 return false;
             }
-            BexValue val = item.get("val");
+            BexValue val = item.get(PATCH_VALUE_FIELD);
             if (entry.val() == null || entry.val().isUndefined()) {
-                if (val != null && !val.isUndefined() && !val.isNull()) {
+                if (item.keys().contains(PATCH_VALUE_FIELD)) {
                     return false;
                 }
             } else if (val == null || val.isUndefined()) {
                 return false;
-            } else if (entry.val() != val
-                    && !Objects.equals(entry.val().toSimple(), val.toSimple())) {
-                // BEX's accumulated changeset view preserves the exact value object
-                // held by each BexPatchEntry. The identity branch is therefore the
-                // normal path; deep conversion remains only for an independently
-                // authored result that happens to be semantically equivalent.
+            } else if (!sameAdmittedValue(
+                    entry.val(),
+                    val)) {
+                /*
+                 * BEX's accumulated changeset view normally preserves the
+                 * exact value object held by each entry. Root output admission
+                 * can replace that cursor with another exact value of the
+                 * same identity. Both lanes are constant-time; never perform
+                 * an unmetered semantic traversal merely to select this fast
+                 * path.
+                 */
                 return false;
             }
         }
         return true;
     }
 
+    private boolean sameAdmittedValue(BexValue left,
+                                      BexValue right) {
+        if (left == right) {
+            return true;
+        }
+        return left != null
+                && right != null
+                && left.isExact()
+                && right.isExact()
+                && left.exactBlueId().equals(
+                right.exactBlueId());
+    }
+
+    private BexValue executionValue(
+            BexExecutionResult result) {
+        return result != null
+                ? result.value()
+                : null;
+    }
+
     FrozenNode freezePatchValue(BexValue value) {
         // BEX exposes the exact FrozenNode only through BexFrozenWriter. Avoid
-        // invoking that writer for ordinary values because rc2's fallback factory
-        // itself performs Node round trips. A non-null frozen BlueId identifies the
+        // invoking that writer for ordinary values because its general fallback
+        // performs Node round trips. A non-null frozen BlueId identifies the
         // zero-materialization FrozenNode-backed lane.
-        if (BexValues.frozenBlueId(value) != null) {
+        String exactBlueId = BexValues.frozenBlueId(value);
+        if (exactBlueId != null) {
             FrozenNode frozen = BexFrozenWriter.toFrozen(value);
-            if (frozen.isStrictCanonical()) {
+            /*
+             * A strict canonical reference returned by the frozen writer is
+             * already an exact, provider-verifiable patch value. Preserve it
+             * directly: resolving or rehashing that value in Coordination
+             * would defeat the released zero-materialization handoff.
+             *
+             * AdmittedExactBexValue is not FrozenNode-backed, so the writer's
+             * general fallback produces a pure reference even when admitted
+             * semantic content remains available. The branch below
+             * distinguishes that case from a genuinely opaque reference.
+             */
+            if (frozen.isStrictCanonical()
+                    && !frozen.isReferenceOnly()) {
                 if (metrics != null) {
                     metrics.incrementBexPatchFrozenDirectConversions();
                 }
                 return frozen;
             }
+            if (frozen.isReferenceOnly()) {
+                /*
+                 * BexFrozenWriter's general exact-value fallback is a pure
+                 * reference. That is the correct zero-materialization result
+                 * for an opaque exact value, but AdmittedExactBexValue also
+                 * uses the fallback while retaining complete host-admitted
+                 * semantic content. Preserve the former and materialize the
+                 * latter: copying an exact document template into a patch
+                 * must not turn it into an unopenable reference before later
+                 * entries in the same atomic changeset address its children.
+                 */
+                Node semantic = semanticOutputView(value);
+                if (semantic.isReferenceOnly()) {
+                    if (metrics != null) {
+                        metrics.incrementBexPatchFrozenDirectConversions();
+                    }
+                    return frozen;
+                }
+                return materializeExactPatchValue(
+                        semantic, exactBlueId);
+            }
+            return materializeExactPatchValue(value, exactBlueId);
         }
         return materializePatchValue(value);
+    }
+
+    private FrozenNode materializeExactPatchValue(BexValue value,
+                                                  String expectedBlueId) {
+        long writerStart = System.nanoTime();
+        try {
+            FrozenNode materialized = FrozenNode.fromNode(
+                    semanticOutputNode(value));
+            return requireExactPatchIdentity(
+                    materialized, expectedBlueId);
+        } finally {
+            recordPatchValueMaterialization(writerStart);
+        }
+    }
+
+    private FrozenNode materializeExactPatchValue(
+            Node semantic,
+            String expectedBlueId) {
+        long writerStart = System.nanoTime();
+        try {
+            FrozenNode materialized = FrozenNode.fromNode(
+                    CoordinationProcessHeaderSupport
+                            .canonicalExactCopy(semantic));
+            return requireExactPatchIdentity(
+                    materialized, expectedBlueId);
+        } finally {
+            recordPatchValueMaterialization(writerStart);
+        }
+    }
+
+    private FrozenNode requireExactPatchIdentity(
+            FrozenNode materialized,
+            String expectedBlueId) {
+        if (!expectedBlueId.equals(materialized.blueId())) {
+            throw invalid(
+                    "Compute result exact patch value identity changed "
+                            + "during semantic materialization: expected "
+                            + expectedBlueId
+                            + " but calculated "
+                            + materialized.blueId());
+        }
+        return materialized;
     }
 
     private FrozenNode materializePatchValue(BexValue value) {
         long writerStart = System.nanoTime();
         try {
-            // This is the one unavoidable rc2 boundary for newly computed values:
-            // take a mutable BEX rendering and immediately freeze it as authored
-            // canonical content. No mutable value crosses into Language.
-            return FrozenNode.fromNode(BexNodeWriter.toNode(value));
+            /*
+             * This is the required boundary for newly computed values. Use
+             * BEX's Blue-aware semantic writer so exact descendants of a
+             * transient aggregate retain their available content. The generic
+             * writer intentionally emits such descendants as transport
+             * references, which would make values read from
+             * $event/$processingEvent opaque inside a newly authored patch.
+             */
+            return FrozenNode.fromNode(
+                    semanticOutputNode(value));
         } finally {
-            if (metrics != null) {
-                metrics.addBexNodeWriterNanos(System.nanoTime() - writerStart);
-                metrics.incrementBexPatchNodeMaterializations();
-            }
+            recordPatchValueMaterialization(writerStart);
         }
+    }
+
+    private void recordPatchValueMaterialization(long writerStart) {
+        if (metrics != null) {
+            metrics.addBexNodeWriterNanos(System.nanoTime() - writerStart);
+            metrics.incrementBexPatchNodeMaterializations();
+        }
+    }
+
+    /**
+     * Materializes the semantic cursor retained by an admitted BEX value.
+     *
+     * <p>Local BEX deliberately exposes an admitted exact root as its compact
+     * canonical transport node. Its cursor still retains the transient
+     * semantic children that were proved by Language at admission. Rebuilding
+     * a transient cursor from the simple semantic view lets the Blue-aware
+     * writer include those children in the processor effect; otherwise a
+     * newly computed aggregate would escape with invocation-local child
+     * references that no later provider can open.</p>
+     */
+    private Node semanticOutputNode(BexValue value) {
+        /*
+         * BEX's semantic writer deliberately inlines locally available exact
+         * descendants. Those resolved views may carry provider BlueIds beside
+         * their fields, which is valid evidence internally but is not valid
+         * authored input to Language's hosted output boundary. Strip that
+         * provenance once, after rebuilding the complete semantic value.
+         */
+        return CoordinationProcessHeaderSupport
+                .canonicalExactCopy(
+                        semanticOutputView(value));
+    }
+
+    private Node semanticOutputView(BexValue value) {
+        if (value == null || !value.isExact()) {
+            return BexBlueNodeWriter.toSemanticNode(value);
+        }
+        try {
+            Node semantic = value.toNode();
+            if (semantic.getItems() != null && value.isList()) {
+                List<Node> items =
+                        new ArrayList<Node>(semantic.getItems().size());
+                for (int index = 0;
+                     index < semantic.getItems().size();
+                     index++) {
+                    items.add(
+                            semanticOutputView(
+                                    value.get(
+                                            String.valueOf(index))));
+                }
+                semantic.items(items);
+            }
+            if (semantic.getProperties() != null
+                    && value.isObject()) {
+                for (String key :
+                        new ArrayList<String>(
+                                semantic.getProperties().keySet())) {
+                    BexValue child = value.get(key);
+                    if (child != null && !child.isUndefined()) {
+                        semantic.getProperties().put(
+                                key,
+                                semanticOutputView(child));
+                    }
+                }
+            }
+            if (semantic.getContracts() != null
+                    && value.isObject()) {
+                BexValue contracts = value.get("contracts");
+                if (contracts != null
+                        && !contracts.isUndefined()) {
+                    semantic.contracts(
+                            semanticOutputView(contracts));
+                }
+            }
+            return semantic;
+        } catch (RuntimeException ex) {
+            if (isUnavailableExactReference(value, ex)) {
+                return new Node().blueId(
+                        value.exactBlueId());
+            }
+            throw ex;
+        }
+    }
+
+    private boolean isUnavailableExactReference(
+            BexValue value,
+            RuntimeException failure) {
+        if (value == null || !value.isExact()) {
+            return false;
+        }
+        Throwable current = failure;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null
+                    && message.contains(
+                    "Semantic content is unavailable for exact Blue reference")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private String textValue(BexValue value) {
@@ -415,13 +716,18 @@ final class ComputeResultEmitter {
     }
 
     private static final class Termination {
-        private static final Termination ABSENT = new Termination(false, null);
+        private static final Termination ABSENT =
+                new Termination(false, null, null);
 
         private final boolean requested;
+        private final String cause;
         private final String reason;
 
-        private Termination(boolean requested, String reason) {
+        private Termination(boolean requested,
+                            String cause,
+                            String reason) {
             this.requested = requested;
+            this.cause = cause;
             this.reason = reason;
         }
 
@@ -429,8 +735,9 @@ final class ComputeResultEmitter {
             return ABSENT;
         }
 
-        private static Termination requested(String reason) {
-            return new Termination(true, reason);
+        private static Termination requested(String cause,
+                                             String reason) {
+            return new Termination(true, cause, reason);
         }
     }
 }

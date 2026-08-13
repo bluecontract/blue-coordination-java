@@ -6,6 +6,12 @@ import blue.language.processor.HandlerRegistrationContext;
 import blue.language.processor.ProcessorExecutionContext;
 import blue.repo.coordination.Operation;
 
+/**
+ * Registers the abstract Operation contract shape without making it directly
+ * executable.
+ *
+ * <p>Concrete operation subtypes supply matching and execution semantics.</p>
+ */
 public final class OperationProcessor implements HandlerProcessor<Operation> {
     @Override
     public Class<Operation> contractType() {
@@ -14,7 +20,11 @@ public final class OperationProcessor implements HandlerProcessor<Operation> {
 
     @Override
     public String deriveChannel(Operation contract, HandlerRegistrationContext context) {
-        return contract != null ? contract.getChannel() : null;
+        return HandlerChannelResolver.resolve(
+                contract != null
+                        ? contract.getChannel()
+                        : null,
+                context);
     }
 
     @Override

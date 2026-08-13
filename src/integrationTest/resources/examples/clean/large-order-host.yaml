@@ -1,0 +1,1682 @@
+documentId: large-order-host
+name: Large Wadowice-like Order Host
+hostStatus: Draft
+hostRevision: 0
+hostOperationCount: 0
+payNoteRevisionCount: 0
+observedPayNoteStatus: Not Attached
+observedAuthorizationCount: 0
+catalog:
+  item001:
+    sku: LARGE-001
+    name: Large ordinary catalog item 001
+    description: This is ordinary host data 001; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1001
+    active: true
+    tags: [travel, wadowice, benchmark, item-001]
+  item002:
+    sku: LARGE-002
+    name: Large ordinary catalog item 002
+    description: This is ordinary host data 002; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1002
+    active: true
+    tags: [travel, wadowice, benchmark, item-002]
+  item003:
+    sku: LARGE-003
+    name: Large ordinary catalog item 003
+    description: This is ordinary host data 003; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1003
+    active: true
+    tags: [travel, wadowice, benchmark, item-003]
+  item004:
+    sku: LARGE-004
+    name: Large ordinary catalog item 004
+    description: This is ordinary host data 004; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1004
+    active: true
+    tags: [travel, wadowice, benchmark, item-004]
+  item005:
+    sku: LARGE-005
+    name: Large ordinary catalog item 005
+    description: This is ordinary host data 005; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1005
+    active: true
+    tags: [travel, wadowice, benchmark, item-005]
+  item006:
+    sku: LARGE-006
+    name: Large ordinary catalog item 006
+    description: This is ordinary host data 006; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1006
+    active: true
+    tags: [travel, wadowice, benchmark, item-006]
+  item007:
+    sku: LARGE-007
+    name: Large ordinary catalog item 007
+    description: This is ordinary host data 007; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1007
+    active: true
+    tags: [travel, wadowice, benchmark, item-007]
+  item008:
+    sku: LARGE-008
+    name: Large ordinary catalog item 008
+    description: This is ordinary host data 008; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1008
+    active: true
+    tags: [travel, wadowice, benchmark, item-008]
+  item009:
+    sku: LARGE-009
+    name: Large ordinary catalog item 009
+    description: This is ordinary host data 009; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1009
+    active: true
+    tags: [travel, wadowice, benchmark, item-009]
+  item010:
+    sku: LARGE-010
+    name: Large ordinary catalog item 010
+    description: This is ordinary host data 010; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1010
+    active: true
+    tags: [travel, wadowice, benchmark, item-010]
+  item011:
+    sku: LARGE-011
+    name: Large ordinary catalog item 011
+    description: This is ordinary host data 011; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1011
+    active: true
+    tags: [travel, wadowice, benchmark, item-011]
+  item012:
+    sku: LARGE-012
+    name: Large ordinary catalog item 012
+    description: This is ordinary host data 012; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1012
+    active: true
+    tags: [travel, wadowice, benchmark, item-012]
+  item013:
+    sku: LARGE-013
+    name: Large ordinary catalog item 013
+    description: This is ordinary host data 013; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1013
+    active: true
+    tags: [travel, wadowice, benchmark, item-013]
+  item014:
+    sku: LARGE-014
+    name: Large ordinary catalog item 014
+    description: This is ordinary host data 014; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1014
+    active: true
+    tags: [travel, wadowice, benchmark, item-014]
+  item015:
+    sku: LARGE-015
+    name: Large ordinary catalog item 015
+    description: This is ordinary host data 015; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1015
+    active: true
+    tags: [travel, wadowice, benchmark, item-015]
+  item016:
+    sku: LARGE-016
+    name: Large ordinary catalog item 016
+    description: This is ordinary host data 016; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1016
+    active: true
+    tags: [travel, wadowice, benchmark, item-016]
+  item017:
+    sku: LARGE-017
+    name: Large ordinary catalog item 017
+    description: This is ordinary host data 017; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1017
+    active: true
+    tags: [travel, wadowice, benchmark, item-017]
+  item018:
+    sku: LARGE-018
+    name: Large ordinary catalog item 018
+    description: This is ordinary host data 018; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1018
+    active: true
+    tags: [travel, wadowice, benchmark, item-018]
+  item019:
+    sku: LARGE-019
+    name: Large ordinary catalog item 019
+    description: This is ordinary host data 019; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1019
+    active: true
+    tags: [travel, wadowice, benchmark, item-019]
+  item020:
+    sku: LARGE-020
+    name: Large ordinary catalog item 020
+    description: This is ordinary host data 020; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1020
+    active: true
+    tags: [travel, wadowice, benchmark, item-020]
+  item021:
+    sku: LARGE-021
+    name: Large ordinary catalog item 021
+    description: This is ordinary host data 021; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1021
+    active: true
+    tags: [travel, wadowice, benchmark, item-021]
+  item022:
+    sku: LARGE-022
+    name: Large ordinary catalog item 022
+    description: This is ordinary host data 022; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1022
+    active: true
+    tags: [travel, wadowice, benchmark, item-022]
+  item023:
+    sku: LARGE-023
+    name: Large ordinary catalog item 023
+    description: This is ordinary host data 023; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1023
+    active: true
+    tags: [travel, wadowice, benchmark, item-023]
+  item024:
+    sku: LARGE-024
+    name: Large ordinary catalog item 024
+    description: This is ordinary host data 024; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1024
+    active: true
+    tags: [travel, wadowice, benchmark, item-024]
+  item025:
+    sku: LARGE-025
+    name: Large ordinary catalog item 025
+    description: This is ordinary host data 025; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1025
+    active: true
+    tags: [travel, wadowice, benchmark, item-025]
+  item026:
+    sku: LARGE-026
+    name: Large ordinary catalog item 026
+    description: This is ordinary host data 026; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1026
+    active: true
+    tags: [travel, wadowice, benchmark, item-026]
+  item027:
+    sku: LARGE-027
+    name: Large ordinary catalog item 027
+    description: This is ordinary host data 027; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1027
+    active: true
+    tags: [travel, wadowice, benchmark, item-027]
+  item028:
+    sku: LARGE-028
+    name: Large ordinary catalog item 028
+    description: This is ordinary host data 028; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1028
+    active: true
+    tags: [travel, wadowice, benchmark, item-028]
+  item029:
+    sku: LARGE-029
+    name: Large ordinary catalog item 029
+    description: This is ordinary host data 029; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1029
+    active: true
+    tags: [travel, wadowice, benchmark, item-029]
+  item030:
+    sku: LARGE-030
+    name: Large ordinary catalog item 030
+    description: This is ordinary host data 030; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1030
+    active: true
+    tags: [travel, wadowice, benchmark, item-030]
+  item031:
+    sku: LARGE-031
+    name: Large ordinary catalog item 031
+    description: This is ordinary host data 031; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1031
+    active: true
+    tags: [travel, wadowice, benchmark, item-031]
+  item032:
+    sku: LARGE-032
+    name: Large ordinary catalog item 032
+    description: This is ordinary host data 032; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1032
+    active: true
+    tags: [travel, wadowice, benchmark, item-032]
+  item033:
+    sku: LARGE-033
+    name: Large ordinary catalog item 033
+    description: This is ordinary host data 033; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1033
+    active: true
+    tags: [travel, wadowice, benchmark, item-033]
+  item034:
+    sku: LARGE-034
+    name: Large ordinary catalog item 034
+    description: This is ordinary host data 034; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1034
+    active: true
+    tags: [travel, wadowice, benchmark, item-034]
+  item035:
+    sku: LARGE-035
+    name: Large ordinary catalog item 035
+    description: This is ordinary host data 035; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1035
+    active: true
+    tags: [travel, wadowice, benchmark, item-035]
+  item036:
+    sku: LARGE-036
+    name: Large ordinary catalog item 036
+    description: This is ordinary host data 036; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1036
+    active: true
+    tags: [travel, wadowice, benchmark, item-036]
+  item037:
+    sku: LARGE-037
+    name: Large ordinary catalog item 037
+    description: This is ordinary host data 037; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1037
+    active: true
+    tags: [travel, wadowice, benchmark, item-037]
+  item038:
+    sku: LARGE-038
+    name: Large ordinary catalog item 038
+    description: This is ordinary host data 038; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1038
+    active: true
+    tags: [travel, wadowice, benchmark, item-038]
+  item039:
+    sku: LARGE-039
+    name: Large ordinary catalog item 039
+    description: This is ordinary host data 039; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1039
+    active: true
+    tags: [travel, wadowice, benchmark, item-039]
+  item040:
+    sku: LARGE-040
+    name: Large ordinary catalog item 040
+    description: This is ordinary host data 040; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1040
+    active: true
+    tags: [travel, wadowice, benchmark, item-040]
+  item041:
+    sku: LARGE-041
+    name: Large ordinary catalog item 041
+    description: This is ordinary host data 041; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1041
+    active: true
+    tags: [travel, wadowice, benchmark, item-041]
+  item042:
+    sku: LARGE-042
+    name: Large ordinary catalog item 042
+    description: This is ordinary host data 042; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1042
+    active: true
+    tags: [travel, wadowice, benchmark, item-042]
+  item043:
+    sku: LARGE-043
+    name: Large ordinary catalog item 043
+    description: This is ordinary host data 043; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1043
+    active: true
+    tags: [travel, wadowice, benchmark, item-043]
+  item044:
+    sku: LARGE-044
+    name: Large ordinary catalog item 044
+    description: This is ordinary host data 044; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1044
+    active: true
+    tags: [travel, wadowice, benchmark, item-044]
+  item045:
+    sku: LARGE-045
+    name: Large ordinary catalog item 045
+    description: This is ordinary host data 045; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1045
+    active: true
+    tags: [travel, wadowice, benchmark, item-045]
+  item046:
+    sku: LARGE-046
+    name: Large ordinary catalog item 046
+    description: This is ordinary host data 046; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1046
+    active: true
+    tags: [travel, wadowice, benchmark, item-046]
+  item047:
+    sku: LARGE-047
+    name: Large ordinary catalog item 047
+    description: This is ordinary host data 047; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1047
+    active: true
+    tags: [travel, wadowice, benchmark, item-047]
+  item048:
+    sku: LARGE-048
+    name: Large ordinary catalog item 048
+    description: This is ordinary host data 048; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1048
+    active: true
+    tags: [travel, wadowice, benchmark, item-048]
+  item049:
+    sku: LARGE-049
+    name: Large ordinary catalog item 049
+    description: This is ordinary host data 049; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1049
+    active: true
+    tags: [travel, wadowice, benchmark, item-049]
+  item050:
+    sku: LARGE-050
+    name: Large ordinary catalog item 050
+    description: This is ordinary host data 050; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1050
+    active: true
+    tags: [travel, wadowice, benchmark, item-050]
+  item051:
+    sku: LARGE-051
+    name: Large ordinary catalog item 051
+    description: This is ordinary host data 051; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1051
+    active: true
+    tags: [travel, wadowice, benchmark, item-051]
+  item052:
+    sku: LARGE-052
+    name: Large ordinary catalog item 052
+    description: This is ordinary host data 052; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1052
+    active: true
+    tags: [travel, wadowice, benchmark, item-052]
+  item053:
+    sku: LARGE-053
+    name: Large ordinary catalog item 053
+    description: This is ordinary host data 053; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1053
+    active: true
+    tags: [travel, wadowice, benchmark, item-053]
+  item054:
+    sku: LARGE-054
+    name: Large ordinary catalog item 054
+    description: This is ordinary host data 054; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1054
+    active: true
+    tags: [travel, wadowice, benchmark, item-054]
+  item055:
+    sku: LARGE-055
+    name: Large ordinary catalog item 055
+    description: This is ordinary host data 055; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1055
+    active: true
+    tags: [travel, wadowice, benchmark, item-055]
+  item056:
+    sku: LARGE-056
+    name: Large ordinary catalog item 056
+    description: This is ordinary host data 056; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1056
+    active: true
+    tags: [travel, wadowice, benchmark, item-056]
+  item057:
+    sku: LARGE-057
+    name: Large ordinary catalog item 057
+    description: This is ordinary host data 057; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1057
+    active: true
+    tags: [travel, wadowice, benchmark, item-057]
+  item058:
+    sku: LARGE-058
+    name: Large ordinary catalog item 058
+    description: This is ordinary host data 058; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1058
+    active: true
+    tags: [travel, wadowice, benchmark, item-058]
+  item059:
+    sku: LARGE-059
+    name: Large ordinary catalog item 059
+    description: This is ordinary host data 059; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1059
+    active: true
+    tags: [travel, wadowice, benchmark, item-059]
+  item060:
+    sku: LARGE-060
+    name: Large ordinary catalog item 060
+    description: This is ordinary host data 060; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1060
+    active: true
+    tags: [travel, wadowice, benchmark, item-060]
+  item061:
+    sku: LARGE-061
+    name: Large ordinary catalog item 061
+    description: This is ordinary host data 061; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1061
+    active: true
+    tags: [travel, wadowice, benchmark, item-061]
+  item062:
+    sku: LARGE-062
+    name: Large ordinary catalog item 062
+    description: This is ordinary host data 062; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1062
+    active: true
+    tags: [travel, wadowice, benchmark, item-062]
+  item063:
+    sku: LARGE-063
+    name: Large ordinary catalog item 063
+    description: This is ordinary host data 063; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1063
+    active: true
+    tags: [travel, wadowice, benchmark, item-063]
+  item064:
+    sku: LARGE-064
+    name: Large ordinary catalog item 064
+    description: This is ordinary host data 064; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1064
+    active: true
+    tags: [travel, wadowice, benchmark, item-064]
+  item065:
+    sku: LARGE-065
+    name: Large ordinary catalog item 065
+    description: This is ordinary host data 065; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1065
+    active: true
+    tags: [travel, wadowice, benchmark, item-065]
+  item066:
+    sku: LARGE-066
+    name: Large ordinary catalog item 066
+    description: This is ordinary host data 066; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1066
+    active: true
+    tags: [travel, wadowice, benchmark, item-066]
+  item067:
+    sku: LARGE-067
+    name: Large ordinary catalog item 067
+    description: This is ordinary host data 067; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1067
+    active: true
+    tags: [travel, wadowice, benchmark, item-067]
+  item068:
+    sku: LARGE-068
+    name: Large ordinary catalog item 068
+    description: This is ordinary host data 068; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1068
+    active: true
+    tags: [travel, wadowice, benchmark, item-068]
+  item069:
+    sku: LARGE-069
+    name: Large ordinary catalog item 069
+    description: This is ordinary host data 069; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1069
+    active: true
+    tags: [travel, wadowice, benchmark, item-069]
+  item070:
+    sku: LARGE-070
+    name: Large ordinary catalog item 070
+    description: This is ordinary host data 070; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1070
+    active: true
+    tags: [travel, wadowice, benchmark, item-070]
+  item071:
+    sku: LARGE-071
+    name: Large ordinary catalog item 071
+    description: This is ordinary host data 071; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1071
+    active: true
+    tags: [travel, wadowice, benchmark, item-071]
+  item072:
+    sku: LARGE-072
+    name: Large ordinary catalog item 072
+    description: This is ordinary host data 072; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1072
+    active: true
+    tags: [travel, wadowice, benchmark, item-072]
+  item073:
+    sku: LARGE-073
+    name: Large ordinary catalog item 073
+    description: This is ordinary host data 073; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1073
+    active: true
+    tags: [travel, wadowice, benchmark, item-073]
+  item074:
+    sku: LARGE-074
+    name: Large ordinary catalog item 074
+    description: This is ordinary host data 074; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1074
+    active: true
+    tags: [travel, wadowice, benchmark, item-074]
+  item075:
+    sku: LARGE-075
+    name: Large ordinary catalog item 075
+    description: This is ordinary host data 075; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1075
+    active: true
+    tags: [travel, wadowice, benchmark, item-075]
+  item076:
+    sku: LARGE-076
+    name: Large ordinary catalog item 076
+    description: This is ordinary host data 076; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1076
+    active: true
+    tags: [travel, wadowice, benchmark, item-076]
+  item077:
+    sku: LARGE-077
+    name: Large ordinary catalog item 077
+    description: This is ordinary host data 077; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1077
+    active: true
+    tags: [travel, wadowice, benchmark, item-077]
+  item078:
+    sku: LARGE-078
+    name: Large ordinary catalog item 078
+    description: This is ordinary host data 078; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1078
+    active: true
+    tags: [travel, wadowice, benchmark, item-078]
+  item079:
+    sku: LARGE-079
+    name: Large ordinary catalog item 079
+    description: This is ordinary host data 079; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1079
+    active: true
+    tags: [travel, wadowice, benchmark, item-079]
+  item080:
+    sku: LARGE-080
+    name: Large ordinary catalog item 080
+    description: This is ordinary host data 080; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1080
+    active: true
+    tags: [travel, wadowice, benchmark, item-080]
+  item081:
+    sku: LARGE-081
+    name: Large ordinary catalog item 081
+    description: This is ordinary host data 081; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1081
+    active: true
+    tags: [travel, wadowice, benchmark, item-081]
+  item082:
+    sku: LARGE-082
+    name: Large ordinary catalog item 082
+    description: This is ordinary host data 082; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1082
+    active: true
+    tags: [travel, wadowice, benchmark, item-082]
+  item083:
+    sku: LARGE-083
+    name: Large ordinary catalog item 083
+    description: This is ordinary host data 083; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1083
+    active: true
+    tags: [travel, wadowice, benchmark, item-083]
+  item084:
+    sku: LARGE-084
+    name: Large ordinary catalog item 084
+    description: This is ordinary host data 084; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1084
+    active: true
+    tags: [travel, wadowice, benchmark, item-084]
+  item085:
+    sku: LARGE-085
+    name: Large ordinary catalog item 085
+    description: This is ordinary host data 085; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1085
+    active: true
+    tags: [travel, wadowice, benchmark, item-085]
+  item086:
+    sku: LARGE-086
+    name: Large ordinary catalog item 086
+    description: This is ordinary host data 086; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1086
+    active: true
+    tags: [travel, wadowice, benchmark, item-086]
+  item087:
+    sku: LARGE-087
+    name: Large ordinary catalog item 087
+    description: This is ordinary host data 087; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1087
+    active: true
+    tags: [travel, wadowice, benchmark, item-087]
+  item088:
+    sku: LARGE-088
+    name: Large ordinary catalog item 088
+    description: This is ordinary host data 088; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1088
+    active: true
+    tags: [travel, wadowice, benchmark, item-088]
+  item089:
+    sku: LARGE-089
+    name: Large ordinary catalog item 089
+    description: This is ordinary host data 089; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1089
+    active: true
+    tags: [travel, wadowice, benchmark, item-089]
+  item090:
+    sku: LARGE-090
+    name: Large ordinary catalog item 090
+    description: This is ordinary host data 090; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1090
+    active: true
+    tags: [travel, wadowice, benchmark, item-090]
+  item091:
+    sku: LARGE-091
+    name: Large ordinary catalog item 091
+    description: This is ordinary host data 091; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1091
+    active: true
+    tags: [travel, wadowice, benchmark, item-091]
+  item092:
+    sku: LARGE-092
+    name: Large ordinary catalog item 092
+    description: This is ordinary host data 092; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1092
+    active: true
+    tags: [travel, wadowice, benchmark, item-092]
+  item093:
+    sku: LARGE-093
+    name: Large ordinary catalog item 093
+    description: This is ordinary host data 093; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1093
+    active: true
+    tags: [travel, wadowice, benchmark, item-093]
+  item094:
+    sku: LARGE-094
+    name: Large ordinary catalog item 094
+    description: This is ordinary host data 094; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1094
+    active: true
+    tags: [travel, wadowice, benchmark, item-094]
+  item095:
+    sku: LARGE-095
+    name: Large ordinary catalog item 095
+    description: This is ordinary host data 095; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1095
+    active: true
+    tags: [travel, wadowice, benchmark, item-095]
+  item096:
+    sku: LARGE-096
+    name: Large ordinary catalog item 096
+    description: This is ordinary host data 096; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1096
+    active: true
+    tags: [travel, wadowice, benchmark, item-096]
+  item097:
+    sku: LARGE-097
+    name: Large ordinary catalog item 097
+    description: This is ordinary host data 097; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1097
+    active: true
+    tags: [travel, wadowice, benchmark, item-097]
+  item098:
+    sku: LARGE-098
+    name: Large ordinary catalog item 098
+    description: This is ordinary host data 098; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1098
+    active: true
+    tags: [travel, wadowice, benchmark, item-098]
+  item099:
+    sku: LARGE-099
+    name: Large ordinary catalog item 099
+    description: This is ordinary host data 099; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1099
+    active: true
+    tags: [travel, wadowice, benchmark, item-099]
+  item100:
+    sku: LARGE-100
+    name: Large ordinary catalog item 100
+    description: This is ordinary host data 100; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1100
+    active: true
+    tags: [travel, wadowice, benchmark, item-100]
+  item101:
+    sku: LARGE-101
+    name: Large ordinary catalog item 101
+    description: This is ordinary host data 101; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1101
+    active: true
+    tags: [travel, wadowice, benchmark, item-101]
+  item102:
+    sku: LARGE-102
+    name: Large ordinary catalog item 102
+    description: This is ordinary host data 102; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1102
+    active: true
+    tags: [travel, wadowice, benchmark, item-102]
+  item103:
+    sku: LARGE-103
+    name: Large ordinary catalog item 103
+    description: This is ordinary host data 103; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1103
+    active: true
+    tags: [travel, wadowice, benchmark, item-103]
+  item104:
+    sku: LARGE-104
+    name: Large ordinary catalog item 104
+    description: This is ordinary host data 104; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1104
+    active: true
+    tags: [travel, wadowice, benchmark, item-104]
+  item105:
+    sku: LARGE-105
+    name: Large ordinary catalog item 105
+    description: This is ordinary host data 105; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1105
+    active: true
+    tags: [travel, wadowice, benchmark, item-105]
+  item106:
+    sku: LARGE-106
+    name: Large ordinary catalog item 106
+    description: This is ordinary host data 106; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1106
+    active: true
+    tags: [travel, wadowice, benchmark, item-106]
+  item107:
+    sku: LARGE-107
+    name: Large ordinary catalog item 107
+    description: This is ordinary host data 107; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1107
+    active: true
+    tags: [travel, wadowice, benchmark, item-107]
+  item108:
+    sku: LARGE-108
+    name: Large ordinary catalog item 108
+    description: This is ordinary host data 108; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1108
+    active: true
+    tags: [travel, wadowice, benchmark, item-108]
+  item109:
+    sku: LARGE-109
+    name: Large ordinary catalog item 109
+    description: This is ordinary host data 109; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1109
+    active: true
+    tags: [travel, wadowice, benchmark, item-109]
+  item110:
+    sku: LARGE-110
+    name: Large ordinary catalog item 110
+    description: This is ordinary host data 110; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1110
+    active: true
+    tags: [travel, wadowice, benchmark, item-110]
+  item111:
+    sku: LARGE-111
+    name: Large ordinary catalog item 111
+    description: This is ordinary host data 111; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1111
+    active: true
+    tags: [travel, wadowice, benchmark, item-111]
+  item112:
+    sku: LARGE-112
+    name: Large ordinary catalog item 112
+    description: This is ordinary host data 112; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1112
+    active: true
+    tags: [travel, wadowice, benchmark, item-112]
+  item113:
+    sku: LARGE-113
+    name: Large ordinary catalog item 113
+    description: This is ordinary host data 113; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1113
+    active: true
+    tags: [travel, wadowice, benchmark, item-113]
+  item114:
+    sku: LARGE-114
+    name: Large ordinary catalog item 114
+    description: This is ordinary host data 114; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1114
+    active: true
+    tags: [travel, wadowice, benchmark, item-114]
+  item115:
+    sku: LARGE-115
+    name: Large ordinary catalog item 115
+    description: This is ordinary host data 115; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1115
+    active: true
+    tags: [travel, wadowice, benchmark, item-115]
+  item116:
+    sku: LARGE-116
+    name: Large ordinary catalog item 116
+    description: This is ordinary host data 116; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1116
+    active: true
+    tags: [travel, wadowice, benchmark, item-116]
+  item117:
+    sku: LARGE-117
+    name: Large ordinary catalog item 117
+    description: This is ordinary host data 117; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1117
+    active: true
+    tags: [travel, wadowice, benchmark, item-117]
+  item118:
+    sku: LARGE-118
+    name: Large ordinary catalog item 118
+    description: This is ordinary host data 118; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1118
+    active: true
+    tags: [travel, wadowice, benchmark, item-118]
+  item119:
+    sku: LARGE-119
+    name: Large ordinary catalog item 119
+    description: This is ordinary host data 119; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1119
+    active: true
+    tags: [travel, wadowice, benchmark, item-119]
+  item120:
+    sku: LARGE-120
+    name: Large ordinary catalog item 120
+    description: This is ordinary host data 120; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1120
+    active: true
+    tags: [travel, wadowice, benchmark, item-120]
+  item121:
+    sku: LARGE-121
+    name: Large ordinary catalog item 121
+    description: This is ordinary host data 121; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1121
+    active: true
+    tags: [travel, wadowice, benchmark, item-121]
+  item122:
+    sku: LARGE-122
+    name: Large ordinary catalog item 122
+    description: This is ordinary host data 122; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1122
+    active: true
+    tags: [travel, wadowice, benchmark, item-122]
+  item123:
+    sku: LARGE-123
+    name: Large ordinary catalog item 123
+    description: This is ordinary host data 123; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1123
+    active: true
+    tags: [travel, wadowice, benchmark, item-123]
+  item124:
+    sku: LARGE-124
+    name: Large ordinary catalog item 124
+    description: This is ordinary host data 124; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1124
+    active: true
+    tags: [travel, wadowice, benchmark, item-124]
+  item125:
+    sku: LARGE-125
+    name: Large ordinary catalog item 125
+    description: This is ordinary host data 125; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1125
+    active: true
+    tags: [travel, wadowice, benchmark, item-125]
+  item126:
+    sku: LARGE-126
+    name: Large ordinary catalog item 126
+    description: This is ordinary host data 126; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1126
+    active: true
+    tags: [travel, wadowice, benchmark, item-126]
+  item127:
+    sku: LARGE-127
+    name: Large ordinary catalog item 127
+    description: This is ordinary host data 127; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1127
+    active: true
+    tags: [travel, wadowice, benchmark, item-127]
+  item128:
+    sku: LARGE-128
+    name: Large ordinary catalog item 128
+    description: This is ordinary host data 128; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1128
+    active: true
+    tags: [travel, wadowice, benchmark, item-128]
+  item129:
+    sku: LARGE-129
+    name: Large ordinary catalog item 129
+    description: This is ordinary host data 129; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1129
+    active: true
+    tags: [travel, wadowice, benchmark, item-129]
+  item130:
+    sku: LARGE-130
+    name: Large ordinary catalog item 130
+    description: This is ordinary host data 130; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1130
+    active: true
+    tags: [travel, wadowice, benchmark, item-130]
+  item131:
+    sku: LARGE-131
+    name: Large ordinary catalog item 131
+    description: This is ordinary host data 131; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1131
+    active: true
+    tags: [travel, wadowice, benchmark, item-131]
+  item132:
+    sku: LARGE-132
+    name: Large ordinary catalog item 132
+    description: This is ordinary host data 132; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1132
+    active: true
+    tags: [travel, wadowice, benchmark, item-132]
+  item133:
+    sku: LARGE-133
+    name: Large ordinary catalog item 133
+    description: This is ordinary host data 133; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1133
+    active: true
+    tags: [travel, wadowice, benchmark, item-133]
+  item134:
+    sku: LARGE-134
+    name: Large ordinary catalog item 134
+    description: This is ordinary host data 134; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1134
+    active: true
+    tags: [travel, wadowice, benchmark, item-134]
+  item135:
+    sku: LARGE-135
+    name: Large ordinary catalog item 135
+    description: This is ordinary host data 135; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1135
+    active: true
+    tags: [travel, wadowice, benchmark, item-135]
+  item136:
+    sku: LARGE-136
+    name: Large ordinary catalog item 136
+    description: This is ordinary host data 136; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1136
+    active: true
+    tags: [travel, wadowice, benchmark, item-136]
+  item137:
+    sku: LARGE-137
+    name: Large ordinary catalog item 137
+    description: This is ordinary host data 137; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1137
+    active: true
+    tags: [travel, wadowice, benchmark, item-137]
+  item138:
+    sku: LARGE-138
+    name: Large ordinary catalog item 138
+    description: This is ordinary host data 138; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1138
+    active: true
+    tags: [travel, wadowice, benchmark, item-138]
+  item139:
+    sku: LARGE-139
+    name: Large ordinary catalog item 139
+    description: This is ordinary host data 139; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1139
+    active: true
+    tags: [travel, wadowice, benchmark, item-139]
+  item140:
+    sku: LARGE-140
+    name: Large ordinary catalog item 140
+    description: This is ordinary host data 140; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1140
+    active: true
+    tags: [travel, wadowice, benchmark, item-140]
+  item141:
+    sku: LARGE-141
+    name: Large ordinary catalog item 141
+    description: This is ordinary host data 141; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1141
+    active: true
+    tags: [travel, wadowice, benchmark, item-141]
+  item142:
+    sku: LARGE-142
+    name: Large ordinary catalog item 142
+    description: This is ordinary host data 142; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1142
+    active: true
+    tags: [travel, wadowice, benchmark, item-142]
+  item143:
+    sku: LARGE-143
+    name: Large ordinary catalog item 143
+    description: This is ordinary host data 143; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1143
+    active: true
+    tags: [travel, wadowice, benchmark, item-143]
+  item144:
+    sku: LARGE-144
+    name: Large ordinary catalog item 144
+    description: This is ordinary host data 144; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1144
+    active: true
+    tags: [travel, wadowice, benchmark, item-144]
+  item145:
+    sku: LARGE-145
+    name: Large ordinary catalog item 145
+    description: This is ordinary host data 145; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1145
+    active: true
+    tags: [travel, wadowice, benchmark, item-145]
+  item146:
+    sku: LARGE-146
+    name: Large ordinary catalog item 146
+    description: This is ordinary host data 146; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1146
+    active: true
+    tags: [travel, wadowice, benchmark, item-146]
+  item147:
+    sku: LARGE-147
+    name: Large ordinary catalog item 147
+    description: This is ordinary host data 147; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1147
+    active: true
+    tags: [travel, wadowice, benchmark, item-147]
+  item148:
+    sku: LARGE-148
+    name: Large ordinary catalog item 148
+    description: This is ordinary host data 148; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1148
+    active: true
+    tags: [travel, wadowice, benchmark, item-148]
+  item149:
+    sku: LARGE-149
+    name: Large ordinary catalog item 149
+    description: This is ordinary host data 149; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1149
+    active: true
+    tags: [travel, wadowice, benchmark, item-149]
+  item150:
+    sku: LARGE-150
+    name: Large ordinary catalog item 150
+    description: This is ordinary host data 150; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1150
+    active: true
+    tags: [travel, wadowice, benchmark, item-150]
+  item151:
+    sku: LARGE-151
+    name: Large ordinary catalog item 151
+    description: This is ordinary host data 151; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1151
+    active: true
+    tags: [travel, wadowice, benchmark, item-151]
+  item152:
+    sku: LARGE-152
+    name: Large ordinary catalog item 152
+    description: This is ordinary host data 152; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1152
+    active: true
+    tags: [travel, wadowice, benchmark, item-152]
+  item153:
+    sku: LARGE-153
+    name: Large ordinary catalog item 153
+    description: This is ordinary host data 153; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1153
+    active: true
+    tags: [travel, wadowice, benchmark, item-153]
+  item154:
+    sku: LARGE-154
+    name: Large ordinary catalog item 154
+    description: This is ordinary host data 154; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1154
+    active: true
+    tags: [travel, wadowice, benchmark, item-154]
+  item155:
+    sku: LARGE-155
+    name: Large ordinary catalog item 155
+    description: This is ordinary host data 155; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1155
+    active: true
+    tags: [travel, wadowice, benchmark, item-155]
+  item156:
+    sku: LARGE-156
+    name: Large ordinary catalog item 156
+    description: This is ordinary host data 156; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1156
+    active: true
+    tags: [travel, wadowice, benchmark, item-156]
+  item157:
+    sku: LARGE-157
+    name: Large ordinary catalog item 157
+    description: This is ordinary host data 157; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1157
+    active: true
+    tags: [travel, wadowice, benchmark, item-157]
+  item158:
+    sku: LARGE-158
+    name: Large ordinary catalog item 158
+    description: This is ordinary host data 158; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1158
+    active: true
+    tags: [travel, wadowice, benchmark, item-158]
+  item159:
+    sku: LARGE-159
+    name: Large ordinary catalog item 159
+    description: This is ordinary host data 159; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1159
+    active: true
+    tags: [travel, wadowice, benchmark, item-159]
+  item160:
+    sku: LARGE-160
+    name: Large ordinary catalog item 160
+    description: This is ordinary host data 160; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1160
+    active: true
+    tags: [travel, wadowice, benchmark, item-160]
+  item161:
+    sku: LARGE-161
+    name: Large ordinary catalog item 161
+    description: This is ordinary host data 161; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1161
+    active: true
+    tags: [travel, wadowice, benchmark, item-161]
+  item162:
+    sku: LARGE-162
+    name: Large ordinary catalog item 162
+    description: This is ordinary host data 162; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1162
+    active: true
+    tags: [travel, wadowice, benchmark, item-162]
+  item163:
+    sku: LARGE-163
+    name: Large ordinary catalog item 163
+    description: This is ordinary host data 163; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1163
+    active: true
+    tags: [travel, wadowice, benchmark, item-163]
+  item164:
+    sku: LARGE-164
+    name: Large ordinary catalog item 164
+    description: This is ordinary host data 164; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1164
+    active: true
+    tags: [travel, wadowice, benchmark, item-164]
+  item165:
+    sku: LARGE-165
+    name: Large ordinary catalog item 165
+    description: This is ordinary host data 165; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1165
+    active: true
+    tags: [travel, wadowice, benchmark, item-165]
+  item166:
+    sku: LARGE-166
+    name: Large ordinary catalog item 166
+    description: This is ordinary host data 166; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1166
+    active: true
+    tags: [travel, wadowice, benchmark, item-166]
+  item167:
+    sku: LARGE-167
+    name: Large ordinary catalog item 167
+    description: This is ordinary host data 167; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1167
+    active: true
+    tags: [travel, wadowice, benchmark, item-167]
+  item168:
+    sku: LARGE-168
+    name: Large ordinary catalog item 168
+    description: This is ordinary host data 168; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1168
+    active: true
+    tags: [travel, wadowice, benchmark, item-168]
+  item169:
+    sku: LARGE-169
+    name: Large ordinary catalog item 169
+    description: This is ordinary host data 169; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1169
+    active: true
+    tags: [travel, wadowice, benchmark, item-169]
+  item170:
+    sku: LARGE-170
+    name: Large ordinary catalog item 170
+    description: This is ordinary host data 170; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1170
+    active: true
+    tags: [travel, wadowice, benchmark, item-170]
+  item171:
+    sku: LARGE-171
+    name: Large ordinary catalog item 171
+    description: This is ordinary host data 171; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1171
+    active: true
+    tags: [travel, wadowice, benchmark, item-171]
+  item172:
+    sku: LARGE-172
+    name: Large ordinary catalog item 172
+    description: This is ordinary host data 172; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1172
+    active: true
+    tags: [travel, wadowice, benchmark, item-172]
+  item173:
+    sku: LARGE-173
+    name: Large ordinary catalog item 173
+    description: This is ordinary host data 173; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1173
+    active: true
+    tags: [travel, wadowice, benchmark, item-173]
+  item174:
+    sku: LARGE-174
+    name: Large ordinary catalog item 174
+    description: This is ordinary host data 174; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1174
+    active: true
+    tags: [travel, wadowice, benchmark, item-174]
+  item175:
+    sku: LARGE-175
+    name: Large ordinary catalog item 175
+    description: This is ordinary host data 175; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1175
+    active: true
+    tags: [travel, wadowice, benchmark, item-175]
+  item176:
+    sku: LARGE-176
+    name: Large ordinary catalog item 176
+    description: This is ordinary host data 176; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1176
+    active: true
+    tags: [travel, wadowice, benchmark, item-176]
+  item177:
+    sku: LARGE-177
+    name: Large ordinary catalog item 177
+    description: This is ordinary host data 177; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1177
+    active: true
+    tags: [travel, wadowice, benchmark, item-177]
+  item178:
+    sku: LARGE-178
+    name: Large ordinary catalog item 178
+    description: This is ordinary host data 178; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1178
+    active: true
+    tags: [travel, wadowice, benchmark, item-178]
+  item179:
+    sku: LARGE-179
+    name: Large ordinary catalog item 179
+    description: This is ordinary host data 179; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1179
+    active: true
+    tags: [travel, wadowice, benchmark, item-179]
+  item180:
+    sku: LARGE-180
+    name: Large ordinary catalog item 180
+    description: This is ordinary host data 180; it is deliberately retained inline and is never a process boundary.
+    priceMinor: 1180
+    active: true
+    tags: [travel, wadowice, benchmark, item-180]
+contracts:
+  ownerChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/large-order/alice
+    actor:
+      type: MyOS/Principal Actor
+      accountId: alice
+  merchantChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/large-order/bob
+    actor:
+      type: MyOS/Principal Actor
+      accountId: bob
+  coordinationEmbeddedChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: coordination/internal/large-order-host
+    actor:
+      type: MyOS/Principal Actor
+      accountId: coordination
+  embedded:
+    type: Process Embedded
+    paths: [/payNote]
+  attachPayNote:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request:
+      document:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: add
+              path: /payNote
+              val: {$binding: event/message/request/document}
+          - $appendChange: {op: replace, path: /hostStatus, val: PayNote Attached}
+          - $appendChange:
+              op: replace
+              path: /hostOperationCount
+              val: {$add: [$document: /hostOperationCount, 1]}
+          - $return: true
+  touchHost:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request:
+      note: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /hostRevision
+              val: {$add: [$document: /hostRevision, 1]}
+          - $appendChange:
+              op: replace
+              path: /hostOperationCount
+              val: {$add: [$document: /hostOperationCount, 1]}
+          - $appendChange: {op: replace, path: /hostStatus, val: Host Updated}
+          - $return: true
+  coordinationApplyEmbeddedRevision:
+    type: Coordination/Sequential Workflow Operation
+    channel: coordinationEmbeddedChannel
+    request:
+      childDocumentId: {type: Text}
+      childEpoch: {type: Integer}
+      after:
+        documentId: {type: Text}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /payNote
+              val: {$binding: event/message/request/after}
+          - $appendChange:
+              op: replace
+              path: /observedPayNoteStatus
+              val: {$binding: event/message/request/after/status}
+          - $appendChange:
+              op: replace
+              path: /observedAuthorizationCount
+              val: {$binding: event/message/request/after/authorizationCountState}
+          - $appendChange:
+              op: replace
+              path: /payNoteRevisionCount
+              val: {$add: [$document: /payNoteRevisionCount, 1]}
+          - $return: true
+  unrelatedWorkflow01:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow02:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow03:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow04:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow05:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow06:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow07:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow08:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow09:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow10:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow11:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow12:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow13:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow14:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow15:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow16:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow17:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow18:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow19:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow20:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow21:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow22:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow23:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow24:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow25:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow26:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow27:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow28:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow29:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow30:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow31:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow32:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow33:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow34:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow35:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow36:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow37:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow38:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow39:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  unrelatedWorkflow40:
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true

@@ -1,0 +1,54 @@
+{
+    "schema": "blue.coordination/basic-runtime-provenance/2.0",
+    "generatedAt": "2026-08-10T21:35:25.706945Z",
+    "sourceManifestSha256": "011e48b9c17681afee813e6eefe5dac5c79dedc2258b68a20636ef87e22fccde",
+    "configurationManifestSha256": "420e5a5e022635a9184e6ed3a1236907424a9af2a88b5c91eca4e4560239eb6f",
+    "dependencyLockSha256": "2fd586ab9a6b636fd37a82c58db5b985836ea5a93576314ac4e2bec57d3b010e",
+    "benchmarkRuntime": {
+        "java": "17.0.10",
+        "vendor": "Oracle Corporation",
+        "vm": "Java HotSpot(TM) 64-Bit Server VM",
+        "os": "Mac OS X",
+        "osVersion": "26.5.2",
+        "architecture": "aarch64"
+    },
+    "provenanceProducer": {
+        "gradle": "9.6.0",
+        "java": "26.0.1",
+        "javaVendor": "Oracle Corporation",
+        "os": "Mac OS X",
+        "osVersion": "26.5.2",
+        "architecture": "aarch64"
+    },
+    "samples": {
+        "microWarmups": 50,
+        "microSamples": 200,
+        "processWarmups": 5,
+        "processSamples": 30,
+        "documentSamples": 30
+    },
+    "reports": [
+        {
+            "file": "runtime-comparison.json",
+            "sha256": "905f40b44c690fa3a964c5a01c47005659f1c2acf590a4243ad5ac363d24bc64"
+        },
+        {
+            "file": "runtime-comparison.md",
+            "sha256": "a3011777ce2349573397825994b7a13e18fad5bcbf818922c140c07222c20bab"
+        },
+        {
+            "file": "large-host-embedded-paynote-timings.json",
+            "sha256": "9cc8eec2f2c51b43ad776d6c4b65ee86114c66f6116bcf6880cd0ddda2f8be94"
+        }
+    ],
+    "artifacts": [
+        {
+            "file": "blue-coordination-java-3.0.0-rc.1-test-fixtures.jar",
+            "sha256": "d5cd13543675f365674eb22bb059fa5f43424cf3ef36c2ea41e87206a0d046c6"
+        },
+        {
+            "file": "blue-coordination-java-3.0.0-rc.1.jar",
+            "sha256": "c68fbd36aa35827eddb0066560d10bdfb6b3b302eb7cf6da70d386a72c72a22e"
+        }
+    ]
+}

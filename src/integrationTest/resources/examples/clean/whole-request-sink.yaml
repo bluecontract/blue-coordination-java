@@ -1,0 +1,43 @@
+documentId: whole-request-sink
+name: Whole Request Sink
+payload:
+touchCount: 0
+storeCount: 0
+contracts:
+  aliceChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/whole-request/alice
+    actor:
+      type: MyOS/Principal Actor
+      accountId: alice
+  touch:
+    type: Coordination/Sequential Workflow Operation
+    channel: aliceChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          # Deliberately do not dereference /message/request/payload.
+          - $appendChange:
+              op: replace
+              path: /touchCount
+              val: {$add: [$document: /touchCount, 1]}
+          - $return: true
+  storePayload:
+    type: Coordination/Sequential Workflow Operation
+    channel: aliceChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /payload
+              val: {$binding: event/message/request/payload}
+          - $appendChange:
+              op: replace
+              path: /storeCount
+              val: {$add: [$document: /storeCount, 1]}
+          - $return: true

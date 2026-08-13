@@ -1,320 +1,270 @@
 package blue.coordination.processor;
 
 import blue.coordination.processor.bex.BexProcessingMetrics;
-import blue.language.Blue;
-import blue.language.model.Node;
+import blue.language.processor.ChannelEvaluation;
 import blue.language.processor.ContractProcessorRegistry;
-import blue.language.processor.DocumentProcessingResult;
+import blue.language.processor.ContractProcessorRegistryBuilder;
 import blue.language.processor.DocumentProcessor;
-import blue.language.processor.model.ChannelContract;
-import blue.language.processor.model.HandlerContract;
-import blue.language.processor.model.MarkerContract;
-import blue.language.utils.TypeClassResolver;
+import blue.language.processor.ProcessingMetricId;
+import blue.language.processor.ProcessingObservation;
+import blue.language.processor.ProcessingObserver;
+import blue.language.identity.DirectBlueIdCalculator;
+import blue.language.model.Node;
+import blue.language.runtime.BlueLanguage;
 import blue.repo.BlueRepository;
-import blue.repo.coordination.AllTimelinesChannel;
-import blue.repo.coordination.ChatMessage;
-import blue.repo.coordination.ChatWorkflowOperation;
-import blue.repo.coordination.CompositeTimelineChannel;
-import blue.repo.coordination.Operation;
+import blue.repo.coordination.Actor;
+import blue.repo.coordination.ActorPolicy;
+import blue.repo.coordination.ComputeDefinition;
+import blue.repo.coordination.DocumentAnchors;
+import blue.repo.coordination.DocumentLinks;
 import blue.repo.coordination.OperationRequest;
-import blue.repo.coordination.SequentialWorkflow;
-import blue.repo.coordination.SequentialWorkflowOperation;
+import blue.repo.coordination.Timeline;
+import blue.repo.coordination.TimelineEntry;
 import blue.repo.coordination.TimelineChannel;
-import blue.repo.coordination.UpdateDocument;
-import java.math.BigInteger;
+import blue.repo.myos.MyOSTimelineChannel;
+import blue.repo.myos.SearchContract;
+import blue.repo.workflows.ContractsChangePolicy;
+import blue.repo.workflows.DocumentSection;
+import org.junit.jupiter.api.Test;
+
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class CoordinationProcessorsTest {
+/** Current immutable builder and observer coverage for Coordination wiring. */
+final class CoordinationProcessorsTest {
 
     @Test
-    void registerWithBlueRegistersCoordinationProcessors() {
-        Fixture fixture = configuredFixture();
+    void shouldRegisterCoordinationChannelsInCurrentContractsRegistry() {
+        // given
+        ContractProcessorRegistryBuilder builder =
+                ContractProcessorRegistryBuilder.create()
+                        .registerDefaults();
 
-        assertCoordinationProcessorsRegistered(fixture.blue.getDocumentProcessor());
+        // when
+        ContractProcessorRegistry registry =
+                CoordinationProcessors.configure(builder).build();
+
+        // then
+        assertTrue(registry.lookupChannel(
+                TimelineChannel.blueId()).isPresent());
     }
 
     @Test
-    void configureBuilderRegistersCoordinationProcessors() {
-        DocumentProcessor processor =
-                CoordinationProcessors.configure(DocumentProcessor.builder()).build();
+    void shouldRegisterEveryCurrentRepositoryMarkerCapability() {
+        // given
+        ContractProcessorRegistry registry = CoordinationProcessors.configure(
+                ContractProcessorRegistryBuilder.create()
+                        .registerDefaults()).build();
 
-        assertCoordinationProcessorsRegistered(processor);
+        // when
+        List<String> registered = new ArrayList<String>();
+        if (registry.lookupMarker(ActorPolicy.blueId()).isPresent()) {
+            registered.add(ActorPolicy.blueId());
+        }
+        if (registry.lookupMarker(ComputeDefinition.blueId()).isPresent()) {
+            registered.add(ComputeDefinition.blueId());
+        }
+        if (registry.lookupMarker(DocumentAnchors.blueId()).isPresent()) {
+            registered.add(DocumentAnchors.blueId());
+        }
+        if (registry.lookupMarker(DocumentLinks.blueId()).isPresent()) {
+            registered.add(DocumentLinks.blueId());
+        }
+        if (registry.lookupMarker(SearchContract.blueId()).isPresent()) {
+            registered.add(SearchContract.blueId());
+        }
+        if (registry.lookupMarker(
+                ContractsChangePolicy.blueId()).isPresent()) {
+            registered.add(ContractsChangePolicy.blueId());
+        }
+        if (registry.lookupMarker(DocumentSection.blueId()).isPresent()) {
+            registered.add(DocumentSection.blueId());
+        }
+
+        // then
+        assertEquals(7, registered.size());
     }
 
     @Test
-    void registerWithBlueInstallsOptionsMetricsAsLanguageSink() {
+    void shouldRegisterTimelineSubtypeInSuccessorRegistryGeneration() {
+        // given
+        ContractProcessorRegistryBuilder builder =
+                CoordinationProcessors.configure(
+                        ContractProcessorRegistryBuilder.create()
+                                .registerDefaults());
+
+        // when
+        ContractProcessorRegistry registry =
+                CoordinationProcessors.registerTimelineSubtype(
+                                builder,
+                                MyOSTimelineChannel.class)
+                        .build();
+
+        // then
+        assertTrue(registry.lookupChannel(
+                MyOSTimelineChannel.blueId()).isPresent());
+    }
+
+    @Test
+    void unionChannelTieBreaksUseUnicodeCodePointOrder() {
+        String privateUse = "\uE000";
+        String supplementary = "\uD800\uDC00";
+        assertTrue(privateUse.compareTo(supplementary) > 0,
+                "the fixture must oppose Java UTF-16 ordering");
+        ChannelEvaluation evaluation = ChannelEvaluation.match(new Node());
+
+        AllTimelinesChannelProcessor.MatchingTimeline allPrivate =
+                new AllTimelinesChannelProcessor.MatchingTimeline(
+                        privateUse, 0, evaluation);
+        AllTimelinesChannelProcessor.MatchingTimeline allSupplementary =
+                new AllTimelinesChannelProcessor.MatchingTimeline(
+                        supplementary, 0, evaluation);
+        assertTrue(allPrivate.precedes(allSupplementary));
+        assertFalse(allSupplementary.precedes(allPrivate));
+
+        CompositeTimelineChannelProcessor.MatchingChild compositePrivate =
+                new CompositeTimelineChannelProcessor.MatchingChild(
+                        privateUse, 0, evaluation);
+        CompositeTimelineChannelProcessor.MatchingChild compositeSupplementary =
+                new CompositeTimelineChannelProcessor.MatchingChild(
+                        supplementary, 0, evaluation);
+        assertTrue(compositePrivate.precedes(compositeSupplementary));
+        assertFalse(compositeSupplementary.precedes(compositePrivate));
+    }
+
+    @Test
+    void shouldFanOutTypedObservationsToBothObservers() {
+        // given
+        List<ProcessingObservation> first =
+                new ArrayList<ProcessingObservation>();
+        List<ProcessingObservation> second =
+                new ArrayList<ProcessingObservation>();
+        ProcessingObserver observer = CoordinationProcessors.observers(
+                first::add,
+                second::add);
+        ProcessingObservation observation = ProcessingObservation.of(
+                ProcessingMetricId.BLUE_ID_CALCULATIONS,
+                3L);
+
+        // when
+        observer.record(observation);
+
+        // then
+        assertEquals(1, first.size());
+        assertEquals(1, second.size());
+        assertEquals(observation, first.get(0));
+        assertEquals(observation, second.get(0));
+    }
+
+    @Test
+    void shouldIsolateOneFailingObserverFromTheOther() {
+        // given
+        AtomicInteger retainedCalls = new AtomicInteger();
+        ProcessingObserver observer = CoordinationProcessors.observers(
+                observation -> {
+                    throw new IllegalStateException("diagnostic failure");
+                },
+                observation -> retainedCalls.incrementAndGet());
+
+        // when
+        observer.record(ProcessingObservation.of(
+                ProcessingMetricId.BLUE_ID_CALCULATIONS,
+                1L));
+
+        // then
+        assertEquals(1, retainedCalls.get());
+    }
+
+    @Test
+    void shouldRetainLanguageMetricsThroughCurrentObserverBoundary() {
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
-        Blue blue = CoordinationTestResources.configuredBlue(BlueRepository.latest());
+        ProcessingObservation observation = ProcessingObservation.of(
+                ProcessingMetricId.BLUE_ID_CALCULATIONS,
+                2L);
 
-        CoordinationProcessors.registerWith(blue, CoordinationProcessorOptions.builder()
-                .processingMetrics(metrics)
-                .build());
+        // when
+        metrics.record(observation);
 
-        assertSame(metrics, blue.getDocumentProcessor().processingMetricsSink());
+        // then
+        assertEquals(
+                Long.valueOf(2L),
+                metrics.languageCounters().get(
+                        "blueIdCalculations"));
     }
 
     @Test
-    void registerWithBluePreservesAndFansOutToIndependentLanguageSink() {
-        BexProcessingMetrics existing = new BexProcessingMetrics();
-        BexProcessingMetrics coordination = new BexProcessingMetrics();
-        Blue blue = CoordinationTestResources.configuredBlue(BlueRepository.latest());
-        blue.getDocumentProcessor().processingMetricsSink(existing);
+    void shouldKeepPublishedSemanticTypeIdentitiesAsTheDefaultProfile() {
+        // given
+        CoordinationSemanticTypeIdentities defaults =
+                CoordinationSemanticTypeIdentities.publishedDefaults();
 
-        CoordinationProcessors.registerWith(blue, CoordinationProcessorOptions.builder()
-                .processingMetrics(coordination)
-                .build());
-        blue.getDocumentProcessor().processingMetricsSink().incrementPatchSequencesPrepared();
-        blue.getDocumentProcessor().processingMetricsSink().addPatchesPrepared(3L);
+        // when
+        String profileIdentity = defaults.profileIdentity();
 
-        assertEquals(1L, existing.preparedPatchSequences());
-        assertEquals(3L, existing.preparedPatches());
-        assertEquals(1L, coordination.preparedPatchSequences());
-        assertEquals(3L, coordination.preparedPatches());
+        // then
+        assertEquals(TimelineEntry.blueId(),
+                defaults.timelineEntryBlueId());
+        assertEquals(OperationRequest.blueId(),
+                defaults.operationRequestBlueId());
+        assertEquals(Timeline.blueId(), defaults.timelineBlueId());
+        assertEquals(Actor.blueId(), defaults.actorBlueId());
+        assertEquals(profileIdentity,
+                CoordinationSemanticTypeIdentities
+                        .publishedDefaults().profileIdentity());
     }
 
     @Test
-    void registerWithBlueFansOutGenericLanguageMetricsToBothSinks() {
-        BexProcessingMetrics existing = new BexProcessingMetrics();
-        BexProcessingMetrics coordination = new BexProcessingMetrics();
-        Blue blue = CoordinationTestResources.configuredBlue(BlueRepository.latest());
-        blue.getDocumentProcessor().processingMetricsSink(existing);
-
-        CoordinationProcessors.registerWith(blue, CoordinationProcessorOptions.builder()
-                .processingMetrics(coordination)
-                .build());
-        blue.getDocumentProcessor().processingMetricsSink()
-                .incrementFullSnapshotFallback("compositeTest");
-        blue.getDocumentProcessor().processingMetricsSink()
-                .incrementNodeCloneCalls("compositeTest");
-        blue.getDocumentProcessor().processingMetricsSink()
-                .setCacheEntries("compositeTest", 4L);
-        blue.getDocumentProcessor().processingMetricsSink()
-                .recordCacheHighWaterBytes("compositeTest", 12L);
-
-        assertEquals(existing.languageCounters(), coordination.languageCounters());
-        assertEquals(existing.languageGauges(), coordination.languageGauges());
-        assertEquals(existing.languageHighWaterMarks(), coordination.languageHighWaterMarks());
-        assertEquals(1L, existing.languageCounters().get("fullSnapshotFallbacks"));
-        assertEquals(1L, existing.languageCounters()
-                .get("fullSnapshotFallbackReason.compositeTest"));
-        assertEquals(1L, existing.languageCounters()
-                .get("nodeCloneCallsByPurpose.compositeTest"));
-        assertEquals(4L, existing.languageGauges().get("cache.compositeTest.entries"));
-        assertEquals(12L, existing.languageHighWaterMarks()
-                .get("cache.compositeTest.highWaterBytes"));
-    }
-
-    @Test
-    void configureBuilderInstallsOptionsMetricsAsLanguageSink() {
-        BexProcessingMetrics metrics = new BexProcessingMetrics();
-        DocumentProcessor processor = CoordinationProcessors.configure(
-                DocumentProcessor.builder(),
-                CoordinationProcessorOptions.builder().processingMetrics(metrics).build())
+    void shouldRejectCustomSemanticIdentityWithMismatchedProviderContent() {
+        // given
+        Node timelineEntry = new Node().name("Test Timeline Entry");
+        Node operationRequest = new Node().name("Test Operation Request");
+        Node timeline = new Node().name("Test Timeline");
+        Node actor = new Node().name("Test Actor");
+        CoordinationSemanticTypeIdentities custom =
+                CoordinationSemanticTypeIdentities.exact(
+                        DirectBlueIdCalculator.calculateBlueId(timelineEntry),
+                        DirectBlueIdCalculator.calculateBlueId(operationRequest),
+                        DirectBlueIdCalculator.calculateBlueId(timeline),
+                        DirectBlueIdCalculator.calculateBlueId(actor));
+        Map<String, Node> content = new LinkedHashMap<String, Node>();
+        content.put(custom.timelineEntryBlueId(),
+                new Node().name("Mismatched Timeline Entry"));
+        content.put(custom.operationRequestBlueId(), operationRequest);
+        content.put(custom.timelineBlueId(), timeline);
+        content.put(custom.actorBlueId(), actor);
+        BlueLanguage language = BlueLanguage.builder()
+                .nodeProvider(blueId -> {
+                    Node node = content.get(blueId);
+                    return node == null
+                            ? null
+                            : Collections.singletonList(node.clone());
+                })
                 .build();
 
-        assertSame(metrics, processor.processingMetricsSink());
-    }
+        // when
+        IllegalArgumentException failure = assertThrows(
+                IllegalArgumentException.class,
+                () -> CoordinationProcessorOptions.builder()
+                        .language(language)
+                        .semanticTypeIdentities(custom)
+                        .build());
 
-    @Test
-    void optionsMetricsReceiveRealLanguageMultiPatchSequenceCallbacks() {
-        BexProcessingMetrics metrics = new BexProcessingMetrics();
-        Fixture fixture = configuredFixture(CoordinationProcessorOptions.builder()
-                .processingMetrics(metrics)
-                .build());
-        Node preprocessed = fixture.blue.preprocess(multiPatchCounterDocument(fixture.repository));
-        DocumentProcessingResult initialized = fixture.blue.initializeDocument(preprocessed);
-        BexProcessingMetrics.Snapshot before = metrics.snapshot();
-
-        DocumentProcessingResult processed = fixture.blue.processDocument(initialized.document(),
-                TestTimelineProvider.timelineEntry(fixture.blue,
-                        fixture.repository,
-                        "owner",
-                        1,
-                        CoordinationTestResources.operationRequest(
-                                "increment", "ownerChannel", new Node().value(7))));
-        BexProcessingMetrics.Snapshot after = metrics.snapshot();
-
-        assertFalse(processed.capabilityFailure(), processed.failureReason());
-        assertEquals(BigInteger.valueOf(3), processed.document().get("/counter"));
-        assertEquals(1L, after.preparedPatchSequences - before.preparedPatchSequences);
-        assertEquals(3L, after.preparedPatches - before.preparedPatches);
-        assertEquals(1L, after.languageSequenceTransactions - before.languageSequenceTransactions);
-        assertEquals(0L, after.languageSingletonTransactions - before.languageSingletonTransactions);
-        assertEquals(0L, after.languageSuffixRebases - before.languageSuffixRebases);
-        assertEquals(0L, after.languageFallbackPatches - before.languageFallbackPatches);
-        assertEquals(2L, after.languageIntermediateSnapshotAdvances
-                - before.languageIntermediateSnapshotAdvances);
-        assertEquals(1L, after.languageFinalSnapshotPromotions
-                - before.languageFinalSnapshotPromotions);
-    }
-
-    @Test
-    void realRepositoryCoordinationContractsLoadAndInitialize() {
-        Fixture fixture = configuredFixture();
-        Node document = counterDocument(fixture.repository, "ownerChannel");
-        Node preprocessed = fixture.blue.preprocess(document.clone());
-        Map<String, Node> contracts = contracts(preprocessed);
-
-        assertEquals(TimelineChannel.blueId(), contracts.get("ownerChannel").getType().getBlueId());
-        assertEquals(SequentialWorkflowOperation.blueId(),
-                contracts.get("increment").getType().getBlueId());
-
-        Object convertedOperation = fixture.blue.nodeToObject(contracts.get("increment"), Object.class);
-        assertTrue(convertedOperation instanceof SequentialWorkflowOperation);
-        assertEquals("ownerChannel", ((SequentialWorkflowOperation) convertedOperation).getChannel());
-
-        Object convertedHandler = fixture.blue.nodeToObject(contracts.get("increment"), Object.class);
-        assertTrue(convertedHandler instanceof SequentialWorkflowOperation);
-        SequentialWorkflowOperation handler = (SequentialWorkflowOperation) convertedHandler;
-        assertEquals("ownerChannel", handler.getChannel());
-        assertNotNull(handler.getRequest());
-        assertNotNull(handler.getSteps());
-        assertTrue(handler.getSteps().isEmpty());
-
-        DocumentProcessingResult result = fixture.blue.initializeDocument(preprocessed);
-
-        assertFalse(result.capabilityFailure(), result.failureReason());
-        assertTrue(fixture.blue.isInitialized(result.document()));
-        assertEquals(BigInteger.ZERO, result.document().getProperties().get("counter").getValue());
-        assertFalse(contracts(result.document()).containsKey("checkpoint"));
-    }
-
-    @Test
-    void sequentialWorkflowOperationWithMissingChannelDoesNotRun() {
-        Fixture fixture = configuredFixture();
-        Node document = counterDocument(fixture.repository, "missingChannel");
-        Node preprocessed = fixture.blue.preprocess(document.clone());
-
-        DocumentProcessingResult initialized = fixture.blue.initializeDocument(preprocessed);
-        DocumentProcessingResult processed = fixture.blue.processDocument(initialized.document(),
-                TestTimelineProvider.timelineEntry(fixture.blue,
-                        fixture.repository,
-                        "owner",
-                        1,
-                        CoordinationTestResources.operationRequest(
-                                "increment", "missingChannel", new Node().value(7))));
-
-        assertFalse(processed.capabilityFailure(), processed.failureReason());
-        assertEquals(BigInteger.ZERO, processed.document().getProperties().get("counter").getValue());
-    }
-
-    @Test
-    void generatedRepositoryContractsProvideProcessorModelBaseTypes() {
-        assertTrue(ChannelContract.class.isAssignableFrom(AllTimelinesChannel.class));
-        assertTrue(ChannelContract.class.isAssignableFrom(TimelineChannel.class));
-        assertTrue(ChannelContract.class.isAssignableFrom(CompositeTimelineChannel.class));
-        assertTrue(HandlerContract.class.isAssignableFrom(ChatWorkflowOperation.class));
-        assertTrue(HandlerContract.class.isAssignableFrom(SequentialWorkflow.class));
-        assertTrue(HandlerContract.class.isAssignableFrom(Operation.class));
-        assertTrue(HandlerContract.class.isAssignableFrom(SequentialWorkflowOperation.class));
-    }
-
-    @Test
-    void generatedCoordinationTypesResolveToRepositoryClasses() {
-        TypeClassResolver resolver = BlueRepository.v1_3_0().typeClassResolver();
-
-        assertEquals(AllTimelinesChannel.class, resolver.resolveClass(AllTimelinesChannel.blueId()));
-        assertEquals(TimelineChannel.class, resolver.resolveClass(TimelineChannel.blueId()));
-        assertEquals(CompositeTimelineChannel.class,
-                resolver.resolveClass(CompositeTimelineChannel.blueId()));
-        assertEquals(ChatWorkflowOperation.class, resolver.resolveClass(ChatWorkflowOperation.blueId()));
-        assertEquals(Operation.class, resolver.resolveClass(Operation.blueId()));
-        assertEquals(SequentialWorkflow.class, resolver.resolveClass(SequentialWorkflow.blueId()));
-        assertEquals(SequentialWorkflowOperation.class,
-                resolver.resolveClass(SequentialWorkflowOperation.blueId()));
-        assertEquals(UpdateDocument.class, resolver.resolveClass(UpdateDocument.blueId()));
-        assertEquals(ChatMessage.class, resolver.resolveClass(ChatMessage.blueId()));
-        assertEquals(OperationRequest.class, resolver.resolveClass(OperationRequest.blueId()));
-    }
-
-    private static void assertCoordinationProcessorsRegistered(DocumentProcessor processor) {
-        ContractProcessorRegistry registry = processor.getContractRegistry();
-
-        assertTrue(registry.lookupChannel(AllTimelinesChannel.blueId()).isPresent());
-        assertTrue(registry.lookupChannel(TimelineChannel.blueId()).isPresent());
-        assertTrue(registry.lookupChannel(CompositeTimelineChannel.blueId()).isPresent());
-        assertFalse(registry.lookupMarker(Operation.blueId()).isPresent());
-        assertTrue(registry.lookupHandler(ChatWorkflowOperation.blueId()).isPresent());
-        assertTrue(registry.lookupHandler(Operation.blueId()).isPresent());
-        assertTrue(registry.lookupHandler(SequentialWorkflow.blueId()).isPresent());
-        assertTrue(registry.lookupHandler(SequentialWorkflowOperation.blueId()).isPresent());
-    }
-
-    private static Fixture configuredFixture() {
-        return configuredFixture(null);
-    }
-
-    private static Fixture configuredFixture(CoordinationProcessorOptions options) {
-        BlueRepository repository = BlueRepository.latest();
-        Blue blue = CoordinationTestResources.configuredBlue(repository);
-        CoordinationProcessors.registerWith(blue, options);
-        return new Fixture(repository, blue);
-    }
-
-    private static Node multiPatchCounterDocument(BlueRepository repository) {
-        Node update = new Node()
-                .type("Coordination/Update Document")
-                .properties("changeset", new Node().items(
-                        replacePatch("/counter", 1),
-                        replacePatch("/counter", 2),
-                        replacePatch("/counter", 3)));
-        Map<String, Node> contracts = new LinkedHashMap<>();
-        contracts.put("ownerChannel", TestTimelineProvider.channel("owner"));
-        contracts.put("increment", new Node()
-                .type("Coordination/Sequential Workflow Operation")
-                .properties("channel", new Node().value("ownerChannel"))
-                .properties("request", new Node().type("Integer"))
-                .properties("steps", new Node().items(update)));
-        return new Node()
-                .blue(repository.typeAliasBlue())
-                .name("MultiPatchCounter")
-                .properties("counter", new Node().value(0))
-                .properties("contracts", new Node().properties(contracts));
-    }
-
-    private static Node replacePatch(String path, int value) {
-        return new Node()
-                .properties("op", new Node().value("replace"))
-                .properties("path", new Node().value(path))
-                .properties("val", new Node().value(value));
-    }
-
-    private static Node counterDocument(BlueRepository repository, String operationChannel) {
-        Map<String, Node> contracts = new LinkedHashMap<>();
-        contracts.put("ownerChannel", TestTimelineProvider.channel("owner"));
-        contracts.put("increment", new Node()
-                .type("Coordination/Sequential Workflow Operation")
-                .properties("channel", new Node().value(operationChannel))
-                .properties("request", new Node().type("Integer"))
-                .properties("steps", new Node().items(Collections.<Node>emptyList())));
-
-        return new Node()
-                .blue(repository.typeAliasBlue())
-                .name("Counter")
-                .properties("counter", new Node().value(0))
-                .properties("contracts", new Node().properties(contracts));
-    }
-
-    private static Map<String, Node> contracts(Node document) {
-        return document.getContracts().getProperties();
-    }
-
-    private static final class Fixture {
-        private final BlueRepository repository;
-        private final Blue blue;
-
-        private Fixture(BlueRepository repository, Blue blue) {
-            this.repository = repository;
-            this.blue = blue;
-        }
+        // then
+        assertNotNull(failure.getMessage());
+        assertTrue(failure.getMessage().contains("Timeline Entry"),
+                failure.getMessage());
+        language.close();
     }
 }

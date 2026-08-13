@@ -1,0 +1,590 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "round12-verification.schema.json",
+  "title": "Blue Coordination Round 12 release evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schemaVersion",
+    "release",
+    "profile",
+    "evidenceState",
+    "evidenceDate",
+    "verdict",
+    "source",
+    "executionBinding",
+    "status",
+    "shape",
+    "tests",
+    "runtimes",
+    "proofs",
+    "performance",
+    "structuralEvidence",
+    "artifacts",
+    "sourceArchive",
+    "publicationEvidence",
+    "capabilities",
+    "blockers",
+    "limitations",
+    "notClaimed",
+    "finalizationRequirements"
+  ],
+  "properties": {
+    "$schema": { "const": "round12-verification.schema.json" },
+    "schemaVersion": { "const": "3.0.0" },
+    "release": { "const": "3.0.0-rc.1" },
+    "profile": { "const": "ROUND12_INITIALIZATION_LIFECYCLE" },
+    "evidenceState": { "enum": ["INTERIM", "FINAL"] },
+    "evidenceDate": { "type": "string", "format": "date" },
+    "verdict": { "$ref": "#/$defs/status" },
+    "source": { "$ref": "#/$defs/source" },
+    "executionBinding": { "$ref": "#/$defs/executionBinding" },
+    "status": { "$ref": "#/$defs/readiness" },
+    "shape": { "$ref": "#/$defs/shape" },
+    "tests": { "$ref": "#/$defs/tests" },
+    "runtimes": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "$ref": "#/$defs/runtime" }
+    },
+    "proofs": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": { "$ref": "#/$defs/proof" }
+    },
+    "performance": { "$ref": "#/$defs/performance" },
+    "structuralEvidence": { "$ref": "#/$defs/structural" },
+    "artifacts": { "$ref": "#/$defs/artifacts" },
+    "sourceArchive": { "$ref": "#/$defs/sourceArchive" },
+    "publicationEvidence": { "$ref": "#/$defs/publication" },
+    "capabilities": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/capability" }
+    },
+    "blockers": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/blocker" }
+    },
+    "limitations": { "type": "object", "minProperties": 1 },
+    "notClaimed": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "finalizationRequirements": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "sha1": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "nullableSha1": {
+      "oneOf": [
+        { "$ref": "#/$defs/sha1" },
+        { "type": "null" }
+      ]
+    },
+    "nullableSha256": {
+      "oneOf": [
+        { "$ref": "#/$defs/sha256" },
+        { "type": "null" }
+      ]
+    },
+    "nullableNonnegativeInteger": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "status": {
+      "enum": [
+        "PASS",
+        "PASS_HARD_GATE",
+        "PENDING_VERIFICATION",
+        "BLOCKED",
+        "BLOCKED_SCOPE",
+        "BLOCKED_UPSTREAM",
+        "FAIL"
+      ]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseCommit",
+        "candidateCommit",
+        "binding",
+        "worktree",
+        "dirtyReason",
+        "mainSourceManifestAlgorithm",
+        "mainSourceManifestSha256"
+      ],
+      "properties": {
+        "baseCommit": { "$ref": "#/$defs/sha1" },
+        "candidateCommit": { "$ref": "#/$defs/nullableSha1" },
+        "binding": {
+          "enum": [
+            "BASE_COMMIT_PLUS_DIRTY_WORKTREE_MANIFEST",
+            "CANDIDATE_COMMIT"
+          ]
+        },
+        "worktree": { "enum": ["CLEAN", "DIRTY"] },
+        "dirtyReason": { "type": ["string", "null"] },
+        "mainSourceManifestAlgorithm": { "type": "string", "minLength": 1 },
+        "mainSourceManifestSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "executionBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "mainSourceManifestSha256", "candidateCommit"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "PENDING",
+            "WORKTREE_EXECUTION",
+            "CANDIDATE_COMMIT_EXECUTION"
+          ]
+        },
+        "mainSourceManifestSha256": { "$ref": "#/$defs/nullableSha256" },
+        "candidateCommit": { "$ref": "#/$defs/nullableSha1" }
+      }
+    },
+    "readiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "temporalArchitectureReady",
+        "inMemoryEngineWorkingReady",
+        "providerBackedReady",
+        "mandateAgentReady",
+        "playgroundLatencyReady",
+        "publicRcReady"
+      ],
+      "properties": {
+        "temporalArchitectureReady": { "$ref": "#/$defs/status" },
+        "inMemoryEngineWorkingReady": { "$ref": "#/$defs/status" },
+        "providerBackedReady": { "$ref": "#/$defs/status" },
+        "mandateAgentReady": { "$ref": "#/$defs/status" },
+        "playgroundLatencyReady": { "$ref": "#/$defs/status" },
+        "publicRcReady": { "$ref": "#/$defs/status" }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["productionClasses", "productionLines", "publicApiSourceTypes"],
+      "properties": {
+        "productionClasses": { "type": "integer", "minimum": 0 },
+        "productionLines": { "type": "integer", "minimum": 0 },
+        "publicApiSourceTypes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "shape": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "basis",
+        "limits",
+        "productionClasses",
+        "productionLines",
+        "publicApiSourceTypes"
+      ],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "basis": { "const": "STATIC_WORKTREE_SNAPSHOT" },
+        "limits": { "$ref": "#/$defs/limits" },
+        "productionClasses": { "type": "integer", "minimum": 0 },
+        "productionLines": { "type": "integer", "minimum": 0 },
+        "publicApiSourceTypes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "suite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "status",
+        "tests",
+        "classes",
+        "failures",
+        "errors",
+        "skipped"
+      ],
+      "properties": {
+        "name": {
+          "enum": ["test", "integrationTest", "consumerTest", "scenarioTest"]
+        },
+        "status": { "$ref": "#/$defs/status" },
+        "tests": { "type": "integer", "minimum": 0 },
+        "classes": { "type": "integer", "minimum": 0 },
+        "failures": { "$ref": "#/$defs/nullableNonnegativeInteger" },
+        "errors": { "$ref": "#/$defs/nullableNonnegativeInteger" },
+        "skipped": { "$ref": "#/$defs/nullableNonnegativeInteger" }
+      }
+    },
+    "tests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inventoryBasis",
+        "executionStatus",
+        "finalTreeRequired",
+        "tests",
+        "classes",
+        "failures",
+        "errors",
+        "skipped",
+        "suites"
+      ],
+      "properties": {
+        "inventoryBasis": { "const": "STATIC_SOURCE_INVENTORY" },
+        "executionStatus": { "$ref": "#/$defs/status" },
+        "finalTreeRequired": { "const": true },
+        "tests": { "type": "integer", "minimum": 0 },
+        "classes": { "type": "integer", "minimum": 0 },
+        "failures": { "$ref": "#/$defs/nullableNonnegativeInteger" },
+        "errors": { "$ref": "#/$defs/nullableNonnegativeInteger" },
+        "skipped": { "$ref": "#/$defs/nullableNonnegativeInteger" },
+        "suites": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/suite" }
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["java", "gate", "status", "durationSeconds"],
+      "properties": {
+        "java": { "enum": ["17", "21"] },
+        "gate": { "type": "string", "minLength": 1 },
+        "status": { "$ref": "#/$defs/status" },
+        "durationSeconds": { "$ref": "#/$defs/nullableNonnegativeInteger" }
+      }
+    },
+    "proof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "sourceSet", "testClass", "testMethod", "status"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "sourceSet": {
+          "enum": ["test", "integrationTest", "scenarioTest"]
+        },
+        "testClass": { "type": "string", "minLength": 1 },
+        "testMethod": { "type": "string", "minLength": 1 },
+        "status": { "$ref": "#/$defs/status" }
+      }
+    },
+    "latencySplit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "frozen", "host"],
+      "properties": {
+        "total": { "type": "number", "minimum": 0 },
+        "frozen": { "type": "number", "minimum": 0 },
+        "host": { "type": "number", "minimum": 0 }
+      }
+    },
+    "singleRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["warmOrdinary", "warmPayNotePlusParent", "threeLayerRestaurantProduct"],
+      "properties": {
+        "warmOrdinary": { "$ref": "#/$defs/latencySplit" },
+        "warmPayNotePlusParent": { "$ref": "#/$defs/latencySplit" },
+        "threeLayerRestaurantProduct": { "$ref": "#/$defs/latencySplit" }
+      }
+    },
+    "historicalPerformance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "classification",
+        "profile",
+        "candidateCommit",
+        "sameSourceAsRound12",
+        "promptRetainedBaselineSingleRunMs",
+        "round11ObservedSingleRunMs",
+        "repeatedP95Rows",
+        "evidenceFiles"
+      ],
+      "properties": {
+        "classification": { "const": "HISTORICAL_BASELINE_ONLY" },
+        "profile": { "const": "ROUND11_READINESS_CLOSURE" },
+        "candidateCommit": { "$ref": "#/$defs/sha1" },
+        "sameSourceAsRound12": { "const": false },
+        "promptRetainedBaselineSingleRunMs": { "$ref": "#/$defs/singleRun" },
+        "round11ObservedSingleRunMs": { "$ref": "#/$defs/singleRun" },
+        "repeatedP95Rows": { "type": "object", "minProperties": 1 },
+        "evidenceFiles": {
+          "type": "object",
+          "minProperties": 6,
+          "additionalProperties": { "$ref": "#/$defs/evidenceFile" }
+        }
+      }
+    },
+    "round12Performance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "finalTreeRequired",
+        "preferredHostP95RegressionPercent",
+        "hardHostP95RegressionPercent",
+        "nbaLifecycleEvidence",
+        "sameScenarioP95"
+      ],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "finalTreeRequired": { "const": true },
+        "preferredHostP95RegressionPercent": { "type": "number", "minimum": 0 },
+        "hardHostP95RegressionPercent": { "type": "number", "minimum": 0 },
+        "nbaLifecycleEvidence": {
+          "$ref": "#/$defs/nbaLifecycleEvidence"
+        },
+        "sameScenarioP95": { "$ref": "#/$defs/sameScenarioP95" }
+      }
+    },
+    "nbaLifecycleEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "evidenceFiles"],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "evidenceFiles": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/evidenceFile" }
+        }
+      }
+    },
+    "sameScenarioP95": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "singleRunMs",
+        "repeatedP95Rows",
+        "evidenceFiles"
+      ],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "singleRunMs": {
+          "oneOf": [
+            { "$ref": "#/$defs/singleRun" },
+            { "type": "null" }
+          ]
+        },
+        "repeatedP95Rows": {
+          "oneOf": [
+            { "$ref": "#/$defs/repeatedP95Rows" },
+            { "type": "null" }
+          ]
+        },
+        "evidenceFiles": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/evidenceFile" }
+        }
+      }
+    },
+    "p95Row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baselineHostMs",
+        "round12P95Ms",
+        "regressionPercent",
+        "preferredGate",
+        "hardGate"
+      ],
+      "properties": {
+        "baselineHostMs": { "type": "number", "exclusiveMinimum": 0 },
+        "round12P95Ms": { "type": "number", "minimum": 0 },
+        "regressionPercent": { "type": "number" },
+        "preferredGate": { "enum": ["PASS", "MISS"] },
+        "hardGate": { "enum": ["PASS", "FAIL"] }
+      }
+    },
+    "repeatedP95Rows": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "warmOrdinary",
+        "warmPayNotePlusParent",
+        "threeLayerRestaurantProduct"
+      ],
+      "properties": {
+        "warmOrdinary": { "$ref": "#/$defs/p95Row" },
+        "warmPayNotePlusParent": { "$ref": "#/$defs/p95Row" },
+        "threeLayerRestaurantProduct": { "$ref": "#/$defs/p95Row" }
+      }
+    },
+    "evidenceFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "performance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["round12Campaign", "historicalRound11Baseline"],
+      "properties": {
+        "round12Campaign": { "$ref": "#/$defs/round12Performance" },
+        "historicalRound11Baseline": { "$ref": "#/$defs/historicalPerformance" }
+      }
+    },
+    "zeroCounters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "REQUEST_FRAGMENTS",
+        "TIMELINE_ENTRY_FRAGMENTS",
+        "ORDINARY_NODE_FRAGMENTS",
+        "FULL_ENVIRONMENT_SCANS",
+        "SOURCE_REPLAYS_PER_PARENT",
+        "POST_PROCESS_FULL_PROJECTIONS",
+        "PARENT_PROCESS_RERUNS_ON_GRAPH_RETRY",
+        "CHILD_PROCESS_RERUNS_ON_PARENT_RETRY"
+      ],
+      "properties": {
+        "REQUEST_FRAGMENTS": { "$ref": "#/$defs/nullableNonnegativeInteger" },
+        "TIMELINE_ENTRY_FRAGMENTS": { "$ref": "#/$defs/nullableNonnegativeInteger" },
+        "ORDINARY_NODE_FRAGMENTS": { "$ref": "#/$defs/nullableNonnegativeInteger" },
+        "FULL_ENVIRONMENT_SCANS": { "$ref": "#/$defs/nullableNonnegativeInteger" },
+        "SOURCE_REPLAYS_PER_PARENT": { "$ref": "#/$defs/nullableNonnegativeInteger" },
+        "POST_PROCESS_FULL_PROJECTIONS": { "$ref": "#/$defs/nullableNonnegativeInteger" },
+        "PARENT_PROCESS_RERUNS_ON_GRAPH_RETRY": { "$ref": "#/$defs/nullableNonnegativeInteger" },
+        "CHILD_PROCESS_RERUNS_ON_PARENT_RETRY": { "$ref": "#/$defs/nullableNonnegativeInteger" }
+      }
+    },
+    "structural": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "finalTreeRequired", "requiredZeroCounters"],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "finalTreeRequired": { "const": true },
+        "requiredZeroCounters": { "$ref": "#/$defs/zeroCounters" }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "finalTreeRequired",
+        "mainJarSha256",
+        "sourcesJarSha256",
+        "javadocJarSha256",
+        "testFixturesJarSha256"
+      ],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "finalTreeRequired": { "const": true },
+        "mainJarSha256": { "$ref": "#/$defs/nullableSha256" },
+        "sourcesJarSha256": { "$ref": "#/$defs/nullableSha256" },
+        "javadocJarSha256": { "$ref": "#/$defs/nullableSha256" },
+        "testFixturesJarSha256": { "$ref": "#/$defs/nullableSha256" }
+      }
+    },
+    "sourceArchive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "configuration",
+        "finalTreeRequired",
+        "authoritativeVersionFile",
+        "authoritativeVersionFileIncluded",
+        "reproducibleFileOrder",
+        "preserveFileTimestamps",
+        "duplicatesStrategy",
+        "exportIgnored",
+        "extractedConfiguration",
+        "focusedTests",
+        "focusedTestsStatus",
+        "publishedArtifactSmokeBuild",
+        "detachedHashEvidence",
+        "pendingReason"
+      ],
+      "properties": {
+        "configuration": { "const": "CONFIGURED" },
+        "finalTreeRequired": { "const": true },
+        "authoritativeVersionFile": { "const": ".cz.toml" },
+        "authoritativeVersionFileIncluded": { "const": true },
+        "reproducibleFileOrder": { "const": true },
+        "preserveFileTimestamps": { "const": false },
+        "duplicatesStrategy": { "const": "FAIL" },
+        "exportIgnored": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "extractedConfiguration": { "$ref": "#/$defs/status" },
+        "focusedTests": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "focusedTestsStatus": { "$ref": "#/$defs/status" },
+        "publishedArtifactSmokeBuild": { "$ref": "#/$defs/status" },
+        "detachedHashEvidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "mode", "sidecarPath", "embeddedInSourceArchive"],
+          "properties": {
+            "status": { "$ref": "#/$defs/status" },
+            "mode": { "const": "DETACHED_POST_BUILD_SIDECAR" },
+            "sidecarPath": { "type": "string", "minLength": 1 },
+            "embeddedInSourceArchive": { "const": false }
+          }
+        },
+        "pendingReason": { "type": ["string", "null"] }
+      }
+    },
+    "publication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "gate", "durationSeconds", "notes"],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "gate": { "type": "string", "minLength": 1 },
+        "durationSeconds": { "$ref": "#/$defs/nullableNonnegativeInteger" },
+        "notes": { "type": "string", "minLength": 1 }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "classification", "blocker", "summary"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "classification": { "type": "string", "minLength": 1 },
+        "blocker": { "type": "boolean" },
+        "summary": { "type": "string", "minLength": 1 }
+      }
+    },
+    "blocker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "category", "summary"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "category": {
+          "enum": ["semantic-upstream", "artifact-upstream", "scope", "verification"]
+        },
+        "summary": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

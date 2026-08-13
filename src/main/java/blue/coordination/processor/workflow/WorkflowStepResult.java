@@ -1,5 +1,9 @@
 package blue.coordination.processor.workflow;
 
+/**
+ * Immutable result of one workflow step, including whether it produced a
+ * value, already handled a changeset, or terminated the workflow.
+ */
 public final class WorkflowStepResult {
     private static final WorkflowStepResult NONE = new WorkflowStepResult(false, null, false, false);
     private static final WorkflowStepResult TERMINAL = new WorkflowStepResult(false, null, false, true);

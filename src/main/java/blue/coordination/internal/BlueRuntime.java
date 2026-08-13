@@ -1,0 +1,408 @@
+package blue.coordination.internal;
+
+import blue.coordination.api.ExactValue;
+import blue.coordination.processor.CoordinationProcessorOptions;
+import blue.coordination.processor.CoordinationProcessors;
+import blue.language.api.BlueCachePolicy;
+import blue.language.api.BlueCacheStats;
+import blue.language.codec.BlueFormat;
+import blue.language.codec.jackson.UncheckedObjectMapper;
+import blue.language.identity.DirectBlueIdCalculator;
+import blue.language.merge.ResolvedSnapshot;
+import blue.language.model.Node;
+import blue.language.model.NodeWireForm;
+import blue.language.processor.BlueContracts;
+import blue.language.processor.DocumentProcessingResult;
+import blue.language.processor.DocumentProcessor;
+import blue.language.processor.EffectiveFragmentationCatalog;
+import blue.language.processor.ExternalDeliveryPlan;
+import blue.language.processor.ExternalOrderKey;
+import blue.language.processor.PlatformProcessInvocation;
+import blue.language.processor.PlatformProcessingResult;
+import blue.language.processor.SubscriptionDelta;
+import blue.language.processor.registry.BlueRuntimeTypeRegistry;
+import blue.language.processor.registry.RuntimeTypeAliases;
+import blue.language.provider.NodeProvider;
+import blue.language.provider.SequentialNodeProvider;
+import blue.language.runtime.BlueLanguage;
+import blue.language.snapshot.FrozenNode;
+import blue.repo.BlueRepository;
+import blue.repo.RepositoryDefinition;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+
+/**
+ * One immutable production composition of Language, Contracts, BEX, and the
+ * current generated Repository.
+ */
+final class BlueRuntime implements AutoCloseable {
+    private final NodeProvider nodeProvider;
+    private final BlueLanguage language;
+    private final BlueContracts contracts;
+    private final DocumentProcessor processor;
+    private final EngineMetrics metrics;
+    private boolean closed;
+
+    private BlueRuntime(
+            NodeProvider nodeProvider,
+            BlueLanguage language,
+            BlueContracts contracts,
+            DocumentProcessor processor,
+            EngineMetrics metrics) {
+        this.nodeProvider = Objects.requireNonNull(
+                nodeProvider, "nodeProvider");
+        this.language = Objects.requireNonNull(language, "language");
+        this.contracts = Objects.requireNonNull(contracts, "contracts");
+        this.processor = Objects.requireNonNull(processor, "processor");
+        this.metrics = Objects.requireNonNull(metrics, "metrics");
+    }
+
+    static BlueRuntime create(WholeObjectStore wholeObjects) {
+        return create(wholeObjects, new EngineMetrics());
+    }
+
+    static BlueRuntime create(
+            WholeObjectStore wholeObjects,
+            EngineMetrics metrics) {
+        BlueRepository repository = BlueRepository.current();
+        List<NodeProvider> providers = new ArrayList<>();
+        providers.add(Objects.requireNonNull(wholeObjects, "wholeObjects"));
+        providers.add(BlueRuntimeTypeRegistry.getDefault()
+                .asProcessorSnapshotProvider());
+        providers.add(repository.nodeProvider());
+        providers.add(new RepositoryExactNodeProvider(repository));
+        NodeProvider nodeProvider = new SequentialNodeProvider(providers);
+
+        Map<String, String> imports = new LinkedHashMap<>();
+        imports.putAll(RuntimeTypeAliases.AGGREGATE_NAME_TO_BLUE_ID);
+        imports.putAll(repository.preprocessingAliases());
+        BlueLanguage language = BlueLanguage.builder()
+                .nodeProvider(nodeProvider)
+                .preprocessingAliases(imports)
+                .environmentImports(imports)
+                .cachePolicy(BlueCachePolicy.highThroughputDefaults())
+                .build();
+        CoordinationProcessorOptions options =
+                CoordinationProcessorOptions.builder()
+                        .language(language)
+                        .build();
+        BlueContracts contracts = CoordinationProcessors.contracts(
+                language, options);
+        DocumentProcessor processor = CoordinationProcessors.configure(
+                        DocumentProcessor.builder()
+                                .runtimeAccess(contracts.runtimeAccess()),
+                        options)
+                .runtimeRegistryIdentity(
+                        "blue.coordination/in-memory-runtime/3.0")
+                .build();
+        return new BlueRuntime(
+                nodeProvider, language, contracts, processor, metrics);
+    }
+
+    Node parseSourceYaml(String yaml) {
+        ensureOpen();
+        return language.codec().parseSource(yaml, BlueFormat.YAML);
+    }
+
+    Node preprocess(Node source) {
+        ensureOpen();
+        return language.preprocessing().preprocess(source);
+    }
+
+    String nodeToYaml(Node node) {
+        ensureOpen();
+        return language.codec().write(node, BlueFormat.YAML);
+    }
+
+    ResolvedSnapshot resolveToSnapshot(Node source) {
+        ensureOpen();
+        return language.snapshots().resolve(source);
+    }
+
+    ResolvedSnapshot resolveToSnapshotPreservingPaths(
+            Node source,
+            Collection<String> paths) {
+        ensureOpen();
+        return language.snapshots().resolvePreservingPaths(source, paths);
+    }
+
+    ResolvedSnapshot loadExactSnapshot(String blueId) {
+        ensureOpen();
+        FrozenNode reference = FrozenNode.fromNode(new Node().blueId(
+                Objects.requireNonNull(blueId, "blueId")));
+        FrozenNode materialized = contracts.runtimeAccess()
+                .materializeVerifiedExactReference(reference)
+                .requireEstablished();
+        return contracts.runtimeAccess().resolveTransient(
+                materialized.toNode());
+    }
+
+    ResolvedSnapshot cache(ResolvedSnapshot snapshot) {
+        ensureOpen();
+        return language.snapshots().cache(
+                Objects.requireNonNull(snapshot, "snapshot"));
+    }
+
+    BlueCacheStats cacheStats() {
+        ensureOpen();
+        return language.snapshots().stats();
+    }
+
+    DocumentProcessingResult initialize(ResolvedSnapshot snapshot) {
+        ensureOpen();
+        return processor.initializeDocument(snapshot);
+    }
+
+    List<SubscriptionDelta.Entry> projectInitialOwnedSubscriptions(
+            FrozenNode processingRoot,
+            long rootRevision,
+            ExternalOrderKey activationOrderKey) {
+        ensureOpen();
+        SubscriptionDelta delta = contracts.subscriptionSurfaceProjection()
+                .projectInitial(
+                        Objects.requireNonNull(
+                                processingRoot, "processingRoot").toNode(),
+                        rootRevision,
+                        Objects.requireNonNull(
+                                activationOrderKey, "activationOrderKey"));
+        if (!delta.removed().isEmpty()) {
+            throw new IllegalStateException(
+                    "Initial subscription projection retired an occurrence");
+        }
+        return delta.added();
+    }
+
+    PlatformProcessingResult process(
+            Node currentRootRepresentation,
+            String exactEventBlueId,
+            long rootRevision,
+            ExternalOrderKey eventOrderKey,
+            List<SubscriptionDelta.Entry> rootSubscriptions) {
+        ensureOpen();
+        Node root = Objects.requireNonNull(
+                currentRootRepresentation, "currentRootRepresentation");
+        Node eventReference = new Node().blueId(Objects.requireNonNull(
+                exactEventBlueId, "exactEventBlueId"));
+        long planStarted = System.nanoTime();
+        ExternalDeliveryPlan deliveryPlan = contracts
+                .currentRootDeliveryPlanDeriver(
+                        rootRevision,
+                        Objects.requireNonNull(eventOrderKey, "eventOrderKey"),
+                        Objects.requireNonNull(
+                                rootSubscriptions, "rootSubscriptions"))
+                .derive(root, eventReference);
+        metrics.addNanos("process.deliveryPlanDerivation",
+                System.nanoTime() - planStarted);
+        PlatformProcessInvocation invocation =
+                PlatformProcessInvocation.builder()
+                        .deliveryPlan(deliveryPlan)
+                        .nodeProvider(nodeProvider)
+                        .build();
+        return metrics.timed("process.platformCommit", () ->
+                contracts.processForPlatformCommit(
+                        root, eventReference, invocation));
+    }
+
+    SubscriptionDelta projectSubscriptionUpdate(
+            FrozenNode processingRoot,
+            List<SubscriptionDelta.Entry> priorActiveIntervals,
+            Set<String> changedRuntimePointers,
+            long resultingRootRevision,
+            ExternalOrderKey transitionOrderKey) {
+        ensureOpen();
+        return contracts.subscriptionSurfaceProjection().projectUpdate(
+                Objects.requireNonNull(
+                        processingRoot, "processingRoot").toNode(),
+                Objects.requireNonNull(
+                        priorActiveIntervals, "priorActiveIntervals"),
+                Objects.requireNonNull(
+                        changedRuntimePointers, "changedRuntimePointers"),
+                resultingRootRevision,
+                Objects.requireNonNull(
+                        transitionOrderKey, "transitionOrderKey"));
+    }
+
+    EffectiveFragmentationCatalog effectiveFragmentationCatalog(
+            String exactRootBlueId) {
+        ensureOpen();
+        return contracts.effectiveFragmentationCatalog(
+                new Node().blueId(Objects.requireNonNull(
+                        exactRootBlueId, "exactRootBlueId")));
+    }
+
+    ExactValue exactSource(
+            String yaml,
+            WholeObjectStore objects,
+            String purpose) {
+        Node source = parseSourceYaml(yaml);
+        Node preprocessed = preprocess(source);
+        return objects.put(
+                cache(resolveToSnapshot(preprocessed)), purpose);
+    }
+
+    NodeProvider nodeProvider() {
+        ensureOpen();
+        return nodeProvider;
+    }
+
+    @Override
+    public void close() {
+        if (closed) {
+            return;
+        }
+        closed = true;
+        close(contracts);
+        close(processor);
+        close(language);
+    }
+
+    private void ensureOpen() {
+        if (closed) {
+            throw new IllegalStateException("Blue runtime is closed");
+        }
+    }
+
+    private static void close(AutoCloseable resource) {
+        try {
+            resource.close();
+        } catch (RuntimeException failure) {
+            throw failure;
+        } catch (Exception failure) {
+            throw new IllegalStateException(
+                    "Could not close Blue runtime component", failure);
+        }
+    }
+
+    /** Lazy exact index for inherited inline Repository contributions. */
+    private static final class RepositoryExactNodeProvider
+            implements NodeProvider {
+        private final BlueRepository repository;
+        private final ClassLoader classLoader;
+        private volatile Map<String, Node> exactNodes;
+
+        private RepositoryExactNodeProvider(BlueRepository repository) {
+            this.repository = Objects.requireNonNull(repository, "repository");
+            ClassLoader context = Thread.currentThread()
+                    .getContextClassLoader();
+            classLoader = context == null
+                    ? BlueRuntime.class.getClassLoader()
+                    : context;
+        }
+
+        @Override
+        public List<Node> fetchByBlueId(String blueId) {
+            Node found = exactNodes().get(Objects.requireNonNull(
+                    blueId, "blueId"));
+            return found == null
+                    ? null
+                    : Collections.singletonList(found.clone());
+        }
+
+        private Map<String, Node> exactNodes() {
+            Map<String, Node> current = exactNodes;
+            if (current != null) {
+                return current;
+            }
+            synchronized (this) {
+                current = exactNodes;
+                if (current == null) {
+                    current = buildIndex();
+                    exactNodes = current;
+                }
+                return current;
+            }
+        }
+
+        private Map<String, Node> buildIndex() {
+            List<String> names = new ArrayList<>(repository.qualifiedNames());
+            names.sort(ExternalOrderKey::compareTextCodePoints);
+            Map<String, Node> indexed = new LinkedHashMap<>();
+            IdentityHashMap<Node, Boolean> visited = new IdentityHashMap<>();
+            for (String name : names) {
+                RepositoryDefinition definition = repository.definition(name)
+                        .orElseThrow(() -> new IllegalStateException(
+                                "Repository manifest has no " + name));
+                Node node = definition.blueId().indexOf('#') >= 0
+                        ? repository.nodeByName(name).orElseThrow(() ->
+                                new IllegalStateException(
+                                        "Repository provider has no " + name))
+                        : readDefinition(definition);
+                index(node, indexed, visited);
+            }
+            return Collections.unmodifiableMap(indexed);
+        }
+
+        private Node readDefinition(RepositoryDefinition definition) {
+            try (InputStream input = classLoader.getResourceAsStream(
+                    definition.resourcePath())) {
+                if (input == null) {
+                    throw new IllegalStateException(
+                            "Repository resource not found: "
+                                    + definition.resourcePath());
+                }
+                return UncheckedObjectMapper.JSON_MAPPER.readValue(
+                        input, Node.class);
+            } catch (IOException failure) {
+                throw new IllegalStateException(
+                        "Could not read Repository resource: "
+                                + definition.resourcePath(),
+                        failure);
+            }
+        }
+
+        private static void index(
+                Node node,
+                Map<String, Node> indexed,
+                IdentityHashMap<Node, Boolean> visited) {
+            if (node == null || node.isReferenceOnly()
+                    || visited.put(node, Boolean.TRUE) != null) {
+                return;
+            }
+            Node exact = node.clone();
+            String declared = exact.getBlueId();
+            boolean addressable = declared == null
+                    || declared.indexOf('#') < 0;
+            if (declared != null && addressable) {
+                exact.blueId(null);
+            }
+            if (addressable) {
+                String blueId = DirectBlueIdCalculator.calculateBlueId(exact);
+                if (declared != null && !declared.equals(blueId)) {
+                    throw new IllegalStateException(
+                            "Repository subtree " + declared
+                                    + " calculates to " + blueId);
+                }
+                Node prior = indexed.putIfAbsent(blueId, exact);
+                if (prior != null && !NodeWireForm.get(prior).equals(
+                        NodeWireForm.get(exact))) {
+                    throw new IllegalStateException(
+                            "Conflicting Repository content for " + blueId);
+                }
+            }
+            index(node.getType(), indexed, visited);
+            index(node.getItemType(), indexed, visited);
+            index(node.getKeyType(), indexed, visited);
+            index(node.getValueType(), indexed, visited);
+            index(node.getBlue(), indexed, visited);
+            index(node.getContracts(), indexed, visited);
+            if (node.getProperties() != null) {
+                node.getProperties().values().forEach(
+                        child -> index(child, indexed, visited));
+            }
+            if (node.getItems() != null) {
+                node.getItems().forEach(
+                        child -> index(child, indexed, visited));
+            }
+        }
+    }
+}

@@ -2,8 +2,9 @@ package blue.coordination.processor.workflow;
 
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.model.Node;
-import blue.language.processor.model.FrozenJsonPatch;
+import blue.language.processor.FrozenJsonPatch;
 import blue.language.snapshot.FrozenNode;
+import blue.language.identity.DirectBlueIdCalculator;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -15,37 +16,65 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class StaticUpdatePlanTest {
 
     @Test
-    void compilesOrderedFrozenTemplatesWithoutRetainingMutableValues() {
+    void shouldCompileOrderedFrozenTemplatesWithoutRetainingMutableValues() {
+        // given
         Node value = new Node().properties("status", new Node().value("authored"));
         Node changeset = new Node().items(Arrays.asList(
                 patch("add", "/added", value),
                 patch("replace", "/replaced", new Node().value(2)),
                 patch("remove", "/removed", null)));
 
+        // when
         StaticUpdatePlan plan = StaticUpdatePlan.compile(FrozenNode.fromNode(changeset));
         value.getProperties().get("status").value("mutated");
 
+        // then
         assertTrue(plan.valid());
         assertEquals(3, plan.patches().size());
         FrozenJsonPatch first = plan.patches().get(0).bind("/scope/added");
         assertEquals(blue.language.processor.model.JsonPatch.Op.ADD, first.getOp());
         assertEquals("/scope/added", first.getPath());
-        assertEquals("authored", first.getVal().getProperties().get("status").getValue());
-        assertTrue(first.getVal().isStrictCanonical());
+        assertEquals("authored", first.getValue().getProperties().get("status").getValue());
+        assertTrue(first.getValue().isStrictCanonical());
         assertTrue(plan.approximateWeightBytes() > 0L);
     }
 
     @Test
-    void resolvedConstructionFallbackCanonicalizesExactlyOnceAtPlanCompilation() {
+    void shouldEstimateRetainedExactValueWeightWithoutTraversingPayload() {
+        // given
+        Node largeValue = new Node().value("leaf");
+        for (int index = 0; index < 128; index++) {
+            largeValue = new Node().properties("nested", largeValue);
+        }
+
+        // when
+        StaticUpdatePlan small = compile(
+                patch("add", "/value", new Node().value("small")));
+        StaticUpdatePlan large = compile(
+                patch("add", "/value", largeValue));
+
+        // then
+        assertTrue(small.valid());
+        assertTrue(large.valid());
+        assertEquals(
+                small.approximateWeightBytes(),
+                large.approximateWeightBytes());
+    }
+
+    @Test
+    void shouldCanonicalizeResolvedFallbackExactlyOnceDuringPlanCompilation() {
+        // given
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         Node changeset = new Node().items(patch("add", "/value",
                 new Node().properties("nested", new Node().value("authored"))));
 
+        // when
         StaticUpdatePlan plan = StaticUpdatePlan.compile(
                 FrozenNode.fromResolvedNode(changeset), metrics);
         FrozenJsonPatch first = plan.patches().get(0).bind("/scope/value");
         FrozenJsonPatch second = plan.patches().get(0).bind("/other/value");
 
+        // then
         assertTrue(first.getValue().isStrictCanonical());
         assertTrue(second.getValue().isStrictCanonical());
         assertEquals(first.getValue().blueId(), second.getValue().blueId());
@@ -53,55 +82,179 @@ class StaticUpdatePlanTest {
     }
 
     @Test
-    void removeIgnoresResolvedOnlyValueWithoutCanonicalizingIt() {
-        BexProcessingMetrics metrics = new BexProcessingMetrics();
-        Node irrelevantResolvedValue = new Node()
-                .blueId("GX7CFUmSDrE2MzptunLCCdZwnuwwrenRQqEnHL4x3uoC")
-                .properties("expanded", new Node().value("ignored"));
-        Node changeset = new Node().items(
-                patch(" REMOVE ", "/removed", irrelevantResolvedValue));
+    void shouldRemoveProviderProvenanceFromResolvedPatchValue() {
+        // given
+        Node authoredValue = new Node().value(3);
+        String valueBlueId =
+                DirectBlueIdCalculator.calculateBlueId(
+                        authoredValue);
+        Node resolvedValue =
+                authoredValue.clone()
+                        .blueId(valueBlueId);
+        FrozenNode resolvedChangeset =
+                FrozenNode.fromResolvedNode(
+                        new Node().items(
+                                patch(
+                                        "replace",
+                                        "/state",
+                                        resolvedValue)));
 
-        StaticUpdatePlan plan = StaticUpdatePlan.compile(
-                FrozenNode.fromResolvedNode(changeset), metrics);
-        FrozenJsonPatch patch = plan.patches().get(0).bind("/scope/removed");
+        // when
+        StaticUpdatePlan plan =
+                StaticUpdatePlan.compile(
+                        resolvedChangeset);
+        FrozenNode exactValue =
+                plan.patches().get(0)
+                        .bind("/state")
+                        .getValue();
+        Node exactNode =
+                exactValue.toNode();
 
+        // then
         assertTrue(plan.valid());
-        assertEquals(blue.language.processor.model.JsonPatch.Op.REMOVE, patch.getOp());
+        assertTrue(exactValue.isStrictCanonical());
+        assertEquals(valueBlueId, exactValue.blueId());
+        assertFalse(
+                exactNode.getBlueId() != null
+                        && !exactNode.isReferenceOnly(),
+                "runtime output must not combine provider provenance "
+                        + "with expanded exact content");
+    }
+
+    @Test
+    void shouldCompileExactRemoveOperationWithAbsentValue() {
+        // given
+        BexProcessingMetrics metrics = new BexProcessingMetrics();
+
+        // when
+        StaticUpdatePlan exact = StaticUpdatePlan.compile(
+                FrozenNode.fromResolvedNode(new Node().items(
+                        patch("remove", "/removed", null))), metrics);
+
+        // then
+        assertTrue(exact.valid());
+        assertEquals(blue.language.processor.model.JsonPatch.Op.REMOVE,
+                exact.patches().get(0).bind("/scope/removed").getOp());
         assertEquals(0L, metric(metrics, "staticUpdateResolvedValueCanonicalizations"));
     }
 
     @Test
-    void rejectsBexOperatorsAndMalformedStaticEntriesBeforeCaching() {
-        StaticUpdatePlan bex = compile(patch("replace", "/status",
-                new Node().properties("$binding", new Node().value("event"))));
-        StaticUpdatePlan missingValue = compile(patch("replace", "/status", null));
-        StaticUpdatePlan badOperation = compile(patch("move", "/status", new Node().value("x")));
-        StaticUpdatePlan scalarEntry = StaticUpdatePlan.compile(FrozenNode.fromResolvedNode(
-                new Node().items(new Node().value("not-a-patch"))));
+    void shouldRejectRemoveOperationWithAuthoredValue() {
+        // given
+        BexProcessingMetrics metrics = new BexProcessingMetrics();
+        Node forbiddenResolvedValue = new Node()
+                .blueId("GX7CFUmSDrE2MzptunLCCdZwnuwwrenRQqEnHL4x3uoC")
+                .properties("expanded", new Node().value("forbidden"));
 
-        assertFalse(bex.valid());
-        assertTrue(bex.validationFailure().contains("must be static"));
+        // when
+        StaticUpdatePlan withValue = StaticUpdatePlan.compile(
+                FrozenNode.fromResolvedNode(new Node().items(
+                        patch("remove", "/removed", forbiddenResolvedValue))), metrics);
+
+        // then
+        assertEquals("Update Document patch value must be absent for remove",
+                withValue.validationFailure());
+        assertEquals(0L, metric(metrics, "staticUpdateResolvedValueCanonicalizations"));
+    }
+
+    @Test
+    void shouldRejectNonCanonicalRemoveOperationText() {
+        // given
+        BexProcessingMetrics metrics = new BexProcessingMetrics();
+
+        // when
+        StaticUpdatePlan nonCanonicalOp = StaticUpdatePlan.compile(
+                FrozenNode.fromResolvedNode(new Node().items(
+                        patch(" REMOVE ", "/removed", null))), metrics);
+
+        // then
+        assertEquals("Unsupported Update Document patch operation:  REMOVE ",
+                nonCanonicalOp.validationFailure());
+        assertEquals(0L, metric(metrics, "staticUpdateResolvedValueCanonicalizations"));
+    }
+
+    @Test
+    void shouldPreserveDollarPrefixedLiteralValues() {
+        // given
+        Node patch = patch("replace", "/status",
+                new Node().properties("$binding", new Node().value("event")));
+
+        // when
+        StaticUpdatePlan literal = compile(patch);
+
+        // then
+        assertTrue(literal.valid());
+        assertEquals("event",
+                literal.patches().get(0).bind("/status")
+                        .getValue().property("$binding").getValue());
+    }
+
+    @Test
+    void shouldRejectReplaceOperationWithoutValue() {
+        // given
+        Node patch = patch("replace", "/status", null);
+
+        // when
+        StaticUpdatePlan missingValue = compile(patch);
+
+        // then
         assertEquals("Update Document patch value is required for operation: replace",
                 missingValue.validationFailure());
+    }
+
+    @Test
+    void shouldRejectUnsupportedPatchOperation() {
+        // given
+        Node patch = patch("move", "/status", new Node().value("x"));
+
+        // when
+        StaticUpdatePlan badOperation = compile(patch);
+
+        // then
         assertEquals("Unsupported Update Document patch operation: move",
                 badOperation.validationFailure());
+    }
+
+    @Test
+    void shouldRejectScalarChangesetEntry() {
+        // given
+        FrozenNode changeset = FrozenNode.fromResolvedNode(
+                new Node().items(new Node().value("not-a-patch")));
+
+        // when
+        StaticUpdatePlan scalarEntry = StaticUpdatePlan.compile(changeset);
+
+        // then
         assertEquals("Update Document changeset entry 0 must be a static patch object",
                 scalarEntry.validationFailure());
     }
 
     @Test
-    void rejectsNonTextFieldsAndNonListPayloadsWithStableDiagnostics() {
+    void shouldRejectNonTextPatchFieldsWithStableDiagnostic() {
+        // given
         Node nonText = new Node().properties("op", new Node().value(1))
                 .properties("path", new Node().value("/status"))
                 .properties("val", new Node().value("x"));
 
+        // when
         StaticUpdatePlan badField = StaticUpdatePlan.compile(FrozenNode.fromResolvedNode(
                 new Node().items(nonText)));
-        StaticUpdatePlan notList = StaticUpdatePlan.compile(FrozenNode.fromResolvedNode(
-                new Node().properties("op", new Node().value("replace"))));
 
+        // then
         assertEquals("Update Document changeset entry 0 field 'op' must be text",
                 badField.validationFailure());
+    }
+
+    @Test
+    void shouldRejectNonListChangesetWithStableDiagnostic() {
+        // given
+        FrozenNode changeset = FrozenNode.fromResolvedNode(
+                new Node().properties("op", new Node().value("replace")));
+
+        // when
+        StaticUpdatePlan notList = StaticUpdatePlan.compile(changeset);
+
+        // then
         assertEquals("Update Document changeset must be a static patch list",
                 notList.validationFailure());
     }

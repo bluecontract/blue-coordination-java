@@ -1,0 +1,44 @@
+documentId: dynamic-source-surface
+name: Dynamic Source Surface
+total: 0
+activated: false
+retired: false
+contracts:
+  ownerChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: examples/dynamic-source-surface/owner
+    actor:
+      type: MyOS/Principal Actor
+      accountId: owner
+  activateDynamic:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request:
+      dynamicChannel: {}
+      dynamicHandler: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: add
+              path: /contracts/dynamicChannel
+              val: {$binding: event/message/request/dynamicChannel}
+          - $appendChange:
+              op: add
+              path: /contracts/applyDynamic
+              val: {$binding: event/message/request/dynamicHandler}
+          - $appendChange: {op: replace, path: /activated, val: true}
+          - $return: true
+  retireDynamic:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange: {op: remove, path: /contracts/applyDynamic}
+          - $appendChange: {op: remove, path: /contracts/dynamicChannel}
+          - $appendChange: {op: replace, path: /retired, val: true}
+          - $return: true

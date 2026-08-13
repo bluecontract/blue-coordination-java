@@ -1,38 +1,33 @@
 package blue.coordination.processor.workflow;
 
-import blue.coordination.processor.RepositoryTypeAliasPreprocessor;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.model.Node;
 import blue.language.snapshot.FrozenNode;
+import blue.language.model.Nodes;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+/**
+ * Produces the minimal authored Compute/definition projection admitted by
+ * hosted BEX.
+ *
+ * <p>Resolved inheritance and unrelated contract structure are deliberately
+ * excluded from the reusable plan identity. Registered type identities and
+ * authored program fields are retained exactly; this layer never rewrites
+ * repository aliases or performs contract processing.</p>
+ */
 final class ComputeProgramNormalizer {
     private static final String NORMALIZATION_VERSION =
-            "compute-program-v2|repository-aliases-3.0.0-rc.10";
+            "compute-program-v6|exact-definition-identity|canonical-bex-source";
 
-    private final RepositoryTypeAliasPreprocessor typeAliasPreprocessor;
     private final BexProcessingMetrics metrics;
 
     ComputeProgramNormalizer() {
-        this(new RepositoryTypeAliasPreprocessor(), null);
+        this(null);
     }
 
     ComputeProgramNormalizer(BexProcessingMetrics metrics) {
-        this(new RepositoryTypeAliasPreprocessor(), metrics);
-    }
-
-    ComputeProgramNormalizer(RepositoryTypeAliasPreprocessor typeAliasPreprocessor) {
-        this(typeAliasPreprocessor, null);
-    }
-
-    private ComputeProgramNormalizer(RepositoryTypeAliasPreprocessor typeAliasPreprocessor,
-                                     BexProcessingMetrics metrics) {
-        if (typeAliasPreprocessor == null) {
-            throw new IllegalArgumentException("typeAliasPreprocessor must not be null");
-        }
-        this.typeAliasPreprocessor = typeAliasPreprocessor;
         this.metrics = metrics;
     }
 
@@ -42,10 +37,9 @@ final class ComputeProgramNormalizer {
 
     /**
      * Normalizes only the authored Compute projection of a frozen step. This
-     * avoids materializing unrelated resolved-contract content. The selected
-     * subtrees still use the mutable alias preprocessor as a conservative,
-     * semantics-preserving cold-path fallback; the resulting frozen plan is
-     * reused on every warm invocation.
+     * avoids materializing unrelated resolved-contract content. Registered
+     * type identities are preserved exactly; no runtime alias rewriting is
+     * applied. The resulting frozen plan is reused on every warm invocation.
      */
     FrozenNode program(FrozenNode stepNode) {
         if (metrics != null) {
@@ -59,7 +53,39 @@ final class ComputeProgramNormalizer {
             metrics.incrementComputeDefinitionNormalizations();
             metrics.incrementComputeDefinitionMaterializations();
         }
-        return FrozenNode.fromResolvedNode(definition(frozenDefinitionInput(definitionNode)));
+        if (definitionNode == null) {
+            throw new IllegalArgumentException(
+                    "definitionNode must not be null");
+        }
+        /*
+         * A verified provider definition is already immutable exact content.
+         * Projecting it into a new object would replace the authored BlueId
+         * with a hash of the projection and discard metadata. BEX reads only
+         * constants/functions, so retaining the exact source is both safe and
+         * necessary for exact compiled-plan identity.
+         */
+        return definitionNode;
+    }
+
+    /**
+     * Projects the executable fields of an already-verified exact definition.
+     *
+     * <p>The exact provider node remains the plan/cache identity returned by
+     * {@link #definition(FrozenNode)}. BEX, however, requires its
+     * {@code constants}, {@code functions}, function arguments, and statement
+     * lists to be authored containers without inherited Blue metadata. Keep
+     * those two concerns separate instead of discarding the provider identity
+     * or asking BEX to interpret resolved contract structure.</p>
+     */
+    FrozenNode definitionSource(FrozenNode definitionNode) {
+        if (definitionNode == null) {
+            throw new IllegalArgumentException(
+                    "definitionNode must not be null");
+        }
+        return FrozenNode.fromResolvedNode(
+                definitionSource(
+                        frozenDefinitionInput(
+                                definitionNode)));
     }
 
     Node program(Node stepNode) {
@@ -78,19 +104,40 @@ final class ComputeProgramNormalizer {
         if (!properties.isEmpty()) {
             program.properties(properties);
         }
-        return typeAliasPreprocessor.preprocess(program);
+        return program;
     }
 
     Node definition(Node definitionNode) {
+        return definitionSource(definitionNode);
+    }
+
+    private Node definitionSource(Node definitionNode) {
+        if (definitionNode == null) {
+            throw new IllegalArgumentException(
+                    "definitionNode must not be null");
+        }
         Node definition = new Node();
         copyMetadata(definition, definitionNode);
-        Map<String, Node> properties = new LinkedHashMap<String, Node>();
-        putIfMeaningful(properties, "constants", authoredMap(NodeUtil.property(definitionNode, "constants")));
-        putIfMeaningful(properties, "functions", normalizeFunctions(NodeUtil.property(definitionNode, "functions")));
+        Map<String, Node> properties =
+                new LinkedHashMap<String, Node>();
+        putIfMeaningful(
+                properties,
+                "constants",
+                authoredMap(
+                        NodeUtil.property(
+                                definitionNode,
+                                "constants")));
+        putIfMeaningful(
+                properties,
+                "functions",
+                normalizeFunctions(
+                        NodeUtil.property(
+                                definitionNode,
+                                "functions")));
         if (!properties.isEmpty()) {
             definition.properties(properties);
         }
-        return typeAliasPreprocessor.preprocess(definition);
+        return definition;
     }
 
     private Node frozenProgramInput(FrozenNode source) {
@@ -115,7 +162,8 @@ final class ComputeProgramNormalizer {
     private Node frozenDefinitionInput(FrozenNode source) {
         Node input = new Node();
         copyMetadata(input, source);
-        Map<String, Node> properties = new LinkedHashMap<String, Node>();
+        Map<String, Node> properties =
+                new LinkedHashMap<String, Node>();
         copyFrozenProperty(properties, source, "constants");
         copyFrozenProperty(properties, source, "functions");
         if (!properties.isEmpty()) {
@@ -131,7 +179,17 @@ final class ComputeProgramNormalizer {
                 ? source.getProperties().get(key)
                 : null;
         if (value != null) {
-            target.put(key, value.toNode());
+            Node mutable = value.toNode();
+            if ("do".equals(key)) {
+                mutable = normalizeDo(mutable);
+            } else if ("functions".equals(key)) {
+                mutable = normalizeFunctions(mutable);
+            } else if ("constants".equals(key)) {
+                mutable = authoredMap(mutable);
+            }
+            if (mutable != null) {
+                target.put(key, mutable);
+            }
         }
     }
 
@@ -169,10 +227,11 @@ final class ComputeProgramNormalizer {
     }
 
     private Node normalizeStatement(Node statement) {
-        if (NodeUtil.isEmpty(statement)) {
+        if (NodeUtil.isEmpty(statement)
+                || Nodes.isEmptyPlaceholder(statement)) {
             return new Node().properties("$return", new Node());
         }
-        return statement.clone();
+        return canonicalStaticSource(statement);
     }
 
     private Node authoredMap(Node node) {
@@ -181,22 +240,60 @@ final class ComputeProgramNormalizer {
         }
         Map<String, Node> properties = new LinkedHashMap<String, Node>();
         for (Map.Entry<String, Node> entry : node.getProperties().entrySet()) {
-            properties.put(entry.getKey(), entry.getValue().clone());
+            properties.put(entry.getKey(),
+                    canonicalStaticSource(entry.getValue()));
         }
         return new Node().properties(properties);
     }
 
     private void putIfMeaningful(Map<String, Node> properties, String key, Node value) {
         if (hasAuthoredContent(value)) {
-            properties.put(key, value.clone());
+            properties.put(key, canonicalStaticSource(value));
         }
     }
 
+    /**
+     * Restores canonical pure-reference shape inside a resolved executable
+     * view.  Language may retain a provider BlueId beside resolved fields so
+     * hosts can inspect effective content.  Those sibling fields are not part
+     * of the authored BEX literal and would make a transient Blue output
+     * invalid if compiled as object members.
+     */
+    private Node canonicalStaticSource(Node source) {
+        if (source == null) {
+            return null;
+        }
+        if (source.getBlueId() != null) {
+            return new Node().blueId(source.getBlueId());
+        }
+        Node normalized = source.clone();
+        normalized.type(canonicalStaticSource(source.getType()));
+        normalized.itemType(canonicalStaticSource(source.getItemType()));
+        normalized.keyType(canonicalStaticSource(source.getKeyType()));
+        normalized.valueType(canonicalStaticSource(source.getValueType()));
+        normalized.blue(canonicalStaticSource(source.getBlue()));
+        normalized.contracts(canonicalStaticSource(source.getContracts()));
+        if (source.getItems() != null) {
+            java.util.List<Node> items = new java.util.ArrayList<Node>();
+            for (Node item : source.getItems()) {
+                items.add(canonicalStaticSource(item));
+            }
+            normalized.items(items);
+        }
+        if (source.getProperties() != null) {
+            Map<String, Node> properties = new LinkedHashMap<String, Node>();
+            for (Map.Entry<String, Node> entry
+                    : source.getProperties().entrySet()) {
+                properties.put(entry.getKey(),
+                        canonicalStaticSource(entry.getValue()));
+            }
+            normalized.properties(properties);
+        }
+        return normalized;
+    }
+
     private boolean hasAuthoredContent(Node node) {
-        return node != null
-                && (node.getValue() != null
-                || (node.getItems() != null && !node.getItems().isEmpty())
-                || (node.getProperties() != null && !node.getProperties().isEmpty()));
+        return !NodeUtil.isEmpty(node);
     }
 
     private void copyMetadata(Node target, Node source) {
@@ -205,7 +302,7 @@ final class ComputeProgramNormalizer {
         }
         target.name(source.getName());
         target.description(source.getDescription());
-        target.type(source.getType() != null ? source.getType().clone() : null);
+        target.type(canonicalStaticSource(source.getType()));
     }
 
     private void copyMetadata(Node target, FrozenNode source) {
@@ -214,6 +311,8 @@ final class ComputeProgramNormalizer {
         }
         target.name(source.getName());
         target.description(source.getDescription());
-        target.type(source.getType() != null ? source.getType().toNode() : null);
+        target.type(source.getType() != null
+                ? canonicalStaticSource(source.getType().toNode())
+                : null);
     }
 }

@@ -5,31 +5,60 @@ import blue.language.processor.ChannelCheckpointContext;
 import blue.language.processor.ChannelEvaluation;
 import blue.language.processor.ChannelEvaluationContext;
 import blue.language.processor.ChannelProcessor;
+import blue.language.processor.ExternalChannelSubscriptionFunctions;
+import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.model.ChannelContract;
 import blue.repo.coordination.AllTimelinesChannel;
 import blue.repo.coordination.TimelineChannel;
 import java.util.Map;
 
+/** Evaluates the deterministic union of every same-scope Timeline Channel. */
 public final class AllTimelinesChannelProcessor implements ChannelProcessor<AllTimelinesChannel> {
+    private final CoordinationSemanticTypeIdentities identities;
+    private final ExternalChannelSubscriptionFunctions<
+            AllTimelinesChannel> subscriptionFunctions;
+
+    public AllTimelinesChannelProcessor() {
+        this.identities = CoordinationSemanticTypeIdentities
+                .publishedDefaults();
+        this.subscriptionFunctions =
+                AllTimelinesExternalSubscriptionFunctions.INSTANCE;
+    }
+
+    AllTimelinesChannelProcessor(
+            String timelineChannelTypeBlueId,
+            CoordinationSemanticTypeIdentities identities) {
+        this.identities = java.util.Objects.requireNonNull(
+                identities, "identities");
+        this.subscriptionFunctions =
+                new AllTimelinesExternalSubscriptionFunctions(
+                        timelineChannelTypeBlueId,
+                        identities);
+    }
+
     @Override
     public Class<AllTimelinesChannel> contractType() {
         return AllTimelinesChannel.class;
     }
 
     @Override
+    public ExternalChannelSubscriptionFunctions<AllTimelinesChannel>
+    externalSubscriptionFunctions() {
+        return subscriptionFunctions;
+    }
+
+    @Override
     public ChannelEvaluation evaluate(AllTimelinesChannel contract, ChannelEvaluationContext context) {
         Node event = context.event();
-        if (!CoordinationEventNodes.isTimelineEntry(event)) {
+        if (!CoordinationEventNodes.isTimelineEntry(event, identities)) {
             return ChannelEvaluation.noMatch();
         }
         MatchingTimeline matching = matchingTimeline(context);
         if (matching == null) {
             return ChannelEvaluation.noMatch();
         }
-        return TimelineProviderSupport.preserveUnionDelivery(matching.evaluation,
-                event,
-                "allTimelinesSourceChannelKey",
-                matching.channelKey);
+        return TimelineProviderSupport.preserveUnionPayload(
+                matching.evaluation, event);
     }
 
     private MatchingTimeline matchingTimeline(ChannelEvaluationContext context) {
@@ -66,29 +95,35 @@ public final class AllTimelinesChannelProcessor implements ChannelProcessor<AllT
     }
 
     @Override
-    public boolean isNewerEvent(AllTimelinesChannel contract, ChannelCheckpointContext context) {
-        return TimelineProviderSupport.isNewerOrDifferentTimelineEvent(context);
+    public boolean isNewerEvent(AllTimelinesChannel contract,
+                                ChannelCheckpointContext context) {
+        return TimelineProviderSupport.isNewerTimelineSubject(
+                context,
+                AllTimelinesExternalSubscriptionFunctions
+                        .ORDER_SUBJECT_VERSION);
     }
 
     private int order(ChannelContract contract) {
         return contract.getOrder() != null ? contract.getOrder() : 0;
     }
 
-    private static final class MatchingTimeline {
+    static final class MatchingTimeline {
         private final String channelKey;
         private final int order;
         private final ChannelEvaluation evaluation;
 
-        private MatchingTimeline(String channelKey, int order, ChannelEvaluation evaluation) {
+        MatchingTimeline(String channelKey, int order, ChannelEvaluation evaluation) {
             this.channelKey = channelKey;
             this.order = order;
             this.evaluation = evaluation;
         }
 
-        private boolean precedes(MatchingTimeline other) {
+        boolean precedes(MatchingTimeline other) {
             int orderComparison = Integer.compare(order, other.order);
             return orderComparison < 0
-                    || (orderComparison == 0 && channelKey.compareTo(other.channelKey) < 0);
+                    || (orderComparison == 0
+                    && ExternalOrderKey.compareTextCodePoints(
+                            channelKey, other.channelKey) < 0);
         }
     }
 }

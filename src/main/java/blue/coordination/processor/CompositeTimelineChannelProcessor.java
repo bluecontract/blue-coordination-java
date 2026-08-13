@@ -5,6 +5,8 @@ import blue.language.processor.ChannelCheckpointContext;
 import blue.language.processor.ChannelEvaluation;
 import blue.language.processor.ChannelEvaluationContext;
 import blue.language.processor.ChannelProcessor;
+import blue.language.processor.ExternalChannelSubscriptionFunctions;
+import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.model.ChannelContract;
 import blue.repo.coordination.CompositeTimelineChannel;
 import blue.repo.coordination.TimelineChannel;
@@ -12,10 +14,34 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+/** Evaluates the deterministic union of explicitly listed Timeline Channels. */
 public final class CompositeTimelineChannelProcessor implements ChannelProcessor<CompositeTimelineChannel> {
+    private final ExternalChannelSubscriptionFunctions<
+            CompositeTimelineChannel> subscriptionFunctions;
+
+    public CompositeTimelineChannelProcessor() {
+        this.subscriptionFunctions =
+                CompositeTimelineExternalSubscriptionFunctions.INSTANCE;
+    }
+
+    CompositeTimelineChannelProcessor(
+            String timelineChannelTypeBlueId,
+            CoordinationSemanticTypeIdentities identities) {
+        this.subscriptionFunctions =
+                new CompositeTimelineExternalSubscriptionFunctions(
+                        timelineChannelTypeBlueId,
+                        identities);
+    }
+
     @Override
     public Class<CompositeTimelineChannel> contractType() {
         return CompositeTimelineChannel.class;
+    }
+
+    @Override
+    public ExternalChannelSubscriptionFunctions<
+            CompositeTimelineChannel> externalSubscriptionFunctions() {
+        return subscriptionFunctions;
     }
 
     @Override
@@ -63,10 +89,8 @@ public final class CompositeTimelineChannelProcessor implements ChannelProcessor
         if (matching == null) {
             return ChannelEvaluation.noMatch();
         }
-        return TimelineProviderSupport.preserveUnionDelivery(matching.evaluation,
-                context.event(),
-                "compositeSourceChannelKey",
-                matching.channelKey);
+        return TimelineProviderSupport.preserveUnionPayload(
+                matching.evaluation, context.event());
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -77,8 +101,12 @@ public final class CompositeTimelineChannelProcessor implements ChannelProcessor
     }
 
     @Override
-    public boolean isNewerEvent(CompositeTimelineChannel contract, ChannelCheckpointContext context) {
-        return TimelineProviderSupport.isNewerOrDifferentTimelineEvent(context);
+    public boolean isNewerEvent(CompositeTimelineChannel contract,
+                                ChannelCheckpointContext context) {
+        return TimelineProviderSupport.isNewerTimelineSubject(
+                context,
+                CompositeTimelineExternalSubscriptionFunctions
+                        .ORDER_SUBJECT_VERSION);
     }
 
     private String trimToNull(String value) {
@@ -93,21 +121,23 @@ public final class CompositeTimelineChannelProcessor implements ChannelProcessor
         return contract.getOrder() != null ? contract.getOrder() : 0;
     }
 
-    private static final class MatchingChild {
+    static final class MatchingChild {
         private final String channelKey;
         private final int order;
         private final ChannelEvaluation evaluation;
 
-        private MatchingChild(String channelKey, int order, ChannelEvaluation evaluation) {
+        MatchingChild(String channelKey, int order, ChannelEvaluation evaluation) {
             this.channelKey = channelKey;
             this.order = order;
             this.evaluation = evaluation;
         }
 
-        private boolean precedes(MatchingChild other) {
+        boolean precedes(MatchingChild other) {
             int orderComparison = Integer.compare(order, other.order);
             return orderComparison < 0
-                    || (orderComparison == 0 && channelKey.compareTo(other.channelKey) < 0);
+                    || (orderComparison == 0
+                    && ExternalOrderKey.compareTextCodePoints(
+                            channelKey, other.channelKey) < 0);
         }
     }
 }

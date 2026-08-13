@@ -1,7 +1,7 @@
 package blue.coordination.processor.workflow;
 
 import blue.language.model.Node;
-import blue.language.processor.model.FrozenJsonPatch;
+import blue.language.processor.FrozenJsonPatch;
 import blue.language.snapshot.FrozenNode;
 
 import java.util.ArrayList;
@@ -19,6 +19,7 @@ final class ComputeEffectPlan {
     private final List<FrozenJsonPatch> patches;
     private final List<FrozenNode> events;
     private final boolean terminationRequested;
+    private final String terminationCause;
     private final String terminationReason;
     private final boolean changesetHandled;
     private final AtomicBoolean bufferingClaimed = new AtomicBoolean();
@@ -26,6 +27,7 @@ final class ComputeEffectPlan {
     ComputeEffectPlan(List<FrozenJsonPatch> patches,
                       List<Node> events,
                       boolean terminationRequested,
+                      String terminationCause,
                       String terminationReason,
                       boolean changesetHandled) {
         List<FrozenJsonPatch> frozenPatches = new ArrayList<FrozenJsonPatch>(patches.size());
@@ -40,13 +42,28 @@ final class ComputeEffectPlan {
         this.patches = Collections.unmodifiableList(frozenPatches);
         List<FrozenNode> frozenEvents = new ArrayList<FrozenNode>(events.size());
         for (Node event : events) {
-            // Repository-backed BEX values may already be resolved and therefore carry
-            // expanded type nodes. Preserve that valid resolved shape while taking an
-            // immutable snapshot of the event planned for later buffering.
-            frozenEvents.add(FrozenNode.fromResolvedNode(event));
+            /*
+             * ComputeResultEmitter has already rebuilt and provenance-normalized
+             * the exact event. Freeze that authored exact shape. A resolved-mode
+             * freeze reattaches the calculated root BlueId beside the event fields
+             * when converted back to Node, which the hosted semantic boundary must
+             * reject as mixed reference/content.
+             */
+            frozenEvents.add(FrozenNode.fromNode(event));
         }
         this.events = Collections.unmodifiableList(frozenEvents);
+        if (terminationRequested
+                && (terminationCause == null || terminationCause.isEmpty())) {
+            throw new IllegalArgumentException(
+                    "Compute termination cause must be non-empty Text");
+        }
+        if (!terminationRequested
+                && (terminationCause != null || terminationReason != null)) {
+            throw new IllegalArgumentException(
+                    "Absent Compute termination cannot carry cause or reason");
+        }
         this.terminationRequested = terminationRequested;
+        this.terminationCause = terminationCause;
         this.terminationReason = terminationReason;
         this.changesetHandled = changesetHandled;
     }
@@ -61,6 +78,10 @@ final class ComputeEffectPlan {
 
     boolean terminationRequested() {
         return terminationRequested;
+    }
+
+    String terminationCause() {
+        return terminationCause;
     }
 
     String terminationReason() {
