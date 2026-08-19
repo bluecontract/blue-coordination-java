@@ -97,17 +97,30 @@ final class OperationRequestRoutingFunctions {
         if (route == null) {
             return context.channelKey();
         }
+        return logicalDeliveryKey(route.operation, route.channel);
+    }
+
+    static String logicalDeliveryKey(
+            String operation,
+            String channel) {
         Node identity = new Node()
                 .properties(
                         "operation",
-                        new Node().value(
-                                route.operation))
+                        new Node().value(requireText(
+                                operation, "operation")))
                 .properties(
                         "channel",
-                        new Node().value(
-                                route.channel));
+                        new Node().value(requireText(
+                                channel, "channel")));
         return LOGICAL_DELIVERY_PREFIX
                 + DirectBlueIdCalculator.calculateBlueId(identity);
+    }
+
+    private static String requireText(String value, String name) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(name + " must be non-blank");
+        }
+        return value;
     }
 
     private static Route route(

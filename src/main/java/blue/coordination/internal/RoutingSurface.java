@@ -119,6 +119,35 @@ final class RoutingSurface {
         return new RoutingSurface(unique.values(), embeddedHandler);
     }
 
+    /** Compiles the non-recursive routing surface of one independently
+     * managed Root from its processor-authenticated effective contracts. */
+    static RoutingSurface fromManagedRootContracts(
+            Collection<EffectiveContractSnapshot> effectiveContracts) {
+        List<EffectiveContractSnapshot> contracts = new ArrayList<>(
+                Objects.requireNonNull(
+                        effectiveContracts, "effectiveContracts"));
+        contracts.sort(Comparator
+                .comparingInt(EffectiveContractSnapshot::order)
+                .thenComparing(EffectiveContractSnapshot::key,
+                        EmbeddingBinding.TEXT_ORDER));
+        for (EffectiveContractSnapshot contract : contracts) {
+            if (!"/".equals(Objects.requireNonNull(
+                    contract, "effective contract").scopePath())) {
+                throw new IllegalArgumentException(
+                        "Managed Root routing contract has non-Root scope "
+                                + contract.scopePath());
+            }
+        }
+        Map<Definition, Definition> unique = new LinkedHashMap<>();
+        collect("/", contracts, unique);
+        boolean embeddedHandler = contracts.stream().anyMatch(contract ->
+                EffectiveContractSnapshotConstants.Role.HANDLER.equals(
+                        contract.role())
+                        && EmbeddedEpochInput.INTERNAL_OPERATION.equals(
+                        contract.key()));
+        return new RoutingSurface(unique.values(), embeddedHandler);
+    }
+
     public List<Definition> definitions() {
         return definitions;
     }

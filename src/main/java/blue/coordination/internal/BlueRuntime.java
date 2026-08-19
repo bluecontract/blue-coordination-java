@@ -12,6 +12,8 @@ import blue.language.merge.ResolvedSnapshot;
 import blue.language.model.Node;
 import blue.language.model.NodeWireForm;
 import blue.language.processor.BlueContracts;
+import blue.language.processor.ContractProcessorRegistry;
+import blue.language.processor.ContractProcessorRegistryBuilder;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.DocumentProcessor;
 import blue.language.processor.EffectiveFragmentationCatalog;
@@ -96,14 +98,22 @@ final class BlueRuntime implements AutoCloseable {
                 CoordinationProcessorOptions.builder()
                         .language(language)
                         .build();
-        BlueContracts contracts = CoordinationProcessors.contracts(
-                language, options);
-        DocumentProcessor processor = CoordinationProcessors.configure(
-                        DocumentProcessor.builder()
-                                .runtimeAccess(contracts.runtimeAccess()),
+        ContractProcessorRegistry runtimeRegistry =
+                CoordinationProcessors.configure(
+                        ContractProcessorRegistryBuilder.create()
+                                .registerDefaults(),
                         options)
-                .runtimeRegistryIdentity(
-                        "blue.coordination/in-memory-runtime/3.0")
+                .build();
+        String runtimeRegistryIdentity =
+                runtimeRegistry.generationIdentity();
+        BlueContracts contracts = BlueContracts.builder(
+                        language.processing())
+                .runtimeRegistry(runtimeRegistry)
+                .build();
+        DocumentProcessor processor = DocumentProcessor.builder()
+                .runtimeAccess(contracts.runtimeAccess())
+                .runtimeRegistry(runtimeRegistry)
+                .runtimeRegistryIdentity(runtimeRegistryIdentity)
                 .build();
         return new BlueRuntime(
                 nodeProvider, language, contracts, processor, metrics);
@@ -253,6 +263,17 @@ final class BlueRuntime implements AutoCloseable {
     NodeProvider nodeProvider() {
         ensureOpen();
         return nodeProvider;
+    }
+
+    /** Returns the exact configured processor borrowed by closure execution. */
+    DocumentProcessor documentProcessor() {
+        ensureOpen();
+        return processor;
+    }
+
+    EngineMetrics metrics() {
+        ensureOpen();
+        return metrics;
     }
 
     @Override

@@ -104,6 +104,14 @@ final class ProcessEmbeddedGraphSnapshot {
         return byId.values().stream().sorted(EmbeddingBinding.GLOBAL_ORDER).toList();
     }
 
+    /**
+     * Builds the deterministic SCC/condensation view of this captured
+     * generation. This does not relax legacy acyclic reconciliation.
+     */
+    ProcessEmbeddedComponentIndex componentIndex() {
+        return ProcessEmbeddedComponentIndex.fromBindings(bindings());
+    }
+
     ProcessEmbeddedGraphSnapshot reconcileParent(
             DocumentId parent,
             List<EmbeddingBinding> replacement) {

@@ -7,6 +7,8 @@ import blue.language.model.wire.JsonPointer;
 import blue.language.merge.ResolvedSnapshot;
 import blue.language.processor.EffectiveFragmentationCatalog;
 import blue.language.processor.EmbeddedScopePlanView;
+import blue.language.processor.closure.ClosureProcessResult;
+import blue.language.processor.closure.ResultingDocument;
 import blue.language.processor.util.PointerUtils;
 import blue.language.processor.registry.RuntimeBlueIds;
 import blue.language.snapshot.FrozenNode;
@@ -59,6 +61,108 @@ final class EmbeddedOnlyLayoutBuilder {
             ExactValue exactRoot,
             EmbeddedOnlyLayout previous) {
         return rebuild(exactRoot, previous, true);
+    }
+
+    /**
+     * Retains one independently managed document from a verified closure
+     * result without re-hashing a cyclic {@code MASTER#n} member as an
+     * acyclic value.
+     *
+     * <p>The Contracts result already authenticates the complete local body,
+     * cyclic component proof, and authoritative member identity. The durable
+     * occurrence inventory owns all managed-document edges, so this layout
+     * intentionally stores only the selected document's Root and carries no
+     * ambient container or recursively opened child scope. The existing local
+     * contract plan may be reused only while its exact declarations still
+     * match the resulting body.</p>
+     */
+    EmbeddedOnlyLayout retainVerifiedClosureRoot(
+            ClosureProcessResult result,
+            DocumentId documentId,
+            EmbeddedOnlyLayout previous) {
+        Objects.requireNonNull(previous, "previous");
+        return retainVerifiedClosureRoot(result, documentId);
+    }
+
+    /** Retains one verified existing Root with an exact non-recursive routing
+     * surface projected by the managed-document processor. */
+    EmbeddedOnlyLayout retainVerifiedClosureRoot(
+            ClosureProcessResult result,
+            DocumentId documentId,
+            EmbeddedOnlyLayout previous,
+            RoutingSurface routingSurface) {
+        Objects.requireNonNull(previous, "previous");
+        return retainVerifiedClosureRoot(result, documentId, routingSurface);
+    }
+
+    /** Retains one new independently managed Root after verified admission. */
+    EmbeddedOnlyLayout retainVerifiedClosureRoot(
+            ClosureProcessResult result,
+            DocumentId documentId) {
+        ClosureProcessResult verified = Objects.requireNonNull(
+                result, "result");
+        DocumentId selected = Objects.requireNonNull(documentId, "documentId");
+        Map<DocumentId, ExactValue> retained = retainClosureMembers(verified);
+        ExactValue exactRoot = retained.get(selected);
+        if (exactRoot == null) {
+            throw new IllegalArgumentException(
+                    "Closure result has no document " + selected);
+        }
+        EffectiveFragmentationCatalog catalog =
+                runtime.effectiveFragmentationCatalog(exactRoot.blueId());
+        EmbeddedLayoutPlan plan = EmbeddedLayoutPlan.compile(
+                exactRoot,
+                catalog,
+                path -> exactScopeAt(exactRoot, path));
+        return verifiedRootLayout(exactRoot, plan);
+    }
+
+    /** Retains one new independently managed Root after verified admission,
+     * using the exact Root-only routing projection rather than reopening a
+     * cyclic member as a fragmentation-catalog Root. */
+    EmbeddedOnlyLayout retainVerifiedClosureRoot(
+            ClosureProcessResult result,
+            DocumentId documentId,
+            RoutingSurface routingSurface) {
+        ClosureProcessResult verified = Objects.requireNonNull(
+                result, "result");
+        DocumentId selected = Objects.requireNonNull(documentId, "documentId");
+        Map<DocumentId, ExactValue> retained = retainClosureMembers(verified);
+        ExactValue exactRoot = retained.get(selected);
+        if (exactRoot == null) {
+            throw new IllegalArgumentException(
+                    "Closure result has no document " + selected);
+        }
+        return verifiedRootLayout(
+                exactRoot,
+                EmbeddedLayoutPlan.managedRoot(routingSurface));
+    }
+
+    private Map<DocumentId, ExactValue> retainClosureMembers(
+            ClosureProcessResult result) {
+        Map<DocumentId, ExactValue> retained = new LinkedHashMap<>();
+        for (ResultingDocument document : result.resultingDocuments()) {
+            DocumentId member = DocumentId.of(document.documentId().value());
+            ExactValue exact = ExactValue.fromVerifiedClosureResult(
+                    result, member);
+            retained.put(
+                    member,
+                    objects.put(exact, "verified-closure-component-member"));
+        }
+        return retained;
+    }
+
+    private EmbeddedOnlyLayout verifiedRootLayout(
+            ExactValue exactRoot,
+            EmbeddedLayoutPlan plan) {
+        metrics.increment("layout.verifiedClosureRootsRetained");
+        return new EmbeddedOnlyLayout(
+                exactRoot,
+                exactRoot.frozen(),
+                Map.of(JsonPointer.ROOT, exactRoot),
+                List.of(),
+                List.of(),
+                plan);
     }
     private EmbeddedOnlyLayout rebuild(
             ExactValue exactRoot,
@@ -248,6 +352,8 @@ final class EmbeddedOnlyLayoutBuilder {
                 throw new IllegalStateException(
                         "Process Embedded materialization changed Root identity");
             }
+            objects.preferCanonicalRepresentation(
+                    materializedRoot, "document-semantic-root");
             Set<String> scopePaths = new LinkedHashSet<>();
             scopePaths.add(JsonPointer.ROOT);
             for (ConcreteBoundary boundary : concreteBoundaries) {
@@ -359,12 +465,22 @@ final class EmbeddedOnlyLayoutBuilder {
                         "Process Embedded scope is absent at "
                                 + boundary.childPath());
             }
+            child = canonicalManagedBody(child);
             result = replaceAt(
                     result,
                     JsonPointer.split(boundary.childPath()),
                     child);
         }
         return result;
+    }
+
+    private FrozenNode canonicalManagedBody(FrozenNode selected) {
+        String identity = selected.isReferenceOnly()
+                ? selected.getReferenceBlueId()
+                : selected.blueId();
+        return objects.contains(identity)
+                ? objects.require(identity).frozen()
+                : selected;
     }
     private FrozenNode resolveThroughReferences(
             FrozenNode root,

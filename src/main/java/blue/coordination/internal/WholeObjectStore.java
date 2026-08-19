@@ -8,10 +8,12 @@ import blue.language.merge.ResolvedSnapshot;
 import blue.language.model.Node;
 import blue.language.snapshot.FrozenNode;
 import blue.language.provider.NodeProvider;
+import blue.language.provider.NodeProviderResult;
 
 import java.util.Collections;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -33,6 +35,8 @@ final class WholeObjectStore implements NodeProvider {
     private final Map<String, ExactValue> providerByBlueId =
             new LinkedHashMap<>();
     private final Map<String, String> purposeByBlueId = new LinkedHashMap<>();
+    private final java.util.Set<String> unavailableProviderBlueIds =
+            new LinkedHashSet<>();
     private final List<Mark> activeMarks = new ArrayList<>();
     private final EngineMetrics metrics;
 
@@ -92,6 +96,42 @@ final class WholeObjectStore implements NodeProvider {
     }
 
     /**
+     * Retains the materialized semantic representation selected by the
+     * embedded-layout boundary without changing the compact provider view.
+     *
+     * <p>Reference substitution permits a managed document body and a shell
+     * containing exact child references to share one BlueId. A processor may
+     * encounter the shell first while restoring an exact patch. Once the
+     * layout has authenticated and materialized every declared managed child,
+     * that richer representation must become the canonical API/read model;
+     * the independently selected provider representation remains unchanged.</p>
+     */
+    synchronized ExactValue preferCanonicalRepresentation(
+            FrozenNode representation,
+            String purpose) {
+        ExactValue preferred = ExactValue.fromFrozen(
+                Objects.requireNonNull(representation, "representation"));
+        ExactValue canonical = canonicalByBlueId.get(preferred.blueId());
+        if (canonical == null) {
+            throw new IllegalStateException(
+                    "Cannot prefer an unknown exact object "
+                            + preferred.blueId());
+        }
+        if (preferred.frozen().isReferenceOnly()) {
+            throw new IllegalArgumentException(
+                    "Canonical preference must contain an exact object body");
+        }
+        if (canonical.frozen().sameResolvedStructure(preferred.frozen())) {
+            return canonical;
+        }
+        recordBeforeMutation(preferred.blueId());
+        canonicalByBlueId.put(preferred.blueId(), preferred);
+        purposeByBlueId.put(preferred.blueId(), sanitize(purpose));
+        metrics.increment("wholeObjectStore.canonicalRepresentationsPreferred");
+        return preferred;
+    }
+
+    /**
      * Selects an identity-equivalent representation for provider-backed frozen
      * calls without replacing the fully materialized semantic value.
      */
@@ -133,6 +173,16 @@ final class WholeObjectStore implements NodeProvider {
 
     public synchronized int size() {
         return canonicalByBlueId.size();
+    }
+
+    synchronized void forceProviderUnavailable(String blueId) {
+        unavailableProviderBlueIds.add(Objects.requireNonNull(
+                blueId, "blueId"));
+    }
+
+    synchronized void restoreProviderAvailability(String blueId) {
+        unavailableProviderBlueIds.remove(Objects.requireNonNull(
+                blueId, "blueId"));
     }
 
     /** Opens an O(1) nested savepoint; only later changed keys are journaled. */
@@ -181,6 +231,17 @@ final class WholeObjectStore implements NodeProvider {
         String purpose = purposeByBlueId.getOrDefault(blueId, "unknown");
         metrics.increment("wholeObjectStore.providerReads." + purpose);
         return Collections.singletonList(value.copyNode());
+    }
+
+    @Override
+    public synchronized NodeProviderResult fetchResultByBlueId(
+            String blueId) {
+        if (unavailableProviderBlueIds.contains(Objects.requireNonNull(
+                blueId, "blueId"))) {
+            return NodeProviderResult.unavailable(
+                    "Test-controlled exact resource is unavailable");
+        }
+        return NodeProvider.super.fetchResultByBlueId(blueId);
     }
 
     private static String sanitize(String purpose) {

@@ -3,6 +3,8 @@ package blue.coordination.processor.workflow;
 import blue.bex.result.BexChangeset;
 import blue.bex.result.BexExecutionResult;
 import blue.bex.result.BexPatchEntry;
+import blue.bex.contracts.ProcessorExactBlueValueCapability;
+import blue.bex.output.BexExactValueCapability;
 import blue.bex.value.BexBlueNodeWriter;
 import blue.bex.value.BexFrozenWriter;
 import blue.bex.value.BexValue;
@@ -11,6 +13,7 @@ import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.model.Node;
 import blue.coordination.processor.support.CoordinationProcessHeaderSupport;
 import blue.language.processor.WorkingDocument;
+import blue.language.processor.ExactBlueValue;
 import blue.language.processor.FrozenJsonPatch;
 import blue.language.snapshot.FrozenNode;
 
@@ -336,12 +339,64 @@ final class ComputeResultEmitter {
         if (remove) {
             return FrozenJsonPatch.remove(path);
         }
-        FrozenNode value = freezePatchValue(entry.val());
+        ExactBlueValue exactValue = admittedExactPatchValue(
+                entry, context);
         if (ADD_OPERATION.equals(op)) {
-            return FrozenJsonPatch.add(path, value);
+            return exactValue != null
+                    ? FrozenJsonPatch.add(path, exactValue)
+                    : FrozenJsonPatch.add(
+                            path, freezePatchValue(entry.val()));
         }
         // BexPatchEntry has already restricted this branch to replace.
-        return FrozenJsonPatch.replace(path, value);
+        return exactValue != null
+                ? FrozenJsonPatch.replace(path, exactValue)
+                : FrozenJsonPatch.replace(
+                        path, freezePatchValue(entry.val()));
+    }
+
+    private ExactBlueValue admitExactPatchValue(
+            BexValue value,
+            StepExecutionContext context) {
+        String exactBlueId = BexValues.frozenBlueId(value);
+        if (exactBlueId == null) {
+            return null;
+        }
+        FrozenNode retained = freezePatchValue(value);
+        ExactBlueValue admitted = context.processorContext()
+                .semanticOutputBoundary()
+                .admit(retained);
+        if (!exactBlueId.equals(admitted.blueId())) {
+            throw invalid(
+                    "Compute result exact patch capability changed identity: "
+                            + "expected " + exactBlueId + " but found "
+                            + admitted.blueId());
+        }
+        return admitted;
+    }
+
+    private ExactBlueValue admittedExactPatchValue(
+            BexPatchEntry entry,
+            StepExecutionContext context) {
+        if (entry.admittedValue() != null) {
+            BexExactValueCapability capability =
+                    entry.admittedValue().exactCapability();
+            if (capability instanceof ProcessorExactBlueValueCapability) {
+                ExactBlueValue carried = context.processorContext()
+                        .semanticOutputBoundary()
+                        .carryExactCapability(
+                                ((ProcessorExactBlueValueCapability) capability)
+                                .exactValue());
+                String exactBlueId = BexValues.frozenBlueId(entry.val());
+                if (exactBlueId == null
+                        || !exactBlueId.equals(carried.blueId())) {
+                    throw invalid(
+                            "Compute result exact patch capability does not "
+                                    + "match its admitted BEX value");
+                }
+                return carried;
+            }
+        }
+        return admitExactPatchValue(entry.val(), context);
     }
 
     private String resolvedPointer(String authoredPath, StepExecutionContext context) {
@@ -498,6 +553,13 @@ final class ComputeResultEmitter {
              */
             if (frozen.isStrictCanonical()
                     && !frozen.isReferenceOnly()) {
+                if (!exactBlueId.equals(frozen.blueId())) {
+                    throw invalid(
+                            "Compute result exact patch value has mismatched "
+                                    + "authenticated content: expected "
+                                    + exactBlueId + " but found "
+                                    + frozen.blueId());
+                }
                 if (metrics != null) {
                     metrics.incrementBexPatchFrozenDirectConversions();
                 }
@@ -505,70 +567,37 @@ final class ComputeResultEmitter {
             }
             if (frozen.isReferenceOnly()) {
                 /*
-                 * BexFrozenWriter's general exact-value fallback is a pure
-                 * reference. That is the correct zero-materialization result
-                 * for an opaque exact value, but AdmittedExactBexValue also
-                 * uses the fallback while retaining complete host-admitted
-                 * semantic content. Preserve the former and materialize the
-                 * latter: copying an exact document template into a patch
-                 * must not turn it into an unopenable reference before later
-                 * entries in the same atomic changeset address its children.
+                 * Preserve the exact reference authenticated by the host.
+                 * Reconstructing its resolved semantic cursor here can
+                 * generalize nominal type/schema fields and silently change
+                 * the established identity. Language remains responsible for
+                 * opening the exact reference if a later patch demands a
+                 * descendant.
                  */
-                Node semantic = semanticOutputView(value);
-                if (semantic.isReferenceOnly()) {
-                    if (metrics != null) {
-                        metrics.incrementBexPatchFrozenDirectConversions();
-                    }
-                    return frozen;
+                if (!exactBlueId.equals(frozen.getReferenceBlueId())) {
+                    throw invalid(
+                            "Compute result exact patch reference changed "
+                                    + "identity: expected " + exactBlueId
+                                    + " but found "
+                                    + frozen.getReferenceBlueId());
                 }
-                return materializeExactPatchValue(
-                        semantic, exactBlueId);
+                if (metrics != null) {
+                    metrics.incrementBexPatchFrozenDirectConversions();
+                }
+                return frozen;
             }
-            return materializeExactPatchValue(value, exactBlueId);
+            /*
+             * A resolved/non-canonical cursor is evidence for semantic reads,
+             * not a second authored representation. Retain the authenticated
+             * identity as a strict exact reference instead of normalizing and
+             * hashing that cursor again.
+             */
+            if (metrics != null) {
+                metrics.incrementBexPatchFrozenDirectConversions();
+            }
+            return FrozenNode.fromNode(new Node().blueId(exactBlueId));
         }
         return materializePatchValue(value);
-    }
-
-    private FrozenNode materializeExactPatchValue(BexValue value,
-                                                  String expectedBlueId) {
-        long writerStart = System.nanoTime();
-        try {
-            FrozenNode materialized = FrozenNode.fromNode(
-                    semanticOutputNode(value));
-            return requireExactPatchIdentity(
-                    materialized, expectedBlueId);
-        } finally {
-            recordPatchValueMaterialization(writerStart);
-        }
-    }
-
-    private FrozenNode materializeExactPatchValue(
-            Node semantic,
-            String expectedBlueId) {
-        long writerStart = System.nanoTime();
-        try {
-            FrozenNode materialized = FrozenNode.fromNode(
-                    CoordinationProcessHeaderSupport
-                            .canonicalExactCopy(semantic));
-            return requireExactPatchIdentity(
-                    materialized, expectedBlueId);
-        } finally {
-            recordPatchValueMaterialization(writerStart);
-        }
-    }
-
-    private FrozenNode requireExactPatchIdentity(
-            FrozenNode materialized,
-            String expectedBlueId) {
-        if (!expectedBlueId.equals(materialized.blueId())) {
-            throw invalid(
-                    "Compute result exact patch value identity changed "
-                            + "during semantic materialization: expected "
-                            + expectedBlueId
-                            + " but calculated "
-                            + materialized.blueId());
-        }
-        return materialized;
     }
 
     private FrozenNode materializePatchValue(BexValue value) {
