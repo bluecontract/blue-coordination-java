@@ -15,6 +15,7 @@ import blue.language.processor.closure.AdmissionCause;
 import blue.language.processor.closure.BlueClosureContracts;
 import blue.language.processor.closure.ClosureAttemptResult;
 import blue.language.processor.closure.ClosureEnvironment;
+import blue.language.processor.closure.ClosureImplementationEvidence;
 import blue.language.processor.closure.ClosureInvocationInput;
 import blue.language.processor.closure.ClosureProcessResult;
 import blue.language.processor.closure.ExecutionPolicy;
@@ -39,6 +40,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Consumer;
@@ -56,6 +58,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
     private final OperationRouteIndex routes;
     private final ContractsClosureProfile profile;
     private final ClosureEnvironment environment;
+    private final ContractsClosureExecutionMetricsObserver executionObserver;
     private final BlueClosureContracts contracts;
     private Consumer<MultiDocumentPublicationTransaction.FailurePoint>
             failureInjector = ignored -> { };
@@ -78,8 +81,11 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
         this.routes = Objects.requireNonNull(routes, "routes");
         this.profile = Objects.requireNonNull(profile, "profile");
         this.environment = profile.environment(runtime.documentProcessor());
+        this.executionObserver =
+                new ContractsClosureExecutionMetricsObserver(
+                        runtime.metrics());
         this.contracts = new BlueClosureContracts(
-                runtime.documentProcessor());
+                runtime.documentProcessor(), executionObserver);
     }
 
     synchronized ContractsClosureAdmissionReceipt admitAndPublish(
@@ -120,6 +126,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
         }
         requireAllAbsent(members, before);
 
+        executionObserver.beginAttempt();
         ClosureAttemptResult attempt = contracts.admitClosure(admission);
         if (!attempt.isComplete()
                 || !attempt.processResult().commits()) {
@@ -146,6 +153,13 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                 publicationIdentity,
                 ContractsClosureAdmissionReceipt.PublicationOutcome.PUBLISHED,
                 members);
+    }
+
+    /** Exact implementation evidence from the latest completed admission. */
+    synchronized Optional<ClosureImplementationEvidence>
+            lastExecutionEvidence() {
+        ensureOpen();
+        return executionObserver.lastEvidence();
     }
 
     synchronized ClosureEnvironment environment() {

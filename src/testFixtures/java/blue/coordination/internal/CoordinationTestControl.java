@@ -3,12 +3,14 @@ package blue.coordination.internal;
 import blue.coordination.api.CoordinationEngine;
 import blue.coordination.api.SessionStatus;
 import blue.language.api.BlueCacheStats;
+import blue.language.processor.closure.ClosureImplementationEvidence;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.LongStream;
 
 /**
@@ -94,6 +96,19 @@ public final class CoordinationTestControl {
         EngineMetrics.MetricsSnapshot snapshot = engine.metricsSnapshot();
         return new MetricsSnapshot(
                 snapshot.counters(), snapshot.phaseNanos());
+    }
+
+    /** Exact evidence from the latest completed PROCESS_CLOSURE attempt. */
+    public Optional<ClosureImplementationEvidence>
+            lastClosureProcessEvidence() {
+        return engine.contractsClosureAdapter().lastExecutionEvidence();
+    }
+
+    /** Exact evidence from the latest completed ADMIT_CLOSURE attempt. */
+    public Optional<ClosureImplementationEvidence>
+            lastClosureAdmissionEvidence() {
+        return engine.contractsClosureAdmissionAdapter()
+                .lastExecutionEvidence();
     }
 
     /** Starts a closed, in-memory trace of successful document transitions. */

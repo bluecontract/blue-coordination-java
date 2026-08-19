@@ -15,6 +15,7 @@ import blue.language.processor.closure.ClosureAttemptResult;
 import blue.language.processor.closure.ClosureCommitCompanion;
 import blue.language.processor.closure.ClosureEnvironment;
 import blue.language.processor.closure.ClosureEvidenceFactory;
+import blue.language.processor.closure.ClosureImplementationEvidence;
 import blue.language.processor.closure.ClosureInvocationInput;
 import blue.language.processor.closure.ClosureProcessResult;
 import blue.language.processor.closure.ComponentKind;
@@ -73,6 +74,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
     private final OperationRouteIndex routes;
     private final ContractsClosureProfile profile;
     private final ClosureEnvironment environment;
+    private final ContractsClosureExecutionMetricsObserver executionObserver;
     private final BlueClosureContracts contracts;
     private Consumer<PublicationFailurePoint> publicationFailureInjector =
             ignored -> { };
@@ -93,8 +95,11 @@ final class ContractsClosureAdapter implements AutoCloseable {
         this.routes = Objects.requireNonNull(routes, "routes");
         this.profile = Objects.requireNonNull(profile, "profile");
         this.environment = profile.environment(runtime.documentProcessor());
+        this.executionObserver =
+                new ContractsClosureExecutionMetricsObserver(
+                        runtime.metrics());
         this.contracts = new BlueClosureContracts(
-                runtime.documentProcessor());
+                runtime.documentProcessor(), executionObserver);
     }
 
     /** Captures all exact inputs selected by one immutable Root feeder event. */
@@ -155,6 +160,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
             return outcome(receipt, true);
         }
         requireRouteSelectionCurrent(frozen, selected);
+        executionObserver.beginAttempt();
         ClosureAttemptResult attempt = contracts.processClosure(
                 selected.input());
         String identity = publicationIdentity(frozen, selected);
@@ -179,6 +185,13 @@ final class ContractsClosureAdapter implements AutoCloseable {
             publishNonCommit(frozen, selected, receipt);
         }
         return outcome(receipt, false);
+    }
+
+    /** Exact implementation evidence from the latest completed execution. */
+    synchronized Optional<ClosureImplementationEvidence>
+            lastExecutionEvidence() {
+        ensureOpen();
+        return executionObserver.lastEvidence();
     }
 
     static boolean isDurablyTerminalStatus(ProcessorStatus status) {
