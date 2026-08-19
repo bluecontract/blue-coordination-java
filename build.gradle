@@ -333,6 +333,48 @@ tasks.register('playgroundRuntimeCampaign', JavaExec) {
     }
 }
 
+tasks.register('cyclicPerformanceAcceptance', JavaExec) {
+    group = 'verification'
+    description = 'Writes the dedicated Java 17 cyclic correctness and performance acceptance report.'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass =
+            'blue.coordination.internal.CyclicPerformanceAcceptance'
+    dependsOn tasks.named(sourceSets.test.classesTaskName)
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+    jvmArgs '-Xms2g',
+            '-Xmx2g',
+            '-XX:+UseG1GC',
+            '-Duser.language=en',
+            '-Duser.country=US',
+            '-Duser.timezone=UTC'
+    outputs.upToDateWhen { false }
+    outputs.doNotCacheIf(
+            'Cyclic performance evidence is intentionally non-cacheable') {
+        true
+    }
+    doFirst {
+        systemProperty 'user.language', 'en'
+        systemProperty 'user.country', 'US'
+        systemProperty 'user.timezone', 'UTC'
+        systemProperty 'blue.coordination.cyclicPerformance.output',
+                providers.systemProperty(
+                        'blue.coordination.cyclicPerformance.output')
+                        .getOrElse(layout.buildDirectory.dir(
+                                'reports/cyclic-performance')
+                                .get().asFile.absolutePath)
+        systemProperty 'blue.coordination.cyclicPerformance.warmups',
+                providers.systemProperty(
+                        'blue.coordination.cyclicPerformance.warmups')
+                        .getOrElse('20')
+        systemProperty 'blue.coordination.cyclicPerformance.samples',
+                providers.systemProperty(
+                        'blue.coordination.cyclicPerformance.samples')
+                        .getOrElse('50')
+    }
+}
+
 publishing {
     publications {
         mavenJava(MavenPublication) {
