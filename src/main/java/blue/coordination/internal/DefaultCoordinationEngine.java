@@ -19,6 +19,7 @@ import blue.coordination.api.CoordinationException;
 import blue.coordination.api.CoordinationMetrics;
 import blue.coordination.api.Contracts10Configuration;
 import blue.coordination.api.ContractsClosureAdmissionReceipt;
+import blue.coordination.api.ContractsClosureDispatchAttempt;
 import blue.coordination.api.ProcessingDrainReceipt;
 import blue.coordination.api.TimelineAppendReceipt;
 import blue.coordination.api.ActivationMode;
@@ -79,6 +80,7 @@ public final class DefaultCoordinationEngine
     private final ContractsClosureAdapter contractsClosureAdapter;
     private final ContractsClosureAdmissionAdapter
             contractsClosureAdmissionAdapter;
+    private final ContractsClosureProfile contractsClosureProfile;
     private final ContractsActiveSourceTimelineIndex
             contractsActiveSourceTimelines;
     private final ContractsRecoveryState contractsRecoveryState;
@@ -120,6 +122,7 @@ public final class DefaultCoordinationEngine
         if (contractsConfiguration == null) {
             contractsClosureAdapter = null;
             contractsClosureAdmissionAdapter = null;
+            contractsClosureProfile = null;
             contractsActiveSourceTimelines = null;
             contractsRecoveryState = null;
             contractsFeederCoordinator = null;
@@ -132,6 +135,7 @@ public final class DefaultCoordinationEngine
                             contractsConfiguration
                                     .contractsSpecificationIdentity(),
                             contractsConfiguration.publicRootDocumentIds());
+            contractsClosureProfile = profile;
             contractsActiveSourceTimelines =
                     new ContractsActiveSourceTimelineIndex(
                             profile.publicRoots());
@@ -176,6 +180,27 @@ public final class DefaultCoordinationEngine
             Contracts10Configuration configuration) {
         return new DefaultCoordinationEngine(Objects.requireNonNull(
                 configuration, "configuration"));
+    }
+
+    /**
+     * Authorizes additional public Root lineages for the SDK host profile.
+     *
+     * <p>This mutates only host routing configuration. It does not admit a
+     * document, create graph evidence, or select recipients. The following
+     * closure admission remains responsible for proving and atomically
+     * publishing every declared Root.</p>
+     */
+    public synchronized void authorizeContractsPublicRoots(
+            java.util.Collection<DocumentId> publicRoots) {
+        ensureOpen();
+        if (contractsClosureProfile == null) {
+            throw new IllegalStateException(
+                    "Contracts 1.0 was not enabled for this engine");
+        }
+        java.util.Collection<DocumentId> checked = Objects.requireNonNull(
+                publicRoots, "publicRoots");
+        contractsClosureProfile.addPublicRoots(checked);
+        contractsActiveSourceTimelines.addPublicRoots(checked);
     }
 
     @Override
@@ -1026,12 +1051,25 @@ public final class DefaultCoordinationEngine
                         inclusiveCutoff, budget);
         Map<String, List<DocumentDispatchOutcome>> outcomes =
                 new LinkedHashMap<>();
+        Map<String, List<ContractsClosureDispatchAttempt>> attempts =
+                new LinkedHashMap<>();
         for (ContractsRootFeederCoordinator.EventProgress attempt
                 : progress.attempts()) {
             TimelineEntry entry = attempt.batch().entry();
             List<DocumentDispatchOutcome> entryOutcomes = new ArrayList<>();
+            List<ContractsClosureDispatchAttempt> entryAttempts =
+                    new ArrayList<>();
             for (ContractsRootFeederCoordinator.CohortProgress cohort
                     : attempt.cohorts()) {
+                ContractsClosureAdapter.CohortOutcome exact =
+                        cohort.outcome();
+                entryAttempts.add(new ContractsClosureDispatchAttempt(
+                        entry.blueId(),
+                        exact.members(),
+                        exact.attempt(),
+                        exact.published(),
+                        exact.publicationIdentity(),
+                        exact.replayed()));
                 if (!cohort.outcome().published()
                         || cohort.outcome().replayed()) {
                     continue;
@@ -1046,6 +1084,11 @@ public final class DefaultCoordinationEngine
             if (!entryOutcomes.isEmpty()) {
                 outcomes.put(entry.blueId(), List.copyOf(entryOutcomes));
             }
+            if (!entryAttempts.isEmpty()) {
+                attempts.computeIfAbsent(
+                        entry.blueId(), ignored -> new ArrayList<>())
+                        .addAll(entryAttempts);
+            }
         }
         long committed = outcomes.values().stream()
                 .mapToLong(List::size)
@@ -1053,6 +1096,7 @@ public final class DefaultCoordinationEngine
         return new ProcessingDrainReceipt(
                 progress.completedEntries(),
                 outcomes,
+                attempts,
                 progress.processedThrough(),
                 progress.quiescent(),
                 progress.paused(),

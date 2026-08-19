@@ -14,6 +14,8 @@ import java.util.Optional;
 public final class ProcessingDrainReceipt {
     private final List<TimelineEntry> processedEntries;
     private final Map<String, List<DocumentDispatchOutcome>> outcomesByEntry;
+    private final Map<String, List<ContractsClosureDispatchAttempt>>
+            contractsAttemptsByEntry;
     private final ExternalOrderKey processedThrough;
     private final boolean quiescent;
     private final boolean paused;
@@ -29,6 +31,23 @@ public final class ProcessingDrainReceipt {
             boolean paused,
             long committedProcessTransitions,
             long elapsedNanos) {
+        this(processedEntries, outcomesByEntry, Map.of(), processedThrough,
+                quiescent, paused, committedProcessTransitions, elapsedNanos);
+    }
+
+    /**
+     * Creates bounded-drain evidence including advanced Contracts attempts.
+     */
+    public ProcessingDrainReceipt(
+            List<TimelineEntry> processedEntries,
+            Map<String, List<DocumentDispatchOutcome>> outcomesByEntry,
+            Map<String, List<ContractsClosureDispatchAttempt>>
+                    contractsAttemptsByEntry,
+            ExternalOrderKey processedThrough,
+            boolean quiescent,
+            boolean paused,
+            long committedProcessTransitions,
+            long elapsedNanos) {
         this.processedEntries = List.copyOf(Objects.requireNonNull(
                 processedEntries, "processedEntries"));
         Map<String, List<DocumentDispatchOutcome>> copied =
@@ -39,6 +58,15 @@ public final class ProcessingDrainReceipt {
                         List.copyOf(Objects.requireNonNull(
                                 outcomes, "outcomes"))));
         this.outcomesByEntry = Collections.unmodifiableMap(copied);
+        Map<String, List<ContractsClosureDispatchAttempt>> attempts =
+                new LinkedHashMap<>();
+        Objects.requireNonNull(
+                contractsAttemptsByEntry, "contractsAttemptsByEntry")
+                .forEach((entryBlueId, values) -> attempts.put(
+                        requireText(entryBlueId, "entryBlueId"),
+                        List.copyOf(Objects.requireNonNull(
+                                values, "contractsAttempts"))));
+        this.contractsAttemptsByEntry = Collections.unmodifiableMap(attempts);
         this.processedThrough = processedThrough;
         this.quiescent = quiescent;
         this.paused = paused;
@@ -86,6 +114,19 @@ public final class ProcessingDrainReceipt {
     /** Immutable outcomes indexed by exact Timeline Entry BlueId. */
     public Map<String, List<DocumentDispatchOutcome>> outcomesByEntry() {
         return outcomesByEntry;
+    }
+
+    /** Advanced exact Contracts cohort attempts for one Timeline Entry. */
+    public List<ContractsClosureDispatchAttempt> contractsAttemptsFor(
+            String entryBlueId) {
+        return contractsAttemptsByEntry.getOrDefault(
+                requireText(entryBlueId, "entryBlueId"), List.of());
+    }
+
+    /** Advanced immutable Contracts attempts indexed by Timeline Entry. */
+    public Map<String, List<ContractsClosureDispatchAttempt>>
+            contractsAttemptsByEntry() {
+        return contractsAttemptsByEntry;
     }
 
     /** Highest canonical external order completed by this environment. */

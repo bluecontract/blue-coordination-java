@@ -20,7 +20,7 @@ import java.util.TreeSet;
  * restart may rebuild every configured Root contribution from it.</p>
  */
 final class ContractsActiveSourceTimelineIndex {
-    private final Set<DocumentId> publicRoots;
+    private final TreeSet<DocumentId> publicRoots;
     private final Map<DocumentId, ContractsRootSourceSurface.Surface>
             surfacesByRoot = new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
     private Set<String> timelineIds = Set.of();
@@ -30,7 +30,12 @@ final class ContractsActiveSourceTimelineIndex {
                 EmbeddingBinding.DOCUMENT_ORDER);
         Objects.requireNonNull(publicRoots, "publicRoots").forEach(root ->
                 canonical.add(Objects.requireNonNull(root, "publicRoot")));
-        this.publicRoots = Collections.unmodifiableSet(canonical);
+        this.publicRoots = canonical;
+    }
+
+    synchronized void addPublicRoots(Collection<DocumentId> roots) {
+        Objects.requireNonNull(roots, "roots").forEach(root ->
+                publicRoots.add(Objects.requireNonNull(root, "publicRoot")));
     }
 
     /** Refreshes configured Roots present in one newly published cohort. */
@@ -62,7 +67,7 @@ final class ContractsActiveSourceTimelineIndex {
     /** Rebuilds the entire disposable index after a process restart. */
     synchronized void rebuild(InMemoryDocumentStore documents) {
         surfacesByRoot.clear();
-        refresh(publicRoots, documents);
+        refresh(List.copyOf(publicRoots), documents);
     }
 
     /** Immutable O(1) snapshot used for journal entry filtering. */

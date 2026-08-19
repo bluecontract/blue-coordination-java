@@ -28,7 +28,7 @@ final class ContractsClosureProfile {
     private final Map<String, Long> portableLimits;
     private final long sharedGasLimit;
     private final String executionPolicyLabel;
-    private final Set<DocumentId> publicRoots;
+    private final TreeSet<DocumentId> publicRoots;
 
     ContractsClosureProfile(
             String blueLanguageSpecificationIdentity,
@@ -68,7 +68,7 @@ final class ContractsClosureProfile {
                 EmbeddingBinding.DOCUMENT_ORDER);
         Objects.requireNonNull(publicRoots, "publicRoots").forEach(root ->
                 roots.add(Objects.requireNonNull(root, "publicRoot")));
-        this.publicRoots = Collections.unmodifiableSet(roots);
+        this.publicRoots = roots;
     }
 
     /** Constructs the release policy while keeping artifact digests explicit. */
@@ -110,13 +110,18 @@ final class ContractsClosureProfile {
                 executionPolicyLabel);
     }
 
-    boolean isPublicRoot(DocumentId documentId) {
+    synchronized boolean isPublicRoot(DocumentId documentId) {
         return publicRoots.contains(Objects.requireNonNull(
                 documentId, "documentId"));
     }
 
-    Set<DocumentId> publicRoots() {
-        return publicRoots;
+    synchronized Set<DocumentId> publicRoots() {
+        return Collections.unmodifiableSet(new TreeSet<>(publicRoots));
+    }
+
+    synchronized void addPublicRoots(Collection<DocumentId> roots) {
+        Objects.requireNonNull(roots, "roots").forEach(root ->
+                publicRoots.add(Objects.requireNonNull(root, "publicRoot")));
     }
 
     private static Map<String, Long> release10PortableLimits() {
