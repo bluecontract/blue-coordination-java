@@ -15,9 +15,12 @@ if (!versionMatches.find()) {
 version = versionMatches.group(1)
 
 def dependencyMode = providers.gradleProperty('blueDependencyMode')
-        .getOrElse('published-artifact')
+        .getOrElse('local-composite')
         .trim()
 def localDependencies = dependencyMode == 'local-composite'
+def blueSpecRoot = file(providers.gradleProperty('blueSpecRoot')
+        .orElse(providers.environmentVariable('BLUE_SPEC_ROOT'))
+        .getOrElse('../blue-spec/latest')).canonicalFile
 def publishedRepository = providers.gradleProperty(
         'bluePublishedRepository').orNull
 
@@ -428,6 +431,14 @@ if (System.getenv('CI') != null) {
 }
 
 def productionSources = fileTree('src/main/java') { include '**/*.java' }
+// Current Contracts 1.0 maintainability guardrails. These are deliberately
+// rounded engineering caps with headroom over the implementation, not retained
+// Round 13 source counts and not performance evidence.
+def currentProductionShapeLimits = [
+        classes: 140,
+        lines: 40_000L,
+        publicApiTypes: 24
+]
 def forbiddenArchitectureTokens = [
         'AutonomousLink', 'TemporalWave', 'ConsistencyMode',
         'ObservingLink', 'CoherentLink', 'SccScheduler',
@@ -436,7 +447,7 @@ def forbiddenArchitectureTokens = [
 
 tasks.register('validateProductionShape') {
     group = 'verification'
-    description = 'Enforces the production class, line, API, and architecture budgets.'
+    description = 'Enforces current Contracts 1.0 maintainability and architecture guardrails.'
     inputs.files(productionSources)
     doLast {
         def sources = productionSources.files.sort()
@@ -446,16 +457,17 @@ tasks.register('validateProductionShape') {
             include '**/*.java'
         }.files
         def failures = []
-        if (classes > 115) failures << "production classes ${classes} > 115"
-        // Round 13 transparently retains a bounded 252-line revision for the
-        // occurrence-path audit receipt, closed retry-counter vocabulary and
-        // retry-monitor producers, timestamp-consumption and attachment-
-        // timestamp guards, committed-input recovery evidence, deterministic
-        // invalid-entry preflight and terminalization, and injective binding
-        // identities. Do not minify or hide this deliberate semantic work.
-        if (lines > 25_952L) failures << "production lines ${lines} > 25952"
-        if (apiSources.size() > 16) {
-            failures << "public API types ${apiSources.size()} > 16"
+        if (classes > currentProductionShapeLimits.classes) {
+            failures << "production classes ${classes} > "
+                    + currentProductionShapeLimits.classes
+        }
+        if (lines > currentProductionShapeLimits.lines) {
+            failures << "production lines ${lines} > "
+                    + currentProductionShapeLimits.lines
+        }
+        if (apiSources.size() > currentProductionShapeLimits.publicApiTypes) {
+            failures << "public API types ${apiSources.size()} > "
+                    + currentProductionShapeLimits.publicApiTypes
         }
         ['engine', 'fastpath'].each { legacy ->
             if (file("src/main/java/blue/coordination/${legacy}").exists()) {
@@ -724,9 +736,119 @@ tasks.register('verifyReleaseMetadata') {
     }
 }
 
+def currentContractsDocumentation = tasks.register(
+        'verifyCurrentContractsDocumentation') {
+    group = 'verification'
+    description = 'Validates current Contracts 1.0 source/docs and writes non-performance integrity evidence.'
+    def semantics = file('docs/semantics/process-embedded-documents.md')
+    def architecture = file('docs/architecture/compact-engine.md')
+    def currentVerification = file(
+            'docs/releases/contracts-1.0-current-verification.md')
+    def historicalReport = file(
+            'docs/releases/3.0.0-rc.1-test-report.md')
+    def contractsTests = fileTree('src/test/java') {
+        include '**/Contracts*Test.java'
+        include '**/ManagedOccurrenceInventoryTest.java'
+        include '**/ProcessEmbeddedComponentIndexTest.java'
+        include '**/MultiDocumentPublicationTransactionTest.java'
+    }
+    inputs.files(productionSources, contractsTests, semantics, architecture,
+            currentVerification, historicalReport)
+    def integrityReport = layout.buildDirectory.file(
+            'reports/contracts10/current-source-integrity.json')
+    outputs.file(integrityReport)
+    doLast {
+        def requiredSources = [
+                'src/main/java/blue/coordination/api/Contracts10Configuration.java',
+                'src/main/java/blue/coordination/api/ContractsClosureAdmissionReceipt.java',
+                'src/main/java/blue/coordination/internal/ContractsClosureAdapter.java',
+                'src/main/java/blue/coordination/internal/ContractsClosureAdmissionAdapter.java',
+                'src/main/java/blue/coordination/internal/ContractsRootFeederCoordinator.java',
+                'src/main/java/blue/coordination/internal/MultiDocumentPublicationTransaction.java'
+        ]
+        def missingSources = requiredSources.findAll { !file(it).isFile() }
+        String semanticText = semantics.getText('UTF-8')
+        String architectureText = architecture.getText('UTF-8')
+        def requiredStatements = [
+                separateDocuments: semanticText.contains(
+                        'Each selected embedded managed document is processed separately'),
+                noContainerAwareness: semanticText.contains(
+                        'completely unaware of documents that contain it'),
+                sharedCyclicProcessor: semanticText.contains(
+                        'the same Contracts closure execution context'),
+                rootUnionFeeder: semanticText.contains(
+                        'one ordered feeder/window for a public Root over the union'),
+                durableHeadsAndEpochs: semanticText.contains(
+                        'Per-document durable heads and epochs therefore'),
+                sameFrozenProcessor: architectureText.contains(
+                        'Every selected managed document crosses the same frozen Contracts processor')
+        ]
+        if (!missingSources.empty || requiredStatements.any {
+            key, present -> !present
+        }) {
+            throw new GradleException(
+                    'Current Contracts 1.0 source/docs integrity failed: missing '
+                            + missingSources + ', statements '
+                            + requiredStatements.findAll {
+                                key, present -> !present
+                            }.keySet())
+        }
+        if (!historicalReport.getText('UTF-8').contains(
+                'ROUND13_HISTORICAL_EVIDENCE_ONLY')
+                || !currentVerification.getText('UTF-8').contains(
+                'CONTRACTS10_CURRENT_PERFORMANCE_CLAIM: NONE')) {
+            throw new GradleException(
+                    'Historical Round 13 and current Contracts 1.0 evidence are not clearly separated')
+        }
+        def sha256 = { byte[] bytes ->
+            java.security.MessageDigest.getInstance('SHA-256')
+                    .digest(bytes).encodeHex().toString()
+        }
+        def relativePath = { File source ->
+            rootDir.toPath().relativize(source.toPath()).toString()
+                    .replace(File.separator, '/')
+        }
+        List<File> mainSources = productionSources.files.sort {
+            source -> relativePath(source)
+        }
+        String manifest = mainSources.collect { source ->
+            "${relativePath(source)} ${sha256(source.bytes)}"
+        }.join('\n')
+        List<File> testSources = contractsTests.files.sort {
+            source -> relativePath(source)
+        }
+        def report = [
+                schemaId: 'blue-coordination-contracts10-source-integrity-v1',
+                dependencyMode: dependencyMode,
+                productionSourceManifestSha256: sha256(manifest.getBytes(
+                        java.nio.charset.StandardCharsets.UTF_8)),
+                productionClasses: mainSources.size(),
+                productionLines: mainSources.sum {
+                    it.readLines('UTF-8').size()
+                } ?: 0L,
+                maintainabilityGuardrails: currentProductionShapeLimits,
+                contractsTestClasses: testSources.size(),
+                contractsTestMethods: testSources.sum { source ->
+                    (source.getText('UTF-8') =~ /(?m)^\s*@Test\b/).count
+                } ?: 0L,
+                documentedInvariants: requiredStatements,
+                historicalRound13Evidence: 'HISTORICAL_ONLY',
+                performanceEvidence: 'NOT_CLAIMED'
+        ]
+        File target = integrityReport.get().asFile
+        target.parentFile.mkdirs()
+        target.setText(groovy.json.JsonOutput.prettyPrint(
+                groovy.json.JsonOutput.toJson(report)) + '\n', 'UTF-8')
+        logger.lifecycle(
+                'Current Contracts 1.0 source integrity: {}',
+                report.productionSourceManifestSha256)
+    }
+}
+
 tasks.register('verifyDocumentation') {
     group = 'verification'
-    description = 'Validates maintained docs and canonical release evidence.'
+    description = 'Validates maintained docs and retained historical release evidence.'
+    dependsOn currentContractsDocumentation
     inputs.files(fileTree('docs') { include '**/*.md' },
             'README.md', 'START-HERE.md', 'CHANGELOG.md',
             'CONTRIBUTING.md', 'SECURITY.md',
@@ -762,6 +884,104 @@ tasks.register('verifyDocumentation') {
         def evidenceFile = file(
                 'docs/releases/3.0.0-rc.1-evidence.json')
         def evidence = new groovy.json.JsonSlurper().parse(evidenceFile)
+        boolean verifyRound13CandidateSnapshot = providers.gradleProperty(
+                'verifyRound13CandidateSnapshot').getOrElse('false') == 'true'
+        if (evidence.schemaVersion == '4.1.0'
+                && evidence.profile
+                == 'ROUND13_PLAYGROUND_FIVE_OCCURRENCE'
+                && !verifyRound13CandidateSnapshot) {
+            def schema = new groovy.json.JsonSlurper().parse(file(
+                    'docs/releases/round13-verification.schema.json'))
+            String sha256Pattern = /^[0-9a-f]{64}$/
+            String commitPattern = /^[0-9a-f]{40}$/
+            String report = file(
+                    'docs/releases/3.0.0-rc.1-test-report.md')
+                    .getText('UTF-8')
+            if (evidence.'$schema' != 'round13-verification.schema.json'
+                    || schema.'$id' != 'round13-verification.schema.json'
+                    || evidence.evidenceState != 'FINAL'
+                    || evidence.release != '3.0.0-rc.1') {
+                failures << 'Retained Round 13 evidence has an invalid historical identity'
+            }
+            if (!(evidence.source.candidateCommit ==~ commitPattern)
+                    || evidence.source.binding != 'CANDIDATE_COMMIT'
+                    || evidence.source.worktree != 'CLEAN'
+                    || !(evidence.source.mainSourceManifestSha256
+                    ==~ sha256Pattern)
+                    || evidence.executionBinding.candidateCommit
+                    != evidence.source.candidateCommit
+                    || evidence.executionBinding.mainSourceManifestSha256
+                    != evidence.source.mainSourceManifestSha256) {
+                failures << 'Retained Round 13 source binding is internally inconsistent'
+            }
+            def shapeValues = [
+                    'productionClasses', 'productionLines',
+                    'publicApiSourceTypes'
+            ]
+            if (evidence.shape.status != 'PASS'
+                    || evidence.shape.basis != 'STATIC_WORKTREE_SNAPSHOT'
+                    || shapeValues.any { key ->
+                        !(evidence.shape[key] instanceof Number)
+                                || !(evidence.shape.limits[key]
+                                instanceof Number)
+                                || evidence.shape[key]
+                                > evidence.shape.limits[key]
+                    }) {
+                failures << 'Retained Round 13 source shape is internally inconsistent'
+            }
+            def expectedSuites = [
+                    'test', 'integrationTest', 'consumerTest', 'scenarioTest'
+            ] as Set
+            def suites = evidence.tests.suites
+            if (evidence.tests.inventoryBasis != 'STATIC_SOURCE_INVENTORY'
+                    || evidence.tests.executionStatus != 'PASS'
+                    || (suites.collect { it.name } as Set) != expectedSuites
+                    || suites.sum { it.tests } != evidence.tests.tests
+                    || suites.sum { it.classes } != evidence.tests.classes
+                    || ['failures', 'errors', 'skipped'].any { field ->
+                        suites.sum { it[field] } != evidence.tests[field]
+                    }) {
+                failures << 'Retained Round 13 test inventory is internally inconsistent'
+            }
+            def campaign = evidence.performance.round13Campaign
+            if (campaign.status != 'PENDING_VERIFICATION'
+                    || campaign.measuredSamples != 0
+                    || campaign.runtimeMarkdown != null
+                    || campaign.runtimeJson != null
+                    || campaign.runtimeProvenanceJson != null
+                    || !(campaign.pendingReason instanceof String)
+                    || campaign.pendingReason.isBlank()
+                    || evidence.status.playgroundLatencyReady
+                    != 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION'
+                    || evidence.verdict
+                    != 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION') {
+                failures << 'Retained Round 13 performance limitation was relabeled'
+            }
+            def artifactHashes = [
+                    'mainJarSha256', 'sourcesJarSha256',
+                    'javadocJarSha256', 'testFixturesJarSha256'
+            ]
+            if (evidence.artifacts.status != 'PASS'
+                    || artifactHashes.any { key ->
+                        !(evidence.artifacts[key] ==~ sha256Pattern)
+                    }) {
+                failures << 'Retained Round 13 artifact evidence is incomplete'
+            }
+            if (!report.contains('ROUND13_HISTORICAL_EVIDENCE_ONLY')
+                    || !report.contains(
+                    evidence.source.mainSourceManifestSha256)
+                    || !report.contains("**${evidence.tests.classes}**")
+                    || !report.contains("**${evidence.tests.tests}**")) {
+                failures << 'Retained Round 13 report no longer matches its historical evidence'
+            }
+            if (!failures.empty) {
+                throw new GradleException(failures.join('\n'))
+            }
+            logger.lifecycle(
+                    'Validated retained Round 13 evidence as historical-only; '
+                            + 'it was not compared with the current Contracts 1.0 source tree.')
+            return
+        }
         if (evidence.schemaVersion == '4.1.0'
                 && evidence.profile
                 == 'ROUND13_PLAYGROUND_FIVE_OCCURRENCE') {
@@ -2201,15 +2421,21 @@ def sourceArchiveChecksum = tasks.register(
 
 def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
     group = 'verification'
-    description = 'Extracts, configures, and runs the focused Round 13 archive proofs.'
+    description = 'Verifies the extracted archive in local-source or isolated published configuration mode.'
     dependsOn sourceArchiveChecksum
     inputs.file(coordinationSourceArchive.flatMap { it.archiveFile })
     inputs.property('dependencyMode', dependencyMode)
     inputs.property('testJavaVersion', providers.gradleProperty(
             'testJavaVersion').getOrElse('17'))
+    if (localDependencies) {
+        inputs.property('blueLanguageCompositePath', file(
+                providers.gradleProperty('blueLanguageCompositePath')
+                        .getOrElse('../blue-language-java')).canonicalPath)
+        inputs.property('blueSpecRoot', blueSpecRoot.canonicalPath)
+    }
     outputs.dir(layout.buildDirectory.dir('source-archive-smoke'))
     def verificationReceipt = layout.buildDirectory.file(
-            'reports/round13/source-archive-verification.json')
+            'reports/contracts10/source-archive-verification.json')
     outputs.file(verificationReceipt)
     doLast {
         File sourceArchive = coordinationSourceArchive.get()
@@ -2270,24 +2496,33 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
                 ? ['cmd', '/d', '/c', wrapper.absolutePath]
                 : [wrapper.absolutePath]
         command.addAll([
-                '--no-daemon', '--max-workers=1',
-                'help', 'round13SourceArchiveSmoke',
+                '--no-daemon', '--max-workers=1', 'help',
                 '-PtestJavaVersion=' + providers.gradleProperty(
                         'testJavaVersion').getOrElse('17')
         ])
         if (localDependencies) {
             command.addAll([
+                    'round13SourceArchiveSmoke',
                     '-PblueDependencyMode=local-composite',
+                    '-PblueLanguageCompositePath=' + file(
+                            providers.gradleProperty(
+                                    'blueLanguageCompositePath').getOrElse(
+                                    '../blue-language-java')).canonicalPath,
                     '-PblueBexCompositePath=' + file(providers.gradleProperty(
                             'blueBexCompositePath').getOrElse(
                             '../blue-bex-java')).canonicalPath,
                     '-PblueRepositoryCompositePath=' + file(
                             providers.gradleProperty(
                                     'blueRepositoryCompositePath').getOrElse(
-                                    '../blue-repository-java')).canonicalPath
+                                    '../blue-repository-java')).canonicalPath,
+                    '-PblueSpecRoot=' + blueSpecRoot.canonicalPath
             ])
         } else {
-            command.add('-PblueDependencyMode=published-artifact')
+            command.addAll([
+                    'verifyDependencyModeIsolation',
+                    'verifyPublishedDependencyIsolation',
+                    '-PblueDependencyMode=published-artifact'
+            ])
             if (publishedRepository != null) {
                 command.add('-PbluePublishedRepository='
                         + uri(publishedRepository).toString())
@@ -2313,7 +2548,7 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
         File receipt = verificationReceipt.get().asFile
         receipt.parentFile.mkdirs()
         def receiptValue = [
-                schemaId: 'blue-coordination-round13-source-archive-verification-v1',
+                schemaId: 'blue-coordination-contracts10-source-archive-verification-v1',
                 archiveName: sourceArchive.name,
                 archiveSha256: archiveHash,
                 checksumMode: 'DETACHED_SHA256_SIDECAR',
@@ -2323,15 +2558,20 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
                 java: providers.gradleProperty(
                         'testJavaVersion').getOrElse('17'),
                 extractedConfiguration: 'PASS',
-                focusedTestsStatus: 'PASS',
-                publishedArtifactSmokeBuild: localDependencies
-                        ? 'PENDING_VERIFICATION' : 'PASS',
-                focusedTasks: [
+                dependencyIsolationStatus: 'PASS',
+                focusedTestsStatus: localDependencies
+                        ? 'PASS' : 'NOT_EXECUTED',
+                publishedArtifactCompatibility: localDependencies
+                        ? 'NOT_APPLICABLE' : 'NOT_VERIFIED',
+                publishedArtifactCompatibilityReason: localDependencies
+                        ? null
+                        : 'Matching published Contracts 1.0 and BEX exact-capability APIs are not yet available',
+                focusedTasks: localDependencies ? [
                         'round13SourceArchiveUnitTest',
                         'round13SourceArchiveIntegrationTest',
                         'round13SourceArchiveScenarioTest',
                         'round13SourceArchiveConsumerTest'
-                ]
+                ] : []
         ]
         receipt.setText(groovy.json.JsonOutput.prettyPrint(
                 groovy.json.JsonOutput.toJson(receiptValue)) + '\n',
@@ -2339,9 +2579,9 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
     }
 }
 
-tasks.register('verifyPublishedModeIsolation') {
+tasks.register('verifyDependencyModeIsolation') {
     group = 'verification'
-    description = 'Proves published mode is the default and has no Git or sibling checks.'
+    description = 'Proves local source is the default and published mode stays explicit and isolated.'
     inputs.files('settings.gradle', 'build.gradle')
     doLast {
         String settings = file('settings.gradle').getText('UTF-8')
@@ -2350,16 +2590,101 @@ tasks.register('verifyPublishedModeIsolation') {
             throw new GradleException(
                     'Ordinary settings must not execute Git')
         }
-        if (!settings.contains(".getOrElse('published-artifact')")
+        if (!settings.contains(".getOrElse('local-composite')")
                 || !buildScript.contains(
-                ".getOrElse('published-artifact')")) {
+                ".getOrElse('local-composite')")) {
             throw new GradleException(
-                    'Published artifacts must remain the default dependency mode')
+                    'Local composite must remain the default implementation mode')
         }
         if (!settings.contains("dependencyMode == 'local-composite'")) {
             throw new GradleException(
                     'Local composite inclusion is not mode-gated')
         }
+        if (!settings.contains("'published-artifact'")
+                || !buildScript.contains(
+                "dependencyMode != 'published-artifact'")) {
+            throw new GradleException(
+                    'Explicit published-artifact isolation is missing')
+        }
+        def languageCompositeProjects = [
+                'blue-language-model',
+                'blue-language-core',
+                'blue-language-mapping',
+                'blue-language-ipfs',
+                'blue-language-java',
+                'blue-contracts-core'
+        ]
+        if (!settings.contains("'blueLanguageCompositePath'")
+                || languageCompositeProjects.any { projectName ->
+                    !settings.contains(
+                            "module('blue.language:${projectName}')")
+                            || !settings.contains(
+                            "project(':${projectName}')")
+                }) {
+            throw new GradleException(
+                    'Complete local Language substitution is missing')
+        }
+    }
+}
+
+def publishedDependencyIsolation = tasks.register(
+        'verifyPublishedDependencyIsolation') {
+    group = 'verification'
+    description = 'Resolves the explicit published-artifact graph without included-build substitution.'
+    doLast {
+        if (dependencyMode != 'published-artifact') {
+            throw new GradleException(
+                    'verifyPublishedDependencyIsolation requires '
+                            + '-PblueDependencyMode=published-artifact')
+        }
+        def components = configurations.testRuntimeClasspath
+                .incoming.resolutionResult.allComponents
+        def leakedProjects = components.findAll { component ->
+            component.id instanceof
+                    org.gradle.api.artifacts.component.ProjectComponentIdentifier
+                    && component.id.displayName
+                    != "root project '${rootProject.name}'"
+        }.collect { component -> component.id.displayName }.sort()
+        def publishedBlueModules = components.findAll { component ->
+            component.id instanceof
+                    org.gradle.api.artifacts.component.ModuleComponentIdentifier
+                    && ['blue.language', 'blue.bex', 'blue.repo'].contains(
+                    component.id.group)
+        }.collect { component ->
+            "${component.id.group}:${component.id.module}"
+        }.toSet()
+        def requiredModules = [
+                'blue.language:blue-contracts-core',
+                'blue.bex:blue-bex-core',
+                'blue.bex:blue-bex-contracts',
+                'blue.repo:blue-repo-java'
+        ] as Set
+        def missingModules = requiredModules - publishedBlueModules
+        if (!leakedProjects.empty || !missingModules.empty) {
+            throw new GradleException(
+                    'Published dependency isolation failed: included projects '
+                            + leakedProjects + ', missing modules '
+                            + missingModules.toList().sort())
+        }
+        logger.lifecycle(
+                'Published dependency lane resolved without sibling substitution.')
+    }
+}
+
+tasks.register('verifyPublishedArtifactDependencies') {
+    group = 'verification'
+    description = 'Compiles against the explicit isolated published-artifact graph.'
+    if (dependencyMode == 'published-artifact') {
+        dependsOn publishedDependencyIsolation, tasks.named('compileJava')
+    }
+    doLast {
+        if (dependencyMode != 'published-artifact') {
+            throw new GradleException(
+                    'verifyPublishedArtifactDependencies requires '
+                            + '-PblueDependencyMode=published-artifact')
+        }
+        logger.lifecycle(
+                'Published dependencies resolve in isolation and provide the required source API.')
     }
 }
 
@@ -2453,7 +2778,7 @@ tasks.register('productionizationCheck') {
     group = 'verification'
     dependsOn 'build', 'validateProductionShape',
             'verifyPublicApiBoundary', 'verifyArtifactContents',
-            'verifyPublicationPom', 'verifyPublishedModeIsolation',
+            'verifyPublicationPom', 'verifyDependencyModeIsolation',
             'verifyReleaseMetadata', 'verifyDocumentation',
             'verifySourceArchiveHygiene', 'scenarioTest',
             'verifyTestArchitecture', extractedSourceArchive
@@ -2464,7 +2789,7 @@ tasks.register('releaseCheck') {
     description = 'Runs the production, API, artifact, and publication gates.'
     dependsOn 'build', 'validateProductionShape', 'verifyPublicApiBoundary',
             'verifyArtifactContents', 'verifyPublicationPom',
-            'verifyPublishedModeIsolation', 'verifyReleaseMetadata',
+            'verifyDependencyModeIsolation', 'verifyReleaseMetadata',
             'verifyDocumentation', 'verifySourceArchiveHygiene', 'test',
             'integrationTest', 'consumerTest', 'scenarioTest',
             'verifyTestArchitecture', extractedSourceArchive
@@ -2740,6 +3065,13 @@ tasks.register('stageRelease') {
     description = 'Builds the verified Maven Central staging repository.'
     dependsOn 'releaseCheck', round13Readiness,
             'publishMavenJavaPublicationToStagingRepository'
+    doFirst {
+        if (dependencyMode != 'published-artifact') {
+            throw new GradleException(
+                    'stageRelease requires the explicit isolated lane: '
+                            + '-PblueDependencyMode=published-artifact')
+        }
+    }
 }
 
 tasks.named('publishMavenJavaPublicationToStagingRepository') {
@@ -2747,15 +3079,19 @@ tasks.named('publishMavenJavaPublicationToStagingRepository') {
 }
 
 if (localDependencies) {
+    File localLanguageCheckout = file(providers.gradleProperty(
+            'blueLanguageCompositePath')
+            .getOrElse('../blue-language-java')).canonicalFile
     File localBexCheckout = file(providers.gradleProperty(
             'blueBexCompositePath').getOrElse('../blue-bex-java'))
+            .canonicalFile
     File localRepositoryCheckout = file(providers.gradleProperty(
             'blueRepositoryCompositePath')
-            .getOrElse('../blue-repository-java'))
+            .getOrElse('../blue-repository-java')).canonicalFile
     def localSourceInputs = tasks.register('verifyLocalSourceInputs') {
         group = 'verification'
-        description = 'Verifies the exact local Repository, BEX, and Language inputs.'
-        inputs.files('gradle/bex-source.lock',
+        description = 'Verifies the exact local Language, Repository, and BEX inputs.'
+        inputs.files('gradle/language-source.lock', 'gradle/bex-source.lock',
                 'gradle/repository-source.lock')
         doLast {
             def readLock = { File lock ->
@@ -2767,9 +3103,9 @@ if (localDependencies) {
                                      line.substring(separator + 1)]
                         }
             }
-            def gitBytes = { File root, String... arguments ->
+            def gitBytes = { File root, List<String> arguments ->
                 def command = ['git', '-C', root.absolutePath]
-                command.addAll(arguments as List)
+                command.addAll(arguments)
                 Process process = new ProcessBuilder(command).start()
                 byte[] stdout = process.inputStream.bytes
                 String stderr = process.errorStream.getText('UTF-8')
@@ -2783,44 +3119,181 @@ if (localDependencies) {
                 java.security.MessageDigest.getInstance('SHA-256')
                         .digest(bytes).encodeHex().toString()
             }
+            def workspaceDiffSha256 = { File root, List<String> paths ->
+                byte[] trackedDiff = gitBytes(root,
+                        ['diff', '--binary', '--no-ext-diff', 'HEAD', '--']
+                                + paths)
+                byte[] untrackedOutput = gitBytes(root,
+                        ['ls-files', '--others', '--exclude-standard', '-z',
+                         '--'] + paths)
+                List<String> untracked = new String(untrackedOutput,
+                        'UTF-8').split('\u0000').findAll().sort()
+                def digest = java.security.MessageDigest
+                        .getInstance('SHA-256')
+                def appendFrame = { byte[] value ->
+                    digest.update(java.nio.ByteBuffer.allocate(8)
+                            .putLong(value.length).array())
+                    digest.update(value)
+                }
+                appendFrame(trackedDiff)
+                untracked.each { relativePath ->
+                    appendFrame(relativePath.getBytes('UTF-8'))
+                    appendFrame(new File(root, relativePath).bytes)
+                }
+                digest.digest().encodeHex().toString()
+            }
+            def languageProductionPaths = [
+                    '.cz.toml', 'build.gradle', 'settings.gradle',
+                    'settings.gradle.kts', 'gradle.properties',
+                    'build-logic/build.gradle',
+                    'build-logic/settings.gradle.kts',
+                    'build-logic/src/main',
+                    'blue-language-model/build.gradle',
+                    'blue-language-model/src/main',
+                    'blue-language-core/build.gradle',
+                    'blue-language-core/src/main',
+                    'blue-language-mapping/build.gradle',
+                    'blue-language-mapping/src/main',
+                    'blue-language-ipfs/build.gradle',
+                    'blue-language-ipfs/src/main',
+                    'blue-language-java/build.gradle',
+                    'blue-language-java/src/main',
+                    'blue-contracts-core/build.gradle',
+                    'blue-contracts-core/src/main',
+                    'blue-conformance/build.gradle',
+                    'blue-conformance/src/main',
+                    'api', 'architecture',
+                    'gradle/blue-spec-inputs.lock.json'
+            ]
+            def bexProductionPaths = [
+                    '.cz.toml', 'build.gradle.kts', 'settings.gradle.kts',
+                    'gradle.properties', 'build-logic/build.gradle.kts',
+                    'build-logic/settings.gradle.kts',
+                    'build-logic/src/main',
+                    'blue-bex-core/build.gradle.kts',
+                    'blue-bex-core/src/main',
+                    'blue-bex-contracts/build.gradle.kts',
+                    'blue-bex-contracts/src/main',
+                    'blue-bex-conformance/build.gradle.kts',
+                    'blue-bex-conformance/src/main',
+                    'blue-bex-java/build.gradle.kts',
+                    'blue-bex-java/src/main',
+                    'examples/build.gradle.kts', 'examples/src/main'
+            ]
+            def languageLock = readLock(
+                    file('gradle/language-source.lock'))
             def bexLock = readLock(file('gradle/bex-source.lock'))
             def repositoryLock = readLock(
                     file('gradle/repository-source.lock'))
             File bex = localBexCheckout
             File repository = localRepositoryCheckout
-            File language = new File(repository, '../blue-language-java')
-                    .canonicalFile
+            File language = localLanguageCheckout
             String bexHead = new String(
-                    gitBytes(bex, 'rev-parse', 'HEAD'), 'UTF-8').trim()
+                    gitBytes(bex, ['rev-parse', 'HEAD']), 'UTF-8').trim()
             String repositoryHead = new String(
-                    gitBytes(repository, 'rev-parse', 'HEAD'), 'UTF-8').trim()
-            String languageHead = new String(
-                    gitBytes(language, 'rev-parse', 'HEAD'), 'UTF-8').trim()
-            if (bexHead != bexLock.commit
-                    || repositoryHead != repositoryLock.baseCommit
-                    || languageHead != repositoryLock.languageCommit) {
-                throw new GradleException('Local dependency commit drift')
-            }
-            if (new String(gitBytes(bex, 'status', '--porcelain'),
+                    gitBytes(repository, ['rev-parse', 'HEAD']),
                     'UTF-8').trim()
-                    || new String(gitBytes(language, 'status', '--porcelain'),
-                    'UTF-8').trim()) {
-                throw new GradleException(
-                        'Pinned BEX and Language inputs must be clean')
-            }
-            byte[] repositoryDiff = gitBytes(repository, 'diff', '--binary',
-                    'HEAD', '--', 'build.gradle', 'settings.gradle',
-                    '.cz.toml', 'src/main/java', 'src/main/resources')
-            if (sha256(repositoryDiff)
+            String languageHead = new String(
+                    gitBytes(language, ['rev-parse', 'HEAD']),
+                    'UTF-8').trim()
+            byte[] repositoryDiff = gitBytes(repository,
+                    ['diff', '--binary', 'HEAD', '--', 'build.gradle',
+                     'settings.gradle', '.cz.toml', 'src/main/java',
+                     'src/main/resources'])
+            String repositoryDiffSha256 = sha256(repositoryDiff)
+            String languageDiffSha256 = workspaceDiffSha256(
+                    language, languageProductionPaths)
+            String bexDiffSha256 = workspaceDiffSha256(
+                    bex, bexProductionPaths)
+
+            logger.lifecycle(
+                    'Local Language source base={} workspaceDiffSha256={}',
+                    languageHead, languageDiffSha256)
+            logger.lifecycle(
+                    'Local BEX source base={} workspaceDiffSha256={}',
+                    bexHead, bexDiffSha256)
+            logger.lifecycle(
+                    'Local Repository source base={} workspaceDiffSha256={}',
+                    repositoryHead, repositoryDiffSha256)
+
+            def failures = []
+            [Language: [languageHead, languageLock.baseCommit],
+             BEX: [bexHead, bexLock.baseCommit],
+             Repository: [repositoryHead, repositoryLock.baseCommit]]
+                    .each { name, values ->
+                        if (values[0] != values[1]) {
+                            failures << ("Local ${name} base commit drift: "
+                                    + "expected ${values[1]}, got ${values[0]}")
+                        }
+                    }
+            if (repositoryDiffSha256
                     != repositoryLock.workspaceDiffSha256) {
-                throw new GradleException(
-                        'Local Repository production diff fingerprint drift')
+                failures << ('Local Repository production diff fingerprint '
+                        + 'drift: expected '
+                        + repositoryLock.workspaceDiffSha256 + ', got '
+                        + repositoryDiffSha256)
+            }
+            if (languageDiffSha256 != languageLock.workspaceDiffSha256) {
+                failures << ('Local Language production diff fingerprint '
+                        + 'drift: expected '
+                        + languageLock.workspaceDiffSha256 + ', got '
+                        + languageDiffSha256)
+            }
+            if (bexDiffSha256 != bexLock.workspaceDiffSha256) {
+                failures << ('Local BEX production diff fingerprint drift: '
+                        + 'expected ' + bexLock.workspaceDiffSha256 + ', got '
+                        + bexDiffSha256)
+            }
+            if (!failures.empty) {
+                throw new GradleException(failures.join('\n'))
             }
             logger.lifecycle('Local source inputs match pinned fingerprints.')
         }
     }
-    tasks.named('releaseCheck') {
+
+    tasks.register('verifyLocalCompositeDependencies') {
+        group = 'verification'
+        description = 'Proves the complete Language runtime graph resolves from the configured composite.'
         dependsOn localSourceInputs
+        doLast {
+            def expectedProjects = [
+                    'blue-language-model',
+                    'blue-language-core',
+                    'blue-language-mapping',
+                    'blue-language-ipfs',
+                    'blue-language-java',
+                    'blue-contracts-core'
+            ] as Set
+            def components = configurations.testRuntimeClasspath
+                    .incoming.resolutionResult.allComponents
+            def selectedProjects = components.collect { component ->
+                component.id instanceof
+                        org.gradle.api.artifacts.component.ProjectComponentIdentifier
+                        ? component.id.projectPath.substring(1)
+                        : null
+            }.findAll().toSet()
+            def missingProjects = expectedProjects - selectedProjects
+            def leakedModules = components.findAll { component ->
+                component.id instanceof
+                        org.gradle.api.artifacts.component.ModuleComponentIdentifier
+                        && component.id.group == 'blue.language'
+                        && expectedProjects.contains(component.id.module)
+            }.collect { component -> component.id.displayName }.sort()
+            if (!missingProjects.isEmpty() || !leakedModules.isEmpty()) {
+                throw new GradleException(
+                        'Incomplete local Language graph: missing projects '
+                                + missingProjects.toList().sort()
+                                + ', published modules ' + leakedModules)
+            }
+            logger.lifecycle('Complete Language runtime graph resolves from {}.',
+                    localLanguageCheckout)
+        }
+    }
+    tasks.named('releaseCheck') {
+        dependsOn 'verifyLocalCompositeDependencies'
+    }
+    tasks.named('productionizationCheck') {
+        dependsOn 'verifyLocalCompositeDependencies'
     }
 
     def localPrerequisites = tasks.register(
@@ -2890,6 +3363,13 @@ if (localDependencies) {
     }
     tasks.named('publishToMavenLocal') {
         dependsOn localPrerequisites
+    }
+} else {
+    tasks.named('releaseCheck') {
+        dependsOn 'verifyPublishedArtifactDependencies'
+    }
+    tasks.named('productionizationCheck') {
+        dependsOn 'verifyPublishedArtifactDependencies'
     }
 }
 

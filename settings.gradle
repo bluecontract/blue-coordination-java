@@ -8,7 +8,7 @@ pluginManagement {
 rootProject.name = 'blue-coordination-java'
 
 def dependencyMode = providers.gradleProperty('blueDependencyMode')
-        .getOrElse('published-artifact')
+        .getOrElse('local-composite')
         .trim()
 if (!(dependencyMode in ['local-composite', 'published-artifact'])) {
     throw new GradleException(
@@ -16,27 +16,75 @@ if (!(dependencyMode in ['local-composite', 'published-artifact'])) {
 }
 
 if (dependencyMode == 'local-composite') {
+    def localLanguage = file(providers.gradleProperty(
+            'blueLanguageCompositePath')
+            .getOrElse('../blue-language-java')).canonicalFile
+    if (!localLanguage.isDirectory()) {
+        throw new GradleException(
+                'blueLanguageCompositePath is not a directory: '
+                        + localLanguage)
+    }
+    if (!new File(localLanguage, 'settings.gradle').isFile()
+            && !new File(localLanguage, 'settings.gradle.kts').isFile()) {
+        throw new GradleException(
+                'blueLanguageCompositePath is not a Gradle build: '
+                        + localLanguage)
+    }
+    def contractsProject = new File(localLanguage, 'blue-contracts-core')
+    if (!contractsProject.isDirectory()
+            || (!new File(contractsProject, 'build.gradle').isFile()
+            && !new File(contractsProject, 'build.gradle.kts').isFile())) {
+        throw new GradleException(
+                'blueLanguageCompositePath is missing :blue-contracts-core: '
+                        + localLanguage)
+    }
+    includeBuild(localLanguage) {
+        dependencySubstitution {
+            substitute(module('blue.language:blue-language-model'))
+                    .using(project(':blue-language-model'))
+            substitute(module('blue.language:blue-language-core'))
+                    .using(project(':blue-language-core'))
+            substitute(module('blue.language:blue-language-mapping'))
+                    .using(project(':blue-language-mapping'))
+            substitute(module('blue.language:blue-language-ipfs'))
+                    .using(project(':blue-language-ipfs'))
+            substitute(module('blue.language:blue-language-java'))
+                    .using(project(':blue-language-java'))
+            substitute(module('blue.language:blue-contracts-core'))
+                    .using(project(':blue-contracts-core'))
+        }
+    }
+
     def localBex = file(providers.gradleProperty('blueBexCompositePath')
-            .getOrElse('../blue-bex-java'))
-    if (localBex.isDirectory()) {
-        includeBuild(localBex) {
-            dependencySubstitution {
-                substitute(module('blue.bex:blue-bex-core'))
-                        .using(project(':blue-bex-core'))
-                substitute(module('blue.bex:blue-bex-contracts'))
-                        .using(project(':blue-bex-contracts'))
-            }
+            .getOrElse('../blue-bex-java')).canonicalFile
+    if (!localBex.isDirectory()
+            || (!new File(localBex, 'settings.gradle').isFile()
+            && !new File(localBex, 'settings.gradle.kts').isFile())) {
+        throw new GradleException(
+                'blueBexCompositePath is not a Gradle build: ' + localBex)
+    }
+    includeBuild(localBex) {
+        dependencySubstitution {
+            substitute(module('blue.bex:blue-bex-core'))
+                    .using(project(':blue-bex-core'))
+            substitute(module('blue.bex:blue-bex-contracts'))
+                    .using(project(':blue-bex-contracts'))
         }
     }
     def localRepository = file(providers.gradleProperty(
             'blueRepositoryCompositePath')
-            .getOrElse('../blue-repository-java'))
-    if (localRepository.isDirectory()) {
-        includeBuild(localRepository) {
-            dependencySubstitution {
-                substitute(module('blue.repo:blue-repo-java'))
-                        .using(project(':'))
-            }
+            .getOrElse('../blue-repository-java')).canonicalFile
+    if (!localRepository.isDirectory()
+            || (!new File(localRepository, 'settings.gradle').isFile()
+            && !new File(localRepository, 'settings.gradle.kts').isFile())) {
+        throw new GradleException(
+                'blueRepositoryCompositePath is not a Gradle build: '
+                        + localRepository)
+    }
+    includeBuild(localRepository) {
+        dependencySubstitution {
+            substitute(module('blue.repo:blue-repo-java'))
+                    .using(project(':'))
         }
     }
 }

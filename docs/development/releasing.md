@@ -7,6 +7,12 @@ from Maven Central. In particular, 3.0.0-rc.1 requires Repository rc.21 and BEX
 rc.3. Local composite success is semantic evidence, but it is not proof that an
 external consumer can resolve the release.
 
+The current Contracts 1.0 implementation also requires APIs newer than the
+published Language rc.20 and BEX rc.3 bytes. Coordinate resolution alone is
+therefore insufficient: `verifyPublishedArtifactDependencies` must compile the
+current source from the isolated artifact graph before staging can be called
+ready. Until matching artifacts are published, this gate is intentionally red.
+
 Repository rc.21 is the first pinned release containing the Repository surface
 required by this Coordination candidate.
 
@@ -15,9 +21,12 @@ required by this Coordination candidate.
 1. Merge the candidate to `next`.
 2. The RC workflow derives the next version, updates `.cz.toml`, creates a
    release commit and annotated tag locally.
-3. `dependencyPreflight` resolves all prerequisites in published-artifact mode.
-4. `clean stageRelease` reruns the full release gate and builds the staging
-   repository.
+3. `verifyPublishedDependencyIsolation dependencyPreflight
+   -PblueDependencyMode=published-artifact` resolves all prerequisites without
+   sibling substitution, and `verifyPublishedArtifactDependencies` compiles
+   against those exact external APIs.
+4. `clean stageRelease -PblueDependencyMode=published-artifact` reruns the full
+   release gate and builds the staging repository.
 5. JReleaser's deploy task verifies, signs, checksums and uploads the staged
    artifacts to Maven Central.
 6. Only after successful publication does the workflow push the release commit

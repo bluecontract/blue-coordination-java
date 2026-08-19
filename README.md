@@ -45,6 +45,44 @@ try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
 }
 ```
 
+## Contracts 1.0 opt-in
+
+Contracts hosts bind the exact final specification artifacts and public Root
+lineages explicitly:
+
+```java
+import blue.coordination.api.Contracts10Configuration;
+import blue.coordination.api.CoordinationEngine;
+import blue.coordination.api.DocumentId;
+
+var configuration = new Contracts10Configuration(
+        finalBlueLanguageSpecificationSha256,
+        finalContractsSpecificationSha256,
+        java.util.Set.of(DocumentId.of("public-root")));
+
+try (CoordinationEngine engine =
+        CoordinationEngine.inMemoryContracts10(configuration)) {
+    // Register the public Root and embedded source Timelines.
+}
+```
+
+Both identity variables must contain lowercase `sha256:` identities of the
+actual final artifacts; the engine supplies no digest placeholder. This path
+uses independent per-document Contracts closure execution, connected atomic
+publication, and Root-lane feeder progress. `CoordinationEngine.inMemory()`
+remains the earlier acyclic Process Embedded compatibility profile.
+
+Contracts-mode `startDocument(...)` intentionally remains fail-closed because
+a singleton start cannot authenticate a multi-member or cyclic closure. The
+explicit `admitContractsClosure(input, policy, verifiedFrontier)` boundary
+executes the caller-supplied typed `ADMIT_CLOSURE` input and atomically installs
+every member when all lineages are new. Its receipt retains the exact Contracts
+attempt and durable publication identity. `NeedsResources` and rejected
+attempts mutate no Coordination state, while an exact retry reconciles the
+durable receipt without executing Contracts again. Mixed existing/new closure
+admission remains fail-closed until complete existing-head fences can be
+proved; the engine never falls back to the legacy child/parent admission path.
+
 `Operation.exact(...)` and `CoordinationEngine.referenceRequest(...)` expose the
 optimized whole-object request path without YAML reserialization. For a
 provider-supplied exact Timeline Entry, use `appendTimelineEntry(Node)`; append
@@ -61,12 +99,36 @@ state to operational tooling.
 ```bash
 ./gradlew clean test
 ./gradlew releaseCheck
-./gradlew stageRelease
+./gradlew stageRelease -PblueDependencyMode=published-artifact
 ```
 
-Published Maven Central artifacts are the default dependency source. Local
-composite substitution is available only as an explicit cross-repository
-diagnostic mode; it is not used by the normal build or release path.
+The normal implementation build uses local composite substitution so the
+complete Language runtime and Contracts module graph resolves from
+`../blue-language-java` by default, together with the adjacent BEX and
+Repository checkouts. Override the Language checkout with
+`-PblueLanguageCompositePath=/absolute/path/to/blue-language-java`. The
+canonical specification and fixture inputs resolve separately from
+`../blue-spec/latest`; override that clean checkout with
+`-PblueSpecRoot=/absolute/path/to/blue-spec/latest`. Source-archive smoke tests
+forward the same path into the extracted build.
+
+The published-artifact lane remains explicit and isolated. Resolution and
+source-API compatibility are separate claims:
+
+```bash
+./gradlew verifyPublishedDependencyIsolation dependencyPreflight \
+  -PblueDependencyMode=published-artifact
+./gradlew verifyPublishedArtifactDependencies \
+  -PblueDependencyMode=published-artifact
+```
+
+The first command proves that external coordinates resolve without sibling
+substitution. The second also compiles this source tree and therefore remains
+red until compatible Contracts 1.0 and BEX exact-capability artifacts are
+published. Until then, the local composite is the supported implementation path
+for the Contracts-enabled source tree. `verifyExtractedSourceArchive` can still
+prove that the source ZIP configures in isolated published mode; its receipt
+marks focused tests `NOT_EXECUTED` and does not claim artifact compatibility.
 
 `releaseCheck` owns the library's complete verification surface: unit tests,
 compact-engine integration tests, tests compiled against the built JAR, and
@@ -77,11 +139,12 @@ Start with [START-HERE.md](START-HERE.md), then see the compact architecture,
 managed `Process Embedded` semantics, catch-up rules, performance
 interpretation, and limitations under `docs/`.
 
-## Release-candidate status
+## Historical release-candidate evidence
 
-The source targets `3.0.0-rc.1` with the Round 10.1 Process Embedded temporal
-profile, the Round 11 readiness closure, and Round 12 initialization lifecycle
-and dynamic-activation proofs. Release status is split
+The retained 3.0.0-rc.1 report covers the earlier Round 10.1 Process Embedded
+temporal profile, Round 11 readiness closure, and Round 12 initialization
+lifecycle and dynamic-activation proofs. It does not cover the current
+Contracts 1.0 implementation. Its release status was split
 into temporal architecture, in-memory engine, provider, Mandate, latency, and
 public-RC evidence. The generic Timeline Entry's missing universal literal
 `documentId` is an optional profile capability; exact provider-backed Mandate

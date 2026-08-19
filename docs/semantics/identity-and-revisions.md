@@ -21,11 +21,18 @@ revision kind, before/after exact values, source Timeline Entry, catch-up cause,
 emitted events, and processing gas. Initialization has no source entry; a
 Timeline revision always has one.
 
-One immutable `EmbeddingBinding` names a parent occurrence, child DocumentId,
-path, activation generation, admitted child state, and attachment evidence.
-`EmbeddedEpochCursor` separately names the latest child epoch incorporated by
-that occurrence. Removing and re-adding a path creates a new activation
-generation and a fresh cursor without deleting immutable child audit history.
+One Contracts-owned managed occurrence row names a source DocumentId/path,
+target DocumentId, activation generation, binding policy, exact expected target
+state, active status, and nullable historical cursor. Its occurrence identity
+is stable across same-lineage exact-state churn; its binding identity changes
+with the expected target BlueId. `ManagedOccurrenceInventory` retains active
+and inactive rows and delegates all identity derivation and assertion checking
+to Contracts. Removing an active row allocates its inactive same-lineage
+successor at generation plus one. Later re-add activates that committed row
+without incrementing again or reusing the retired occurrence/checkpoint
+lineage. Failed transitions publish no generation. `EmbeddedEpochCursor`
+remains the legacy coordinator's separate per-occurrence progress state during
+the migration.
 
 The journal owns global and per-Timeline sequence numbers. Failed append parsing
 does not consume either sequence or logical time. Failed top-level admission

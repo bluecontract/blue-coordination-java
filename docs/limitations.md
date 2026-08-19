@@ -9,6 +9,11 @@
   subscription surface remains a frozen-API gap.
 - Journal completeness is proven only for the current in-memory journal. There
   is no durable or distributed transaction protocol.
+- The copy-on-write multi-document publication API is currently package
+  internal and in-memory. It proves selected-head and managed-topology CAS plus
+  one-swap rollback, but `SequentialDrainCoordinator` is not wired to it and no
+  serialized adapter yet reloads its inventory, component state, outbox,
+  checkpoint evidence, or publication receipts.
 - The pinned generic Timeline Entry has no universal literal `documentId`
   field. This is an optional generalized targeting-profile gap, not a blocker
   for append-once/environment-derived routing: concrete Channel/message types

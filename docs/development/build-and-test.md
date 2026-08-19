@@ -6,14 +6,49 @@ Use Java 17+ and the checked-in Gradle wrapper. Production compiles with Java 17
 `-Xlint:all` and `-Werror`. Tests can run on a newer LTS with
 `-PtestJavaVersion=21`.
 
-Published Maven Central artifacts are the default and are used by ordinary
-development, consumer, CI, and release builds. This mode runs no Git commands
-and never reads sibling checkouts.
+`local-composite` is the default implementation mode for the coordinated
+Contracts 1.0 source tree. It substitutes `../blue-language-java`,
+`../blue-bex-java`, and `../blue-repository-java`, or paths supplied with
+`-PblueLanguageCompositePath`, `-PblueBexCompositePath`, and
+`-PblueRepositoryCompositePath`. It is source-backed implementation evidence,
+not evidence that external consumers can resolve published artifacts.
+The Language substitution is an aligned source graph: model, core, mapping,
+IPFS, the runtime aggregate, and Contracts all map to their projects in the
+same included build. Mixing a source-built Contracts kernel with published
+Language runtime jars is rejected by `verifyLocalCompositeDependencies`.
 
-`local-composite` remains an explicit diagnostic mode for coordinated changes
-that have not been published. It substitutes `../blue-bex-java` and
-`../blue-repository-java`, or paths supplied with `-PblueBexCompositePath` and
-`-PblueRepositoryCompositePath`; it must not be used as release evidence.
+Run the focused local wiring proof with:
+
+```bash
+./gradlew verifyLocalCompositeDependencies \
+  -PblueDependencyMode=local-composite \
+  -PblueLanguageCompositePath=/absolute/path/to/blue-language-java
+```
+
+`verifyLocalSourceInputs` checks the explicitly configured Language and BEX
+checkouts against their base commits and framed tracked/untracked production
+workspace fingerprints. Dirty, intentional workspaces are supported without
+weakening provenance. The extracted-source smoke forwards the same absolute
+paths, so its temporary extraction directory cannot accidentally change which
+sibling checkouts are selected.
+
+Use the isolated published-artifact lane explicitly:
+
+```bash
+./gradlew verifyPublishedDependencyIsolation dependencyPreflight \
+  -PblueDependencyMode=published-artifact
+```
+
+This mode includes no sibling builds and runs no local-source Git checks. It is
+the resolution-isolation proof. `verifyPublishedArtifactDependencies` adds a
+real production compile and is the release-compatibility gate once matching
+Contracts 1.0 artifacts exist. Until then it fails honestly even though the
+older pinned coordinates resolve.
+
+The extracted source archive runs the resolution-isolation proof in this mode
+without reaching any sibling checkout. Its current receipt marks focused tests
+`NOT_EXECUTED` and published compatibility `NOT_VERIFIED`; it is configuration
+and packaging evidence, not a substitute for the compile gate.
 
 ## Coordination gates
 
@@ -21,7 +56,7 @@ that have not been published. It substitutes `../blue-bex-java` and
 ./gradlew test
 ./gradlew integrationTest consumerTest scenarioTest
 ./gradlew releaseCheck
-./gradlew stageRelease
+./gradlew stageRelease -PblueDependencyMode=published-artifact
 ```
 
 The release-owned suites have distinct responsibilities:
@@ -49,10 +84,13 @@ that a changed source snapshot has passed them.
 To prove external dependency availability:
 
 ```bash
-./gradlew dependencyPreflight
+./gradlew verifyPublishedDependencyIsolation dependencyPreflight \
+  -PblueDependencyMode=published-artifact
 ```
 
-That command fails closed unless every pinned prerequisite is published.
+That command fails closed unless every pinned prerequisite resolves externally.
+Before release, also run `verifyPublishedArtifactDependencies`; it compiles the
+current source against that isolated graph and fails on stale published APIs.
 
 ## Historical performance evidence
 
@@ -84,5 +122,7 @@ change:
 ```
 
 Review the entire lock diff. Never hand-wave an unexpected transitive version.
-Only regenerate the local-composite lock during an explicit cross-repository
-diagnostic by adding `-PblueDependencyMode=local-composite`.
+Refresh the Language and BEX source locks only for an intentional coordinated
+workspace snapshot. Both locks bind a base commit plus the framed fingerprint
+of tracked and untracked production changes; a dirty workspace is valid only
+when its fingerprint matches exactly.

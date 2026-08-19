@@ -9,14 +9,29 @@ the new 3.x API before the first stable 3.0.0 release.
 
 - A compact Java 17 in-memory Coordination engine with a small immutable
   application API.
+- An explicit `CoordinationEngine.inMemoryContracts10(...)` lifecycle boundary
+  requiring final Language/Contracts SHA-256 artifact identities and public
+  Root lineages, plus typed `admitContractsClosure(...)` all-new-lineage
+  admission with one atomic durable receipt. Legacy `startDocument` and mixed
+  existing/new admission remain rejected in that mode.
+- Contracts 1.0 affected-closure capture and independent per-document
+  execution, with the same processor/context for acyclic and cyclic documents
+  and no ambient containing-document context.
+- A durable Root feeder/window over the union of Root and active embedded
+  Timelines, with exact lane-local `NeedsResources` no-overtake and
+  disconnected-Root progress.
+- Copy-on-write connected-closure publication with CAS-fenced per-document
+  heads/epochs, active/inactive occurrence inventory, active SCC component
+  state, per-document graph generations, exact subscriptions/routes,
+  checkpoints, outbox, and idempotency receipts.
 - Exact whole-request and whole-Timeline-Entry admission.
 - Environment-selected append/drain processing, immutable document snapshots
   and revision history.
 - Managed `Process Embedded.paths` and `collectionPaths`, historical catch-up,
   shared-child convergence and nested synchronized barriers.
-- Immutable bindings with separate occurrence cursors, exact processor-owned
-  child-epoch inputs, document-local commits, commit companions and idempotent
-  retry behavior.
+- A legacy compatibility profile with immutable bindings, separate occurrence
+  cursors, exact processor-owned child-epoch inputs, document-local commits,
+  commit companions, and idempotent retry behavior.
 - Explicit `FULL_HISTORY`, `FROM_FRONTIER`, and `FROM_NOW` top-level admission.
 - Occurrence-specific embedded admission evidence with exact child epoch,
   completeness proof, attachment identity, atomic consumption, and retry.
@@ -34,6 +49,11 @@ the new 3.x API before the first stable 3.0.0 release.
   code-point-canonical occurrence order, nested settlement, and retry proofs.
 - A reproducible extracted-source archive smoke that runs focused tests using
   its own executable Gradle wrapper and authoritative `.cz.toml`.
+- A default local-composite implementation lane that substitutes the complete
+  Language graph (`blue-language-model`, `blue-language-core`,
+  `blue-language-mapping`, `blue-language-ipfs`, `blue-language-java`, and
+  `blue-contracts-core`) together with both BEX modules and Repository, with
+  source-lock and extracted-archive path verification.
 
 ### Changed
 
@@ -60,7 +80,12 @@ the new 3.x API before the first stable 3.0.0 release.
 
 ### Release prerequisites
 
-The RC resolves `blue.repo:blue-repo-java:3.0.0-rc.21`,
-`blue.bex:blue-bex-core:1.1.0-rc.3`, and
-`blue.bex:blue-bex-contracts:1.1.0-rc.3` from Maven Central. Release automation
-verifies the complete conflict-checked graph before building.
+The explicit published-artifact isolation lane resolves Language rc.20,
+`blue.repo:blue-repo-java:3.0.0-rc.21`, `blue.bex:blue-bex-core:1.1.0-rc.3`,
+and `blue.bex:blue-bex-contracts:1.1.0-rc.3` from Maven Central without sibling
+substitution. That proves repository isolation and a conflict-checked resolved
+graph only. The current Contracts 1.0 source requires Language and BEX APIs
+newer than those published bytes, so published compile/API compatibility
+remains red until matching artifacts are published. Until then,
+`local-composite` is the supported implementation lane and release automation
+must not describe the candidate as staging-ready.

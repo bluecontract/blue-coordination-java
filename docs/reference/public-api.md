@@ -14,7 +14,14 @@ Javadocs.
   BlueId identifies one exact immutable state within that history.
 - `ActivationMode` names supported embedded-document temporal behavior.
 - `startDocument(..., AdmissionPolicy, verifiedFrontier)` selects top-level
-  `FULL_HISTORY`, `FROM_FRONTIER`, or `FROM_NOW` behavior.
+  `FULL_HISTORY`, `FROM_FRONTIER`, or `FROM_NOW` behavior in the legacy
+  profile. Contracts mode rejects this singleton boundary.
+- `admitContractsClosure(input, policy, verifiedFrontier)` is the Contracts 1.0
+  multi-document admission boundary. The caller supplies one exact typed
+  `ADMIT_CLOSURE` invocation whose operation, environment, configured policy,
+  public Roots, member graph, and proofs are verified by Contracts. The bounded
+  1.0 lane atomically admits all members only when every lineage is new; mixed
+  existing/new membership fails closed.
 - `appendTimelineEntry(Node)` validates and stores one externally supplied exact
   entry without routing or PROCESS. `append` and `appendAt` are convenience
   builders with the same append/process separation.
@@ -91,6 +98,12 @@ Mandate resolution remains an upstream blocker.
 - `DocumentSnapshot` is current state plus readiness/frontier evidence.
 - `DocumentRevision` is one immutable state transition with provenance.
 - `ExactValue` retains verified content identity and frozen form.
+- `ContractsClosureAdmissionReceipt` retains the exact
+  `ClosureAttemptResult`, a framed host publication identity, canonical admitted
+  `DocumentId` list, and `NOT_PUBLISHED`, `PUBLISHED`, or
+  `ALREADY_PUBLISHED` outcome. `NeedsResources` and rejection are
+  `NOT_PUBLISHED` with no durable mutation. An exact retry returns the original
+  attempt as `ALREADY_PUBLISHED` and reconciles missing route-cache rows.
 - `CoordinationMetrics` exposes cumulative phase timers, work counters and
   gauges.
 

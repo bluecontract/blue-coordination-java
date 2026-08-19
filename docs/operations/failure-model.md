@@ -17,6 +17,24 @@ state CAS succeeds but the caller loses the response, retry reconciles the
 commit companion and does not invoke frozen PROCESS or publish another
 revision. Duplicate exact journal admission is similarly idempotent.
 
+The Contracts closure-publication store seam has a stronger, deliberately
+narrow boundary for one affected closure. PROCESS checks every selected
+epoch/BlueId head and the occurrence-inventory/component-index generations.
+All-new `ADMIT_CLOSURE` instead fences every member as expected absent. The
+resulting sessions or revisions, complete occurrence inventory, affected
+component states/proofs, graph generations, subscriptions, public outbox,
+checkpoint receipts, and typed publication receipt are built off-store and
+become visible by one state-reference swap. Any stale CAS or injected pre-swap
+failure publishes none of them.
+
+A committing admission can durably swap the store immediately before an
+in-memory route-cache publication fails. The durable admission receipt remains
+authoritative; an exact retry rebuilds the missing route rows from retained
+sessions and reports `ALREADY_PUBLISHED` without repeating Contracts. A
+`NeedsResources` or non-committing result creates no receipt or state mutation.
+Mixed existing/new admission and an all-present closure without the exact
+receipt fail closed.
+
 Child and parent synchronization are intentionally separate commits. If a
 child epoch commits and parent application fails, the child remains committed,
 the parent cursor remains behind, and the parent stays `CATCHING_UP` or

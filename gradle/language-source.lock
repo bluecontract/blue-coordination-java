@@ -1,0 +1,4 @@
+# Supported clean local-composite Language input for Contracts 1.0.
+coordinate=blue.language:blue-contracts-core:3.1.0-rc.20
+baseCommit=2cff37bc48bda44e800ae82b4d0a706dda6d6258
+workspaceDiffSha256=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc

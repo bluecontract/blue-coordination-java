@@ -39,6 +39,9 @@ Release-owned coverage must prove:
 - exact processor-owned parent inputs with indexed event identity;
 - document-local failure/retry, commit-companion reconciliation and coordinator
   reconstruction through the same-live-engine retained-state seam;
+- copy-on-write multi-head success, stale-CAS rejection, pre-swap injected
+  failure rollback, and disconnected transaction isolation at the unwired
+  closure-publication store seam;
 - known current/older states, divergent-state rejection and independent equal
   BlueIds under different DocumentIds;
 - both `paths` and direct stable-key `collectionPaths` discovery;
