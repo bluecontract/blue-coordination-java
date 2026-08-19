@@ -42,6 +42,12 @@ final class ContractsPublicNestedScopeBoundaryTest {
             throws Exception {
         try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
             engine.startDocument(DOCUMENT, ordinaryNestedDocument());
+            String beforeBlueId = null;
+            Long beforeEpoch = null;
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                beforeBlueId = engine.document(DOCUMENT).blueId();
+                beforeEpoch = engine.document(DOCUMENT).epoch();
+            }
 
             Timeline nested = engine.registerTimeline(
                     NESTED_TIMELINE, ACTOR);
@@ -64,6 +70,29 @@ final class ContractsPublicNestedScopeBoundaryTest {
                     engine.document(DOCUMENT), "/rootCount"));
             assertEquals(2L, engine.document(DOCUMENT).epoch(),
                     "child execution and containing-document reaction commit");
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.captureHost(
+                        "P7.ordinary-nested-scope",
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "entryBlueId", entry.blueId(),
+                                "routeTargetCount", 1,
+                                "outcomeOrder", drained.outcomesFor(
+                                        entry.blueId()).stream()
+                                        .map(outcome -> outcome.documentId())
+                                        .toList(),
+                                "beforeBlueId", beforeBlueId,
+                                "afterBlueId",
+                                engine.document(DOCUMENT).blueId(),
+                                "beforeEpoch", beforeEpoch,
+                                "afterEpoch",
+                                engine.document(DOCUMENT).epoch(),
+                                "nestedCount", integer(
+                                        engine.document(DOCUMENT),
+                                        "/nested/count"),
+                                "rootCount", integer(
+                                        engine.document(DOCUMENT),
+                                        "/rootCount")));
+            }
         }
     }
 
@@ -71,7 +100,11 @@ final class ContractsPublicNestedScopeBoundaryTest {
     void contractsDirectSeedsAndManagedStepsRemainPreciselyRootOnly()
             throws Exception {
         Contracts10Configuration configuration = new Contracts10Configuration(
-                sha('a'), sha('b'), Set.of(DOCUMENT));
+                "sha256:01b038b64e3f0a9a11f3f70d544a63ff78a01d5169f1"
+                        + "a03f8b8629cf73645a7d",
+                "sha256:dfb444962a5a17b3a6519e8d148c2bf4a975a921b1fc"
+                        + "b1277710052caaecd930",
+                Set.of(DOCUMENT));
         try (CoordinationEngine publicEngine =
                      CoordinationEngine.inMemoryContracts10(configuration)) {
             DefaultCoordinationEngine engine =
@@ -96,6 +129,16 @@ final class ContractsPublicNestedScopeBoundaryTest {
             assertEquals(List.of(DOCUMENT, PEER), admitted.documentIds());
             assertEquals(ComponentKind.CYCLIC, admitted.attempt()
                     .processResult().resultingComponents().get(0).kind());
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.capture(
+                        "P7.cyclic-root-only-admission",
+                        engine,
+                        admitted.attempt().processResult(),
+                        null,
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "admissionPublicationIdentity",
+                                admitted.publicationIdentity()));
+            }
             DocumentSnapshot snapshot = publicEngine.document(DOCUMENT);
             assertTrue(snapshot.routingDefinitions().stream()
                     .anyMatch(definition -> definition.startsWith(
@@ -154,6 +197,28 @@ final class ContractsPublicNestedScopeBoundaryTest {
                 assertEquals("ISOLATED_DOCUMENT", step.executionMode());
                 assertTrue(step.ambientContainingDocumentIds().isEmpty());
             });
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.captureLatest(
+                        "P7.cyclic-root-only-operation",
+                        engine,
+                        rootDrain,
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "nestedEntryBlueId", nestedEntry.blueId(),
+                                "nestedRouteTargetCount", 0,
+                                "nestedOutcomeCount",
+                                nestedDrain.outcomesFor(
+                                        nestedEntry.blueId()).size(),
+                                "rootEntryBlueId", rootEntry.blueId(),
+                                "rootRouteTargetCount", 1,
+                                "rootOutcomeOrder", rootDrain.outcomesFor(
+                                        rootEntry.blueId()).stream()
+                                        .map(outcome -> outcome.documentId())
+                                        .toList(),
+                                "workScopePaths",
+                                evidence.documentStepTrace().stream()
+                                        .map(step -> step.scopePath())
+                                        .toList()));
+            }
         }
     }
 
@@ -273,7 +338,4 @@ final class ContractsPublicNestedScopeBoundaryTest {
         return ((Number) value).longValue();
     }
 
-    private static String sha(char value) {
-        return "sha256:" + String.valueOf(value).repeat(64);
-    }
 }

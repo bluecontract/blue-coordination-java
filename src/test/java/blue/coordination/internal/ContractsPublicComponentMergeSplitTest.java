@@ -58,8 +58,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Public Contracts proof for component merge, split, and dissolution. */
 final class ContractsPublicComponentMergeSplitTest {
-    private static final String LANGUAGE_SPEC = sha('a');
-    private static final String CONTRACTS_SPEC = sha('b');
+    private static final String LANGUAGE_SPEC = "sha256:01b038b64e3f0a9a"
+            + "11f3f70d544a63ff78a01d5169f1a03f8b8629cf73645a7d";
+    private static final String CONTRACTS_SPEC = "sha256:dfb444962a5a17b3"
+            + "a6519e8d148c2bf4a975a921b1fcb1277710052caaecd930";
     private static final long ENTRY_TIME = 2_300_000_000_000_001L;
     private static final DocumentId A = DocumentId.of("merge-split-a");
     private static final DocumentId B = DocumentId.of("merge-split-b");
@@ -129,6 +131,23 @@ final class ContractsPublicComponentMergeSplitTest {
             assertEquals(publicEngine.document(C).blueId(),
                     activated.expectedTargetBlueId());
             assertCommittedEvidence(merged);
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.capture(
+                        "P5.1.merge-two-cycles",
+                        engine,
+                        merged.result(),
+                        merged.drain(),
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "prospectiveOccurrenceIdentity",
+                                prospective.occurrenceIdentity(),
+                                "prospectiveBindingIdentity",
+                                prospective.bindingIdentity(),
+                                "activatedOccurrenceIdentity",
+                                activated.occurrenceIdentity(),
+                                "activatedBindingIdentity",
+                                activated.bindingIdentity(),
+                                "mergedMasterBlueId", cycle.masterBlueId()));
+            }
         }
     }
 
@@ -203,6 +222,19 @@ final class ContractsPublicComponentMergeSplitTest {
             assertFalse(row(engine, A, "/c").active());
             assertFalse(row(engine, A, "/d").active());
             assertCommittedEvidence(split);
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.capture(
+                        "P5.2.split-four-member-cycle",
+                        engine,
+                        split.result(),
+                        split.drain(),
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "oldMasterBlueId", oldMaster,
+                                "newMasterBlueIds", split.result()
+                                        .resultingComponents().stream()
+                                        .map(ComponentSnapshot::masterBlueId)
+                                        .toList()));
+            }
         }
     }
 
@@ -254,6 +286,18 @@ final class ContractsPublicComponentMergeSplitTest {
             assertCurrentReference(publicEngine, B, "/a", A);
             assertFalse(row(engine, A, "/b").active());
             assertCommittedEvidence(split);
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.capture(
+                        "P5.3.split-to-ordinary-singletons",
+                        engine,
+                        split.result(),
+                        split.drain(),
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "retiredOccurrenceIdentity",
+                                row(engine, A, "/b").occurrenceIdentity(),
+                                "retiredBindingIdentity",
+                                row(engine, A, "/b").bindingIdentity()));
+            }
         }
     }
 
@@ -296,6 +340,18 @@ final class ContractsPublicComponentMergeSplitTest {
                     "/self"));
             assertFalse(row(engine, A, "/self").active());
             assertCommittedEvidence(dissolved);
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.capture(
+                        "P5.4.dissolve-self-cycle",
+                        engine,
+                        dissolved.result(),
+                        dissolved.drain(),
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "retiredOccurrenceIdentity",
+                                row(engine, A, "/self").occurrenceIdentity(),
+                                "retiredBindingIdentity",
+                                row(engine, A, "/self").bindingIdentity()));
+            }
         }
     }
 
@@ -364,6 +420,24 @@ final class ContractsPublicComponentMergeSplitTest {
             assertEquals(1, rejected.addedReceipts().size());
             assertEquals(before.publicationReceipts().size() + 1,
                     after.publicationReceipts().size());
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.capture(
+                        "P5.5.late-failure-rollback",
+                        engine,
+                        result,
+                        rejected.drain(),
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "oldComponentIdentity",
+                                oldComponent.componentIdentity(),
+                                "oldComponentStateIdentity",
+                                oldComponent.componentStateIdentity(),
+                                "oldMasterBlueId",
+                                oldComponent.masterBlueId(),
+                                "durableOccurrenceIdentity",
+                                row(engine, A, "/b").occurrenceIdentity(),
+                                "durableBindingIdentity",
+                                row(engine, A, "/b").bindingIdentity()));
+            }
         }
     }
 
@@ -1058,10 +1132,6 @@ final class ContractsPublicComponentMergeSplitTest {
                 phase: initial
                 contracts: {}
                 """.formatted(documentId.value());
-    }
-
-    private static String sha(char value) {
-        return "sha256:" + String.valueOf(value).repeat(64);
     }
 
     private record Invocation(

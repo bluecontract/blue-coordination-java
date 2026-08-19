@@ -49,8 +49,10 @@ final class ContractsPublicInitializationTopologyTest {
     private static final List<DocumentId> MEMBERS = List.of(A, B, C);
     private static final Set<String> DYNAMIC_PATHS = Set.of(
             "/reciprocal", "/members/b", "/members/c");
-    private static final String LANGUAGE_SPEC = sha('a');
-    private static final String CONTRACTS_SPEC = sha('b');
+    private static final String LANGUAGE_SPEC = "sha256:01b038b64e3f0a9a"
+            + "11f3f70d544a63ff78a01d5169f1a03f8b8629cf73645a7d";
+    private static final String CONTRACTS_SPEC = "sha256:dfb444962a5a17b3"
+            + "a6519e8d148c2bf4a975a921b1fcb1277710052caaecd930";
     private static final String ADMISSION_POLICY =
             "contracts-top-level-admission-v1";
 
@@ -118,6 +120,19 @@ final class ContractsPublicInitializationTopologyTest {
                     .count());
             assertEquals(0L, publicEngine.metrics().journalEntryCount(),
                     "ADMIT_CLOSURE initialization is not a Timeline Entry");
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.capture(
+                        "P6.static-three-member-admission",
+                        engine,
+                        result,
+                        null,
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "admissionPublicationIdentity",
+                                admitted.publicationIdentity(),
+                                "timelineEntryCount",
+                                publicEngine.metrics().journalEntryCount(),
+                                "workTargets", workTargets(evidence)));
+            }
         }
     }
 
@@ -156,6 +171,17 @@ final class ContractsPublicInitializationTopologyTest {
             ClosureImplementationEvidence evidence = engine
                     .contractsClosureAdmissionAdapter()
                     .lastExecutionEvidence().orElseThrow();
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.capture(
+                        "P6.static-order-" + variant.name(),
+                        engine,
+                        result,
+                        null,
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "admissionPublicationIdentity",
+                                admitted.publicationIdentity(),
+                                "workTargets", workTargets(evidence)));
+            }
             return new StaticOrderEvidence(
                     result.outputClosureIdentity(),
                     result.resultingComponents().get(0)
@@ -226,6 +252,20 @@ final class ContractsPublicInitializationTopologyTest {
             assertTrue(publication.admissionReceipts().isEmpty());
             assertEquals(0, engine.routeRowCount());
             assertEquals(0L, publicEngine.metrics().journalEntryCount());
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.capture(
+                        "P6.late-initialization-failure",
+                        engine,
+                        result,
+                        null,
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "inputInvocationIdentity",
+                                input.invocationIdentity(),
+                                "publicationOutcome",
+                                rejected.publicationOutcome(),
+                                "durableDocumentCount",
+                                engine.documentCount()));
+            }
         }
     }
 
@@ -286,6 +326,22 @@ final class ContractsPublicInitializationTopologyTest {
             assertEquals(0, engine.routeRowCount());
             assertEquals(0L, publicEngine.metrics().journalEntryCount(),
                     "ADMIT_CLOSURE must not fabricate a Timeline Entry");
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.capture(
+                        "P6.c-clo-08-public-host-boundary",
+                        engine,
+                        result,
+                        null,
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "inputInvocationIdentity",
+                                input.invocationIdentity(),
+                                "publicationOutcome",
+                                unavailable.publicationOutcome(),
+                                "activeInputOccurrences", 1,
+                                "inactiveInputOccurrences", 1,
+                                "timelineEntryCount",
+                                publicEngine.metrics().journalEntryCount()));
+            }
         }
     }
 
@@ -348,6 +404,23 @@ final class ContractsPublicInitializationTopologyTest {
                     .admissionReceipts().isEmpty());
             assertEquals(0, engine.routeRowCount());
             assertEquals(0L, publicEngine.metrics().journalEntryCount());
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.capture(
+                        "P6.dynamic-topology-" + variant.name(),
+                        engine,
+                        result,
+                        null,
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "inputInvocationIdentity",
+                                input.invocationIdentity(),
+                                "publicationOutcome",
+                                admitted.publicationOutcome(),
+                                "inactiveInputPaths", DYNAMIC_PATHS.stream()
+                                        .sorted()
+                                        .toList(),
+                                "durableDocumentCount",
+                                engine.documentCount()));
+            }
 
             return new DynamicFailureEvidence(
                     input.invocationIdentity(),
@@ -740,10 +813,6 @@ final class ContractsPublicInitializationTopologyTest {
         return CoordinationEngine.inMemoryContracts10(
                 new Contracts10Configuration(
                         LANGUAGE_SPEC, CONTRACTS_SPEC, roots));
-    }
-
-    private static String sha(char value) {
-        return "sha256:" + String.valueOf(value).repeat(64);
     }
 
     private enum Variant {

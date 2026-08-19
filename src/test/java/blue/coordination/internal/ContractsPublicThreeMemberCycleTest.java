@@ -56,8 +56,10 @@ final class ContractsPublicThreeMemberCycleTest {
     private static final List<String> MEMBER_VALUES = MEMBERS.stream()
             .map(DocumentId::value)
             .toList();
-    private static final String LANGUAGE_SPEC = sha('a');
-    private static final String CONTRACTS_SPEC = sha('b');
+    private static final String LANGUAGE_SPEC = "sha256:01b038b64e3f0a9a"
+            + "11f3f70d544a63ff78a01d5169f1a03f8b8629cf73645a7d";
+    private static final String CONTRACTS_SPEC = "sha256:dfb444962a5a17b3"
+            + "a6519e8d148c2bf4a975a921b1fcb1277710052caaecd930";
     private static final String ADMISSION_POLICY =
             "contracts-top-level-admission-v1";
     private static final String FINITE_ADMISSION_LABEL =
@@ -194,6 +196,17 @@ final class ContractsPublicThreeMemberCycleTest {
             assertEquals("direct-c", property(publicEngine, C, "phase"));
             assertVerifiedThreeMemberComponent(
                     result.resultingComponents().get(0));
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.capture(
+                        "P2.3.three-direct-seeds",
+                        engine,
+                        result,
+                        drained,
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "entryBlueId", entry.blueId(),
+                                "routeTargetCount", 3,
+                                "directSeedOrder", MEMBER_VALUES));
+            }
         }
     }
 
@@ -262,6 +275,24 @@ final class ContractsPublicThreeMemberCycleTest {
             Map<String, String> memberMapping = memberMapping(component);
             assertEquals(new HashSet<>(MEMBER_VALUES),
                     memberMapping.keySet());
+
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.capture(
+                        "P2.1.finite-three-member-ring",
+                        engine,
+                        result,
+                        drained,
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "entryBlueId", entry.blueId(),
+                                "admissionPublicationIdentity",
+                                admitted.publicationIdentity(),
+                                "changedDocuments", changed,
+                                "workOrder", dequeuedDocumentIds(result),
+                                "finalEpochs", List.of(
+                                        publicEngine.document(A).epoch(),
+                                        publicEngine.document(B).epoch(),
+                                        publicEngine.document(C).epoch())));
+            }
 
             return new FiniteEvidence(
                     admitted.publicationIdentity(),
@@ -442,6 +473,25 @@ final class ContractsPublicThreeMemberCycleTest {
             ProcessingDrainReceipt terminal = publicEngine.drain();
             assertTrue(terminal.processedEntries().isEmpty());
             assertEquals(0L, terminal.committedProcessTransitions());
+
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.capture(
+                        "P2.4.shared-gas-rollback",
+                        engine,
+                        result,
+                        drained,
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "entryBlueId", entry.blueId(),
+                                "admissionPublicationIdentity",
+                                admitted.publicationIdentity(),
+                                "beforeHeadBlueIds", beforeHeads,
+                                "beforeMasterBlueId", beforeMaster,
+                                "rejectedCounter",
+                                result.rejectedCharge().counter(),
+                                "rejectedWorkIdentity",
+                                result.rejectedWorkOccurrence()
+                                        .workIdentity()));
+            }
 
             return new LoopEvidence(
                     admitted.publicationIdentity(),
@@ -732,10 +782,6 @@ final class ContractsPublicThreeMemberCycleTest {
 
     private static String master(String memberBlueId) {
         return memberBlueId.substring(0, memberBlueId.lastIndexOf('#'));
-    }
-
-    private static String sha(char character) {
-        return "sha256:" + String.valueOf(character).repeat(64);
     }
 
     private static String finiteDocument(DocumentId documentId) {

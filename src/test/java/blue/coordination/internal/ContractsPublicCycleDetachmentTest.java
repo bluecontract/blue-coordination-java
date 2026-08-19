@@ -41,8 +41,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Public Contracts proof for cyclic detachment and exact reactivation. */
 final class ContractsPublicCycleDetachmentTest {
-    private static final String LANGUAGE_SPEC = sha('a');
-    private static final String CONTRACTS_SPEC = sha('b');
+    private static final String LANGUAGE_SPEC = "sha256:01b038b64e3f0a9a"
+            + "11f3f70d544a63ff78a01d5169f1a03f8b8629cf73645a7d";
+    private static final String CONTRACTS_SPEC = "sha256:dfb444962a5a17b3"
+            + "a6519e8d148c2bf4a975a921b1fcb1277710052caaecd930";
     private static final long ENTRY_TIME = 2_200_000_000_000_001L;
 
     private static final BranchingIds BRANCHING = new BranchingIds(
@@ -86,6 +88,20 @@ final class ContractsPublicCycleDetachmentTest {
                     engine, BRANCHING.c1(), "/root");
             assertTrue(admittedC1Root.active());
             assertEquals(1L, admittedC1Root.activationGeneration());
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.capture(
+                        "P4.initial-five-member-cycle",
+                        engine,
+                        admitted.admissionReceipt().attempt().processResult(),
+                        null,
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "occurrenceIdentity",
+                                admittedC1Root.occurrenceIdentity(),
+                                "bindingIdentity",
+                                admittedC1Root.bindingIdentity(),
+                                "activationGeneration",
+                                admittedC1Root.activationGeneration()));
+            }
 
             Timeline signalTimeline = publicEngine.registerTimeline(
                     "detachment/signal", "alice");
@@ -156,6 +172,19 @@ final class ContractsPublicCycleDetachmentTest {
                     publicEngine, BRANCHING.a(), "loopStarts"));
             assertEquals(beforeLoopBindings, bindingIdentities(engine));
             assertEquals(beforeLoopComponents, componentStates(engine));
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.capture(
+                        "P4.pre-detach-gas-rollback",
+                        engine,
+                        rejected,
+                        rejectedLoop.drain(),
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "routeTargetCount",
+                                rejectedLoop.routeTargetCount(),
+                                "beforeMasterBlueId", oldMaster,
+                                "beforeBindingIdentities",
+                                beforeLoopBindings));
+            }
 
             Timeline controlTimeline = publicEngine.registerTimeline(
                     "detachment/control", "alice");
@@ -252,6 +281,21 @@ final class ContractsPublicCycleDetachmentTest {
             assertTrue(partial.result().checkpointWrites().stream()
                     .noneMatch(write -> "pingFromRootOne".equals(
                             write.rawChannelKey())));
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.capture(
+                        "P4.1.partial-detach",
+                        engine,
+                        partial.result(),
+                        partial.drain(),
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "oldMasterBlueId", oldMaster,
+                                "retiredOccurrenceIdentity",
+                                inactiveAfterPartial.occurrenceIdentity(),
+                                "retiredBindingIdentity",
+                                inactiveAfterPartial.bindingIdentity(),
+                                "retiredActivationGeneration",
+                                inactiveAfterPartial.activationGeneration()));
+            }
 
             Invocation full = invoke(
                     publicEngine,
@@ -324,6 +368,17 @@ final class ContractsPublicCycleDetachmentTest {
             assertNoMasterReference(publicEngine, oldMaster);
             assertNoMasterReference(
                     publicEngine, remainingCycle.masterBlueId());
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.capture(
+                        "P4.2.full-dissolution",
+                        engine,
+                        full.result(),
+                        full.drain(),
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "oldMasterBlueId", oldMaster,
+                                "partialMasterBlueId",
+                                remainingCycle.masterBlueId()));
+            }
 
             long c1PingsBeforeDetachedWork = numberProperty(
                     publicEngine, BRANCHING.c1(), "pings");
@@ -358,6 +413,18 @@ final class ContractsPublicCycleDetachmentTest {
                             write.rawChannelKey())
                             || "loopFromRootTwo".equals(
                             write.rawChannelKey())));
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.capture(
+                        "P4.3.post-detach-gas-success",
+                        engine,
+                        acceptedLoop.result(),
+                        acceptedLoop.drain(),
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "sharedLimit", builder.scenario().admission()
+                                        .executionPolicy().sharedLimit(),
+                                "acceptedGas",
+                                acceptedLoop.result().totalGas()));
+            }
 
             ManagedOccurrenceBinding inactiveBeforeReadd = row(
                     engine, BRANCHING.c1(), "/root");
@@ -458,6 +525,28 @@ final class ContractsPublicCycleDetachmentTest {
                             full.result(),
                             acceptedLoop.result()),
                     readded.result());
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.capture(
+                        "P4.5.re-add-retired-edge",
+                        engine,
+                        readded.result(),
+                        readded.drain(),
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "oldActiveOccurrenceIdentity",
+                                activeBeforeDetach.occurrenceIdentity(),
+                                "inactiveOccurrenceIdentity",
+                                inactiveBeforeReadd.occurrenceIdentity(),
+                                "readdedOccurrenceIdentity",
+                                activeAfterReadd.occurrenceIdentity(),
+                                "oldActiveBindingIdentity",
+                                activeBeforeDetach.bindingIdentity(),
+                                "inactiveBindingIdentity",
+                                inactiveBeforeReadd.bindingIdentity(),
+                                "readdedBindingIdentity",
+                                activeAfterReadd.bindingIdentity(),
+                                "activationGeneration",
+                                activeAfterReadd.activationGeneration()));
+            }
 
             Invocation reformedProbe = invoke(
                     publicEngine,
@@ -480,6 +569,16 @@ final class ContractsPublicCycleDetachmentTest {
             assertDisjointWorkIds(
                     List.of(initialProbe.result()),
                     reformedProbe.result());
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.capture(
+                        "P4.5.reformed-cycle-probe",
+                        engine,
+                        reformedProbe.result(),
+                        reformedProbe.drain(),
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "reformedMasterBlueId",
+                                reformed.masterBlueId()));
+            }
         }
     }
 
@@ -577,6 +676,22 @@ final class ContractsPublicCycleDetachmentTest {
             assertNotEquals(
                     initial.bindingIdentity(),
                     retired.bindingIdentity());
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.capture(
+                        "P4.4.frozen-edge-delivery",
+                        engine,
+                        frozen.result(),
+                        frozen.drain(),
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "initialOccurrenceIdentity",
+                                initial.occurrenceIdentity(),
+                                "initialBindingIdentity",
+                                initial.bindingIdentity(),
+                                "retiredOccurrenceIdentity",
+                                retired.occurrenceIdentity(),
+                                "retiredBindingIdentity",
+                                retired.bindingIdentity()));
+            }
 
             Invocation later = invoke(
                     publicEngine,
@@ -602,6 +717,20 @@ final class ContractsPublicCycleDetachmentTest {
             assertFalse(row(engine, FROZEN_A, "/b").active());
             assertDisjointWorkIds(
                     List.of(frozen.result()), later.result());
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.capture(
+                        "P4.4.later-occurrence-uses-new-graph",
+                        engine,
+                        later.result(),
+                        later.drain(),
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "retiredOccurrenceIdentity",
+                                row(engine, FROZEN_A, "/b")
+                                        .occurrenceIdentity(),
+                                "retiredBindingIdentity",
+                                row(engine, FROZEN_A, "/b")
+                                        .bindingIdentity()));
+            }
         }
     }
 
@@ -1255,10 +1384,6 @@ final class ContractsPublicCycleDetachmentTest {
                         LANGUAGE_SPEC,
                         CONTRACTS_SPEC,
                         publicRoots));
-    }
-
-    private static String sha(char character) {
-        return "sha256:" + String.valueOf(character).repeat(64);
     }
 
     private record BranchingIds(

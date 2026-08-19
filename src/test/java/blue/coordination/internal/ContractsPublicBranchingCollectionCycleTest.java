@@ -35,8 +35,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Public Contracts proof for branching collection-backed cyclic topology. */
 final class ContractsPublicBranchingCollectionCycleTest {
-    private static final String LANGUAGE_SPEC = sha('a');
-    private static final String CONTRACTS_SPEC = sha('b');
+    private static final String LANGUAGE_SPEC = "sha256:01b038b64e3f0a9a"
+            + "11f3f70d544a63ff78a01d5169f1a03f8b8629cf73645a7d";
+    private static final String CONTRACTS_SPEC = "sha256:dfb444962a5a17b3"
+            + "a6519e8d148c2bf4a975a921b1fcb1277710052caaecd930";
     private static final long ENTRY_TIME = 2_100_000_000_000_001L;
     private static final int UNRELATED_ADMISSION_BATCH_SIZE = 25;
     private static final BranchingIds BRANCHING = new BranchingIds(
@@ -420,6 +422,26 @@ final class ContractsPublicBranchingCollectionCycleTest {
                                     ::eventOccurrenceIdentity)
                             .toList(),
                     result.outputClosureIdentity());
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                CyclicTopologyIdentityEvidenceTest.capture(
+                        "P3.1.shared-anchor-" + variant.name(),
+                        engine,
+                        result,
+                        drained,
+                        CyclicTopologyIdentityEvidenceTest.facts(
+                                "entryBlueId", entry.blueId(),
+                                "routeTargetCount", routeTargets,
+                                "changedDocuments", drained.outcomesFor(
+                                        entry.blueId()).stream()
+                                        .map(outcome -> outcome.documentId())
+                                        .toList(),
+                                "publicEventKinds",
+                                semantic.publicEventKinds(),
+                                "publicEventBlueIds",
+                                semantic.publicEventBlueIds(),
+                                "publicEventOccurrenceIdentities",
+                                semantic.publicEventOccurrenceIds()));
+            }
             return new BranchingRun(
                     semantic,
                     result,
@@ -652,6 +674,29 @@ final class ContractsPublicBranchingCollectionCycleTest {
             Map<DocumentId, Long> untargetedEpochs = Map.of(
                     ids.a2(), publicEngine.document(ids.a2()).epoch(),
                     ids.b2(), publicEngine.document(ids.b2()).epoch());
+            if (CyclicTopologyIdentityEvidenceTest.isActive()) {
+                for (int index = 0; index < receipts.size(); index++) {
+                    ClosureProcessResult result = receipts.get(index)
+                            .attempt().processResult();
+                    CyclicTopologyIdentityEvidenceTest.capture(
+                            "P3.3.disjoint-" + selection.name()
+                                    + "-cohort-" + index,
+                            engine,
+                            result,
+                            drained,
+                            CyclicTopologyIdentityEvidenceTest.facts(
+                                    "entryBlueId", entry.blueId(),
+                                    "routeTargetCount", routeTargetCount,
+                                    "cohortIndex", index,
+                                    "cohortDocuments",
+                                    receipts.get(index).documentIds(),
+                                    "beforeUntargetedBlueIds",
+                                    beforeUntargeted,
+                                    "afterUntargetedBlueIds",
+                                    afterUntargeted,
+                                    "untargetedEpochs", untargetedEpochs));
+                }
+            }
             return new DisjointRun(
                     ids,
                     drained,
@@ -1060,10 +1105,6 @@ final class ContractsPublicBranchingCollectionCycleTest {
                         LANGUAGE_SPEC,
                         CONTRACTS_SPEC,
                         publicRoots));
-    }
-
-    private static String sha(char character) {
-        return "sha256:" + String.valueOf(character).repeat(64);
     }
 
     private enum BranchingVariant {
