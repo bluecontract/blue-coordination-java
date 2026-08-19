@@ -94,7 +94,7 @@ public final class DefaultCoordinationEngine
     private boolean closed;
 
     private DefaultCoordinationEngine(
-            Contracts10Configuration contractsConfiguration) {
+            ContractsBootstrap contractsConfiguration) {
         metrics = new EngineMetrics();
         objects = new WholeObjectStore(metrics);
         runtime = BlueRuntime.create(objects, metrics);
@@ -178,8 +178,25 @@ public final class DefaultCoordinationEngine
      */
     public static DefaultCoordinationEngine createContracts10(
             Contracts10Configuration configuration) {
-        return new DefaultCoordinationEngine(Objects.requireNonNull(
-                configuration, "configuration"));
+        Contracts10Configuration selected = Objects.requireNonNull(
+                configuration, "configuration");
+        return new DefaultCoordinationEngine(new ContractsBootstrap(
+                selected.blueLanguageSpecificationIdentity(),
+                selected.contractsSpecificationIdentity(),
+                selected.publicRootDocumentIds()));
+    }
+
+    /**
+     * Creates the SDK Contracts runtime before authored public Roots are known.
+     * Every Root must still be authorized before its atomic admission.
+     */
+    public static DefaultCoordinationEngine createContracts10Sdk(
+            String blueLanguageSpecificationIdentity,
+            String contractsSpecificationIdentity) {
+        return new DefaultCoordinationEngine(new ContractsBootstrap(
+                blueLanguageSpecificationIdentity,
+                contractsSpecificationIdentity,
+                Set.of()));
     }
 
     /**
@@ -1121,6 +1138,33 @@ public final class DefaultCoordinationEngine
                         .map(session -> session.layout().routingSurface()
                                 .externalTimelineIds())
                         .orElse(List.of()));
+    }
+
+    private record ContractsBootstrap(
+            String blueLanguageSpecificationIdentity,
+            String contractsSpecificationIdentity,
+            Set<DocumentId> publicRootDocumentIds) {
+        private ContractsBootstrap {
+            blueLanguageSpecificationIdentity = requireSha256Identity(
+                    blueLanguageSpecificationIdentity,
+                    "blueLanguageSpecificationIdentity");
+            contractsSpecificationIdentity = requireSha256Identity(
+                    contractsSpecificationIdentity,
+                    "contractsSpecificationIdentity");
+            publicRootDocumentIds = Set.copyOf(Objects.requireNonNull(
+                    publicRootDocumentIds, "publicRootDocumentIds"));
+        }
+
+        private static String requireSha256Identity(
+                String value,
+                String label) {
+            String checked = Objects.requireNonNull(value, label);
+            if (!checked.matches("sha256:[0-9a-f]{64}")) {
+                throw new IllegalArgumentException(
+                        label + " must be a lowercase sha256 identity");
+            }
+            return checked;
+        }
     }
 
     /** In-memory stand-in for the durable feeder publication boundary. */

@@ -63,10 +63,13 @@ final class SdkCoreSeamsTest {
     }
 
     @Test
-    void additionalSdkRootCanBeAuthorizedBeforeAtomicAdmission() {
+    void sdkRuntimeCanBootstrapBeforeAnyPublicRootIsKnown() {
+        BundledContracts10Release.Manifest manifest =
+                BundledContracts10Release.manifest();
         try (DefaultCoordinationEngine engine =
-                DefaultCoordinationEngine.createContracts10(
-                        BundledContracts10Release.configuration(Set.of(A)))) {
+                DefaultCoordinationEngine.createContracts10Sdk(
+                        manifest.blueLanguageSpecification(),
+                        manifest.contractsSpecification())) {
             engine.authorizeContractsPublicRoots(Set.of(B));
             Contracts10ScenarioBuilder.ScenarioRuntime runtime =
                     new Contracts10ScenarioBuilder(engine)
