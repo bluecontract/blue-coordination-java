@@ -116,4 +116,31 @@ final class WholeObjectStoreTest {
                                 new Node().blueId(known.blueId())).frozen(),
                         "reference"));
     }
+
+    @Test
+    void materializedCanonicalBodyDoesNotReplaceCompactProviderShell() {
+        EngineMetrics metrics = new EngineMetrics();
+        WholeObjectStore store = new WholeObjectStore(metrics);
+        ExactValue child = store.put(
+                new Node().properties(
+                        "status", new Node().value("confirmed")),
+                "child");
+        ExactValue shell = store.put(
+                new Node().properties("child", child.referenceNode()),
+                "shell");
+        ExactValue materialized = ExactValue.verified(
+                new Node().properties("child", child.copyNode()));
+        assertEquals(shell.blueId(), materialized.blueId());
+
+        store.preferCanonicalRepresentation(
+                materialized.frozen(), "semantic-root");
+
+        assertEquals("confirmed", store.require(shell.blueId()).copyNode()
+                .getProperties().get("child")
+                .getProperties().get("status").getValue());
+        assertEquals(child.blueId(), store.fetchByBlueId(shell.blueId()).get(0)
+                .getProperties().get("child").getBlueId());
+        assertEquals(1L, metrics.counter(
+                "wholeObjectStore.canonicalRepresentationsPreferred"));
+    }
 }

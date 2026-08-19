@@ -63,6 +63,10 @@ final class LargeHostPayNoteScenarioTest {
             assertEquals(Boolean.TRUE, engine.value("large-paynote",
                     "/productConditions/restaurant/product/confirmed")
                     .getValue());
+            assertEquals(engine.session("large-paynote").current().blueId(),
+                    engine.session("large-order-host").current()
+                            .canonicalBlueIdAt("/payNote"),
+                    "the containing host must retain the current PayNote head");
             assertEquals(Boolean.TRUE, engine.value("large-order-host",
                     "/payNote/productConditions/restaurant/product/confirmed")
                     .getValue());

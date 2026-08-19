@@ -103,8 +103,10 @@ final class WorkflowBexGasLedgerHostTest {
                         .canonicalName(),
                 propagated.counter());
         assertEquals(3L, propagated.quantity());
-        assertEquals(4L, propagated.admittedGas());
-        assertEquals(6L, propagated.effectiveBudget());
+        // The Contracts cap reports the invocation-parent cumulative ledger:
+        // the first compute's 4 plus the second compute's admitted 4.
+        assertEquals(8L, propagated.admittedGas());
+        assertEquals(10L, propagated.effectiveBudget());
         assertEquals(8L, parent.totalGas());
         assertEquals(2, parent.trace().size());
         assertEquals(4L, parent.trace().get(0).quantity());

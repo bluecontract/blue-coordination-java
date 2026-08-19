@@ -181,6 +181,78 @@ final class OperationRouteIndexTest {
         assertEquals(4L, index.generation());
     }
 
+    @Test
+    void freezesCanonicalRootDeliveriesWithoutContainerContext() {
+        OperationRouteIndex index = new OperationRouteIndex(
+                new EngineMetrics());
+        DocumentId later = DocumentId.of("document-z");
+        DocumentId earlier = DocumentId.of("document-a");
+        RoutingSurface surface = surface("timeline-a", "alice");
+        ExternalOrderKey frontier = ExternalOrderKey.of(List.of(0L));
+        index.replace(later, surface, List.of(active(
+                "ownerChannel", "timeline-a", "alice", frontier, 4)));
+        index.replace(earlier, surface, List.of(active(
+                "ownerChannel", "timeline-a", "alice", frontier, 2)));
+
+        OperationRouteIndex.FrozenDirectDeliverySelection selected =
+                index.selectDirectDeliveries(entry(
+                        "timeline-a", "alice"));
+
+        assertEquals(2L, selected.routeGeneration());
+        assertEquals(List.of(earlier, later), selected.documentIds());
+        assertEquals(List.of(earlier, later), selected.deliveries().stream()
+                .map(OperationRouteIndex.FrozenDirectDelivery::documentId)
+                .toList());
+        assertEquals(List.of(0L, 1L), selected.deliveries().stream()
+                .map(OperationRouteIndex.FrozenDirectDelivery
+                        ::rawOccurrenceOrder)
+                .toList());
+        assertEquals(List.of("ownerChannel", "ownerChannel"),
+                selected.contractsEvidence().stream()
+                        .map(delivery -> delivery.channelKey())
+                        .toList());
+        String runtimeDeliveryKey = TimelineProviderSupport
+                .operationRequestLogicalDeliveryKey(
+                        "increment", "ownerChannel");
+        assertEquals(List.of(runtimeDeliveryKey, runtimeDeliveryKey),
+                selected.contractsEvidence().stream()
+                        .map(delivery -> delivery.logicalDeliveryKey())
+                        .toList());
+        selected.contractsEvidence().forEach(delivery -> {
+            assertEquals("/", delivery.targetScope().address().path());
+            assertEquals(0L,
+                    delivery.targetScope().address().activationGeneration());
+        });
+    }
+
+    @Test
+    void preservesLegacyNestedRoutingButExcludesItFromClosureDeliveries() {
+        OperationRouteIndex index = new OperationRouteIndex(
+                new EngineMetrics());
+        RoutingSurface nested = new RoutingSurface(List.of(
+                new RoutingSurface.Definition(
+                        "/nested", "increment", "ownerChannel",
+                        "timeline-a", "alice")), false);
+        SubscriptionDelta.Entry active = new SubscriptionDelta.Entry(
+                "/nested",
+                "ownerChannel",
+                "timeline-channel-type",
+                List.of("source-ownerChannel"),
+                0,
+                List.of(TimelineProviderSupport.exactScalarEventKeys(
+                        "timeline-a", "alice").get(0)),
+                "checkpoint-domain",
+                0L,
+                ExternalOrderKey.of(List.of(0L)),
+                null);
+        index.replace(DOCUMENT, nested, List.of(active));
+
+        TimelineEntry entry = entry("timeline-a", "alice");
+        assertEquals(List.of(DOCUMENT), index.route(entry));
+        assertEquals(List.of(),
+                index.selectDirectDeliveries(entry).deliveries());
+    }
+
     private static RoutingSurface surface(String timeline, String actor) {
         return new RoutingSurface(List.of(new RoutingSurface.Definition(
                 "/",
@@ -211,12 +283,21 @@ final class OperationRouteIndexTest {
             String timeline,
             String actor,
             ExternalOrderKey startAfter) {
+        return active(channel, timeline, actor, startAfter, 0);
+    }
+
+    private static SubscriptionDelta.Entry active(
+            String channel,
+            String timeline,
+            String actor,
+            ExternalOrderKey startAfter,
+            int order) {
         return new SubscriptionDelta.Entry(
                 "/",
                 channel,
                 "timeline-channel-type",
                 List.of("source-" + channel),
-                0,
+                order,
                 List.of(TimelineProviderSupport.exactScalarEventKeys(
                         timeline, actor).get(0)),
                 "checkpoint-domain",
