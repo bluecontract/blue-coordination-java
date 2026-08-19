@@ -10,6 +10,7 @@ import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -332,6 +333,131 @@ final class SdkAcceptanceTest {
     }
 
     @Test
+    void detachBreaksTheLoopAndTheLaterCallTerminates() {
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            DynamicLoop scenario = admitDynamicLoop(
+                    coordination, "sdk-detach");
+            String beforeA = scenario.a().snapshot().blueId();
+            String beforeB = scenario.b().snapshot().blueId();
+
+            EntryResult rejected = coordination.operations()
+                    .on(scenario.a())
+                    .from(scenario.signalTimeline())
+                    .call("startLoop")
+                    .through("signalChannel")
+                    .execute();
+
+            assertEquals(EntryDisposition.GAS_LIMIT_EXCEEDED,
+                    rejected.disposition());
+            assertTrue(rejected.closures().get(0).changes().isEmpty());
+            assertEquals(beforeA, scenario.a().snapshot().blueId());
+            assertEquals(beforeB, scenario.b().snapshot().blueId());
+
+            EntryResult detached = coordination.operations()
+                    .on(scenario.b())
+                    .from(scenario.controlTimeline())
+                    .call("detach")
+                    .through("controlChannel")
+                    .execute();
+
+            assertEquals(EntryDisposition.APPLIED,
+                    detached.disposition());
+            assertEquals(Set.of(scenario.a().id(), scenario.b().id()),
+                    changedDocuments(detached));
+            assertFalse(scenario.a().exact().cyclicMember());
+            assertFalse(scenario.b().exact().cyclicMember());
+            assertFalse(coordination.advanced()
+                    .auditDocument(scenario.b().id())
+                    .embeddedChildren().containsKey("/peer"));
+
+            EntryResult accepted = coordination.operations()
+                    .on(scenario.a())
+                    .from(scenario.signalTimeline())
+                    .call("startLoop")
+                    .through("signalChannel")
+                    .execute();
+
+            assertEquals(EntryDisposition.APPLIED,
+                    accepted.disposition());
+            assertEquals(List.of(scenario.a().id()),
+                    accepted.stats().documentStepOrder());
+            assertEquals(Set.of(scenario.a().id()),
+                    changedDocuments(accepted));
+            assertEquals(1L,
+                    scenario.a().snapshot().longAt("/loopStarts"));
+            assertTrue(accepted.stats().gas() < rejected.stats().gas());
+        }
+    }
+
+    @Test
+    void removeAndReaddProducesFreshAuthenticatedCycleIdentity() {
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            DynamicLoop scenario = admitDynamicLoop(
+                    coordination, "sdk-reactivation");
+            String initialA = scenario.a().snapshot().blueId();
+            String initialB = scenario.b().snapshot().blueId();
+            String initialMaster = cyclicMaster(initialA);
+            assertEquals(scenario.a().id(), coordination.advanced()
+                    .auditDocument(scenario.b().id())
+                    .embeddedChildren().get("/peer"));
+
+            EntryResult detached = coordination.operations()
+                    .on(scenario.b())
+                    .from(scenario.controlTimeline())
+                    .call("detach")
+                    .through("controlChannel")
+                    .execute();
+            assertEquals(EntryDisposition.APPLIED,
+                    detached.disposition());
+            String detachedA = scenario.a().snapshot().blueId();
+            String detachedB = scenario.b().snapshot().blueId();
+            assertFalse(scenario.a().exact().cyclicMember());
+            assertFalse(scenario.b().exact().cyclicMember());
+
+            EntryResult finite = coordination.operations()
+                    .on(scenario.a())
+                    .from(scenario.signalTimeline())
+                    .call("startLoop")
+                    .through("signalChannel")
+                    .execute();
+            assertEquals(EntryDisposition.APPLIED, finite.disposition());
+
+            EntryResult readded = coordination.operations()
+                    .on(scenario.b())
+                    .from(scenario.controlTimeline())
+                    .call("readd")
+                    .through("controlChannel")
+                    .request(request -> request.exact(
+                            "peer", scenario.a().exact()))
+                    .execute();
+
+            assertEquals(EntryDisposition.APPLIED,
+                    readded.disposition());
+            assertEquals(Set.of(scenario.a().id(), scenario.b().id()),
+                    changedDocuments(readded));
+            assertTrue(scenario.a().exact().cyclicMember());
+            assertTrue(scenario.b().exact().cyclicMember());
+            String readdedA = scenario.a().snapshot().blueId();
+            String readdedB = scenario.b().snapshot().blueId();
+            String readdedMaster = cyclicMaster(readdedA);
+            assertEquals(readdedMaster, cyclicMaster(readdedB));
+            assertNotEquals(initialMaster, readdedMaster);
+            assertNotEquals(initialA, readdedA);
+            assertNotEquals(initialB, readdedB);
+            assertNotEquals(detachedA, readdedA);
+            assertNotEquals(detachedB, readdedB);
+            assertEquals(scenario.a().id(), coordination.advanced()
+                    .auditDocument(scenario.b().id())
+                    .embeddedChildren().get("/peer"));
+
+            // The normal SDK authenticates fresh member/master identities.
+            // Its advanced DocumentSnapshot exposes the restored path and
+            // lineage, but deliberately does not expose the internal
+            // activation-row generation or occurrence/binding identities.
+        }
+    }
+
+    @Test
     void submitIsAppendOnlyAndDrainMatchesExecute() {
         String timelineId = "sdk/parity/alice";
         DocumentId id = DocumentId.of("sdk-parity-counter");
@@ -546,6 +672,45 @@ final class SdkAcceptanceTest {
                     closure.document("a").snapshot().blueId(),
                     closure.document("b").snapshot().blueId());
         }
+    }
+
+    private static DynamicLoop admitDynamicLoop(
+            BlueCoordination coordination,
+            String prefix) {
+        DocumentId aId = DocumentId.of(prefix + "-a");
+        DocumentId bId = DocumentId.of(prefix + "-b");
+        String signalTimelineId = prefix + "/signal";
+        String controlTimelineId = prefix + "/control";
+        ManagedClosure definition = ManagedClosure.builder()
+                .document("a", aId,
+                        dynamicLoopA(aId, signalTimelineId))
+                .document("b", bId,
+                        dynamicLoopB(bId, controlTimelineId))
+                .bindOccurrence("a", "/peer", "b")
+                .bindOccurrence("b", "/peer", "a")
+                .publicRoot("a")
+                .publicRoot("b")
+                .fromNow()
+                .build();
+        TimelineHandle signal = coordination.timelines().register(
+                signalTimelineId, ACTOR);
+        TimelineHandle control = coordination.timelines().register(
+                controlTimelineId, ACTOR);
+        ClosureHandle closure = coordination.documents().admit(definition);
+        return new DynamicLoop(
+                closure.document("a"),
+                closure.document("b"),
+                signal,
+                control);
+    }
+
+    private static String cyclicMaster(String memberBlueId) {
+        int separator = memberBlueId.lastIndexOf('#');
+        if (separator <= 0) {
+            throw new AssertionError(
+                    "Expected cyclic member BlueId, got " + memberBlueId);
+        }
+        return memberBlueId.substring(0, separator);
     }
 
     private static void assertAllExactEvidence(
@@ -1010,6 +1175,109 @@ final class SdkAcceptanceTest {
                 id.value(), peerPath, peerPath, external.stripTrailing());
     }
 
+    private static String dynamicLoopA(
+            DocumentId id,
+            String timelineId) {
+        return """
+                documentId: %s
+                loopStarts: 0
+                contracts:
+                  embedded:
+                    type: Process Embedded
+                    paths:
+                      - /peer
+                  signalChannel:
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: %s
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: %s
+                  startLoop:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: signalChannel
+                    request: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: replace
+                              path: /loopStarts
+                              val: {$add: [{$document: /loopStarts}, 1]}
+                          - $appendEvent: {type: Coordination/Event, kind: LOOP}
+                          - $return: true
+                  fromPeer:
+                    type: Embedded Node Channel
+                    sourcePath: /peer
+                    event: {type: Coordination/Event, kind: LOOP}
+                  relayLoop:
+                    type: Coordination/Sequential Workflow
+                    channel: fromPeer
+                    event: {type: Coordination/Event, kind: LOOP}
+                    steps:
+                      - type: Coordination/Trigger Event
+                        event: {type: Coordination/Event, kind: LOOP}
+                """.formatted(id.value(), timelineId, ACTOR);
+    }
+
+    private static String dynamicLoopB(
+            DocumentId id,
+            String timelineId) {
+        return """
+                documentId: %s
+                phase: attached
+                contracts:
+                  embedded:
+                    type: Process Embedded
+                    paths:
+                      - /peer
+                  controlChannel:
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: %s
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: %s
+                  detach:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: controlChannel
+                    request: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange: {op: remove, path: /peer}
+                          - $appendChange: {op: replace, path: /phase, val: detached}
+                          - $return: true
+                  readd:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: controlChannel
+                    request:
+                      peer: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: add
+                              path: /peer
+                              val: {$binding: event/message/request/peer}
+                          - $appendChange: {op: replace, path: /phase, val: attached}
+                          - $return: true
+                  fromPeer:
+                    type: Embedded Node Channel
+                    sourcePath: /peer
+                    event: {type: Coordination/Event, kind: LOOP}
+                  relayLoop:
+                    type: Coordination/Sequential Workflow
+                    channel: fromPeer
+                    event: {type: Coordination/Event, kind: LOOP}
+                    steps:
+                      - type: Coordination/Trigger Event
+                        event: {type: Coordination/Event, kind: LOOP}
+                """.formatted(id.value(), timelineId, ACTOR);
+    }
+
     private record GasLoopEvidence(
             String entryBlueId,
             String closureId,
@@ -1023,5 +1291,12 @@ final class SdkAcceptanceTest {
         private GasLoopEvidence {
             documentStepOrder = List.copyOf(documentStepOrder);
         }
+    }
+
+    private record DynamicLoop(
+            DocumentHandle a,
+            DocumentHandle b,
+            TimelineHandle signalTimeline,
+            TimelineHandle controlTimeline) {
     }
 }
