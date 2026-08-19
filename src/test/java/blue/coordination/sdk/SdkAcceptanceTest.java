@@ -1,0 +1,1027 @@
+package blue.coordination.sdk;
+
+import blue.coordination.api.DocumentId;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/** Public-SDK-only acceptance of the bundled Contracts 1.0 runtime. */
+final class SdkAcceptanceTest {
+    private static final String ACTOR = "alice";
+
+    @Test
+    void counterAppliesPlusThreeThenMinusOne() {
+        String timelineId = "sdk/counter/alice";
+        DocumentId counterId = DocumentId.of("sdk-counter");
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            TimelineHandle timeline = coordination.timelines().register(
+                    timelineId, ACTOR);
+            DocumentHandle counter = coordination.documents().admit(
+                    ManagedDocument.yaml(
+                                    counterId,
+                                    counterDocument(counterId, timelineId))
+                            .publicRoot()
+                            .fromNow());
+
+            EntryResult increment = coordination.operations().on(counter)
+                    .from(timeline)
+                    .call("increment")
+                    .through("ownerChannel")
+                    .requestYaml("amount: 3")
+                    .execute();
+            EntryResult decrement = coordination.operations().on(counter)
+                    .from(timeline)
+                    .call("decrement")
+                    .through("ownerChannel")
+                    .requestYaml("amount: 1")
+                    .execute();
+
+            assertApplied(increment, counterId);
+            assertApplied(decrement, counterId);
+            assertEquals(2L, counter.snapshot().longAt("/counter"));
+            assertEquals(2L, counter.snapshot().epoch());
+            assertEquals(List.of(0L, 1L, 2L), counter.history().stream()
+                    .map(DocumentRevision::epoch)
+                    .toList());
+            assertTrue(increment.stats().gas() > 0L);
+            assertTrue(decrement.stats().gas() > 0L);
+            assertEquals(List.of(counterId),
+                    increment.stats().documentStepOrder());
+            assertEquals(List.of(counterId),
+                    decrement.stats().documentStepOrder());
+        }
+    }
+
+    @Test
+    void exactOrderTargetDoesNotProcessStandalonePayNote() {
+        String timelineId = "sdk/targeting/alice";
+        DocumentId orderId = DocumentId.of("sdk-order");
+        DocumentId payNoteId = DocumentId.of("sdk-paynote");
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            TimelineHandle timeline = coordination.timelines().register(
+                    timelineId, ACTOR);
+            DocumentHandle order = coordination.documents().admit(
+                    ManagedDocument.yaml(orderId,
+                                    targetedDocument(orderId, timelineId))
+                            .publicRoot()
+                            .fromNow());
+            DocumentHandle payNote = coordination.documents().admit(
+                    ManagedDocument.yaml(payNoteId,
+                                    targetedDocument(payNoteId, timelineId))
+                            .publicRoot()
+                            .fromNow());
+            String payNoteBefore = payNote.snapshot().blueId();
+
+            EntryResult result = coordination.operations().on(order)
+                    .from(timeline)
+                    .call("markProcessed")
+                    .through("ownerChannel")
+                    .execute();
+
+            assertApplied(result, orderId);
+            assertEquals(1L, order.snapshot().longAt("/processed"));
+            assertEquals(0L, payNote.snapshot().longAt("/processed"));
+            assertEquals(0L, payNote.snapshot().epoch());
+            assertEquals(payNoteBefore, payNote.snapshot().blueId());
+            assertEquals(Set.of(orderId), changedDocuments(result));
+        }
+    }
+
+    @Test
+    void validBroadcastWithNoAcceptingChannelIsTerminalNoMatch() {
+        String timelineId = "sdk/no-match/source";
+        String accountId = "outsider";
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            TimelineHandle timeline = coordination.timelines().register(
+                    timelineId, accountId);
+            ExactBlueValue event = coordination.values().yaml("""
+                    type: Coordination/Timeline Entry
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: %s
+                    timestamp: 2100000000000001
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: %s
+                    message:
+                      type: Coordination/Operation Request
+                      operation: orphanFact
+                      channel: outsideChannel
+                      request: {fact: valid-but-unmatched}
+                    """.formatted(timelineId, accountId));
+
+            EntryResult result = coordination.events().from(timeline)
+                    .exact(event)
+                    .execute();
+
+            assertEquals(EntryDisposition.NO_MATCH, result.disposition());
+            assertTrue(result.closures().isEmpty());
+            assertTrue(result.publicEvents().isEmpty());
+            assertEquals(ProcessingStats.zero(), result.stats());
+            assertFalse(result.diagnostic().present());
+        }
+    }
+
+    @Test
+    void missingExactTargetIsRejectedWithPreciseDiagnostic() {
+        DocumentId missingId = DocumentId.of("sdk-missing-target");
+        String timelineId = "sdk/missing/alice";
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            TimelineHandle timeline = coordination.timelines().register(
+                    timelineId, ACTOR);
+
+            EntryResult result = coordination.operations().on(missingId)
+                    .from(timeline)
+                    .call("advance")
+                    .through("ownerChannel")
+                    .execute();
+
+            assertEquals(EntryDisposition.REJECTED,
+                    result.disposition());
+            assertEquals("TARGET_DOCUMENT_NOT_FOUND",
+                    result.diagnostic().code());
+            assertEquals(missingId.value(),
+                    result.diagnostic().details().get("documentId"));
+            assertEquals("advance",
+                    result.diagnostic().details().get("operation"));
+            assertEquals("ownerChannel",
+                    result.diagnostic().details().get("channel"));
+            assertTrue(result.closures().isEmpty());
+            assertEquals(0L, result.stats().gas());
+        }
+    }
+
+    @Test
+    void finiteTwoMemberCycleReportsExactPublicEvidence() {
+        assertFiniteRing("sdk-two-ring", 2,
+                List.of("sdk-two-ring-0", "sdk-two-ring-1",
+                        "sdk-two-ring-0"));
+    }
+
+    @Test
+    void finiteThreeMemberCycleReportsExactPublicEvidence() {
+        assertFiniteRing("sdk-three-ring", 3,
+                List.of("sdk-three-ring-0", "sdk-three-ring-1",
+                        "sdk-three-ring-2", "sdk-three-ring-0"));
+    }
+
+    @Test
+    void fiveMemberSharedAnchorCyclePreservesExactStepOrder() {
+        DocumentId a = DocumentId.of("sdk-branch-a");
+        DocumentId b1 = DocumentId.of("sdk-branch-b1");
+        DocumentId b2 = DocumentId.of("sdk-branch-b2");
+        DocumentId c1 = DocumentId.of("sdk-branch-c1");
+        DocumentId c2 = DocumentId.of("sdk-branch-c2");
+        List<DocumentId> members = List.of(a, b1, b2, c1, c2);
+        String timelineId = "sdk/branching/shared";
+        ManagedClosure closure = ManagedClosure.builder()
+                .document("a", a, branchingA(a, timelineId))
+                .document("b1", b1,
+                        branchingB(b1, "branch-c1", "branch-result-1"))
+                .document("b2", b2,
+                        branchingB(b2, "branch-c2", "branch-result-2"))
+                .document("c1", c1,
+                        branchingC(c1, "branch-start-1", "branch-c1"))
+                .document("c2", c2,
+                        branchingC(c2, "branch-start-2", "branch-c2"))
+                .bindOccurrence("a", "/branches/b1", "b1")
+                .bindOccurrence("b1", "/child", "c1")
+                .bindOccurrence("c1", "/root", "a")
+                .bindOccurrence("a", "/branches/b2", "b2")
+                .bindOccurrence("b2", "/child", "c2")
+                .bindOccurrence("c2", "/root", "a")
+                .publicRoot("a")
+                .fromNow()
+                .build();
+
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            TimelineHandle timeline = coordination.timelines().register(
+                    timelineId, ACTOR);
+            ClosureHandle admitted = coordination.documents().admit(closure);
+
+            EntryResult result = coordination.operations()
+                    .on(admitted.document("a"))
+                    .from(timeline)
+                    .call("start")
+                    .through("ownerChannel")
+                    .execute();
+
+            assertEquals(EntryDisposition.APPLIED, result.disposition());
+            assertEquals(1, result.closures().size());
+            assertEquals(List.of(a, c1, b1, a, c2, b2, a),
+                    result.stats().documentStepOrder());
+            assertEquals(Set.copyOf(members), changedDocuments(result));
+            assertEquals(5, result.publicEvents().size());
+            List<String> publicEventBlueIds = result.publicEvents().stream()
+                    .map(PublicEvent::blueId)
+                    .toList();
+            assertEquals(publicEventBlueIds.get(1),
+                    publicEventBlueIds.get(3),
+                    "the two exact branch-ack values share one BlueId");
+            assertEquals(4, Set.copyOf(publicEventBlueIds).size());
+            assertAllExactEvidence(result, admitted, members, 1L);
+            assertEquals("done",
+                    admitted.document("a").snapshot().textAt("/phase"));
+            assertEquals("done",
+                    admitted.document("a").snapshot().textAt("/branch1"));
+            assertEquals("done",
+                    admitted.document("a").snapshot().textAt("/branch2"));
+            assertEquals("contributed", admitted.document("b1")
+                    .snapshot().textAt("/phase"));
+            assertEquals("contributed", admitted.document("b2")
+                    .snapshot().textAt("/phase"));
+            assertEquals("observed", admitted.document("c1")
+                    .snapshot().textAt("/phase"));
+            assertEquals("observed", admitted.document("c2")
+                    .snapshot().textAt("/phase"));
+        }
+    }
+
+    @Test
+    void oneBroadcastPreservesTwoDisconnectedCycleResults() {
+        DocumentId a1 = DocumentId.of("sdk-disjoint-a1");
+        DocumentId b1 = DocumentId.of("sdk-disjoint-b1");
+        DocumentId a2 = DocumentId.of("sdk-disjoint-a2");
+        DocumentId b2 = DocumentId.of("sdk-disjoint-b2");
+        String timelineId = "sdk/disjoint/shared";
+        ManagedClosure closure = ManagedClosure.builder()
+                .document("a1", a1,
+                        disjointA(a1, timelineId, "disjoint-one"))
+                .document("b1", b1,
+                        disjointB(b1, "disjoint-one"))
+                .document("a2", a2,
+                        disjointA(a2, timelineId, "disjoint-two"))
+                .document("b2", b2,
+                        disjointB(b2, "disjoint-two"))
+                .bindOccurrence("a1", "/peer", "b1")
+                .bindOccurrence("b1", "/peer", "a1")
+                .bindOccurrence("a2", "/peer", "b2")
+                .bindOccurrence("b2", "/peer", "a2")
+                .publicRoot("a1")
+                .publicRoot("a2")
+                .fromNow()
+                .build();
+
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            TimelineHandle timeline = coordination.timelines().register(
+                    timelineId, ACTOR);
+            ClosureHandle admitted = coordination.documents().admit(closure);
+            ExactBlueValue event = coordination.values().yaml("""
+                    type: Coordination/Timeline Entry
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: %s
+                    timestamp: 2100000000000101
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: %s
+                    message:
+                      type: Coordination/Operation Request
+                      operation: start
+                      channel: sharedChannel
+                      request: {}
+                    """.formatted(timelineId, ACTOR));
+
+            EntryResult result = coordination.events().from(timeline)
+                    .exact(event)
+                    .execute();
+
+            assertEquals(EntryDisposition.APPLIED, result.disposition());
+            assertEquals(2, result.closures().size());
+            assertTrue(result.closures().stream().allMatch(
+                    ClosureResult::applied));
+            assertEquals(List.of(
+                            Set.of(a1, b1),
+                            Set.of(a2, b2)),
+                    result.closures().stream()
+                            .map(closureResult -> closureResult.changes()
+                                    .stream()
+                                    .map(DocumentChange::documentId)
+                                    .collect(Collectors.toUnmodifiableSet()))
+                            .toList());
+            assertEquals(List.of(a1, b1, a1, a2, b2, a2),
+                    result.stats().documentStepOrder());
+            assertEquals(Set.of(a1, b1, a2, b2),
+                    changedDocuments(result));
+            assertAllExactEvidence(
+                    result, admitted, List.of(a1, b1, a2, b2), 1L);
+        }
+    }
+
+    @Test
+    void gasLoopRollsBackAndIsExactlyRepeatable() {
+        GasLoopEvidence first = runGasLoop();
+        GasLoopEvidence retry = runGasLoop();
+
+        assertEquals(first, retry);
+        assertTrue(first.gas() > 0L);
+        assertTrue(first.documentStepOrder().size() > 2);
+        assertEquals(List.of(
+                        DocumentId.of("sdk-gas-loop-a"),
+                        DocumentId.of("sdk-gas-loop-b"),
+                        DocumentId.of("sdk-gas-loop-a")),
+                first.documentStepOrder().subList(0, 3));
+    }
+
+    @Test
+    void submitIsAppendOnlyAndDrainMatchesExecute() {
+        String timelineId = "sdk/parity/alice";
+        DocumentId id = DocumentId.of("sdk-parity-counter");
+        EntryResult submittedResult;
+        DocumentSnapshot submittedSnapshot;
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            TimelineHandle timeline = coordination.timelines().register(
+                    timelineId, ACTOR);
+            DocumentHandle document = coordination.documents().admit(
+                    ManagedDocument.yaml(
+                                    id, counterDocument(id, timelineId))
+                            .publicRoot()
+                            .fromNow());
+
+            EntryHandle submitted = coordination.operations().on(document)
+                    .from(timeline)
+                    .call("increment")
+                    .through("ownerChannel")
+                    .requestYaml("amount: 3")
+                    .submit();
+
+            assertEquals(0L, document.snapshot().epoch());
+            assertEquals(0L, document.snapshot().longAt("/counter"));
+            DrainResult drain = coordination.processing().drain();
+            submittedResult = drain.entry(submitted);
+            submittedSnapshot = document.snapshot();
+            assertTrue(drain.quiescent());
+        }
+
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            TimelineHandle timeline = coordination.timelines().register(
+                    timelineId, ACTOR);
+            DocumentHandle document = coordination.documents().admit(
+                    ManagedDocument.yaml(
+                                    id, counterDocument(id, timelineId))
+                            .publicRoot()
+                            .fromNow());
+            EntryResult executed = coordination.operations().on(document)
+                    .from(timeline)
+                    .call("increment")
+                    .through("ownerChannel")
+                    .requestYaml("amount: 3")
+                    .execute();
+
+            assertEquals(executed.disposition(),
+                    submittedResult.disposition());
+            assertEquals(executed.stats().gas(),
+                    submittedResult.stats().gas());
+            assertEquals(executed.stats().documentStepOrder(),
+                    submittedResult.stats().documentStepOrder());
+            assertEquals(executed.publicEvents().stream()
+                            .map(PublicEvent::blueId).toList(),
+                    submittedResult.publicEvents().stream()
+                            .map(PublicEvent::blueId).toList());
+            assertEquals(document.snapshot().blueId(),
+                    submittedSnapshot.blueId());
+            assertEquals(document.snapshot().epoch(),
+                    submittedSnapshot.epoch());
+            assertEquals(document.snapshot().longAt("/counter"),
+                    submittedSnapshot.longAt("/counter"));
+        }
+    }
+
+    @Test
+    void managedOrderDraftAdmissionFailsClosedWithStableCode() {
+        String timelineId = "sdk/draft/alice";
+        DocumentId hostId = DocumentId.of("sdk-order-host");
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            TimelineHandle timeline = coordination.timelines().register(
+                    timelineId, ACTOR);
+            DocumentHandle host = coordination.documents().admit(
+                    ManagedDocument.yaml(
+                                    hostId,
+                                    orderHostDocument(hostId, timelineId))
+                            .publicRoot()
+                            .fromNow());
+            ManagedDocumentDraft order = coordination.documents().draft(
+                    DocumentId.of("sdk-created-order"),
+                    coordination.values().yaml("""
+                            documentId: sdk-created-order
+                            state: draft
+                            """));
+            String before = host.snapshot().blueId();
+            int historyBefore = host.history().size();
+
+            UnsupportedOperationException failure = assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> coordination.operations().on(host)
+                            .from(timeline)
+                            .call("createOrder")
+                            .through("ownerChannel")
+                            .request(request -> request.managed(
+                                    "order", order))
+                            .expectOccurrence("/orders/order-1", order)
+                            .execute());
+
+            assertTrue(failure.getMessage().startsWith(
+                    "UNSUPPORTED_MANAGED_DRAFT_ADMISSION:"));
+            assertEquals(before, host.snapshot().blueId());
+            assertEquals(0L, host.snapshot().epoch());
+            assertEquals(historyBefore, host.history().size());
+        }
+    }
+
+    private static void assertFiniteRing(
+            String prefix,
+            int size,
+            List<String> expectedStepOrder) {
+        String timelineId = prefix + "/alice";
+        List<DocumentId> ids = IntStream.range(0, size)
+                .mapToObj(index -> DocumentId.of(prefix + "-" + index))
+                .toList();
+        ManagedClosure.Builder builder = ManagedClosure.builder();
+        for (int index = 0; index < size; index++) {
+            String alias = "m" + index;
+            builder.document(alias, ids.get(index), ringDocument(
+                    ids.get(index), timelineId, index, size));
+            int previous = Math.floorMod(index - 1, size);
+            builder.bindOccurrence(alias, "/previous", "m" + previous);
+        }
+        ManagedClosure definition = builder.publicRoot("m0")
+                .fromNow()
+                .build();
+
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            TimelineHandle timeline = coordination.timelines().register(
+                    timelineId, ACTOR);
+            ClosureHandle closure = coordination.documents().admit(
+                    definition);
+
+            EntryResult result = coordination.operations()
+                    .on(closure.document("m0"))
+                    .from(timeline)
+                    .call("start")
+                    .through("ownerChannel")
+                    .execute();
+
+            assertEquals(EntryDisposition.APPLIED, result.disposition());
+            assertEquals(1, result.closures().size());
+            assertEquals(expectedStepOrder.stream()
+                            .map(DocumentId::of)
+                            .toList(),
+                    result.stats().documentStepOrder());
+            assertEquals(Set.copyOf(ids), changedDocuments(result));
+            assertEquals(1, result.publicEvents().size());
+            assertAllExactEvidence(result, closure, ids, 1L);
+            assertEquals("done", closure.document("m0")
+                    .snapshot().textAt("/phase"));
+            for (int index = 1; index < size; index++) {
+                assertEquals("relayed-" + index,
+                        closure.document("m" + index)
+                                .snapshot().textAt("/phase"));
+            }
+        }
+    }
+
+    private static GasLoopEvidence runGasLoop() {
+        DocumentId a = DocumentId.of("sdk-gas-loop-a");
+        DocumentId b = DocumentId.of("sdk-gas-loop-b");
+        String timelineId = "sdk/gas-loop/alice";
+        ManagedClosure definition = ManagedClosure.builder()
+                .document("a", a,
+                        gasLoopDocument(a, timelineId, "/peer", true))
+                .document("b", b,
+                        gasLoopDocument(b, timelineId, "/peer", false))
+                .bindOccurrence("a", "/peer", "b")
+                .bindOccurrence("b", "/peer", "a")
+                .publicRoot("a")
+                .fromNow()
+                .build();
+
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            TimelineHandle timeline = coordination.timelines().register(
+                    timelineId, ACTOR);
+            ClosureHandle closure = coordination.documents().admit(
+                    definition);
+            String beforeA = closure.document("a").snapshot().blueId();
+            String beforeB = closure.document("b").snapshot().blueId();
+
+            EntryResult result = coordination.operations()
+                    .on(closure.document("a"))
+                    .from(timeline)
+                    .call("startLoop")
+                    .through("ownerChannel")
+                    .execute();
+
+            assertEquals(EntryDisposition.GAS_LIMIT_EXCEEDED,
+                    result.disposition());
+            assertEquals(1, result.closures().size());
+            assertEquals(EntryDisposition.GAS_LIMIT_EXCEEDED,
+                    result.closures().get(0).disposition());
+            assertTrue(result.diagnostic().present());
+            assertTrue(result.closures().get(0).changes().isEmpty());
+            assertTrue(result.publicEvents().isEmpty());
+            assertEquals(0L, closure.document("a").snapshot().epoch());
+            assertEquals(0L, closure.document("b").snapshot().epoch());
+            assertEquals(beforeA,
+                    closure.document("a").snapshot().blueId());
+            assertEquals(beforeB,
+                    closure.document("b").snapshot().blueId());
+            assertTrue(coordination.processing().drain().entries().isEmpty(),
+                    "a terminal gas failure is not silently retried");
+
+            return new GasLoopEvidence(
+                    result.entry().blueId(),
+                    result.closures().get(0).closureId(),
+                    result.stats().gas(),
+                    result.stats().documentStepOrder(),
+                    result.diagnostic().code(),
+                    beforeA,
+                    beforeB,
+                    closure.document("a").snapshot().blueId(),
+                    closure.document("b").snapshot().blueId());
+        }
+    }
+
+    private static void assertAllExactEvidence(
+            EntryResult result,
+            ClosureHandle closure,
+            List<DocumentId> members,
+            long epoch) {
+        assertTrue(result.stats().gas() > 0L);
+        assertFalse(result.entry().blueId().isBlank());
+        assertFalse(result.closures().get(0).closureId().isBlank());
+        assertTrue(result.publicEvents().stream().allMatch(event ->
+                !event.blueId().isBlank()
+                        && event.blueId().equals(event.exact().blueId())));
+        assertEquals(Set.copyOf(members),
+                Set.copyOf(closure.documents().values().stream()
+                        .map(DocumentHandle::id)
+                        .toList()));
+        for (DocumentHandle handle : closure.documents().values()) {
+            assertEquals(epoch, handle.snapshot().epoch());
+            String blueId = handle.snapshot().blueId();
+            int memberSeparator = blueId.lastIndexOf('#');
+            assertTrue(memberSeparator > 0, () -> blueId);
+            assertTrue(blueId.substring(memberSeparator + 1)
+                    .matches("[0-9]+"), () -> blueId);
+            assertTrue(handle.exact().cyclicMember());
+        }
+    }
+
+    private static void assertApplied(
+            EntryResult result,
+            DocumentId expectedDocument) {
+        assertEquals(EntryDisposition.APPLIED, result.disposition());
+        assertTrue(result.applied());
+        assertFalse(result.diagnostic().present());
+        assertEquals(Set.of(expectedDocument), changedDocuments(result));
+    }
+
+    private static Set<DocumentId> changedDocuments(EntryResult result) {
+        return result.closures().stream()
+                .flatMap(closure -> closure.changes().stream())
+                .map(DocumentChange::documentId)
+                .collect(Collectors.toUnmodifiableSet());
+    }
+
+    private static String counterDocument(
+            DocumentId documentId,
+            String timelineId) {
+        return """
+                documentId: %s
+                counter: 0
+                contracts:
+                  ownerChannel:
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: %s
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: %s
+                  increment:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request:
+                      amount: {type: Integer}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: replace
+                              path: /counter
+                              val:
+                                $add:
+                                  - $document: /counter
+                                  - $binding: event/message/request/amount
+                          - $return: true
+                  decrement:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request:
+                      amount: {type: Integer}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: replace
+                              path: /counter
+                              val:
+                                $subtract:
+                                  - $document: /counter
+                                  - $binding: event/message/request/amount
+                          - $return: true
+                """.formatted(documentId.value(), timelineId, ACTOR);
+    }
+
+    private static String targetedDocument(
+            DocumentId documentId,
+            String timelineId) {
+        return """
+                documentId: %s
+                processed: 0
+                contracts:
+                  ownerChannel:
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: %s
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: %s
+                  markProcessed:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange: {op: replace, path: /processed, val: 1}
+                          - $return: true
+                """.formatted(documentId.value(), timelineId, ACTOR);
+    }
+
+    private static String ringDocument(
+            DocumentId id,
+            String timelineId,
+            int index,
+            int size) {
+        String external = index == 0 ? """
+                  ownerChannel:
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: %s
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: %s
+                  start:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange: {op: replace, path: /phase, val: started}
+                          - $appendEvent: {type: Coordination/Event, kind: ring-0}
+                          - $return: true
+                """.formatted(timelineId, ACTOR) : "";
+        String response;
+        if (index == 0) {
+            response = """
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange: {op: replace, path: /phase, val: done}
+                          - $return: true
+                    """;
+        } else {
+            response = """
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange: {op: replace, path: /phase, val: relayed-%d}
+                          - $appendEvent: {type: Coordination/Event, kind: ring-%d}
+                          - $return: true
+                    """.formatted(index, index);
+        }
+        int incoming = Math.floorMod(index - 1, size);
+        return """
+                documentId: %s
+                phase: initial
+                contracts:
+                  embedded:
+                    type: Process Embedded
+                    paths:
+                      - /previous
+                  fromPrevious:
+                    type: Embedded Node Channel
+                    sourcePath: /previous
+                    event: {type: Coordination/Event, kind: ring-%d}
+                  onPrevious:
+                    type: Coordination/Sequential Workflow
+                    channel: fromPrevious
+                    event: {type: Coordination/Event, kind: ring-%d}
+                    steps:
+                %s
+                %s
+                """.formatted(
+                id.value(), incoming, incoming,
+                response.indent(4).stripTrailing(),
+                external.stripTrailing());
+    }
+
+    private static String branchingA(
+            DocumentId id,
+            String timelineId) {
+        return """
+                documentId: %s
+                phase: initial
+                branch1: pending
+                branch2: pending
+                contracts:
+                  embedded:
+                    type: Process Embedded
+                    collectionPaths:
+                      - /branches
+                  ownerChannel:
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: %s
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: %s
+                  start:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange: {op: replace, path: /phase, val: started}
+                          - $appendEvent: {type: Coordination/Event, kind: branch-start-1}
+                          - $return: true
+                  fromB1:
+                    type: Embedded Node Channel
+                    sourcePath: /branches/b1
+                    event: {type: Coordination/Event, kind: branch-result-1}
+                  onB1:
+                    type: Coordination/Sequential Workflow
+                    channel: fromB1
+                    event: {type: Coordination/Event, kind: branch-result-1}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange: {op: replace, path: /branch1, val: done}
+                          - $appendEvent: {type: Coordination/Event, kind: branch-ack}
+                          - $appendEvent: {type: Coordination/Event, kind: branch-start-2}
+                          - $return: true
+                  fromB2:
+                    type: Embedded Node Channel
+                    sourcePath: /branches/b2
+                    event: {type: Coordination/Event, kind: branch-result-2}
+                  onB2:
+                    type: Coordination/Sequential Workflow
+                    channel: fromB2
+                    event: {type: Coordination/Event, kind: branch-result-2}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange: {op: replace, path: /branch2, val: done}
+                          - $appendChange: {op: replace, path: /phase, val: done}
+                          - $appendEvent: {type: Coordination/Event, kind: branch-ack}
+                          - $appendEvent: {type: Coordination/Event, kind: branching-done}
+                          - $return: true
+                """.formatted(id.value(), timelineId, ACTOR);
+    }
+
+    private static String branchingB(
+            DocumentId id,
+            String incomingKind,
+            String outgoingKind) {
+        return """
+                documentId: %s
+                phase: initial
+                contracts:
+                  embedded:
+                    type: Process Embedded
+                    paths:
+                      - /child
+                  fromChild:
+                    type: Embedded Node Channel
+                    sourcePath: /child
+                    event: {type: Coordination/Event, kind: %s}
+                  contribute:
+                    type: Coordination/Sequential Workflow
+                    channel: fromChild
+                    event: {type: Coordination/Event, kind: %s}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange: {op: replace, path: /phase, val: contributed}
+                          - $appendEvent: {type: Coordination/Event, kind: %s}
+                          - $return: true
+                """.formatted(id.value(), incomingKind,
+                incomingKind, outgoingKind);
+    }
+
+    private static String branchingC(
+            DocumentId id,
+            String incomingKind,
+            String outgoingKind) {
+        return """
+                documentId: %s
+                phase: initial
+                contracts:
+                  embedded:
+                    type: Process Embedded
+                    paths:
+                      - /root
+                  fromRoot:
+                    type: Embedded Node Channel
+                    sourcePath: /root
+                    event: {type: Coordination/Event, kind: %s}
+                  observe:
+                    type: Coordination/Sequential Workflow
+                    channel: fromRoot
+                    event: {type: Coordination/Event, kind: %s}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange: {op: replace, path: /phase, val: observed}
+                          - $appendEvent: {type: Coordination/Event, kind: %s}
+                          - $return: true
+                """.formatted(id.value(), incomingKind,
+                incomingKind, outgoingKind);
+    }
+
+    private static String disjointA(
+            DocumentId id,
+            String timelineId,
+            String kind) {
+        return """
+                documentId: %s
+                phase: initial
+                contracts:
+                  embedded:
+                    type: Process Embedded
+                    paths:
+                      - /peer
+                  sharedChannel:
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: %s
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: %s
+                  start:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: sharedChannel
+                    request: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange: {op: replace, path: /phase, val: started}
+                          - $appendEvent: {type: Coordination/Event, kind: %s-start}
+                          - $return: true
+                  fromPeer:
+                    type: Embedded Node Channel
+                    sourcePath: /peer
+                    event: {type: Coordination/Event, kind: %s-done}
+                  finish:
+                    type: Coordination/Sequential Workflow
+                    channel: fromPeer
+                    event: {type: Coordination/Event, kind: %s-done}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange: {op: replace, path: /phase, val: done}
+                          - $return: true
+                """.formatted(id.value(), timelineId, ACTOR,
+                kind, kind, kind);
+    }
+
+    private static String disjointB(
+            DocumentId id,
+            String kind) {
+        return """
+                documentId: %s
+                phase: initial
+                contracts:
+                  embedded:
+                    type: Process Embedded
+                    paths:
+                      - /peer
+                  fromPeer:
+                    type: Embedded Node Channel
+                    sourcePath: /peer
+                    event: {type: Coordination/Event, kind: %s-start}
+                  relay:
+                    type: Coordination/Sequential Workflow
+                    channel: fromPeer
+                    event: {type: Coordination/Event, kind: %s-start}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange: {op: replace, path: /phase, val: relayed}
+                          - $appendEvent: {type: Coordination/Event, kind: %s-done}
+                          - $return: true
+                """.formatted(id.value(), kind, kind, kind);
+    }
+
+    private static String orderHostDocument(
+            DocumentId id,
+            String timelineId) {
+        return """
+                documentId: %s
+                orders: {}
+                contracts:
+                  embedded:
+                    type: Process Embedded
+                    collectionPaths:
+                      - /orders
+                  ownerChannel:
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: %s
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: %s
+                  createOrder:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $return: true
+                """.formatted(id.value(), timelineId, ACTOR);
+    }
+
+    private static String gasLoopDocument(
+            DocumentId id,
+            String timelineId,
+            String peerPath,
+            boolean publicRoot) {
+        String external = publicRoot ? """
+                  ownerChannel:
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: %s
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: %s
+                  startLoop:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request: {}
+                    steps:
+                      - type: Coordination/Trigger Event
+                        event: {type: Coordination/Event, kind: LOOP}
+                """.formatted(timelineId, ACTOR) : "";
+        return """
+                documentId: %s
+                contracts:
+                  embedded:
+                    type: Process Embedded
+                    paths:
+                      - %s
+                  fromPeer:
+                    type: Embedded Node Channel
+                    sourcePath: %s
+                    event: {type: Coordination/Event, kind: LOOP}
+                  onPeerLoop:
+                    type: Coordination/Sequential Workflow
+                    channel: fromPeer
+                    event: {type: Coordination/Event, kind: LOOP}
+                    steps:
+                      - type: Coordination/Trigger Event
+                        event: {type: Coordination/Event, kind: LOOP}
+                %s
+                """.formatted(
+                id.value(), peerPath, peerPath, external.stripTrailing());
+    }
+
+    private record GasLoopEvidence(
+            String entryBlueId,
+            String closureId,
+            long gas,
+            List<DocumentId> documentStepOrder,
+            String diagnosticCode,
+            String beforeA,
+            String beforeB,
+            String afterA,
+            String afterB) {
+        private GasLoopEvidence {
+            documentStepOrder = List.copyOf(documentStepOrder);
+        }
+    }
+}
