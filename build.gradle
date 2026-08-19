@@ -7,29 +7,58 @@ plugins {
 }
 
 group = 'blue.coordination'
+def dependencyMode = providers.gradleProperty('blueDependencyMode')
+        .getOrElse('local-composite')
+        .trim()
+def sdkCandidateVersion = '3.0.0-rc.2'
 def versionMatches = file('.cz.toml').getText('UTF-8') =~
         /(?m)^version = "([^"]+)"$/
 if (!versionMatches.find()) {
     throw new GradleException('Missing version in .cz.toml')
 }
-version = versionMatches.group(1)
+def declaredProjectVersion = versionMatches.group(1)
+version = dependencyMode == 'staged-artifact'
+        ? sdkCandidateVersion : declaredProjectVersion
 
-def dependencyMode = providers.gradleProperty('blueDependencyMode')
-        .getOrElse('local-composite')
-        .trim()
 def localDependencies = dependencyMode == 'local-composite'
+def stagedDependencies = dependencyMode == 'staged-artifact'
+def sdkStagedBlueCoordinates = [
+        'blue.language:blue-language-model': '3.1.0-rc.20',
+        'blue.language:blue-language-core': '3.1.0-rc.20',
+        'blue.language:blue-language-mapping': '3.1.0-rc.20',
+        'blue.language:blue-language-ipfs': '3.1.0-rc.20',
+        'blue.language:blue-language-java': '3.1.0-rc.20',
+        'blue.language:blue-contracts-core': '3.1.0-rc.20',
+        'blue.repo:blue-repo-java': '3.0.0-rc.21',
+        'blue.bex:blue-bex-core': '1.1.0-rc.3',
+        'blue.bex:blue-bex-contracts': '1.1.0-rc.3'
+]
 def blueSpecRoot = file(providers.gradleProperty('blueSpecRoot')
         .orElse(providers.environmentVariable('BLUE_SPEC_ROOT'))
         .getOrElse('../blue-spec/latest')).canonicalFile
 def publishedRepository = providers.gradleProperty(
         'bluePublishedRepository').orNull
+def sdkStagingRepository = providers.gradleProperty(
+        'blueStagingRepository').orNull
+
+if (stagedDependencies
+        && (sdkStagingRepository == null || sdkStagingRepository.isBlank())) {
+    throw new GradleException(
+            'staged-artifact mode requires '
+                    + '-PblueStagingRepository=/absolute/path')
+}
+if (stagedDependencies && !new File(sdkStagingRepository).isAbsolute()) {
+    throw new GradleException(
+            'blueStagingRepository must be an absolute path')
+}
 
 base {
     archivesName = 'blue-coordination-java'
 }
 
 repositories {
-    if (!localDependencies && publishedRepository != null) {
+    if (!localDependencies && !stagedDependencies
+            && publishedRepository != null) {
         exclusiveContent {
             forRepository {
                 maven {
@@ -42,6 +71,26 @@ repositories {
                 includeModule 'blue.repo', 'blue-repo-java'
                 includeModule 'blue.bex', 'blue-bex-core'
                 includeModule 'blue.bex', 'blue-bex-contracts'
+            }
+        }
+    }
+    if (stagedDependencies) {
+        exclusiveContent {
+            forRepository {
+                maven {
+                    name = 'stagedBlueRepository'
+                    url = uri(sdkStagingRepository)
+                    metadataSources {
+                        gradleMetadata()
+                        mavenPom()
+                        artifact()
+                    }
+                }
+            }
+            filter {
+                includeGroup 'blue.language'
+                includeGroup 'blue.repo'
+                includeGroup 'blue.bex'
             }
         }
     }
@@ -93,6 +142,7 @@ tasks.withType(JavaCompile).configureEach {
 tasks.withType(Javadoc).configureEach {
     source = fileTree('src/main/java') {
         include 'blue/coordination/api/**/*.java'
+        include 'blue/coordination/sdk/**/*.java'
         include 'blue/coordination/processor/**/*.java'
     }
     options.encoding = 'UTF-8'
@@ -414,6 +464,12 @@ publishing {
             name = 'staging'
             url = layout.buildDirectory.dir('staging-deploy')
         }
+        if (stagedDependencies) {
+            maven {
+                name = 'sdkFreeze'
+                url = uri(file(sdkStagingRepository).canonicalFile)
+            }
+        }
     }
 }
 
@@ -473,13 +529,21 @@ if (System.getenv('CI') != null) {
 }
 
 def productionSources = fileTree('src/main/java') { include '**/*.java' }
+def publicBoundarySources = files(
+        fileTree('src/main/java/blue/coordination/api') {
+            include '**/*.java'
+        },
+        fileTree('src/main/java/blue/coordination/sdk') {
+            include '**/*.java'
+        })
 // Current Contracts 1.0 maintainability guardrails. These are deliberately
-// rounded engineering caps with headroom over the implementation, not retained
-// Round 13 source counts and not performance evidence.
+// bounded caps over the SDK baseline of 163 production source files, 39,656
+// lines, and 49 public api+sdk source types. They are not retained Round 13
+// counts and are not performance evidence.
 def currentProductionShapeLimits = [
-        classes: 140,
-        lines: 40_000L,
-        publicApiTypes: 24
+        classes: 170,
+        lines: 42_000L,
+        publicApiTypes: 50
 ]
 def forbiddenArchitectureTokens = [
         'AutonomousLink', 'TemporalWave', 'ConsistencyMode',
@@ -490,14 +554,15 @@ def forbiddenArchitectureTokens = [
 tasks.register('validateProductionShape') {
     group = 'verification'
     description = 'Enforces current Contracts 1.0 maintainability and architecture guardrails.'
-    inputs.files(productionSources)
+    inputs.files(productionSources, publicBoundarySources)
     doLast {
         def sources = productionSources.files.sort()
         int classes = sources.size()
         long lines = sources.sum { it.readLines('UTF-8').size() } ?: 0L
-        def apiSources = fileTree('src/main/java/blue/coordination/api') {
-            include '**/*.java'
-        }.files
+        def publicTypePattern = ~/(?m)^public\s+(?:(?:final|abstract|sealed|non-sealed)\s+)?(?:class|interface|record|enum)\s+/
+        def apiSources = publicBoundarySources.files.findAll { source ->
+            source.getText('UTF-8') =~ publicTypePattern
+        }
         def failures = []
         if (classes > currentProductionShapeLimits.classes) {
             failures << "production classes ${classes} > "
@@ -567,18 +632,148 @@ tasks.register('verifyPublicApiBoundary') {
                 }
             }
         }
+        def allowedPublicInternalSources = [
+                'src/main/java/blue/coordination/internal/DefaultCoordinationEngine.java',
+                'src/main/java/blue/coordination/internal/BundledContracts10Release.java',
+                'src/main/java/blue/coordination/internal/Contracts10AuthoredClosureCompiler.java'
+        ] as Set
         fileTree('src/main/java/blue/coordination/internal') {
             include '**/*.java'
-            exclude 'DefaultCoordinationEngine.java'
         }.each { source ->
             String body = source.getText('UTF-8')
-            if (body =~ /(?m)^public\s+(?:final\s+|abstract\s+)?(?:class|interface|record|enum)\s+/) {
+            String sourcePath = rootDir.toPath().relativize(
+                    source.toPath()).toString().replace('\\', '/')
+            if ((body =~ /(?m)^public\s+(?:(?:final|abstract|sealed|non-sealed)\s+)?(?:class|interface|record|enum)\s+/)
+                    && !allowedPublicInternalSources.contains(sourcePath)) {
                 violations << "public implementation type ${source}"
             }
         }
         if (!violations.empty) {
             throw new GradleException(
                     "Internal API leakage: ${violations.join(', ')}")
+        }
+    }
+}
+
+tasks.register('verifySdkPublicApiBoundary') {
+    group = 'verification'
+    description = 'Allows only DocumentId from the compatibility API and rejects every implementation dependency in normal SDK signatures.'
+    dependsOn tasks.named('compileJava')
+    inputs.files(fileTree('src/main/java/blue/coordination/sdk') {
+        include '**/*.java'
+    }, sourceSets.main.output.classesDirs)
+    def inspectionLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+    doLast {
+        File sdkClasses = layout.buildDirectory.dir(
+                'classes/java/main/blue/coordination/sdk').get().asFile
+        if (!sdkClasses.isDirectory()) {
+            throw new GradleException(
+                    'Compiled SDK classes are missing: ' + sdkClasses)
+        }
+        String executableName = System.getProperty('os.name')
+                .toLowerCase(java.util.Locale.ROOT).contains('windows')
+                ? 'javap.exe' : 'javap'
+        File javap = inspectionLauncher.get().metadata.installationPath
+                .file('bin/' + executableName).asFile
+        if (!javap.isFile()) {
+            throw new GradleException('Java API inspector is missing: ' + javap)
+        }
+        def inspectClass = { String className, String visibility ->
+            Process process = new ProcessBuilder(
+                    javap.absolutePath,
+                    visibility,
+                    '-classpath',
+                    sourceSets.main.output.classesDirs.asPath
+                            + File.pathSeparator
+                            + configurations.compileClasspath.asPath,
+                    className)
+                    .redirectErrorStream(true)
+                    .start()
+            String signature = process.inputStream.getText('UTF-8')
+            if (process.waitFor() != 0) {
+                throw new GradleException(
+                        "javap failed for ${className}: ${signature}")
+            }
+            signature
+        }
+        def forbiddenSignaturePrefixes = [
+                'blue.coordination.internal.',
+                'blue.coordination.processor.',
+                'blue.coordination.api.',
+                'blue.language.',
+                'blue.bex.'
+        ]
+        def violations = []
+        def packagePrivateHelpers = [
+                'SdkCoordinationRuntime',
+                'SdkDrainResultMapper',
+                'SdkPreconditions'
+        ]
+        packagePrivateHelpers.each { helper ->
+            File source = file(
+                    "src/main/java/blue/coordination/sdk/${helper}.java")
+            if (!source.isFile()) {
+                violations << "missing SDK package-private helper ${helper}"
+                return
+            }
+            def sourcePublicDeclaration = java.util.regex.Pattern.compile(
+                    '(?m)^\\s*public\\s+(?:(?:final|abstract|sealed|non-sealed)\\s+)*'
+                            + '(?:class|interface|record|enum)\\s+'
+                            + java.util.regex.Pattern.quote(helper)
+                            + '\\b')
+            if (sourcePublicDeclaration.matcher(
+                    source.getText('UTF-8')).find()) {
+                violations << "SDK helper ${helper} is public in source"
+            }
+            String className = "blue.coordination.sdk.${helper}"
+            String binaryDeclaration = inspectClass(className, '-p')
+            def binaryPublicDeclaration = java.util.regex.Pattern.compile(
+                    '(?m)^public\\s+.*\\b(?:class|interface|enum)\\s+'
+                            + java.util.regex.Pattern.quote(className)
+                            + '(?:\\s|\\{|<)')
+            if (binaryPublicDeclaration.matcher(binaryDeclaration).find()) {
+                violations << "SDK helper ${helper} is public in bytecode"
+            }
+        }
+        fileTree(sdkClasses) { include '**/*.class' }.files.sort().each {
+            File classFile ->
+                String relative = sdkClasses.toPath().relativize(
+                        classFile.toPath()).toString().replace('\\', '/')
+                String className = "blue.coordination.sdk.${relative
+                        .substring(0, relative.length() - 6)
+                        .replace('/', '.')}"
+                if (className == 'blue.coordination.sdk.AdvancedCoordination'
+                        || className.startsWith(
+                        'blue.coordination.sdk.AdvancedCoordination$')
+                        || packagePrivateHelpers.any { helper ->
+                    className == "blue.coordination.sdk.${helper}"
+                            || className.startsWith(
+                            "blue.coordination.sdk.${helper}\$")
+                }) {
+                    return
+                }
+                String signature = inspectClass(className, '-public')
+                def publicDeclaration = java.util.regex.Pattern.compile(
+                        '(?m)^public\\s+.*\\b(?:class|interface|enum)\\s+'
+                                + java.util.regex.Pattern.quote(className)
+                                + '(?:\\s|\\{|<)')
+                if (!publicDeclaration.matcher(signature).find()) {
+                    return
+                }
+                String normalSignature = signature.replaceAll(
+                        /blue\.coordination\.api\.DocumentId\b/, '')
+                forbiddenSignaturePrefixes.findAll {
+                    normalSignature.contains(it)
+                }.each { forbidden ->
+                    violations << "${className} exposes ${forbidden}"
+                }
+        }
+        if (!violations.empty) {
+            throw new GradleException(
+                    'Normal SDK signature leakage: '
+                            + violations.join(', '))
         }
     }
 }
@@ -621,11 +816,22 @@ tasks.register('verifyArtifactContents') {
                 'CoordinationTestControl'
         ] + forbiddenArchitectureTokens
         def violations = []
-        zipTree(tasks.named('jar').get().archiveFile).visit { details ->
+        def artifactTree = zipTree(
+                tasks.named('jar').get().archiveFile)
+        artifactTree.visit { details ->
             if (!details.directory && forbidden.any {
                 details.path.contains(it)
             }) {
                 violations << details.path
+            }
+        }
+        [
+                'blue/coordination/sdk/BlueCoordination.class',
+                'blue/coordination/sdk/EntryDisposition.class',
+                'blue/coordination/sdk/contracts-1.0-release.properties'
+        ].each { required ->
+            if (artifactTree.matching { include required }.isEmpty()) {
+                violations << "missing required SDK entry ${required}"
             }
         }
         if (!violations.empty) {
@@ -770,10 +976,12 @@ tasks.register('verifyReleaseMetadata') {
         if (javadocEntries.matching {
             include 'blue/coordination/api/CoordinationEngine.html'
         }.isEmpty() || javadocEntries.matching {
+            include 'blue/coordination/sdk/BlueCoordination.html'
+        }.isEmpty() || javadocEntries.matching {
             include 'blue/coordination/processor/CoordinationProcessors.html'
         }.isEmpty()) {
             throw new GradleException(
-                    'Javadoc JAR must cover API and processor surfaces')
+                    'Javadoc JAR must cover SDK, compatibility API, and processor surfaces')
         }
     }
 }
@@ -2387,10 +2595,16 @@ tasks.register('verifySourceArchiveHygiene') {
         def declaredVersions = versionSource =~
                 /(?m)^version = "([^"]+)"$/
         if (!declaredVersions.find()
-                || declaredVersions.group(1) != configuredArchiveVersion
+                || declaredVersions.group(1) != declaredProjectVersion
                 || declaredVersions.find()) {
             throw new GradleException(
                     '.cz.toml must contain one authoritative project version')
+        }
+        if (configuredArchiveVersion != (stagedDependencies
+                ? sdkCandidateVersion : declaredProjectVersion)) {
+            throw new GradleException(
+                    'Configured source archive version does not match its '
+                            + 'explicit release lane')
         }
         String attributes = file('.gitattributes').getText('UTF-8')
         [
@@ -2415,7 +2629,8 @@ def sourceArchiveIncludes = [
         'CHANGELOG.md', 'CONTRIBUTING.md', 'LICENSE', 'README.md',
         'SECURITY.md', 'START-HERE.md', 'build.gradle', 'docs/**',
         'gradle/**', 'gradle.lockfile', 'gradle.properties', 'gradlew',
-        'gradlew.bat', 'scripts/**', 'settings.gradle', 'src/**'
+        'gradlew.bat', 'scripts/**', 'settings.gradle', 'src/**',
+        'staged-sdk-consumer/**'
 ]
 def sourceArchiveExcludes = [
         '**/.git/**', '**/.gradle/**', '**/.idea/**', '**/build/**',
@@ -2463,7 +2678,7 @@ def sourceArchiveChecksum = tasks.register(
 
 def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
     group = 'verification'
-    description = 'Verifies the extracted archive in local-source or isolated published configuration mode.'
+    description = 'Verifies the extracted archive in local-source or isolated artifact configuration mode.'
     dependsOn sourceArchiveChecksum
     inputs.file(coordinationSourceArchive.flatMap { it.archiveFile })
     inputs.property('dependencyMode', dependencyMode)
@@ -2474,6 +2689,9 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
                 providers.gradleProperty('blueLanguageCompositePath')
                         .getOrElse('../blue-language-java')).canonicalPath)
         inputs.property('blueSpecRoot', blueSpecRoot.canonicalPath)
+    } else if (stagedDependencies) {
+        inputs.property('blueStagingRepository',
+                file(sdkStagingRepository).canonicalPath)
     }
     outputs.dir(layout.buildDirectory.dir('source-archive-smoke'))
     def verificationReceipt = layout.buildDirectory.file(
@@ -2559,6 +2777,14 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
                                     '../blue-repository-java')).canonicalPath,
                     '-PblueSpecRoot=' + blueSpecRoot.canonicalPath
             ])
+        } else if (stagedDependencies) {
+            command.addAll([
+                    'verifyDependencyModeIsolation',
+                    'verifySdkStagedDependencyGraph',
+                    '-PblueDependencyMode=staged-artifact',
+                    '-PblueStagingRepository='
+                            + file(sdkStagingRepository).canonicalPath
+            ])
         } else {
             command.addAll([
                     'verifyDependencyModeIsolation',
@@ -2604,10 +2830,12 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
                 focusedTestsStatus: localDependencies
                         ? 'PASS' : 'NOT_EXECUTED',
                 publishedArtifactCompatibility: localDependencies
-                        ? 'NOT_APPLICABLE' : 'NOT_VERIFIED',
-                publishedArtifactCompatibilityReason: localDependencies
-                        ? null
-                        : 'Matching published Contracts 1.0 and BEX exact-capability APIs are not yet available',
+                        ? 'NOT_APPLICABLE'
+                        : stagedDependencies ? 'PASS' : 'NOT_VERIFIED',
+                publishedArtifactCompatibilityReason:
+                        localDependencies || stagedDependencies
+                                ? null
+                                : 'Matching published Contracts 1.0 and BEX exact-capability APIs are not yet available',
                 focusedTasks: localDependencies ? [
                         'round13SourceArchiveUnitTest',
                         'round13SourceArchiveIntegrationTest',
@@ -2623,7 +2851,7 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
 
 tasks.register('verifyDependencyModeIsolation') {
     group = 'verification'
-    description = 'Proves local source is the default and published mode stays explicit and isolated.'
+    description = 'Proves local source is the default and artifact modes stay explicit and isolated.'
     inputs.files('settings.gradle', 'build.gradle')
     doLast {
         String settings = file('settings.gradle').getText('UTF-8')
@@ -2643,10 +2871,12 @@ tasks.register('verifyDependencyModeIsolation') {
                     'Local composite inclusion is not mode-gated')
         }
         if (!settings.contains("'published-artifact'")
+                || !settings.contains("'staged-artifact'")
+                || !settings.contains("'blueStagingRepository'")
                 || !buildScript.contains(
-                "dependencyMode != 'published-artifact'")) {
+                "dependencyMode == 'staged-artifact'")) {
             throw new GradleException(
-                    'Explicit published-artifact isolation is missing')
+                    'Explicit published/staged artifact isolation is missing')
         }
         def languageCompositeProjects = [
                 'blue-language-model',
@@ -2730,6 +2960,87 @@ tasks.register('verifyPublishedArtifactDependencies') {
     }
 }
 
+def stagedDependencyGraph = tasks.register(
+        'verifySdkStagedDependencyGraph') {
+    group = 'verification'
+    description = 'Compiles and resolves every exact Blue dependency from the unified local staged repository.'
+    if (stagedDependencies) {
+        dependsOn tasks.named('compileJava')
+    }
+    doLast {
+        if (!stagedDependencies) {
+            throw new GradleException(
+                    'verifySdkStagedDependencyGraph requires '
+                            + '-PblueDependencyMode=staged-artifact')
+        }
+        File repository = file(sdkStagingRepository).canonicalFile
+        def failures = []
+        def components = configurations.runtimeClasspath
+                .incoming.resolutionResult.allComponents
+        def leakedProjects = components.findAll { component ->
+            component.id instanceof
+                    org.gradle.api.artifacts.component.ProjectComponentIdentifier
+                    && component.id.displayName
+                    != "root project '${rootProject.name}'"
+        }.collect { component -> component.id.displayName }.sort()
+        if (!leakedProjects.empty) {
+            failures << "included-project substitution leaked into staged mode: ${leakedProjects}"
+        }
+        def selectedBlue = components.findAll { component ->
+            component.id instanceof
+                    org.gradle.api.artifacts.component.ModuleComponentIdentifier
+                    && ['blue.language', 'blue.bex', 'blue.repo'].contains(
+                    component.id.group)
+        }.collectEntries { component ->
+            [(component.id.group + ':' + component.id.module):
+                     component.id.version]
+        }
+        def missing = (sdkStagedBlueCoordinates.keySet()
+                - selectedBlue.keySet())
+        def unexpected = (selectedBlue.keySet()
+                - sdkStagedBlueCoordinates.keySet())
+        if (!missing.empty) {
+            failures << 'missing staged Blue modules ' + missing.sort()
+        }
+        if (!unexpected.empty) {
+            failures << 'unexpected staged Blue modules ' + unexpected.sort()
+        }
+        sdkStagedBlueCoordinates.each { coordinate, expectedVersion ->
+            if (selectedBlue[coordinate] != null
+                    && selectedBlue[coordinate] != expectedVersion) {
+                failures << ("${coordinate} resolved "
+                        + "${selectedBlue[coordinate]}; expected ${expectedVersion}")
+            }
+            def parts = coordinate.split(':', 2)
+            String relative = [parts[0].replace('.', '/'), parts[1],
+                               expectedVersion,
+                               "${parts[1]}-${expectedVersion}"].join('/')
+            File jar = new File(repository, relative + '.jar')
+            File pom = new File(repository, relative + '.pom')
+            if (!jar.isFile() || jar.length() == 0L) {
+                failures << "missing staged JAR ${jar}"
+            }
+            if (!pom.isFile() || pom.length() == 0L) {
+                failures << "missing staged POM ${pom}"
+            } else if (pom.getText('UTF-8').contains('SNAPSHOT')) {
+                failures << "snapshot dependency in staged POM ${pom}"
+            }
+            File module = new File(repository, relative + '.module')
+            if (!module.isFile() || module.length() == 0L) {
+                failures << "missing Gradle module metadata ${module}"
+            }
+        }
+        if (!failures.empty) {
+            throw new GradleException(
+                    'SDK staged dependency graph failed:\n - '
+                            + failures.join('\n - '))
+        }
+        logger.lifecycle(
+                'SDK staged graph resolved exact Blue modules from {}',
+                repository)
+    }
+}
+
 tasks.register('verifyTestArchitecture') {
     group = 'verification'
     description = 'Protects release-owned test depth and JAR-only consumer isolation.'
@@ -2750,7 +3061,7 @@ tasks.register('verifyTestArchitecture') {
     dependsOn tasks.named('jar')
     doLast {
         def minimumTests = [unit: 175, integration: 24,
-                            consumer: 5, scenario: 2]
+                            consumer: 6, scenario: 2]
         def failures = []
         suites.each { name, sources ->
             int methods = sources.files.sum { source ->
@@ -2792,6 +3103,28 @@ tasks.register('verifyTestArchitecture') {
                                 }
                             }
                 }
+        File sdkConsumer = file(
+                'src/consumerTest/java/blue/coordination/consumer/'
+                        + 'SdkBuiltJarConsumerTest.java')
+        if (!sdkConsumer.isFile()) {
+            failures << 'SDK built-JAR consumer test is missing'
+        } else {
+            String body = sdkConsumer.getText('UTF-8')
+            [
+                    'blue.coordination.api',
+                    'blue.coordination.internal',
+                    'blue.coordination.processor',
+                    'blue.language',
+                    'blue.bex'
+            ].each { forbidden ->
+                if (body.contains(forbidden)) {
+                    failures << "SDK built-JAR consumer imports ${forbidden}"
+                }
+            }
+            if (!body.contains('blue.coordination.sdk.BlueCoordination')) {
+                failures << 'SDK built-JAR consumer does not use BlueCoordination'
+            }
+        }
         Set<File> mainOutputs = sourceSets.main.output.files.collect {
             it.canonicalFile
         } as Set
@@ -2819,7 +3152,8 @@ tasks.register('verifyTestArchitecture') {
 tasks.register('productionizationCheck') {
     group = 'verification'
     dependsOn 'build', 'validateProductionShape',
-            'verifyPublicApiBoundary', 'verifyArtifactContents',
+            'verifyPublicApiBoundary', 'verifySdkPublicApiBoundary',
+            'verifyArtifactContents',
             'verifyPublicationPom', 'verifyDependencyModeIsolation',
             'verifyReleaseMetadata', 'verifyDocumentation',
             'verifySourceArchiveHygiene', 'scenarioTest',
@@ -2830,7 +3164,8 @@ tasks.register('releaseCheck') {
     group = 'verification'
     description = 'Runs the production, API, artifact, and publication gates.'
     dependsOn 'build', 'validateProductionShape', 'verifyPublicApiBoundary',
-            'verifyArtifactContents', 'verifyPublicationPom',
+            'verifySdkPublicApiBoundary', 'verifyArtifactContents',
+            'verifyPublicationPom',
             'verifyDependencyModeIsolation', 'verifyReleaseMetadata',
             'verifyDocumentation', 'verifySourceArchiveHygiene', 'test',
             'integrationTest', 'consumerTest', 'scenarioTest',
@@ -3120,6 +3455,476 @@ tasks.named('publishMavenJavaPublicationToStagingRepository') {
     dependsOn round13Readiness
 }
 
+def sdkFreezePrepublicationCheck = tasks.register(
+        'sdkFreezePrepublicationCheck') {
+    group = 'verification'
+    description = 'Runs every fail-closed gate before publishing the 3.0.0-rc.2 SDK candidate.'
+    if (stagedDependencies) {
+        dependsOn 'releaseCheck', stagedDependencyGraph,
+                sourceArchiveChecksum
+    }
+    doLast {
+        def failures = []
+        if (!stagedDependencies) {
+            failures << 'blueDependencyMode must be staged-artifact'
+        }
+        if (version.toString() != sdkCandidateVersion) {
+            failures << "candidate version is ${version}; expected ${sdkCandidateVersion}"
+        }
+        if (sdkStagingRepository == null
+                || sdkStagingRepository.isBlank()
+                || !new File(sdkStagingRepository).isAbsolute()) {
+            failures << 'blueStagingRepository must be an absolute path'
+        } else if (!file(sdkStagingRepository).canonicalFile.isDirectory()) {
+            failures << 'blueStagingRepository must already contain the staged prerequisite repository'
+        }
+        if (!gradle.includedBuilds.empty) {
+            failures << ('staged-artifact mode contains composite builds: '
+                    + gradle.includedBuilds.collect { it.name }.sort())
+        }
+        if (repositories.any { repository ->
+            repository.class.name.contains('MavenLocal')
+        }) {
+            failures << 'mavenLocal is forbidden in the SDK candidate lane'
+        }
+        if (!failures.empty) {
+            throw new GradleException(
+                    'SDK freeze prepublication check failed:\n - '
+                            + failures.join('\n - '))
+        }
+    }
+}
+
+def sdkFreezePublish = stagedDependencies
+        ? tasks.named(
+        'publishMavenJavaPublicationToSdkFreezeRepository') : null
+if (sdkFreezePublish != null) {
+    sdkFreezePublish.configure {
+        dependsOn sdkFreezePrepublicationCheck
+    }
+}
+
+def stageSdkFreezeCandidate = tasks.register(
+        'stageSdkFreezeCandidate') {
+    group = 'publishing'
+    description = 'Publishes only the verified 3.0.0-rc.2 SDK candidate to the unified local repository.'
+    if (sdkFreezePublish != null) {
+        dependsOn sdkFreezePublish
+    }
+    doFirst {
+        if (!stagedDependencies || sdkFreezePublish == null) {
+            throw new GradleException(
+                    'stageSdkFreezeCandidate requires '
+                            + '-PblueDependencyMode=staged-artifact '
+                            + '-PblueStagingRepository=/absolute/path')
+        }
+    }
+}
+
+def sdkFreezeSourceArchiveFile = coordinationSourceArchive.flatMap {
+    it.archiveFile
+}
+def sdkFreezeSourceArchiveChecksumFile = sdkFreezeSourceArchiveFile.map {
+    regularFile -> new File(regularFile.asFile.parentFile,
+            regularFile.asFile.name + '.sha256')
+}
+def sdkFreezeCandidateReport = layout.buildDirectory.file(
+        'reports/sdk-freeze/staged-candidate.json')
+def verifySdkStagedCandidateRepository = tasks.register(
+        'verifySdkStagedCandidateRepository') {
+    group = 'verification'
+    description = 'Verifies the staged candidate JAR, manifest, POM, module metadata, and documentation artifacts.'
+    if (sdkFreezePublish != null) {
+        dependsOn sdkFreezePublish, sourceArchiveChecksum
+        inputs.files(providers.provider {
+            File versionDirectory = new File(
+                    file(sdkStagingRepository).canonicalFile,
+                    'blue/coordination/blue-coordination-java/'
+                            + sdkCandidateVersion)
+            [
+                    new File(versionDirectory,
+                            "blue-coordination-java-${sdkCandidateVersion}.jar"),
+                    new File(versionDirectory,
+                            "blue-coordination-java-${sdkCandidateVersion}.pom"),
+                    new File(versionDirectory,
+                            "blue-coordination-java-${sdkCandidateVersion}.module"),
+                    new File(versionDirectory,
+                            "blue-coordination-java-${sdkCandidateVersion}-sources.jar"),
+                    new File(versionDirectory,
+                            "blue-coordination-java-${sdkCandidateVersion}-javadoc.jar"),
+                    new File(versionDirectory,
+                            "blue-coordination-java-${sdkCandidateVersion}-test-fixtures.jar")
+            ]
+        })
+        inputs.file(sdkFreezeSourceArchiveFile)
+        inputs.file(sdkFreezeSourceArchiveChecksumFile)
+    }
+    outputs.file(sdkFreezeCandidateReport)
+    doLast {
+        if (!stagedDependencies || sdkFreezePublish == null) {
+            throw new GradleException(
+                    'verifySdkStagedCandidateRepository requires the staged-artifact lane')
+        }
+        File repository = file(sdkStagingRepository).canonicalFile
+        File versionDirectory = new File(repository,
+                'blue/coordination/blue-coordination-java/'
+                        + sdkCandidateVersion)
+        File mainJar = new File(versionDirectory,
+                "blue-coordination-java-${sdkCandidateVersion}.jar")
+        File pom = new File(versionDirectory,
+                "blue-coordination-java-${sdkCandidateVersion}.pom")
+        File module = new File(versionDirectory,
+                "blue-coordination-java-${sdkCandidateVersion}.module")
+        File sources = new File(versionDirectory,
+                "blue-coordination-java-${sdkCandidateVersion}-sources.jar")
+        File javadoc = new File(versionDirectory,
+                "blue-coordination-java-${sdkCandidateVersion}-javadoc.jar")
+        File testFixtures = new File(versionDirectory,
+                "blue-coordination-java-${sdkCandidateVersion}-test-fixtures.jar")
+        File sourceArchive = sdkFreezeSourceArchiveFile.get().asFile
+        File sourceArchiveSidecar =
+                sdkFreezeSourceArchiveChecksumFile.get()
+        def requiredArtifacts = [mainJar, pom, module, sources, javadoc,
+                                 testFixtures, sourceArchive,
+                                 sourceArchiveSidecar]
+        def failures = requiredArtifacts.findAll {
+            !it.isFile() || it.length() == 0L
+        }.collect { "missing or empty candidate artifact/evidence ${it}" }
+        def sha256 = { File artifact ->
+            java.security.MessageDigest.getInstance('SHA-256')
+                    .digest(artifact.bytes).encodeHex().toString()
+        }
+
+        String sourceArchiveHash = sourceArchive.isFile()
+                ? sha256(sourceArchive) : null
+        String sourceArchiveSidecarHash = sourceArchiveSidecar.isFile()
+                ? sha256(sourceArchiveSidecar) : null
+        String expectedSourceArchiveName =
+                "blue-coordination-java-${sdkCandidateVersion}-source.zip"
+        if (sourceArchive.name != expectedSourceArchiveName) {
+            failures << ("source archive is ${sourceArchive.name}; expected "
+                    + expectedSourceArchiveName)
+        }
+        if (sourceArchiveSidecar.name
+                != expectedSourceArchiveName + '.sha256') {
+            failures << 'source archive checksum sidecar has the wrong name'
+        }
+        if (sourceArchive.isFile() && sourceArchiveSidecar.isFile()
+                && sourceArchiveSidecar.getText('UTF-8')
+                != "${sourceArchiveHash}  ${sourceArchive.name}\n") {
+            failures << 'source archive checksum sidecar is not exactly hash-bound'
+        }
+
+        String manifestVersion = null
+        if (mainJar.isFile() && mainJar.length() > 0L) {
+            def jar = new java.util.jar.JarFile(mainJar)
+            try {
+                manifestVersion = jar.manifest?.mainAttributes
+                        ?.getValue('Implementation-Version')
+                if (manifestVersion != sdkCandidateVersion) {
+                    failures << ('candidate manifest version is '
+                            + "${manifestVersion}; expected ${sdkCandidateVersion}")
+                }
+                [
+                        'blue/coordination/sdk/BlueCoordination.class',
+                        'blue/coordination/sdk/EntryDisposition.class',
+                        'blue/coordination/sdk/contracts-1.0-release.properties'
+                ].each { entry ->
+                    if (jar.getEntry(entry) == null) {
+                        failures << "candidate JAR is missing ${entry}"
+                    }
+                }
+            } finally {
+                jar.close()
+            }
+        }
+
+        String pomText = pom.isFile() ? pom.getText('UTF-8') : ''
+        [
+                '<groupId>blue.coordination</groupId>',
+                '<artifactId>blue-coordination-java</artifactId>',
+                "<version>${sdkCandidateVersion}</version>"
+        ].each { marker ->
+            if (!pomText.contains(marker)) {
+                failures << "candidate POM is missing ${marker}"
+            }
+        }
+        def expectedPomDependencies = [
+                'blue.language:blue-contracts-core': '3.1.0-rc.20',
+                'blue.repo:blue-repo-java': '3.0.0-rc.21',
+                'blue.bex:blue-bex-core': '1.1.0-rc.3',
+                'blue.bex:blue-bex-contracts': '1.1.0-rc.3'
+        ]
+        expectedPomDependencies.each { coordinate, expectedVersion ->
+            def parts = coordinate.split(':', 2)
+            String dependencyMarker = "<groupId>${parts[0]}</groupId>"
+            String artifactMarker = "<artifactId>${parts[1]}</artifactId>"
+            def dependencyBlock = pomText.split('</dependency>').find {
+                it.contains(dependencyMarker)
+                        && it.contains(artifactMarker)
+            }
+            if (dependencyBlock == null || !dependencyBlock.contains(
+                    "<version>${expectedVersion}</version>")) {
+                failures << "candidate POM does not pin ${coordinate}:${expectedVersion}"
+            }
+        }
+        if (pomText.toUpperCase(java.util.Locale.ROOT)
+                .contains('SNAPSHOT')) {
+            failures << 'candidate POM contains a snapshot version'
+        }
+
+        def moduleMetadata = module.isFile()
+                ? new groovy.json.JsonSlurper().parse(module) : [:]
+        if (moduleMetadata.formatVersion == null
+                || moduleMetadata.component?.group != 'blue.coordination'
+                || moduleMetadata.component?.module
+                != 'blue-coordination-java'
+                || moduleMetadata.component?.version
+                != sdkCandidateVersion
+                || !(moduleMetadata.variants instanceof List)
+                || moduleMetadata.variants.empty) {
+            failures << 'candidate Gradle module metadata has the wrong coordinate or no variants'
+        }
+        if (module.isFile() && module.getText('UTF-8')
+                .toUpperCase(java.util.Locale.ROOT).contains('SNAPSHOT')) {
+            failures << 'candidate Gradle module metadata contains a snapshot version'
+        }
+        [
+                (mainJar): tasks.named('jar').get().archiveFile.get().asFile,
+                (sources): tasks.named('sourcesJar').get()
+                        .archiveFile.get().asFile,
+                (javadoc): tasks.named('javadocJar').get()
+                        .archiveFile.get().asFile,
+                (testFixtures): tasks.named('testFixturesJar').get()
+                        .archiveFile.get().asFile
+        ].each { stagedArtifact, builtArtifact ->
+            if (stagedArtifact.isFile() && builtArtifact.isFile()
+                    && !java.util.Arrays.equals(
+                    stagedArtifact.bytes, builtArtifact.bytes)) {
+                failures << "staged artifact differs from the built artifact: ${stagedArtifact.name}"
+            }
+        }
+        if (sources.isFile()) {
+            def sourcesArchive = new java.util.zip.ZipFile(sources)
+            try {
+                if (sourcesArchive.getEntry(
+                        'blue/coordination/sdk/BlueCoordination.java')
+                        == null) {
+                    failures << 'candidate sources JAR omits the SDK entry point'
+                }
+            } finally {
+                sourcesArchive.close()
+            }
+        }
+        if (javadoc.isFile()) {
+            def javadocArchive = new java.util.zip.ZipFile(javadoc)
+            try {
+                if (javadocArchive.getEntry(
+                        'blue/coordination/sdk/BlueCoordination.html')
+                        == null) {
+                    failures << 'candidate Javadoc JAR omits the SDK entry point'
+                }
+            } finally {
+                javadocArchive.close()
+            }
+        }
+        if (!failures.empty) {
+            throw new GradleException(
+                    'Staged SDK candidate verification failed:\n - '
+                            + failures.join('\n - '))
+        }
+
+        File report = sdkFreezeCandidateReport.get().asFile
+        report.parentFile.mkdirs()
+        report.setText(groovy.json.JsonOutput.prettyPrint(
+                groovy.json.JsonOutput.toJson([
+                        schemaId: 'blue-coordination-sdk-candidate-v1',
+                        status: 'PASS',
+                        coordinate: "blue.coordination:blue-coordination-java:${sdkCandidateVersion}",
+                        manifestVersion: manifestVersion,
+                        repository: repository.absolutePath,
+                        sourceArchive: [
+                                name: sourceArchive.name,
+                                sha256: sourceArchiveHash,
+                                checksumName: sourceArchiveSidecar.name,
+                                checksumSha256: sourceArchiveSidecarHash,
+                                checksumValue: sourceArchiveHash
+                        ],
+                        artifacts: requiredArtifacts.collectEntries {
+                            [(it.name): sha256(it)]
+                        }
+                ])) + '\n', 'UTF-8')
+    }
+}
+
+def sdkConsumerFixtureArchive = tasks.register(
+        'sdkFreezeConsumerFixtureArchive', Zip) {
+    group = 'distribution'
+    description = 'Packages the standalone SDK consumer before isolated extraction.'
+    archiveFileName = 'blue-coordination-staged-sdk-consumer.zip'
+    destinationDirectory = layout.buildDirectory.dir(
+            'sdk-freeze/consumer-fixture')
+    includeEmptyDirs = false
+    duplicatesStrategy = org.gradle.api.file.DuplicatesStrategy.FAIL
+    from('staged-sdk-consumer') {
+        include 'settings.gradle', 'build.gradle', 'src/main/java/**'
+    }
+}
+
+def extractedSdkConsumerDirectory = layout.buildDirectory.dir(
+        'sdk-freeze/extracted-consumer')
+def extractSdkConsumerFixture = tasks.register(
+        'extractSdkFreezeConsumerFixture', Sync) {
+    group = 'verification'
+    description = 'Extracts a fresh standalone consumer with no composite-build state.'
+    dependsOn sdkConsumerFixtureArchive
+    from sdkConsumerFixtureArchive.map { zipTree(it.archiveFile) }
+    into extractedSdkConsumerDirectory
+}
+
+def registerExtractedSdkConsumer = { int javaVersion ->
+    def report = layout.buildDirectory.file(
+            "reports/sdk-freeze/consumer-java${javaVersion}.json")
+    tasks.register(
+            "verifyExtractedSdkConsumerJava${javaVersion}", GradleBuild) {
+        group = 'verification'
+        description = "Builds and runs the extracted staged SDK consumer on Java ${javaVersion}."
+        dependsOn extractSdkConsumerFixture,
+                verifySdkStagedCandidateRepository
+        setDir(extractedSdkConsumerDirectory)
+        setTasks(['verifyStagedSdkConsumer'])
+        startParameter.projectProperties = [
+                stagedRepository: stagedDependencies
+                        ? file(sdkStagingRepository).canonicalPath : '',
+                coordinationVersion: sdkCandidateVersion,
+                testJavaVersion: javaVersion.toString(),
+                consumerReport: report.get().asFile.absolutePath
+        ]
+        inputs.file(sdkFreezeCandidateReport)
+        inputs.file(sdkConsumerFixtureArchive.flatMap { it.archiveFile })
+        inputs.property('javaVersion', javaVersion)
+        inputs.property('coordinationVersion', sdkCandidateVersion)
+        outputs.file(report)
+        outputs.upToDateWhen { false }
+    }
+}
+
+def extractedSdkConsumerJava17 = registerExtractedSdkConsumer(17)
+def extractedSdkConsumerJava21 = registerExtractedSdkConsumer(21)
+extractedSdkConsumerJava21.configure {
+    mustRunAfter extractedSdkConsumerJava17
+}
+
+def verifyExtractedSdkConsumer = tasks.register(
+        'verifyExtractedSdkConsumer') {
+    group = 'verification'
+    description = 'Runs the extracted staged SDK consumer on Java 17 and Java 21.'
+    dependsOn extractedSdkConsumerJava17, extractedSdkConsumerJava21
+}
+
+def sdkFreezeArtifactReport = layout.buildDirectory.file(
+        'reports/sdk-freeze/artifact-check.json')
+tasks.register('sdkFreezeArtifactCheck') {
+    group = 'verification'
+    description = 'Completes the staged 3.0.0-rc.2 SDK artifact and Java 17/21 consumer gate.'
+    if (stagedDependencies) {
+        dependsOn stageSdkFreezeCandidate,
+                verifySdkStagedCandidateRepository,
+                verifyExtractedSdkConsumer
+    }
+    inputs.files(sdkFreezeCandidateReport,
+            layout.buildDirectory.file(
+                    'reports/sdk-freeze/consumer-java17.json'),
+            layout.buildDirectory.file(
+                    'reports/sdk-freeze/consumer-java21.json'))
+    outputs.file(sdkFreezeArtifactReport)
+    doLast {
+        if (!stagedDependencies) {
+            throw new GradleException(
+                    'sdkFreezeArtifactCheck requires the staged-artifact lane')
+        }
+        def candidate = new groovy.json.JsonSlurper().parse(
+                sdkFreezeCandidateReport.get().asFile)
+        def consumerReports = [17, 21].collect { javaVersion ->
+            new groovy.json.JsonSlurper().parse(
+                    layout.buildDirectory.file(
+                            "reports/sdk-freeze/consumer-java${javaVersion}.json")
+                            .get().asFile)
+        }
+        String candidateJar = "blue-coordination-java-${sdkCandidateVersion}.jar"
+        String candidateHash = candidate.artifacts[candidateJar]
+        String expectedCoordinate =
+                "blue.coordination:blue-coordination-java:${sdkCandidateVersion}"
+        File candidateReportFile = sdkFreezeCandidateReport.get().asFile
+        String candidateReportHash = java.security.MessageDigest
+                .getInstance('SHA-256').digest(candidateReportFile.bytes)
+                .encodeHex().toString()
+        def consumerReportFiles = [17, 21].collect { javaVersion ->
+            layout.buildDirectory.file(
+                    "reports/sdk-freeze/consumer-java${javaVersion}.json")
+                    .get().asFile
+        }
+        def failures = []
+        if (candidate.status != 'PASS'
+                || candidate.coordinate != expectedCoordinate
+                || candidate.manifestVersion != sdkCandidateVersion) {
+            failures << 'candidate receipt is not bound to the exact SDK coordinate'
+        }
+        if (!(candidate.artifacts instanceof Map)
+                || candidate.artifacts.size() < 8
+                || candidate.sourceArchive?.sha256
+                != candidate.artifacts[candidate.sourceArchive?.name]
+                || candidate.sourceArchive?.checksumSha256
+                != candidate.artifacts[candidate.sourceArchive?.checksumName]
+                || candidate.sourceArchive?.checksumValue
+                != candidate.sourceArchive?.sha256) {
+            failures << 'candidate receipt does not bind its full artifact and source archive map'
+        }
+        if (consumerReports.collect { it.javaRuntime } as Set
+                != [17, 21] as Set) {
+            failures << 'consumer receipts do not cover Java 17 and Java 21'
+        }
+        consumerReports.each { receipt ->
+            if (receipt.status != 'PASS'
+                    || receipt.coordination != expectedCoordinate
+                    || receipt.candidateJarSha256 != candidateHash
+                    || receipt.javaRelease != 17) {
+                failures << "invalid Java ${receipt.javaRuntime} consumer receipt"
+            }
+        }
+        if (!failures.empty) {
+            throw new GradleException(
+                    'SDK freeze artifact check failed:\n - '
+                            + failures.join('\n - '))
+        }
+        File report = sdkFreezeArtifactReport.get().asFile
+        report.parentFile.mkdirs()
+        report.setText(groovy.json.JsonOutput.prettyPrint(
+                groovy.json.JsonOutput.toJson([
+                        schemaId: 'blue-coordination-sdk-artifact-check-v1',
+                        status: 'PASS',
+                        coordinate: candidate.coordinate,
+                        candidateJarSha256: candidateHash,
+                        candidateReport: [
+                                path: 'build/reports/sdk-freeze/staged-candidate.json',
+                                sha256: candidateReportHash
+                        ],
+                        artifacts: candidate.artifacts,
+                        sourceArchive: candidate.sourceArchive,
+                        consumerReports: consumerReportFiles.collect {
+                            receiptFile -> [
+                                    name: receiptFile.name,
+                                    sha256: java.security.MessageDigest
+                                            .getInstance('SHA-256')
+                                            .digest(receiptFile.bytes)
+                                            .encodeHex().toString()
+                            ]
+                        },
+                        consumerJavaVersions: [17, 21]
+                ])) + '\n', 'UTF-8')
+    }
+}
+
 if (localDependencies) {
     File localLanguageCheckout = file(providers.gradleProperty(
             'blueLanguageCompositePath')
@@ -3406,6 +4211,13 @@ if (localDependencies) {
     tasks.named('publishToMavenLocal') {
         dependsOn localPrerequisites
     }
+} else if (stagedDependencies) {
+    tasks.named('releaseCheck') {
+        dependsOn stagedDependencyGraph
+    }
+    tasks.named('productionizationCheck') {
+        dependsOn stagedDependencyGraph
+    }
 } else {
     tasks.named('releaseCheck') {
         dependsOn 'verifyPublishedArtifactDependencies'
@@ -3424,6 +4236,7 @@ tasks.matching {
 
 tasks.named('check') {
     dependsOn 'validateProductionShape', 'verifyPublicApiBoundary',
+            'verifySdkPublicApiBoundary',
             'verifyArtifactContents', 'integrationTest', 'consumerTest',
             'verifyTestArchitecture'
 }

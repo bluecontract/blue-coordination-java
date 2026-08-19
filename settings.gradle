@@ -10,9 +10,32 @@ rootProject.name = 'blue-coordination-java'
 def dependencyMode = providers.gradleProperty('blueDependencyMode')
         .getOrElse('local-composite')
         .trim()
-if (!(dependencyMode in ['local-composite', 'published-artifact'])) {
+if (!(dependencyMode in [
+        'local-composite', 'published-artifact', 'staged-artifact'])) {
     throw new GradleException(
-            'blueDependencyMode must be local-composite or published-artifact')
+            'blueDependencyMode must be local-composite, published-artifact, '
+                    + 'or staged-artifact')
+}
+
+if (dependencyMode == 'staged-artifact') {
+    def stagedRepository = providers.gradleProperty(
+            'blueStagingRepository').orNull
+    if (stagedRepository == null || stagedRepository.isBlank()) {
+        throw new GradleException(
+                'staged-artifact mode requires '
+                        + '-PblueStagingRepository=/absolute/path')
+    }
+    def stagedRepositoryPath = new File(stagedRepository)
+    if (!stagedRepositoryPath.isAbsolute()) {
+        throw new GradleException(
+                'blueStagingRepository must be an absolute path')
+    }
+    def stagedRepositoryDirectory = stagedRepositoryPath.canonicalFile
+    if (!stagedRepositoryDirectory.isDirectory()) {
+        throw new GradleException(
+                'blueStagingRepository is not a staged Maven repository: '
+                        + stagedRepositoryDirectory)
+    }
 }
 
 if (dependencyMode == 'local-composite') {
