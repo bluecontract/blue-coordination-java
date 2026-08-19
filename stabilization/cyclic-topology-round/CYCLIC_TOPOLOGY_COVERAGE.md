@@ -1,12 +1,12 @@
 # Cyclic topology coverage audit
 
-Date: 2026-08-19  
-Coordination branch: `codex/cyclic-topology-coordination`  
-Frozen Contracts release identity: `sha256:7e6c3717bc28d21ebadec9f81725913e944bb3b9b70094531f19f10510a10e50`  
-Frozen fixture package identity: `sha256:071cecb68e1c4dcec2dbb0895de928629281d2b0a18f3e8a83a41a720e621bfa`  
-Frozen Blue Language specification SHA-256: `01b038b64e3f0a9a11f3f70d544a63ff78a01d5169f1a03f8b8629cf73645a7d`  
-Closure fixture inventory: 67 files  
-Normative fixture changes in this round: none
+- Date: 2026-08-19
+- Coordination branch: `codex/cyclic-topology-coordination`
+- Frozen Contracts release identity: `sha256:7e6c3717bc28d21ebadec9f81725913e944bb3b9b70094531f19f10510a10e50`
+- Frozen fixture package identity: `sha256:071cecb68e1c4dcec2dbb0895de928629281d2b0a18f3e8a83a41a720e621bfa`
+- Frozen Blue Language specification SHA-256: `01b038b64e3f0a9a11f3f70d544a63ff78a01d5169f1a03f8b8629cf73645a7d`
+- Closure fixture inventory: 67 files
+- Normative fixture changes in this round: none
 
 ## Conclusion
 
