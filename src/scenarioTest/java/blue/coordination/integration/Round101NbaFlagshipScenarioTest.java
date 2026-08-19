@@ -97,7 +97,7 @@ final class Round101NbaFlagshipScenarioTest {
     }
 
     private static Outcome run(AdmissionOrder order) throws Exception {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
             Map<RootSpec, Timeline> rootTimelines = registerRootTimelines(
                     engine);
             Map<GameSpec, Timeline> gameTimelines = registerGameTimelines(

@@ -66,7 +66,7 @@ final class CoordinationEngineTest {
 
     @Test
     void counterQuickstartProducesTwo() {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
             Timeline alice = engine.registerTimeline(
                     "counter/alice", "alice");
             Timeline bob = engine.registerTimeline("counter/bob", "bob");
@@ -106,7 +106,7 @@ final class CoordinationEngineTest {
 
     @Test
     void failedAppendDoesNotConsumeClockOrJournalCoordinates() {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
             Timeline alice = engine.registerTimeline(
                     "counter/alice", "alice");
             CoordinationMetrics before = engine.metrics();

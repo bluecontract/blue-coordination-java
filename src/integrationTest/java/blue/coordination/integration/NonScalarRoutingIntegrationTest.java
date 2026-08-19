@@ -47,7 +47,7 @@ final class NonScalarRoutingIntegrationTest {
     void fromNowRouteIntervalExcludesBacklogStillInTheGlobalJournal()
             throws Exception {
         DocumentId counter = DocumentId.of("counter");
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
             Timeline alice = engine.registerTimeline(
                     "examples/clean-counter/alice", "alice");
             TimelineEntry oldOne = engine.appendAt(
@@ -93,7 +93,7 @@ final class NonScalarRoutingIntegrationTest {
     private static void verifyAggregateRouting(
             DocumentId documentId,
             String resourcePath) throws Exception {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
             Timeline alice = engine.registerTimeline(
                     ALICE_TIMELINE, "alice");
             Timeline bob = engine.registerTimeline(

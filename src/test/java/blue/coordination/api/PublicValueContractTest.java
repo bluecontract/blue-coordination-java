@@ -137,7 +137,7 @@ final class PublicValueContractTest {
 
     @Test
     void appendProducesSelfContainedExactImmutableEvidence() {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
             Timeline timeline = engine.registerTimeline("feed", "alice");
             TimelineEntry entry = engine.append(timeline, Operation.yaml(
                     "touch", "owner", "value: 1"));
@@ -152,7 +152,7 @@ final class PublicValueContractTest {
 
     @Test
     void zeroTargetDispatchIsImmutableAndOnlyOutcomeFailsClearly() {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
             Timeline timeline = engine.registerTimeline("feed", "alice");
             TimelineEntry entry = engine.append(
                     timeline, Operation.yaml("unknown", "owner", "{}"));
@@ -172,7 +172,7 @@ final class PublicValueContractTest {
 
     @Test
     void missingDocumentsUseTheStableTypedErrorModel() {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
             CoordinationException failure = assertThrows(
                     CoordinationException.class,
                     () -> engine.document(DocumentId.of("missing")));
@@ -185,7 +185,7 @@ final class PublicValueContractTest {
 
     @Test
     void closeIsIdempotentAndFurtherMutationFails() {
-        CoordinationEngine engine = CoordinationEngine.inMemory();
+        CoordinationEngine engine = CoordinationEngine.legacyInMemory();
         engine.close();
         engine.close();
 

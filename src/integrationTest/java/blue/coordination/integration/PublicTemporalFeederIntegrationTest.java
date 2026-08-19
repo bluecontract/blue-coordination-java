@@ -39,8 +39,8 @@ final class PublicTemporalFeederIntegrationTest {
     @Test
     void exactNodeAdmissionIsIdempotentAndRejectsClaimedIdentityForgery()
             throws Exception {
-        try (CoordinationEngine source = CoordinationEngine.inMemory();
-                CoordinationEngine target = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine source = CoordinationEngine.legacyInMemory();
+                CoordinationEngine target = CoordinationEngine.legacyInMemory()) {
             Timeline sourceAlice = source.registerTimeline(
                     ALICE_TIMELINE, "alice");
             TimelineEntry canonical = source.append(
@@ -111,8 +111,8 @@ final class PublicTemporalFeederIntegrationTest {
     @Test
     void oneExactAdmissionBuildsAndStoresOneEntryForSeveralRecipients()
             throws Exception {
-        try (CoordinationEngine source = CoordinationEngine.inMemory();
-                CoordinationEngine target = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine source = CoordinationEngine.legacyInMemory();
+                CoordinationEngine target = CoordinationEngine.legacyInMemory()) {
             Timeline sourceAlice = source.registerTimeline(
                     ALICE_TIMELINE, "alice");
             TimelineEntry canonical = source.append(
@@ -160,7 +160,7 @@ final class PublicTemporalFeederIntegrationTest {
 
     @Test
     void normalReadsFailClosedUntilAuditStateBecomesReady() throws Exception {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
             Timeline alice = engine.registerTimeline(ALICE_TIMELINE, "alice");
             engine.append(alice, Operation.yaml(
                     "increment", "aliceChannel", "amount: 3"));
@@ -195,7 +195,7 @@ final class PublicTemporalFeederIntegrationTest {
     @Test
     void boundedDrainResumesAnOpenEntryWithoutRepeatingFrozenProcess()
             throws Exception {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
             Timeline alice = engine.registerTimeline(ALICE_TIMELINE, "alice");
             engine.startDocument(COUNTER_A, counterYaml(COUNTER_A));
             engine.startDocument(COUNTER_B, counterYaml(COUNTER_B));
@@ -257,7 +257,7 @@ final class PublicTemporalFeederIntegrationTest {
 
     @Test
     void appendStoresWorkWithoutInvokingProcess() throws Exception {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
             Timeline alice = engine.registerTimeline(
                     ALICE_TIMELINE, "alice");
             engine.startDocument(
@@ -291,8 +291,8 @@ final class PublicTemporalFeederIntegrationTest {
     @Test
     void exactDocumentTargetUsesCurrentOrAnyRetainedEpochWithoutProcessingOnAppend()
             throws Exception {
-        try (CoordinationEngine source = CoordinationEngine.inMemory();
-                CoordinationEngine target = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine source = CoordinationEngine.legacyInMemory();
+                CoordinationEngine target = CoordinationEngine.legacyInMemory()) {
             Timeline sourceAlice = source.registerTimeline(
                     ALICE_TIMELINE, "alice");
             TimelineEntry template1 = source.appendAt(sourceAlice,
@@ -460,7 +460,7 @@ final class PublicTemporalFeederIntegrationTest {
     }
 
     private static CoordinationEngine counterEngine() throws Exception {
-        CoordinationEngine engine = CoordinationEngine.inMemory();
+        CoordinationEngine engine = CoordinationEngine.legacyInMemory();
         try {
             engine.startDocument(
                     COUNTER, resource("examples/clean/counter.yaml"));

@@ -40,7 +40,7 @@ final class ContractsPublicNestedScopeBoundaryTest {
     @Test
     void ordinaryPublicEngineExecutesTheNestedScopeNormally()
             throws Exception {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
             engine.startDocument(DOCUMENT, ordinaryNestedDocument());
             String beforeBlueId = null;
             Long beforeEpoch = null;

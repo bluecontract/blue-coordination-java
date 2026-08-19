@@ -16,8 +16,21 @@ import java.util.Set;
  * the engine releases its borrowed Language, Contracts, and BEX runtimes.</p>
  */
 public interface CoordinationEngine extends AutoCloseable {
-    /** Creates the supported single-process in-memory engine. */
+    /**
+     * Creates the legacy single-document in-memory engine.
+     *
+     * @deprecated normal applications should use
+     *         {@link blue.coordination.sdk.BlueCoordination#inMemory()};
+     *         advanced compatibility callers should name
+     *         {@link #legacyInMemory()} explicitly
+     */
+    @Deprecated(since = "3.0.0-rc.2", forRemoval = false)
     static CoordinationEngine inMemory() {
+        return legacyInMemory();
+    }
+
+    /** Creates the explicitly named legacy in-memory compatibility engine. */
+    static CoordinationEngine legacyInMemory() {
         return builder().inMemory().build();
     }
 

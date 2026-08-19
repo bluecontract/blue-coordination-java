@@ -22,7 +22,7 @@ final class PublishedArtifactConsumerTest {
 
     @Test
     void counterExternalApiExample() throws Exception {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
             Timeline alice = engine.registerTimeline(
                     "examples/clean-counter/alice", "alice");
             Timeline bob = engine.registerTimeline(
@@ -50,7 +50,7 @@ final class PublishedArtifactConsumerTest {
 
     @Test
     void largeOrdinaryRequestAppendsWholeWithoutTarget() throws Exception {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
             Timeline unmatched = engine.registerTimeline(
                     "consumer/unmatched", "consumer");
             ExactValue payNote = engine.exactValue(
@@ -70,7 +70,7 @@ final class PublishedArtifactConsumerTest {
 
     @Test
     void largeHostCanAttachAuthorizeAndConfirmPayNote() throws Exception {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
             Timeline alice = engine.registerTimeline(
                     "examples/large-order/alice", "alice");
             Timeline admin = engine.registerTimeline(
@@ -127,7 +127,7 @@ final class PublishedArtifactConsumerTest {
 
     @Test
     void existingSharedChildAdvancesTwoParents() throws Exception {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
             String childYaml = resource(
                     "examples/clean/embedded-counter.yaml");
             Timeline childTimeline = engine.registerTimeline(
@@ -167,7 +167,7 @@ final class PublishedArtifactConsumerTest {
 
     @Test
     void nbaHistoricalGameCatchesStatisticsUp() throws Exception {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
             String gameYaml = resource("examples/clean/nba-game.yaml");
             Timeline gameFeed = engine.registerTimeline(
                     "examples/nba/game-2016-lal-min", "nba-feed");
@@ -206,7 +206,7 @@ final class PublishedArtifactConsumerTest {
 
     @Test
     void fiveEmbeddedOccurrencesReuseThreeManagedDocuments() throws Exception {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
             Timeline owner = engine.registerTimeline(
                     "examples/playground/five-occurrence/host",
                     "playground-owner");
