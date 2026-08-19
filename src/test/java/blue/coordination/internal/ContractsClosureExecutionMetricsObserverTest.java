@@ -87,10 +87,24 @@ final class ContractsClosureExecutionMetricsObserverTest {
                     .lastClosureProcessEvidence()
                     .orElseThrow();
             assertTrue(processEvidence.complete());
+            CoordinationTestControl.MetricsSnapshot afterProcess =
+                    control.metricsSnapshot();
             assertEvidenceMetrics(
                     beforeProcess,
-                    control.metricsSnapshot(),
+                    afterProcess,
                     processEvidence);
+            assertTrue(phaseDelta(
+                    beforeProcess,
+                    afterProcess,
+                    ContractsClosureAdapter.PROCESSOR_PHASE) > 0L);
+            assertTrue(phaseDelta(
+                    beforeProcess,
+                    afterProcess,
+                    ContractsClosureAdapter.RESULT_VALIDATION_PHASE) > 0L);
+            assertTrue(phaseDelta(
+                    beforeProcess,
+                    afterProcess,
+                    ContractsClosureAdapter.PUBLICATION_PHASE) > 0L);
             assertFalse(processEvidence.workTrace().isEmpty());
             assertFalse(processEvidence.tentativeFinalizations().isEmpty());
             assertSame(
@@ -175,6 +189,34 @@ final class ContractsClosureExecutionMetricsObserverTest {
                         after,
                         ContractsClosureExecutionMetricsObserver
                                 .CANONICAL_CYCLIC_BYTES));
+        assertEquals(
+                evidence.managedDocumentStepInclusiveNanos(),
+                phaseDelta(
+                        before,
+                        after,
+                        ContractsClosureExecutionMetricsObserver
+                                .MANAGED_DOCUMENT_STEP_INCLUSIVE_PHASE));
+        assertEquals(
+                evidence.managedDocumentStepExclusiveNanos(),
+                phaseDelta(
+                        before,
+                        after,
+                        ContractsClosureExecutionMetricsObserver
+                                .MANAGED_DOCUMENT_STEP_EXCLUSIVE_PHASE));
+        assertEquals(
+                evidence.componentFinalizationProofNanos(),
+                phaseDelta(
+                        before,
+                        after,
+                        ContractsClosureExecutionMetricsObserver
+                                .COMPONENT_FINALIZATION_PROOF_PHASE));
+        assertEquals(
+                evidence.successfulResultAssemblyNanos(),
+                phaseDelta(
+                        before,
+                        after,
+                        ContractsClosureExecutionMetricsObserver
+                                .SUCCESSFUL_RESULT_ASSEMBLY_PHASE));
     }
 
     private static long canonicalBytes(
@@ -193,6 +235,14 @@ final class ContractsClosureExecutionMetricsObserverTest {
             String name) {
         return after.counters().getOrDefault(name, 0L)
                 - before.counters().getOrDefault(name, 0L);
+    }
+
+    private static long phaseDelta(
+            CoordinationTestControl.MetricsSnapshot before,
+            CoordinationTestControl.MetricsSnapshot after,
+            String name) {
+        return after.phaseNanos().getOrDefault(name, 0L)
+                - before.phaseNanos().getOrDefault(name, 0L);
     }
 
     private static String sha(char character) {

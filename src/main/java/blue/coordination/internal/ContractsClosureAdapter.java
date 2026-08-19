@@ -82,6 +82,12 @@ final class ContractsClosureAdapter implements AutoCloseable {
             "contracts.closure.resultingComponents";
     static final String PLAN_CONSTRUCTION_PHASE =
             "contracts.closure.planConstruction";
+    static final String PROCESSOR_PHASE =
+            "contracts.closure.processor";
+    static final String RESULT_VALIDATION_PHASE =
+            "contracts.closure.resultValidation";
+    static final String PUBLICATION_PHASE =
+            "contracts.closure.publication";
 
     enum PublicationFailurePoint {
         AFTER_STORE_COMMIT_BEFORE_ROUTE_PUBLISH
@@ -218,34 +224,47 @@ final class ContractsClosureAdapter implements AutoCloseable {
         executionObserver.beginAttempt(selected.members().stream()
                 .map(DocumentId::value)
                 .toList());
-        ClosureAttemptResult attempt = contracts.processClosure(
-                selected.input());
-        if (attempt.isComplete()) {
-            runtime.metrics().add(
-                    RESULTING_COMPONENTS,
-                    attempt.processResult().resultingComponents().size());
+        ClosureAttemptResult attempt = runtime.metrics().timed(
+                PROCESSOR_PHASE,
+                () -> contracts.processClosure(selected.input()));
+        long validationStarted = System.nanoTime();
+        String identity;
+        ContractsClosurePublicationReceipt receipt;
+        try {
+            if (attempt.isComplete()) {
+                runtime.metrics().add(
+                        RESULTING_COMPONENTS,
+                        attempt.processResult()
+                                .resultingComponents().size());
+            }
+            identity = publicationIdentity(frozen, selected);
+            if (!attempt.isComplete()) {
+                return new CohortOutcome(
+                        selected.members(), attempt, false, identity, false);
+            }
+            if (!isDurablyTerminalStatus(
+                    attempt.processResult().status())) {
+                throw new ProjectionUnavailableException(
+                        "Contracts capability failure is not a durable feeder "
+                                + "disposition and must be retried after the "
+                                + "capability is available");
+            }
+            receipt = new ContractsClosurePublicationReceipt(
+                    identity,
+                    selected.members(),
+                    attempt);
+        } finally {
+            runtime.metrics().addNanos(
+                    RESULT_VALIDATION_PHASE,
+                    System.nanoTime() - validationStarted);
         }
-        String identity = publicationIdentity(frozen, selected);
-        if (!attempt.isComplete()) {
-            return new CohortOutcome(
-                    selected.members(), attempt, false, identity, false);
-        }
-        if (!isDurablyTerminalStatus(attempt.processResult().status())) {
-            throw new ProjectionUnavailableException(
-                    "Contracts capability failure is not a durable feeder "
-                            + "disposition and must be retried after the "
-                            + "capability is available");
-        }
-        ContractsClosurePublicationReceipt receipt =
-                new ContractsClosurePublicationReceipt(
-                        identity,
-                        selected.members(),
-                        attempt);
-        if (receipt.commits()) {
-            publish(frozen, selected, receipt);
-        } else {
-            publishNonCommit(frozen, selected, receipt);
-        }
+        runtime.metrics().timed(PUBLICATION_PHASE, () -> {
+            if (receipt.commits()) {
+                publish(frozen, selected, receipt);
+            } else {
+                publishNonCommit(frozen, selected, receipt);
+            }
+        });
         return outcome(receipt, false);
     }
 

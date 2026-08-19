@@ -29,6 +29,14 @@ final class ContractsClosureExecutionMetricsObserver
             "contracts.closure.canonicalCyclicBytes";
     static final String UNRELATED_COMPONENT_FINALIZATIONS =
             "contracts.closure.unrelatedComponentFinalizations";
+    static final String MANAGED_DOCUMENT_STEP_INCLUSIVE_PHASE =
+            "contracts.closure.managedDocumentStepInclusive";
+    static final String MANAGED_DOCUMENT_STEP_EXCLUSIVE_PHASE =
+            "contracts.closure.managedDocumentStepExclusive";
+    static final String COMPONENT_FINALIZATION_PROOF_PHASE =
+            "contracts.closure.componentFinalizationProof";
+    static final String SUCCESSFUL_RESULT_ASSEMBLY_PHASE =
+            "contracts.closure.successfulResultAssembly";
 
     private final EngineMetrics metrics;
     private ClosureImplementationEvidence lastEvidence;
@@ -85,6 +93,18 @@ final class ContractsClosureExecutionMetricsObserver
             metrics.add(
                     UNRELATED_COMPONENT_FINALIZATIONS,
                     unrelatedFinalizations);
+            metrics.addNanos(
+                    MANAGED_DOCUMENT_STEP_INCLUSIVE_PHASE,
+                    evidence.managedDocumentStepInclusiveNanos());
+            metrics.addNanos(
+                    MANAGED_DOCUMENT_STEP_EXCLUSIVE_PHASE,
+                    evidence.managedDocumentStepExclusiveNanos());
+            metrics.addNanos(
+                    COMPONENT_FINALIZATION_PROOF_PHASE,
+                    evidence.componentFinalizationProofNanos());
+            metrics.addNanos(
+                    SUCCESSFUL_RESULT_ASSEMBLY_PHASE,
+                    evidence.successfulResultAssemblyNanos());
         } catch (ThreadDeath failure) {
             throw failure;
         } catch (VirtualMachineError failure) {
