@@ -30,6 +30,9 @@ import java.util.Set;
  * Language-supported canonical edit, not an approximate hand-built event.</p>
  */
 final class WholeRequestEntryFactory {
+    static final String REQUEST_SOURCES_PARSED =
+            "append.requestSourcesParsed";
+
     private static final Set<String> PRESERVED_EVENT_PATHS =
             Set.of("/message/request");
 
@@ -166,6 +169,7 @@ final class WholeRequestEntryFactory {
                     operation.exactRequest().orElseThrow(),
                     "timeline-request");
         }
+        metrics.increment(REQUEST_SOURCES_PARSED);
         Node source = runtime.parseSourceYaml(
                 operation.requestYaml().orElseThrow());
         Node preprocessed = runtime.preprocess(source);

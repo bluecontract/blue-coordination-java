@@ -57,6 +57,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
     private final InMemoryDocumentStore documents;
     private final OperationRouteIndex routes;
     private final ContractsClosureProfile profile;
+    private final ContractsActiveSourceTimelineIndex activeSourceTimelines;
     private final ClosureEnvironment environment;
     private final ContractsClosureExecutionMetricsObserver executionObserver;
     private final BlueClosureContracts contracts;
@@ -73,6 +74,25 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
             InMemoryDocumentStore documents,
             OperationRouteIndex routes,
             ContractsClosureProfile profile) {
+        this(
+                runtime,
+                objects,
+                layoutBuilder,
+                documents,
+                routes,
+                profile,
+                new ContractsActiveSourceTimelineIndex(
+                        profile.publicRoots()));
+    }
+
+    ContractsClosureAdmissionAdapter(
+            BlueRuntime runtime,
+            WholeObjectStore objects,
+            EmbeddedOnlyLayoutBuilder layoutBuilder,
+            InMemoryDocumentStore documents,
+            OperationRouteIndex routes,
+            ContractsClosureProfile profile,
+            ContractsActiveSourceTimelineIndex activeSourceTimelines) {
         this.runtime = Objects.requireNonNull(runtime, "runtime");
         this.objects = Objects.requireNonNull(objects, "objects");
         this.layoutBuilder = Objects.requireNonNull(
@@ -80,6 +100,8 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
         this.documents = Objects.requireNonNull(documents, "documents");
         this.routes = Objects.requireNonNull(routes, "routes");
         this.profile = Objects.requireNonNull(profile, "profile");
+        this.activeSourceTimelines = Objects.requireNonNull(
+                activeSourceTimelines, "activeSourceTimelines");
         this.environment = profile.environment(runtime.documentProcessor());
         this.executionObserver =
                 new ContractsClosureExecutionMetricsObserver(
@@ -126,7 +148,9 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
         }
         requireAllAbsent(members, before);
 
-        executionObserver.beginAttempt();
+        executionObserver.beginAttempt(members.stream()
+                .map(DocumentId::value)
+                .toList());
         ClosureAttemptResult attempt = contracts.admitClosure(admission);
         if (!attempt.isComplete()
                 || !attempt.processResult().commits()) {
@@ -206,7 +230,8 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
         ManagedOccurrenceInventory resultingInventory = mergeAdmissionInventory(
                 before.occurrenceInventory(),
                 result.occurrenceBindings(),
-                new LinkedHashSet<>(members));
+                new LinkedHashSet<>(members),
+                runtime.metrics());
         long inventoryGeneration = result.occurrenceBindings().isEmpty()
                 ? before.occurrenceInventoryGeneration()
                 : InMemoryDocumentStore.increment(
@@ -340,6 +365,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                     PublicationFailurePoint
                             .AFTER_STORE_COMMIT_BEFORE_ROUTE_PUBLISH);
             preparedRoutes.publish();
+            activeSourceTimelines.refresh(members, documents);
             objects.commit(objectMark);
         } catch (RuntimeException failure) {
             if (storeCommitted) {
@@ -415,7 +441,13 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
     private static ManagedOccurrenceInventory mergeAdmissionInventory(
             ManagedOccurrenceInventory before,
             Collection<ManagedOccurrenceBinding> admittedRows,
-            Set<DocumentId> admittedMembers) {
+            Set<DocumentId> admittedMembers,
+            EngineMetrics metrics) {
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_OCCURRENCE_ENTRIES_TRAVERSED,
+                before.rows().size());
         ArrayList<ManagedOccurrenceBinding> merged = new ArrayList<>(
                 before.rows());
         for (ManagedOccurrenceBinding row : Objects.requireNonNull(
@@ -429,6 +461,11 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
             }
             merged.add(row);
         }
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_OCCURRENCE_ENTRIES_TRAVERSED,
+                merged.size());
         return ManagedOccurrenceInventory.of(merged);
     }
 
@@ -520,6 +557,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
             }
         }
         routes.prepareReplacement(replacements).publish();
+        activeSourceTimelines.refresh(members, documents);
     }
 
     private String retainAdmissionCause(

@@ -373,6 +373,7 @@ final class MultiDocumentPublicationTransaction {
     synchronized InMemoryDocumentStore.StoreState prepareReplacement(
             InMemoryDocumentStore.StoreState before) {
         Objects.requireNonNull(before, "before");
+        EngineMetrics metrics = store.metrics();
         if ((stagedGraphGeneration == null)
                 != (stagedClosureSubscriptions == null)) {
             throw new IllegalStateException(
@@ -387,6 +388,11 @@ final class MultiDocumentPublicationTransaction {
         requireGenerationFences(before);
         requireHeadFences(before);
         requireAbsentFences(before);
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_COMPONENT_ENTRIES_TRAVERSED,
+                before.componentStates().size());
         requireComponentStateFences(before);
         requireClosurePublicationShape();
         if (before.publicationReceipts().contains(publicationIdentity)) {
@@ -395,6 +401,11 @@ final class MultiDocumentPublicationTransaction {
         }
         failureInjector.accept(FailurePoint.AFTER_CAS_CHECKS);
 
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_SESSION_ENTRIES_TRAVERSED,
+                before.sessions().size());
         LinkedHashMap<DocumentId, DocumentSession> resultingSessions =
                 new LinkedHashMap<>(before.sessions());
         for (Map.Entry<DocumentId, DocumentSession> entry
@@ -444,13 +455,16 @@ final class MultiDocumentPublicationTransaction {
         ProcessEmbeddedComponentIndex resultingIndex =
                 stagedOccurrenceInventory == null
                         ? before.componentIndex()
-                        : InMemoryDocumentStore.componentIndex(
-                                resultingSessions.values(),
-                                resultingInventory);
+                        : rebuildComponentIndex(
+                                resultingSessions,
+                                resultingInventory,
+                                metrics);
         long resultingIndexGeneration =
                 stagedOccurrenceInventory == null
                         ? before.componentIndexGeneration()
                         : this.resultingComponentIndexGeneration;
+        recordGenerationTransitionTraversals(
+                before, resultingInventory, resultingIndex, metrics);
         requireGenerationTransitions(
                 before,
                 resultingInventory,
@@ -462,6 +476,16 @@ final class MultiDocumentPublicationTransaction {
                 before,
                 resultingSessions,
                 resultingIndex);
+        if (stagedGraphGeneration != null) {
+            ContractsStructuralWorkMetrics.recordGlobalPasses(
+                    metrics,
+                    ContractsStructuralWorkMetrics
+                            .GLOBAL_GRAPH_ENTRIES_TRAVERSED,
+                    2L,
+                    Math.multiplyExact(
+                            before.graphGenerations().documents().size(),
+                            2L));
+        }
         ClosureGraphGenerationInventory resultingGraphGenerations =
                 stagedGraphGeneration == null
                         ? before.graphGenerations()
@@ -470,21 +494,38 @@ final class MultiDocumentPublicationTransaction {
                                 stagedGraphGeneration, expectedAbsent)
                         : before.graphGenerations().apply(stagedGraphGeneration);
         ClosureSubscriptionInventory resultingClosureSubscriptions =
-                stagedClosureSubscriptions == null
-                        ? before.closureSubscriptions()
-                        : before.closureSubscriptions().apply(
-                                stagedClosureSubscriptions);
+                applyClosureSubscriptions(before, metrics);
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_EVIDENCE_ENTRIES_TRAVERSED,
+                before.outbox().size());
         List<PublicEventOccurrence> resultingOutbox = new ArrayList<>(
                 before.outbox());
         requireContiguousPublicEventOrdinals(stagedOutbox);
         resultingOutbox.addAll(stagedOutbox);
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_EVIDENCE_ENTRIES_TRAVERSED,
+                before.checkpointEvidence().size());
         List<CheckpointWrite> resultingCheckpoints = new ArrayList<>(
                 before.checkpointEvidence());
         requireContiguousCheckpointOrdinals(stagedCheckpointEvidence);
         resultingCheckpoints.addAll(stagedCheckpointEvidence);
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_RECEIPT_ENTRIES_TRAVERSED,
+                before.publicationReceipts().size());
         LinkedHashSet<String> resultingReceipts = new LinkedHashSet<>(
                 before.publicationReceipts());
         resultingReceipts.add(publicationIdentity);
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_RECEIPT_ENTRIES_TRAVERSED,
+                before.admissionReceipts().size());
         LinkedHashMap<String, ContractsClosureAdmissionReceipt>
                 resultingAdmissionReceipts = new LinkedHashMap<>(
                         before.admissionReceipts());
@@ -492,6 +533,11 @@ final class MultiDocumentPublicationTransaction {
             resultingAdmissionReceipts.put(
                     publicationIdentity, stagedAdmissionReceipt);
         }
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_RECEIPT_ENTRIES_TRAVERSED,
+                before.closurePublicationReceipts().size());
         LinkedHashMap<String, ContractsClosurePublicationReceipt>
                 resultingClosurePublicationReceipts = new LinkedHashMap<>(
                         before.closurePublicationReceipts());
@@ -513,6 +559,19 @@ final class MultiDocumentPublicationTransaction {
                 resultingClosureSubscriptions);
         failureInjector.accept(FailurePoint.AFTER_TOPOLOGY_STAGED);
 
+        recordStoreStateConstruction(
+                resultingSessions,
+                resultingIndex,
+                resultingGraphGenerations,
+                resultingComponents,
+                resultingClosureSubscriptions,
+                resultingOutbox,
+                resultingCheckpoints,
+                resultingReceipts,
+                resultingAdmissionReceipts,
+                resultingClosurePublicationReceipts,
+                metrics);
+
         InMemoryDocumentStore.StoreState replacement =
                 new InMemoryDocumentStore.StoreState(
                         resultingSessions,
@@ -530,6 +589,131 @@ final class MultiDocumentPublicationTransaction {
                         resultingClosurePublicationReceipts);
         failureInjector.accept(FailurePoint.BEFORE_SWAP);
         return replacement;
+    }
+
+    private static ProcessEmbeddedComponentIndex rebuildComponentIndex(
+            Map<DocumentId, DocumentSession> sessions,
+            ManagedOccurrenceInventory inventory,
+            EngineMetrics metrics) {
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_SESSION_ENTRIES_TRAVERSED,
+                sessions.size());
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_OCCURRENCE_ENTRIES_TRAVERSED,
+                inventory.rows().size());
+        return InMemoryDocumentStore.componentIndex(
+                sessions.values(), inventory);
+    }
+
+    private static void recordGenerationTransitionTraversals(
+            InMemoryDocumentStore.StoreState before,
+            ManagedOccurrenceInventory resultingInventory,
+            ProcessEmbeddedComponentIndex resultingIndex,
+            EngineMetrics metrics) {
+        ContractsStructuralWorkMetrics.recordGlobalPasses(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_OCCURRENCE_ENTRIES_TRAVERSED,
+                2L,
+                Math.addExact(
+                        (long) before.occurrenceInventory().rows().size(),
+                        resultingInventory.rows().size()));
+        ContractsStructuralWorkMetrics.recordGlobalPasses(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_SESSION_ENTRIES_TRAVERSED,
+                2L,
+                Math.addExact(
+                        (long) before.componentIndex().documents().size(),
+                        resultingIndex.documents().size()));
+        ContractsStructuralWorkMetrics.recordGlobalPasses(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_OCCURRENCE_ENTRIES_TRAVERSED,
+                2L,
+                Math.addExact(
+                        (long) before.occurrenceInventory()
+                                .activeRows().size(),
+                        resultingInventory.activeRows().size()));
+    }
+
+    private ClosureSubscriptionInventory applyClosureSubscriptions(
+            InMemoryDocumentStore.StoreState before,
+            EngineMetrics metrics) {
+        if (stagedClosureSubscriptions == null) {
+            return before.closureSubscriptions();
+        }
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_SUBSCRIPTION_ENTRIES_TRAVERSED,
+                before.closureSubscriptions().states().size());
+        ClosureSubscriptionInventory resulting = before
+                .closureSubscriptions().apply(stagedClosureSubscriptions);
+        ContractsStructuralWorkMetrics.recordGlobalPasses(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_SUBSCRIPTION_ENTRIES_TRAVERSED,
+                2L,
+                Math.multiplyExact(resulting.states().size(), 2L));
+        return resulting;
+    }
+
+    private static void recordStoreStateConstruction(
+            Map<DocumentId, DocumentSession> sessions,
+            ProcessEmbeddedComponentIndex componentIndex,
+            ClosureGraphGenerationInventory graphGenerations,
+            List<ComponentSnapshot> components,
+            ClosureSubscriptionInventory subscriptions,
+            List<PublicEventOccurrence> outbox,
+            List<CheckpointWrite> checkpoints,
+            Set<String> receipts,
+            Map<String, ContractsClosureAdmissionReceipt> admissionReceipts,
+            Map<String, ContractsClosurePublicationReceipt> processReceipts,
+            EngineMetrics metrics) {
+        ContractsStructuralWorkMetrics.recordGlobalPasses(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_SESSION_ENTRIES_TRAVERSED,
+                2L,
+                Math.multiplyExact(sessions.size(), 2L));
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_GRAPH_ENTRIES_TRAVERSED,
+                graphGenerations.documents().size());
+        ContractsStructuralWorkMetrics.recordGlobalPasses(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_COMPONENT_ENTRIES_TRAVERSED,
+                2L,
+                Math.addExact((long) components.size(),
+                        componentIndex.components().size()));
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_SUBSCRIPTION_ENTRIES_TRAVERSED,
+                subscriptions.states().size());
+        ContractsStructuralWorkMetrics.recordGlobalPasses(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_EVIDENCE_ENTRIES_TRAVERSED,
+                2L,
+                Math.addExact((long) outbox.size(), checkpoints.size()));
+        ContractsStructuralWorkMetrics.recordGlobalPasses(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_RECEIPT_ENTRIES_TRAVERSED,
+                3L,
+                Math.addExact(
+                        (long) receipts.size(),
+                        Math.addExact(
+                                (long) admissionReceipts.size(),
+                                processReceipts.size())));
     }
 
     private void requireGenerationFences(
@@ -749,7 +933,8 @@ final class MultiDocumentPublicationTransaction {
                 resultingGraphGenerations,
                 resultingComponents,
                 resultingClosureSubscriptions,
-                "Process receipt");
+                "Process receipt",
+                store.metrics());
     }
 
     private void requireAdmissionPublicationResult(
@@ -769,7 +954,8 @@ final class MultiDocumentPublicationTransaction {
                 resultingGraphGenerations,
                 resultingComponents,
                 resultingClosureSubscriptions,
-                "Admission receipt");
+                "Admission receipt",
+                store.metrics());
     }
 
     private static void requireExactResultState(
@@ -780,7 +966,8 @@ final class MultiDocumentPublicationTransaction {
             ClosureGraphGenerationInventory resultingGraphGenerations,
             List<ComponentSnapshot> resultingComponents,
             ClosureSubscriptionInventory resultingClosureSubscriptions,
-            String label) {
+            String label,
+            EngineMetrics metrics) {
         for (DocumentId member : members) {
             if (!resultingSessions.containsKey(member)
                     || resultingGraphGenerations.require(member)
@@ -794,6 +981,11 @@ final class MultiDocumentPublicationTransaction {
         List<OccurrenceRow> expectedRows = result.occurrenceBindings().stream()
                 .map(OccurrenceRow::from)
                 .toList();
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_OCCURRENCE_ENTRIES_TRAVERSED,
+                resultingInventory.rows().size());
         List<OccurrenceRow> actualRows = resultingInventory.rows().stream()
                 .filter(row -> members.contains(DocumentId.of(
                         row.sourceDocumentId().value()))
@@ -809,6 +1001,11 @@ final class MultiDocumentPublicationTransaction {
         List<String> expectedComponents = result.resultingComponents().stream()
                 .map(ComponentSnapshot::componentStateIdentity)
                 .toList();
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_COMPONENT_ENTRIES_TRAVERSED,
+                resultingComponents.size());
         List<String> actualComponents = resultingComponents.stream()
                 .filter(component -> component.orderedMemberDocumentIds()
                         .stream().anyMatch(member -> members.contains(
@@ -820,6 +1017,14 @@ final class MultiDocumentPublicationTransaction {
                     label + " component state is not the exact result");
         }
 
+        ContractsStructuralWorkMetrics.recordGlobalPasses(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_SUBSCRIPTION_ENTRIES_TRAVERSED,
+                members.size(),
+                Math.multiplyExact(
+                        (long) resultingClosureSubscriptions.states().size(),
+                        members.size()));
         for (DocumentId member : members) {
             List<blue.language.processor.closure.SubscriptionState> states =
                     resultingClosureSubscriptions.statesFor(member);
@@ -993,6 +1198,11 @@ final class MultiDocumentPublicationTransaction {
 
         LinkedHashMap<String, ComponentSnapshot> merged =
                 new LinkedHashMap<>();
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                store.metrics(),
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_COMPONENT_ENTRIES_TRAVERSED,
+                before.componentStates().size());
         for (ComponentSnapshot existing : before.componentStates()) {
             if (!stagedLineages.contains(existing.componentIdentity())
                     && existing.orderedMemberDocumentIds().stream()
@@ -1008,6 +1218,11 @@ final class MultiDocumentPublicationTransaction {
         }
         Map<List<DocumentId>, ComponentSnapshot> byMembers =
                 new LinkedHashMap<>();
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                store.metrics(),
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_COMPONENT_ENTRIES_TRAVERSED,
+                merged.size());
         for (ComponentSnapshot component : merged.values()) {
             List<DocumentId> members = component.orderedMemberDocumentIds()
                     .stream()
@@ -1020,6 +1235,11 @@ final class MultiDocumentPublicationTransaction {
             }
         }
         List<ComponentSnapshot> ordered = new ArrayList<>();
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                store.metrics(),
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_COMPONENT_ENTRIES_TRAVERSED,
+                resultingIndex.components().size());
         for (ProcessEmbeddedComponentIndex.Component component
                 : resultingIndex.components()) {
             ComponentSnapshot state = byMembers.remove(component.members());

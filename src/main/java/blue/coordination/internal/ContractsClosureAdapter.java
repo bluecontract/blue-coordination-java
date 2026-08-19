@@ -34,9 +34,12 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.Deque;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -63,6 +66,23 @@ import java.util.function.Consumer;
  * every document-head and topology generation fence at the final swap.</p>
  */
 final class ContractsClosureAdapter implements AutoCloseable {
+    static final String PLAN_CONSTRUCTIONS =
+            "contracts.closure.planConstructions";
+    static final String COHORTS_SELECTED =
+            "contracts.closure.cohortsSelected";
+    static final String DOCUMENT_OPENS =
+            "contracts.closure.documentOpens";
+    static final String UNRELATED_DOCUMENT_OPENS =
+            "contracts.closure.unrelatedDocumentOpens";
+    static final String OCCURRENCE_ROWS_EXAMINED =
+            "contracts.closure.occurrenceRowsExamined";
+    static final String COMPONENT_STATES_READ =
+            "contracts.closure.componentStatesRead";
+    static final String RESULTING_COMPONENTS =
+            "contracts.closure.resultingComponents";
+    static final String PLAN_CONSTRUCTION_PHASE =
+            "contracts.closure.planConstruction";
+
     enum PublicationFailurePoint {
         AFTER_STORE_COMMIT_BEFORE_ROUTE_PUBLISH
     }
@@ -73,6 +93,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
     private final InMemoryDocumentStore documents;
     private final OperationRouteIndex routes;
     private final ContractsClosureProfile profile;
+    private final ContractsActiveSourceTimelineIndex activeSourceTimelines;
     private final ClosureEnvironment environment;
     private final ContractsClosureExecutionMetricsObserver executionObserver;
     private final BlueClosureContracts contracts;
@@ -87,6 +108,25 @@ final class ContractsClosureAdapter implements AutoCloseable {
             InMemoryDocumentStore documents,
             OperationRouteIndex routes,
             ContractsClosureProfile profile) {
+        this(
+                runtime,
+                objects,
+                layoutBuilder,
+                documents,
+                routes,
+                profile,
+                new ContractsActiveSourceTimelineIndex(
+                        profile.publicRoots()));
+    }
+
+    ContractsClosureAdapter(
+            BlueRuntime runtime,
+            WholeObjectStore objects,
+            EmbeddedOnlyLayoutBuilder layoutBuilder,
+            InMemoryDocumentStore documents,
+            OperationRouteIndex routes,
+            ContractsClosureProfile profile,
+            ContractsActiveSourceTimelineIndex activeSourceTimelines) {
         this.runtime = Objects.requireNonNull(runtime, "runtime");
         this.objects = Objects.requireNonNull(objects, "objects");
         this.layoutBuilder = Objects.requireNonNull(
@@ -94,6 +134,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
         this.documents = Objects.requireNonNull(documents, "documents");
         this.routes = Objects.requireNonNull(routes, "routes");
         this.profile = Objects.requireNonNull(profile, "profile");
+        this.activeSourceTimelines = Objects.requireNonNull(
+                activeSourceTimelines, "activeSourceTimelines");
         this.environment = profile.environment(runtime.documentProcessor());
         this.executionObserver =
                 new ContractsClosureExecutionMetricsObserver(
@@ -108,24 +150,37 @@ final class ContractsClosureAdapter implements AutoCloseable {
         TimelineEntry selectedEntry = Objects.requireNonNull(entry, "entry");
         OperationRouteIndex.FrozenDirectDeliverySelection selection =
                 routes.selectDirectDeliveries(selectedEntry);
-        InMemoryDocumentStore.PublicationSnapshot publication =
-                documents.publicationSnapshot();
-        List<CohortSelection> selectedCohorts = partitionSelection(
-                publication.componentIndex(),
-                publication.occurrenceInventory(),
-                selection);
-        List<CohortInvocation> invocations = new ArrayList<>();
-        for (CohortSelection selectedCohort : selectedCohorts) {
-            invocations.add(captureInvocation(
-                    selectedEntry,
-                    publication,
-                    selectedCohort));
+        if (selection.deliveries().isEmpty()) {
+            return new FrozenBatch(
+                    selectedEntry, selection.routeGeneration(), List.of());
         }
-        return new FrozenBatch(
-                selectedEntry,
-                selection.routeGeneration(),
-                publication,
-                invocations);
+        return runtime.metrics().timed(PLAN_CONSTRUCTION_PHASE, () -> {
+            InMemoryDocumentStore.ClosureTopologySnapshot topology =
+                    documents.closureTopologySnapshot();
+            List<CohortSelection> selectedCohorts = partitionSelection(
+                    topology.componentIndex(),
+                    topology.occurrenceInventory(),
+                    selection,
+                    runtime.metrics());
+            LinkedHashSet<DocumentId> selectedMembers = new LinkedHashSet<>();
+            selectedCohorts.forEach(cohort -> selectedMembers.addAll(
+                    cohort.members()));
+            InMemoryDocumentStore.ClosureSnapshot publication =
+                    documents.closureSnapshot(selectedMembers, topology);
+            List<CohortInvocation> invocations = new ArrayList<>();
+            for (CohortSelection selectedCohort : selectedCohorts) {
+                invocations.add(captureInvocation(
+                        selectedEntry,
+                        publication,
+                        selectedCohort));
+            }
+            runtime.metrics().add(COHORTS_SELECTED, invocations.size());
+            runtime.metrics().increment(PLAN_CONSTRUCTIONS);
+            return new FrozenBatch(
+                    selectedEntry,
+                    selection.routeGeneration(),
+                    invocations);
+        });
     }
 
     /** Executes and independently publishes every disconnected cohort. */
@@ -160,9 +215,16 @@ final class ContractsClosureAdapter implements AutoCloseable {
             return outcome(receipt, true);
         }
         requireRouteSelectionCurrent(frozen, selected);
-        executionObserver.beginAttempt();
+        executionObserver.beginAttempt(selected.members().stream()
+                .map(DocumentId::value)
+                .toList());
         ClosureAttemptResult attempt = contracts.processClosure(
                 selected.input());
+        if (attempt.isComplete()) {
+            runtime.metrics().add(
+                    RESULTING_COMPONENTS,
+                    attempt.processResult().resultingComponents().size());
+        }
         String identity = publicationIdentity(frozen, selected);
         if (!attempt.isComplete()) {
             return new CohortOutcome(
@@ -217,8 +279,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
         ensureOpen();
         FrozenBatch frozen = requireCohortHandle(batch, cohort);
         String identity = publicationIdentity(frozen, cohort);
-        InMemoryDocumentStore.PublicationSnapshot snapshot =
-                documents.publicationSnapshot();
+        InMemoryDocumentStore.ClosureSnapshot snapshot =
+                documents.closureSnapshot(cohort.members());
         ContractsClosurePublicationReceipt receipt = snapshot
                 .closurePublicationReceipts().get(identity);
         if (receipt == null) {
@@ -270,8 +332,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
             throw new IllegalArgumentException(
                     "Receipt-only publication requires a non-commit result");
         }
-        InMemoryDocumentStore.PublicationSnapshot current =
-                documents.publicationSnapshot();
+        InMemoryDocumentStore.ClosureSnapshot current =
+                documents.closureSnapshot(invocation.members());
         requireCohortStillCurrent(invocation, current);
         MultiDocumentPublicationTransaction transaction = documents
                 .beginAtomicPublication(
@@ -346,6 +408,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
             }
         }
         routes.prepareReplacement(replacements).publish();
+        activeSourceTimelines.refresh(cohort.members(), documents);
         return true;
     }
 
@@ -361,50 +424,58 @@ final class ContractsClosureAdapter implements AutoCloseable {
             ProcessEmbeddedComponentIndex componentIndex,
             ManagedOccurrenceInventory occurrenceInventory,
             OperationRouteIndex.FrozenDirectDeliverySelection selection) {
+        return partitionSelection(
+                componentIndex, occurrenceInventory, selection, null);
+    }
+
+    private static List<CohortSelection> partitionSelection(
+            ProcessEmbeddedComponentIndex componentIndex,
+            ManagedOccurrenceInventory occurrenceInventory,
+            OperationRouteIndex.FrozenDirectDeliverySelection selection,
+            EngineMetrics metrics) {
         ProcessEmbeddedComponentIndex index = Objects.requireNonNull(
                 componentIndex, "componentIndex");
         ManagedOccurrenceInventory inventory = Objects.requireNonNull(
                 occurrenceInventory, "occurrenceInventory");
         OperationRouteIndex.FrozenDirectDeliverySelection frozen =
                 Objects.requireNonNull(selection, "selection");
-        Map<DocumentId, DocumentId> parents = new TreeMap<>(
+        TreeMap<DocumentId, ConnectedSelection> groups = new TreeMap<>(
                 EmbeddingBinding.DOCUMENT_ORDER);
-        for (DocumentId documentId : index.documents()) {
-            parents.put(documentId, documentId);
-        }
-        for (ProcessEmbeddedComponentIndex.Cohort activeCohort
-                : index.cohorts()) {
-            DocumentId first = activeCohort.members().get(0);
-            for (int member = 1;
-                    member < activeCohort.members().size(); member++) {
-                union(parents, first, activeCohort.members().get(member));
-            }
-        }
-        for (ManagedOccurrenceBinding row : inventory.rows()) {
-            union(
-                    parents,
-                    coordinationId(row.sourceDocumentId()),
-                    coordinationId(row.targetDocumentId()));
-        }
-        TreeMap<DocumentId, List<DocumentId>> groups = new TreeMap<>(
-                EmbeddingBinding.DOCUMENT_ORDER);
-        for (DocumentId documentId : index.documents()) {
-            groups.computeIfAbsent(find(parents, documentId),
-                            ignored -> new ArrayList<>())
-                    .add(documentId);
-        }
-        Set<DocumentId> selectedDocuments = new LinkedHashSet<>(
-                frozen.documentIds());
-        List<CohortSelection> result = new ArrayList<>();
-        for (List<DocumentId> members : groups.values()) {
-            if (members.stream().noneMatch(selectedDocuments::contains)) {
+        Set<DocumentId> alreadySelected = new LinkedHashSet<>();
+        long occurrenceRowsExamined = 0L;
+        List<DocumentId> directTargets = frozen.documentIds().stream()
+                .sorted(EmbeddingBinding.DOCUMENT_ORDER)
+                .toList();
+        for (DocumentId directTarget : directTargets) {
+            if (alreadySelected.contains(directTarget)) {
                 continue;
             }
+            ConnectedSelection connected = connectedSelection(
+                    index, inventory, directTarget);
+            groups.put(connected.members().get(0), connected);
+            alreadySelected.addAll(connected.members());
+            occurrenceRowsExamined = Math.addExact(
+                    occurrenceRowsExamined, connected.rowsExamined());
+        }
+        if (metrics != null) {
+            metrics.add(OCCURRENCE_ROWS_EXAMINED, occurrenceRowsExamined);
+        }
+        List<CohortSelection> result = new ArrayList<>();
+        for (ConnectedSelection connected : groups.values()) {
+            List<DocumentId> members = connected.members();
             Set<DocumentId> memberSet = new LinkedHashSet<>(members);
+            TreeMap<DocumentId, ProcessEmbeddedComponentIndex.Cohort>
+                    activeCohorts = new TreeMap<>(
+                            EmbeddingBinding.DOCUMENT_ORDER);
+            for (DocumentId member : members) {
+                ProcessEmbeddedComponentIndex.Cohort active =
+                        index.cohort(member);
+                activeCohorts.putIfAbsent(
+                        active.members().get(0), active);
+            }
             List<ProcessEmbeddedComponentIndex.Component> components =
-                    index.components().stream()
-                            .filter(component -> memberSet.containsAll(
-                                    component.members()))
+                    activeCohorts.values().stream()
+                            .flatMap(active -> active.components().stream())
                             .toList();
             List<OperationRouteIndex.FrozenDirectDelivery> deliveries =
                     frozen.deliveries().stream()
@@ -412,55 +483,73 @@ final class ContractsClosureAdapter implements AutoCloseable {
                                     delivery.documentId()))
                             .toList();
             result.add(new CohortSelection(
-                    members, components, deliveries));
+                    members,
+                    components,
+                    connected.occurrences(),
+                    deliveries));
         }
         return List.copyOf(result);
     }
 
-    private static void union(
-            Map<DocumentId, DocumentId> parents,
-            DocumentId left,
-            DocumentId right) {
-        DocumentId leftRoot = find(parents, left);
-        DocumentId rightRoot = find(parents, right);
-        if (leftRoot.equals(rightRoot)) {
-            return;
+    private static ConnectedSelection connectedSelection(
+            ProcessEmbeddedComponentIndex index,
+            ManagedOccurrenceInventory inventory,
+            DocumentId start) {
+        TreeMap<DocumentId, Boolean> discovered = new TreeMap<>(
+                EmbeddingBinding.DOCUMENT_ORDER);
+        Deque<DocumentId> pending = new ArrayDeque<>();
+        discovered.put(Objects.requireNonNull(start, "start"), Boolean.TRUE);
+        pending.addLast(start);
+        Map<String, ManagedOccurrenceBinding> occurrences =
+                new LinkedHashMap<>();
+        long rowsExamined = 0L;
+        while (!pending.isEmpty()) {
+            DocumentId current = pending.removeFirst();
+            for (DocumentId activeMember : index.cohort(current).members()) {
+                if (discovered.putIfAbsent(
+                        activeMember, Boolean.TRUE) == null) {
+                    pending.addLast(activeMember);
+                }
+            }
+            for (ManagedOccurrenceBinding row
+                    : inventory.rowsTouching(current)) {
+                if (occurrences.putIfAbsent(
+                        row.occurrenceIdentity(), row) != null) {
+                    continue;
+                }
+                rowsExamined = Math.addExact(rowsExamined, 1L);
+                DocumentId source = coordinationId(row.sourceDocumentId());
+                DocumentId target = coordinationId(row.targetDocumentId());
+                if (discovered.putIfAbsent(source, Boolean.TRUE) == null) {
+                    pending.addLast(source);
+                }
+                if (discovered.putIfAbsent(target, Boolean.TRUE) == null) {
+                    pending.addLast(target);
+                }
+            }
         }
-        if (EmbeddingBinding.DOCUMENT_ORDER.compare(leftRoot, rightRoot) < 0) {
-            parents.put(rightRoot, leftRoot);
-        } else {
-            parents.put(leftRoot, rightRoot);
-        }
-    }
-
-    private static DocumentId find(
-            Map<DocumentId, DocumentId> parents,
-            DocumentId documentId) {
-        DocumentId current = Objects.requireNonNull(
-                documentId, "documentId");
-        DocumentId parent = parents.get(current);
-        if (parent == null) {
-            throw new IllegalStateException(
-                    "Occurrence inventory names an unmanaged document "
-                            + current);
-        }
-        while (!current.equals(parent)) {
-            current = parent;
-            parent = parents.get(current);
-        }
-        return current;
+        ArrayList<ManagedOccurrenceBinding> canonicalOccurrences =
+                new ArrayList<>(occurrences.values());
+        canonicalOccurrences.sort(Comparator.naturalOrder());
+        return new ConnectedSelection(
+                new ArrayList<>(discovered.keySet()),
+                canonicalOccurrences,
+                rowsExamined);
     }
 
     private CohortInvocation captureInvocation(
             TimelineEntry entry,
-            InMemoryDocumentStore.PublicationSnapshot publication,
+            InMemoryDocumentStore.ClosureSnapshot publication,
             CohortSelection selection) {
         TreeMap<DocumentId, CapturedDocument> captured = new TreeMap<>(
                 EmbeddingBinding.DOCUMENT_ORDER);
+        Set<DocumentId> allowedMembers = new LinkedHashSet<>(
+                selection.members());
         for (DocumentId documentId : selection.members()) {
             captured.put(documentId, captureDocument(
                     documentId,
-                    publication.requireHead(documentId)));
+                    publication.requireHead(documentId),
+                    allowedMembers));
         }
 
         List<ComponentSnapshot> components = captureComponents(
@@ -495,8 +584,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
             }
         }
 
-        List<ManagedOccurrenceBinding> occurrences = captureOccurrences(
-                publication.occurrenceInventory(), captured.keySet());
+        List<ManagedOccurrenceBinding> occurrences = selection.occurrences();
         long graphGeneration = publication.graphGenerations()
                 .requireCohortGeneration(captured.keySet());
         AffectedClosureSnapshot snapshot = ClosureEvidenceFactory
@@ -531,7 +619,14 @@ final class ContractsClosureAdapter implements AutoCloseable {
 
     private CapturedDocument captureDocument(
             DocumentId documentId,
-            InMemoryDocumentStore.DocumentHead expectedHead) {
+            InMemoryDocumentStore.DocumentHead expectedHead,
+            Set<DocumentId> allowedMembers) {
+        runtime.metrics().increment(DOCUMENT_OPENS);
+        if (!Objects.requireNonNull(allowedMembers, "allowedMembers")
+                .contains(documentId)) {
+            runtime.metrics().increment(UNRELATED_DOCUMENT_OPENS);
+            runtime.metrics().increment("temporal.unrelatedDocumentReads");
+        }
         DocumentSession session = documents.require(documentId);
         synchronized (session) {
             InMemoryDocumentStore.DocumentHead actualHead =
@@ -563,13 +658,14 @@ final class ContractsClosureAdapter implements AutoCloseable {
         }
     }
 
-    private static List<ComponentSnapshot> captureComponents(
-            InMemoryDocumentStore.PublicationSnapshot publication,
+    private List<ComponentSnapshot> captureComponents(
+            InMemoryDocumentStore.ClosureSnapshot publication,
             List<ProcessEmbeddedComponentIndex.Component> indexedComponents,
             Map<DocumentId, CapturedDocument> documentsById) {
         Map<List<DocumentId>, ComponentSnapshot> byMembers =
                 new LinkedHashMap<>();
         for (ComponentSnapshot component : publication.componentStates()) {
+            runtime.metrics().increment(COMPONENT_STATES_READ);
             List<DocumentId> members = coordinationIds(
                     component.orderedMemberDocumentIds());
             if (byMembers.putIfAbsent(members, component) != null) {
@@ -608,27 +704,6 @@ final class ContractsClosureAdapter implements AutoCloseable {
         return List.copyOf(result);
     }
 
-    private static List<ManagedOccurrenceBinding> captureOccurrences(
-            ManagedOccurrenceInventory inventory,
-            Set<DocumentId> cohortMembers) {
-        List<ManagedOccurrenceBinding> result = new ArrayList<>();
-        for (ManagedOccurrenceBinding row : inventory.rows()) {
-            boolean source = cohortMembers.contains(
-                    coordinationId(row.sourceDocumentId()));
-            boolean target = cohortMembers.contains(
-                    coordinationId(row.targetDocumentId()));
-            if (source != target) {
-                throw new ProjectionUnavailableException(
-                        "An inactive occurrence crosses disconnected cohorts: "
-                                + row.occurrenceIdentity());
-            }
-            if (source) {
-                result.add(row);
-            }
-        }
-        return List.copyOf(result);
-    }
-
     private void publish(
             FrozenBatch batch,
             CohortInvocation invocation,
@@ -640,8 +715,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     "Process receipt identity does not identify this cohort");
         }
         requirePublishableResult(batch, invocation, result);
-        InMemoryDocumentStore.PublicationSnapshot current =
-                documents.publicationSnapshot();
+        InMemoryDocumentStore.ClosureSnapshot current =
+                documents.closureSnapshot(invocation.members());
         requireCohortStillCurrent(invocation, current);
         ManagedOccurrenceInventory resultingInventory = mergeInventory(
                 current.occurrenceInventory(),
@@ -694,6 +769,14 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 resultingDocuments(result, invocation.memberSet());
         Map<DocumentId, Long> gasByDocument = gasByDocument(
                 result, resultingDocuments.keySet());
+        ContractsStructuralWorkMetrics.recordGlobalPasses(
+                runtime.metrics(),
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_SUBSCRIPTION_ENTRIES_TRAVERSED,
+                3L,
+                Math.multiplyExact(
+                        current.closureSubscriptions().states().size(),
+                        3L));
         ClosureSubscriptionInventory resultingClosureSubscriptions =
                 current.closureSubscriptions().apply(result);
         WholeObjectStore.Mark objectMark = objects.mark();
@@ -722,7 +805,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 requireExactRootSubscriptionSurface(
                         entry.getKey(),
                         projected,
-                        resultingClosureSubscriptions.statesFor(
+                        subscriptionStatesFor(
+                                resultingClosureSubscriptions,
                                 entry.getKey()));
                 List<SubscriptionDelta.Entry> activeSubscriptionsAfter;
                 if (changed) {
@@ -791,6 +875,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     PublicationFailurePoint
                             .AFTER_STORE_COMMIT_BEFORE_ROUTE_PUBLISH);
             preparedRoutes.publish();
+            activeSourceTimelines.refresh(invocation.members(), documents);
             objects.commit(objectMark);
         } catch (RuntimeException failure) {
             if (storeCommitted) {
@@ -1058,7 +1143,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
 
     private static void requireCohortStillCurrent(
             CohortInvocation invocation,
-            InMemoryDocumentStore.PublicationSnapshot current) {
+            InMemoryDocumentStore.ClosureSnapshot current) {
         Set<DocumentId> members = invocation.memberSet();
         for (CapturedDocument document : invocation.documents().values()) {
             if (!document.head().equals(
@@ -1080,7 +1165,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 .toList();
         List<OccurrenceProjection> currentOccurrences = new ArrayList<>();
         for (ManagedOccurrenceBinding row
-                : current.occurrenceInventory().rows()) {
+                : targetedOccurrences(
+                        current.occurrenceInventory(), members)) {
             boolean source = members.contains(
                     coordinationId(row.sourceDocumentId()));
             boolean target = members.contains(
@@ -1111,6 +1197,22 @@ final class ContractsClosureAdapter implements AutoCloseable {
         if (!expectedComponents.equals(currentComponents)) {
             throw stale("Cohort component state changed before publication");
         }
+    }
+
+    private static List<ManagedOccurrenceBinding> targetedOccurrences(
+            ManagedOccurrenceInventory inventory,
+            Set<DocumentId> members) {
+        Map<String, ManagedOccurrenceBinding> selected =
+                new LinkedHashMap<>();
+        for (DocumentId member : members) {
+            for (ManagedOccurrenceBinding row : inventory.rowsTouching(member)) {
+                selected.putIfAbsent(row.occurrenceIdentity(), row);
+            }
+        }
+        ArrayList<ManagedOccurrenceBinding> canonical = new ArrayList<>(
+                selected.values());
+        canonical.sort(Comparator.naturalOrder());
+        return List.copyOf(canonical);
     }
 
     private static Map<DocumentId, ResultingDocument> resultingDocuments(
@@ -1156,11 +1258,16 @@ final class ContractsClosureAdapter implements AutoCloseable {
         return true;
     }
 
-    private static ManagedOccurrenceInventory mergeInventory(
+    private ManagedOccurrenceInventory mergeInventory(
             ManagedOccurrenceInventory before,
             Set<DocumentId> cohortMembers,
             Collection<ManagedOccurrenceBinding> replacements) {
         List<ManagedOccurrenceBinding> merged = new ArrayList<>();
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                runtime.metrics(),
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_OCCURRENCE_ENTRIES_TRAVERSED,
+                before.rows().size());
         for (ManagedOccurrenceBinding row : before.rows()) {
             boolean source = cohortMembers.contains(
                     coordinationId(row.sourceDocumentId()));
@@ -1184,36 +1291,62 @@ final class ContractsClosureAdapter implements AutoCloseable {
             }
             merged.add(replacement);
         }
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                runtime.metrics(),
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_OCCURRENCE_ENTRIES_TRAVERSED,
+                merged.size());
         return ManagedOccurrenceInventory.of(merged);
     }
 
-    private static boolean sameInventory(
+    private boolean sameInventory(
             ManagedOccurrenceInventory first,
             ManagedOccurrenceInventory second) {
         return inventoryProjection(first).equals(inventoryProjection(second));
     }
 
-    private static List<OccurrenceProjection> inventoryProjection(
+    private List<OccurrenceProjection> inventoryProjection(
             ManagedOccurrenceInventory inventory) {
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                runtime.metrics(),
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_OCCURRENCE_ENTRIES_TRAVERSED,
+                inventory.rows().size());
         return inventory.rows().stream()
                 .map(OccurrenceProjection::from)
                 .toList();
     }
 
-    private static boolean sameActiveTopology(
+    private boolean sameActiveTopology(
             ManagedOccurrenceInventory first,
             ManagedOccurrenceInventory second) {
         return activeTopology(first).equals(activeTopology(second));
     }
 
-    private static List<ActiveEdge> activeTopology(
+    private List<ActiveEdge> activeTopology(
             ManagedOccurrenceInventory inventory) {
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                runtime.metrics(),
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_OCCURRENCE_ENTRIES_TRAVERSED,
+                inventory.activeRows().size());
         return inventory.activeRows().stream()
                 .map(row -> new ActiveEdge(
                         row.occurrenceIdentity(),
                         row.sourceDocumentId().value(),
                         row.targetDocumentId().value()))
                 .toList();
+    }
+
+    private List<SubscriptionState> subscriptionStatesFor(
+            ClosureSubscriptionInventory subscriptions,
+            DocumentId documentId) {
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                runtime.metrics(),
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_SUBSCRIPTION_ENTRIES_TRAVERSED,
+                subscriptions.states().size());
+        return subscriptions.statesFor(documentId);
     }
 
     private static Map<DocumentId, Long> gasByDocument(
@@ -1404,7 +1537,6 @@ final class ContractsClosureAdapter implements AutoCloseable {
     record FrozenBatch(
             TimelineEntry entry,
             long routeGeneration,
-            InMemoryDocumentStore.PublicationSnapshot publication,
             List<CohortInvocation> invocations) {
         FrozenBatch {
             entry = Objects.requireNonNull(entry, "entry");
@@ -1412,8 +1544,6 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 throw new IllegalArgumentException(
                         "routeGeneration must be non-negative");
             }
-            publication = Objects.requireNonNull(
-                    publication, "publication");
             invocations = List.copyOf(Objects.requireNonNull(
                     invocations, "invocations"));
         }
@@ -1422,12 +1552,15 @@ final class ContractsClosureAdapter implements AutoCloseable {
     record CohortSelection(
             List<DocumentId> members,
             List<ProcessEmbeddedComponentIndex.Component> components,
+            List<ManagedOccurrenceBinding> occurrences,
             List<OperationRouteIndex.FrozenDirectDelivery> deliveries) {
         CohortSelection {
             members = List.copyOf(Objects.requireNonNull(
                     members, "members"));
             components = List.copyOf(Objects.requireNonNull(
                     components, "components"));
+            occurrences = List.copyOf(Objects.requireNonNull(
+                    occurrences, "occurrences"));
             deliveries = List.copyOf(Objects.requireNonNull(
                     deliveries, "deliveries"));
             if (members.isEmpty() || components.isEmpty()) {
@@ -1437,6 +1570,23 @@ final class ContractsClosureAdapter implements AutoCloseable {
             if (deliveries.isEmpty()) {
                 throw new IllegalArgumentException(
                         "A selected cohort must retain a direct delivery");
+            }
+        }
+    }
+
+    private record ConnectedSelection(
+            List<DocumentId> members,
+            List<ManagedOccurrenceBinding> occurrences,
+            long rowsExamined) {
+        private ConnectedSelection {
+            members = List.copyOf(Objects.requireNonNull(
+                    members, "members"));
+            occurrences = List.copyOf(Objects.requireNonNull(
+                    occurrences, "occurrences"));
+            if (members.isEmpty() || rowsExamined < 0L) {
+                throw new IllegalArgumentException(
+                        "Connected selection must retain members and a "
+                                + "non-negative row count");
             }
         }
     }

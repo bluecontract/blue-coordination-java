@@ -26,6 +26,10 @@ import java.util.function.Function;
  * Large request content is not part of the lookup key.
  */
 final class OperationRouteIndex {
+    static final String DIRECT_ROUTE_SNAPSHOTS = "routing.directSnapshots";
+    static final String DIRECT_ROUTE_REVALIDATION_SNAPSHOTS =
+            "routing.directRevalidationSnapshots";
+
     private final Map<RouteKey, List<RouteRow>> rows = new LinkedHashMap<>();
     private final Map<DocumentId, Set<RouteKey>> keysByDocument =
             new LinkedHashMap<>();
@@ -85,7 +89,17 @@ final class OperationRouteIndex {
                             checked.activeSubscriptions()));
         }
 
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_ROUTE_ENTRIES_TRAVERSED,
+                rows.size());
         Map<RouteKey, List<RouteRow>> preparedRows = copyRows(rows);
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_ROUTE_ENTRIES_TRAVERSED,
+                keysByDocument.size());
         Map<DocumentId, Set<RouteKey>> preparedKeys = copyKeys(
                 keysByDocument);
         long retainedKeys = 0L;
@@ -121,6 +135,12 @@ final class OperationRouteIndex {
                 || !keysByDocument.equals(preparedKeys);
         long resultingGeneration = changed
                 ? Math.addExact(generation, 1L) : generation;
+        ContractsStructuralWorkMetrics.recordGlobalPasses(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_ROUTE_ENTRIES_TRAVERSED,
+                2L,
+                Math.addExact((long) rows.size(), preparedRows.size()));
         Set<RouteKey> changedKeys = changedKeys(rows, preparedRows);
         long insertedRows = compiled.values().stream()
                 .flatMap(value -> value.values().stream())
@@ -208,8 +228,18 @@ final class OperationRouteIndex {
                             + replacement.expectedGeneration + " but found "
                             + generation);
         }
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_ROUTE_ENTRIES_TRAVERSED,
+                replacement.rows.size());
         rows.clear();
         rows.putAll(copyRows(replacement.rows));
+        ContractsStructuralWorkMetrics.recordGlobalPass(
+                metrics,
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_ROUTE_ENTRIES_TRAVERSED,
+                replacement.keysByDocument.size());
         keysByDocument.clear();
         keysByDocument.putAll(copyKeys(replacement.keysByDocument));
         generation = replacement.resultingGeneration;
@@ -308,9 +338,18 @@ final class OperationRouteIndex {
      */
     public synchronized FrozenDirectDeliverySelection selectDirectDeliveries(
             TimelineEntry entry) {
+        return selectDirectDeliveries(entry, false);
+    }
+
+    private FrozenDirectDeliverySelection selectDirectDeliveries(
+            TimelineEntry entry,
+            boolean revalidation) {
         Objects.requireNonNull(entry, "entry");
         long started = System.nanoTime();
         metrics.increment("routing.lookups");
+        metrics.increment(revalidation
+                ? DIRECT_ROUTE_REVALIDATION_SNAPSHOTS
+                : DIRECT_ROUTE_SNAPSHOTS);
         DocumentTarget target = DocumentTarget.from(entry);
         Map<DirectDeliveryKey, RouteRow> selected = new LinkedHashMap<>();
         for (String eventKey
@@ -386,7 +425,8 @@ final class OperationRouteIndex {
                 .map(DeliveryProjection::from)
                 .collect(java.util.stream.Collectors.toCollection(
                         LinkedHashSet::new));
-        Set<DeliveryProjection> actualRows = selectDirectDeliveries(entry)
+        Set<DeliveryProjection> actualRows = selectDirectDeliveries(
+                entry, true)
                 .deliveries().stream()
                 .filter(delivery -> documents.contains(delivery.documentId()))
                 .map(DeliveryProjection::from)

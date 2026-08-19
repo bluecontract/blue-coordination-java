@@ -21,7 +21,33 @@ import java.util.TreeMap;
 
 /** Deterministic in-memory document store. */
 final class InMemoryDocumentStore {
-    private StoreState state = StoreState.empty();
+    /**
+     * Explicit snapshots that materialize every durable document head.
+     *
+     * <p>This is the deliberately narrow source of the public
+     * FULL_ENVIRONMENT_SCANS counter. Remaining global publication-state
+     * traversals are reported separately by {@link ContractsStructuralWorkMetrics}.</p>
+     */
+    static final String FULL_ENVIRONMENT_SCANS =
+            "temporal.fullEnvironmentScans";
+    static final String CLOSURE_TOPOLOGY_SNAPSHOTS =
+            "contracts.closure.topologySnapshots";
+    static final String CLOSURE_HEADS_CAPTURED =
+            "contracts.closure.headsCaptured";
+    static final String CLOSURE_COMPONENT_STATES_CAPTURED =
+            "contracts.closure.componentStatesCaptured";
+
+    private final EngineMetrics metrics;
+    private StoreState state;
+
+    InMemoryDocumentStore() {
+        this(new EngineMetrics());
+    }
+
+    InMemoryDocumentStore(EngineMetrics metrics) {
+        this.metrics = Objects.requireNonNull(metrics, "metrics");
+        state = StoreState.empty();
+    }
 
     public synchronized Optional<DocumentSession> find(DocumentId documentId) {
         return Optional.ofNullable(state.sessions().get(
@@ -78,9 +104,82 @@ final class InMemoryDocumentStore {
         return state.sessions().size();
     }
 
-    /** Captures immutable CAS and publication evidence for a future attempt. */
+    /** Current immutable occurrence topology without opening document heads. */
+    synchronized ManagedOccurrenceInventory occurrenceInventory() {
+        return state.occurrenceInventory();
+    }
+
+    EngineMetrics metrics() {
+        return metrics;
+    }
+
+    /** Captures every durable head plus immutable publication evidence. */
     synchronized PublicationSnapshot publicationSnapshot() {
+        metrics.increment(FULL_ENVIRONMENT_SCANS);
         return PublicationSnapshot.from(state);
+    }
+
+    /** Captures immutable topology indexes without opening document heads. */
+    synchronized ClosureTopologySnapshot closureTopologySnapshot() {
+        metrics.increment(CLOSURE_TOPOLOGY_SNAPSHOTS);
+        return new ClosureTopologySnapshot(
+                state.occurrenceInventoryGeneration(),
+                state.componentIndexGeneration(),
+                state.occurrenceInventory(),
+                state.componentIndex());
+    }
+
+    /** Captures only the durable heads and component states in one cohort. */
+    synchronized ClosureSnapshot closureSnapshot(
+            Collection<DocumentId> documentIds) {
+        return closureSnapshot(documentIds, null);
+    }
+
+    /** Captures one cohort against the exact topology image used to select it. */
+    synchronized ClosureSnapshot closureSnapshot(
+            Collection<DocumentId> documentIds,
+            ClosureTopologySnapshot expectedTopology) {
+        if (expectedTopology != null
+                && (state.occurrenceInventoryGeneration()
+                        != expectedTopology.occurrenceInventoryGeneration()
+                || state.componentIndexGeneration()
+                        != expectedTopology.componentIndexGeneration())) {
+            throw new MultiDocumentPublicationTransaction
+                    .AtomicPublicationCasException(
+                            "Closure topology changed during targeted capture");
+        }
+        TreeMap<DocumentId, DocumentHead> heads = new TreeMap<>(
+                EmbeddingBinding.DOCUMENT_ORDER);
+        for (DocumentId documentId : new LinkedHashSet<>(Objects.requireNonNull(
+                documentIds, "documentIds"))) {
+            DocumentSession session = state.sessions().get(Objects.requireNonNull(
+                    documentId, "documentId"));
+            if (session == null) {
+                throw new IllegalArgumentException(
+                        "Unknown document " + documentId);
+            }
+            heads.put(documentId, new DocumentHead(
+                    session.epoch(),
+                    session.currentRevision().after().blueId()));
+        }
+        if (heads.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "A closure snapshot requires at least one document");
+        }
+        List<ComponentSnapshot> components = state.componentStatesFor(
+                heads.keySet());
+        metrics.add(CLOSURE_HEADS_CAPTURED, heads.size());
+        metrics.add(CLOSURE_COMPONENT_STATES_CAPTURED, components.size());
+        return new ClosureSnapshot(
+                heads,
+                state.occurrenceInventoryGeneration(),
+                state.componentIndexGeneration(),
+                state.occurrenceInventory(),
+                state.graphGenerations(),
+                components,
+                state.closureSubscriptions(),
+                state.publicationReceipts(),
+                state.closurePublicationReceipts());
     }
 
     /**
@@ -132,6 +231,9 @@ final class InMemoryDocumentStore {
         private final long componentIndexGeneration;
         private final ClosureGraphGenerationInventory graphGenerations;
         private final List<ComponentSnapshot> componentStates;
+        private final Map<DocumentId, ComponentSnapshot>
+                componentStateByDocument;
+        private final Map<String, Integer> componentStateOrder;
         private final ClosureSubscriptionInventory closureSubscriptions;
         private final List<PublicEventOccurrence> outbox;
         private final List<CheckpointWrite> checkpointEvidence;
@@ -186,7 +288,15 @@ final class InMemoryDocumentStore {
             Set<String> componentLineages = new LinkedHashSet<>();
             Set<String> componentStateIdentities = new LinkedHashSet<>();
             Set<String> componentMembers = new LinkedHashSet<>();
-            for (ComponentSnapshot component : canonicalComponents) {
+            LinkedHashMap<DocumentId, ComponentSnapshot> byDocument =
+                    new LinkedHashMap<>();
+            LinkedHashMap<String, Integer> orderByIdentity =
+                    new LinkedHashMap<>();
+            for (int statePosition = 0;
+                    statePosition < canonicalComponents.size();
+                    statePosition++) {
+                ComponentSnapshot component = canonicalComponents.get(
+                        statePosition);
                 if (!componentLineages.add(component.componentIdentity())) {
                     throw new IllegalArgumentException(
                             "Duplicate component lineage "
@@ -204,10 +314,18 @@ final class InMemoryDocumentStore {
                                 "Overlapping component state member "
                                         + documentId.value());
                     }
+                    byDocument.put(
+                            DocumentId.of(documentId.value()), component);
                 });
+                orderByIdentity.put(
+                        component.componentStateIdentity(), statePosition);
             }
             requireCondensationOrder(canonicalComponents, componentIndex);
             this.componentStates = List.copyOf(canonicalComponents);
+            this.componentStateByDocument = Collections.unmodifiableMap(
+                    byDocument);
+            this.componentStateOrder = Collections.unmodifiableMap(
+                    orderByIdentity);
             this.closureSubscriptions = Objects.requireNonNull(
                     closureSubscriptions, "closureSubscriptions");
             this.closureSubscriptions.states().forEach(state -> {
@@ -225,15 +343,13 @@ final class InMemoryDocumentStore {
                             "Closure subscription does not identify the durable "
                                     + "document head " + owner);
                 }
-                ComponentSnapshot component = canonicalComponents.stream()
-                        .filter(candidate -> candidate
-                                .orderedMemberDocumentIds().stream()
-                                .anyMatch(member -> member.value()
-                                        .equals(owner.value())))
-                        .findFirst()
-                        .orElseThrow(() -> new IllegalArgumentException(
-                                "Closure subscription has no component state for "
-                                        + owner));
+                ComponentSnapshot component = componentStateByDocument.get(
+                        owner);
+                if (component == null) {
+                    throw new IllegalArgumentException(
+                            "Closure subscription has no component state for "
+                                    + owner);
+                }
                 if (component.componentGeneration()
                         != state.componentGeneration()) {
                     throw new IllegalArgumentException(
@@ -409,6 +525,26 @@ final class InMemoryDocumentStore {
             return componentStates;
         }
 
+        List<ComponentSnapshot> componentStatesFor(
+                Collection<DocumentId> documentIds) {
+            LinkedHashMap<String, ComponentSnapshot> selected =
+                    new LinkedHashMap<>();
+            for (DocumentId documentId : documentIds) {
+                ComponentSnapshot component = componentStateByDocument.get(
+                        Objects.requireNonNull(documentId, "documentId"));
+                if (component != null) {
+                    selected.putIfAbsent(
+                            component.componentStateIdentity(), component);
+                }
+            }
+            ArrayList<ComponentSnapshot> canonical = new ArrayList<>(
+                    selected.values());
+            canonical.sort((left, right) -> Integer.compare(
+                    componentStateOrder.get(left.componentStateIdentity()),
+                    componentStateOrder.get(right.componentStateIdentity())));
+            return List.copyOf(canonical);
+        }
+
         ClosureSubscriptionInventory closureSubscriptions() {
             return closureSubscriptions;
         }
@@ -507,6 +643,77 @@ final class InMemoryDocumentStore {
                 }
                 prior = position;
             }
+        }
+    }
+
+    /** Immutable topology image which opens no document session. */
+    record ClosureTopologySnapshot(
+            long occurrenceInventoryGeneration,
+            long componentIndexGeneration,
+            ManagedOccurrenceInventory occurrenceInventory,
+            ProcessEmbeddedComponentIndex componentIndex) {
+        ClosureTopologySnapshot {
+            MultiDocumentPublicationTransaction.requireSafeInteger(
+                    occurrenceInventoryGeneration,
+                    "occurrenceInventoryGeneration");
+            MultiDocumentPublicationTransaction.requireSafeInteger(
+                    componentIndexGeneration,
+                    "componentIndexGeneration");
+            occurrenceInventory = Objects.requireNonNull(
+                    occurrenceInventory, "occurrenceInventory");
+            componentIndex = Objects.requireNonNull(
+                    componentIndex, "componentIndex");
+        }
+    }
+
+    /** Targeted immutable publication image for one affected closure. */
+    record ClosureSnapshot(
+            Map<DocumentId, DocumentHead> documentHeads,
+            long occurrenceInventoryGeneration,
+            long componentIndexGeneration,
+            ManagedOccurrenceInventory occurrenceInventory,
+            ClosureGraphGenerationInventory graphGenerations,
+            List<ComponentSnapshot> componentStates,
+            ClosureSubscriptionInventory closureSubscriptions,
+            Set<String> publicationReceipts,
+            Map<String, ContractsClosurePublicationReceipt>
+                    closurePublicationReceipts) {
+        ClosureSnapshot {
+            documentHeads = Collections.unmodifiableMap(
+                    new LinkedHashMap<>(Objects.requireNonNull(
+                            documentHeads, "documentHeads")));
+            MultiDocumentPublicationTransaction.requireSafeInteger(
+                    occurrenceInventoryGeneration,
+                    "occurrenceInventoryGeneration");
+            MultiDocumentPublicationTransaction.requireSafeInteger(
+                    componentIndexGeneration,
+                    "componentIndexGeneration");
+            occurrenceInventory = Objects.requireNonNull(
+                    occurrenceInventory, "occurrenceInventory");
+            graphGenerations = Objects.requireNonNull(
+                    graphGenerations, "graphGenerations");
+            componentStates = List.copyOf(Objects.requireNonNull(
+                    componentStates, "componentStates"));
+            closureSubscriptions = Objects.requireNonNull(
+                    closureSubscriptions, "closureSubscriptions");
+            // These are already immutable StoreState views. Retaining them
+            // avoids copying global receipt inventories for a local capture.
+            publicationReceipts = Objects.requireNonNull(
+                    publicationReceipts, "publicationReceipts");
+            closurePublicationReceipts = Objects.requireNonNull(
+                    closurePublicationReceipts,
+                    "closurePublicationReceipts");
+        }
+
+        DocumentHead requireHead(DocumentId documentId) {
+            DocumentHead head = documentHeads.get(Objects.requireNonNull(
+                    documentId, "documentId"));
+            if (head == null) {
+                throw new IllegalArgumentException(
+                        "Document is outside the captured closure "
+                                + documentId);
+            }
+            return head;
         }
     }
 

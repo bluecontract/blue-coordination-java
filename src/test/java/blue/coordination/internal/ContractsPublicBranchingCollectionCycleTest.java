@@ -107,7 +107,7 @@ final class ContractsPublicBranchingCollectionCycleTest {
     }
 
     @Test
-    void oneThousandUnrelatedDocumentsPerformZeroSemanticWork() {
+    void oneThousandUnrelatedDocumentsKeepCaptureLocalAndExposeGlobalBlocker() {
         BranchingRun base = runBranching(BranchingVariant.BASELINE, 0);
         BranchingRun withUnrelated = runBranching(
                 BranchingVariant.BASELINE, 1_000);
@@ -116,18 +116,130 @@ final class ContractsPublicBranchingCollectionCycleTest {
         assertEquals(0L, withUnrelated.unrelatedDocumentOpens());
         assertEquals(0L, withUnrelated.unrelatedDocumentSteps());
         assertEquals(0L, withUnrelated.unrelatedMemberFinalizations());
-        assertEquals(0L, withUnrelated.fullEnvironmentScans());
+        assertEquals(0L, withUnrelated.fullPublicationHeadSnapshots());
         assertEquals(0L, withUnrelated.unrelatedDocumentReads());
         assertEquals(1, withUnrelated.processResult()
                 .resultingComponents().size());
-        assertEquals(branchingDocumentValues(), withUnrelated.processResult()
+        assertEquals(Set.of(
+                        "branching-a",
+                        "branching-b1",
+                        "branching-b2",
+                        "branching-c1",
+                        "branching-c2"),
+                withUnrelated.processResult()
                 .resultingComponents().get(0)
                 .orderedMemberDocumentIds().stream()
                 .map(documentId -> documentId.value())
-                .collect(Collectors.toCollection(LinkedHashSet::new)));
+                .collect(Collectors.toSet()));
         assertEquals(1_005, withUnrelated.documentCount());
         assertEquals(5L, withUnrelated.drain()
                 .committedProcessTransitions());
+        assertEquals(1L, withUnrelated.journalEntriesAdded());
+        assertEquals(
+                withUnrelated.semantic().workIds().size(),
+                Set.copyOf(withUnrelated.semantic().workIds()).size());
+
+        StructuralMetrics structural = withUnrelated.structuralMetrics();
+        assertEquals(1L, structural.directRouteSnapshots());
+        assertEquals(0L, structural.directRouteRevalidationSnapshots());
+        assertEquals(1L, structural.directDeliveriesSelected());
+        assertEquals(1L, structural.planConstructions());
+        assertEquals(1L, structural.cohortsSelected());
+        assertEquals(1L, structural.topologySnapshots());
+        assertEquals(15L, structural.headsCaptured());
+        assertEquals(5L, structural.documentOpens());
+        assertEquals(0L, structural.unrelatedDocumentOpens());
+        assertEquals(3L, structural.componentStatesCaptured());
+        assertEquals(1L, structural.componentStatesRead());
+        assertEquals(1L, structural.requestSourcesParsed());
+        assertEquals(7L, structural.acceptedWorkOccurrences());
+        assertEquals(
+                structural.acceptedWorkOccurrences(),
+                structural.isolatedDocumentSteps());
+        assertEquals(0L, structural.unrelatedComponentFinalizations());
+        assertTrue(structural.componentFinalizations() > 0L);
+        assertTrue(structural.canonicalCyclicBytes() > 0L);
+        assertTrue(structural.providerExactNodeReads() > 0L);
+        assertTrue(structural.occurrenceRowsExamined() > 0L);
+        assertEquals(
+                base.structuralMetrics().occurrenceRowsExamined(),
+                structural.occurrenceRowsExamined());
+        assertEquals(1L, structural.resultingComponents());
+        assertTrue(structural.globalStatePasses() > 0L);
+        assertTrue(structural.globalStateEntriesTraversed() > 0L,
+                "Known global publication traversals remain an explicit "
+                        + "optimization blocker");
+        assertTrue(structural.globalSessionEntriesTraversed() > 0L);
+        assertTrue(structural.globalOccurrenceEntriesTraversed() > 0L);
+        assertTrue(structural.globalComponentEntriesTraversed() > 0L);
+        assertTrue(structural.globalGraphEntriesTraversed() > 0L);
+        assertTrue(structural.globalSubscriptionEntriesTraversed() > 0L);
+        assertTrue(structural.globalReceiptEntriesTraversed() > 0L);
+        assertTrue(structural.globalRouteEntriesTraversed() > 0L);
+        assertTrue(structural.globalEvidenceEntriesTraversed() > 0L);
+        StructuralMetrics baseStructural = base.structuralMetrics();
+        assertTrue(structural.globalStateEntriesTraversed()
+                > baseStructural.globalStateEntriesTraversed());
+        assertTrue(structural.globalSessionEntriesTraversed()
+                > baseStructural.globalSessionEntriesTraversed());
+        assertTrue(structural.globalComponentEntriesTraversed()
+                > baseStructural.globalComponentEntriesTraversed());
+        assertTrue(structural.globalGraphEntriesTraversed()
+                > baseStructural.globalGraphEntriesTraversed());
+    }
+
+    @Test
+    void unrelatedEntryDoesNotSpendOneSelectedEntryBudget() {
+        try (CoordinationEngine publicEngine = engine(Set.of(BRANCHING.a()))) {
+            DefaultCoordinationEngine engine =
+                    (DefaultCoordinationEngine) publicEngine;
+            branchingBuilder(engine, BranchingVariant.BASELINE)
+                    .admitTo(publicEngine);
+
+            Timeline unrelatedTimeline = publicEngine.registerTimeline(
+                    "outside/source", "mallory");
+            TimelineEntry unrelated = publicEngine.appendAt(
+                    unrelatedTimeline,
+                    Operation.yaml("ignored", "outsideChannel", "{}"),
+                    ENTRY_TIME);
+            Timeline relevantTimeline = publicEngine.registerTimeline(
+                    "branching/shared", "alice");
+            TimelineEntry relevant = publicEngine.appendAt(
+                    relevantTimeline,
+                    Operation.yaml("start", "ownerChannel", "{}"),
+                    ENTRY_TIME + 1L);
+
+            EngineMetrics.MetricsSnapshot rawBefore =
+                    engine.engineMetrics().snapshot();
+            ProcessingDrainReceipt drained = publicEngine.drain(
+                    new CoordinationEngine.DrainBudget(Long.MAX_VALUE, 1L));
+            EngineMetrics.MetricsSnapshot rawAfter =
+                    engine.engineMetrics().snapshot();
+
+            assertTrue(drained.quiescent());
+            assertFalse(drained.paused());
+            assertEquals(List.of(unrelated, relevant),
+                    drained.processedEntries());
+            assertEquals(List.of(), drained.outcomesFor(unrelated.blueId()));
+            assertEquals(List.of(
+                            BRANCHING.a(),
+                            BRANCHING.b1(),
+                            BRANCHING.b2(),
+                            BRANCHING.c1(),
+                            BRANCHING.c2()),
+                    drained.outcomesFor(relevant.blueId()).stream()
+                            .map(outcome -> outcome.documentId())
+                            .toList());
+            assertEquals(5L, drained.committedProcessTransitions());
+            assertEquals(1L, rawDelta(
+                    rawBefore,
+                    rawAfter,
+                    OperationRouteIndex.DIRECT_ROUTE_SNAPSHOTS));
+            assertEquals(1L, rawDelta(
+                    rawBefore,
+                    rawAfter,
+                    ContractsClosureAdapter.PLAN_CONSTRUCTIONS));
+        }
     }
 
     @Test
@@ -215,6 +327,8 @@ final class ContractsPublicBranchingCollectionCycleTest {
                     engine.documents().publicationSnapshot()
                             .componentStates().size());
 
+            EngineMetrics.MetricsSnapshot rawBefore =
+                    engine.engineMetrics().snapshot();
             CoordinationMetrics before = publicEngine.metrics();
             Timeline timeline = publicEngine.registerTimeline(
                     "branching/shared", "alice");
@@ -226,6 +340,8 @@ final class ContractsPublicBranchingCollectionCycleTest {
             assertEquals(1, routeTargets);
             ProcessingDrainReceipt drained = publicEngine.drain();
             CoordinationMetrics after = publicEngine.metrics();
+            EngineMetrics.MetricsSnapshot rawAfter =
+                    engine.engineMetrics().snapshot();
 
             assertTrue(drained.quiescent());
             assertFalse(drained.paused());
@@ -332,6 +448,7 @@ final class ContractsPublicBranchingCollectionCycleTest {
                             after,
                             CoordinationMetrics.Counter
                                     .UNRELATED_DOCUMENT_READS),
+                    structuralDelta(rawBefore, rawAfter),
                     after.documentCount());
         }
     }
@@ -797,6 +914,96 @@ final class ContractsPublicBranchingCollectionCycleTest {
         return after.counter(counter) - before.counter(counter);
     }
 
+    private static StructuralMetrics structuralDelta(
+            EngineMetrics.MetricsSnapshot before,
+            EngineMetrics.MetricsSnapshot after) {
+        return new StructuralMetrics(
+                rawDelta(before, after,
+                        OperationRouteIndex.DIRECT_ROUTE_SNAPSHOTS),
+                rawDelta(before, after,
+                        OperationRouteIndex
+                                .DIRECT_ROUTE_REVALIDATION_SNAPSHOTS),
+                rawDelta(before, after,
+                        "routing.closureDeliveriesSelected"),
+                rawDelta(before, after,
+                        ContractsClosureAdapter.PLAN_CONSTRUCTIONS),
+                rawDelta(before, after,
+                        ContractsClosureAdapter.COHORTS_SELECTED),
+                rawDelta(before, after,
+                        InMemoryDocumentStore.CLOSURE_TOPOLOGY_SNAPSHOTS),
+                rawDelta(before, after,
+                        InMemoryDocumentStore.CLOSURE_HEADS_CAPTURED),
+                rawDelta(before, after,
+                        ContractsClosureAdapter.DOCUMENT_OPENS),
+                rawDelta(before, after,
+                        ContractsClosureAdapter.UNRELATED_DOCUMENT_OPENS),
+                rawDelta(before, after,
+                        InMemoryDocumentStore
+                                .CLOSURE_COMPONENT_STATES_CAPTURED),
+                rawDelta(before, after,
+                        ContractsClosureAdapter.COMPONENT_STATES_READ),
+                rawDelta(before, after,
+                        WholeRequestEntryFactory.REQUEST_SOURCES_PARSED),
+                rawDelta(before, after,
+                        ContractsClosureExecutionMetricsObserver
+                                .ACCEPTED_WORK_OCCURRENCES),
+                rawDelta(before, after,
+                        ContractsClosureExecutionMetricsObserver
+                                .ISOLATED_DOCUMENT_STEPS),
+                rawDelta(before, after,
+                        ContractsClosureExecutionMetricsObserver
+                                .TENTATIVE_COMPONENT_FINALIZATIONS),
+                rawDelta(before, after,
+                        ContractsClosureExecutionMetricsObserver
+                                .UNRELATED_COMPONENT_FINALIZATIONS),
+                rawDelta(before, after,
+                        ContractsClosureExecutionMetricsObserver
+                                .CANONICAL_CYCLIC_BYTES),
+                rawDelta(before, after,
+                        BlueRuntime.PROVIDER_EXACT_NODE_READS),
+                rawDelta(before, after,
+                        ContractsClosureAdapter.OCCURRENCE_ROWS_EXAMINED),
+                rawDelta(before, after,
+                        ContractsClosureAdapter.RESULTING_COMPONENTS),
+                rawDelta(before, after,
+                        ContractsStructuralWorkMetrics.GLOBAL_STATE_PASSES),
+                rawDelta(before, after,
+                        ContractsStructuralWorkMetrics
+                                .GLOBAL_STATE_ENTRIES_TRAVERSED),
+                rawDelta(before, after,
+                        ContractsStructuralWorkMetrics
+                                .GLOBAL_SESSION_ENTRIES_TRAVERSED),
+                rawDelta(before, after,
+                        ContractsStructuralWorkMetrics
+                                .GLOBAL_OCCURRENCE_ENTRIES_TRAVERSED),
+                rawDelta(before, after,
+                        ContractsStructuralWorkMetrics
+                                .GLOBAL_COMPONENT_ENTRIES_TRAVERSED),
+                rawDelta(before, after,
+                        ContractsStructuralWorkMetrics
+                                .GLOBAL_GRAPH_ENTRIES_TRAVERSED),
+                rawDelta(before, after,
+                        ContractsStructuralWorkMetrics
+                                .GLOBAL_SUBSCRIPTION_ENTRIES_TRAVERSED),
+                rawDelta(before, after,
+                        ContractsStructuralWorkMetrics
+                                .GLOBAL_RECEIPT_ENTRIES_TRAVERSED),
+                rawDelta(before, after,
+                        ContractsStructuralWorkMetrics
+                                .GLOBAL_ROUTE_ENTRIES_TRAVERSED),
+                rawDelta(before, after,
+                        ContractsStructuralWorkMetrics
+                                .GLOBAL_EVIDENCE_ENTRIES_TRAVERSED));
+    }
+
+    private static long rawDelta(
+            EngineMetrics.MetricsSnapshot before,
+            EngineMetrics.MetricsSnapshot after,
+            String counter) {
+        return after.counters().getOrDefault(counter, 0L)
+                - before.counters().getOrDefault(counter, 0L);
+    }
+
     private static String eventKind(PublicEventOccurrence event) {
         return String.valueOf(event.event().getProperties()
                 .get("kind").getValue());
@@ -914,14 +1121,48 @@ final class ContractsPublicBranchingCollectionCycleTest {
             long unrelatedDocumentOpens,
             long unrelatedDocumentSteps,
             long unrelatedMemberFinalizations,
-            long fullEnvironmentScans,
+            long fullPublicationHeadSnapshots,
             long unrelatedDocumentReads,
+            StructuralMetrics structuralMetrics,
             int documentCount) {
         private BranchingRun {
             changedDocuments = Set.copyOf(changedDocuments);
             finalPhases = Map.copyOf(finalPhases);
             branchStates = Map.copyOf(branchStates);
         }
+    }
+
+    private record StructuralMetrics(
+            long directRouteSnapshots,
+            long directRouteRevalidationSnapshots,
+            long directDeliveriesSelected,
+            long planConstructions,
+            long cohortsSelected,
+            long topologySnapshots,
+            long headsCaptured,
+            long documentOpens,
+            long unrelatedDocumentOpens,
+            long componentStatesCaptured,
+            long componentStatesRead,
+            long requestSourcesParsed,
+            long acceptedWorkOccurrences,
+            long isolatedDocumentSteps,
+            long componentFinalizations,
+            long unrelatedComponentFinalizations,
+            long canonicalCyclicBytes,
+            long providerExactNodeReads,
+            long occurrenceRowsExamined,
+            long resultingComponents,
+            long globalStatePasses,
+            long globalStateEntriesTraversed,
+            long globalSessionEntriesTraversed,
+            long globalOccurrenceEntriesTraversed,
+            long globalComponentEntriesTraversed,
+            long globalGraphEntriesTraversed,
+            long globalSubscriptionEntriesTraversed,
+            long globalReceiptEntriesTraversed,
+            long globalRouteEntriesTraversed,
+            long globalEvidenceEntriesTraversed) {
     }
 
     private record DisjointIds(

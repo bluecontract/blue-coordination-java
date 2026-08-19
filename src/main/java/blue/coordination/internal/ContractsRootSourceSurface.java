@@ -4,14 +4,11 @@ import blue.coordination.api.DocumentId;
 import blue.language.processor.closure.ManagedOccurrenceBinding;
 
 import java.util.ArrayDeque;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Deque;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
@@ -40,16 +37,6 @@ final class ContractsRootSourceSurface {
         Function<DocumentId, ? extends Collection<String>> resolver =
                 Objects.requireNonNull(timelines, "timelines");
 
-        Map<DocumentId, List<DocumentId>> targets = new LinkedHashMap<>();
-        for (ManagedOccurrenceBinding row : inventory.activeRows()) {
-            DocumentId source = coordinationId(row.sourceDocumentId());
-            DocumentId target = coordinationId(row.targetDocumentId());
-            targets.computeIfAbsent(source, ignored -> new ArrayList<>())
-                    .add(target);
-        }
-        targets.values().forEach(values -> values.sort(
-                EmbeddingBinding.DOCUMENT_ORDER));
-
         TreeSet<DocumentId> documents = new TreeSet<>(
                 EmbeddingBinding.DOCUMENT_ORDER);
         Deque<DocumentId> pending = new ArrayDeque<>();
@@ -59,8 +46,10 @@ final class ContractsRootSourceSurface {
             if (!documents.add(document)) {
                 continue;
             }
-            targets.getOrDefault(document, List.of())
-                    .forEach(pending::addLast);
+            for (ManagedOccurrenceBinding row
+                    : inventory.activeRowsFrom(document)) {
+                pending.addLast(coordinationId(row.targetDocumentId()));
+            }
         }
 
         TreeSet<String> timelineIds = new TreeSet<>(

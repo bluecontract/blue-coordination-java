@@ -43,6 +43,10 @@ final class ManagedOccurrenceInventory {
     private final List<DocumentId> documentIds;
     private final Map<OccurrenceKey, ManagedOccurrenceBinding>
             rowsBySourcePath;
+    private final Map<DocumentId, List<ManagedOccurrenceBinding>>
+            rowsByDocument;
+    private final Map<DocumentId, List<ManagedOccurrenceBinding>>
+            activeRowsBySourceDocument;
 
     private ManagedOccurrenceInventory(
             Collection<ManagedOccurrenceBinding> suppliedRows) {
@@ -57,6 +61,10 @@ final class ManagedOccurrenceInventory {
         Set<String> bindingIdentities = new LinkedHashSet<>();
         TreeSet<DocumentId> documents = new TreeSet<>(
                 EmbeddingBinding.DOCUMENT_ORDER);
+        TreeMap<DocumentId, List<ManagedOccurrenceBinding>> byDocument =
+                new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
+        TreeMap<DocumentId, List<ManagedOccurrenceBinding>> activeBySource =
+                new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
         ArrayList<ManagedOccurrenceBinding> active = new ArrayList<>();
         for (ManagedOccurrenceBinding row : canonical) {
             OccurrenceKey key = key(row);
@@ -75,16 +83,41 @@ final class ManagedOccurrenceInventory {
                         "Duplicate binding identity "
                                 + row.bindingIdentity());
             }
-            documents.add(toCoordinationDocumentId(row.sourceDocumentId()));
-            documents.add(toCoordinationDocumentId(row.targetDocumentId()));
+            DocumentId source = toCoordinationDocumentId(
+                    row.sourceDocumentId());
+            DocumentId target = toCoordinationDocumentId(
+                    row.targetDocumentId());
+            documents.add(source);
+            documents.add(target);
+            byDocument.computeIfAbsent(
+                    source, ignored -> new ArrayList<>()).add(row);
+            if (!source.equals(target)) {
+                byDocument.computeIfAbsent(
+                        target, ignored -> new ArrayList<>()).add(row);
+            }
             if (row.active()) {
                 active.add(row);
+                activeBySource.computeIfAbsent(
+                        source, ignored -> new ArrayList<>()).add(row);
             }
         }
         this.rows = List.copyOf(canonical);
         this.activeRows = List.copyOf(active);
         this.documentIds = List.copyOf(documents);
         this.rowsBySourcePath = Collections.unmodifiableMap(bySourcePath);
+        LinkedHashMap<DocumentId, List<ManagedOccurrenceBinding>>
+                immutableByDocument = new LinkedHashMap<>();
+        byDocument.forEach((documentId, touching) ->
+                immutableByDocument.put(documentId, List.copyOf(touching)));
+        this.rowsByDocument = Collections.unmodifiableMap(
+                immutableByDocument);
+        LinkedHashMap<DocumentId, List<ManagedOccurrenceBinding>>
+                immutableActiveBySource = new LinkedHashMap<>();
+        activeBySource.forEach((documentId, outgoing) ->
+                immutableActiveBySource.put(
+                        documentId, List.copyOf(outgoing)));
+        this.activeRowsBySourceDocument = Collections.unmodifiableMap(
+                immutableActiveBySource);
     }
 
     /** Returns the canonical empty inventory. */
@@ -112,6 +145,18 @@ final class ManagedOccurrenceInventory {
     /** Every source or target lineage named by any retained row. */
     List<DocumentId> documentIds() {
         return documentIds;
+    }
+
+    /** All canonical occurrence rows touching one managed lineage. */
+    List<ManagedOccurrenceBinding> rowsTouching(DocumentId documentId) {
+        return rowsByDocument.getOrDefault(Objects.requireNonNull(
+                documentId, "documentId"), List.of());
+    }
+
+    /** Active authored edges whose source is one managed lineage. */
+    List<ManagedOccurrenceBinding> activeRowsFrom(DocumentId documentId) {
+        return activeRowsBySourceDocument.getOrDefault(
+                Objects.requireNonNull(documentId, "documentId"), List.of());
     }
 
     /** Returns the unique retained row for one source/path. */

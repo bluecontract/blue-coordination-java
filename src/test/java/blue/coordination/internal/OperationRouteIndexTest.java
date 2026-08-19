@@ -13,7 +13,9 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Exact active-subscription routing tests for one document generation. */
 final class OperationRouteIndexTest {
@@ -223,6 +225,46 @@ final class OperationRouteIndexTest {
             assertEquals(0L,
                     delivery.targetScope().address().activationGeneration());
         });
+    }
+
+    @Test
+    void revalidationAcceptsUnrelatedBumpAndRejectsRelevantMutation() {
+        EngineMetrics metrics = new EngineMetrics();
+        OperationRouteIndex index = new OperationRouteIndex(metrics);
+        RoutingSurface relevantSurface = surface("timeline-a", "alice");
+        ExternalOrderKey frontier = ExternalOrderKey.of(List.of(0L));
+        index.replace(DOCUMENT, relevantSurface, List.of(active(
+                "ownerChannel", "timeline-a", "alice", frontier, 0)));
+        TimelineEntry relevantEntry = entry("timeline-a", "alice");
+        OperationRouteIndex.FrozenDirectDeliverySelection frozen =
+                index.selectDirectDeliveries(relevantEntry);
+
+        DocumentId unrelated = DocumentId.of("unrelated");
+        index.replace(
+                unrelated,
+                surface("timeline-b", "bob"),
+                List.of(active(
+                        "ownerChannel",
+                        "timeline-b",
+                        "bob",
+                        frontier,
+                        0)));
+        assertTrue(index.generation() > frozen.routeGeneration());
+
+        assertTrue(index.revalidatesDirectDeliveries(
+                relevantEntry, frozen.contractsEvidence()));
+        assertEquals(1L, metrics.counter(
+                OperationRouteIndex.DIRECT_ROUTE_SNAPSHOTS));
+        assertEquals(1L, metrics.counter(
+                OperationRouteIndex.DIRECT_ROUTE_REVALIDATION_SNAPSHOTS));
+
+        index.remove(DOCUMENT);
+        assertFalse(index.revalidatesDirectDeliveries(
+                relevantEntry, frozen.contractsEvidence()));
+        assertEquals(1L, metrics.counter(
+                OperationRouteIndex.DIRECT_ROUTE_SNAPSHOTS));
+        assertEquals(2L, metrics.counter(
+                OperationRouteIndex.DIRECT_ROUTE_REVALIDATION_SNAPSHOTS));
     }
 
     @Test

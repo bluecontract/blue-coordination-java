@@ -76,10 +76,11 @@ public final class DefaultCoordinationEngine
     private final EmbeddedOnlyLayoutBuilder layoutBuilder;
     private final DocumentTransitionProcessor processor;
     private final InMemoryDocumentStore documents;
-    private final Contracts10Configuration contractsConfiguration;
     private final ContractsClosureAdapter contractsClosureAdapter;
     private final ContractsClosureAdmissionAdapter
             contractsClosureAdmissionAdapter;
+    private final ContractsActiveSourceTimelineIndex
+            contractsActiveSourceTimelines;
     private final ContractsRecoveryState contractsRecoveryState;
     private SequentialDrainCoordinator drainCoordinator;
     private ContractsRootFeederCoordinator contractsFeederCoordinator;
@@ -97,7 +98,7 @@ public final class DefaultCoordinationEngine
         runtime = BlueRuntime.create(objects, metrics);
         entryFactory = new WholeRequestEntryFactory(runtime, objects, metrics);
         journal = new InMemoryTimelineJournal(entryFactory, metrics);
-        documents = new InMemoryDocumentStore();
+        documents = new InMemoryDocumentStore(metrics);
         routeIndex = new OperationRouteIndex(
                 metrics, documentId -> documents.find(documentId).orElse(null));
         layoutBuilder = new EmbeddedOnlyLayoutBuilder(
@@ -117,14 +118,13 @@ public final class DefaultCoordinationEngine
                 this::nextApplicationTimestamp,
                 this::inject);
         if (contractsConfiguration == null) {
-            this.contractsConfiguration = null;
             contractsClosureAdapter = null;
             contractsClosureAdmissionAdapter = null;
+            contractsActiveSourceTimelines = null;
             contractsRecoveryState = null;
             contractsFeederCoordinator = null;
             contractsJournalCoordinator = null;
         } else {
-            this.contractsConfiguration = contractsConfiguration;
             ContractsClosureProfile profile = ContractsClosureProfile
                     .release10(
                             contractsConfiguration
@@ -132,13 +132,17 @@ public final class DefaultCoordinationEngine
                             contractsConfiguration
                                     .contractsSpecificationIdentity(),
                             contractsConfiguration.publicRootDocumentIds());
+            contractsActiveSourceTimelines =
+                    new ContractsActiveSourceTimelineIndex(
+                            profile.publicRoots());
             contractsClosureAdapter = new ContractsClosureAdapter(
                     runtime,
                     objects,
                     layoutBuilder,
                     documents,
                     routeIndex,
-                    profile);
+                    profile,
+                    contractsActiveSourceTimelines);
             contractsClosureAdmissionAdapter =
                     new ContractsClosureAdmissionAdapter(
                             runtime,
@@ -146,7 +150,8 @@ public final class DefaultCoordinationEngine
                             layoutBuilder,
                             documents,
                             routeIndex,
-                            profile);
+                            profile,
+                            contractsActiveSourceTimelines);
             contractsRecoveryState = new ContractsRecoveryState();
             contractsFeederCoordinator = createContractsFeederCoordinator();
             contractsJournalCoordinator = createContractsJournalCoordinator();
@@ -583,6 +588,7 @@ public final class DefaultCoordinationEngine
                         session.activeSubscriptions()));
         drainCoordinator = drainCoordinator.restartFromStores(this::inject);
         if (contractsClosureAdapter != null) {
+            contractsActiveSourceTimelines.rebuild(documents);
             contractsFeederCoordinator = createContractsFeederCoordinator();
             contractsJournalCoordinator = createContractsJournalCoordinator();
         }
@@ -1059,21 +1065,14 @@ public final class DefaultCoordinationEngine
                 journal,
                 contractsFeederCoordinator,
                 contractsRecoveryState.journalDrain,
-                this::contractsSourceTimelineIds);
-    }
-
-    private Set<String> contractsSourceTimelineIds() {
-        LinkedHashSet<String> result = new LinkedHashSet<>();
-        contractsConfiguration.publicRootDocumentIds().forEach(root ->
-                result.addAll(contractsSourceSurface(root).timelineIds()));
-        return Collections.unmodifiableSet(result);
+                contractsActiveSourceTimelines::timelineIds);
     }
 
     private ContractsRootSourceSurface.Surface contractsSourceSurface(
             DocumentId root) {
         return ContractsRootSourceSurface.resolve(
                 ContractsRootFeederWindow.LaneId.publicRoots(List.of(root)),
-                documents.publicationSnapshot().occurrenceInventory(),
+                documents.occurrenceInventory(),
                 documentId -> documents.find(documentId)
                         .map(session -> session.layout().routingSurface()
                                 .externalTimelineIds())
