@@ -2,22 +2,25 @@
 
 ## Prerequisites
 
-Use Java 17+ and the checked-in Gradle wrapper. Production compiles with Java 17,
-`-Xlint:all` and `-Werror`. Tests can run on a newer LTS with
+Use Java 17+ and the checked-in Gradle wrapper. Production compiles with Java
+17, `-Xlint:all`, and `-Werror`. Tests can run on Java 21 with
 `-PtestJavaVersion=21`.
 
-`local-composite` is the default implementation mode for the coordinated
-Contracts 1.0 source tree. It substitutes `../blue-language-java`,
-`../blue-bex-java`, and `../blue-repository-java`, or paths supplied with
-`-PblueLanguageCompositePath`, `-PblueBexCompositePath`, and
-`-PblueRepositoryCompositePath`. It is source-backed implementation evidence,
-not evidence that external consumers can resolve published artifacts.
-The Language substitution is an aligned source graph: model, core, mapping,
-IPFS, the runtime aggregate, and Contracts all map to their projects in the
-same included build. Mixing a source-built Contracts kernel with published
-Language runtime jars is rejected by `verifyLocalCompositeDependencies`.
+The canonical specification and fixtures come from `../blue-spec/latest`.
+Override that clean checkout only with
+`-PblueSpecRoot=/absolute/path/to/blue-spec/latest`; do not restore archived
+copies under this repository's `docs/` tree.
 
-Run the focused local wiring proof with:
+## Source-backed development
+
+`local-composite` is the default implementation mode. It substitutes
+`../blue-language-java`, `../blue-bex-java`, and `../blue-repository-java`, or
+paths supplied with `-PblueLanguageCompositePath`, `-PblueBexCompositePath`,
+and `-PblueRepositoryCompositePath`.
+
+The Language substitution is an aligned source graph: model, core, mapping,
+IPFS, runtime aggregate, and Contracts all come from one included build. Mixing
+a source Contracts kernel with published Language runtime JARs is rejected.
 
 ```bash
 ./gradlew verifyLocalCompositeDependencies \
@@ -25,104 +28,149 @@ Run the focused local wiring proof with:
   -PblueLanguageCompositePath=/absolute/path/to/blue-language-java
 ```
 
-`verifyLocalSourceInputs` checks the explicitly configured Language and BEX
-checkouts against their base commits and framed tracked/untracked production
-workspace fingerprints. Dirty, intentional workspaces are supported without
-weakening provenance. The extracted-source smoke forwards the same absolute
-paths, so its temporary extraction directory cannot accidentally change which
-sibling checkouts are selected.
+`verifyLocalSourceInputs` binds explicitly configured Language and BEX
+checkouts to their base commits and framed tracked/untracked production
+fingerprints. The extracted-source smoke forwards the same absolute paths.
+This lane is development evidence; it is not a staged-JAR consumer proof.
 
-Use the isolated published-artifact lane explicitly:
+## Local-only SDK freeze lane
 
-```bash
-./gradlew verifyPublishedDependencyIsolation dependencyPreflight \
-  -PblueDependencyMode=published-artifact
+The candidate coordinate is exactly
+`blue.coordination:blue-coordination-java:3.0.0-rc.2`. Its exact prerequisite
+order is:
+
+```text
+Language 3.1.0-rc.20
+  -> BEX 1.1.0-rc.3 and Repository 3.0.0-rc.21
+  -> Coordination 3.0.0-rc.2
 ```
 
-This mode includes no sibling builds and runs no local-source Git checks. It is
-the resolution-isolation proof. `verifyPublishedArtifactDependencies` adds a
-real production compile and is the release-compatibility gate once matching
-Contracts 1.0 artifacts exist. Until then it fails honestly even though the
-older pinned coordinates resolve.
+Stage Language first. BEX and Repository must both resolve that staged
+Language repository rather than a sibling build or Maven Local:
 
-The extracted source archive runs the resolution-isolation proof in this mode
-without reaching any sibling checkout. Its current receipt marks focused tests
-`NOT_EXECUTED` and published compatibility `NOT_VERIFIED`; it is configuration
-and packaging evidence, not a substitute for the compile gate.
+```bash
+# Language worktree
+./gradlew stagePublications verifyPublishedRepository \
+  -PreleaseVersion=3.1.0-rc.20
 
-## Coordination gates
+mkdir -p /absolute/path/to/blue-sdk-staged-repository
+rsync -a --checksum build/staging-deploy/ \
+  /absolute/path/to/blue-sdk-staged-repository/
+
+# BEX staging worktree
+./gradlew bexSdkStageVerify \
+  -PblueLanguageRepository=/absolute/path/to/language/build/staging-deploy \
+  -PbexLocalStageVersion=1.1.0-rc.3 \
+  -PbexSdkStagingRepository=/absolute/path/to/blue-sdk-staged-repository
+
+# Repository staging worktree
+./gradlew repositorySdkStageVerify \
+  -PblueLanguageRepository=/absolute/path/to/language/build/staging-deploy \
+  -PrepositoryLocalStageVersion=3.0.0-rc.21 \
+  -PrepositorySdkStagingRepository=/absolute/path/to/blue-sdk-staged-repository
+```
+
+The `rsync` step seeds the unified repository with the verified Language bytes;
+BEX and Repository then append only their locally staged coordinates. Before
+running Coordination, the unified repository must contain real JAR, POM, and
+Gradle module metadata for every coordinate.
+
+```bash
+./gradlew sdkFreezePrepublicationCheck \
+  -PblueDependencyMode=staged-artifact \
+  -PblueStagingRepository=/absolute/path/to/blue-sdk-staged-repository
+
+./gradlew stageSdkFreezeCandidate \
+  -PblueDependencyMode=staged-artifact \
+  -PblueStagingRepository=/absolute/path/to/blue-sdk-staged-repository
+
+./gradlew verifySdkStagedDependencyGraph \
+  verifySdkStagedCandidateRepository \
+  verifyExtractedSdkConsumerJava17 \
+  verifyExtractedSdkConsumerJava21 \
+  sdkFreezeArtifactCheck \
+  -PblueDependencyMode=staged-artifact \
+  -PblueStagingRepository=/absolute/path/to/blue-sdk-staged-repository
+```
+
+The gates mean:
+
+- `sdkFreezePrepublicationCheck` runs the SDK facade, acceptance, public
+  signature, Javadoc, built-JAR consumer, documentation, and artifact
+  prerequisites.
+- `stageSdkFreezeCandidate` refuses an effective Coordination version other
+  than rc.2. Only `staged-artifact` selects that override; `.cz.toml` remains
+  the historical rc.1 authority for unchanged `stageRelease` behavior.
+- `verifySdkStagedDependencyGraph` requires module components at the exact
+  versions above and rejects project/composite substitutions.
+- `verifySdkStagedCandidateRepository` checks the locally staged Coordination
+  rc.2 POM, module metadata, main/sources/Javadoc JARs, and required SDK/release
+  manifest entries before a consumer can use them.
+- `verifyExtractedSdkConsumerJava17` and
+  `verifyExtractedSdkConsumerJava21` compile and run
+  `staged-sdk-consumer/` against the staged repository only.
+- `verifyExtractedSdkConsumer` aggregates the two consumer runtimes.
+- `sdkFreezeArtifactCheck` is the final local artifact aggregate.
+
+`staged-artifact` includes no sibling builds, does not consult Maven Local, and
+does not deploy remotely. These commands do not push a commit or tag. Passing
+the lane proves consistency of the local candidate bytes; it does not claim
+remote availability or implementation conformance.
+
+## Coordination suites
 
 ```bash
 ./gradlew test
 ./gradlew integrationTest consumerTest scenarioTest
 ./gradlew releaseCheck
-./gradlew stageRelease -PblueDependencyMode=published-artifact
+./gradlew sdkFreezePrepublicationCheck \
+  -PblueDependencyMode=staged-artifact \
+  -PblueStagingRepository=/absolute/path/to/blue-sdk-staged-repository
 ```
 
-The release-owned suites have distinct responsibilities:
+The repository-owned suites have distinct responsibilities:
 
-- `test` exercises public value contracts, internal atomic primitives and
-  retained workflow/BEX processor semantics.
-- `integrationTest` exercises exact append, engine-selected drain, entry-frame
-  ordering, document-local atomic retry, embedded-only storage, `paths` and
-  `collectionPaths`, synchronized catch-up, reattachment and ownership.
+- `test` covers SDK immutable values and authored compilation as well as public
+  API values, atomic internals, and retained processor semantics. Its SDK
+  acceptance cases exercise the public facade without casts to engine
+  internals or hand-built closure proof values.
+- `integrationTest` covers exact append, engine-selected drain, entry-frame
+  ordering, closure admission/publication, embedded topology, catch-up,
+  ownership, and atomic retry.
 - `consumerTest` compiles against the built production JAR, never main source
-  output or test fixtures, and verifies the supported public API as a real
+  output or test fixtures. Its SDK case imports the SDK boundary as a real
   consumer sees it.
-- `scenarioTest` runs NBA admission-order/multi-game convergence and the
-  complete large-host/PayNote lifecycle.
+- `scenarioTest` runs complete NBA and large-host/PayNote lifecycles.
 
-`releaseCheck` runs all four suites. It also enforces minimum suite depth,
-validates the production class/line budget and small application API boundary,
-scans the production JAR, validates POM scopes and versions, and checks legal,
-documentation, source and Javadoc artifacts. The current verified status is
-recorded in the RC report; commands listed here are gates to run, not claims
-that a changed source snapshot has passed them.
-`stageRelease` creates a Maven Central-shaped repository at
-`build/staging-deploy`.
+`releaseCheck` runs the historical four-suite release surface and its retained
+rc.1 gates. The SDK freeze aggregate adds SDK-specific signature, staging, and
+consumer gates without rewriting the historical Round 13 tasks or receipts.
+Commands listed here are gates to run, not claims that an arbitrary changed
+worktree has passed.
 
-To prove external dependency availability:
+## Historical remote and performance lanes
 
-```bash
-./gradlew verifyPublishedDependencyIsolation dependencyPreflight \
-  -PblueDependencyMode=published-artifact
-```
+`published-artifact`, `stageRelease`, and the rc.1 GitHub publication workflows
+are retained for historical compatibility. They are not part of the local-only
+rc.2 SDK freeze. Likewise, the older `blue-basic` performance workflow used
+Maven Local; do not run it for this candidate. Its receipts remain unchanged as
+audit evidence, and a missing `../blue-basic` checkout cannot affect
+`sdkFreezeArtifactCheck`.
 
-That command fails closed unless every pinned prerequisite resolves externally.
-Before release, also run `verifyPublishedArtifactDependencies`; it compiles the
-current source against that isolated graph and fails on stale published APIs.
-
-## Historical performance evidence
-
-`../blue-basic` is deliberately outside the library's correctness and release
-gate. It retains historical step timings, percentile campaigns and comparative
-metrics so performance investigations remain reproducible without coupling the
-published library to a sibling checkout. Run it only when collecting or
-comparing performance evidence:
-
-```bash
-./gradlew publishToMavenLocal
-../blue-basic/gradlew -p ../blue-basic performanceTest runtimeCampaign
-```
-
-The runtime campaign is deliberately slower: it collects repeated samples so
-percentile comparisons are not based on one noisy run. A missing or failing
-`../blue-basic` checkout cannot make `releaseCheck` pass or fail.
-
-See [test strategy](test-strategy.md) for the behavior-to-suite map and the
-rules that prevent release verification from drifting back into a demo module.
+Do not rerun the old long performance campaign merely to validate this SDK
+delta. Use the recovered short topology smoke and keep its evidence separate
+from the historical Round 13 latency receipts.
 
 ## Lock files
 
-Regenerate the appropriate dependency lock only after an intentional version
-change:
+Regenerate a dependency lock only after an intentional version change:
 
 ```bash
 ./gradlew dependencies --write-locks
 ```
 
-Review the entire lock diff. Never hand-wave an unexpected transitive version.
-Refresh the Language and BEX source locks only for an intentional coordinated
-workspace snapshot. Both locks bind a base commit plus the framed fingerprint
-of tracked and untracked production changes; a dirty workspace is valid only
-when its fingerprint matches exactly.
+Review the complete lock diff. Refresh Language and BEX source locks only for
+an intentional coordinated snapshot. A dirty workspace is valid only when its
+framed fingerprint matches exactly.
+
+See [test strategy](test-strategy.md) for the behavior-to-suite map.

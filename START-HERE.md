@@ -1,19 +1,35 @@
 # Start here
 
 1. Use Java 17 or newer.
-2. Depend on `blue.coordination:blue-coordination-java:3.0.0-rc.1`.
-3. Create an in-memory `CoordinationEngine` in a try-with-resources block.
-4. Register each Timeline with its exact Timeline and actor identities.
-5. Admit each managed document with a stable `DocumentId`, authored initial
-   YAML, and—when historical data exists—an explicit top-level admission policy.
-6. Append exact Timeline Entries without recipients, then call `drain()` or
-   `drainThrough(cutoff)`. The environment, not the caller, selects canonical
-   processing order and direct targets.
-7. Use `drain(DrainBudget)` when a host must pause after a deterministic amount
-   of PROCESS work; resume with another drain call.
-8. Read coherent application state with READY-only `document(id)`. Reserve
-   `auditDocument(id)` for explicit recovery/diagnostic inspection, and never
-   retain mutable internal nodes.
+2. Resolve the local-only `3.0.0-rc.2` candidate from the explicit staged file
+   repository. It is not available from Maven Central or Maven Local.
+3. Create `BlueCoordination.inMemory()` in a try-with-resources block. This is
+   the one normal default and uses the bundled Contracts 1.0 identities.
+4. Register each Timeline with `blue.timelines().local(...)` or
+   `register(timelineId, accountId)`.
+5. Admit an authored public Root with `ManagedDocument...publicRoot()` or admit
+   a complete authored closure with `ManagedClosure`. Choose an activation
+   policy explicitly.
+6. Submit target-aware operations with `blue.operations().on(document)`. Use
+   `blue.events()` only for deliberate broadcasts; callers never name final
+   recipients.
+7. Call `submit()` for append-only behavior and `blue.processing().drain()` for
+   a later canonical drain, or call `execute()` to append and drain through the
+   submitted entry without overtaking older eligible work.
+8. Inspect `EntryDisposition` and `Diagnostic`, then read coherent application
+   state through the READY-only `DocumentHandle.snapshot()`. Reserve
+   `blue.advanced()` for host integration and operational diagnostics.
+
+The older `CoordinationEngine` surface is an advanced/legacy compatibility
+boundary. Its plain `inMemory()` factory retains the earlier acyclic profile;
+it does not share the SDK default's Contracts semantics. New application code
+should stay in `blue.coordination.sdk`.
+
+The rc.2 SDK does not yet admit a managed child produced by an operation.
+`request.managed(...)` and `expectOccurrence(...)` fail before append with
+`UNSUPPORTED_MANAGED_DRAFT_ADMISSION`; no partial journal or document mutation
+is allowed. This unresolved host-invocation bridge keeps the implementation
+conformance claim false.
 
 The runtime is deliberately single-process and sequential. Each document
 transition atomically commits its exact state, epoch, events, graph and
@@ -23,10 +39,10 @@ parent application instead of reprocessing the child. The bundled host is
 in-memory, so process-restart durability and provider-backed completeness remain
 explicit release gates rather than implied guarantees.
 
-The work budget does not preempt one frozen PROCESS invocation or epoch-zero
-INITIALIZE, so it is not a wall-clock timeout. Public phase metrics and the
-standalone performance campaign separate Coordination scheduling from frozen
-Language/Contracts/BEX time.
+The normal SDK does not expose the advanced `DrainBudget` boundary. Hosts that
+need deterministic work budgets can use `blue.advanced().rawEngine()` during
+migration. A work budget does not preempt one frozen PROCESS invocation or
+epoch-zero INITIALIZE and is not a wall-clock timeout.
 
 Read next:
 
@@ -40,9 +56,11 @@ Read next:
 - [Known limitations](docs/limitations.md)
 - [Migration from 2.x](docs/migration-from-2.x.md)
 - [Public API reference](docs/reference/public-api.md)
+- [SDK migration and ownership ledger](docs/reference/sdk-migration-and-ownership.md)
 - [Metrics reference](docs/reference/metrics.md)
 - [Failure and retry model](docs/operations/failure-model.md)
 - [Build and test](docs/development/build-and-test.md)
 - [Test strategy](docs/development/test-strategy.md)
 - [Release process](docs/development/releasing.md)
-- [3.0.0-rc.1 readiness](docs/releases/3.0.0-rc.1.md)
+- [Current Contracts/SDK verification boundary](docs/releases/contracts-1.0-current-verification.md)
+- [Historical 3.0.0-rc.1 readiness](docs/releases/3.0.0-rc.1.md)

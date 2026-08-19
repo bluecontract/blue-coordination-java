@@ -4,6 +4,43 @@ The engine has one mutation owner: `DefaultCoordinationEngine`. Calls are
 synchronized because the supported boundary is deterministic, single-process
 coordination rather than parallel publication.
 
+## SDK delegation boundary
+
+`BlueCoordination` and the public values in `blue.coordination.sdk` are an
+additive facade over that same mutation owner. They do not contain a scheduler,
+graph algorithm, gas policy, cyclic identity algorithm, or publication store.
+`SdkCoordinationRuntime` owns the low-level engine and translates SDK calls;
+`SdkDrainResultMapper` translates retained Contracts attempts into immutable
+SDK results. Both, together with `SdkPreconditions`, must remain package-private.
+
+Ordinary `ManagedDocument` admission is compiled as a complete one-member
+Contracts closure. `ManagedClosure` admission passes authored documents,
+aliases, occurrence-lineage evidence, public Roots, and activation inputs to
+`Contracts10AuthoredClosureCompiler`. The compiler resolves each authored
+document, derives the effective `Process Embedded` catalog, validates exact
+binding agreement and completeness, and calls the pinned cyclic finalizer and
+proof verifier. It must never accept caller-supplied component membership,
+cyclic proofs, snapshots, or an independent graph.
+
+The SDK's exact release root comes from `BundledContracts10Release`. Bundled
+identities are release evidence, not user configuration. The only intentionally
+public implementation types in `blue.coordination.internal` are the low-level
+factory boundary `DefaultCoordinationEngine`, the bundled release loader
+`BundledContracts10Release`, and the authored compiler
+`Contracts10AuthoredClosureCompiler`; the build maintains that exact allowlist.
+
+Operation targeting is evidence on the appended request. It narrows the
+profile's eligible target without allowing the caller to name the resulting
+recipient set. Broadcast admission remains a different, explicit SDK path.
+The result mapper consumes retained per-entry Contracts attempts directly; it
+does not call `onlyOutcome()` and therefore preserves valid zero-recipient
+`NO_MATCH` and independent disconnected closure outcomes.
+
+Managed drafts stop before append with
+`UNSUPPORTED_MANAGED_DRAFT_ADMISSION`. This guard is intentional. Removing it
+without a real Contracts host-invocation bridge would manufacture admission
+semantics in Coordination and is prohibited.
+
 The append path validates and retains one exact request and Timeline Entry,
 then commits its journal coordinates and logical clock. It does not scan
 documents, encode a target document, or invoke PROCESS.
@@ -63,12 +100,13 @@ entry BlueId, source order, cohort/lane, and invocation identity. Restart
 rebuilds route state from the durable store before receipt reconciliation, so a
 crash after copy-on-write swap cannot execute the committed cohort again.
 
-`CoordinationEngine.inMemoryContracts10(...)` is the public lifecycle boundary;
-`DefaultCoordinationEngine.createContracts10(...)` implements it. The factory
-requires exact final Language and Contracts SHA-256 artifact identities and
-public Root lineages, owns the adapter runtime, and preserves feeder recovery
-state when reconstructing coordinators from stores. It never invents release
-digest placeholders.
+`BlueCoordination.inMemory()` is the normal lifecycle boundary and creates the
+Contracts 1.0 engine with bundled exact identities and initially empty public
+Root authorization. Authored SDK admission extends that authorization with the
+admitted public Roots. `CoordinationEngine.inMemoryContracts10(...)` remains the
+advanced explicit-identity lifecycle; `DefaultCoordinationEngine.createContracts10(...)`
+implements both paths and preserves feeder recovery state when reconstructing
+coordinators from stores. It never invents release digest placeholders.
 
 `ContractsClosureAdmissionAdapter` owns the bounded all-new admission lane. It
 verifies the exact `ADMIT_CLOSURE` operation, environment, execution policy,
@@ -95,7 +133,8 @@ per-occurrence cursors, and document-local child/parent commits. These classes
 remain for the earlier temporal profile and must not be used to infer Contracts
 1.0 closure semantics.
 
-Types in `blue.coordination.internal` are package-private except the concrete
-engine factory target. Applications must depend on `blue.coordination.api`.
-Test-only inspection and failure injection live in the test-fixtures artifact,
-never the main JAR.
+Applications should depend on `blue.coordination.sdk`. Existing hosts may use
+`blue.coordination.api` or `blue.advanced().rawEngine()` during migration.
+Except for the exact allowlist above, types in `blue.coordination.internal`
+remain package-private. Test-only inspection and failure injection live in the
+test-fixtures artifact, never the main JAR.

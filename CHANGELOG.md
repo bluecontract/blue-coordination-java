@@ -3,7 +3,59 @@
 This project follows Semantic Versioning. Release candidates may still refine
 the new 3.x API before the first stable 3.0.0 release.
 
-## 3.0.0-rc.1 - unreleased
+## 3.0.0-rc.2 - local-only freeze candidate
+
+### Added
+
+- The additive `blue.coordination.sdk` application facade, headed by
+  `BlueCoordination.inMemory()`, with the bundled Contracts 1.0 release as its
+  only normal default.
+- Immutable SDK document, closure, entry, result, diagnostic, event, revision,
+  and processing-stat values. Low-level closure inputs and proof structures do
+  not appear in normal SDK signatures.
+- Authored ordinary and complete cyclic-closure admission. The SDK derives the
+  effective `Process Embedded` graph, validates managed occurrence bindings,
+  and delegates exact finalization and proof verification to the pinned
+  Language/Contracts runtime.
+- Exact document-targeted operation calls, explicit broadcast events,
+  append-only `submit()`, append-and-drain `execute()`, terminal `NO_MATCH`,
+  precise target `REJECTED`, and disconnected per-closure results.
+- A built-JAR-only SDK consumer test and a standalone extracted consumer that
+  resolves the staged candidate on Java 17 and Java 21.
+- A separate local SDK freeze lane that consumes Language, BEX, Repository, and
+  Coordination from one explicit Maven-shaped file repository with composite
+  substitution and Maven Local disabled.
+
+### Changed
+
+- `CoordinationEngine` is now documented as an advanced host-integration and
+  legacy compatibility boundary. Its earlier acyclic `inMemory()` profile is
+  not the SDK default.
+- Public API/Javadoc, package ownership, dependency isolation, artifact
+  contents, and candidate-coordinate checks are release gates for the SDK
+  lane. Historical rc.1 staging and evidence remain unchanged.
+
+### Known limitations
+
+- Managed-child admission from an operation result is not implemented. Calls
+  carrying `request.managed(...)` or `expectOccurrence(...)` fail before append
+  with `UNSUPPORTED_MANAGED_DRAFT_ADMISSION`; the runtime does not emulate this
+  through the legacy admission path.
+- The candidate is in-memory, one-JVM, sequential, and has no fresh-process
+  recovery, durable provider-completeness adapter, Mandate resolver, stable
+  latency SLA, or production MyOS operational profile.
+- `implementationConformanceClaimed` remains `false` until the managed-draft
+  bridge and every artifact-bound acceptance/conformance gate are complete.
+
+### Distribution status
+
+- `3.0.0-rc.2` is staged locally only. The freeze workflow does not upload
+  packages, publish to Maven Local, push commits, or create/push tags.
+
+## 3.0.0-rc.1 - historical candidate
+
+This section records the earlier pre-SDK candidate. Its retained receipts and
+performance policy are historical evidence, not evidence for rc.2.
 
 ### Added
 

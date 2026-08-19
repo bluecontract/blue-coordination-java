@@ -1,116 +1,152 @@
 # Releasing
 
+## Current decision: local-only SDK freeze candidate
+
+`3.0.0-rc.2` is a prepublication candidate. The authorized workflow stages and
+verifies artifacts in an explicit local file repository. It does not upload a
+package, publish to Maven Local, push a branch/commit/tag, or create a remote
+release.
+
+This distinction is part of the release claim. A successful local staging run
+does not make the coordinate available to external consumers and is not a
+publication receipt.
+
 ## Candidate prerequisites
 
-An RC is releasable only when all exact coordinates in `build.gradle` resolve
-from Maven Central. In particular, 3.0.0-rc.1 requires Repository rc.21 and BEX
-rc.3. Local composite success is semantic evidence, but it is not proof that an
-external consumer can resolve the release.
+The coordinated inputs must be exact and clean:
 
-The current Contracts 1.0 implementation also requires APIs newer than the
-published Language rc.20 and BEX rc.3 bytes. Coordinate resolution alone is
-therefore insufficient: `verifyPublishedArtifactDependencies` must compile the
-current source from the isolated artifact graph before staging can be called
-ready. Until matching artifacts are published, this gate is intentionally red.
+| Component | Candidate | Required source of bytes |
+| --- | --- | --- |
+| Language | `3.1.0-rc.20` | locally staged JAR/POM/module metadata |
+| BEX core/contracts | `1.1.0-rc.3` | locally staged against that Language |
+| Repository | `3.0.0-rc.21` | locally staged against that Language |
+| Coordination | `3.0.0-rc.2` | this SDK candidate |
 
-Repository rc.21 is the first pinned release containing the Repository surface
-required by this Coordination candidate.
+The specification and fixtures are read from the clean `../blue-spec/latest`
+checkout, not an archived copy under `docs/`. The recovered topology commits,
+reports, bundles, and source archives are provenance inputs; they are not
+reconstructed from completion notes.
 
-## RC workflow
+Before artifact staging:
 
-1. Merge the candidate to `next`.
-2. The RC workflow derives the next version, updates `.cz.toml`, creates a
-   release commit and annotated tag locally.
-3. `verifyPublishedDependencyIsolation dependencyPreflight
-   -PblueDependencyMode=published-artifact` resolves all prerequisites without
-   sibling substitution, and `verifyPublishedArtifactDependencies` compiles
-   against those exact external APIs.
-4. `clean stageRelease -PblueDependencyMode=published-artifact` reruns the full
-   release gate and builds the staging repository.
-5. JReleaser's deploy task verifies, signs, checksums and uploads the staged
-   artifacts to Maven Central.
-6. Only after successful publication does the workflow push the release commit
-   and tag.
+- all SDK source/acceptance tests and the built-JAR consumer pass;
+- public SDK signatures contain no low-level closure/proof types;
+- the bundled release manifest and required SDK classes are in the production
+  JAR and Javadoc;
+- the focused recovered topology verification is recorded;
+- no unresolved gate is relabeled as a pass.
 
-The workflow uses GitHub Actions concurrency to serialize releases. Required
-secrets are `WORKFLOW_PAT`, Maven Central username/password and the JReleaser GPG
-public key, secret key and passphrase.
+## Exact local workflow
 
-Release artifacts have one canonical producer: GitHub's Ubuntu 24.04 `x64`
-runner with Eclipse Temurin 17.0.19+10. The workflow disables Gradle toolchain
-auto-discovery/download and the build cache while generating and checking the
-published bytes. The pull-request Java 17 lane uses that same producer and runs
-`verifyRound13Readiness`, so toolchain or artifact-hash drift is rejected before
-merge instead of first appearing in the post-merge release job. The Java 21
-lane uses Eclipse Temurin 21.0.11+10 for test execution while production
-artifacts continue to be compiled by the canonical Java 17 toolchain.
+Stage prerequisites in the order documented in
+[Build and test](build-and-test.md): Language first, then BEX and Repository
+against those Language bytes, then Coordination. Merge their verified Maven
+repository contents into one absolute directory and run:
 
-## Stable workflow
+```bash
+./gradlew sdkFreezePrepublicationCheck \
+  -PblueDependencyMode=staged-artifact \
+  -PblueStagingRepository=/absolute/path/to/blue-sdk-staged-repository
 
-Stable release is manual, restricted to `main`, and requires an exact
-`MAJOR.MINOR.PATCH` version in `.cz.toml`. It follows the same dependency
-preflight, staging, signing and publication path as an RC.
+./gradlew stageSdkFreezeCandidate \
+  -PblueDependencyMode=staged-artifact \
+  -PblueStagingRepository=/absolute/path/to/blue-sdk-staged-repository
 
-## Verification checklist
+./gradlew verifySdkStagedDependencyGraph \
+  verifySdkStagedCandidateRepository \
+  verifyExtractedSdkConsumerJava17 \
+  verifyExtractedSdkConsumerJava21 \
+  sdkFreezeArtifactCheck \
+  -PblueDependencyMode=staged-artifact \
+  -PblueStagingRepository=/absolute/path/to/blue-sdk-staged-repository
+```
 
-- `releaseCheck` passes all library-owned unit, integration, built-JAR consumer
-  and end-to-end scenario suites without `../blue-basic`.
-- The one canonical Round 13 report and JSON evidence use the Round 13
-  Playground schema. For 3.0.0-rc.1 only, `verifyRound13Readiness` accepts
-  `FINAL` evidence with policy mode
-  `RC_WITH_KNOWN_PERFORMANCE_LIMITATION` when the release workflow explicitly
-  opts in. The verdict, public-RC status, and latency status must be
-  `PASS_WITH_KNOWN_PERFORMANCE_LIMITATION`; the current campaign and performance
-  proof remain `PENDING_VERIFICATION`. This exception never waives the clean-
-  commit binding, Java 17/21 lanes, six non-performance proof rows, eight
-  measured zero counters, final artifact hashes, detached source-archive
-  verification, published-mode evidence, POM metadata, checksums, or signatures.
-  The tested implementation commit may precede the clean evidence commit, but
-  it must be an ancestor and the current main-source manifest must still match
-  exactly.
-- Java 17 and Java 21 CI jobs pass, including the Java 17 pre-merge staging-
-  readiness check.
-- POM dependencies and scopes match `docs/reference/public-api.md`.
-- Main, sources and Javadoc JAR hashes reproduce across two clean builds.
-- Staged POM, checksum and signature inventory is complete.
-- Changelog, migration notes, limitations and RC notes are current.
-- The external Maven consumer resolves without adjacent sibling repositories.
-- The exported source archive contains the authoritative `.cz.toml`, configures
-  from its own contents, and excludes nested ZIPs, build output, macOS metadata,
-  profiler recordings, and heap dumps.
+`.cz.toml` intentionally remains the historical rc.1 authority for the existing
+`stageRelease` workflow. Only `staged-artifact` selects the explicit rc.2 SDK
+candidate override; the prepublication and candidate-repository checks require
+that effective version and verify that the JAR manifest, POM, and Gradle module
+metadata agree. This mode contains no included sibling builds and ignores Maven
+Local. The staged dependency graph must contain module components at the exact
+table versions. `verifySdkStagedCandidateRepository` also verifies the main,
+sources, and Javadoc JAR inventory. The extracted `staged-sdk-consumer/`
+resolves only the file repository and must run on both Java 17 and Java 21.
 
-Historical `blue-basic` metrics may be captured for performance comparison,
-but they are not an RC correctness prerequisite and are never substituted for
-the library-owned suites.
+`sdkFreezeArtifactCheck` is the terminal local prepublication gate. Do not
+follow it with a JReleaser deploy, Maven publication, Git push, or tag command
+under this plan.
 
-Never bypass dependency preflight or publish from local composite resolution.
+## Artifact and evidence checklist
 
-## 3.0.0-rc.1 known-performance-limitation policy
+The external evidence directory, not a historical receipt path, must bind:
 
-The 3.0.0-rc.1 workflow has one narrow exception so the release candidate can
-be published for external evaluation:
+- exact source commit IDs and clean status for every component;
+- staged coordinates and resolved module-component versions;
+- SHA-256 for the main, sources, and Javadoc JARs, POM, Gradle module metadata,
+  source ZIP, topology bundles, and source archives;
+- bundled Language specification, Contracts release, fixture package, gas
+  manifest, cyclic finalizer, and proof-verifier identities;
+- ordinary/closure fixture totals from the final staged bytes;
+- recovered topology test names, counts, durations, document-step order, gas,
+  component membership, document BlueIds, and structural counters;
+- SDK unit/acceptance, built-JAR consumer, and extracted Java 17/21 consumer
+  results;
+- the exact unsupported managed-draft gate.
 
-- `mode`: `RC_WITH_KNOWN_PERFORMANCE_LIMITATION`
-- `exactRelease`: `3.0.0-rc.1`
-- `decision`: `PASS_WITH_KNOWN_PERFORMANCE_LIMITATION`
-- `performanceReleaseBlocking`: `false`
-- `stableReleaseEligible`: `false`
-- `nonPerformanceGatesRequired`: `true`
-- `explicitWorkflowOptInRequired`: `true`
+Generate `FINAL_RECEIPT.md`, `final-receipt.json`, and
+`changed-files.sha256` only from the final candidate state. Do not edit the
+retained rc.1 Round 13 Markdown, JSON, schemas, or provenance files to make
+them describe rc.2.
 
-The workflow must opt in explicitly; a normal local staging call, another RC,
-or a stable release cannot inherit the exception. Every non-performance gate
-listed above remains fail-closed.
+## Conformance decision
 
-The retained historical campaign remains `FAIL`: append p95 was 18.680667 ms
-against a 1.000000 ms hard limit, and Coordination-host p95 was 872.356126 ms
-against 250.000000 ms. Route and total passed their hard limits, but all four
-preferred targets were missed. The old Markdown, JSON, and provenance receipts
-remain unchanged as audit evidence. Their temporary `Archive.zip` input is not
-a release artifact, is not needed to build or publish 3.0.0-rc.1, and must not be
-reintroduced as a staging prerequisite. The current published-artifact campaign
-and performance proof remain `PENDING_VERIFICATION`; no latency pass is claimed.
+The semantic freeze and artifact readiness decisions are independent.
+The recovered topology architecture and staged SDK artifacts can be valid while
+the implementation-conformance claim remains false.
 
-Performance remediation and a passing campaign are required before any stable
-release. The tracked source-archive evidence intentionally leaves its digest
-`null`; the generated detached `.sha256` sidecar remains the checksum authority.
+For rc.2, managed-child admission produced by an operation is still missing.
+`request.managed(...)` and `expectOccurrence(...)` fail before append with
+`UNSUPPORTED_MANAGED_DRAFT_ADMISSION`. Therefore the Order-draft and
+five-child/duplicate-lineage acceptance requirements are unresolved. The final
+receipt must report them explicitly and retain:
+
+```text
+implementationConformanceClaimed = false
+```
+
+Only a real Contracts host-invocation bridge, the complete acceptance corpus,
+and artifact-bound fixture execution can make that value eligible for review.
+A local staging success alone cannot.
+
+## External-pilot tier
+
+After the supported SDK cases and staged consumer gates pass, the candidate can
+be handed to a controlled external pilot as local artifacts with these stated
+limits:
+
+- one JVM and in-memory state only;
+- no fresh-process durable recovery or serialized publication-store adapter;
+- no external provider-completeness adapter;
+- no provider-backed Mandate resolver;
+- sequential drain and no distributed scheduling;
+- public-Root-scope closure profile with bounded cyclic components;
+- managed drafts produced by operations are unsupported;
+- no stable latency SLA;
+- not a production MyOS durability, tenant-isolation, outbox-recovery,
+  backpressure, or operational profile.
+
+Pilot suitability is not production readiness and does not imply the full
+Contracts implementation-conformance claim.
+
+## Historical rc.1 workflow and evidence
+
+The existing `published-artifact`, `stageRelease`, JReleaser, Round 13, and
+GitHub publication tasks remain bound to the earlier rc.1 workflow. They are
+deliberately unchanged by the SDK freeze lane. The retained campaign failed
+append and Coordination-host p95 hard limits and claimed no latency pass; its
+narrow `PASS_WITH_KNOWN_PERFORMANCE_LIMITATION` policy was rc.1-specific and
+cannot be inherited by rc.2 or a stable release.
+
+Historical receipts remain useful audit evidence, but none of them proves the
+SDK candidate. Performance remediation, durable production adapters, complete
+conformance, and an explicitly authorized remote workflow are separate future
+release decisions.

@@ -9,79 +9,115 @@ document graph.
 ## Install
 
 ```groovy
+repositories {
+    maven { url = uri('/absolute/path/to/blue-sdk-staged-repository') }
+}
+
 dependencies {
-    implementation 'blue.coordination:blue-coordination-java:3.0.0-rc.1'
+    implementation 'blue.coordination:blue-coordination-java:3.0.0-rc.2'
 }
 ```
 
-The artifact is compiled with `--release 17`. Version 3 is a breaking API reset;
-the removed 2.x planning, fragmentation, session-store, and fast-path APIs are
-not shimmed.
+`3.0.0-rc.2` is currently a local-only SDK freeze candidate. It is staged into
+an explicit file repository and is not published to Maven Central or Maven
+Local. The artifact is compiled with `--release 17`. Version 3 is a breaking
+API reset; the removed 2.x planning, fragmentation, session-store, and
+fast-path APIs are not shimmed.
 
 ## Counter quickstart
 
 ```java
-import blue.coordination.api.CoordinationEngine;
-import blue.coordination.api.DocumentId;
-import blue.coordination.api.Operation;
+import blue.coordination.sdk.BlueCoordination;
+import blue.coordination.sdk.ManagedClosure;
+import blue.coordination.sdk.ManagedDocument;
 
-try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
-    var alice = engine.registerTimeline("counter/alice", "alice");
-    var bob = engine.registerTimeline("counter/bob", "bob");
-    var counter = DocumentId.of("counter");
+try (BlueCoordination blue = BlueCoordination.inMemory()) {
+    var alice = blue.timelines().local("alice");
+    var bob = blue.timelines().local("bob");
+    var counter = blue.documents().admit(
+            ManagedDocument.yaml("counter", counterYaml)
+                    .publicRoot()
+                    .fromNow());
 
-    engine.startDocument(counter, counterYaml);
-    engine.append(
-            alice, Operation.yaml("increment", "aliceChannel", "amount: 3"));
-    engine.append(
-            bob, Operation.yaml("decrement", "bobChannel", "amount: 1"));
+    var plusThree = blue.operations().on(counter)
+            .from(alice)
+            .call("increment")
+            .through("aliceChannel")
+            .requestYaml("amount: 3")
+            .execute();
+    var minusOne = blue.operations().on(counter)
+            .from(bob)
+            .call("decrement")
+            .through("bobChannel")
+            .requestYaml("amount: 1")
+            .execute();
 
-    var receipt = engine.drain();
-    assert receipt.quiescent();
-
-    long value = ((java.math.BigInteger) engine.document(counter)
-            .valueAt("/counter").copyNode().getValue()).longValueExact();
-    assert value == 2L;
+    assert plusThree.applied();
+    assert minusOne.applied();
+    assert counter.snapshot().longAt("/counter") == 2L;
 }
 ```
 
-## Contracts 1.0 opt-in
+## Contracts 1.0 is the SDK default
 
-Contracts hosts bind the exact final specification artifacts and public Root
-lineages explicitly:
+`BlueCoordination.inMemory()` always creates the Contracts 1.0 profile and
+pins the exact release identities bundled in the Coordination JAR. Ordinary
+applications do not pass specification hashes, construct closure proofs, or
+predeclare public Root IDs. Public Roots are authorized when an authored
+document or closure is admitted.
+
+The SDK compiles a complete authored cyclic closure without introducing a
+second graph:
 
 ```java
-import blue.coordination.api.Contracts10Configuration;
-import blue.coordination.api.CoordinationEngine;
-import blue.coordination.api.DocumentId;
+var closure = blue.documents().admit(
+        ManagedClosure.builder()
+                .document("a", yamlA)
+                .document("b", yamlB)
+                .bindOccurrence("a", "/b", "b")
+                .bindOccurrence("b", "/a", "a")
+                .publicRoot("a")
+                .fromNow()
+                .build());
+```
 
-var configuration = new Contracts10Configuration(
-        finalBlueLanguageSpecificationSha256,
-        finalContractsSpecificationSha256,
-        java.util.Set.of(DocumentId.of("public-root")));
+Each occurrence binding is stable managed-lineage evidence for an effective
+`Process Embedded` path. The compiler verifies the authored catalog and exact
+target value, then delegates finalization and complete-proof verification to
+the pinned Language/Contracts implementation.
 
-try (CoordinationEngine engine =
-        CoordinationEngine.inMemoryContracts10(configuration)) {
-    // Register the public Root and embedded source Timelines.
+`submit()` appends only. `execute()` appends and canonically drains through the
+submitted entry, including earlier eligible work. Explicit broadcast entries
+use `blue.events()`; a valid broadcast accepted by no Channel returns
+`NO_MATCH`. A missing exact operation target returns `REJECTED` with a stable
+diagnostic instead of becoming a broadcast.
+
+## Advanced and legacy compatibility
+
+The older `blue.coordination.api.CoordinationEngine` surface remains an
+advanced host-integration and migration boundary. Its
+`inMemoryContracts10(...)` factory requires explicit release identities and its
+raw closure admission accepts low-level proof values. Its `inMemory()` factory
+retains the earlier acyclic compatibility profile; it is not the default SDK
+semantics. New applications should not start there.
+
+An SDK owner exposes the same low-level engine deliberately through
+`blue.advanced().rawEngine()`. Custom exact release identities are likewise an
+advanced option:
+
+```java
+try (BlueCoordination blue = BlueCoordination.builder()
+        .release(languageSpecificationIdentity, contractsSpecificationIdentity)
+        .build()) {
+    var raw = blue.advanced().rawEngine();
 }
 ```
 
-Both identity variables must contain lowercase `sha256:` identities of the
-actual final artifacts; the engine supplies no digest placeholder. This path
-uses independent per-document Contracts closure execution, connected atomic
-publication, and Root-lane feeder progress. `CoordinationEngine.inMemory()`
-remains the earlier acyclic Process Embedded compatibility profile.
-
-Contracts-mode `startDocument(...)` intentionally remains fail-closed because
-a singleton start cannot authenticate a multi-member or cyclic closure. The
-explicit `admitContractsClosure(input, policy, verifiedFrontier)` boundary
-executes the caller-supplied typed `ADMIT_CLOSURE` input and atomically installs
-every member when all lineages are new. Its receipt retains the exact Contracts
-attempt and durable publication identity. `NeedsResources` and rejected
-attempts mutate no Coordination state, while an exact retry reconciles the
-durable receipt without executing Contracts again. Mixed existing/new closure
-admission remains fail-closed until complete existing-head fences can be
-proved; the engine never falls back to the legacy child/parent admission path.
+Managed-document drafts can be described by the SDK, but operation-result
+admission is deliberately not enabled in this candidate. Calls using
+`request.managed(...)` or `expectOccurrence(...)` fail before append with
+`UNSUPPORTED_MANAGED_DRAFT_ADMISSION`. A real Contracts host-invocation bridge
+is required; the runtime never falls back to the legacy child/parent path.
 
 `Operation.exact(...)` and `CoordinationEngine.referenceRequest(...)` expose the
 optimized whole-object request path without YAML reserialization. For a
@@ -99,7 +135,17 @@ state to operational tooling.
 ```bash
 ./gradlew clean test
 ./gradlew releaseCheck
-./gradlew stageRelease -PblueDependencyMode=published-artifact
+./gradlew sdkFreezePrepublicationCheck \
+  -PblueDependencyMode=staged-artifact \
+  -PblueStagingRepository=/absolute/path/to/blue-sdk-staged-repository
+./gradlew stageSdkFreezeCandidate \
+  -PblueDependencyMode=staged-artifact \
+  -PblueStagingRepository=/absolute/path/to/blue-sdk-staged-repository
+./gradlew verifySdkStagedDependencyGraph \
+  verifySdkStagedCandidateRepository \
+  verifyExtractedSdkConsumer sdkFreezeArtifactCheck \
+  -PblueDependencyMode=staged-artifact \
+  -PblueStagingRepository=/absolute/path/to/blue-sdk-staged-repository
 ```
 
 The normal implementation build uses local composite substitution so the
@@ -112,8 +158,16 @@ canonical specification and fixture inputs resolve separately from
 `-PblueSpecRoot=/absolute/path/to/blue-spec/latest`. Source-archive smoke tests
 forward the same path into the extracted build.
 
-The published-artifact lane remains explicit and isolated. Resolution and
-source-API compatibility are separate claims:
+The SDK freeze lane stages the coordinated prerequisites in exact order—
+Language, then BEX and Repository against that Language, then Coordination—
+into one explicit file repository. `staged-artifact` disables sibling
+composite substitution and Maven Local, consumes real POM and Gradle module
+metadata, and verifies the exact candidate graph. These tasks do not upload,
+publish remotely, push commits, or create tags. See the
+[release procedure](docs/development/releasing.md) for the complete commands.
+
+The historical published-artifact lane remains explicit and isolated.
+Resolution and source-API compatibility are separate claims:
 
 ```bash
 ./gradlew verifyPublishedDependencyIsolation dependencyPreflight \
@@ -122,13 +176,9 @@ source-API compatibility are separate claims:
   -PblueDependencyMode=published-artifact
 ```
 
-The first command proves that external coordinates resolve without sibling
-substitution. The second also compiles this source tree and therefore remains
-red until compatible Contracts 1.0 and BEX exact-capability artifacts are
-published. Until then, the local composite is the supported implementation path
-for the Contracts-enabled source tree. `verifyExtractedSourceArchive` can still
-prove that the source ZIP configures in isolated published mode; its receipt
-marks focused tests `NOT_EXECUTED` and does not claim artifact compatibility.
+Those commands describe the older remote-coordinate lane and are not part of
+the local-only rc.2 freeze. Do not infer remote availability from the SDK
+staged repository.
 
 `releaseCheck` owns the library's complete verification surface: unit tests,
 compact-engine integration tests, tests compiled against the built JAR, and
@@ -168,6 +218,7 @@ Developer references:
 - [Five-occurrence Playground API example](docs/examples/playground-five-occurrence.md)
 - [Canonical RC evidence report](docs/releases/3.0.0-rc.1-test-report.md)
 - [Public API](docs/reference/public-api.md)
+- [SDK migration and ownership ledger](docs/reference/sdk-migration-and-ownership.md)
 - [Metrics](docs/reference/metrics.md)
 - [Failure and retry model](docs/operations/failure-model.md)
 - [Contributing](CONTRIBUTING.md)

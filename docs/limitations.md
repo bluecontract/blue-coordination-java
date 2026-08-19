@@ -1,5 +1,21 @@
 # Known limitations
 
+- The rc.2 artifact is a local-only in-memory SDK freeze candidate. It is not
+  remotely published and is not a production MyOS runtime.
+- Managed-child admission from an operation result is deliberately unsupported.
+  The SDK can create `ManagedDocumentDraft` values, but a call using
+  `request.managed(...)` or `expectOccurrence(...)` fails before append with
+  `UNSUPPORTED_MANAGED_DRAFT_ADMISSION`. There is no partial mutation and no
+  fallback to legacy child/parent admission. A real Contracts host-invocation
+  bridge remains required.
+- The supported external-pilot profile is one JVM, in-memory, sequential drain,
+  public-Root-scope closures, and bounded cyclic components. It has no
+  fresh-process durable recovery, provider-completeness adapter, provider-backed
+  Mandate resolver, parallel/distributed scheduling, or stable latency SLA.
+- Production MyOS still requires durable stores, exact restart recovery,
+  authorization and tenant isolation, provider completeness, outbox recovery,
+  operational backpressure, and production observability. Those are separate
+  adapter/profile phases and are not simulated by the SDK.
 - Managed embedded-document epochs and historical synchronization are a
   next-version Coordination temporal profile. They are not claimed as frozen
   Contracts 1.0 semantics.
@@ -33,8 +49,9 @@
   cursor, epoch, entry-frame, commit-companion, and provider-completeness
   evidence is durably available.
 - Drain is intentionally sequential. Parallel document processing, leasing,
-  distributed scheduling, SCC planning, and caller-selected target sets are out
-  of scope.
+  distributed scheduling, a second SCC planner, and caller-selected recipient
+  sets are out of scope. The normal SDK may select an exact operation target;
+  the environment still derives the resulting recipients.
 - `DrainBudget` bounds selected entries and committed PROCESS transitions. It
   cannot preempt one frozen processor call, does not count epoch-zero
   INITIALIZE inside an atomic attachment, and is not a hard latency deadline.
@@ -46,10 +63,9 @@
 - The retained Round 13 campaign failed append p95 (18.680667 ms against a
   1.000000 ms hard limit) and Coordination-host p95 (872.356126 ms against a
   250.000000 ms hard limit); route and total passed hard, while all four metrics
-  missed their preferred targets. The exact 3.0.0-rc.1 workflow policy permits
-  publication only as `PASS_WITH_KNOWN_PERFORMANCE_LIMITATION`. It does not
-  claim a latency pass, cannot apply to a stable release, and does not waive any
-  non-performance release gate.
+  missed their preferred targets. The historical 3.0.0-rc.1 workflow policy
+  permitted only `PASS_WITH_KNOWN_PERFORMANCE_LIMITATION`. It does not claim a
+  latency pass and cannot be applied to rc.2 or a stable release.
 - Immutable graph generations structurally share unchanged forward/reverse
   buckets and binding records, but a topology-changing publication still makes
   shallow copies of the three top-level in-memory directory maps. This RC does
