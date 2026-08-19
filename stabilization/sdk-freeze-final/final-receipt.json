@@ -1,0 +1,498 @@
+{
+  "schema": "blue.coordination/sdk-freeze-final-receipt/v1",
+  "generatedAt": "2026-08-19T22:21:28Z",
+  "receiptState": "FINAL_WITH_CHARACTERIZED_CAPABILITY_BLOCKERS",
+  "overallStatus": "INCOMPLETE_WITH_CHARACTERIZED_CAPABILITY_BLOCKERS",
+  "implementationConformanceClaimed": false,
+  "releaseReady": false,
+  "supportedSubsetLocalArtifactGate": "PASS",
+  "performanceClaim": "NONE",
+  "scope": {
+    "candidate": "blue.coordination:blue-coordination-java:3.0.0-rc.2",
+    "distribution": "LOCAL_FILE_REPOSITORY_ONLY",
+    "stagedRepository": "/private/tmp/blue-coordination-sdk-freeze.A5R15s/staged-repository",
+    "specificationRoot": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-spec/latest",
+    "semanticChangesAuthorized": false,
+    "fullLongPerformanceCampaignRerun": false
+  },
+  "policy": {
+    "remotePackagePublication": false,
+    "mavenLocalPublication": false,
+    "gitPush": false,
+    "gitTag": false,
+    "remoteRelease": false,
+    "localFileRepositoryStaging": true,
+    "notes": "All dependency hand-off and candidate verification used explicit local file-repository bytes. No remote package publication, Maven Local installation, Git push, tag, or remote release was performed."
+  },
+  "sourceBindings": [
+    {
+      "component": "Language",
+      "repository": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-language-java",
+      "branch": "codex/cyclic-topology-language",
+      "commit": "d4a0379053e1a716395349c40fa403ee993796ff",
+      "clean": true
+    },
+    {
+      "component": "BEX topology source",
+      "repository": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-bex-java",
+      "branch": "codex/cyclic-topology-bex",
+      "commit": "821fe877fef5b04a729b7422cdda05a7ace55a1f",
+      "clean": true
+    },
+    {
+      "component": "BEX staging",
+      "repository": "/private/tmp/blue-coordination-sdk-freeze.A5R15s/bex-staging",
+      "branch": "codex/coordination-sdk-staging-bex",
+      "commit": "d91c4c69e9aa463f0ae5ab9033ddf802ef9f8263",
+      "parent": "821fe877fef5b04a729b7422cdda05a7ace55a1f",
+      "clean": true
+    },
+    {
+      "component": "Specification",
+      "repository": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-spec",
+      "branch": "codex/contracts-1.0-spec",
+      "commit": "5dc8096276652156e248c9c018a0850fcd8dbdbb",
+      "clean": true
+    },
+    {
+      "component": "Repository source",
+      "repository": "/Users/piotr/data/blue-repository-java",
+      "branch": "feat/current-repository-api",
+      "commit": "2fcf29bf060ed114c971194adb6f8b747899aee2",
+      "cleanAtExport": true
+    },
+    {
+      "component": "Repository staging",
+      "repository": "/private/tmp/blue-coordination-sdk-freeze.A5R15s/repository-staging",
+      "branch": "codex/coordination-sdk-staging-repository",
+      "commit": "d305821bd813e77d46b7e559f03c0c6c902353f2",
+      "parent": "2fcf29bf060ed114c971194adb6f8b747899aee2",
+      "clean": true
+    },
+    {
+      "component": "Coordination topology base",
+      "branch": "codex/cyclic-topology-coordination",
+      "commit": "d6075717061ae59a87906d075b9bd30f9fb95e65",
+      "promptNamedEvidenceCommit": "f245270"
+    },
+    {
+      "component": "Coordination SDK candidate",
+      "repository": "/private/tmp/blue-coordination-sdk-freeze.A5R15s/worktree",
+      "branch": "codex/coordination-sdk-freeze",
+      "commit": "2b6219a1a6846283aeacb674b5b08288faca23e4",
+      "base": "d6075717061ae59a87906d075b9bd30f9fb95e65",
+      "clean": true,
+      "changedFileCount": 74
+    }
+  ],
+  "coordinationCommits": [
+    {"commit": "00f4fbbbec4eb847f65c6c74800f025a51e439c4", "subject": "feat(coordination): add SDK engine evidence seams"},
+    {"commit": "64e41b5981df51b37e5d9d99dac372f6e09235cd", "subject": "feat(coordination): bootstrap SDK Contracts roots dynamically"},
+    {"commit": "c9a250aadbec2e2c36c8eddfce4c5c1eeb5a10b6", "subject": "feat(coordination): compile authored Contracts closures"},
+    {"commit": "f1c7178bb63cfec2c91789e12cceb74dca010fe7", "subject": "feat(coordination): add immutable developer SDK values"},
+    {"commit": "4408ff4e26ac17fbbd7d4238197789173b616e48", "subject": "feat(coordination): add Contracts developer SDK runtime"},
+    {"commit": "4dccee138a11d03551c6bc1c3b1e7861871acc11", "subject": "test(coordination): prove public SDK workflows"},
+    {"commit": "25467dc85cb6e7e9e20cd421344763c1ee926de0", "subject": "refactor(coordination): name the legacy engine explicitly"},
+    {"commit": "6d6f8a950e305dc7fe89fa513f2ff0b0c9e64b49", "subject": "test(coordination): cover SDK cycle detach and reattachment"},
+    {"commit": "9f9923ee9b7bc89ba773e05fe8d236805fa56b69", "subject": "build(coordination): add isolated SDK freeze lane"},
+    {"commit": "b1e38632dcd86ff4a184341f47d783a9f3385014", "subject": "docs(coordination): define SDK freeze and migration boundary"},
+    {"commit": "2b6219a1a6846283aeacb674b5b08288faca23e4", "subject": "fix(coordination): isolate staged consumer JVM lanes"}
+  ],
+  "bundledIdentities": {
+    "blueLanguageSpecification": "sha256:01b038b64e3f0a9a11f3f70d544a63ff78a01d5169f1a03f8b8629cf73645a7d",
+    "contractsSpecification": "sha256:dfb444962a5a17b3a6519e8d148c2bf4a975a921b1fcb1277710052caaecd930",
+    "contractsRelease": "sha256:7e6c3717bc28d21ebadec9f81725913e944bb3b9b70094531f19f10510a10e50",
+    "fixturePackage": "sha256:071cecb68e1c4dcec2dbb0895de928629281d2b0a18f3e8a83a41a720e621bfa",
+    "gasManifest": "sha256:03219c42eb3696ef8727fe8ae226c8a5eb4a6126859ba744f571d892c409626a",
+    "cyclicFinalizer": "sha256:0b4bd3bbe4380faa52d14bc6baf8bb0a6dbc01acc576985676155ea0115969b4",
+    "cyclicProofVerifier": "sha256:eb0501a25ec5ac6a18fc86584c0afb6ecc2e6c1201c723f28ec56c80a2ae3bc5"
+  },
+  "fixtureCorpus": {
+    "ordinary": {"count": 167, "status": "PASS", "sourceBound": true},
+    "closure": {"count": 67, "status": "PASS", "sourceBound": true},
+    "totalContractsFixtures": 234,
+    "releaseConformanceTotalIncludingLanguageFixtures": 387,
+    "normativeFixtureMutations": 0,
+    "artifactReexecutionNote": "The corpus results are bound to the exact staged Language source commit and immutable package identity. The Coordination staged releaseCheck does not itself rerun the Language fixture harness; this receipt does not relabel that as a new implementation-conformance run."
+  },
+  "stagedCoordinates": [
+    {
+      "coordinate": "blue.language:blue-conformance:3.1.0-rc.20",
+      "artifacts": {
+        "jar": "db1a398958d02c8b80d04cba0f3997d72f14c5965c106a356d7043d8b92b9e10",
+        "pom": "45e8b67f94ded3e1d8752eddce00c16b4fb4052b4e8d93eff41807b250fcd6a8",
+        "module": "303d6b618cf176ea8f5337341b48cb7cea67548602003fdc16e159f0adadc024",
+        "sourcesJar": "1f12c4102de76659b9df1d5ad86938076bb0d877bdf70b2149966352ee786af8",
+        "javadocJar": "b8adde1a0ea7208954f633fae2ec30fbbaa4da2ef08d70ec9808256ee23ef430"
+      }
+    },
+    {
+      "coordinate": "blue.language:blue-contracts-core:3.1.0-rc.20",
+      "artifacts": {
+        "jar": "6452b1271877d73736068fe0411d27d4f737dfb2f44900e31ab407d2169aba20",
+        "pom": "0bba60df373eb66c052c104cd2515889b6a33dc571d96ce66c46e91d1075d685",
+        "module": "c4847234a27047836f689f14a021aef101bedbe96fc34564396ab3ec7de48f22",
+        "sourcesJar": "989bf0ecdbe65e71e9c7b402bb5f7ec8d782d3c7f9903179711d9b999f18dc51",
+        "javadocJar": "61559c362c248aa048c58de50046d938fcdbbf431dc0bb8f4156893fb8cf1c3f"
+      }
+    },
+    {
+      "coordinate": "blue.language:blue-language-core:3.1.0-rc.20",
+      "artifacts": {
+        "jar": "8d7167254a39132e7a494561ed966748918c138c08f0967ccc3e841edba0b1f0",
+        "pom": "e45c0f87e3cff13795cbd9aa800c72cb714a3d5f78e814845c4960f3073a00ed",
+        "module": "575f2e22af188336e6b9b8ff7b04084fa116e3cee6dca2d13c031eadd4e84581",
+        "sourcesJar": "74ad60632833c303f42b95e8c4122b4c4fd16f61b76c121c04c28786819f929d",
+        "javadocJar": "bec768b95b3d7c8887c360f74f71dc27f8d95121956dc7e834face6ffa33d6a5"
+      }
+    },
+    {
+      "coordinate": "blue.language:blue-language-ipfs:3.1.0-rc.20",
+      "artifacts": {
+        "jar": "bec7355f39a109c4fe6dfc5f9970232dc0a75cd8e5b4ab055abc311314d24c8e",
+        "pom": "435e07124b36ccb8dfff346f5bdf62e60208335084d521580cf4ff3dd71210be",
+        "module": "873f8f5105145da514f8cd5a5c286db209ed17567895b52d6f040a751b2da4de",
+        "sourcesJar": "a7fd62c141303410d1dba27904e6114afd3a9b997b44493be951b8d1c1a3eab9",
+        "javadocJar": "cf7101f7be0450ba957a40667aa64a127663e42a79d3d1e95f4e03812f400ca8"
+      }
+    },
+    {
+      "coordinate": "blue.language:blue-language-java:3.1.0-rc.20",
+      "artifacts": {
+        "jar": "0de1584be094515ddd27938819464dc024a993c7eb06e4145cac129ad5bbfed0",
+        "pom": "d1592a32bf4556117476be331c3453d848ef81bf8a6da07155fc16953db1291d",
+        "module": "15b5fabda72d05ad5fc40074c3ec18d7ff79ffc8b932a58e2016d4977acc931f",
+        "sourcesJar": "68d1069c56f754c2e76f208a4126a967533cc91059062c2e86b70e098f33a518",
+        "javadocJar": "3dffbe1e6614edf10e1dee47f6c2840fde9c69ed50f7e03f9e88ccc39dc41908"
+      }
+    },
+    {
+      "coordinate": "blue.language:blue-language-mapping:3.1.0-rc.20",
+      "artifacts": {
+        "jar": "d9141d5c611bde7eb6a21bce3dc4bc0df7d8167f013eeaef2a365dd0a6af329b",
+        "pom": "247c7ed579152bd66df286ec00946540141e91d229df5b89d021ee9b0dbd3feb",
+        "module": "3398ef16f4c085b8cac95ddf1c284533ee839de97d80f67eb933cc3de9468e54",
+        "sourcesJar": "05ddbc700dd0635927ac6e8b2edb93e778d92c1312c3504539d6799c9e2079db",
+        "javadocJar": "53dbf28cab3d343bac70ba20b4eb1683c61346c6c789eac7527b86ceaeb6ffa1"
+      }
+    },
+    {
+      "coordinate": "blue.language:blue-language-model:3.1.0-rc.20",
+      "artifacts": {
+        "jar": "ef55be8331147442b858474add4782489d993568effe30202a9c4a8b014d5bd8",
+        "pom": "4f33c99eed160d9e5650288e92e5f39ffdc49eae4428b60009e4db52ee34bbe2",
+        "module": "d1f808f910b2117f90f961da29980b0edcba50a5446614f34900965757f81f0a",
+        "sourcesJar": "84b48c13cff2594230a23cc248a7c00e7b2d0cb3b352cc90347039035ab472e6",
+        "javadocJar": "f098f3ebd4ed87ee0088e7b170940db033a0b9f2e106815c7fd3472ce73b365a"
+      }
+    },
+    {
+      "coordinate": "blue.bex:blue-bex-contracts:1.1.0-rc.3",
+      "artifacts": {
+        "jar": "18fcce8af029debc5e8d446d28fbf6d3de52cb4bae3952d1232303ba3ee37537",
+        "pom": "49348f416f133ad167454cc866441e56077193302f9e0da03aaa5cbaa58a94c8",
+        "module": "259356f92ad5145c3e452ca1bbd5d5aa38184121e6e36af76a1b0223096b4548",
+        "sourcesJar": "24d1ddd90c1376775a964618d0a565cab0b4f671c2307318497e7c4e70abc6ec",
+        "javadocJar": "73579f13e452293d8084d06bdca082b2c5c627e37f477a769be31b9f213ebd4f"
+      }
+    },
+    {
+      "coordinate": "blue.bex:blue-bex-core:1.1.0-rc.3",
+      "artifacts": {
+        "jar": "612637c316afe9f7e211f9e31aa03a47da772065b2f895c9851ef04b098a978e",
+        "pom": "07d69aba9bdfb2694966587ff150e7d030078ea67cdae2c2d98645394e7f7c43",
+        "module": "eba2558674d6e6e03a00ea81d5fb9a8d7ba97c1ff7336f9a62984f62596969d0",
+        "sourcesJar": "88a77248bb97f5f53f6849a409c945bc06309a9d1ac8bb2defb4eb514d71d04e",
+        "javadocJar": "6116925c9415078a18f0b00b1ead1f18e1e6e73ad9c0965bff45904250f9f2e2"
+      }
+    },
+    {
+      "coordinate": "blue.bex:blue-bex-java:1.1.0-rc.3",
+      "artifacts": {
+        "jar": "c6deada2fac53b8ea6523dbda77597b128006674616f140f04df23264c6d1aa3",
+        "pom": "217e82c1c0ebf27ac0c279ecf1de7a6faa1092c7078f3af735b716472052855a",
+        "module": "1fb8878f109c91bbcdbc3aa29f36d1c9e4c048d0357d011d146d12db60a1e042",
+        "sourcesJar": "c39806d158cd696e501240eed2c9e3c7ae73db706c6b52e204a2ba248f1d7ac5",
+        "javadocJar": "c6deada2fac53b8ea6523dbda77597b128006674616f140f04df23264c6d1aa3"
+      }
+    },
+    {
+      "coordinate": "blue.repo:blue-repo-java:3.0.0-rc.21",
+      "artifacts": {
+        "jar": "c5bea287b3714db1478b058b18197b2626675a17bf420bee3672eaa14d7fae38",
+        "pom": "d8841891b363f4d129c5d0fa27918dce90cfca1dbe47d7a0af6de6972c9308eb",
+        "module": "291fb13ecb8d904ebd082344312e69c0304a6d8bfc9cbc589696dec7e3bea6a1",
+        "sourcesJar": "95596afb7e2a3a6c8a127fcd6b32fd8addae00aca2e4b2be0a5227afdf899488",
+        "javadocJar": "327f9ea0c6ab33de963584865625bd8db7c9714fd7dde45015dc5a2ddb59e8bf"
+      }
+    },
+    {
+      "coordinate": "blue.coordination:blue-coordination-java:3.0.0-rc.2",
+      "artifacts": {
+        "jar": "8f71c0dc6fef128639d8a63467dec3ee1628bb303540ae149f170512a73024fa",
+        "pom": "2d008123fb5fe17ad81e187cb705ab89133b03f99cfd7437f8f480d9fe22264b",
+        "module": "6967dc45d16209654c346efb20d03fe51762a9d8ec7a7deb2e36ccb6a046fc54",
+        "sourcesJar": "0e1fdcfb9b41ef94b091e23a524ebb3565fbfd2be9b15f69aaadff4192ebd831",
+        "javadocJar": "78f2b1ade77e9746a186847809708379038430f6f1a220387dd83d82cf29ec9a",
+        "testFixturesJar": "f6e61fd4ac620b366995dc061569c738ec55f9e4d899b4ab81f61cb76d8b93a6"
+      }
+    }
+  ],
+  "sourceArchives": [
+    {
+      "component": "Language",
+      "file": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-language-java/build/release/blue-language-java-3.1.0-rc.20-SNAPSHOT-source-release.zip",
+      "sha256": "45728c6b4d75c28fb8961240437a1b8319133c7239c57b4fe8c8352dea38111d"
+    },
+    {
+      "component": "BEX",
+      "file": "/private/tmp/blue-coordination-sdk-freeze.A5R15s/bex-staging/build/distributions/blue-bex-java-1.1.0-rc.3-source-release.zip",
+      "sha256": "7e1acbc1ad2bc431ef643bb0bd1936a623e37a8b6ee69ae0e762f7a6355a43f8"
+    },
+    {
+      "component": "Repository",
+      "file": null,
+      "sha256": null,
+      "status": "NOT_PRODUCED_BY_STAGING_LANE",
+      "note": "The staged Repository coordinate includes a bound sources JAR and Javadoc JAR; its staging lane did not create a separate source ZIP."
+    },
+    {
+      "component": "Coordination",
+      "file": "/private/tmp/blue-coordination-sdk-freeze.A5R15s/worktree/build/distributions/blue-coordination-java-3.0.0-rc.2-source.zip",
+      "sha256": "d1e5200634f2be548228499ccc10945c658dca55880b688a476f51f6f5e13c56",
+      "checksumFileSha256": "942aecf54d29ea580283e217077faec707e0c22efb7890229dba29381e10c2ad"
+    }
+  ],
+  "topologyEvidence": {
+    "provenance": {
+      "path": "/private/tmp/blue-coordination-sdk-freeze.A5R15s/evidence/PROVENANCE.md",
+      "sha256": "db1f29f226ec031f1153e7acdd683264c1fc3da3387511d5ca7f7fd16e395a8d"
+    },
+    "exportManifest": {
+      "path": "/private/tmp/blue-coordination-sdk-freeze.A5R15s/SHA256SUMS",
+      "sha256": "f3b0ed16d7a6eda76162048a28c54e3674eedd2e2c488a77fe483b5124d4a7f6"
+    },
+    "reports": [
+      {"file": "CYCLIC_TOPOLOGY_COVERAGE.md", "sha256": "5d6350a2303fbaca9924bdd0d67c8deda434a27a658987afd407db697e18c646"},
+      {"file": "cyclic-topology-coverage.json", "sha256": "60e2111a404df56561c94e9fd26f16e6e681898e2c390d8d835e12ac9de4dc52"},
+      {"file": "cyclic-topology-identities.md", "sha256": "a23f9b1c19630e9ca47afb7f2c675c3d233eda998453a52f9159db6fefea860f"},
+      {"file": "cyclic-topology-identities.json", "sha256": "10b4e7b4788773ebd23915eafebf6790182d5557901b24e8f9f3c0d487b63470"},
+      {"file": "cyclic-performance.md", "sha256": "8fadbc5780ee0d7f23c7b047c2a3c1c408323450b1ecf68c14e270cfe3cc88e9"},
+      {"file": "cyclic-performance.json", "sha256": "63d65fc48f219c4e2f9be58ccb4028b4af0798e4a8d7585bdc20b4090984cd7e"},
+      {"file": "FINAL_RECEIPT.md", "sha256": "4daac795b66b94232b220847992131ce793a3c152121b7efaa30051456f5f1f4"},
+      {"file": "final-receipt.json", "sha256": "2fb6454786b2c012cefd6440df93d2135bd34b33d937226964a312cae0697242"}
+    ],
+    "exports": [
+      {"file": "blue-language-cyclic-topology-d4a0379.zip", "sha256": "caf35d709a1cc9123dcbd1fd7ac06c61f435d68bd99556612430ef9deab6e6de"},
+      {"file": "blue-language-cyclic-topology.bundle", "sha256": "c692522c67d7e2c7091f062b04589e2e9c161f6ce2a0f89ac99eb582c67c231f"},
+      {"file": "blue-bex-cyclic-topology-821fe87.zip", "sha256": "ed6bf6b6fd229fd096a8ac9e8d5f4db9f1454e0278ee5dbfdf6a848036f8b4f9"},
+      {"file": "blue-bex-cyclic-topology.bundle", "sha256": "17393e2f93e23e136b8e414a4026e1bc12c7b017ec24744b07281c9ea966b0e2"},
+      {"file": "blue-coordination-cyclic-topology-f245270.zip", "sha256": "f20b682031f01551485ecc4e762a47a027a05ba5b5fd1ddc2c491ec4361e0e11"},
+      {"file": "blue-coordination-cyclic-topology-d607571.zip", "sha256": "d382ffb9f16c9152fd1db1acf75db93c1ed1f21e2e82c47b652e1042e05d89dc"},
+      {"file": "blue-coordination-cyclic-topology.bundle", "sha256": "81584c21851f1f180b52f4de36281f4184d23c39a3b43148304bdacc7aec814c"},
+      {"file": "blue-spec-contracts-1.0-5dc8096.zip", "sha256": "ef36e1e458e46cc4b76c2a6ce83b3542bf68894a0cf8616af1d45ba61e0fd511"},
+      {"file": "blue-spec-contracts-1.0.bundle", "sha256": "bd296698f243d77a14c4e21ac5f43d72721959e17212ccce3fabf384e6f9f9ea"},
+      {"file": "blue-repository-current-2fcf29b.zip", "sha256": "363b85b191cc72a278d6d0ae7e06befd930199e4754aa6f908f58e9748272d2f"},
+      {"file": "blue-repository-current.bundle", "sha256": "e373b78833449b891652847b3245e857bad71a4cc3806916953ce85c9e657e47"}
+    ],
+    "shortRecoveredRerun": {
+      "java": 17,
+      "status": "PASS",
+      "tests": 18,
+      "failures": 0,
+      "durationSeconds": 276,
+      "exactMethodInventoryPreserved": false,
+      "evidence": "PROVENANCE.md",
+      "note": "No trustworthy exact 18-method selector was preserved. The receipt binds the count, duration, clean source, and provenance hash and does not invent method names."
+    },
+    "historicalFullSelectedGate": {
+      "status": "PASS",
+      "java": 17,
+      "classes": 15,
+      "tests": 57,
+      "failures": 0,
+      "durationSeconds": 435,
+      "exactCommandPreservedIn": "cyclic-topology-round/final-receipt.json",
+      "classification": "HISTORICAL_COMMITTED_TOPOLOGY_EVIDENCE"
+    },
+    "historicalPerformance": {
+      "status": "FAIL_WITH_COMPLETE_AUTHORITATIVE_ARTIFACTS",
+      "longCampaignRerunForSdkFreeze": false,
+      "releaseWallTargets": "PASS",
+      "plus1000SemanticAndGasEquality": "PASS",
+      "blockingFacts": [
+        "broad-global-state-traversals observed 57, required 0",
+        "broad-global-state-entries-traversed observed 100, required 0",
+        "raw BEX cold/warm equality unobservable at the public Coordination boundary"
+      ]
+    }
+  },
+  "verification": [
+    {
+      "id": "language-clean-full-java17",
+      "status": "PASS",
+      "tests": 2859,
+      "failures": 0,
+      "durationSeconds": 697,
+      "sourceCommit": "d4a0379053e1a716395349c40fa403ee993796ff"
+    },
+    {
+      "id": "language-direct-closure-corpus",
+      "status": "PASS",
+      "tests": 81,
+      "failures": 0,
+      "durationSeconds": 155,
+      "closureFixtures": 67
+    },
+    {
+      "id": "bex-clean-check-java17",
+      "status": "PASS",
+      "tests": 911,
+      "failures": 0,
+      "durationSeconds": 32
+    },
+    {
+      "id": "language-local-stage",
+      "status": "PASS",
+      "durationSeconds": 15,
+      "tasks": 73,
+      "coordinateVersion": "3.1.0-rc.20"
+    },
+    {
+      "id": "bex-local-stage",
+      "status": "PASS",
+      "durationSeconds": 24,
+      "tasks": 78,
+      "coordinateVersion": "1.1.0-rc.3",
+      "compatibility": "PASS",
+      "reproducibility": "PASS"
+    },
+    {
+      "id": "repository-local-stage",
+      "status": "PASS",
+      "durationSeconds": 15,
+      "tests": 58,
+      "coordinateVersion": "3.0.0-rc.21"
+    },
+    {
+      "id": "sdk-focused-supported-subset",
+      "status": "PASS",
+      "tests": 23,
+      "failures": 0,
+      "durationSeconds": 88
+    },
+    {
+      "id": "sdk-detach-and-reattachment-addition",
+      "status": "PASS",
+      "tests": 2,
+      "failures": 0,
+      "durationSeconds": 61
+    },
+    {
+      "id": "sdk-built-jar-consumer-focused",
+      "status": "PASS",
+      "tests": 1,
+      "failures": 0,
+      "durationSeconds": 12
+    },
+    {
+      "id": "coordination-full-staged-java17",
+      "status": "PASS",
+      "command": "./gradlew --no-daemon --max-workers=1 sdkFreezeArtifactCheck -PblueDependencyMode=staged-artifact -PblueStagingRepository=/private/tmp/blue-coordination-sdk-freeze.A5R15s/staged-repository -PblueSpecRoot=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-spec/latest -PtestJavaVersion=17 --no-parallel --no-build-cache --console=plain",
+      "counts": {"unit": 361, "integration": 91, "builtJarConsumer": 7, "scenario": 14, "primaryTotal": 473},
+      "failures": 0,
+      "durationSeconds": null,
+      "enclosingInitialArtifactAttemptDurationSeconds": 1340,
+      "durationNote": "The 22m20 measurement is the enclosing first artifact-gate attempt. releaseCheck and its 473-test primary corpus were green before the original same-directory Java 21 consumer orchestration failed; it is not represented as an isolated releaseCheck duration."
+    },
+    {
+      "id": "extracted-staged-consumer-java17",
+      "status": "PASS",
+      "javaRuntime": 17,
+      "javaRelease": 17,
+      "durationSeconds": null,
+      "reportSha256": "123b30c52ce898cf70861a9eed490ef0a3af545c57a1578b65c059f25843e2fe"
+    },
+    {
+      "id": "extracted-staged-consumer-java21",
+      "status": "PASS",
+      "javaRuntime": 21,
+      "javaRelease": 17,
+      "reportSha256": "946d3fcb5adc75e6170a61f5be693a3efae5f286e83cd4e47a2756c3d6ad1b7c"
+    },
+    {
+      "id": "extracted-staged-consumers-combined-verification",
+      "status": "PASS",
+      "javaRuntimes": [17, 21],
+      "durationSeconds": 22
+    },
+    {
+      "id": "terminal-sdk-freeze-artifact-check",
+      "status": "PASS",
+      "durationSeconds": 13,
+      "artifactReportSha256": "78d847448d256fdf8148a5a3071876bbb4815acc54897fd44555f65ee4441c72",
+      "candidateReportSha256": "162a04ba8672d3026898d645c7198c402f31d2f502c129bb46ca0bfa7a584c4f"
+    },
+    {
+      "id": "coordination-full-staged-java21",
+      "status": "PASS",
+      "command": "./gradlew --no-daemon --max-workers=1 releaseCheck --rerun-tasks -PblueDependencyMode=staged-artifact -PblueStagingRepository=/private/tmp/blue-coordination-sdk-freeze.A5R15s/staged-repository -PblueSpecRoot=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-spec/latest -PtestJavaVersion=21 --no-parallel --no-build-cache --console=plain",
+      "counts": {"unit": 361, "integration": 91, "builtJarConsumer": 7, "scenario": 14, "primaryTotal": 473},
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "durationSeconds": 1260,
+      "outcome": "BUILD_SUCCESSFUL",
+      "tasks": {"actionable": 35, "executed": 35},
+      "sourceArchiveSmoke": {"status": "PASS", "outcome": "BUILD_SUCCESSFUL", "durationSeconds": 5},
+      "stagedDependencyGraph": "EXACT"
+    }
+  ],
+  "sdkAcceptance": [
+    {"case": 1, "requirement": "counter +3/-1", "status": "PASS"},
+    {"case": 2, "requirement": "targeted Order operation excludes standalone PayNote", "status": "PASS"},
+    {"case": 3, "requirement": "valid broadcast with no accepting Channel returns NO_MATCH", "status": "PASS"},
+    {"case": 4, "requirement": "missing targeted document returns precise REJECTED", "status": "PASS"},
+    {"case": 5, "requirement": "finite A-B-A through SDK", "status": "PASS"},
+    {"case": 6, "requirement": "finite A-B-C-A through SDK", "status": "PASS"},
+    {"case": 7, "requirement": "five-member shared-A SCC through SDK", "status": "PASS"},
+    {"case": 8, "requirement": "two disconnected SCCs through SDK", "status": "PASS"},
+    {"case": 9, "requirement": "gas-loop rollback and exact retry", "status": "PASS"},
+    {"case": 10, "requirement": "detach breaks loop and later call terminates", "status": "PASS"},
+    {"case": 11, "requirement": "remove/re-add activation generation", "status": "PASS"},
+    {"case": 12, "requirement": "create Order draft into /orders collection", "status": "BLOCKED_UNSUPPORTED_MANAGED_DRAFT_ADMISSION"},
+    {"case": 13, "requirement": "five child occurrences with duplicate managed lineages", "status": "BLOCKED_UNSUPPORTED_MANAGED_DRAFT_ADMISSION"},
+    {"case": 14, "requirement": "append-only submit and separate drain parity", "status": "PASS"},
+    {"case": 15, "requirement": "consumer compiled only against built/staged JARs", "status": "PASS"}
+  ],
+  "artifactReports": [
+    {"file": "build/reports/sdk-freeze/staged-candidate.json", "sha256": "162a04ba8672d3026898d645c7198c402f31d2f502c129bb46ca0bfa7a584c4f"},
+    {"file": "build/reports/sdk-freeze/artifact-check.json", "sha256": "78d847448d256fdf8148a5a3071876bbb4815acc54897fd44555f65ee4441c72"},
+    {"file": "build/reports/sdk-freeze/consumer-java17.json", "sha256": "123b30c52ce898cf70861a9eed490ef0a3af545c57a1578b65c059f25843e2fe"},
+    {"file": "build/reports/sdk-freeze/consumer-java21.json", "sha256": "946d3fcb5adc75e6170a61f5be693a3efae5f286e83cd4e47a2756c3d6ad1b7c"}
+  ],
+  "unresolvedGates": [
+    {
+      "id": "UNSUPPORTED_MANAGED_DRAFT_ADMISSION",
+      "severity": "IMPLEMENTATION_CONFORMANCE_BLOCKER",
+      "effect": "request.managed(...) and expectOccurrence(...) fail before append; no host state is mutated",
+      "requiredForCompletion": "A real Contracts host-invocation bridge that validates exact result occurrence path/state and performs atomic affected-closure admission"
+    },
+    {
+      "id": "FIVE_CHILD_DUPLICATE_LINEAGE_ACCEPTANCE",
+      "severity": "IMPLEMENTATION_CONFORMANCE_BLOCKER",
+      "effect": "SDK acceptance case 13 cannot execute until managed-draft admission exists"
+    },
+    {
+      "id": "PRODUCTION_RUNTIME_PROFILE",
+      "severity": "PRODUCTION_READINESS_BLOCKER",
+      "effect": "Candidate is single-JVM/in-memory, sequential, Root-scope, without durable recovery, external provider completeness, Mandate resolution, tenant isolation, outbox recovery, or operational backpressure"
+    },
+    {
+      "id": "PERFORMANCE_CLAIM",
+      "severity": "NO_RELEASE_PERFORMANCE_CLAIM",
+      "effect": "The historical topology campaign retains broad-state traversal and raw-BEX-observability blockers; no long campaign was rerun and no stable latency SLA is claimed"
+    }
+  ],
+  "finalConclusion": "The local staged SDK supported subset, full staged Java 17 and Java 21 gates, and both extracted consumer JVM lanes pass, and the recovered topology evidence is source- and artifact-bound. This receipt is not release-ready and makes no implementation-conformance claim: managed-draft admission and the five-child duplicate-lineage acceptance case remain unsupported, and the production durability/operations profile is absent."
+}
