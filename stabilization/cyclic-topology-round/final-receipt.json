@@ -1,0 +1,492 @@
+{
+  "schema": "blue.coordination/cyclic-topology-final-receipt/v1",
+  "generatedAt": "2026-08-19T19:27:45Z",
+  "receiptState": "FINAL_EVIDENCE_WITH_CHARACTERIZED_BLOCKERS",
+  "overallStatus": "INCOMPLETE_WITH_CHARACTERIZED_BLOCKERS",
+  "implementationConformanceClaimed": false,
+  "definitionOfDoneSatisfied": false,
+  "releaseReady": false,
+  "scope": "Cyclic topology, detachment, identity, locality, and performance completion round",
+  "prompt": {
+    "path": "/Users/piotr/Downloads/CODEX_CYCLIC_TOPOLOGY_AND_PERFORMANCE_COMPLETION_PROMPT.md",
+    "sha256": "568c6bf6cf7a4be81af60a6a932ab322997f87fcd07ba17bcdd6ca3a6a8ae136"
+  },
+  "policy": {
+    "dependencyMode": "local-composite",
+    "publishPackages": false,
+    "pushPackages": false,
+    "publishToMavenLocal": false,
+    "stageToIsolatedMavenRepository": false,
+    "publishedArtifactLane": "NOT_RUN_BY_USER_POLICY",
+    "reason": "The user explicitly required local versions between repositories and prohibited package push/publication.",
+    "gitPushed": false,
+    "normativeFixturePackageChanged": false,
+    "architectureFrozen": true
+  },
+  "frozenInputs": {
+    "blueLanguageSpecification": "sha256:01b038b64e3f0a9a11f3f70d544a63ff78a01d5169f1a03f8b8629cf73645a7d",
+    "previousLanguageCharacterizationNotUsed": "sha256:a234b0b42190a7982809781b5efdaa2e5f1ab4b7f8d870fbd1ffe7020cc7e869",
+    "contractsSpecification": "sha256:dfb444962a5a17b3a6519e8d148c2bf4a975a921b1fcb1277710052caaecd930",
+    "contractsReleaseIdentity": "sha256:7e6c3717bc28d21ebadec9f81725913e944bb3b9b70094531f19f10510a10e50",
+    "fixturePackageIdentity": "sha256:071cecb68e1c4dcec2dbb0895de928629281d2b0a18f3e8a83a41a720e621bfa",
+    "closureFixtureCount": 67,
+    "specificationRoot": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-spec/latest",
+    "normativeFixtureMutations": []
+  },
+  "repositories": [
+    {
+      "name": "blue-language-java",
+      "path": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-language-java",
+      "branch": "codex/cyclic-topology-language",
+      "baselineHead": "2cff37bc48bda44e800ae82b4d0a706dda6d6258",
+      "finalHead": "d4a0379053e1a716395349c40fa403ee993796ff",
+      "changedPathCount": 9,
+      "diff": {
+        "insertions": 372,
+        "deletions": 33
+      }
+    },
+    {
+      "name": "blue-bex-java",
+      "path": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-bex-java",
+      "branch": "codex/cyclic-topology-bex",
+      "baselineHead": "821fe877fef5b04a729b7422cdda05a7ace55a1f",
+      "finalHead": "821fe877fef5b04a729b7422cdda05a7ace55a1f",
+      "changedPathCount": 0
+    },
+    {
+      "name": "blue-contract-java",
+      "path": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-contract-java",
+      "branch": "codex/cyclic-topology-coordination",
+      "baselineHead": "3fd8b5a6f1aa5db295b2de5d03b617281a080e5b",
+      "evidenceHeadBeforeFinalReceipt": "f245270c87cbcec80ed81b416c82513a64367ffc",
+      "receiptParentHead": "f245270c87cbcec80ed81b416c82513a64367ffc",
+      "receiptCommit": null,
+      "receiptCommitBinding": "The receipt cannot bind its own commit hash; the resulting local receipt commit is reported in the external handoff.",
+      "changedPathCountBeforeFinalReceipt": 40,
+      "diffBeforeFinalReceipt": {
+        "insertions": 343125,
+        "deletions": 213
+      }
+    },
+    {
+      "name": "blue-spec",
+      "path": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-spec",
+      "branch": "codex/contracts-1.0-spec",
+      "baselineHead": "5dc8096276652156e248c9c018a0850fcd8dbdbb",
+      "finalHead": "5dc8096276652156e248c9c018a0850fcd8dbdbb",
+      "changedPathCount": 0
+    },
+    {
+      "name": "blue-repository-java",
+      "path": "/Users/piotr/data/blue-repository-java",
+      "finalHead": "2fcf29bf060ed114c971194adb6f8b747899aee2",
+      "changedPathCount": 0
+    }
+  ],
+  "sourceLocks": {
+    "language": {
+      "coordinate": "blue.language:blue-contracts-core:3.1.0-rc.20",
+      "baseCommit": "d4a0379053e1a716395349c40fa403ee993796ff",
+      "workspaceDiffSha256": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc"
+    },
+    "bex": {
+      "coordinate": "blue.bex:blue-bex-core:1.1.0-rc.3",
+      "contractsCoordinate": "blue.bex:blue-bex-contracts:1.1.0-rc.3",
+      "baseCommit": "821fe877fef5b04a729b7422cdda05a7ace55a1f",
+      "workspaceDiffSha256": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc"
+    },
+    "repository": {
+      "coordinate": "blue.repo:blue-repo-java:3.0.0-rc.21",
+      "baseCommit": "2fcf29bf060ed114c971194adb6f8b747899aee2",
+      "workspaceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "commits": {
+    "language": [
+      {
+        "sha": "3bb97b5dba7902e7bed68f628e64bae71ab2b342",
+        "subject": "perf(contracts): expose closure phase timings"
+      },
+      {
+        "sha": "d4a0379053e1a716395349c40fa403ee993796ff",
+        "subject": "docs(language): refresh timing API reference"
+      }
+    ],
+    "coordination": [
+      {"sha": "94dd14933dc94694a23e3a9faef7334ea0c2a4bc", "subject": "chore(stabilization): capture cyclic topology baseline"},
+      {"sha": "2e199510efc3d95244790f411091eecc3a65d76d", "subject": "test(coordination): add authored Contracts scenario support"},
+      {"sha": "f803fbae7578ad36b6f2f7b34cb305a437203963", "subject": "test(coordination): prove branching cyclic topology"},
+      {"sha": "146b3862c0cc3a511c30b6c4b1adaed37f862b32", "subject": "test(coordination): prove three-member cyclic execution"},
+      {"sha": "d044c0ba59e11a66d7b3ae4367734a32c6c1fe0a", "subject": "feat(coordination): instrument closure execution evidence"},
+      {"sha": "b1dd137e3dd151ede2d1189999321a6d1417cebb", "subject": "test(coordination): prove cyclic detachment and reactivation"},
+      {"sha": "aafcf34947c4508b6f280c093bc583630f056096", "subject": "test(coordination): prove public component merge and split"},
+      {"sha": "f9c958c1a4baf8bbb9288c20ac3cd304db6961c5", "subject": "test(coordination): characterize cyclic initialization topology"},
+      {"sha": "42d60f87625d8151892ec60f797e7e6d55507240", "subject": "test(coordination): characterize cyclic scope boundary"},
+      {"sha": "cd533cf016d85d8212aa9d15811f63e8033dd089", "subject": "docs(coordination): define authored closure admission boundary"},
+      {"sha": "e9a79488ba1e87a2fe4f9c1ae9833d7b63600749", "subject": "docs(stabilization): map cyclic topology coverage"},
+      {"sha": "32449f08ac4a7fd09c63e350675f65d8c3499c40", "subject": "perf(coordination): bound cyclic closure planning"},
+      {"sha": "c5eb78bcefa463f0a82a853185dc0a39ad8bd484", "subject": "perf(coordination): publish closure phase timings"},
+      {"sha": "6280acc302585455c7a72212b52a142eca5b384d", "subject": "test(coordination): add cyclic performance campaign"},
+      {"sha": "ef214a5e9b66871b7997ad6b3f79ac3beec83c4c", "subject": "test(coordination): record exact cyclic identity evidence"},
+      {"sha": "3e01b07ac26ca1cebb5836aeca45e5da3a26c817", "subject": "test(coordination): record cyclic performance campaign"},
+      {"sha": "ab071edff73b8151a7b5c9f5379f4d570bbdace5", "subject": "docs(coordination): normalize coverage metadata"},
+      {"sha": "f245270c87cbcec80ed81b416c82513a64367ffc", "subject": "build(coordination): rebind Language documentation head"}
+    ]
+  },
+  "implementationSummary": {
+    "testOnlyScenarioBuilder": true,
+    "authoredFacadeParity": true,
+    "threeMemberRing": true,
+    "sharedAnchorFiveMemberScc": true,
+    "twoDisjointCycles": true,
+    "detachDissolveReadd": true,
+    "mergeSplitRollback": true,
+    "initializationBoundaryCharacterized": true,
+    "nestedScopeBoundaryCharacterized": true,
+    "targetedClosurePlanning": true,
+    "sourceIndexing": true,
+    "providerMetering": true,
+    "phaseTiming": true,
+    "exactIdentityEvidence": true,
+    "authoritativePerformanceCampaign": true,
+    "broadStateCopyArchitectureRewritten": false,
+    "rawBexResultExposedAtCoordinationBoundary": false,
+    "normativeFixturesAdded": 0
+  },
+  "coverage": {
+    "scenarioCount": 30,
+    "performanceScenarioCount": 6,
+    "matrixRowCount": 36,
+    "passOrSemanticPassCount": 26,
+    "blockerOrPartialBlockerCount": 4,
+    "normativeFixtureRequiredCount": 0,
+    "statuses": {
+      "PASS": 25,
+      "PASS_SEMANTIC": 1,
+      "BLOCKER_CHARACTERIZED": 3,
+      "PARTIAL_BLOCKER_CHARACTERIZED": 1
+    }
+  },
+  "identityEvidence": {
+    "schema": "cyclic-topology-identities/1.0",
+    "scenarioCheckpointCount": 32,
+    "runtimeProduced": true,
+    "byteForByteVerifyModePassed": true,
+    "records": [
+      "before/after BlueIds",
+      "before/after MASTERs",
+      "component and proof identities",
+      "occurrence and binding identities",
+      "activation generations",
+      "event BlueIds and occurrence order",
+      "gas trace identity, total, rejected work, and rejected charge",
+      "work, document-step, and direct-seed order",
+      "durable state"
+    ],
+    "repeatProof": {
+      "P2.1.finite-three-member-ring": 6,
+      "P2.4.shared-gas-rollback": 1,
+      "allOtherScenarios": 0
+    }
+  },
+  "performance": {
+    "schema": "blue.coordination/cyclic-performance/v1",
+    "generatedAt": "2026-08-19T17:34:51.205355Z",
+    "status": "FAIL",
+    "authoritative": true,
+    "implementationConformanceClaimed": false,
+    "configuration": {
+      "warmupsPerShape": 20,
+      "measuredSamplesPerShape": 50,
+      "shapeCount": 6,
+      "freshPublicEngineAndStatePerIteration": true,
+      "totalIterations": 420,
+      "totalOperations": 490,
+      "heapBytes": 2147483648,
+      "garbageCollector": "G1",
+      "java": "Oracle Java 17.0.10",
+      "locale": "en_US",
+      "timezone": "UTC"
+    },
+    "referenceMachine": {
+      "model": "MacBook Pro Mac15,9",
+      "chip": "Apple M3 Max",
+      "logicalCores": 16,
+      "memory": "64 GB",
+      "os": "macOS 26.5.2 (25F84)",
+      "baselineStatus": "PASS",
+      "baselineSha256": "1cfcbb840c8fcfd0244e2fdb44277fbf68eeeaf3a7efdbed866a4b78b3c4a5d2"
+    },
+    "releaseWallTargets": [
+      {"shape": "two-member-finite-cycle", "p95Millis": 698.536916, "limitMillis": 1000, "status": "PASS"},
+      {"shape": "three-member-ring", "p95Millis": 952.255667, "limitMillis": 1500, "status": "PASS"},
+      {"shape": "five-member-shared-anchor", "p95Millis": 2332.671458, "limitMillis": 2500, "status": "PASS"}
+    ],
+    "aspirationalWallTargets": [
+      {"shape": "two-member-finite-cycle", "p95Millis": 698.536916, "limitMillis": 250, "status": "FAIL", "hard": false},
+      {"shape": "three-member-ring", "p95Millis": 952.255667, "limitMillis": 500, "status": "FAIL", "hard": false},
+      {"shape": "five-member-shared-anchor", "p95Millis": 2332.671458, "limitMillis": 1000, "status": "FAIL", "hard": false}
+    ],
+    "otherShapeP95Millis": {
+      "two-disjoint-two-member-cycles": 1344.114459,
+      "five-member-plus-1000-unrelated": 2336.946083,
+      "cycle-detachment-and-dissolution": 1216.267833
+    },
+    "plus1000Overhead": {
+      "ratio": 0.0018325019519315436,
+      "percent": 0.18325019519315436,
+      "limitRatio": 0.1,
+      "status": "PASS",
+      "affectedSemanticEquality": "PASS",
+      "affectedGasEquality": "PASS",
+      "observableResultEquality": "PASS"
+    },
+    "hostResidualP95Millis": {
+      "two-member-finite-cycle": 0.190041,
+      "three-member-ring": 0.216041,
+      "five-member-shared-anchor": 0.175376,
+      "two-disjoint-two-member-cycles": 0.284835,
+      "five-member-plus-1000-unrelated": 0.220125,
+      "cycle-detachment-and-dissolution": 0.219583
+    },
+    "hardBlockers": [
+      {
+        "id": "broad-global-state-traversals",
+        "status": "FAIL",
+        "observed": 57,
+        "limit": 0,
+        "detail": "Global publication/state copying still performs broad traversals even though the narrow full-environment-scan counter is zero."
+      },
+      {
+        "id": "broad-global-state-entries-traversed",
+        "status": "FAIL",
+        "observed": 100,
+        "limit": 0
+      },
+      {
+        "id": "raw-bex-cold-warm-equality",
+        "status": "UNOBSERVABLE",
+        "detail": "No raw BEX result fingerprint is exposed at the public Coordination boundary; the exact observable projection passes."
+      }
+    ]
+  },
+  "verification": [
+    {
+      "id": "language-exact-head-clean-build-java17",
+      "workingDirectory": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-language-java",
+      "command": "env JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home PATH=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin LANG=C.UTF-8 LC_ALL=C.UTF-8 SOURCE_DATE_EPOCH=1787162541 ./gradlew --no-daemon --max-workers=1 clean build -PblueSpecRoot=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-spec/latest --no-parallel --console=plain",
+      "status": "PASS",
+      "durationSeconds": 697,
+      "durationSource": "recorded wall duration 11m37s",
+      "counts": {"xmlFiles": 330, "tests": 2859, "rootTests": 2381, "failures": 0, "errors": 0, "skipped": 0},
+      "sourceCommit": "d4a0379053e1a716395349c40fa403ee993796ff",
+      "sourceInputIdentity": "sha256:5979da40c1b6751dff78a743235d389925f71ee1b2d4565d7c19a6ee69c5d22c"
+    },
+    {
+      "id": "language-semantic-api-docs-and-archive-gates",
+      "workingDirectory": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-language-java",
+      "command": "env JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home PATH=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin LANG=C.UTF-8 LC_ALL=C.UTF-8 SOURCE_DATE_EPOCH=1787162541 ./gradlew --no-daemon --max-workers=1 releaseConformanceTest semanticBaselineVerify verifySemanticApiMigration documentationVerify verifyFinalApiBaseline verifyDeterministicSourceArchives -PblueSpecRoot=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-spec/latest --rerun-tasks --no-parallel --console=plain",
+      "documentationRerunCommand": "env JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home PATH=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin LANG=C.UTF-8 LC_ALL=C.UTF-8 SOURCE_DATE_EPOCH=1787162541 ./gradlew --no-daemon --max-workers=1 documentationVerify -PblueSpecRoot=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-spec/latest --rerun-tasks --no-parallel --console=plain",
+      "finalHeadArchiveRerunCommand": "env JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home PATH=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin LANG=C.UTF-8 LC_ALL=C.UTF-8 SOURCE_DATE_EPOCH=1787162541 ./gradlew --no-daemon --max-workers=1 verifyDeterministicSourceArchives -PblueSpecRoot=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-spec/latest --rerun-tasks --no-parallel --console=plain",
+      "status": "PASS_AFTER_DOCUMENTATION_REFRESH",
+      "initialOutcome": "BUILD_FAILED_AT_DOCUMENTATION_VERIFY_ONLY",
+      "initialDurationSeconds": 519,
+      "documentationRerunOutcome": "BUILD_SUCCESSFUL",
+      "documentationRerunDurationSeconds": 88,
+      "finalHeadArchiveRerunOutcome": "BUILD_SUCCESSFUL",
+      "finalHeadArchiveRerunDurationSeconds": 24,
+      "totalRecordedSeconds": 631,
+      "durationSource": "recorded wall durations 8m39s + 1m28s + 24s",
+      "counts": {"releaseConformanceFixtures": 387, "languageFixtures": 153, "contractsFixtures": 234, "approvedIncompatibleChanges": 337, "approvedAdditiveChanges": 473, "unexpectedChanges": 0},
+      "archiveEvidence": {"sourceCommit": "d4a0379053e1a716395349c40fa403ee993796ff", "sourceReleaseSha256": "45728c6b4d75c28fb8961240437a1b8319133c7239c57b4fe8c8352dea38111d", "replicaIdentical": true, "fileEntryCount": 1750, "verificationStatus": "PASS"},
+      "failureHistory": ["The first documentation verification detected generated reference drift; docs/reference/public-api.md was regenerated in commit d4a0379 and verification passed.", "The pre-refresh archive identity c42cceca43e222ad68d6aa433fc462d0a62989ca662b2129d2eae6e7dc38559d was historical to 3bb97b5 and was replaced by the final-head d4a0379 archive proof."]
+    },
+    {
+      "id": "direct-blue-spec-latest-closure-corpus",
+      "workingDirectory": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-language-java",
+      "command": "env JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home PATH=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin LANG=C.UTF-8 LC_ALL=C.UTF-8 ./gradlew --no-daemon --max-workers=1 :blue-conformance:test -PblueSpecRoot=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-spec/latest --tests blue.language.conformance.contracts.closure.CombinedClosureFixtureConformanceTest --tests blue.language.conformance.contracts.closure.DynamicClosureCorpusConformanceTest --tests blue.language.conformance.contracts.closure.ExternalClosureFixtureMatrixTest --tests blue.language.conformance.contracts.closure.FullClosureCorpusConformanceTest --rerun-tasks --no-parallel --console=plain",
+      "status": "PASS",
+      "durationSeconds": 155,
+      "durationSource": "recorded wall duration 2m35s",
+      "packageRootEnvironmentOverride": false,
+      "counts": {"combined": 8, "dynamic": 67, "external": 5, "full": 1, "tests": 81, "failures": 0, "errors": 0, "skipped": 0}
+    },
+    {
+      "id": "bex-clean-check-compatibility-reproducibility",
+      "workingDirectory": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-bex-java",
+      "command": "env JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home PATH=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin LANG=C.UTF-8 LC_ALL=C.UTF-8 ./gradlew --no-daemon --max-workers=1 clean check bexLocalLanguageVerification bexCompatibilityCheck bexReproducibilityCheck -PblueLanguageCompositePath=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-language-java --rerun-tasks --no-parallel --console=plain",
+      "status": "PASS",
+      "durationSeconds": 32,
+      "durationSource": "recorded wall duration 32s",
+      "counts": {"xmlFiles": 62, "tests": 911, "failures": 0, "errors": 0, "skipped": 0},
+      "checks": {"binaryApi": "PASS", "java8Bytecode": "PASS", "archiveReproducibility": "PASS"}
+    },
+    {
+      "id": "coordination-focused-public-cyclic-java17",
+      "workingDirectory": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-contract-java",
+      "command": "env JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home PATH=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin LANG=C.UTF-8 LC_ALL=C.UTF-8 ./gradlew --no-daemon --max-workers=1 test -PblueDependencyMode=local-composite -PblueLanguageCompositePath=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-language-java -PblueBexCompositePath=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-bex-java -PblueRepositoryCompositePath=/Users/piotr/data/blue-repository-java -PblueSpecRoot=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-spec/latest -PtestJavaVersion=17 --rerun-tasks --no-parallel --console=plain --tests blue.coordination.internal.BlueRuntimeProviderMeterTest --tests blue.coordination.internal.Contracts10AuthoredFacadeParityTest --tests blue.coordination.internal.Contracts10ScenarioBuilderTest --tests blue.coordination.internal.ContractsClosureAdmissionAdapterTest --tests blue.coordination.internal.ContractsClosureExecutionMetricsObserverTest --tests blue.coordination.internal.ContractsPublicBranchingCollectionCycleTest --tests blue.coordination.internal.ContractsPublicComponentMergeSplitTest --tests blue.coordination.internal.ContractsPublicCycleDetachmentTest --tests blue.coordination.internal.ContractsPublicInitializationTopologyTest --tests blue.coordination.internal.ContractsPublicLoopAndIsolationTest --tests blue.coordination.internal.ContractsPublicNestedScopeBoundaryTest --tests blue.coordination.internal.ContractsPublicOrderingAcceptanceTest --tests blue.coordination.internal.ContractsPublicThreeMemberCycleTest --tests blue.coordination.internal.CyclicTopologyIdentityEvidenceTest --tests blue.coordination.internal.OperationRouteIndexTest",
+      "status": "PASS",
+      "durationSeconds": 435,
+      "durationSource": "recorded wall duration 7m15s",
+      "counts": {"classes": 15, "tests": 57, "failures": 0, "errors": 0, "skipped": 0}
+    },
+    {
+      "id": "coordination-java17-clean-release-check",
+      "workingDirectory": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-contract-java",
+      "command": "env JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home PATH=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin LANG=C.UTF-8 LC_ALL=C.UTF-8 ./gradlew --no-daemon --max-workers=1 clean releaseCheck -PblueDependencyMode=local-composite -PblueLanguageCompositePath=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-language-java -PblueBexCompositePath=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-bex-java -PblueRepositoryCompositePath=/Users/piotr/data/blue-repository-java -PblueSpecRoot=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-spec/latest -PtestJavaVersion=17 --rerun-tasks --no-parallel --console=plain",
+      "status": "PASS",
+      "durationSeconds": 1249,
+      "durationSource": "recorded wall duration 20m49s",
+      "counts": {"unit": 327, "integration": 91, "consumer": 6, "scenario": 14, "primaryTotal": 438, "extractedSourceSmoke": 18, "total": 456, "failures": 0, "errors": 0, "skipped": 0}
+    },
+    {
+      "id": "coordination-java21-independent-clean-release-check",
+      "workingDirectory": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-contract-java",
+      "command": "env JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home PATH=/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin LANG=C.UTF-8 LC_ALL=C.UTF-8 ./gradlew --no-daemon --max-workers=1 clean releaseCheck -PblueDependencyMode=local-composite -PblueLanguageCompositePath=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-language-java -PblueBexCompositePath=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-bex-java -PblueRepositoryCompositePath=/Users/piotr/data/blue-repository-java -PblueSpecRoot=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-spec/latest -PtestJavaVersion=21 --rerun-tasks --no-parallel --console=plain",
+      "status": "PASS",
+      "durationSeconds": 1222,
+      "durationSource": "recorded Gradle duration 20m22s",
+      "counts": {"unit": 327, "integration": 91, "consumer": 6, "scenario": 14, "primaryTotal": 438, "extractedSourceSmoke": 18, "total": 456, "failures": 0, "errors": 0, "skipped": 0},
+      "tasks": {"actionable": 67, "executed": 67},
+      "gradleOutcome": "BUILD_SUCCESSFUL"
+    },
+    {
+      "id": "cyclic-identity-write",
+      "workingDirectory": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-contract-java",
+      "command": "env PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin BLUE_CYCLIC_TOPOLOGY_IDENTITY_ARTIFACT_MODE=WRITE ./gradlew --no-daemon --max-workers=1 test -PblueDependencyMode=local-composite -PblueLanguageCompositePath=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-language-java -PblueBexCompositePath=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-bex-java -PblueRepositoryCompositePath=/Users/piotr/data/blue-repository-java -PblueSpecRoot=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-spec/latest -PtestJavaVersion=17 --no-parallel --console=plain --tests blue.coordination.internal.CyclicTopologyIdentityEvidenceTest",
+      "status": "PASS",
+      "durationSeconds": 155,
+      "counts": {"tests": 1, "failures": 0, "errors": 0, "skipped": 0}
+    },
+    {
+      "id": "cyclic-identity-byte-for-byte-verify",
+      "workingDirectory": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-contract-java",
+      "command": "env PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin ./gradlew --no-daemon --max-workers=1 test --rerun-tasks -PblueDependencyMode=local-composite -PblueLanguageCompositePath=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-language-java -PblueBexCompositePath=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-bex-java -PblueRepositoryCompositePath=/Users/piotr/data/blue-repository-java -PblueSpecRoot=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-spec/latest -PtestJavaVersion=17 --no-parallel --console=plain --tests blue.coordination.internal.CyclicTopologyIdentityEvidenceTest",
+      "status": "PASS",
+      "durationSeconds": 159,
+      "counts": {"tests": 1, "failures": 0, "errors": 0, "skipped": 0}
+    },
+    {
+      "id": "cyclic-performance-smoke",
+      "workingDirectory": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-contract-java",
+      "commandSummary": "cyclicPerformanceAcceptance with one warmup and one measured sample per shape, output build/reports/cyclic-performance-smoke-v2",
+      "status": "EXPECTED_NONZERO_BLOCKER_EVIDENCE",
+      "durationSeconds": 67,
+      "counts": {"warmupsPerShape": 1, "samplesPerShape": 1, "phaseGatesPassed": 84},
+      "failures": ["raw BEX equality unobservable", "broad global-state traversal gate failed"]
+    },
+    {
+      "id": "cyclic-performance-distinct-cold-warm-probe",
+      "workingDirectory": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-contract-java",
+      "commandSummary": "cyclicPerformanceAcceptance with one warmup and one measured sample per shape, output build/reports/cyclic-performance-probe",
+      "status": "EXPECTED_NONZERO_BLOCKER_EVIDENCE",
+      "durationSeconds": 128,
+      "counts": {"warmupsPerShape": 1, "samplesPerShape": 1, "shapes": 6},
+      "checks": {"semanticEquality": "PASS", "gasEquality": "PASS", "observableProjectionEquality": "PASS"},
+      "failures": ["raw BEX equality unobservable", "broad global-state traversal gate failed"]
+    },
+    {
+      "id": "cyclic-performance-authoritative-20-50",
+      "workingDirectory": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-contract-java",
+      "command": "env JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home PATH=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin LANG=C.UTF-8 LC_ALL=C.UTF-8 ./gradlew --no-daemon --max-workers=1 cyclicPerformanceAcceptance -PblueDependencyMode=local-composite -PblueLanguageCompositePath=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-language-java -PblueBexCompositePath=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-bex-java -PblueRepositoryCompositePath=/Users/piotr/data/blue-repository-java -PblueSpecRoot=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-spec/latest -PtestJavaVersion=17 -Dblue.coordination.cyclicPerformance.output=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-contract-java/stabilization/cyclic-topology-round --no-parallel --console=plain",
+      "status": "FAIL_WITH_COMPLETE_AUTHORITATIVE_ARTIFACTS",
+      "durationSeconds": 4404,
+      "durationSource": "recorded wall duration 1h13m24s",
+      "counts": {"shapes": 6, "warmupsPerShape": 20, "samplesPerShape": 50, "iterations": 420, "operations": 490},
+      "failures": ["broad-global-state-traversals: observed 57, limit 0", "broad-global-state-entries-traversed: observed 100, limit 0", "raw-bex-cold-warm-equality: UNOBSERVABLE"]
+    },
+    {
+      "id": "published-or-staged-artifact-dependency-lane",
+      "command": null,
+      "status": "NOT_RUN_BY_USER_POLICY",
+      "durationSeconds": 0,
+      "counts": {"tests": 0},
+      "reason": "The user prohibited publishing, pushing, staging, and Maven-local installation; local composites were required."
+    }
+  ],
+  "localBuildArtifacts": {
+    "coordinationJava17EvidenceRoot": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/evidence/cyclic-topology-round/final/coord-j17",
+    "coordinationJava21EvidenceRoot": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/evidence/cyclic-topology-round/final/coord-j21",
+    "coordinationJava21EvidenceManifestSha256": "b32a82c41612ecdd37b422b5ba4915e08928a8f4ca011f1d0b8fe57c3579aead",
+    "crossRuntimeArtifactsByteIdentical": true,
+    "sourceZip": {"path": "build/distributions/blue-coordination-java-3.0.0-rc.1-source.zip", "sha256": "d0d997684c74894dc3268d4d2be2860137be1739396271c7fa1c4269bf1074b5"},
+    "sourceZipSidecar": {"path": "build/distributions/blue-coordination-java-3.0.0-rc.1-source.zip.sha256", "sha256": "aaa161f2ca10e9a9340c5e511f2ce4df2d94371400b769f866090be62c780002"},
+    "mainJar": {"path": "build/libs/blue-coordination-java-3.0.0-rc.1.jar", "sha256": "485cd608e216d76406c8de93fa164a36b27f061b117cc9179a48b82ab13ea556"},
+    "sourcesJar": {"path": "build/libs/blue-coordination-java-3.0.0-rc.1-sources.jar", "sha256": "6f995253ecf4ad6ff3411778ed483a93512cf1eebd70a4394328cf7163585f34"},
+    "javadocJar": {"path": "build/libs/blue-coordination-java-3.0.0-rc.1-javadoc.jar", "sha256": "54c94c8c5bde70b4a0afb5333a81f94a6fb376ef5d2db42246149dad711c1436"},
+    "testFixturesJar": {"path": "build/libs/blue-coordination-java-3.0.0-rc.1-test-fixtures.jar", "sha256": "f6e61fd4ac620b366995dc061569c738ec55f9e4d899b4ab81f61cb76d8b93a6"}
+  },
+  "artifacts": [
+    {"path": "stabilization/cyclic-topology-round/baseline.md", "bytes": 8692, "sha256": "333197e973f83f764c1cf188198fa3a214c3788686bdf9bbfe59df196bcae280"},
+    {"path": "stabilization/cyclic-topology-round/baseline.json", "bytes": 33354, "sha256": "1cfcbb840c8fcfd0244e2fdb44277fbf68eeeaf3a7efdbed866a4b78b3c4a5d2"},
+    {"path": "stabilization/cyclic-topology-round/CYCLIC_TOPOLOGY_COVERAGE.md", "bytes": 33018, "sha256": "5d6350a2303fbaca9924bdd0d67c8deda434a27a658987afd407db697e18c646"},
+    {"path": "stabilization/cyclic-topology-round/cyclic-topology-coverage.json", "bytes": 43731, "sha256": "60e2111a404df56561c94e9fd26f16e6e681898e2c390d8d835e12ac9de4dc52"},
+    {"path": "stabilization/cyclic-topology-round/cyclic-topology-identities.md", "bytes": 2166438, "sha256": "a23f9b1c19630e9ca47afb7f2c675c3d233eda998453a52f9159db6fefea860f"},
+    {"path": "stabilization/cyclic-topology-round/cyclic-topology-identities.json", "bytes": 2355377, "sha256": "10b4e7b4788773ebd23915eafebf6790182d5557901b24e8f9f3c0d487b63470"},
+    {"path": "stabilization/cyclic-topology-round/cyclic-performance.md", "bytes": 10847, "sha256": "8fadbc5780ee0d7f23c7b047c2a3c1c408323450b1ecf68c14e270cfe3cc88e9"},
+    {"path": "stabilization/cyclic-topology-round/cyclic-performance.json", "bytes": 9680051, "sha256": "63d65fc48f219c4e2f9be58ccb4028b4af0798e4a8d7585bdc20b4090984cd7e"},
+    {"path": "stabilization/cyclic-topology-round/changed-files.sha256", "entryCount": 51, "sha256": null, "manifestHashReportedExternally": true, "selfExcluded": true},
+    {"path": "stabilization/cyclic-topology-round/FINAL_RECEIPT.md", "sha256": null, "selfHashOmitted": true},
+    {"path": "stabilization/cyclic-topology-round/final-receipt.json", "sha256": null, "selfHashOmitted": true}
+  ],
+  "checksumManifest": {
+    "path": "stabilization/cyclic-topology-round/changed-files.sha256",
+    "entryCount": 51,
+    "includesReceiptFiles": true,
+    "selfExcluded": true,
+    "sha256": null,
+    "hashBinding": "Reported in the external handoff. Embedding it here would create a receipt-manifest digest cycle because the manifest authenticates this receipt."
+  },
+  "remainingLimitations": [
+    {
+      "id": "BLOCKER-PERF-BROAD-STATE",
+      "severity": "RELEASE_BLOCKING",
+      "detail": "Publication still copies or traverses broad StoreState/session/occurrence/component/subscription/receipt state. A compliant zero-traversal result requires a larger persistent path-copy or copy-on-write state architecture, outside this bounded-fix round."
+    },
+    {
+      "id": "BLOCKER-RAW-BEX-OBSERVABILITY",
+      "severity": "RELEASE_BLOCKING_FOR_PROMPT_GATE",
+      "detail": "The public Coordination boundary exposes an exact semantic/gas/event projection but not a raw BEX result fingerprint, so literal cold/warm raw BEX equality remains UNOBSERVABLE."
+    },
+    {
+      "id": "BLOCKER-P6-INIT-PATCH",
+      "severity": "CAPABILITY_BOUNDARY",
+      "detail": "The fixed public Coordination composition has no conformance initialization-patch seam. Successful reciprocal or collection-backed edge formation during ADMIT_CLOSURE initialization cannot be proved without broadening the host API."
+    },
+    {
+      "id": "BLOCKER-P7-NONROOT-CLOSURE",
+      "severity": "NORMATIVE_PROFILE_BOUNDARY",
+      "detail": "Contracts 1.0 affected-closure direct seeds are Root-only. Ordinary PROCESS nested-scope execution passes, but positive nested cyclic work would require a specification/profile change."
+    },
+    {
+      "id": "GAS-REJECTION-BOUNDARY",
+      "severity": "CHARACTERIZED_LIMIT",
+      "detail": "The rejected internalEventEnqueued charge belongs to an already-started work occurrence; this receipt does not claim that rejection happens before that work begins."
+    },
+    {
+      "id": "PUBLISHED-ARTIFACT-LANE",
+      "severity": "USER_POLICY_SKIP",
+      "detail": "The exact staged/published artifact dependency lane was not run because the user prohibited publication/staging and required local composites."
+    }
+  ],
+  "definitionOfDone": [
+    {"item": "existing public two-member cyclic tests remain green", "status": "PASS"},
+    {"item": "A -> B -> C -> A finite and loop cases are green", "status": "PASS"},
+    {"item": "shared-A branching graph is one five-member SCC", "status": "PASS"},
+    {"item": "two disjoint cycles remain two SCCs", "status": "PASS"},
+    {"item": "partial detach splits to one smaller SCC plus acyclic tails", "status": "PASS"},
+    {"item": "full detach dissolves cyclic identity", "status": "PASS"},
+    {"item": "former loop succeeds after detachment", "status": "PASS"},
+    {"item": "re-add creates fresh activation lineage and reforms cycle", "status": "PASS"},
+    {"item": "merge and split work through public engine", "status": "PASS"},
+    {"item": "initialization and nested-scope cases are covered", "status": "PARTIAL_BLOCKERS_CHARACTERIZED"},
+    {"item": "one thousand unrelated documents cause zero semantic work", "status": "PASS_SEMANTIC_BUT_BROAD_HOST_TRAVERSAL_FAILS"},
+    {"item": "performance report and structural gates are green", "status": "FAIL"},
+    {"item": "Java 17 full gate is green", "status": "PASS"},
+    {"item": "Java 21 full gate is green", "status": "PASS"},
+    {"item": "source trees are clean and commits reviewable", "status": "PASS_BEFORE_RECEIPT_COMMIT_WITH_FINAL_COMMIT_CHECK_REPORTED_EXTERNALLY"},
+    {"item": "fixture/package identities regenerated only if normative corpus changed", "status": "PASS_NO_NORMATIVE_CHANGE"}
+  ],
+  "finalConclusion": "The bounded cyclic topology round produced reviewable local-composite implementation, semantic, identity, and performance evidence. The majority of requested topology behavior is proven. The prompt Definition of Done is not satisfied because hard performance/observability gates and two public-host/profile capabilities remain blocked; implementationConformanceClaimed therefore remains false."
+}
