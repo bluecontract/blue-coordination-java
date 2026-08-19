@@ -3771,27 +3771,26 @@ def sdkConsumerFixtureArchive = tasks.register(
     }
 }
 
-def extractedSdkConsumerDirectory = layout.buildDirectory.dir(
-        'sdk-freeze/extracted-consumer')
-def extractSdkConsumerFixture = tasks.register(
-        'extractSdkFreezeConsumerFixture', Sync) {
-    group = 'verification'
-    description = 'Extracts a fresh standalone consumer with no composite-build state.'
-    dependsOn sdkConsumerFixtureArchive
-    from sdkConsumerFixtureArchive.map { zipTree(it.archiveFile) }
-    into extractedSdkConsumerDirectory
-}
-
 def registerExtractedSdkConsumer = { int javaVersion ->
+    def extractedDirectory = layout.buildDirectory.dir(
+            "sdk-freeze/extracted-consumer-java${javaVersion}")
+    def extractFixture = tasks.register(
+            "extractSdkFreezeConsumerFixtureJava${javaVersion}", Sync) {
+        group = 'verification'
+        description = "Extracts a fresh standalone Java ${javaVersion} consumer with no composite-build state."
+        dependsOn sdkConsumerFixtureArchive
+        from sdkConsumerFixtureArchive.map { zipTree(it.archiveFile) }
+        into extractedDirectory
+    }
     def report = layout.buildDirectory.file(
             "reports/sdk-freeze/consumer-java${javaVersion}.json")
     tasks.register(
             "verifyExtractedSdkConsumerJava${javaVersion}", GradleBuild) {
         group = 'verification'
         description = "Builds and runs the extracted staged SDK consumer on Java ${javaVersion}."
-        dependsOn extractSdkConsumerFixture,
+        dependsOn extractFixture,
                 verifySdkStagedCandidateRepository
-        setDir(extractedSdkConsumerDirectory)
+        setDir(extractedDirectory)
         setTasks(['verifyStagedSdkConsumer'])
         startParameter.projectProperties = [
                 stagedRepository: stagedDependencies
