@@ -44,8 +44,8 @@ manually.
 A push to `next` starts `.github/workflows/release-rc.yml`. It:
 
 1. checks out the complete history and tags;
-2. pins Temurin 17.0.19+10 for the canonical build and Temurin 21.0.11+10
-   for compatibility verification;
+2. pins Temurin 17.0.19+10 for the canonical build and Temurin
+   21.0.11+10.0.LTS for compatibility verification;
 3. validates release credentials and the wrapper;
 4. prepares the version authorized by `docs/releases/3.0.0-rc.3.md`;
 5. creates the annotated tag locally and verifies push permissions;

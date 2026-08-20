@@ -30,7 +30,7 @@ jobs:
           - test-java: '17'
             setup-java: '17.0.19+10'
           - test-java: '21'
-            setup-java: '21.0.11+10'
+            setup-java: '21.0.11+10.0.LTS'
     env:
       CI: true
     defaults:
