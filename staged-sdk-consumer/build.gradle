@@ -6,7 +6,7 @@ group = 'blue.coordination.consumer'
 version = '1.0.0'
 
 def coordinationVersion = providers.gradleProperty(
-        'coordinationVersion').getOrElse('3.0.0-rc.2')
+        'coordinationVersion').getOrElse('3.0.0-rc.3')
 def testJavaVersion = providers.gradleProperty(
         'testJavaVersion').getOrElse('17') as int
 def stagedRepository = file(providers.gradleProperty(
@@ -16,9 +16,9 @@ def consumerReport = file(providers.gradleProperty(
         layout.buildDirectory.file('reports/sdk-consumer.json')
                 .get().asFile.absolutePath))
 
-if (coordinationVersion != '3.0.0-rc.2') {
+if (coordinationVersion != '3.0.0-rc.3') {
     throw new GradleException(
-            'The SDK freeze consumer is pinned to 3.0.0-rc.2')
+            'The SDK freeze consumer is pinned to 3.0.0-rc.3')
 }
 if (!(testJavaVersion in [17, 21])) {
     throw new GradleException(
@@ -47,15 +47,15 @@ application {
 
 def expectedBlueCoordinates = [
         'blue.coordination:blue-coordination-java': coordinationVersion,
-        'blue.language:blue-language-model': '3.1.0-rc.20',
-        'blue.language:blue-language-core': '3.1.0-rc.20',
-        'blue.language:blue-language-mapping': '3.1.0-rc.20',
-        'blue.language:blue-language-ipfs': '3.1.0-rc.20',
-        'blue.language:blue-language-java': '3.1.0-rc.20',
-        'blue.language:blue-contracts-core': '3.1.0-rc.20',
+        'blue.language:blue-language-model': '3.1.0-rc.21',
+        'blue.language:blue-language-core': '3.1.0-rc.21',
+        'blue.language:blue-language-mapping': '3.1.0-rc.21',
+        'blue.language:blue-language-ipfs': '3.1.0-rc.21',
+        'blue.language:blue-language-java': '3.1.0-rc.21',
+        'blue.language:blue-contracts-core': '3.1.0-rc.21',
         'blue.repo:blue-repo-java': '3.0.0-rc.21',
-        'blue.bex:blue-bex-core': '1.1.0-rc.3',
-        'blue.bex:blue-bex-contracts': '1.1.0-rc.3'
+        'blue.bex:blue-bex-core': '1.1.0-rc.4',
+        'blue.bex:blue-bex-contracts': '1.1.0-rc.4'
 ]
 
 def verifyGraph = tasks.register('verifyStagedSdkConsumerGraph') {

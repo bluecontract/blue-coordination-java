@@ -10,7 +10,7 @@ group = 'blue.coordination'
 def dependencyMode = providers.gradleProperty('blueDependencyMode')
         .getOrElse('local-composite')
         .trim()
-def sdkCandidateVersion = '3.0.0-rc.2'
+def sdkCandidateVersion = '3.0.0-rc.3'
 def versionMatches = file('.cz.toml').getText('UTF-8') =~
         /(?m)^version = "([^"]+)"$/
 if (!versionMatches.find()) {
@@ -23,15 +23,15 @@ version = dependencyMode == 'staged-artifact'
 def localDependencies = dependencyMode == 'local-composite'
 def stagedDependencies = dependencyMode == 'staged-artifact'
 def sdkStagedBlueCoordinates = [
-        'blue.language:blue-language-model': '3.1.0-rc.20',
-        'blue.language:blue-language-core': '3.1.0-rc.20',
-        'blue.language:blue-language-mapping': '3.1.0-rc.20',
-        'blue.language:blue-language-ipfs': '3.1.0-rc.20',
-        'blue.language:blue-language-java': '3.1.0-rc.20',
-        'blue.language:blue-contracts-core': '3.1.0-rc.20',
+        'blue.language:blue-language-model': '3.1.0-rc.21',
+        'blue.language:blue-language-core': '3.1.0-rc.21',
+        'blue.language:blue-language-mapping': '3.1.0-rc.21',
+        'blue.language:blue-language-ipfs': '3.1.0-rc.21',
+        'blue.language:blue-language-java': '3.1.0-rc.21',
+        'blue.language:blue-contracts-core': '3.1.0-rc.21',
         'blue.repo:blue-repo-java': '3.0.0-rc.21',
-        'blue.bex:blue-bex-core': '1.1.0-rc.3',
-        'blue.bex:blue-bex-contracts': '1.1.0-rc.3'
+        'blue.bex:blue-bex-core': '1.1.0-rc.4',
+        'blue.bex:blue-bex-contracts': '1.1.0-rc.4'
 ]
 def blueSpecRoot = file(providers.gradleProperty('blueSpecRoot')
         .orElse(providers.environmentVariable('BLUE_SPEC_ROOT'))
@@ -163,10 +163,11 @@ tasks.withType(Jar).configureEach {
 }
 
 dependencies {
-    api 'blue.language:blue-contracts-core:3.1.0-rc.20'
+    api 'blue.language:blue-contracts-core:3.1.0-rc.21'
+    implementation 'blue.language:blue-language-java:3.1.0-rc.21'
     implementation 'blue.repo:blue-repo-java:3.0.0-rc.21'
-    api 'blue.bex:blue-bex-core:1.1.0-rc.3'
-    api 'blue.bex:blue-bex-contracts:1.1.0-rc.3'
+    api 'blue.bex:blue-bex-core:1.1.0-rc.4'
+    api 'blue.bex:blue-bex-contracts:1.1.0-rc.4'
     implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
 
     testImplementation platform('org.junit:junit-bom:5.14.1')
@@ -181,7 +182,7 @@ dependencies {
     scenarioTestImplementation sourceSets.integrationTest.output
 
     consumerTestImplementation files(tasks.named('jar'))
-    consumerTestImplementation 'blue.language:blue-contracts-core:3.1.0-rc.20'
+    consumerTestImplementation 'blue.language:blue-contracts-core:3.1.0-rc.21'
     consumerTestImplementation platform('org.junit:junit-bom:5.14.1')
     consumerTestImplementation 'org.junit.jupiter:junit-jupiter'
     consumerTestRuntimeOnly files(configurations.runtimeClasspath)
@@ -790,11 +791,13 @@ tasks.register('dependencyPreflight') {
         }
         def releaseDependencies = configurations.detachedConfiguration(
                 dependencies.create(
-                        'blue.language:blue-contracts-core:3.1.0-rc.20'),
-                dependencies.create('blue.repo:blue-repo-java:3.0.0-rc.21'),
-                dependencies.create('blue.bex:blue-bex-core:1.1.0-rc.3'),
+                        'blue.language:blue-contracts-core:3.1.0-rc.21'),
                 dependencies.create(
-                        'blue.bex:blue-bex-contracts:1.1.0-rc.3'),
+                        'blue.language:blue-language-java:3.1.0-rc.21'),
+                dependencies.create('blue.repo:blue-repo-java:3.0.0-rc.21'),
+                dependencies.create('blue.bex:blue-bex-core:1.1.0-rc.4'),
+                dependencies.create(
+                        'blue.bex:blue-bex-contracts:1.1.0-rc.4'),
                 dependencies.create('org.bouncycastle:bcprov-jdk18on:1.78.1'))
         releaseDependencies.transitive = true
         releaseDependencies.resolutionStrategy.failOnVersionConflict()
@@ -869,7 +872,8 @@ tasks.register('verifyPublicationPom') {
                                 "${coordinate} must be compile scoped because public APIs expose its types")
                     }
                 }
-        ['blue.repo:blue-repo-java', 'org.bouncycastle:bcprov-jdk18on']
+        ['blue.language:blue-language-java',
+         'blue.repo:blue-repo-java', 'org.bouncycastle:bcprov-jdk18on']
                 .each { coordinate ->
                     if (scopes[coordinate] != 'runtime') {
                         throw new GradleException(
@@ -877,10 +881,11 @@ tasks.register('verifyPublicationPom') {
                     }
                 }
         def expectedVersions = [
-                'blue.language:blue-contracts-core': '3.1.0-rc.20',
+                'blue.language:blue-contracts-core': '3.1.0-rc.21',
+                'blue.language:blue-language-java': '3.1.0-rc.21',
                 'blue.repo:blue-repo-java': '3.0.0-rc.21',
-                'blue.bex:blue-bex-core': '1.1.0-rc.3',
-                'blue.bex:blue-bex-contracts': '1.1.0-rc.3',
+                'blue.bex:blue-bex-core': '1.1.0-rc.4',
+                'blue.bex:blue-bex-contracts': '1.1.0-rc.4',
                 'org.bouncycastle:bcprov-jdk18on': '1.78.1'
         ]
         expectedVersions.each { coordinate, expectedVersion ->
@@ -3459,7 +3464,7 @@ tasks.named('publishMavenJavaPublicationToStagingRepository') {
 def sdkFreezePrepublicationCheck = tasks.register(
         'sdkFreezePrepublicationCheck') {
     group = 'verification'
-    description = 'Runs every fail-closed gate before publishing the 3.0.0-rc.2 SDK candidate.'
+    description = 'Runs every fail-closed gate before publishing the 3.0.0-rc.3 SDK candidate.'
     if (stagedDependencies) {
         dependsOn 'releaseCheck', stagedDependencyGraph,
                 sourceArchiveChecksum
@@ -3508,7 +3513,7 @@ if (sdkFreezePublish != null) {
 def stageSdkFreezeCandidate = tasks.register(
         'stageSdkFreezeCandidate') {
     group = 'publishing'
-    description = 'Publishes only the verified 3.0.0-rc.2 SDK candidate to the unified local repository.'
+    description = 'Publishes only the verified 3.0.0-rc.3 SDK candidate to the unified local repository.'
     if (sdkFreezePublish != null) {
         dependsOn sdkFreezePublish
     }
@@ -3651,10 +3656,11 @@ def verifySdkStagedCandidateRepository = tasks.register(
             }
         }
         def expectedPomDependencies = [
-                'blue.language:blue-contracts-core': '3.1.0-rc.20',
+                'blue.language:blue-contracts-core': '3.1.0-rc.21',
+                'blue.language:blue-language-java': '3.1.0-rc.21',
                 'blue.repo:blue-repo-java': '3.0.0-rc.21',
-                'blue.bex:blue-bex-core': '1.1.0-rc.3',
-                'blue.bex:blue-bex-contracts': '1.1.0-rc.3'
+                'blue.bex:blue-bex-core': '1.1.0-rc.4',
+                'blue.bex:blue-bex-contracts': '1.1.0-rc.4'
         ]
         expectedPomDependencies.each { coordinate, expectedVersion ->
             def parts = coordinate.split(':', 2)
@@ -3826,7 +3832,7 @@ def sdkFreezeArtifactReport = layout.buildDirectory.file(
         'reports/sdk-freeze/artifact-check.json')
 tasks.register('sdkFreezeArtifactCheck') {
     group = 'verification'
-    description = 'Completes the staged 3.0.0-rc.2 SDK artifact and Java 17/21 consumer gate.'
+    description = 'Completes the staged 3.0.0-rc.3 SDK artifact and Java 17/21 consumer gate.'
     if (stagedDependencies) {
         dependsOn stageSdkFreezeCandidate,
                 verifySdkStagedCandidateRepository,
@@ -4192,8 +4198,8 @@ if (localDependencies) {
                     exclude '*-sources.jar', '*-javadoc.jar'
                 }.singleFile
                 into new File(targetRoot,
-                        'blue/bex/blue-bex-core/1.1.0-rc.3')
-                rename { 'blue-bex-core-1.1.0-rc.3.jar' }
+                        'blue/bex/blue-bex-core/1.1.0-rc.4')
+                rename { 'blue-bex-core-1.1.0-rc.4.jar' }
             }
             copy {
                 from fileTree(
@@ -4203,8 +4209,8 @@ if (localDependencies) {
                     exclude '*-sources.jar', '*-javadoc.jar'
                 }.singleFile
                 into new File(targetRoot,
-                        'blue/bex/blue-bex-contracts/1.1.0-rc.3')
-                rename { 'blue-bex-contracts-1.1.0-rc.3.jar' }
+                        'blue/bex/blue-bex-contracts/1.1.0-rc.4')
+                rename { 'blue-bex-contracts-1.1.0-rc.4.jar' }
             }
         }
     }

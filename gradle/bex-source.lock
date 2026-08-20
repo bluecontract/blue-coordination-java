@@ -1,5 +1,5 @@
 # Clean local-composite BEX input for the Contracts 1.0 bridge.
-coordinate=blue.bex:blue-bex-core:1.1.0-rc.3
-contractsCoordinate=blue.bex:blue-bex-contracts:1.1.0-rc.3
-baseCommit=821fe877fef5b04a729b7422cdda05a7ace55a1f
+coordinate=blue.bex:blue-bex-core:1.1.0-rc.4
+contractsCoordinate=blue.bex:blue-bex-contracts:1.1.0-rc.4
+baseCommit=23e9e62feb36bf14a579912bcfa80da84f5ee85f
 workspaceDiffSha256=af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc
