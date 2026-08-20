@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
@@ -26,18 +27,19 @@ final class ContractsJournalDrainCoordinator {
     private final ContractsRootFeederCoordinator feeder;
     private final DurableState durableState;
     private final Supplier<Set<String>> activeSourceTimelines;
+    private final Consumer<TimelineEntry> terminalEntryObserver;
 
     ContractsJournalDrainCoordinator(
             InMemoryTimelineJournal journal,
             ContractsRootFeederCoordinator feeder) {
-        this(journal, feeder, new DurableState(), null);
+        this(journal, feeder, new DurableState(), null, ignored -> { });
     }
 
     ContractsJournalDrainCoordinator(
             InMemoryTimelineJournal journal,
             ContractsRootFeederCoordinator feeder,
             DurableState durableState) {
-        this(journal, feeder, durableState, null);
+        this(journal, feeder, durableState, null, ignored -> { });
     }
 
     ContractsJournalDrainCoordinator(
@@ -45,11 +47,27 @@ final class ContractsJournalDrainCoordinator {
             ContractsRootFeederCoordinator feeder,
             DurableState durableState,
             Supplier<Set<String>> activeSourceTimelines) {
+        this(
+                journal,
+                feeder,
+                durableState,
+                activeSourceTimelines,
+                ignored -> { });
+    }
+
+    ContractsJournalDrainCoordinator(
+            InMemoryTimelineJournal journal,
+            ContractsRootFeederCoordinator feeder,
+            DurableState durableState,
+            Supplier<Set<String>> activeSourceTimelines,
+            Consumer<TimelineEntry> terminalEntryObserver) {
         this.journal = Objects.requireNonNull(journal, "journal");
         this.feeder = Objects.requireNonNull(feeder, "feeder");
         this.durableState = Objects.requireNonNull(
                 durableState, "durableState");
         this.activeSourceTimelines = activeSourceTimelines;
+        this.terminalEntryObserver = Objects.requireNonNull(
+                terminalEntryObserver, "terminalEntryObserver");
     }
 
     synchronized DrainProgress drain() {
@@ -90,6 +108,7 @@ final class ContractsJournalDrainCoordinator {
             if (!durableState.terminalEntries.contains(key)) {
                 if (!isOnActiveSourceSurface(entry)) {
                     durableState.terminalEntries.add(key);
+                    terminalEntryObserver.accept(entry);
                     scanAfter = entry.sourceOrderKey();
                     continue;
                 }
@@ -102,6 +121,7 @@ final class ContractsJournalDrainCoordinator {
                         committedTransitions(progress));
                 if (progress.terminal()) {
                     durableState.terminalEntries.add(key);
+                    terminalEntryObserver.accept(entry);
                 }
             }
             scanAfter = entry.sourceOrderKey();

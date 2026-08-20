@@ -116,11 +116,15 @@ final class ContractsManagedDraftExpansionTest {
             ContractsClosureAdapter.FrozenBatch captured = engine
                     .contractsClosureAdapter().capture(entry);
             assertTrue(captured.invocations().isEmpty());
+            assertTrue(engine.contractsClosureAdapter()
+                    .hasManagedDraftPlan(entry.blueId()));
             ProcessingDrainReceipt drained = engine.drain();
             assertEquals(List.of(entry), drained.processedEntries());
             assertTrue(drained.contractsAttemptsFor(
                     entry.blueId()).isEmpty());
             assertTrue(engine.documents().find(DRAFT).isEmpty());
+            assertFalse(engine.contractsClosureAdapter()
+                    .hasManagedDraftPlan(entry.blueId()));
         }
     }
 
@@ -177,6 +181,74 @@ final class ContractsManagedDraftExpansionTest {
             ContractsClosureAdapter.CohortOutcome replay = adapter
                     .executeAndPublish(batch, invocation);
             assertTrue(replay.replayed());
+            assertTrue(engine.documents().find(DRAFT).isEmpty());
+            assertTrue(adapter.hasManagedDraftPlan(entry.blueId()));
+
+            ProcessingDrainReceipt terminal = engine.drain();
+            assertEquals(List.of(entry), terminal.processedEntries());
+            assertFalse(adapter.hasManagedDraftPlan(entry.blueId()));
+        }
+    }
+
+    @Test
+    void managedDraftPlanSurvivesFailedPublicationAndClearsAfterRetry() {
+        try (DefaultCoordinationEngine engine = admittedHost(
+                "managed/retry")) {
+            Timeline timeline = engine.timeline("managed/retry", ACTOR);
+            ExactValue target = engine.document(HOST).current();
+            ExactValue draft = draft(engine);
+            ExactValue request = engine.referenceRequest("order", draft);
+            TimelineEntry entry = engine.append(
+                    timeline,
+                    Operation.exact(
+                            "createOrder", "ownerChannel", request)
+                            .targeting(target, true),
+                    plan(HOST, target, draft, "order",
+                            "/orders/order-1"));
+            ContractsClosureAdapter adapter = engine
+                    .contractsClosureAdapter();
+            adapter.onPublicationFailurePoint(point -> {
+                throw new IllegalStateException("route publication failed");
+            });
+
+            assertThrows(RuntimeException.class, engine::drain);
+            assertTrue(adapter.hasManagedDraftPlan(entry.blueId()));
+            assertTrue(engine.documents().find(DRAFT).isPresent());
+
+            adapter.onPublicationFailurePoint(ignored -> { });
+            ProcessingDrainReceipt retried = engine.drain();
+            assertEquals(List.of(entry), retried.processedEntries());
+            assertFalse(adapter.hasManagedDraftPlan(entry.blueId()));
+            assertTrue(engine.documents().find(DRAFT).isPresent());
+        }
+    }
+
+    @Test
+    void offSurfaceManagedDraftPlanClearsWhenJournalMarksEntryTerminal() {
+        try (DefaultCoordinationEngine engine = admittedHost(
+                "managed/active")) {
+            Timeline offSurface = engine.registerTimeline(
+                    "managed/off-surface", ACTOR);
+            ExactValue target = engine.document(HOST).current();
+            ExactValue draft = draft(engine);
+            ExactValue request = engine.referenceRequest("order", draft);
+            TimelineEntry entry = engine.append(
+                    offSurface,
+                    Operation.exact(
+                            "createOrder", "ownerChannel", request)
+                            .targeting(target, true),
+                    plan(HOST, target, draft, "order",
+                            "/orders/order-1"));
+            ContractsClosureAdapter adapter = engine
+                    .contractsClosureAdapter();
+            assertTrue(adapter.hasManagedDraftPlan(entry.blueId()));
+
+            ProcessingDrainReceipt terminal = engine.drain();
+
+            assertEquals(List.of(entry), terminal.processedEntries());
+            assertTrue(terminal.contractsAttemptsFor(
+                    entry.blueId()).isEmpty());
+            assertFalse(adapter.hasManagedDraftPlan(entry.blueId()));
             assertTrue(engine.documents().find(DRAFT).isEmpty());
         }
     }

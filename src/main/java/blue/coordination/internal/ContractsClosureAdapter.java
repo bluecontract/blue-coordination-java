@@ -240,6 +240,13 @@ final class ContractsClosureAdapter implements AutoCloseable {
         }
     }
 
+    /** Forgets disposable host evidence after its journal entry is terminal. */
+    synchronized void completeManagedDraftPlan(String entryBlueId) {
+        ensureOpen();
+        managedDraftPlans.remove(Objects.requireNonNull(
+                entryBlueId, "entryBlueId"));
+    }
+
     /** Package-internal append-atomicity observation. */
     synchronized boolean hasManagedDraftPlan(String entryBlueId) {
         ensureOpen();

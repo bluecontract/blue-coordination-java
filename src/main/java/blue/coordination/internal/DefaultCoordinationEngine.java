@@ -1192,7 +1192,9 @@ public final class DefaultCoordinationEngine
                 journal,
                 contractsFeederCoordinator,
                 contractsRecoveryState.journalDrain,
-                contractsActiveSourceTimelines::timelineIds);
+                contractsActiveSourceTimelines::timelineIds,
+                entry -> contractsClosureAdapter.completeManagedDraftPlan(
+                        entry.blueId()));
     }
 
     private ContractsRootSourceSurface.Surface contractsSourceSurface(
