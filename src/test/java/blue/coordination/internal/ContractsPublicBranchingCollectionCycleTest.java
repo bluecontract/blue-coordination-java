@@ -50,11 +50,16 @@ final class ContractsPublicBranchingCollectionCycleTest {
 
     @Test
     void sharedAnchorCollectionCycleConvergesOnceInCanonicalOrder() {
+        // given
+
         BranchingRun baseline = runBranching(
                 BranchingVariant.BASELINE, 0);
+
+        // when
         BranchingRun reversed = runBranching(
                 BranchingVariant.REVERSED_MATERIALIZED, 0);
 
+        // then
         assertEquals(baseline.semantic(), reversed.semantic());
         assertEquals(List.of(
                         BRANCHING.a().value(),
@@ -110,10 +115,15 @@ final class ContractsPublicBranchingCollectionCycleTest {
 
     @Test
     void oneThousandUnrelatedDocumentsKeepCaptureLocalAndExposeGlobalBlocker() {
+        // given
+
         BranchingRun base = runBranching(BranchingVariant.BASELINE, 0);
+
+        // when
         BranchingRun withUnrelated = runBranching(
                 BranchingVariant.BASELINE, 1_000);
 
+        // then
         assertEquals(base.semantic(), withUnrelated.semantic());
         assertEquals(0L, withUnrelated.unrelatedDocumentOpens());
         assertEquals(0L, withUnrelated.unrelatedDocumentSteps());
@@ -195,6 +205,8 @@ final class ContractsPublicBranchingCollectionCycleTest {
 
     @Test
     void unrelatedEntryDoesNotSpendOneSelectedEntryBudget() {
+        // given
+
         try (CoordinationEngine publicEngine = engine(Set.of(BRANCHING.a()))) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
@@ -218,9 +230,12 @@ final class ContractsPublicBranchingCollectionCycleTest {
                     engine.engineMetrics().snapshot();
             ProcessingDrainReceipt drained = publicEngine.drain(
                     new CoordinationEngine.DrainBudget(Long.MAX_VALUE, 1L));
+
+            // when
             EngineMetrics.MetricsSnapshot rawAfter =
                     engine.engineMetrics().snapshot();
 
+            // then
             assertTrue(drained.quiescent());
             assertFalse(drained.paused());
             assertEquals(List.of(unrelated, relevant),
@@ -249,9 +264,14 @@ final class ContractsPublicBranchingCollectionCycleTest {
 
     @Test
     void disjointCyclesRemainSeparateForBothAndSingleTargetEntries() {
+        // given
+
         DisjointRun both = runDisjoint(DisjointEntry.BOTH);
+
+        // when
         DisjointRun one = runDisjoint(DisjointEntry.FIRST_ONLY);
 
+        // then
         assertEquals(2, both.routeTargetCount());
         assertEquals(4L, both.drain().committedProcessTransitions());
         assertEquals(List.of(

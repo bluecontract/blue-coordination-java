@@ -64,20 +64,25 @@ final class ContractsClosureAdmissionAdapterTest {
 
     @Test
     void admitsC01CycleAtomicallyReplaysReceiptAndDrainsAfterAdmission() {
+        // given
+
         Contracts10Configuration configuration = new Contracts10Configuration(
                 SHA_A, SHA_B, Set.of(A));
+
         try (CoordinationEngine publicEngine =
                      CoordinationEngine.inMemoryContracts10(configuration)) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
             ClosureInvocationInput input = cyclicAdmission(engine, A, B);
 
+            // when
             ContractsClosureAdmissionReceipt admitted = publicEngine
                     .admitContractsClosure(
                             input,
                             CoordinationEngine.AdmissionPolicy.FROM_NOW,
                             null);
 
+            // then
             assertEquals(
                     ContractsClosureAdmissionReceipt.PublicationOutcome
                             .PUBLISHED,
@@ -223,18 +228,24 @@ final class ContractsClosureAdmissionAdapterTest {
 
     @Test
     void publicDrainProcessesFiniteCycleInExactAThenBThenAOrder() {
+        // given
+
         Contracts10Configuration configuration = new Contracts10Configuration(
                 SHA_A, SHA_B, Set.of(A));
+
         try (CoordinationEngine publicEngine =
                      CoordinationEngine.inMemoryContracts10(configuration)) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
+
+            // when
             ContractsClosureAdmissionReceipt admitted = publicEngine
                     .admitContractsClosure(
                             finiteCycleAdmission(engine, A, B),
                             CoordinationEngine.AdmissionPolicy.FROM_NOW,
                             null);
 
+            // then
             assertEquals(
                     ContractsClosureAdmissionReceipt.PublicationOutcome
                             .PUBLISHED,
@@ -311,18 +322,24 @@ final class ContractsClosureAdmissionAdapterTest {
 
     @Test
     void publicDrainPreservesOrdinaryThreeDocumentAcyclicChain() {
+        // given
+
         Contracts10Configuration configuration = new Contracts10Configuration(
                 SHA_A, SHA_B, Set.of(C));
+
         try (CoordinationEngine publicEngine =
                      CoordinationEngine.inMemoryContracts10(configuration)) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
+
+            // when
             ContractsClosureAdmissionReceipt admitted = publicEngine
                     .admitContractsClosure(
                             acyclicThreeStepAdmission(engine, A, B, C),
                             CoordinationEngine.AdmissionPolicy.FROM_NOW,
                             null);
 
+            // then
             assertEquals(
                     ContractsClosureAdmissionReceipt.PublicationOutcome
                             .PUBLISHED,
@@ -375,13 +392,18 @@ final class ContractsClosureAdmissionAdapterTest {
 
     @Test
     void rollsBackEveryNewLineageWhenFailureOccursBeforeSwap() {
+        // given
+
         Contracts10Configuration configuration = new Contracts10Configuration(
                 SHA_A, SHA_B, Set.of(A));
+
         try (CoordinationEngine publicEngine =
                      CoordinationEngine.inMemoryContracts10(configuration)) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
             ClosureInvocationInput input = cyclicAdmission(engine, A, B);
+
+            // when
             engine.contractsClosureAdmissionAdapter().onFailurePoint(point -> {
                 if (point == MultiDocumentPublicationTransaction.FailurePoint
                         .BEFORE_SWAP) {
@@ -389,6 +411,7 @@ final class ContractsClosureAdmissionAdapterTest {
                 }
             });
 
+            // then
             assertThrows(IllegalStateException.class, () -> publicEngine
                     .admitContractsClosure(
                             input,
@@ -420,8 +443,11 @@ final class ContractsClosureAdmissionAdapterTest {
 
     @Test
     void needsResourcesIsRetryableAndMutatesNoCoordinationState() {
+        // given
+
         Contracts10Configuration configuration = new Contracts10Configuration(
                 SHA_A, SHA_B, Set.of(A));
+
         try (CoordinationEngine publicEngine =
                      CoordinationEngine.inMemoryContracts10(configuration)) {
             DefaultCoordinationEngine engine =
@@ -439,12 +465,14 @@ final class ContractsClosureAdmissionAdapterTest {
                     .documents().publicationSnapshot();
             int objectsBefore = engine.objects().size();
 
+            // when
             ContractsClosureAdmissionReceipt suspended = publicEngine
                     .admitContractsClosure(
                             input,
                             CoordinationEngine.AdmissionPolicy.FROM_NOW,
                             null);
 
+            // then
             assertEquals(
                     ContractsClosureAdmissionReceipt.PublicationOutcome
                             .NOT_PUBLISHED,
@@ -482,8 +510,11 @@ final class ContractsClosureAdmissionAdapterTest {
 
     @Test
     void rejectsMixedExistingAndNewMembersAndStalePublicationIdentity() {
+        // given
+
         Contracts10Configuration configuration = new Contracts10Configuration(
                 SHA_A, SHA_B, Set.of(A));
+
         try (CoordinationEngine publicEngine =
                      CoordinationEngine.inMemoryContracts10(configuration)) {
             DefaultCoordinationEngine engine =
@@ -494,9 +525,12 @@ final class ContractsClosureAdmissionAdapterTest {
                             original,
                             CoordinationEngine.AdmissionPolicy.FROM_NOW,
                             null);
+
+            // when
             InMemoryDocumentStore.PublicationSnapshot before = engine
                     .documents().publicationSnapshot();
 
+            // then
             assertThrows(IllegalStateException.class, () -> publicEngine
                     .admitContractsClosure(
                             original,
@@ -520,13 +554,18 @@ final class ContractsClosureAdmissionAdapterTest {
 
     @Test
     void durableReceiptRecoversRoutePublicationFailureOnExactReplay() {
+        // given
+
         Contracts10Configuration configuration = new Contracts10Configuration(
                 SHA_A, SHA_B, Set.of(A));
+
         try (CoordinationEngine publicEngine =
                      CoordinationEngine.inMemoryContracts10(configuration)) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
             ClosureInvocationInput input = cyclicAdmission(engine, A, B);
+
+            // when
             engine.contractsClosureAdmissionAdapter()
                     .onPublicationFailurePoint(point -> {
                         if (point == ContractsClosureAdmissionAdapter
@@ -536,6 +575,7 @@ final class ContractsClosureAdmissionAdapterTest {
                         }
                     });
 
+            // then
             assertThrows(IllegalStateException.class, () -> publicEngine
                     .admitContractsClosure(
                             input,
@@ -563,17 +603,24 @@ final class ContractsClosureAdmissionAdapterTest {
 
     @Test
     void responseLossAfterAtomicProcessSwapReconcilesWithoutNewDocumentSteps() {
+        // given
+
         Contracts10Configuration configuration = new Contracts10Configuration(
                 SHA_A, SHA_B, Set.of(A));
+
         try (CoordinationEngine publicEngine =
                      CoordinationEngine.inMemoryContracts10(configuration)) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
+
+            // when
             ContractsClosureAdmissionReceipt admitted = publicEngine
                     .admitContractsClosure(
                             finiteCycleAdmission(engine, A, B),
                             CoordinationEngine.AdmissionPolicy.FROM_NOW,
                             null);
+
+            // then
             assertEquals(
                     ContractsClosureAdmissionReceipt.PublicationOutcome
                             .PUBLISHED,
@@ -651,8 +698,11 @@ final class ContractsClosureAdmissionAdapterTest {
 
     @Test
     void publicationIdentityFramesTupleShapeAndScalarKind() {
+        // given
+
         Contracts10Configuration configuration = new Contracts10Configuration(
                 SHA_A, SHA_B, Set.of(A));
+
         try (CoordinationEngine publicEngine =
                      CoordinationEngine.inMemoryContracts10(configuration)) {
             DefaultCoordinationEngine engine =
@@ -674,12 +724,15 @@ final class ContractsClosureAdmissionAdapterTest {
                             input,
                             CoordinationEngine.AdmissionPolicy.FROM_FRONTIER,
                             ExternalOrderKey.of(List.of(1L)));
+
+            // when
             String text = ContractsClosureAdmissionAdapter
                     .publicationIdentity(
                             input,
                             CoordinationEngine.AdmissionPolicy.FROM_FRONTIER,
                             ExternalOrderKey.of(List.of("1")));
 
+            // then
             assertNotEquals(splitText, joinedText);
             assertNotEquals(integer, text);
             assertEquals(splitText, ContractsClosureAdmissionAdapter
@@ -692,17 +745,24 @@ final class ContractsClosureAdmissionAdapterTest {
 
     @Test
     void retiresThenLaterReactivatesExactInactiveSuccessorAcrossRestart() {
+        // given
+
         Contracts10Configuration configuration = new Contracts10Configuration(
                 SHA_A, SHA_B, Set.of(A));
+
         try (CoordinationEngine publicEngine =
                      CoordinationEngine.inMemoryContracts10(configuration)) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
+
+            // when
             ContractsClosureAdmissionReceipt admitted = publicEngine
                     .admitContractsClosure(
                             acyclicAdmission(engine, A, B),
                             CoordinationEngine.AdmissionPolicy.FROM_NOW,
                             null);
+
+            // then
             assertEquals(
                     ContractsClosureAdmissionReceipt.PublicationOutcome
                             .PUBLISHED,

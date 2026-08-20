@@ -19,6 +19,7 @@ final class LateAdmissionEmbeddedHistoryTest {
     void missingChildSessionIsCreatedThenCaughtUpFromCompleteHistory()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String childInitial = resource(
                     "examples/clean/embedded-counter.yaml");
             Timeline childTimeline = engine.timeline(
@@ -54,10 +55,13 @@ final class LateAdmissionEmbeddedHistoryTest {
                             "ownerChannel",
                             engine.embeddedDocumentRequest(childInitial)),
                     T0 + 1_000);
+
+            // when
             engine.dispatch(attach);
             EngineTestSupport.MetricDelta work = delta(
                     before, engine.metricsSnapshot());
 
+            // then
             assertEquals(SessionStatus.READY,
                     engine.session("embedded-parent-B").status());
             assertEquals(6L, integer(
@@ -82,6 +86,7 @@ final class LateAdmissionEmbeddedHistoryTest {
     void laterAppendWithEarlierSourceOrderIsSelectedBeforeAttachment()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String childInitial = resource(
                     "examples/clean/embedded-counter.yaml");
             Timeline childTimeline = engine.timeline(
@@ -112,18 +117,22 @@ final class LateAdmissionEmbeddedHistoryTest {
 
             EngineMetrics.MetricsSnapshot beforeAttach =
                     engine.metricsSnapshot();
+
+            // when
             engine.dispatch(attachment);
             EngineTestSupport.MetricDelta attachWork = delta(
                     beforeAttach, engine.metricsSnapshot());
-            assertEquals(3L, integer(
-                    engine, "embedded-state-parent", "/child/counter"));
+            long parentCounterAfterAttachment = integer(
+                    engine, "embedded-state-parent", "/child/counter");
+            engine.dispatch(laterAppend);
+
+            // then
+            assertEquals(3L, parentCounterAfterAttachment);
             assertEquals(2L, attachWork.counter(
                     "childHistoricalProcessCalls"),
                     "the global feeder ordered both entries before the "
                             + "attachment; late admission then replays them "
                             + "into the newly managed child");
-
-            engine.dispatch(laterAppend);
             assertEquals(3L, integer(
                     engine, "embedded-counter-A", "/counter"));
             assertEquals(3L, integer(

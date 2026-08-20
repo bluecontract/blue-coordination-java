@@ -28,6 +28,7 @@ final class SourceSurfaceIdentityIntegrationTest {
     void businessOnlyTransitionReusesIdentityAndRouteChangeInvalidatesIt()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             Timeline owner = engine.timeline(OWNER_TIMELINE, "owner");
             Timeline dynamic = engine.timeline(
                     DYNAMIC_TIMELINE, "dynamic-owner");
@@ -100,12 +101,16 @@ final class SourceSurfaceIdentityIntegrationTest {
 
             long beforeFreshWindow = counter(engine.metricsSnapshot(),
                     "journal.sourceSurfaceIdentitiesResolved");
+
+            // when
             engine.dispatch(engine.appendAt(parent, Operation.yaml(
                     "detachChild", "ownerChannel", "{}"), T0 + 500L));
             engine.dispatch(engine.appendAt(parent, Operation.exact(
                     "attachChild", "ownerChannel",
                     engine.embeddedDocumentRequest(
                             engine.session(CHILD).current())), T0 + 600L));
+
+            // then
             assertTrue(counter(engine.metricsSnapshot(),
                     "journal.sourceSurfaceIdentitiesResolved")
                     > beforeFreshWindow,

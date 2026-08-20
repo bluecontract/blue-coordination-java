@@ -21,16 +21,21 @@ final class DocumentTransitionProcessorSubscriptionDeltaTest {
 
     @Test
     void appliesAdditionAndRemovalAsOneDeterministicGeneration() {
+        // given
+
         SubscriptionDelta.Entry alice = active(
                 "aliceChannel", "alice-key", "alice-domain", 0L, ADMISSION);
         SubscriptionDelta.Entry bob = active(
                 "bobChannel", "bob-key", "bob-domain", 1L, TRANSITION);
         EngineMetrics metrics = new EngineMetrics();
 
+        // when
         List<SubscriptionDelta.Entry> afterAddition = apply(
                 List.of(alice),
                 new SubscriptionDelta(List.of(bob), List.of()),
                 metrics);
+
+        // then
         assertEquals(List.of(alice, bob), afterAddition);
         assertEquals(1L, metrics.counter(
                 "process.dynamicSubscriptionsAdded"));
@@ -49,18 +54,22 @@ final class DocumentTransitionProcessorSubscriptionDeltaTest {
 
     @Test
     void replacesChangedMembershipAtTheSameOccurrence() {
+        // given
+
         SubscriptionDelta.Entry before = active(
                 "ownerChannel", "old-key", "old-domain", 0L, ADMISSION);
         SubscriptionDelta.Entry after = active(
                 "ownerChannel", "new-key", "new-domain", 1L, TRANSITION);
         EngineMetrics metrics = new EngineMetrics();
 
+        // when
         List<SubscriptionDelta.Entry> result = apply(
                 List.of(before),
                 new SubscriptionDelta(
                         List.of(after), List.of(retired(before, 1L))),
                 metrics);
 
+        // then
         assertEquals(List.of(after), result);
         assertEquals(1L, metrics.counter(
                 "process.dynamicSubscriptionsAdded"));
@@ -72,6 +81,8 @@ final class DocumentTransitionProcessorSubscriptionDeltaTest {
 
     @Test
     void retainsVerifiedIntervalForConservativeHeaderOnlyReplacement() {
+        // given
+
         SubscriptionDelta.Entry established = active(
                 "ownerChannel", "stable-key", "verified-domain", 0L,
                 ADMISSION);
@@ -80,6 +91,7 @@ final class DocumentTransitionProcessorSubscriptionDeltaTest {
                 TRANSITION);
         EngineMetrics metrics = new EngineMetrics();
 
+        // when
         List<SubscriptionDelta.Entry> result = apply(
                 List.of(established),
                 new SubscriptionDelta(
@@ -87,6 +99,7 @@ final class DocumentTransitionProcessorSubscriptionDeltaTest {
                         List.of(retired(established, 1L))),
                 metrics);
 
+        // then
         assertEquals(1, result.size());
         assertSame(established, result.get(0));
         assertEquals(1L, metrics.counter(
@@ -99,13 +112,18 @@ final class DocumentTransitionProcessorSubscriptionDeltaTest {
 
     @Test
     void rejectsSameOccurrenceSemanticReplacementMissingFromProjection() {
+        // given
+
         SubscriptionDelta.Entry before = active(
                 "ownerChannel", "old-key", "old-domain", 0L, ADMISSION);
         SubscriptionDelta.Entry after = active(
                 "ownerChannel", "new-key", "new-domain", 1L, TRANSITION);
+
+        // when
         SubscriptionDelta companion = new SubscriptionDelta(
                 List.of(after), List.of(retired(before, 1L)));
 
+        // then
         assertThrows(InvalidExecutionEvidenceException.class, () ->
                 DocumentTransitionProcessor.requireSameOwnedTransition(
                         companion,
@@ -116,12 +134,17 @@ final class DocumentTransitionProcessorSubscriptionDeltaTest {
 
     @Test
     void rejectsUnknownOrForgedIntervalEvidenceWithoutPublishingMetrics() {
+        // given
         SubscriptionDelta.Entry established = active(
                 "ownerChannel", "stable-key", "verified-domain", 0L,
                 ADMISSION);
 
-        assertInvalid(List.of(), new SubscriptionDelta(
-                List.of(), List.of(retired(established, 1L))));
+        // when
+        SubscriptionDelta retiredOnly = new SubscriptionDelta(
+                List.of(), List.of(retired(established, 1L)));
+
+        // then
+        assertInvalid(List.of(), retiredOnly);
         assertInvalid(List.of(established), new SubscriptionDelta(
                 List.of(),
                 List.of(retired(active(

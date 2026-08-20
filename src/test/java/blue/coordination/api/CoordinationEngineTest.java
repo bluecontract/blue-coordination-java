@@ -66,6 +66,8 @@ final class CoordinationEngineTest {
 
     @Test
     void counterQuickstartProducesTwo() {
+        // given
+
         try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
             Timeline alice = engine.registerTimeline(
                     "counter/alice", "alice");
@@ -73,8 +75,11 @@ final class CoordinationEngineTest {
             DocumentId counter = DocumentId.of("counter");
             engine.startDocument(counter, COUNTER);
 
+            // when
             TimelineEntry increment = engine.append(alice, Operation.yaml(
                     "increment", "aliceChannel", "amount: 3"));
+
+            // then
             assertEquals(1L, engine.metrics().counter(
                     CoordinationMetrics.Counter.ENTRIES_STORED_WHOLE));
             assertEquals(0L, engine.metrics().counter(
@@ -106,11 +111,16 @@ final class CoordinationEngineTest {
 
     @Test
     void failedAppendDoesNotConsumeClockOrJournalCoordinates() {
+        // given
+
         try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
             Timeline alice = engine.registerTimeline(
                     "counter/alice", "alice");
+
+            // when
             CoordinationMetrics before = engine.metrics();
 
+            // then
             assertThrows(RuntimeException.class, () -> engine.append(
                     alice,
                     Operation.yaml("increment", "aliceChannel", "[")));

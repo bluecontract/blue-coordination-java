@@ -4,7 +4,7 @@ const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 
 const CZ_TOML = '.cz.toml';
-const CANONICAL_EVIDENCE = 'docs/releases/3.0.0-rc.1-evidence.json';
+const RELEASE_AUTHORITY = 'docs/releases/3.0.0-rc.3.md';
 const MAIN_REF = process.env.RC_BASE_REF || 'origin/main';
 const VALID_BUMPS = new Set(['major', 'minor', 'patch']);
 
@@ -109,19 +109,19 @@ function nextVersionForCurrentRc(currentVersion, latestTaggedRc) {
   return `${formatVersion(parsed)}-rc.${nextRc}`;
 }
 
-function evidenceRelease(content) {
-  const evidence = JSON.parse(content);
-  if (typeof evidence.release !== 'string' || evidence.release.length === 0) {
-    throw new Error(`Canonical evidence is missing a release: ${CANONICAL_EVIDENCE}`);
+function authorityRelease(content) {
+  const match = content.match(/^RC3_VERSION:\s*(\S+)\s*$/m);
+  if (!match) {
+    throw new Error(`Release authority is missing RC3_VERSION: ${RELEASE_AUTHORITY}`);
   }
-  return evidence.release;
+  return match[1];
 }
 
-function assertEvidenceRelease(preparedVersion, content) {
-  const canonicalRelease = evidenceRelease(content);
-  if (canonicalRelease !== preparedVersion) {
+function assertAuthorityRelease(preparedVersion, content) {
+  const authorizedRelease = authorityRelease(content);
+  if (authorizedRelease !== preparedVersion) {
     throw new Error(
-      `Prepared RC ${preparedVersion} does not match canonical evidence release ${canonicalRelease}`,
+      `Prepared RC ${preparedVersion} does not match authorized release ${authorizedRelease}`,
     );
   }
 }
@@ -147,9 +147,9 @@ function prepareRcRelease() {
     console.log(`Aggregate bump: ${bump}`);
   }
 
-  assertEvidenceRelease(
+  assertAuthorityRelease(
     nextVersion,
-    fs.readFileSync(CANONICAL_EVIDENCE, 'utf8'),
+    fs.readFileSync(RELEASE_AUTHORITY, 'utf8'),
   );
 
   const nextContent = currentContent.replace(
@@ -170,8 +170,8 @@ if (require.main === module) {
 }
 
 module.exports = {
-  assertEvidenceRelease,
-  evidenceRelease,
+  assertAuthorityRelease,
+  authorityRelease,
   nextVersionForCurrentRc,
   parseVersion,
 };

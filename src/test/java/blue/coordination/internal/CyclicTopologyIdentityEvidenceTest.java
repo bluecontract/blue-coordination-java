@@ -89,6 +89,8 @@ final class CyclicTopologyIdentityEvidenceTest {
 
     @Test
     void exactRuntimeIdentitiesMatchTheCommittedArtifacts() throws Exception {
+        // given
+
         Recorder recorder = new Recorder();
         if (ACTIVE.get() != null) {
             throw new IllegalStateException(
@@ -106,7 +108,11 @@ final class CyclicTopologyIdentityEvidenceTest {
         String json = Json.render(document) + "\n";
         String markdown = renderMarkdown(document);
         String mode = System.getenv(WRITE_MODE_ENV);
+
+        // when
         if (mode == null) {
+
+            // then
             assertEquals(readRequired(JSON_ARTIFACT), json,
                     "regenerate explicitly with " + WRITE_MODE_ENV
                             + "=" + WRITE_MODE);

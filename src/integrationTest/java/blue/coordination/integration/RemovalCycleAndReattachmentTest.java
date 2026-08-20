@@ -18,6 +18,7 @@ final class RemovalCycleAndReattachmentTest {
     void detachedParentStopsMovingAndReattachUsesFreshCursorWithoutReplay()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String childInitial = resource(
                     "examples/clean/embedded-counter.yaml");
             Timeline childTimeline = engine.timeline(
@@ -58,6 +59,8 @@ final class RemovalCycleAndReattachmentTest {
                     "embedded-counter-A").size();
 
             EngineMetrics.MetricsSnapshot before = engine.metricsSnapshot();
+
+            // when
             engine.appendAndDispatch(
                     parentTimeline,
                     Operation.exact(
@@ -66,6 +69,8 @@ final class RemovalCycleAndReattachmentTest {
                             engine.embeddedDocumentRequest(childInitial)));
             EngineTestSupport.MetricDelta work = delta(
                     before, engine.metricsSnapshot());
+
+            // then
             assertEquals(3L, integer(
                     engine, "embedded-state-parent", "/child/counter"));
             assertEquals(3L, work.counter("childRevisionApplications"),
@@ -86,6 +91,7 @@ final class RemovalCycleAndReattachmentTest {
     void directCycleFailsBeforeAnySessionLinkCursorOrReceiptPublishes()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String parentInitial = resource(
                     "examples/clean/embedded-state-parent.yaml");
             Timeline parentTimeline = engine.timeline(
@@ -98,9 +104,12 @@ final class RemovalCycleAndReattachmentTest {
                             "ownerChannel",
                             engine.embeddedDocumentRequest(parentInitial)));
 
+            // when
             assertThrows(
                     IllegalStateException.class,
                     () -> engine.dispatch(cycle));
+
+            // then
             assertEquals(0L, engine.session(
                     "embedded-state-parent").epoch());
             assertEquals(SessionStatus.READY, engine.session(
@@ -114,6 +123,7 @@ final class RemovalCycleAndReattachmentTest {
     void threeRootCycleFailsBeforeAttemptedEdgeOrReceiptPublishes()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String template = resource(
                     "examples/clean/embedded-state-parent.yaml");
             String first = parent(template, "a");
@@ -141,11 +151,14 @@ final class RemovalCycleAndReattachmentTest {
                             "attachChild", "ownerChannel",
                             engine.embeddedDocumentRequest(first)));
             EngineMetrics.MetricsSnapshot before = engine.metricsSnapshot();
+
+            // when
             assertThrows(IllegalStateException.class,
                     () -> engine.dispatch(closingEdge));
             EngineTestSupport.MetricDelta work = delta(
                     before, engine.metricsSnapshot());
 
+            // then
             assertTrue(engine.embeddedDocuments(
                     "embedded-state-parent-c").isEmpty());
             assertEquals(SessionStatus.READY, engine.session(

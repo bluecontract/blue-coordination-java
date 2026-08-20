@@ -72,10 +72,14 @@ final class ContractsPublicThreeMemberCycleTest {
 
     @Test
     void literalContainmentRingRoutesChildEventsToContainingDocuments() {
+        // given
+
         try (CoordinationEngine publicEngine = engine(Set.of(A))) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
             Contracts10ScenarioBuilder builder = literalFiniteScenario(engine);
+
+            // when
             Contracts10ScenarioBuilder.Scenario scenario = builder.scenario();
 
             // Process Embedded declares containment. Events travel from an
@@ -83,6 +87,8 @@ final class ContractsPublicThreeMemberCycleTest {
             // literal A/b->B, B/c->C, C/a->A ring flows A,C,B,A. The reverse
             // containment ring used below is what realizes business flow
             // A,B,C,A without relabeling documents or inventing routing.
+
+            // then
             assertEquals(Map.of(
                     A, List.of(B),
                     B, List.of(C),
@@ -113,8 +119,13 @@ final class ContractsPublicThreeMemberCycleTest {
 
     @Test
     void finiteReverseContainmentRingExecutesRequestedBusinessFlow() {
-        FiniteEvidence evidence = runFinite(FiniteVariant.BASELINE);
+        // given
+        FiniteVariant variant = FiniteVariant.BASELINE;
 
+        // when
+        FiniteEvidence evidence = runFinite(variant);
+
+        // then
         assertEquals(List.of(A.value(), B.value(), C.value(), A.value()),
                 evidence.dequeueOrder());
         assertEquals(4, evidence.dequeueWorkIds().size());
@@ -136,26 +147,37 @@ final class ContractsPublicThreeMemberCycleTest {
 
     @Test
     void canonicalAdmissionAndDiscoveryIgnoreEveryAuthoredOrderVariant() {
+        // given
+
         FiniteEvidence baseline = runFinite(FiniteVariant.BASELINE);
 
+        // when
         for (FiniteVariant variant : List.of(
                 FiniteVariant.REQUESTED_C_B_A,
                 FiniteVariant.REQUESTED_B_A_C,
                 FiniteVariant.REVERSED_OCCURRENCES,
                 FiniteVariant.REVERSED_BODY_MAP,
                 FiniteVariant.MATERIALIZED_REFERENCES)) {
+
+            // then
             assertEquals(baseline, runFinite(variant), variant.name());
         }
     }
 
     @Test
     void sameEntryUsesCanonicalDirectSeedsAndClosesEachContinuation() {
+        // given
+
         try (CoordinationEngine publicEngine = engine(Set.of(A, B, C))) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
             Contracts10ScenarioBuilder builder = directScenario(engine);
+
+            // when
             ContractsClosureAdmissionReceipt admitted =
                     builder.admitTo(publicEngine).admissionReceipt();
+
+            // then
             assertEquals(
                     ContractsClosureAdmissionReceipt.PublicationOutcome
                             .PUBLISHED,
@@ -212,9 +234,14 @@ final class ContractsPublicThreeMemberCycleTest {
 
     @Test
     void threeMemberLoopRollbackIsIdenticalAcrossFreshEngineRuns() {
+        // given
+
         LoopEvidence first = runLoopAttempt();
+
+        // when
         LoopEvidence second = runLoopAttempt();
 
+        // then
         assertEquals(first, second);
         assertTrue(first.gasEntries() > 0);
         assertTrue(first.rejectedWorkOrdinal() > 0L);

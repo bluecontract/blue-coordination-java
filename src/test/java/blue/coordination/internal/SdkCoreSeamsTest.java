@@ -25,11 +25,15 @@ final class SdkCoreSeamsTest {
 
     @Test
     void bundledReleaseCreatesExactContractsConfiguration() {
+        // given
         BundledContracts10Release.Manifest manifest =
                 BundledContracts10Release.manifest();
+
+        // when
         Contracts10Configuration configuration =
                 BundledContracts10Release.configuration(Set.of(A));
 
+        // then
         assertEquals(manifest.blueLanguageSpecification(),
                 configuration.blueLanguageSpecificationIdentity());
         assertEquals(manifest.contractsSpecification(),
@@ -44,15 +48,19 @@ final class SdkCoreSeamsTest {
     void targetedOperationWritesExactDocumentEvidenceIntoEntry() {
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.create()) {
+            // given
             Timeline timeline = engine.registerTimeline(
                     "sdk-target-timeline", "alice");
             ExactValue target = engine.exactValue(
                     "documentId: sdk-target\ncounter: 1");
+
+            // when
             TimelineEntry entry = engine.append(
                     timeline,
                     Operation.yaml("update", "ownerChannel", "{}")
                             .targeting(target, true));
 
+            // then
             assertEquals(target.blueId(), entry.exactEvent()
                     .canonicalAt("/message/document")
                     .getReferenceBlueId());
@@ -64,12 +72,14 @@ final class SdkCoreSeamsTest {
 
     @Test
     void sdkRuntimeCanBootstrapBeforeAnyPublicRootIsKnown() {
+        // given
         BundledContracts10Release.Manifest manifest =
                 BundledContracts10Release.manifest();
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.createContracts10Sdk(
                         manifest.blueLanguageSpecification(),
                         manifest.contractsSpecification())) {
+            // when
             engine.authorizeContractsPublicRoots(Set.of(B));
             Contracts10ScenarioBuilder.ScenarioRuntime runtime =
                     new Contracts10ScenarioBuilder(engine)
@@ -77,8 +87,6 @@ final class SdkCoreSeamsTest {
                             .publicRoot(B)
                             .expectedComponent(B)
                             .admitTo(engine);
-
-            assertTrue(runtime.admissionReceipt().published());
             ContractsClosureDispatchAttempt attempt =
                     new ContractsClosureDispatchAttempt(
                             "sha256:" + "1".repeat(64),
@@ -90,6 +98,9 @@ final class SdkCoreSeamsTest {
             ProcessingDrainReceipt drain = new ProcessingDrainReceipt(
                     List.of(), Map.of(), Map.of(attempt.entryBlueId(),
                     List.of(attempt)), null, true, false, 0L, 0L);
+
+            // then
+            assertTrue(runtime.admissionReceipt().published());
             assertEquals(List.of(attempt),
                     drain.contractsAttemptsFor(attempt.entryBlueId()));
             assertFalse(drain.blocked());

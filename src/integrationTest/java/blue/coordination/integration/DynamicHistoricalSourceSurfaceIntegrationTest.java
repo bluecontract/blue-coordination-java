@@ -31,6 +31,7 @@ final class DynamicHistoricalSourceSurfaceIntegrationTest {
     void historicalAddAndRemovalRefreshTheSurfaceBeforeNextSelection()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             Timeline owner = engine.timeline(OWNER_TIMELINE, "owner");
             Timeline dynamic = engine.timeline(
                     DYNAMIC_TIMELINE, "dynamic-owner");
@@ -71,40 +72,57 @@ final class DynamicHistoricalSourceSurfaceIntegrationTest {
             TimelineEntry afterRetirement = engine.appendAt(
                     dynamic, applyDynamic(1_000L), T0 + 400L);
 
+            // when
             engine.start(
                     DOCUMENT,
                     resource("examples/clean/dynamic-source-surface.yaml"),
                     CoordinationEngine.AdmissionPolicy.FULL_HISTORY,
                     null);
+            long totalAfterHistoricalStart = integer(
+                    engine, DOCUMENT, "/total");
+            Object activatedAfterHistoricalStart =
+                    engine.value(DOCUMENT, "/activated").getValue();
+            Object retiredAfterHistoricalStart =
+                    engine.value(DOCUMENT, "/retired").getValue();
+            List<String> processedAfterHistoricalStart =
+                    processedTimelineEntries(engine);
+            Set<String> timelinesAfterHistoricalStart =
+                    engine.effectiveTimelineIds(DOCUMENT);
+            int beforeActivationTargets =
+                    engine.routeTargetCount(beforeActivation);
+            int activeTargets = engine.routeTargetCount(active);
+            int afterRetirementTargets =
+                    engine.routeTargetCount(afterRetirement);
+            int activationTargets = engine.routeTargetCount(activation);
+            int retirementTargets = engine.routeTargetCount(retirement);
+            int historySize = engine.history(DOCUMENT).size();
+            TimelineEntry liveAfterRetirement = engine.appendAt(
+                    dynamic, applyDynamic(10_000L), T0 + 500L);
+            int liveAfterRetirementTargets =
+                    engine.routeTargetCount(liveAfterRetirement);
+            engine.dispatch(liveAfterRetirement);
 
-            assertEquals(2L, integer(engine, DOCUMENT, "/total"),
+            // then
+            assertEquals(2L, totalAfterHistoricalStart,
                     "only the entry inside the dynamic active interval runs");
-            assertEquals(Boolean.TRUE,
-                    engine.value(DOCUMENT, "/activated").getValue());
-            assertEquals(Boolean.TRUE,
-                    engine.value(DOCUMENT, "/retired").getValue());
+            assertEquals(Boolean.TRUE, activatedAfterHistoricalStart);
+            assertEquals(Boolean.TRUE, retiredAfterHistoricalStart);
             assertEquals(
                     List.of(
                             activation.blueId(),
                             active.blueId(),
                             retirement.blueId()),
-                    processedTimelineEntries(engine),
+                    processedAfterHistoricalStart,
                     "the feeder must reselect after both surface changes");
             assertEquals(Set.of(OWNER_TIMELINE),
-                    engine.effectiveTimelineIds(DOCUMENT),
+                    timelinesAfterHistoricalStart,
                     "the retired dynamic Timeline must leave the surface");
-            assertEquals(0, engine.routeTargetCount(beforeActivation));
-            assertEquals(0, engine.routeTargetCount(active));
-            assertEquals(0, engine.routeTargetCount(afterRetirement));
-            assertEquals(1, engine.routeTargetCount(activation));
-            assertEquals(1, engine.routeTargetCount(retirement));
-
-            int historySize = engine.history(DOCUMENT).size();
-            TimelineEntry liveAfterRetirement = engine.appendAt(
-                    dynamic, applyDynamic(10_000L), T0 + 500L);
-            assertEquals(0, engine.routeTargetCount(liveAfterRetirement));
-            engine.dispatch(liveAfterRetirement);
-
+            assertEquals(0, beforeActivationTargets);
+            assertEquals(0, activeTargets);
+            assertEquals(0, afterRetirementTargets);
+            assertEquals(1, activationTargets);
+            assertEquals(1, retirementTargets);
+            assertEquals(0, liveAfterRetirementTargets);
             assertEquals(2L, integer(engine, DOCUMENT, "/total"));
             assertEquals(historySize, engine.history(DOCUMENT).size(),
                     "removed handlers cannot receive later live entries");

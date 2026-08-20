@@ -25,9 +25,15 @@ final class EmbeddedReceiptRetryIdentityIntegrationTest {
     @Test
     void committedReceiptRetryDoesNotConsumeClockOrCreatePhantomInput()
             throws Exception {
-        Scenario uninterrupted = run(false);
-        Scenario retried = run(true);
+        // given
+        boolean uninterruptedRun = false;
+        boolean retryingRun = true;
 
+        // when
+        Scenario uninterrupted = run(uninterruptedRun);
+        Scenario retried = run(retryingRun);
+
+        // then
         assertEquals(uninterrupted.objectsAfterRecovery(),
                 retried.objectsAfterRecovery(),
                 "receipt recovery cannot add a whole object");

@@ -25,6 +25,7 @@ final class ProcessEmbeddedGraphSnapshotTest {
 
     @Test
     void capturedSnapshotIsImmutableWhileCursorAndLaterTopologyAdvance() {
+        // given
         EmbeddingBinding first = binding(
                 "binding-a", "/a", CHILD_A, 1L);
         ProcessEmbeddedGraphSnapshot captured =
@@ -33,11 +34,19 @@ final class ProcessEmbeddedGraphSnapshotTest {
         List<EmbeddingBinding> capturedChildren = captured.children(PARENT);
         long capturedGeneration = captured.generation();
 
+        // when
         EmbeddedEpochCursor initial = new EmbeddedEpochCursor(
                 first.bindingId(), -1L);
         EmbeddedEpochCursor initialized = initial.advanceTo(0L);
         EmbeddedEpochCursor processed = initialized.advanceTo(1L);
+        ProcessEmbeddedGraphSnapshot unchanged = captured.reconcileParent(
+                PARENT, List.of(first));
+        EmbeddingBinding second = binding(
+                "binding-b", "/b", CHILD_B, 1L);
+        ProcessEmbeddedGraphSnapshot advanced = captured.reconcileParent(
+                PARENT, List.of(first, second));
 
+        // then
         assertEquals(-1L, initial.appliedChildEpoch());
         assertEquals(0L, initialized.appliedChildEpoch());
         assertEquals(1L, processed.appliedChildEpoch());
@@ -49,17 +58,8 @@ final class ProcessEmbeddedGraphSnapshotTest {
                 () -> capturedChildren.clear());
         assertThrows(UnsupportedOperationException.class,
                 () -> captured.bindings().clear());
-
-        ProcessEmbeddedGraphSnapshot unchanged = captured.reconcileParent(
-                PARENT, List.of(first));
         assertSame(captured, unchanged,
                 "cursor progress and identical reconciliation are not topology");
-
-        EmbeddingBinding second = binding(
-                "binding-b", "/b", CHILD_B, 1L);
-        ProcessEmbeddedGraphSnapshot advanced = captured.reconcileParent(
-                PARENT, List.of(first, second));
-
         assertEquals(capturedGeneration + 1L, advanced.generation());
         assertEquals(List.of(first), captured.children(PARENT),
                 "the captured generation must not observe later topology");
@@ -71,6 +71,7 @@ final class ProcessEmbeddedGraphSnapshotTest {
 
     @Test
     void oneAddedBindingRetainsEveryUnrelatedBucketAndRecord() {
+        // given
         List<EmbeddingBinding> many = IntStream.range(0, 64)
                 .mapToObj(index -> binding(
                         "binding-" + index,
@@ -96,9 +97,11 @@ final class ProcessEmbeddedGraphSnapshotTest {
                 DocumentId.of("child-new"), 1L));
         EngineMetrics metrics = new EngineMetrics();
 
+        // when
         ProcessEmbeddedGraphSnapshot advanced = captured.reconcileParent(
                 PARENT, replacement, metrics);
 
+        // then
         assertSame(unrelatedBucket, advanced.children(OTHER_PARENT));
         assertSame(retainedReverse, advanced.parents(
                 many.get(0).childDocumentId()));

@@ -22,9 +22,12 @@ final class EmbeddedOnlyStoragePolicyTest {
     void ordinaryLargeDocumentAndRequestsStayWholeWhileEmbeddedChildIsOneCut()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String payNote = resource("examples/clean/package-paynote.yaml");
             EngineMetrics.MetricsSnapshot beforePayNote =
                     engine.metricsSnapshot();
+
+            // when
             engine.start("standalone-paynote", payNote);
             EngineTestSupport.MetricDelta payNoteWork = delta(
                     beforePayNote, engine.metricsSnapshot());
@@ -72,6 +75,8 @@ final class EmbeddedOnlyStoragePolicyTest {
 
             EmbeddedOnlyLayout parentLayout =
                     engine.session("embedded-parent-B").layout();
+
+            // then
             assertEquals(2, parentLayout.physicalObjectCount());
             assertEquals(1, parentLayout.embeddedDocumentCount());
             assertEquals(1, parentLayout.splitterCreatedEdgeCount());

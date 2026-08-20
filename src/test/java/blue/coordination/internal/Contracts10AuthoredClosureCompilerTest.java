@@ -26,14 +26,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class Contracts10AuthoredClosureCompilerTest {
     @Test
     void compilesMissingPathAndCollectionValuesIntoVerifiedCyclicAdmission() {
+        // given
+
         DocumentId a = DocumentId.of("compiler-ring-a");
         DocumentId b = DocumentId.of("compiler-ring-b");
+
         try (CoordinationEngine publicEngine = engine(Set.of(a))) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
             Contracts10AuthoredClosureCompiler compiler =
                     new Contracts10AuthoredClosureCompiler(engine);
 
+            // when
             Contracts10AuthoredClosureCompiler.CompiledClosure compiled =
                     compiler.compile(request(
                             List.of(
@@ -45,6 +49,7 @@ final class Contracts10AuthoredClosureCompilerTest {
                                     binding("b", "/back", "a")),
                             Set.of(a)));
 
+            // then
             assertEquals(ClosureInvocationInput.Operation.ADMIT_CLOSURE,
                     compiled.invocation().operation());
             assertEquals(List.of(List.of(a, b)),
@@ -85,14 +90,19 @@ final class Contracts10AuthoredClosureCompilerTest {
 
     @Test
     void derivesTwoDisjointComponentsWithoutCallerPartitionEvidence() {
+        // given
+
         DocumentId a1 = DocumentId.of("compiler-disjoint-a1");
         DocumentId b1 = DocumentId.of("compiler-disjoint-b1");
         DocumentId a2 = DocumentId.of("compiler-disjoint-a2");
         DocumentId b2 = DocumentId.of("compiler-disjoint-b2");
+
         try (CoordinationEngine publicEngine = engine(Set.of(a1, a2))) {
             Contracts10AuthoredClosureCompiler compiler =
                     new Contracts10AuthoredClosureCompiler(
                             (DefaultCoordinationEngine) publicEngine);
+
+            // when
             Contracts10AuthoredClosureCompiler.CompiledClosure compiled =
                     compiler.compile(request(
                             List.of(
@@ -112,6 +122,7 @@ final class Contracts10AuthoredClosureCompilerTest {
                                     binding("b2", "/a", "a2")),
                             Set.of(a1, a2)));
 
+            // then
             assertEquals(List.of(
                             List.of(a1, b1),
                             List.of(a2, b2)),
@@ -124,12 +135,19 @@ final class Contracts10AuthoredClosureCompilerTest {
 
     @Test
     void rejectsBindingOutsideEffectiveProcessEmbeddedCatalog() {
+        // given
+
         DocumentId a = DocumentId.of("compiler-undeclared-a");
         DocumentId b = DocumentId.of("compiler-undeclared-b");
+
         try (CoordinationEngine publicEngine = engine(Set.of(a))) {
+
+            // when
             Contracts10AuthoredClosureCompiler compiler =
                     new Contracts10AuthoredClosureCompiler(
                             (DefaultCoordinationEngine) publicEngine);
+
+            // then
             IllegalArgumentException failure = assertThrows(
                     IllegalArgumentException.class,
                     () -> compiler.compile(request(
@@ -148,11 +166,16 @@ final class Contracts10AuthoredClosureCompilerTest {
 
     @Test
     void rejectsUnboundConcreteProcessEmbeddedOccurrence() {
+        // given
+
         DocumentId a = DocumentId.of("compiler-unbound-a");
+
         try (CoordinationEngine publicEngine = engine(Set.of(a))) {
             Contracts10AuthoredClosureCompiler compiler =
                     new Contracts10AuthoredClosureCompiler(
                             (DefaultCoordinationEngine) publicEngine);
+
+            // when
             String authored = """
                     marker: a
                     peer:
@@ -165,6 +188,7 @@ final class Contracts10AuthoredClosureCompilerTest {
                           - /peer
                     """.formatted(RuntimeBlueIds.PROCESS_EMBEDDED);
 
+            // then
             IllegalArgumentException failure = assertThrows(
                     IllegalArgumentException.class,
                     () -> compiler.compile(request(
@@ -180,12 +204,17 @@ final class Contracts10AuthoredClosureCompilerTest {
 
     @Test
     void rejectsMaterializedValueThatIsNotTheBoundTarget() {
+        // given
+
         DocumentId a = DocumentId.of("compiler-wrong-target-a");
         DocumentId b = DocumentId.of("compiler-wrong-target-b");
+
         try (CoordinationEngine publicEngine = engine(Set.of(a))) {
             Contracts10AuthoredClosureCompiler compiler =
                     new Contracts10AuthoredClosureCompiler(
                             (DefaultCoordinationEngine) publicEngine);
+
+            // when
             String authoredA = """
                     marker: a
                     peer: definitely-not-b
@@ -197,6 +226,7 @@ final class Contracts10AuthoredClosureCompilerTest {
                           - /peer
                     """.formatted(RuntimeBlueIds.PROCESS_EMBEDDED);
 
+            // then
             IllegalArgumentException failure = assertThrows(
                     IllegalArgumentException.class,
                     () -> compiler.compile(request(
@@ -215,12 +245,19 @@ final class Contracts10AuthoredClosureCompilerTest {
 
     @Test
     void rejectsDuplicateManagedIdentityAndOverlappingOccurrences() {
+        // given
+
         DocumentId a = DocumentId.of("compiler-invalid-a");
         DocumentId b = DocumentId.of("compiler-invalid-b");
+
         try (CoordinationEngine publicEngine = engine(Set.of(a))) {
+
+            // when
             Contracts10AuthoredClosureCompiler compiler =
                     new Contracts10AuthoredClosureCompiler(
                             (DefaultCoordinationEngine) publicEngine);
+
+            // then
             assertThrows(IllegalArgumentException.class,
                     () -> compiler.compile(request(
                             List.of(

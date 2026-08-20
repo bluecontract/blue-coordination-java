@@ -1,8 +1,9 @@
 # Start here
 
 1. Use Java 17 or newer.
-2. Resolve the local-only `3.0.0-rc.3` candidate from the explicit staged file
-   repository. It is not available from Maven Central or Maven Local.
+2. Resolve `blue.coordination:blue-coordination-java:3.0.0-rc.3` from Maven
+   Central. The build does not use sibling composites, Maven Local, or a staged
+   file repository.
 3. Create `BlueCoordination.inMemory()` in a try-with-resources block. This is
    the one normal default and uses the bundled Contracts 1.0 identities.
 4. Register each Timeline with `blue.timelines().local(...)` or
@@ -32,8 +33,8 @@ Duplicate occurrences may share one stable draft lineage. Invalid or
 incomplete evidence fails closed, and a terminal processing failure publishes
 neither a partial child nor a partial topology expansion. Imported draft state
 and historical operation-result activation are not supported in this
-candidate. Final implementation conformance remains an artifact-bound decision
-made only after the complete staged acceptance and fixture corpus passes.
+candidate. The bounded external-pilot claim is rechecked against the published
+dependency graph by the complete acceptance and fixture corpus.
 
 The runtime is deliberately single-process and sequential. Each document
 transition atomically commits its exact state, epoch, events, graph and
@@ -66,5 +67,6 @@ Read next:
 - [Build and test](docs/development/build-and-test.md)
 - [Test strategy](docs/development/test-strategy.md)
 - [Release process](docs/development/releasing.md)
+- [3.0.0-rc.3 release decision](docs/releases/3.0.0-rc.3.md)
 - [Current Contracts/SDK verification boundary](docs/releases/contracts-1.0-current-verification.md)
 - [Historical 3.0.0-rc.1 readiness](docs/releases/3.0.0-rc.1.md)

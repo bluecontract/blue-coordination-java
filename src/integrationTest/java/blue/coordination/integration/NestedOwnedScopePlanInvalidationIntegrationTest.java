@@ -30,6 +30,7 @@ final class NestedOwnedScopePlanInvalidationIntegrationTest {
     void nestedChannelAdditionDoesNotInvalidateItsContainingRootPlan()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             Timeline owner = engine.timeline(
                     "examples/nested-owned-surface/owner", "nested-owner");
             Timeline dynamic = engine.timeline(
@@ -71,8 +72,10 @@ final class NestedOwnedScopePlanInvalidationIntegrationTest {
                             "applyDynamic", "dynamicChannel", "amount: 2"),
                     T0 + 200L);
 
+            // when
             engine.dispatch(dynamicEntry);
 
+            // then
             assertEquals(2L, integer(engine, CHILD, "/total"));
             assertEquals(2L, integer(engine, ROOT, "/child/total"));
             assertEquals(

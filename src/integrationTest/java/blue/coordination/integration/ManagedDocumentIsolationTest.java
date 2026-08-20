@@ -16,6 +16,7 @@ final class ManagedDocumentIsolationTest {
     void sharedOperationExecutesOncePerManagedDocumentThenOneEpochPropagation()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             Timeline shared = engine.timeline(
                     "examples/root-isolation/shared", "alice");
             engine.start(
@@ -30,12 +31,15 @@ final class ManagedDocumentIsolationTest {
                                     "examples/clean/root-isolation-child.yaml"))));
 
             EngineMetrics.MetricsSnapshot before = engine.metricsSnapshot();
+
+            // when
             engine.appendAndDispatch(
                     shared,
                     Operation.yaml("collide", "sharedChannel", "{}"));
             EngineTestSupport.MetricDelta work = delta(
                     before, engine.metricsSnapshot());
 
+            // then
             assertEquals(1L, integer(
                     engine, "root-isolation-parent", "/rootCount"));
             assertEquals(1L, integer(

@@ -32,6 +32,7 @@ final class PlaygroundFiveOccurrenceCorrectnessIntegrationTest {
     @Test
     void conflictingStatesAreRejectedAndCoherentRetryWorksOnSameEngine()
             throws Exception {
+        // given
         String alphaYaml = Round12NbaFixtures.game(
                 PlaygroundFiveOccurrenceFixtures.ALPHA_ID,
                 PlaygroundFiveOccurrenceFixtures.alphaTimeline(),
@@ -55,6 +56,7 @@ final class PlaygroundFiveOccurrenceCorrectnessIntegrationTest {
                             PlaygroundFiveOccurrenceFixtures.ALPHA_SECOND,
                             conflictingAlpha)));
 
+            // when
             IllegalStateException failure = assertThrows(
                     IllegalStateException.class,
                     () -> engine.dispatch(rejected));
@@ -85,6 +87,7 @@ final class PlaygroundFiveOccurrenceCorrectnessIntegrationTest {
                             PlaygroundFiveOccurrenceFixtures.ALPHA_SECOND,
                             alpha)));
 
+            // then
             assertEquals(2, engine.documentCount());
             assertEquals(Map.of(
                             ALPHA_FIRST_PATH,
@@ -112,6 +115,7 @@ final class PlaygroundFiveOccurrenceCorrectnessIntegrationTest {
     void removingAndReaddingOneDuplicateUsesOneSourceProcessAndFreshCursor()
             throws Exception {
         try (TestEngine engine = initializedHostWithAlphaReattachment()) {
+            // given
             Timeline owner = owner(engine);
             engine.appendAndDispatch(
                     owner, PlaygroundFiveOccurrenceFixtures.attachFive(engine));
@@ -140,6 +144,8 @@ final class PlaygroundFiveOccurrenceCorrectnessIntegrationTest {
             Timeline alpha = engine.timeline(
                     PlaygroundFiveOccurrenceFixtures.alphaTimeline(),
                     "playground-feed-alpha");
+
+            // when
             engine.appendAndDispatch(alpha, Round12NbaFixtures.startGame());
             EngineTestSupport.MetricDelta advance = delta(
                     beforeAdvance, engine.metricsSnapshot());
@@ -166,6 +172,8 @@ final class PlaygroundFiveOccurrenceCorrectnessIntegrationTest {
 
             CoordinationTestControl.EmbeddedOccurrenceEvidence newSecond =
                     occurrence(engine, ALPHA_SECOND_PATH);
+
+            // then
             assertNotEquals(oldSecond.bindingId(), newSecond.bindingId());
             assertTrue(newSecond.activationGeneration()
                     > oldSecond.activationGeneration());
@@ -199,12 +207,18 @@ final class PlaygroundFiveOccurrenceCorrectnessIntegrationTest {
     void oneInitializationEventBlueIdHasDistinctOccurrenceReceipts()
             throws Exception {
         try (TestEngine engine = initializedHost()) {
+            // given
+            Timeline owner = owner(engine);
+
+            // when
             engine.appendAndDispatch(
-                    owner(engine),
+                    owner,
                     PlaygroundFiveOccurrenceFixtures.attachFive(engine));
 
             DocumentRevision alphaInitialization = engine.history(
                     PlaygroundFiveOccurrenceFixtures.ALPHA_ID).get(0);
+
+            // then
             assertEquals(1, alphaInitialization.emittedEvents().size());
             String eventBlueId = DirectBlueIdCalculator.calculateBlueId(
                     alphaInitialization.emittedEvents().get(0));

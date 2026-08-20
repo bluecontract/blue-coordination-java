@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class SdkBuiltJarConsumerTest {
     @Test
     void bundledContractsSdkRunsFromTheBuiltJar() {
+        // given
         String timelineId = "consumer/sdk-counter/alice";
         String id = "consumer-sdk-counter";
         try (BlueCoordination coordination = BlueCoordination.inMemory()) {
@@ -24,6 +25,7 @@ final class SdkBuiltJarConsumerTest {
                             .publicRoot()
                             .fromNow());
 
+            // when
             var result = coordination.operations().on(counter)
                     .from(timeline)
                     .call("increment")
@@ -31,6 +33,7 @@ final class SdkBuiltJarConsumerTest {
                     .requestYaml("amount: 3")
                     .execute();
 
+            // then
             assertEquals(EntryDisposition.APPLIED,
                     result.disposition());
             assertEquals(3L, counter.snapshot().longAt("/counter"));

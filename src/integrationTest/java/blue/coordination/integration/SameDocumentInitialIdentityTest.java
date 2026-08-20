@@ -19,6 +19,7 @@ final class SameDocumentInitialIdentityTest {
     void equalExactStatesWithDifferentDocumentIdsKeepIndependentHistories()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String identityFreeCounter = resource(
                     "examples/clean/embedded-counter.yaml")
                     .replace("documentId: embedded-counter-A\n", "");
@@ -32,11 +33,13 @@ final class SameDocumentInitialIdentityTest {
                     engine.session("counter-lineage-one").current().blueId(),
                     engine.session("counter-lineage-two").current().blueId());
 
+            // when
             engine.appendAndDispatch(
                     timeline,
                     Operation.yaml(
                             "increment", "ownerChannel", "amount: 4"));
 
+            // then
             assertEquals(4L, integer(
                     engine, "counter-lineage-one", "/counter"));
             assertEquals(4L, integer(
@@ -54,6 +57,7 @@ final class SameDocumentInitialIdentityTest {
     void sameDocumentIsReusedButUnknownDivergentStateIsRejectedAtomically()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String childInitial = resource(
                     "examples/clean/embedded-counter.yaml");
             Timeline childTimeline = engine.timeline(
@@ -101,6 +105,8 @@ final class SameDocumentInitialIdentityTest {
 
             String conflictingInitial = childInitial.replace(
                     "counter: 0", "counter: 99");
+
+            // when
             IllegalStateException failure = assertThrows(
                     IllegalStateException.class,
                     () -> engine.appendAndDispatch(
@@ -111,6 +117,7 @@ final class SameDocumentInitialIdentityTest {
                                     engine.embeddedDocumentRequest(
                                             conflictingInitial))));
 
+            // then
             assertTrue(failure.getMessage().contains(
                     "Invalid admission evidence: unknown state"),
                     failure::getMessage);

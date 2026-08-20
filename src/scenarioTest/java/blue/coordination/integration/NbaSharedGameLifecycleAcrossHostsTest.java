@@ -33,6 +33,7 @@ final class NbaSharedGameLifecycleAcrossHostsTest {
     @Test
     void laterAndPostFinalHostsReuseGameAndReceiveRetainedLifecycleEvents()
             throws Exception {
+        // given
         String gameYaml = Round12NbaFixtures.game(
                 GAME_ID,
                 "examples/round12/nba/shared-game",
@@ -66,6 +67,7 @@ final class NbaSharedGameLifecycleAcrossHostsTest {
                     "examples/round12/nba/host-three",
                     "round12-host-three-owner");
 
+            // when
             evidence.admit("Host 1 admission", HOST_ONE,
                     () -> engine.start(HOST_ONE, hostOneYaml));
             assertEquals(1L, integer(engine, HOST_ONE,
@@ -211,6 +213,8 @@ final class NbaSharedGameLifecycleAcrossHostsTest {
 
             EngineTestSupport.MetricDelta total = delta(
                     before, engine.metricsSnapshot());
+
+            // then
             assertEquals(1L, total.counter(
                     "embedding.childSessionsCreated"));
             assertEquals(2L, total.counter(

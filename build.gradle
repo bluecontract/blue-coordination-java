@@ -8,21 +8,17 @@ plugins {
 
 group = 'blue.coordination'
 def dependencyMode = providers.gradleProperty('blueDependencyMode')
-        .getOrElse('local-composite')
+        .getOrElse('published-artifact')
         .trim()
-def sdkCandidateVersion = '3.0.0-rc.3'
 def versionMatches = file('.cz.toml').getText('UTF-8') =~
         /(?m)^version = "([^"]+)"$/
 if (!versionMatches.find()) {
     throw new GradleException('Missing version in .cz.toml')
 }
 def declaredProjectVersion = versionMatches.group(1)
-version = dependencyMode == 'staged-artifact'
-        ? sdkCandidateVersion : declaredProjectVersion
+version = declaredProjectVersion
 
-def localDependencies = dependencyMode == 'local-composite'
-def stagedDependencies = dependencyMode == 'staged-artifact'
-def sdkStagedBlueCoordinates = [
+def publishedBlueCoordinates = [
         'blue.language:blue-language-model': '3.1.0-rc.21',
         'blue.language:blue-language-core': '3.1.0-rc.21',
         'blue.language:blue-language-mapping': '3.1.0-rc.21',
@@ -33,23 +29,9 @@ def sdkStagedBlueCoordinates = [
         'blue.bex:blue-bex-core': '1.1.0-rc.4',
         'blue.bex:blue-bex-contracts': '1.1.0-rc.4'
 ]
-def blueSpecRoot = file(providers.gradleProperty('blueSpecRoot')
-        .orElse(providers.environmentVariable('BLUE_SPEC_ROOT'))
-        .getOrElse('../blue-spec/latest')).canonicalFile
-def publishedRepository = providers.gradleProperty(
-        'bluePublishedRepository').orNull
-def sdkStagingRepository = providers.gradleProperty(
-        'blueStagingRepository').orNull
-
-if (stagedDependencies
-        && (sdkStagingRepository == null || sdkStagingRepository.isBlank())) {
+if (dependencyMode != 'published-artifact') {
     throw new GradleException(
-            'staged-artifact mode requires '
-                    + '-PblueStagingRepository=/absolute/path')
-}
-if (stagedDependencies && !new File(sdkStagingRepository).isAbsolute()) {
-    throw new GradleException(
-            'blueStagingRepository must be an absolute path')
+            'Only blueDependencyMode=published-artifact is supported')
 }
 
 base {
@@ -57,43 +39,6 @@ base {
 }
 
 repositories {
-    if (!localDependencies && !stagedDependencies
-            && publishedRepository != null) {
-        exclusiveContent {
-            forRepository {
-                maven {
-                    name = 'publishedBlueRepository'
-                    url = uri(publishedRepository)
-                    metadataSources { artifact() }
-                }
-            }
-            filter {
-                includeModule 'blue.repo', 'blue-repo-java'
-                includeModule 'blue.bex', 'blue-bex-core'
-                includeModule 'blue.bex', 'blue-bex-contracts'
-            }
-        }
-    }
-    if (stagedDependencies) {
-        exclusiveContent {
-            forRepository {
-                maven {
-                    name = 'stagedBlueRepository'
-                    url = uri(sdkStagingRepository)
-                    metadataSources {
-                        gradleMetadata()
-                        mavenPom()
-                        artifact()
-                    }
-                }
-            }
-            filter {
-                includeGroup 'blue.language'
-                includeGroup 'blue.repo'
-                includeGroup 'blue.bex'
-            }
-        }
-    }
     mavenCentral()
 }
 
@@ -122,10 +67,8 @@ configurations {
 
 dependencyLocking {
     lockAllConfigurations()
-    if (!localDependencies) {
-        lockFile = layout.projectDirectory.file(
-                'gradle/published-artifact.lockfile')
-    }
+    lockFile = layout.projectDirectory.file(
+            'gradle/published-artifact.lockfile')
 }
 
 tasks.withType(JavaCompile).configureEach {
@@ -165,7 +108,11 @@ tasks.withType(Jar).configureEach {
 dependencies {
     api 'blue.language:blue-contracts-core:3.1.0-rc.21'
     implementation 'blue.language:blue-language-java:3.1.0-rc.21'
-    implementation 'blue.repo:blue-repo-java:3.0.0-rc.21'
+    implementation('blue.repo:blue-repo-java:3.0.0-rc.21') {
+        // Repository rc.21 was published against Language rc.20. Coordination
+        // owns the rc.21 runtime and excludes that stale transitive edge.
+        exclude group: 'blue.language', module: 'blue-language-java'
+    }
     api 'blue.bex:blue-bex-core:1.1.0-rc.4'
     api 'blue.bex:blue-bex-contracts:1.1.0-rc.4'
     implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
@@ -255,77 +202,6 @@ def playgroundSmokeTest = tasks.register('playgroundSmokeTest', Test) {
     }
 }
 
-def round13SourceArchiveUnitTest = tasks.register(
-        'round13SourceArchiveUnitTest', Test) {
-    group = 'verification'
-    description = 'Runs the four focused Round 13 source-archive unit proofs.'
-    testClassesDirs = sourceSets.test.output.classesDirs
-    classpath = sourceSets.test.runtimeClasspath
-    dependsOn tasks.named(sourceSets.test.classesTaskName)
-    filter {
-        includeTestsMatching(
-                'blue.coordination.api.DocumentRevisionInitializationCausalityTest')
-        includeTestsMatching(
-                'blue.coordination.internal.DocumentAdmissionCauseTest')
-        includeTestsMatching(
-                'blue.coordination.internal.EmbeddedEpochInputInitializationCausalityTest')
-        includeTestsMatching(
-                'blue.coordination.internal.EmbeddingBindingCanonicalOrderTest')
-    }
-}
-
-def round13SourceArchiveIntegrationTest = tasks.register(
-        'round13SourceArchiveIntegrationTest', Test) {
-    group = 'verification'
-    description = 'Runs the focused Round 13 recovery, retry, and five-occurrence correctness proofs.'
-    testClassesDirs = sourceSets.integrationTest.output.classesDirs
-    classpath = sourceSets.integrationTest.runtimeClasspath
-    dependsOn tasks.named(sourceSets.integrationTest.classesTaskName)
-    filter {
-        includeTestsMatching(
-                'blue.coordination.internal.EmbeddedReceiptRetryIdentityIntegrationTest')
-        includeTestsMatching(
-                'blue.coordination.integration.PlaygroundFiveOccurrenceCorrectnessIntegrationTest')
-        includeTestsMatching(
-                'blue.coordination.integration.PlaygroundFiveOccurrenceRetryTest.retryCompletesFiveOccurrenceFanoutWithoutReinitializingChildren')
-    }
-}
-
-def round13SourceArchiveScenarioTest = tasks.register(
-        'round13SourceArchiveScenarioTest', Test) {
-    group = 'verification'
-    description = 'Runs the focused Round 13 five-occurrence scenario proof.'
-    testClassesDirs = sourceSets.scenarioTest.output.classesDirs
-    classpath = sourceSets.scenarioTest.runtimeClasspath
-    dependsOn tasks.named(sourceSets.scenarioTest.classesTaskName)
-    filter {
-        includeTestsMatching(
-                'blue.coordination.integration.PlaygroundFiveOccurrenceInitializationTest.fiveOccurrencesReuseThreeSessionsAndForwardFiveInitializationEvents')
-    }
-}
-
-def round13SourceArchiveConsumerTest = tasks.register(
-        'round13SourceArchiveConsumerTest', Test) {
-    group = 'verification'
-    description = 'Runs the public-JAR five-occurrence consumer proof.'
-    testClassesDirs = sourceSets.consumerTest.output.classesDirs
-    classpath = sourceSets.consumerTest.runtimeClasspath
-    dependsOn tasks.named(sourceSets.consumerTest.classesTaskName),
-            tasks.named('jar')
-    filter {
-        includeTestsMatching(
-                'blue.coordination.consumer.PublishedArtifactConsumerTest.fiveEmbeddedOccurrencesReuseThreeManagedDocuments')
-    }
-}
-
-tasks.register('round13SourceArchiveSmoke') {
-    group = 'verification'
-    description = 'Runs all focused Round 13 proofs required after archive extraction.'
-    dependsOn round13SourceArchiveUnitTest,
-            round13SourceArchiveIntegrationTest,
-            round13SourceArchiveScenarioTest,
-            round13SourceArchiveConsumerTest
-}
 
 def configureRound13EvidenceRuntime = { JavaExec task ->
     task.group = 'verification'
@@ -464,12 +340,6 @@ publishing {
         maven {
             name = 'staging'
             url = layout.buildDirectory.dir('staging-deploy')
-        }
-        if (stagedDependencies) {
-            maven {
-                name = 'sdkFreeze'
-                url = uri(file(sdkStagingRepository).canonicalFile)
-            }
         }
     }
 }
@@ -789,12 +659,16 @@ tasks.register('dependencyPreflight') {
                     'dependencyPreflight requires '
                             + '-PblueDependencyMode=published-artifact')
         }
+        def repositoryDependency = dependencies.create(
+                'blue.repo:blue-repo-java:3.0.0-rc.21')
+        repositoryDependency.exclude(
+                group: 'blue.language', module: 'blue-language-java')
         def releaseDependencies = configurations.detachedConfiguration(
                 dependencies.create(
                         'blue.language:blue-contracts-core:3.1.0-rc.21'),
                 dependencies.create(
                         'blue.language:blue-language-java:3.1.0-rc.21'),
-                dependencies.create('blue.repo:blue-repo-java:3.0.0-rc.21'),
+                repositoryDependency,
                 dependencies.create('blue.bex:blue-bex-core:1.1.0-rc.4'),
                 dependencies.create(
                         'blue.bex:blue-bex-contracts:1.1.0-rc.4'),
@@ -802,7 +676,23 @@ tasks.register('dependencyPreflight') {
         releaseDependencies.transitive = true
         releaseDependencies.resolutionStrategy.failOnVersionConflict()
         releaseDependencies.resolve()
-        logger.lifecycle('All published release dependencies resolved.')
+        def selectedBlue = releaseDependencies.incoming.resolutionResult
+                .allComponents.findAll { component ->
+            component.id instanceof
+                    org.gradle.api.artifacts.component.ModuleComponentIdentifier
+                    && ['blue.language', 'blue.bex', 'blue.repo'].contains(
+                    component.id.group)
+        }.collectEntries { component ->
+            [(component.id.group + ':' + component.id.module):
+                     component.id.version]
+        }
+        if (selectedBlue != publishedBlueCoordinates) {
+            throw new GradleException(
+                    'Published Blue dependency graph differs from the release '
+                            + "pin: ${selectedBlue}")
+        }
+        logger.lifecycle(
+                'All published release dependencies resolved at exact pins.')
     }
 }
 
@@ -854,13 +744,18 @@ tasks.register('verifyPublicationPom') {
                 .get().asFile.getText('UTF-8')
         def scopes = [:]
         pom.split('</dependency>').each { block ->
-            def groups = (block =~ /<groupId>([^<]+)<\/groupId>/)
+            int dependencyStart = block.lastIndexOf('<dependency>')
+            String dependencyBlock = dependencyStart >= 0
+                    ? block.substring(dependencyStart) : ''
+            def groups = (dependencyBlock
+                    =~ /<groupId>([^<]+)<\/groupId>/)
                     .collect { it[1] }
-            def artifacts = (block =~ /<artifactId>([^<]+)<\/artifactId>/)
+            def artifacts = (dependencyBlock
+                    =~ /<artifactId>([^<]+)<\/artifactId>/)
                     .collect { it[1] }
-            def scope = (block =~ /<scope>([^<]+)<\/scope>/)
+            def scope = (dependencyBlock =~ /<scope>([^<]+)<\/scope>/)
             if (!groups.empty && !artifacts.empty) {
-                scopes[groups.last() + ':' + artifacts.last()] =
+                scopes[groups.first() + ':' + artifacts.first()] =
                         scope.find() ? scope.group(1) : 'compile'
             }
         }
@@ -900,6 +795,19 @@ tasks.register('verifyPublicationPom') {
                 throw new GradleException(
                         "${coordinate} must use ${expectedVersion}")
             }
+        }
+        def repositoryDependency = pom.split('</dependency>').find { block ->
+            block.contains('<groupId>blue.repo</groupId>')
+                    && block.contains(
+                    '<artifactId>blue-repo-java</artifactId>')
+        }
+        if (repositoryDependency == null
+                || !repositoryDependency.contains(
+                '<groupId>blue.language</groupId>')
+                || !repositoryDependency.contains(
+                '<artifactId>blue-language-java</artifactId>')) {
+            throw new GradleException(
+                    'Repository rc.21 must exclude its stale Language rc.20 edge')
         }
         ['MIT License', '<developers>', '<scm>', '<issueManagement>']
                 .each { marker ->
@@ -954,6 +862,7 @@ tasks.register('verifyReleaseMetadata') {
                 'docs/development/build-and-test.md',
                 'docs/development/test-strategy.md',
                 'docs/development/releasing.md',
+                'docs/releases/3.0.0-rc.3.md',
                 'docs/releases/3.0.0-rc.1-test-report.md',
                 'docs/releases/3.0.0-rc.1-evidence.json',
                 'docs/releases/round11-verification.schema.json',
@@ -2606,11 +2515,9 @@ tasks.register('verifySourceArchiveHygiene') {
             throw new GradleException(
                     '.cz.toml must contain one authoritative project version')
         }
-        if (configuredArchiveVersion != (stagedDependencies
-                ? sdkCandidateVersion : declaredProjectVersion)) {
+        if (configuredArchiveVersion != declaredProjectVersion) {
             throw new GradleException(
-                    'Configured source archive version does not match its '
-                            + 'explicit release lane')
+                    'Configured source archive version does not match .cz.toml')
         }
         String attributes = file('.gitattributes').getText('UTF-8')
         [
@@ -2634,9 +2541,9 @@ def sourceArchiveIncludes = [
         '.cz.toml', '.gitattributes', '.github/**', '.gitignore',
         'CHANGELOG.md', 'CONTRIBUTING.md', 'LICENSE', 'README.md',
         'SECURITY.md', 'START-HERE.md', 'build.gradle', 'docs/**',
-        'gradle/**', 'gradle.lockfile', 'gradle.properties', 'gradlew',
+        'gradle/**', 'gradle.properties', 'gradlew',
         'gradlew.bat', 'scripts/**', 'settings.gradle', 'src/**',
-        'staged-sdk-consumer/**'
+        'stabilization/cyclic-topology-rc3-final/**'
 ]
 def sourceArchiveExcludes = [
         '**/.git/**', '**/.gradle/**', '**/.idea/**', '**/build/**',
@@ -2684,21 +2591,12 @@ def sourceArchiveChecksum = tasks.register(
 
 def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
     group = 'verification'
-    description = 'Verifies the extracted archive in local-source or isolated artifact configuration mode.'
+    description = 'Verifies the extracted archive against published dependencies.'
     dependsOn sourceArchiveChecksum
     inputs.file(coordinationSourceArchive.flatMap { it.archiveFile })
     inputs.property('dependencyMode', dependencyMode)
     inputs.property('testJavaVersion', providers.gradleProperty(
             'testJavaVersion').getOrElse('17'))
-    if (localDependencies) {
-        inputs.property('blueLanguageCompositePath', file(
-                providers.gradleProperty('blueLanguageCompositePath')
-                        .getOrElse('../blue-language-java')).canonicalPath)
-        inputs.property('blueSpecRoot', blueSpecRoot.canonicalPath)
-    } else if (stagedDependencies) {
-        inputs.property('blueStagingRepository',
-                file(sdkStagingRepository).canonicalPath)
-    }
     outputs.dir(layout.buildDirectory.dir('source-archive-smoke'))
     def verificationReceipt = layout.buildDirectory.file(
             'reports/contracts10/source-archive-verification.json')
@@ -2764,44 +2662,11 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
         command.addAll([
                 '--no-daemon', '--max-workers=1', 'help',
                 '-PtestJavaVersion=' + providers.gradleProperty(
-                        'testJavaVersion').getOrElse('17')
+                        'testJavaVersion').getOrElse('17'),
+                'verifyDependencyModeIsolation',
+                'verifyPublishedDependencyIsolation',
+                '-PblueDependencyMode=published-artifact'
         ])
-        if (localDependencies) {
-            command.addAll([
-                    'round13SourceArchiveSmoke',
-                    '-PblueDependencyMode=local-composite',
-                    '-PblueLanguageCompositePath=' + file(
-                            providers.gradleProperty(
-                                    'blueLanguageCompositePath').getOrElse(
-                                    '../blue-language-java')).canonicalPath,
-                    '-PblueBexCompositePath=' + file(providers.gradleProperty(
-                            'blueBexCompositePath').getOrElse(
-                            '../blue-bex-java')).canonicalPath,
-                    '-PblueRepositoryCompositePath=' + file(
-                            providers.gradleProperty(
-                                    'blueRepositoryCompositePath').getOrElse(
-                                    '../blue-repository-java')).canonicalPath,
-                    '-PblueSpecRoot=' + blueSpecRoot.canonicalPath
-            ])
-        } else if (stagedDependencies) {
-            command.addAll([
-                    'verifyDependencyModeIsolation',
-                    'verifySdkStagedDependencyGraph',
-                    '-PblueDependencyMode=staged-artifact',
-                    '-PblueStagingRepository='
-                            + file(sdkStagingRepository).canonicalPath
-            ])
-        } else {
-            command.addAll([
-                    'verifyDependencyModeIsolation',
-                    'verifyPublishedDependencyIsolation',
-                    '-PblueDependencyMode=published-artifact'
-            ])
-            if (publishedRepository != null) {
-                command.add('-PbluePublishedRepository='
-                        + uri(publishedRepository).toString())
-            }
-        }
         Process process = new ProcessBuilder(command)
                 .directory(extracted).redirectErrorStream(true).start()
         process.inputStream.eachLine { logger.lifecycle(it) }
@@ -2833,21 +2698,10 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
                         'testJavaVersion').getOrElse('17'),
                 extractedConfiguration: 'PASS',
                 dependencyIsolationStatus: 'PASS',
-                focusedTestsStatus: localDependencies
-                        ? 'PASS' : 'NOT_EXECUTED',
-                publishedArtifactCompatibility: localDependencies
-                        ? 'NOT_APPLICABLE'
-                        : stagedDependencies ? 'PASS' : 'NOT_VERIFIED',
-                publishedArtifactCompatibilityReason:
-                        localDependencies || stagedDependencies
-                                ? null
-                                : 'Matching published Contracts 1.0 and BEX exact-capability APIs are not yet available',
-                focusedTasks: localDependencies ? [
-                        'round13SourceArchiveUnitTest',
-                        'round13SourceArchiveIntegrationTest',
-                        'round13SourceArchiveScenarioTest',
-                        'round13SourceArchiveConsumerTest'
-                ] : []
+                focusedTestsStatus: 'NOT_EXECUTED',
+                publishedArtifactCompatibility: 'PASS',
+                publishedArtifactCompatibilityReason: null,
+                focusedTasks: []
         ]
         receipt.setText(groovy.json.JsonOutput.prettyPrint(
                 groovy.json.JsonOutput.toJson(receiptValue)) + '\n',
@@ -2857,7 +2711,7 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
 
 tasks.register('verifyDependencyModeIsolation') {
     group = 'verification'
-    description = 'Proves local source is the default and artifact modes stay explicit and isolated.'
+    description = 'Proves Maven Central artifacts are the only live dependency lane.'
     inputs.files('settings.gradle', 'build.gradle')
     doLast {
         String settings = file('settings.gradle').getText('UTF-8')
@@ -2866,41 +2720,32 @@ tasks.register('verifyDependencyModeIsolation') {
             throw new GradleException(
                     'Ordinary settings must not execute Git')
         }
-        if (!settings.contains(".getOrElse('local-composite')")
+        if (!settings.contains(".getOrElse('published-artifact')")
                 || !buildScript.contains(
-                ".getOrElse('local-composite')")) {
+                ".getOrElse('published-artifact')")) {
             throw new GradleException(
-                    'Local composite must remain the default implementation mode')
+                    'Published artifacts must remain the default dependency mode')
         }
-        if (!settings.contains("dependencyMode == 'local-composite'")) {
-            throw new GradleException(
-                    'Local composite inclusion is not mode-gated')
-        }
-        if (!settings.contains("'published-artifact'")
-                || !settings.contains("'staged-artifact'")
-                || !settings.contains("'blueStagingRepository'")
-                || !buildScript.contains(
-                "dependencyMode == 'staged-artifact'")) {
-            throw new GradleException(
-                    'Explicit published/staged artifact isolation is missing')
-        }
-        def languageCompositeProjects = [
-                'blue-language-model',
-                'blue-language-core',
-                'blue-language-mapping',
-                'blue-language-ipfs',
-                'blue-language-java',
-                'blue-contracts-core'
+        def forbiddenLiveModes = [
+                'include' + 'Build(', 'local-' + 'composite',
+                'staged-' + 'artifact',
+                'blueLanguage' + 'CompositePath',
+                'blueBex' + 'CompositePath',
+                'blueRepository' + 'CompositePath',
+                'blueStaging' + 'Repository', 'maven' + 'Local()'
         ]
-        if (!settings.contains("'blueLanguageCompositePath'")
-                || languageCompositeProjects.any { projectName ->
-                    !settings.contains(
-                            "module('blue.language:${projectName}')")
-                            || !settings.contains(
-                            "project(':${projectName}')")
-                }) {
+        def leaked = forbiddenLiveModes.findAll { token ->
+            settings.contains(token) || buildScript.contains(token)
+        }
+        if (!leaked.empty) {
             throw new GradleException(
-                    'Complete local Language substitution is missing')
+                    'Retired local dependency plumbing remains: ' + leaked)
+        }
+        if (!settings.contains("dependencyMode != 'published-artifact'")
+                || !buildScript.contains(
+                "dependencyMode != 'published-artifact'")) {
+            throw new GradleException(
+                    'Published-only dependency mode is not fail-closed')
         }
     }
 }
@@ -2923,26 +2768,20 @@ def publishedDependencyIsolation = tasks.register(
                     && component.id.displayName
                     != "root project '${rootProject.name}'"
         }.collect { component -> component.id.displayName }.sort()
-        def publishedBlueModules = components.findAll { component ->
+        def selectedBlue = components.findAll { component ->
             component.id instanceof
                     org.gradle.api.artifacts.component.ModuleComponentIdentifier
                     && ['blue.language', 'blue.bex', 'blue.repo'].contains(
                     component.id.group)
-        }.collect { component ->
-            "${component.id.group}:${component.id.module}"
-        }.toSet()
-        def requiredModules = [
-                'blue.language:blue-contracts-core',
-                'blue.bex:blue-bex-core',
-                'blue.bex:blue-bex-contracts',
-                'blue.repo:blue-repo-java'
-        ] as Set
-        def missingModules = requiredModules - publishedBlueModules
-        if (!leakedProjects.empty || !missingModules.empty) {
+        }.collectEntries { component ->
+            [(component.id.group + ':' + component.id.module):
+                     component.id.version]
+        }
+        if (!leakedProjects.empty || selectedBlue != publishedBlueCoordinates) {
             throw new GradleException(
                     'Published dependency isolation failed: included projects '
-                            + leakedProjects + ', missing modules '
-                            + missingModules.toList().sort())
+                            + leakedProjects + ', selected modules '
+                            + selectedBlue)
         }
         logger.lifecycle(
                 'Published dependency lane resolved without sibling substitution.')
@@ -2966,90 +2805,9 @@ tasks.register('verifyPublishedArtifactDependencies') {
     }
 }
 
-def stagedDependencyGraph = tasks.register(
-        'verifySdkStagedDependencyGraph') {
-    group = 'verification'
-    description = 'Compiles and resolves every exact Blue dependency from the unified local staged repository.'
-    if (stagedDependencies) {
-        dependsOn tasks.named('compileJava')
-    }
-    doLast {
-        if (!stagedDependencies) {
-            throw new GradleException(
-                    'verifySdkStagedDependencyGraph requires '
-                            + '-PblueDependencyMode=staged-artifact')
-        }
-        File repository = file(sdkStagingRepository).canonicalFile
-        def failures = []
-        def components = configurations.runtimeClasspath
-                .incoming.resolutionResult.allComponents
-        def leakedProjects = components.findAll { component ->
-            component.id instanceof
-                    org.gradle.api.artifacts.component.ProjectComponentIdentifier
-                    && component.id.displayName
-                    != "root project '${rootProject.name}'"
-        }.collect { component -> component.id.displayName }.sort()
-        if (!leakedProjects.empty) {
-            failures << "included-project substitution leaked into staged mode: ${leakedProjects}"
-        }
-        def selectedBlue = components.findAll { component ->
-            component.id instanceof
-                    org.gradle.api.artifacts.component.ModuleComponentIdentifier
-                    && ['blue.language', 'blue.bex', 'blue.repo'].contains(
-                    component.id.group)
-        }.collectEntries { component ->
-            [(component.id.group + ':' + component.id.module):
-                     component.id.version]
-        }
-        def missing = (sdkStagedBlueCoordinates.keySet()
-                - selectedBlue.keySet())
-        def unexpected = (selectedBlue.keySet()
-                - sdkStagedBlueCoordinates.keySet())
-        if (!missing.empty) {
-            failures << 'missing staged Blue modules ' + missing.sort()
-        }
-        if (!unexpected.empty) {
-            failures << 'unexpected staged Blue modules ' + unexpected.sort()
-        }
-        sdkStagedBlueCoordinates.each { coordinate, expectedVersion ->
-            if (selectedBlue[coordinate] != null
-                    && selectedBlue[coordinate] != expectedVersion) {
-                failures << ("${coordinate} resolved "
-                        + "${selectedBlue[coordinate]}; expected ${expectedVersion}")
-            }
-            def parts = coordinate.split(':', 2)
-            String relative = [parts[0].replace('.', '/'), parts[1],
-                               expectedVersion,
-                               "${parts[1]}-${expectedVersion}"].join('/')
-            File jar = new File(repository, relative + '.jar')
-            File pom = new File(repository, relative + '.pom')
-            if (!jar.isFile() || jar.length() == 0L) {
-                failures << "missing staged JAR ${jar}"
-            }
-            if (!pom.isFile() || pom.length() == 0L) {
-                failures << "missing staged POM ${pom}"
-            } else if (pom.getText('UTF-8').contains('SNAPSHOT')) {
-                failures << "snapshot dependency in staged POM ${pom}"
-            }
-            File module = new File(repository, relative + '.module')
-            if (!module.isFile() || module.length() == 0L) {
-                failures << "missing Gradle module metadata ${module}"
-            }
-        }
-        if (!failures.empty) {
-            throw new GradleException(
-                    'SDK staged dependency graph failed:\n - '
-                            + failures.join('\n - '))
-        }
-        logger.lifecycle(
-                'SDK staged graph resolved exact Blue modules from {}',
-                repository)
-    }
-}
-
 tasks.register('verifyTestArchitecture') {
     group = 'verification'
-    description = 'Protects release-owned test depth and JAR-only consumer isolation.'
+    description = 'Protects test depth, Given/When/Then shape, and JAR-only consumer isolation.'
     def suites = [
             unit: fileTree('src/test/java') { include '**/*Test.java' },
             integration: fileTree('src/integrationTest/java') {
@@ -3071,7 +2829,7 @@ tasks.register('verifyTestArchitecture') {
         def failures = []
         suites.each { name, sources ->
             int methods = sources.files.sum { source ->
-                (source.getText('UTF-8') =~ /(?m)^\s*@Test\b/).count
+                (source.getText('UTF-8') =~ /(?m)^[ \t]*@Test\b/).count
             } ?: 0
             if (methods < minimumTests[name]) {
                 failures << "${name} has ${methods} @Test methods; "
@@ -3080,6 +2838,89 @@ tasks.register('verifyTestArchitecture') {
             logger.lifecycle(
                     "${name} tests: ${sources.files.size()} classes, "
                             + "${methods} methods")
+            sources.files.sort().each { source ->
+                String body = source.getText('UTF-8')
+                def tests = body =~ /(?m)^[ \t]*@Test\b/
+                def starts = []
+                while (tests.find()) {
+                    starts << tests.start()
+                }
+                starts.eachWithIndex { start, index ->
+                    int annotationLineEnd = body.indexOf('\n', start)
+                    if (annotationLineEnd < 0) {
+                        annotationLineEnd = body.length()
+                    }
+                    String annotationLine = body.substring(
+                            start, annotationLineEnd)
+                    def indentMatch = annotationLine =~ /^(\s*)@Test\b/
+                    if (!indentMatch.find()) {
+                        failures << "${source}: test ${index + 1} has an " +
+                                'unreadable @Test annotation line'
+                        return
+                    }
+                    String closePattern = ('(?m)^'
+                            + java.util.regex.Pattern.quote(
+                                    indentMatch.group(1))
+                            + '\\}\\s*$')
+                    def methodClose = body.substring(start) =~ closePattern
+                    if (!methodClose.find()) {
+                        failures << "${source}: test ${index + 1} has no " +
+                                'matching method close'
+                        return
+                    }
+                    int end = start + methodClose.end()
+                    String testBody = body.substring(start, end)
+                    def markerRanges = [:]
+                    ['given', 'when', 'then'].each { phase ->
+                        def marker = testBody =~
+                                /(?m)^\s*\/\/ ${phase}\s*$/
+                        def ranges = []
+                        while (marker.find()) {
+                            ranges << [start: marker.start(), end: marker.end()]
+                        }
+                        markerRanges[phase] = ranges
+                    }
+                    if (markerRanges.any { phase, ranges ->
+                        ranges.size() != 1
+                    }) {
+                        failures << ("${source}: test ${index + 1} must "
+                                + 'contain exactly one // given, // when, '
+                                + '// then marker')
+                    } else if (!(markerRanges.given[0].start
+                            < markerRanges.when[0].start
+                            && markerRanges.when[0].start
+                            < markerRanges.then[0].start)) {
+                        failures << ("${source}: test ${index + 1} must order "
+                                + '// given before // when before // then')
+                    } else {
+                        Closure<Boolean> hasCode = { String phaseBody ->
+                            phaseBody.readLines().any { line ->
+                                String trimmed = line.trim()
+                                !trimmed.isEmpty()
+                                        && !trimmed.startsWith('//')
+                                        && !trimmed.startsWith('/*')
+                                        && !trimmed.startsWith('*')
+                                        && !['{', '}'].contains(trimmed)
+                            }
+                        }
+                        String givenBody = testBody.substring(
+                                markerRanges.given[0].end,
+                                markerRanges.when[0].start)
+                        String whenBody = testBody.substring(
+                                markerRanges.when[0].end,
+                                markerRanges.then[0].start)
+                        String thenBody = testBody.substring(
+                                markerRanges.then[0].end)
+                        if (!hasCode(givenBody)
+                                || !hasCode(whenBody)
+                                || !hasCode(thenBody)) {
+                            failures << ("${source}: test ${index + 1} must "
+                                    + 'contain meaningful given, when, and '
+                                    + 'then phases')
+                        }
+                    }
+                }
+            }
         }
 
         String integrationSources = fileTree('src/integrationTest/java') {
@@ -3178,275 +3019,144 @@ tasks.register('releaseCheck') {
             'verifyTestArchitecture', extractedSourceArchive
 }
 
-def round13Readiness = tasks.register('verifyRound13Readiness') {
+def rcReadiness = tasks.register('verifyRcReadiness') {
     group = 'verification'
-    description = 'Requires FINAL, complete Round 13 Playground evidence before staging.'
-    inputs.files('docs/releases/3.0.0-rc.1-test-report.md',
-            'docs/releases/3.0.0-rc.1-evidence.json',
-            'docs/releases/round13-verification.schema.json')
-    dependsOn sourceArchiveChecksum, extractedSourceArchive,
-            'verifyDocumentation',
+    description = 'Runs the published-dependency gate for the bounded external-pilot RC.'
+    inputs.files('.cz.toml', 'settings.gradle', 'build.gradle',
+            'gradle/published-artifact.lockfile',
+            'stabilization/cyclic-topology-rc3-final/final-receipt.json',
+            'docs/releases/3.0.0-rc.3.md')
+    def rcTestSources = files(
+            fileTree('src/test/java') { include '**/*Test.java' },
+            fileTree('src/integrationTest/java') {
+                include '**/*Test.java'
+            },
+            fileTree('src/consumerTest/java') { include '**/*Test.java' },
+            fileTree('src/scenarioTest/java') { include '**/*Test.java' })
+    inputs.files(rcTestSources)
+    inputs.files(tasks.named('jar').flatMap { it.archiveFile },
+            tasks.named('sourcesJar').flatMap { it.archiveFile },
+            tasks.named('javadocJar').flatMap { it.archiveFile },
+            tasks.named('testFixturesJar').flatMap { it.archiveFile })
+    dependsOn 'releaseCheck', 'dependencyPreflight',
             'jar', 'sourcesJar', 'javadocJar', 'testFixturesJar'
+    def readinessReport = layout.buildDirectory.file(
+            'reports/release/3.0.0-rc.3-readiness.json')
+    outputs.file(readinessReport)
     doLast {
-        String report = file(
-                'docs/releases/3.0.0-rc.1-test-report.md')
-                .getText('UTF-8')
-        def evidence = new groovy.json.JsonSlurper().parse(
-                file('docs/releases/3.0.0-rc.1-evidence.json'))
-        File sourceArchive = coordinationSourceArchive.get()
-                .archiveFile.get().asFile
-        File sourceArchiveSidecar = new File(
-                sourceArchive.parentFile, sourceArchive.name + '.sha256')
-        String sourceArchiveHash = java.security.MessageDigest
-                .getInstance('SHA-256').digest(sourceArchive.bytes)
-                .encodeHex().toString()
-        boolean detachedHashMatches = sourceArchiveSidecar.isFile()
-                && sourceArchiveSidecar.getText('UTF-8')
-                .startsWith(sourceArchiveHash + '  ' + sourceArchive.name)
-        def publishableLatency = ['PASS', 'PASS_HARD_GATE'] as Set
-        Closure<Boolean> containsUnfinalized
-        containsUnfinalized = { value, String field = null ->
-            if (field != 'duplicatesStrategy'
-                    && ['PENDING_VERIFICATION', 'FAIL', 'BLOCKED',
-                        'BLOCKED_UPSTREAM'].contains(value)) {
-                return true
-            }
-            if (value instanceof Map) {
-                return value.any { key, nested ->
-                    containsUnfinalized(nested, key as String)
-                }
-            }
-            if (value instanceof List) {
-                return value.any { containsUnfinalized(it, field) }
-            }
-            return false
+        def failures = []
+        if (version.toString() != '3.0.0-rc.3') {
+            failures << "release version is ${version}; expected 3.0.0-rc.3"
+        }
+        if (dependencyMode != 'published-artifact') {
+            failures << 'published-artifact is not the active dependency mode'
+        }
+        if (!gradle.includedBuilds.empty) {
+            failures << ('included builds leaked into the release: '
+                    + gradle.includedBuilds.collect { it.name }.sort())
         }
 
-        Closure<String> gitOutput = { String... arguments ->
-            def command = ['git']
-            command.addAll(arguments as List)
-            Process process = new ProcessBuilder(command)
-                    .directory(rootDir).start()
-            String stdout = process.inputStream.getText('UTF-8')
-            String stderr = process.errorStream.getText('UTF-8')
-            if (process.waitFor() != 0) {
-                throw new GradleException("Git failed: ${stderr}")
-            }
-            stdout.trim()
-        }
-        String actualHead = gitOutput('rev-parse', 'HEAD')
-        String actualStatus = gitOutput(
-                'status', '--porcelain', '--untracked-files=normal')
-        Process ancestorProcess = new ProcessBuilder(
-                'git', 'merge-base', '--is-ancestor',
-                evidence.source.candidateCommit ?: 'INVALID', actualHead)
-                .directory(rootDir).start()
-        boolean testedCommitIsAncestor = ancestorProcess.waitFor() == 0
-        Closure<String> sha256 = { byte[] bytes ->
-            java.security.MessageDigest.getInstance('SHA-256')
-                    .digest(bytes).encodeHex().toString()
-        }
-        Closure<String> relativeSourcePath = { File source ->
-            rootDir.toPath().relativize(source.toPath()).toString()
-                    .replace(File.separator, '/')
-        }
-        String currentSourceManifest = productionSources.files.sort {
-            source -> relativeSourcePath(source)
-        }.collect { source ->
-            "${relativeSourcePath(source)} ${sha256(source.bytes)}"
-        }.join('\n')
-        boolean testedSourceStillExact = sha256(currentSourceManifest.getBytes(
-                java.nio.charset.StandardCharsets.UTF_8))
-                == evidence.source.mainSourceManifestSha256
-        String sha256Pattern = /^[0-9a-f]{64}$/
-        String sha1Pattern = /^[0-9a-f]{40}$/
-        def artifactTasks = [
-                mainJarSha256: 'jar',
-                sourcesJarSha256: 'sourcesJar',
-                javadocJarSha256: 'javadocJar',
-                testFixturesJarSha256: 'testFixturesJar'
-        ]
-        def artifactHashMismatches = []
-        artifactTasks.each { evidenceKey, taskName ->
-            File artifact = tasks.named(taskName).get()
-                    .archiveFile.get().asFile
-            String actualHash = java.security.MessageDigest
-                    .getInstance('SHA-256').digest(artifact.bytes)
-                    .encodeHex().toString()
-            def expectedHash = evidence.artifacts[evidenceKey]
-            if (!(expectedHash ==~ sha256Pattern)
-                    || expectedHash != actualHash) {
-                artifactHashMismatches << ("${artifact.name}: expected "
-                        + "${expectedHash}, actual ${actualHash}")
+        String lock = file('gradle/published-artifact.lockfile')
+                .getText('UTF-8')
+        publishedBlueCoordinates.each { coordinate, expectedVersion ->
+            if (!lock.contains("${coordinate}:${expectedVersion}=")) {
+                failures << "dependency lock does not pin ${coordinate}:${expectedVersion}"
             }
         }
-        boolean artifactHashesMatch = artifactHashMismatches.empty
-        def campaign = evidence.performance.round13Campaign
-        def campaignProvenance = campaign.runtimeProvenanceJson
-                && file(campaign.runtimeProvenanceJson).isFile()
-                ? new groovy.json.JsonSlurper().parse(
-                file(campaign.runtimeProvenanceJson)) : [:]
-        def expectedLimitedRcPolicy = [
-                mode: 'RC_WITH_KNOWN_PERFORMANCE_LIMITATION',
-                exactRelease: '3.0.0-rc.1',
-                decision: 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION',
-                performanceReleaseBlocking: false,
-                stableReleaseEligible: false,
-                nonPerformanceGatesRequired: true,
-                explicitWorkflowOptInRequired: true
-        ]
-        boolean limitedRcPolicy = version.toString() == '3.0.0-rc.1'
-                && evidence.release == version.toString()
-                && evidence.releasePolicy == expectedLimitedRcPolicy
-        boolean latencyExceptionOptIn = providers.gradleProperty(
-                'allowRound13LatencyException').orNull == 'true'
-        boolean normalLatencyDecision = evidence.verdict == 'PASS'
-                && publishableLatency.contains(
-                evidence.status.playgroundLatencyReady)
-                && evidence.status.publicRcReady == 'PASS'
-                && publishableLatency.contains(campaign.status)
-                && campaignProvenance.candidate?.implementationHead
-                == evidence.source.candidateCommit
-                && campaignProvenance.candidate?.worktreeStatusSha256
-                == java.security.MessageDigest.getInstance('SHA-256')
-                .digest(new byte[0]).encodeHex().toString()
-                && campaign.comparison == 'SAME_MACHINE_INTERLEAVED_AB'
-                && campaign.requiredSamples >= 30
-                && campaign.measuredSamples >= campaign.requiredSamples
-                && [campaign.runtimeMarkdown, campaign.runtimeJson,
-                    campaign.runtimeProvenanceJson].every {
-                    it instanceof String && file(it).isFile()
-                }
-                && campaign.pendingReason == null
-                && evidence.proofs.every { it.status == 'PASS' }
-        boolean limitedLatencyDecision = latencyExceptionOptIn
-                && limitedRcPolicy
-                && evidence.verdict
-                == 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION'
-                && evidence.status.playgroundLatencyReady
-                == 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION'
-                && evidence.status.publicRcReady
-                == 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION'
-                && campaign.status == 'PENDING_VERIFICATION'
-                && campaign.comparison == 'SAME_MACHINE_INTERLEAVED_AB'
-                && campaign.requiredSamples >= 30
-                && campaign.measuredSamples == 0
-                && campaign.runtimeMarkdown == null
-                && campaign.runtimeJson == null
-                && campaign.runtimeProvenanceJson == null
-                && campaign.pendingReason instanceof String
-                && !campaign.pendingReason.isBlank()
-                && evidence.proofs.every {
-                    it.status == 'PASS'
-                            || (it.id
-                            == 'five-occurrence-host-versus-frozen-time'
-                            && it.status == 'PENDING_VERIFICATION')
-                }
-        def finalizedEvidenceScope = evidence
-        if (limitedLatencyDecision) {
-            finalizedEvidenceScope = new LinkedHashMap(evidence)
-            finalizedEvidenceScope.status = evidence.status.findAll {
-                key, ignored -> key != 'playgroundLatencyReady'
-            }
-            finalizedEvidenceScope.performance = new LinkedHashMap(
-                    evidence.performance)
-            finalizedEvidenceScope.performance.remove('round13Campaign')
-            finalizedEvidenceScope.proofs = evidence.proofs.findAll {
-                it.id != 'five-occurrence-host-versus-frozen-time'
+
+        def semanticReceipt = new groovy.json.JsonSlurper().parse(
+                file('stabilization/cyclic-topology-rc3-final/final-receipt.json'))
+        if (semanticReceipt.receiptState
+                != 'FINAL_EXTERNAL_PILOT_RC_EVIDENCE'
+                || semanticReceipt.overallStatus
+                != 'PASS_FOR_BOUNDED_EXTERNAL_PILOT'
+                || semanticReceipt.implementationConformanceClaimed != true
+                || semanticReceipt.externalPilotReady != true
+                || semanticReceipt.releaseReady != false
+                || semanticReceipt.publicReleaseReady != false
+                || semanticReceipt.productionReleaseReady != false
+                || semanticReceipt.stableLatencySlaClaimed != false) {
+            failures << 'retained semantic evidence does not authorize the bounded pilot tier'
+        }
+        String releaseNotes = file('docs/releases/3.0.0-rc.3.md')
+                .getText('UTF-8')
+        if (!releaseNotes.contains(
+                'RC3_RELEASE_TIER: BOUNDED_EXTERNAL_PILOT')
+                || !releaseNotes.contains(
+                'RC3_DEPENDENCY_MODE: PUBLISHED_ARTIFACTS_ONLY')
+                || !releaseNotes.contains(
+                'RC3_PUBLIC_ARTIFACT_READY: true')
+                || !releaseNotes.contains(
+                'RC3_PRODUCTION_READY: false')) {
+            failures << 'rc.3 release notes do not state the exact release tier'
+        }
+
+        if (System.getenv('CI') != null) {
+            Process statusProcess = new ProcessBuilder(
+                    'git', 'status', '--porcelain',
+                    '--untracked-files=normal').directory(rootDir).start()
+            String status = statusProcess.inputStream.getText('UTF-8').trim()
+            String error = statusProcess.errorStream.getText('UTF-8').trim()
+            if (statusProcess.waitFor() != 0) {
+                failures << "cannot inspect release worktree: ${error}"
+            } else if (!status.isEmpty()) {
+                failures << 'CI release worktree is not clean'
             }
         }
-        File archiveReceiptFile = file(
-                'build/reports/round13/source-archive-verification.json')
-        def archiveReceipt = archiveReceiptFile.isFile()
-                ? new groovy.json.JsonSlurper().parse(archiveReceiptFile)
-                : [:]
-        boolean archiveReceiptMatches = archiveReceipt.schemaId
-                == 'blue-coordination-round13-source-archive-verification-v1'
-                && archiveReceipt.archiveName == sourceArchive.name
-                && archiveReceipt.archiveSha256 == sourceArchiveHash
-                && archiveReceipt.dependencyMode == 'published-artifact'
-                && archiveReceipt.extractedConfiguration == 'PASS'
-                && archiveReceipt.focusedTestsStatus == 'PASS'
-                && archiveReceipt.publishedArtifactSmokeBuild == 'PASS'
-        if (evidence.schemaVersion != '4.1.0'
-                || evidence.profile
-                != 'ROUND13_PLAYGROUND_FIVE_OCCURRENCE'
-                || evidence.evidenceState != 'FINAL'
-                || !(normalLatencyDecision || limitedLatencyDecision)
-                || !(evidence.source.candidateCommit ==~ sha1Pattern)
-                || !(testedCommitIsAncestor || testedSourceStillExact)
-                || evidence.source.binding != 'CANDIDATE_COMMIT'
-                || evidence.source.worktree != 'CLEAN'
-                || evidence.source.dirtyReason != null
-                || !actualStatus.isEmpty()
-                || evidence.executionBinding.kind
-                != 'CANDIDATE_COMMIT_EXECUTION'
-                || evidence.executionBinding.candidateCommit
-                != evidence.source.candidateCommit
-                || evidence.executionBinding.mainSourceManifestSha256
-                != evidence.source.mainSourceManifestSha256
-                || evidence.executionBinding.reason != null
-                || evidence.status.temporalArchitectureReady != 'PASS'
-                || evidence.status.inMemoryEngineWorkingReady != 'PASS'
-                || evidence.status.playgroundCoreReady != 'PASS'
-                || evidence.status.providerBackedReady != 'OUT_OF_SCOPE'
-                || evidence.status.mandateAgentReady != 'OUT_OF_SCOPE'
-                || evidence.tests.executionStatus != 'PASS'
-                || evidence.tests.failures != 0
-                || evidence.tests.errors != 0
-                || evidence.tests.skipped != 0
-                || evidence.tests.suites.any {
-                    it.status != 'PASS' || it.failures != 0
-                            || it.errors != 0 || it.skipped != 0
-                }
-                || evidence.shape.status != 'PASS'
-                || evidence.artifacts.status != 'PASS'
-                || !artifactHashesMatch
-                || evidence.runtimes.any { it.status != 'PASS' }
-                || evidence.structuralEvidence.status != 'PASS'
-                || evidence.structuralEvidence.requiredZeroCounters.any {
-                    key, value -> value != 0
-                }
-                || evidence.sourceArchive.extractedConfiguration != 'PASS'
-                || evidence.sourceArchive.focusedTestsStatus != 'PASS'
-                || evidence.sourceArchive.publishedArtifactSmokeBuild != 'PASS'
-                || evidence.sourceArchive.verificationReceipt.path
-                != 'build/reports/round13/source-archive-verification.json'
-                || evidence.sourceArchive.checksum.mode
-                != 'DETACHED_SHA256_SIDECAR'
-                || evidence.sourceArchive.checksum.path
-                != 'build/distributions/' + sourceArchive.name + '.sha256'
-                || evidence.sourceArchive.checksum.digest != null
-                || evidence.sourceArchive.pendingReason != null
-                || !archiveReceiptMatches
-                || !detachedHashMatches
-                || evidence.publicationEvidence.status != 'PASS'
-                || !(evidence.publicationEvidence.durationSeconds
-                        instanceof Number)
-                || !evidence.blockers.empty
-                || containsUnfinalized(finalizedEvidenceScope)
-                || (normalLatencyDecision
-                        && report.contains('PENDING_VERIFICATION'))
-                || report.contains('ROUND13_INTERIM_VERIFICATION:')
-                || (normalLatencyDecision && !report.contains(
-                        'ROUND13_FINAL_VERIFICATION: PASS'))
-                || (limitedLatencyDecision && !report.contains(
-                        'ROUND13_FINAL_VERIFICATION: '
-                                + 'PASS_WITH_KNOWN_PERFORMANCE_LIMITATION'))) {
-            String artifactDetails = artifactHashMismatches.empty ? ''
-                    : ('\nArtifact SHA-256 mismatches:\n - '
-                    + artifactHashMismatches.join('\n - '))
+
+        if (!failures.empty) {
             throw new GradleException(
-                    'Canonical Round 13 evidence does not permit staging'
-                            + artifactDetails)
+                    'RC readiness failed:\n - ' + failures.join('\n - '))
         }
+
+        Closure<String> sha256 = { File artifact ->
+            java.security.MessageDigest.getInstance('SHA-256')
+                    .digest(artifact.bytes).encodeHex().toString()
+        }
+        def artifacts = [
+                mainJar: tasks.named('jar').get().archiveFile.get().asFile,
+                sourcesJar: tasks.named('sourcesJar').get()
+                        .archiveFile.get().asFile,
+                javadocJar: tasks.named('javadocJar').get()
+                        .archiveFile.get().asFile,
+                testFixturesJar: tasks.named('testFixturesJar').get()
+                        .archiveFile.get().asFile
+        ]
+        long testMethods = rcTestSources.files.sum { source ->
+            (source.getText('UTF-8') =~ /(?m)^\s*@Test\b/).count
+        } ?: 0L
+        File report = readinessReport.get().asFile
+        report.parentFile.mkdirs()
+        report.setText(groovy.json.JsonOutput.prettyPrint(
+                groovy.json.JsonOutput.toJson([
+                        schemaId: 'blue-coordination-rc-readiness-v1',
+                        release: version.toString(),
+                        status: 'PASS_FOR_BOUNDED_EXTERNAL_PILOT',
+                        dependencyMode: dependencyMode,
+                        dependencies: publishedBlueCoordinates,
+                        testMethods: testMethods,
+                        semanticEvidence:
+                                'stabilization/cyclic-topology-rc3-final/final-receipt.json',
+                        publicArtifactReady: true,
+                        productionReady: false,
+                        stableLatencySlaClaimed: false,
+                        artifacts: artifacts.collectEntries { name, artifact ->
+                            [(name): [
+                                    file: artifact.name,
+                                    sha256: sha256(artifact)
+                            ]]
+                        }
+                ])) + '\n', 'UTF-8')
     }
 }
 
 tasks.register('stageRelease') {
     group = 'publishing'
     description = 'Builds the verified Maven Central staging repository.'
-    dependsOn 'releaseCheck', round13Readiness,
+    dependsOn(version.toString() == '3.0.0-rc.3'
+            ? rcReadiness
+            : tasks.named('releaseCheck'))
+    dependsOn 'dependencyPreflight',
             'publishMavenJavaPublicationToStagingRepository'
     doFirst {
         if (dependencyMode != 'published-artifact') {
@@ -3458,779 +3168,17 @@ tasks.register('stageRelease') {
 }
 
 tasks.named('publishMavenJavaPublicationToStagingRepository') {
-    dependsOn round13Readiness
+    dependsOn(version.toString() == '3.0.0-rc.3'
+            ? rcReadiness
+            : tasks.named('releaseCheck'))
+    dependsOn 'dependencyPreflight'
 }
 
-def sdkFreezePrepublicationCheck = tasks.register(
-        'sdkFreezePrepublicationCheck') {
-    group = 'verification'
-    description = 'Runs every fail-closed gate before publishing the 3.0.0-rc.3 SDK candidate.'
-    if (stagedDependencies) {
-        dependsOn 'releaseCheck', stagedDependencyGraph,
-                sourceArchiveChecksum
-    }
-    doLast {
-        def failures = []
-        if (!stagedDependencies) {
-            failures << 'blueDependencyMode must be staged-artifact'
-        }
-        if (version.toString() != sdkCandidateVersion) {
-            failures << "candidate version is ${version}; expected ${sdkCandidateVersion}"
-        }
-        if (sdkStagingRepository == null
-                || sdkStagingRepository.isBlank()
-                || !new File(sdkStagingRepository).isAbsolute()) {
-            failures << 'blueStagingRepository must be an absolute path'
-        } else if (!file(sdkStagingRepository).canonicalFile.isDirectory()) {
-            failures << 'blueStagingRepository must already contain the staged prerequisite repository'
-        }
-        if (!gradle.includedBuilds.empty) {
-            failures << ('staged-artifact mode contains composite builds: '
-                    + gradle.includedBuilds.collect { it.name }.sort())
-        }
-        if (repositories.any { repository ->
-            repository.class.name.contains('MavenLocal')
-        }) {
-            failures << 'mavenLocal is forbidden in the SDK candidate lane'
-        }
-        if (!failures.empty) {
-            throw new GradleException(
-                    'SDK freeze prepublication check failed:\n - '
-                            + failures.join('\n - '))
-        }
-    }
+tasks.named('releaseCheck') {
+    dependsOn 'verifyPublishedArtifactDependencies'
 }
-
-def sdkFreezePublish = stagedDependencies
-        ? tasks.named(
-        'publishMavenJavaPublicationToSdkFreezeRepository') : null
-if (sdkFreezePublish != null) {
-    sdkFreezePublish.configure {
-        dependsOn sdkFreezePrepublicationCheck
-    }
-}
-
-def stageSdkFreezeCandidate = tasks.register(
-        'stageSdkFreezeCandidate') {
-    group = 'publishing'
-    description = 'Publishes only the verified 3.0.0-rc.3 SDK candidate to the unified local repository.'
-    if (sdkFreezePublish != null) {
-        dependsOn sdkFreezePublish
-    }
-    doFirst {
-        if (!stagedDependencies || sdkFreezePublish == null) {
-            throw new GradleException(
-                    'stageSdkFreezeCandidate requires '
-                            + '-PblueDependencyMode=staged-artifact '
-                            + '-PblueStagingRepository=/absolute/path')
-        }
-    }
-}
-
-def sdkFreezeSourceArchiveFile = coordinationSourceArchive.flatMap {
-    it.archiveFile
-}
-def sdkFreezeSourceArchiveChecksumFile = sdkFreezeSourceArchiveFile.map {
-    regularFile -> new File(regularFile.asFile.parentFile,
-            regularFile.asFile.name + '.sha256')
-}
-def sdkFreezeCandidateReport = layout.buildDirectory.file(
-        'reports/sdk-freeze/staged-candidate.json')
-def verifySdkStagedCandidateRepository = tasks.register(
-        'verifySdkStagedCandidateRepository') {
-    group = 'verification'
-    description = 'Verifies the staged candidate JAR, manifest, POM, module metadata, and documentation artifacts.'
-    if (sdkFreezePublish != null) {
-        dependsOn sdkFreezePublish, sourceArchiveChecksum
-        inputs.files(providers.provider {
-            File versionDirectory = new File(
-                    file(sdkStagingRepository).canonicalFile,
-                    'blue/coordination/blue-coordination-java/'
-                            + sdkCandidateVersion)
-            [
-                    new File(versionDirectory,
-                            "blue-coordination-java-${sdkCandidateVersion}.jar"),
-                    new File(versionDirectory,
-                            "blue-coordination-java-${sdkCandidateVersion}.pom"),
-                    new File(versionDirectory,
-                            "blue-coordination-java-${sdkCandidateVersion}.module"),
-                    new File(versionDirectory,
-                            "blue-coordination-java-${sdkCandidateVersion}-sources.jar"),
-                    new File(versionDirectory,
-                            "blue-coordination-java-${sdkCandidateVersion}-javadoc.jar"),
-                    new File(versionDirectory,
-                            "blue-coordination-java-${sdkCandidateVersion}-test-fixtures.jar")
-            ]
-        })
-        inputs.file(sdkFreezeSourceArchiveFile)
-        inputs.file(sdkFreezeSourceArchiveChecksumFile)
-    }
-    outputs.file(sdkFreezeCandidateReport)
-    doLast {
-        if (!stagedDependencies || sdkFreezePublish == null) {
-            throw new GradleException(
-                    'verifySdkStagedCandidateRepository requires the staged-artifact lane')
-        }
-        File repository = file(sdkStagingRepository).canonicalFile
-        File versionDirectory = new File(repository,
-                'blue/coordination/blue-coordination-java/'
-                        + sdkCandidateVersion)
-        File mainJar = new File(versionDirectory,
-                "blue-coordination-java-${sdkCandidateVersion}.jar")
-        File pom = new File(versionDirectory,
-                "blue-coordination-java-${sdkCandidateVersion}.pom")
-        File module = new File(versionDirectory,
-                "blue-coordination-java-${sdkCandidateVersion}.module")
-        File sources = new File(versionDirectory,
-                "blue-coordination-java-${sdkCandidateVersion}-sources.jar")
-        File javadoc = new File(versionDirectory,
-                "blue-coordination-java-${sdkCandidateVersion}-javadoc.jar")
-        File testFixtures = new File(versionDirectory,
-                "blue-coordination-java-${sdkCandidateVersion}-test-fixtures.jar")
-        File sourceArchive = sdkFreezeSourceArchiveFile.get().asFile
-        File sourceArchiveSidecar =
-                sdkFreezeSourceArchiveChecksumFile.get()
-        def requiredArtifacts = [mainJar, pom, module, sources, javadoc,
-                                 testFixtures, sourceArchive,
-                                 sourceArchiveSidecar]
-        def failures = requiredArtifacts.findAll {
-            !it.isFile() || it.length() == 0L
-        }.collect { "missing or empty candidate artifact/evidence ${it}" }
-        def sha256 = { File artifact ->
-            java.security.MessageDigest.getInstance('SHA-256')
-                    .digest(artifact.bytes).encodeHex().toString()
-        }
-
-        String sourceArchiveHash = sourceArchive.isFile()
-                ? sha256(sourceArchive) : null
-        String sourceArchiveSidecarHash = sourceArchiveSidecar.isFile()
-                ? sha256(sourceArchiveSidecar) : null
-        String expectedSourceArchiveName =
-                "blue-coordination-java-${sdkCandidateVersion}-source.zip"
-        if (sourceArchive.name != expectedSourceArchiveName) {
-            failures << ("source archive is ${sourceArchive.name}; expected "
-                    + expectedSourceArchiveName)
-        }
-        if (sourceArchiveSidecar.name
-                != expectedSourceArchiveName + '.sha256') {
-            failures << 'source archive checksum sidecar has the wrong name'
-        }
-        if (sourceArchive.isFile() && sourceArchiveSidecar.isFile()
-                && sourceArchiveSidecar.getText('UTF-8')
-                != "${sourceArchiveHash}  ${sourceArchive.name}\n") {
-            failures << 'source archive checksum sidecar is not exactly hash-bound'
-        }
-
-        String manifestVersion = null
-        if (mainJar.isFile() && mainJar.length() > 0L) {
-            def jar = new java.util.jar.JarFile(mainJar)
-            try {
-                manifestVersion = jar.manifest?.mainAttributes
-                        ?.getValue('Implementation-Version')
-                if (manifestVersion != sdkCandidateVersion) {
-                    failures << ('candidate manifest version is '
-                            + "${manifestVersion}; expected ${sdkCandidateVersion}")
-                }
-                [
-                        'blue/coordination/sdk/BlueCoordination.class',
-                        'blue/coordination/sdk/EntryDisposition.class',
-                        'blue/coordination/sdk/contracts-1.0-release.properties'
-                ].each { entry ->
-                    if (jar.getEntry(entry) == null) {
-                        failures << "candidate JAR is missing ${entry}"
-                    }
-                }
-            } finally {
-                jar.close()
-            }
-        }
-
-        String pomText = pom.isFile() ? pom.getText('UTF-8') : ''
-        [
-                '<groupId>blue.coordination</groupId>',
-                '<artifactId>blue-coordination-java</artifactId>',
-                "<version>${sdkCandidateVersion}</version>"
-        ].each { marker ->
-            if (!pomText.contains(marker)) {
-                failures << "candidate POM is missing ${marker}"
-            }
-        }
-        def expectedPomDependencies = [
-                'blue.language:blue-contracts-core': '3.1.0-rc.21',
-                'blue.language:blue-language-java': '3.1.0-rc.21',
-                'blue.repo:blue-repo-java': '3.0.0-rc.21',
-                'blue.bex:blue-bex-core': '1.1.0-rc.4',
-                'blue.bex:blue-bex-contracts': '1.1.0-rc.4'
-        ]
-        expectedPomDependencies.each { coordinate, expectedVersion ->
-            def parts = coordinate.split(':', 2)
-            String dependencyMarker = "<groupId>${parts[0]}</groupId>"
-            String artifactMarker = "<artifactId>${parts[1]}</artifactId>"
-            def dependencyBlock = pomText.split('</dependency>').find {
-                it.contains(dependencyMarker)
-                        && it.contains(artifactMarker)
-            }
-            if (dependencyBlock == null || !dependencyBlock.contains(
-                    "<version>${expectedVersion}</version>")) {
-                failures << "candidate POM does not pin ${coordinate}:${expectedVersion}"
-            }
-        }
-        if (pomText.toUpperCase(java.util.Locale.ROOT)
-                .contains('SNAPSHOT')) {
-            failures << 'candidate POM contains a snapshot version'
-        }
-
-        def moduleMetadata = module.isFile()
-                ? new groovy.json.JsonSlurper().parse(module) : [:]
-        if (moduleMetadata.formatVersion == null
-                || moduleMetadata.component?.group != 'blue.coordination'
-                || moduleMetadata.component?.module
-                != 'blue-coordination-java'
-                || moduleMetadata.component?.version
-                != sdkCandidateVersion
-                || !(moduleMetadata.variants instanceof List)
-                || moduleMetadata.variants.empty) {
-            failures << 'candidate Gradle module metadata has the wrong coordinate or no variants'
-        }
-        if (module.isFile() && module.getText('UTF-8')
-                .toUpperCase(java.util.Locale.ROOT).contains('SNAPSHOT')) {
-            failures << 'candidate Gradle module metadata contains a snapshot version'
-        }
-        [
-                (mainJar): tasks.named('jar').get().archiveFile.get().asFile,
-                (sources): tasks.named('sourcesJar').get()
-                        .archiveFile.get().asFile,
-                (javadoc): tasks.named('javadocJar').get()
-                        .archiveFile.get().asFile,
-                (testFixtures): tasks.named('testFixturesJar').get()
-                        .archiveFile.get().asFile
-        ].each { stagedArtifact, builtArtifact ->
-            if (stagedArtifact.isFile() && builtArtifact.isFile()
-                    && !java.util.Arrays.equals(
-                    stagedArtifact.bytes, builtArtifact.bytes)) {
-                failures << "staged artifact differs from the built artifact: ${stagedArtifact.name}"
-            }
-        }
-        if (sources.isFile()) {
-            def sourcesArchive = new java.util.zip.ZipFile(sources)
-            try {
-                if (sourcesArchive.getEntry(
-                        'blue/coordination/sdk/BlueCoordination.java')
-                        == null) {
-                    failures << 'candidate sources JAR omits the SDK entry point'
-                }
-            } finally {
-                sourcesArchive.close()
-            }
-        }
-        if (javadoc.isFile()) {
-            def javadocArchive = new java.util.zip.ZipFile(javadoc)
-            try {
-                if (javadocArchive.getEntry(
-                        'blue/coordination/sdk/BlueCoordination.html')
-                        == null) {
-                    failures << 'candidate Javadoc JAR omits the SDK entry point'
-                }
-            } finally {
-                javadocArchive.close()
-            }
-        }
-        if (!failures.empty) {
-            throw new GradleException(
-                    'Staged SDK candidate verification failed:\n - '
-                            + failures.join('\n - '))
-        }
-
-        File report = sdkFreezeCandidateReport.get().asFile
-        report.parentFile.mkdirs()
-        report.setText(groovy.json.JsonOutput.prettyPrint(
-                groovy.json.JsonOutput.toJson([
-                        schemaId: 'blue-coordination-sdk-candidate-v1',
-                        status: 'PASS',
-                        coordinate: "blue.coordination:blue-coordination-java:${sdkCandidateVersion}",
-                        manifestVersion: manifestVersion,
-                        repository: repository.absolutePath,
-                        sourceArchive: [
-                                name: sourceArchive.name,
-                                sha256: sourceArchiveHash,
-                                checksumName: sourceArchiveSidecar.name,
-                                checksumSha256: sourceArchiveSidecarHash,
-                                checksumValue: sourceArchiveHash
-                        ],
-                        artifacts: requiredArtifacts.collectEntries {
-                            [(it.name): sha256(it)]
-                        }
-                ])) + '\n', 'UTF-8')
-    }
-}
-
-def sdkConsumerFixtureArchive = tasks.register(
-        'sdkFreezeConsumerFixtureArchive', Zip) {
-    group = 'distribution'
-    description = 'Packages the standalone SDK consumer before isolated extraction.'
-    archiveFileName = 'blue-coordination-staged-sdk-consumer.zip'
-    destinationDirectory = layout.buildDirectory.dir(
-            'sdk-freeze/consumer-fixture')
-    includeEmptyDirs = false
-    duplicatesStrategy = org.gradle.api.file.DuplicatesStrategy.FAIL
-    from('staged-sdk-consumer') {
-        include 'settings.gradle', 'build.gradle', 'src/main/java/**'
-    }
-}
-
-def registerExtractedSdkConsumer = { int javaVersion ->
-    def extractedDirectory = layout.buildDirectory.dir(
-            "sdk-freeze/extracted-consumer-java${javaVersion}")
-    def extractFixture = tasks.register(
-            "extractSdkFreezeConsumerFixtureJava${javaVersion}", Sync) {
-        group = 'verification'
-        description = "Extracts a fresh standalone Java ${javaVersion} consumer with no composite-build state."
-        dependsOn sdkConsumerFixtureArchive
-        from sdkConsumerFixtureArchive.map { zipTree(it.archiveFile) }
-        into extractedDirectory
-    }
-    def report = layout.buildDirectory.file(
-            "reports/sdk-freeze/consumer-java${javaVersion}.json")
-    tasks.register(
-            "verifyExtractedSdkConsumerJava${javaVersion}", GradleBuild) {
-        group = 'verification'
-        description = "Builds and runs the extracted staged SDK consumer on Java ${javaVersion}."
-        dependsOn extractFixture,
-                verifySdkStagedCandidateRepository
-        setDir(extractedDirectory)
-        setTasks(['verifyStagedSdkConsumer'])
-        startParameter.projectProperties = [
-                stagedRepository: stagedDependencies
-                        ? file(sdkStagingRepository).canonicalPath : '',
-                coordinationVersion: sdkCandidateVersion,
-                testJavaVersion: javaVersion.toString(),
-                consumerReport: report.get().asFile.absolutePath
-        ]
-        inputs.file(sdkFreezeCandidateReport)
-        inputs.file(sdkConsumerFixtureArchive.flatMap { it.archiveFile })
-        inputs.property('javaVersion', javaVersion)
-        inputs.property('coordinationVersion', sdkCandidateVersion)
-        outputs.file(report)
-        outputs.upToDateWhen { false }
-    }
-}
-
-def extractedSdkConsumerJava17 = registerExtractedSdkConsumer(17)
-def extractedSdkConsumerJava21 = registerExtractedSdkConsumer(21)
-extractedSdkConsumerJava21.configure {
-    mustRunAfter extractedSdkConsumerJava17
-}
-
-def verifyExtractedSdkConsumer = tasks.register(
-        'verifyExtractedSdkConsumer') {
-    group = 'verification'
-    description = 'Runs the extracted staged SDK consumer on Java 17 and Java 21.'
-    dependsOn extractedSdkConsumerJava17, extractedSdkConsumerJava21
-}
-
-def sdkFreezeArtifactReport = layout.buildDirectory.file(
-        'reports/sdk-freeze/artifact-check.json')
-tasks.register('sdkFreezeArtifactCheck') {
-    group = 'verification'
-    description = 'Completes the staged 3.0.0-rc.3 SDK artifact and Java 17/21 consumer gate.'
-    if (stagedDependencies) {
-        dependsOn stageSdkFreezeCandidate,
-                verifySdkStagedCandidateRepository,
-                verifyExtractedSdkConsumer
-    }
-    inputs.files(sdkFreezeCandidateReport,
-            layout.buildDirectory.file(
-                    'reports/sdk-freeze/consumer-java17.json'),
-            layout.buildDirectory.file(
-                    'reports/sdk-freeze/consumer-java21.json'))
-    outputs.file(sdkFreezeArtifactReport)
-    doLast {
-        if (!stagedDependencies) {
-            throw new GradleException(
-                    'sdkFreezeArtifactCheck requires the staged-artifact lane')
-        }
-        def candidate = new groovy.json.JsonSlurper().parse(
-                sdkFreezeCandidateReport.get().asFile)
-        def consumerReports = [17, 21].collect { javaVersion ->
-            new groovy.json.JsonSlurper().parse(
-                    layout.buildDirectory.file(
-                            "reports/sdk-freeze/consumer-java${javaVersion}.json")
-                            .get().asFile)
-        }
-        String candidateJar = "blue-coordination-java-${sdkCandidateVersion}.jar"
-        String candidateHash = candidate.artifacts[candidateJar]
-        String expectedCoordinate =
-                "blue.coordination:blue-coordination-java:${sdkCandidateVersion}"
-        File candidateReportFile = sdkFreezeCandidateReport.get().asFile
-        String candidateReportHash = java.security.MessageDigest
-                .getInstance('SHA-256').digest(candidateReportFile.bytes)
-                .encodeHex().toString()
-        def consumerReportFiles = [17, 21].collect { javaVersion ->
-            layout.buildDirectory.file(
-                    "reports/sdk-freeze/consumer-java${javaVersion}.json")
-                    .get().asFile
-        }
-        def failures = []
-        if (candidate.status != 'PASS'
-                || candidate.coordinate != expectedCoordinate
-                || candidate.manifestVersion != sdkCandidateVersion) {
-            failures << 'candidate receipt is not bound to the exact SDK coordinate'
-        }
-        if (!(candidate.artifacts instanceof Map)
-                || candidate.artifacts.size() < 8
-                || candidate.sourceArchive?.sha256
-                != candidate.artifacts[candidate.sourceArchive?.name]
-                || candidate.sourceArchive?.checksumSha256
-                != candidate.artifacts[candidate.sourceArchive?.checksumName]
-                || candidate.sourceArchive?.checksumValue
-                != candidate.sourceArchive?.sha256) {
-            failures << 'candidate receipt does not bind its full artifact and source archive map'
-        }
-        if (consumerReports.collect { it.javaRuntime } as Set
-                != [17, 21] as Set) {
-            failures << 'consumer receipts do not cover Java 17 and Java 21'
-        }
-        consumerReports.each { receipt ->
-            if (receipt.status != 'PASS'
-                    || receipt.coordination != expectedCoordinate
-                    || receipt.candidateJarSha256 != candidateHash
-                    || receipt.javaRelease != 17) {
-                failures << "invalid Java ${receipt.javaRuntime} consumer receipt"
-            }
-        }
-        if (!failures.empty) {
-            throw new GradleException(
-                    'SDK freeze artifact check failed:\n - '
-                            + failures.join('\n - '))
-        }
-        File report = sdkFreezeArtifactReport.get().asFile
-        report.parentFile.mkdirs()
-        report.setText(groovy.json.JsonOutput.prettyPrint(
-                groovy.json.JsonOutput.toJson([
-                        schemaId: 'blue-coordination-sdk-artifact-check-v1',
-                        status: 'PASS',
-                        coordinate: candidate.coordinate,
-                        candidateJarSha256: candidateHash,
-                        candidateReport: [
-                                path: 'build/reports/sdk-freeze/staged-candidate.json',
-                                sha256: candidateReportHash
-                        ],
-                        artifacts: candidate.artifacts,
-                        sourceArchive: candidate.sourceArchive,
-                        consumerReports: consumerReportFiles.collect {
-                            receiptFile -> [
-                                    name: receiptFile.name,
-                                    sha256: java.security.MessageDigest
-                                            .getInstance('SHA-256')
-                                            .digest(receiptFile.bytes)
-                                            .encodeHex().toString()
-                            ]
-                        },
-                        consumerJavaVersions: [17, 21]
-                ])) + '\n', 'UTF-8')
-    }
-}
-
-if (localDependencies) {
-    File localLanguageCheckout = file(providers.gradleProperty(
-            'blueLanguageCompositePath')
-            .getOrElse('../blue-language-java')).canonicalFile
-    File localBexCheckout = file(providers.gradleProperty(
-            'blueBexCompositePath').getOrElse('../blue-bex-java'))
-            .canonicalFile
-    File localRepositoryCheckout = file(providers.gradleProperty(
-            'blueRepositoryCompositePath')
-            .getOrElse('../blue-repository-java')).canonicalFile
-    def localSourceInputs = tasks.register('verifyLocalSourceInputs') {
-        group = 'verification'
-        description = 'Verifies the exact local Language, Repository, and BEX inputs.'
-        inputs.files('gradle/language-source.lock', 'gradle/bex-source.lock',
-                'gradle/repository-source.lock')
-        doLast {
-            def readLock = { File lock ->
-                lock.readLines('UTF-8')
-                        .findAll { !it.startsWith('#') && it.contains('=') }
-                        .collectEntries { line ->
-                            int separator = line.indexOf('=')
-                            [(line.substring(0, separator)):
-                                     line.substring(separator + 1)]
-                        }
-            }
-            def gitBytes = { File root, List<String> arguments ->
-                def command = ['git', '-C', root.absolutePath]
-                command.addAll(arguments)
-                Process process = new ProcessBuilder(command).start()
-                byte[] stdout = process.inputStream.bytes
-                String stderr = process.errorStream.getText('UTF-8')
-                if (process.waitFor() != 0) {
-                    throw new GradleException(
-                            "Git failed in ${root}: ${stderr}")
-                }
-                stdout
-            }
-            def sha256 = { byte[] bytes ->
-                java.security.MessageDigest.getInstance('SHA-256')
-                        .digest(bytes).encodeHex().toString()
-            }
-            def workspaceDiffSha256 = { File root, List<String> paths ->
-                byte[] trackedDiff = gitBytes(root,
-                        ['diff', '--binary', '--no-ext-diff', 'HEAD', '--']
-                                + paths)
-                byte[] untrackedOutput = gitBytes(root,
-                        ['ls-files', '--others', '--exclude-standard', '-z',
-                         '--'] + paths)
-                List<String> untracked = new String(untrackedOutput,
-                        'UTF-8').split('\u0000').findAll().sort()
-                def digest = java.security.MessageDigest
-                        .getInstance('SHA-256')
-                def appendFrame = { byte[] value ->
-                    digest.update(java.nio.ByteBuffer.allocate(8)
-                            .putLong(value.length).array())
-                    digest.update(value)
-                }
-                appendFrame(trackedDiff)
-                untracked.each { relativePath ->
-                    appendFrame(relativePath.getBytes('UTF-8'))
-                    appendFrame(new File(root, relativePath).bytes)
-                }
-                digest.digest().encodeHex().toString()
-            }
-            def languageProductionPaths = [
-                    '.cz.toml', 'build.gradle', 'settings.gradle',
-                    'settings.gradle.kts', 'gradle.properties',
-                    'build-logic/build.gradle',
-                    'build-logic/settings.gradle.kts',
-                    'build-logic/src/main',
-                    'blue-language-model/build.gradle',
-                    'blue-language-model/src/main',
-                    'blue-language-core/build.gradle',
-                    'blue-language-core/src/main',
-                    'blue-language-mapping/build.gradle',
-                    'blue-language-mapping/src/main',
-                    'blue-language-ipfs/build.gradle',
-                    'blue-language-ipfs/src/main',
-                    'blue-language-java/build.gradle',
-                    'blue-language-java/src/main',
-                    'blue-contracts-core/build.gradle',
-                    'blue-contracts-core/src/main',
-                    'blue-conformance/build.gradle',
-                    'blue-conformance/src/main',
-                    'api', 'architecture',
-                    'gradle/blue-spec-inputs.lock.json'
-            ]
-            def bexProductionPaths = [
-                    '.cz.toml', 'build.gradle.kts', 'settings.gradle.kts',
-                    'gradle.properties', 'build-logic/build.gradle.kts',
-                    'build-logic/settings.gradle.kts',
-                    'build-logic/src/main',
-                    'blue-bex-core/build.gradle.kts',
-                    'blue-bex-core/src/main',
-                    'blue-bex-contracts/build.gradle.kts',
-                    'blue-bex-contracts/src/main',
-                    'blue-bex-conformance/build.gradle.kts',
-                    'blue-bex-conformance/src/main',
-                    'blue-bex-java/build.gradle.kts',
-                    'blue-bex-java/src/main',
-                    'examples/build.gradle.kts', 'examples/src/main'
-            ]
-            def languageLock = readLock(
-                    file('gradle/language-source.lock'))
-            def bexLock = readLock(file('gradle/bex-source.lock'))
-            def repositoryLock = readLock(
-                    file('gradle/repository-source.lock'))
-            File bex = localBexCheckout
-            File repository = localRepositoryCheckout
-            File language = localLanguageCheckout
-            String bexHead = new String(
-                    gitBytes(bex, ['rev-parse', 'HEAD']), 'UTF-8').trim()
-            String repositoryHead = new String(
-                    gitBytes(repository, ['rev-parse', 'HEAD']),
-                    'UTF-8').trim()
-            String languageHead = new String(
-                    gitBytes(language, ['rev-parse', 'HEAD']),
-                    'UTF-8').trim()
-            byte[] repositoryDiff = gitBytes(repository,
-                    ['diff', '--binary', 'HEAD', '--', 'build.gradle',
-                     'settings.gradle', '.cz.toml', 'src/main/java',
-                     'src/main/resources'])
-            String repositoryDiffSha256 = sha256(repositoryDiff)
-            String languageDiffSha256 = workspaceDiffSha256(
-                    language, languageProductionPaths)
-            String bexDiffSha256 = workspaceDiffSha256(
-                    bex, bexProductionPaths)
-
-            logger.lifecycle(
-                    'Local Language source base={} workspaceDiffSha256={}',
-                    languageHead, languageDiffSha256)
-            logger.lifecycle(
-                    'Local BEX source base={} workspaceDiffSha256={}',
-                    bexHead, bexDiffSha256)
-            logger.lifecycle(
-                    'Local Repository source base={} workspaceDiffSha256={}',
-                    repositoryHead, repositoryDiffSha256)
-
-            def failures = []
-            [Language: [languageHead, languageLock.baseCommit],
-             BEX: [bexHead, bexLock.baseCommit],
-             Repository: [repositoryHead, repositoryLock.baseCommit]]
-                    .each { name, values ->
-                        if (values[0] != values[1]) {
-                            failures << ("Local ${name} base commit drift: "
-                                    + "expected ${values[1]}, got ${values[0]}")
-                        }
-                    }
-            if (repositoryDiffSha256
-                    != repositoryLock.workspaceDiffSha256) {
-                failures << ('Local Repository production diff fingerprint '
-                        + 'drift: expected '
-                        + repositoryLock.workspaceDiffSha256 + ', got '
-                        + repositoryDiffSha256)
-            }
-            if (languageDiffSha256 != languageLock.workspaceDiffSha256) {
-                failures << ('Local Language production diff fingerprint '
-                        + 'drift: expected '
-                        + languageLock.workspaceDiffSha256 + ', got '
-                        + languageDiffSha256)
-            }
-            if (bexDiffSha256 != bexLock.workspaceDiffSha256) {
-                failures << ('Local BEX production diff fingerprint drift: '
-                        + 'expected ' + bexLock.workspaceDiffSha256 + ', got '
-                        + bexDiffSha256)
-            }
-            if (!failures.empty) {
-                throw new GradleException(failures.join('\n'))
-            }
-            logger.lifecycle('Local source inputs match pinned fingerprints.')
-        }
-    }
-
-    tasks.register('verifyLocalCompositeDependencies') {
-        group = 'verification'
-        description = 'Proves the complete Language runtime graph resolves from the configured composite.'
-        dependsOn localSourceInputs
-        doLast {
-            def expectedProjects = [
-                    'blue-language-model',
-                    'blue-language-core',
-                    'blue-language-mapping',
-                    'blue-language-ipfs',
-                    'blue-language-java',
-                    'blue-contracts-core'
-            ] as Set
-            def components = configurations.testRuntimeClasspath
-                    .incoming.resolutionResult.allComponents
-            def selectedProjects = components.collect { component ->
-                component.id instanceof
-                        org.gradle.api.artifacts.component.ProjectComponentIdentifier
-                        ? component.id.projectPath.substring(1)
-                        : null
-            }.findAll().toSet()
-            def missingProjects = expectedProjects - selectedProjects
-            def leakedModules = components.findAll { component ->
-                component.id instanceof
-                        org.gradle.api.artifacts.component.ModuleComponentIdentifier
-                        && component.id.group == 'blue.language'
-                        && expectedProjects.contains(component.id.module)
-            }.collect { component -> component.id.displayName }.sort()
-            if (!missingProjects.isEmpty() || !leakedModules.isEmpty()) {
-                throw new GradleException(
-                        'Incomplete local Language graph: missing projects '
-                                + missingProjects.toList().sort()
-                                + ', published modules ' + leakedModules)
-            }
-            logger.lifecycle('Complete Language runtime graph resolves from {}.',
-                    localLanguageCheckout)
-        }
-    }
-    tasks.named('releaseCheck') {
-        dependsOn 'verifyLocalCompositeDependencies'
-    }
-    tasks.named('productionizationCheck') {
-        dependsOn 'verifyLocalCompositeDependencies'
-    }
-
-    def localPrerequisites = tasks.register(
-            'stageLocalPrerequisiteArtifacts') {
-        group = 'publishing'
-        description = 'Stages source-built prerequisites for local artifact verification.'
-        dependsOn gradle.includedBuild('blue-repository-java').task(':jar')
-        dependsOn gradle.includedBuild('blue-bex-java')
-                .task(':blue-bex-core:jar')
-        dependsOn gradle.includedBuild('blue-bex-java')
-                .task(':blue-bex-contracts:jar')
-        inputs.files(
-                fileTree(new File(localRepositoryCheckout, 'build/libs')) {
-                    include 'blue-repo-java-*-SNAPSHOT.jar'
-                    exclude '*-sources.jar', '*-javadoc.jar'
-                },
-                fileTree(new File(localBexCheckout,
-                        'blue-bex-core/build/libs')) {
-                    include 'blue-bex-core-*-SNAPSHOT.jar'
-                    exclude '*-sources.jar', '*-javadoc.jar'
-                },
-                fileTree(new File(localBexCheckout,
-                        'blue-bex-contracts/build/libs')) {
-                    include 'blue-bex-contracts-*-SNAPSHOT.jar'
-                    exclude '*-sources.jar', '*-javadoc.jar'
-                })
-        outputs.dir(layout.buildDirectory.dir('local-prerequisites'))
-        doLast {
-            def targetRoot = layout.buildDirectory
-                    .dir('local-prerequisites').get().asFile
-            if (targetRoot.exists() && !targetRoot.deleteDir()) {
-                throw new GradleException(
-                        "Cannot refresh generated artifacts at ${targetRoot}")
-            }
-            copy {
-                from fileTree(new File(
-                        localRepositoryCheckout, 'build/libs')) {
-                    include 'blue-repo-java-*-SNAPSHOT.jar'
-                    exclude '*-sources.jar', '*-javadoc.jar'
-                }.singleFile
-                into new File(targetRoot,
-                        'blue/repo/blue-repo-java/3.0.0-rc.21')
-                rename { 'blue-repo-java-3.0.0-rc.21.jar' }
-            }
-            copy {
-                from fileTree(new File(localBexCheckout,
-                        'blue-bex-core/build/libs')) {
-                    include 'blue-bex-core-*-SNAPSHOT.jar'
-                    exclude '*-sources.jar', '*-javadoc.jar'
-                }.singleFile
-                into new File(targetRoot,
-                        'blue/bex/blue-bex-core/1.1.0-rc.4')
-                rename { 'blue-bex-core-1.1.0-rc.4.jar' }
-            }
-            copy {
-                from fileTree(
-                        new File(localBexCheckout,
-                                'blue-bex-contracts/build/libs')) {
-                    include 'blue-bex-contracts-*-SNAPSHOT.jar'
-                    exclude '*-sources.jar', '*-javadoc.jar'
-                }.singleFile
-                into new File(targetRoot,
-                        'blue/bex/blue-bex-contracts/1.1.0-rc.4')
-                rename { 'blue-bex-contracts-1.1.0-rc.4.jar' }
-            }
-        }
-    }
-    tasks.named('publishToMavenLocal') {
-        dependsOn localPrerequisites
-    }
-} else if (stagedDependencies) {
-    tasks.named('releaseCheck') {
-        dependsOn stagedDependencyGraph
-    }
-    tasks.named('productionizationCheck') {
-        dependsOn stagedDependencyGraph
-    }
-} else {
-    tasks.named('releaseCheck') {
-        dependsOn 'verifyPublishedArtifactDependencies'
-    }
-    tasks.named('productionizationCheck') {
-        dependsOn 'verifyPublishedArtifactDependencies'
-    }
+tasks.named('productionizationCheck') {
+    dependsOn 'verifyPublishedArtifactDependencies'
 }
 
 tasks.matching {

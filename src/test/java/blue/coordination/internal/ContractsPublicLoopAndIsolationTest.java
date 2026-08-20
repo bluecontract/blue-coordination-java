@@ -57,9 +57,14 @@ final class ContractsPublicLoopAndIsolationTest {
 
     @Test
     void sameEventLoopRollbackIsIdenticalAcrossFreshEngineRuns() {
+        // given
+
         LoopEvidence first = runLoopAttempt();
+
+        // when
         LoopEvidence secondRun = runLoopAttempt();
 
+        // then
         assertEquals(first, secondRun);
         assertTrue(first.admittedGasEntries() > 0);
         assertTrue(first.rejectedWorkOrdinal() > 0L);
@@ -68,20 +73,27 @@ final class ContractsPublicLoopAndIsolationTest {
 
     @Test
     void disconnectedPublicRootsCommitAndRollbackWithoutCrossRootOvertake() {
+        // given
+
         DocumentId success = DocumentId.of("a-success");
         DocumentId failure = DocumentId.of("z-failure");
         Contracts10Configuration configuration = new Contracts10Configuration(
                 SHA_A, SHA_B, Set.of(success, failure));
+
         try (CoordinationEngine publicEngine =
                      CoordinationEngine.inMemoryContracts10(configuration)) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
+
+            // when
             ContractsClosureAdmissionReceipt admitted = publicEngine
                     .admitContractsClosure(
                             disconnectedRootsAdmission(
                                     engine, success, failure),
                             CoordinationEngine.AdmissionPolicy.FROM_NOW,
                             null);
+
+            // then
             assertEquals(
                     ContractsClosureAdmissionReceipt.PublicationOutcome
                             .PUBLISHED,

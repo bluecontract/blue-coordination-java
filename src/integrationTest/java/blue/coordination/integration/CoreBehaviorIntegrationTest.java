@@ -29,6 +29,7 @@ final class CoreBehaviorIntegrationTest {
     void counterRoutesAliceAndBobExactlyOnceWithoutGenericSplitting()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             Timeline alice = engine.timeline(
                     "examples/clean-counter/alice", "alice");
             Timeline bob = engine.timeline(
@@ -36,6 +37,7 @@ final class CoreBehaviorIntegrationTest {
             engine.start("counter", resource("examples/clean/counter.yaml"));
             EngineMetrics.MetricsSnapshot before = engine.metricsSnapshot();
 
+            // when
             engine.appendAndDispatch(alice, Operation.yaml(
                     "increment", "aliceChannel", "amount: 3"));
             engine.appendAndDispatch(bob, Operation.yaml(
@@ -43,6 +45,8 @@ final class CoreBehaviorIntegrationTest {
 
             EngineTestSupport.MetricDelta work = delta(
                     before, engine.metricsSnapshot());
+
+            // then
             assertEquals(2L, integer(engine, "counter", "/counter"));
             assertEquals(2L, engine.session("counter").epoch());
             assertEquals(2, engine.journalSize());
@@ -60,6 +64,7 @@ final class CoreBehaviorIntegrationTest {
     @Test
     void ordinaryPayNoteIsOneWholeInlineValue() throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             Timeline alice = engine.timeline(
                     "examples/whole-request/alice", "alice");
             engine.start("whole-request-sink", resource(
@@ -70,6 +75,7 @@ final class CoreBehaviorIntegrationTest {
                     "payload", payNoteYaml);
             EngineMetrics.MetricsSnapshot before = engine.metricsSnapshot();
 
+            // when
             engine.appendAndDispatch(alice, Operation.exact(
                     "storePayload", "aliceChannel", request));
 
@@ -80,6 +86,8 @@ final class CoreBehaviorIntegrationTest {
                     ? stored.getBlueId()
                     : DirectBlueIdCalculator.calculateBlueId(stored);
             Node expected = engine.exactRequest(payNoteYaml).copyNode();
+
+            // then
             assertEquals(DirectBlueIdCalculator.calculateBlueId(expected),
                     storedBlueId);
             assertEquals(1, engine.session("whole-request-sink")
@@ -97,6 +105,7 @@ final class CoreBehaviorIntegrationTest {
     void existingChildRevisionsCatchParentUpWithoutSourceReplay()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String childInitial = resource(
                     "examples/clean/embedded-counter.yaml");
             Timeline child = engine.timeline("examples/embedded/A", "alice");
@@ -111,6 +120,8 @@ final class CoreBehaviorIntegrationTest {
             engine.start("embedded-parent-B", resource(
                     "examples/clean/embedded-parent.yaml"));
             EngineMetrics.MetricsSnapshot before = engine.metricsSnapshot();
+
+            // when
             engine.dispatch(engine.appendAt(parent, Operation.exact(
                     "attachChild", "ownerChannel",
                     engine.embeddedDocumentRequest(childInitial)),
@@ -118,6 +129,8 @@ final class CoreBehaviorIntegrationTest {
 
             EngineTestSupport.MetricDelta work = delta(
                     before, engine.metricsSnapshot());
+
+            // then
             assertEquals(SessionStatus.READY,
                     engine.session("embedded-parent-B").status());
             assertEquals(6L, integer(
@@ -138,6 +151,7 @@ final class CoreBehaviorIntegrationTest {
     void completedNbaGameCatchesUpAndContinuesLiveWithoutReplay()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String gameInitial = resource("examples/clean/nba-game.yaml");
             Timeline gameFeed = engine.timeline(
                     "examples/nba/game-2016-lal-min", "nba-feed");
@@ -154,6 +168,8 @@ final class CoreBehaviorIntegrationTest {
             engine.start("nba-statistics", resource(
                     "examples/clean/nba-statistics.yaml"));
             EngineMetrics.MetricsSnapshot before = engine.metricsSnapshot();
+
+            // when
             engine.dispatch(engine.appendAt(commissioner, Operation.exact(
                     "attachGame", "commissionerChannel",
                     engine.embeddedDocumentRequest(gameInitial)),
@@ -178,6 +194,8 @@ final class CoreBehaviorIntegrationTest {
                     "homeScores", "points: 1");
             EngineTestSupport.MetricDelta live = delta(
                     beforeLive, engine.metricsSnapshot());
+
+            // then
             assertEquals(3L, integer(
                     engine, "nba-statistics", "/observedHomeScore"));
             assertEquals(3L, integer(

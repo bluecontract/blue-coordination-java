@@ -15,18 +15,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class WholeObjectStoreTest {
     @Test
     void insertionAndReadsRetainDetachedExactBodies() {
+        // given
         EngineMetrics metrics = new EngineMetrics();
         WholeObjectStore store = new WholeObjectStore(metrics);
         Node authored = new Node().properties(
                 "status", new Node().value("authored"));
+
+        // when
         ExactValue retained = store.put(authored, "test object");
         authored.getProperties().get("status").value("mutated");
+        List<Node> provider = store.fetchByBlueId(retained.blueId());
+        provider.get(0).getProperties().get("status").value("provider-copy");
 
+        // then
         assertTrue(store.contains(retained.blueId()));
         assertEquals("authored", store.require(retained.blueId()).copyNode()
                 .getProperties().get("status").getValue());
-        List<Node> provider = store.fetchByBlueId(retained.blueId());
-        provider.get(0).getProperties().get("status").value("provider-copy");
         assertEquals("authored", store.fetchByBlueId(retained.blueId()).get(0)
                 .getProperties().get("status").getValue());
         assertEquals(1L, metrics.counter("wholeObjectStore.insertions"));
@@ -36,13 +40,16 @@ final class WholeObjectStoreTest {
 
     @Test
     void duplicateIdentityDoesNotIncreaseStoreSize() {
+        // given
         EngineMetrics metrics = new EngineMetrics();
         WholeObjectStore store = new WholeObjectStore(metrics);
         ExactValue value = ExactValue.verified(new Node().value("same"));
 
+        // when
         store.put(value, "first");
         store.put(ExactValue.verified(new Node().value("same")), "second");
 
+        // then
         assertEquals(1, store.size());
         assertEquals(1L, metrics.counter(
                 "wholeObjectStore.representationVariants"));
@@ -50,14 +57,18 @@ final class WholeObjectStoreTest {
 
     @Test
     void rollbackRestoresProviderAndCanonicalVisibility() {
+        // given
         WholeObjectStore store = new WholeObjectStore(new EngineMetrics());
         ExactValue retained = ExactValue.verified(new Node().value("later"));
         WholeObjectStore.Mark before = store.mark();
         store.put(retained, "later");
-        assertEquals(1, store.size());
+        int sizeBeforeRollback = store.size();
 
+        // when
         store.rollbackTo(before);
 
+        // then
+        assertEquals(1, sizeBeforeRollback);
         assertEquals(0, store.size());
         assertFalse(store.contains(retained.blueId()));
         assertTrue(store.fetchByBlueId(retained.blueId()).isEmpty());
@@ -65,36 +76,48 @@ final class WholeObjectStoreTest {
 
     @Test
     void savepointsJournalOnlyChangedKeysAndNestInConstantStartTime() {
+        // given
         WholeObjectStore store = new WholeObjectStore(new EngineMetrics());
         for (int index = 0; index < 100; index++) {
             store.put(new Node().value("existing-" + index), "existing");
         }
+
+        // when
         WholeObjectStore.Mark outer = store.mark();
         ExactValue retained = store.put(
                 new Node().value("outer-change"), "outer");
-        assertEquals(1, outer.changedKeyCount(),
-                "a mark must not copy the hundred existing objects");
-
+        int outerChangedKeyCount = outer.changedKeyCount();
         WholeObjectStore.Mark inner = store.mark();
         ExactValue rolledBack = store.put(
                 new Node().value("inner-change"), "inner");
-        assertEquals(1, inner.changedKeyCount());
+        int innerChangedKeyCount = inner.changedKeyCount();
         store.rollbackTo(inner);
-
-        assertTrue(store.contains(retained.blueId()));
-        assertFalse(store.contains(rolledBack.blueId()));
+        boolean retainedAfterInnerRollback = store.contains(retained.blueId());
+        boolean removedAfterInnerRollback = !store.contains(
+                rolledBack.blueId());
         store.commit(outer);
+
+        // then
+        assertEquals(1, outerChangedKeyCount,
+                "a mark must not copy the hundred existing objects");
+        assertEquals(1, innerChangedKeyCount);
+        assertTrue(retainedAfterInnerRollback);
+        assertTrue(removedAfterInnerRollback);
         assertTrue(store.contains(retained.blueId()));
         assertEquals(101, store.size());
     }
 
     @Test
     void exactReadsAreDetachedAndUnknownObjectsFailClearly() {
+        // given
         WholeObjectStore store = new WholeObjectStore(new EngineMetrics());
         ExactValue value = store.put(new Node().value("known"), "known");
 
+        // when
         Node detached = store.require(value.blueId()).copyNode();
         detached.value("changed");
+
+        // then
         assertEquals("known", store.require(value.blueId())
                 .copyNode().getValue());
         assertThrows(IllegalArgumentException.class,
@@ -103,22 +126,33 @@ final class WholeObjectStoreTest {
 
     @Test
     void providerPreferenceRejectsUnknownAndReferenceOnlyValues() {
+        // given
         WholeObjectStore store = new WholeObjectStore(new EngineMetrics());
         ExactValue known = store.put(new Node().value("known"), "known");
+        ExactValue unknown = ExactValue.verified(new Node().value("other"));
+        ExactValue reference = ExactValue.verified(
+                new Node().blueId(known.blueId()));
 
-        assertThrows(IllegalStateException.class,
+        // when
+        IllegalStateException unknownFailure = assertThrows(
+                IllegalStateException.class,
                 () -> store.preferProviderRepresentation(
-                        ExactValue.verified(new Node().value("other")).frozen(),
+                        unknown.frozen(),
                         "unknown"));
-        assertThrows(IllegalArgumentException.class,
+        IllegalArgumentException referenceFailure = assertThrows(
+                IllegalArgumentException.class,
                 () -> store.preferProviderRepresentation(
-                        ExactValue.verified(
-                                new Node().blueId(known.blueId())).frozen(),
+                        reference.frozen(),
                         "reference"));
+
+        // then
+        assertFalse(unknownFailure.getMessage().isBlank());
+        assertFalse(referenceFailure.getMessage().isBlank());
     }
 
     @Test
     void materializedCanonicalBodyDoesNotReplaceCompactProviderShell() {
+        // given
         EngineMetrics metrics = new EngineMetrics();
         WholeObjectStore store = new WholeObjectStore(metrics);
         ExactValue child = store.put(
@@ -130,11 +164,13 @@ final class WholeObjectStoreTest {
                 "shell");
         ExactValue materialized = ExactValue.verified(
                 new Node().properties("child", child.copyNode()));
-        assertEquals(shell.blueId(), materialized.blueId());
 
+        // when
         store.preferCanonicalRepresentation(
                 materialized.frozen(), "semantic-root");
 
+        // then
+        assertEquals(shell.blueId(), materialized.blueId());
         assertEquals("confirmed", store.require(shell.blueId()).copyNode()
                 .getProperties().get("child")
                 .getProperties().get("status").getValue());

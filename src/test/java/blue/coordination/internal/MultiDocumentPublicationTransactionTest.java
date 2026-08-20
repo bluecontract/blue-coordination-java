@@ -30,6 +30,8 @@ final class MultiDocumentPublicationTransactionTest {
 
     @Test
     void publishesMultipleHeadsAndAllTypedEvidenceWithOneSwap() {
+        // given
+
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.create()) {
             DocumentSession originalA = start(engine, A);
@@ -61,8 +63,11 @@ final class MultiDocumentPublicationTransactionTest {
                     .stageCheckpointEvidence(List.of(checkpoint))
                     .commit();
 
+            // when
             InMemoryDocumentStore.PublicationSnapshot after =
                     store.publicationSnapshot();
+
+            // then
             assertEquals(1L, after.requireHead(A).epoch());
             assertEquals(1L, after.requireHead(B).epoch());
             assertEquals(head(originalA), after.requireHead(A).blueId());
@@ -100,6 +105,8 @@ final class MultiDocumentPublicationTransactionTest {
 
     @Test
     void staleHeadCasPublishesNothingFromTheLosingAttempt() {
+        // given
+
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.create()) {
             DocumentSession original = start(engine, A);
@@ -125,7 +132,10 @@ final class MultiDocumentPublicationTransactionTest {
             InMemoryDocumentStore.PublicationSnapshot winner =
                     store.publicationSnapshot();
 
+            // when
             MultiDocumentPublicationTransaction.AtomicPublicationCasException
+
+                    // then
                     failure = assertThrows(
                             MultiDocumentPublicationTransaction
                                     .AtomicPublicationCasException.class,
@@ -144,6 +154,8 @@ final class MultiDocumentPublicationTransactionTest {
 
     @Test
     void staleManagedTopologyGenerationPublishesNothing() {
+        // given
+
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.create()) {
             DocumentSession originalA = start(engine, A);
@@ -166,7 +178,10 @@ final class MultiDocumentPublicationTransactionTest {
             InMemoryDocumentStore.PublicationSnapshot winner =
                     store.publicationSnapshot();
 
+            // when
             MultiDocumentPublicationTransaction.AtomicPublicationCasException
+
+                    // then
                     failure = assertThrows(
                             MultiDocumentPublicationTransaction
                                     .AtomicPublicationCasException.class,
@@ -187,6 +202,8 @@ final class MultiDocumentPublicationTransactionTest {
 
     @Test
     void injectedFailureAfterCompleteStagingRollsBackEverySurface() {
+        // given
+
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.create()) {
             DocumentSession originalA = start(engine, A);
@@ -194,9 +211,12 @@ final class MultiDocumentPublicationTransactionTest {
             InMemoryDocumentStore store = engine.documents();
             InMemoryDocumentStore.PublicationSnapshot before =
                     store.publicationSnapshot();
+
+            // when
             ManagedOccurrenceInventory inventory = inventory(
                     originalB.currentRevision().after().blueId());
 
+            // then
             RuntimeException failure = assertThrows(
                     RuntimeException.class,
                     () -> transaction(store, "injected", before)
@@ -254,6 +274,8 @@ final class MultiDocumentPublicationTransactionTest {
 
     @Test
     void disconnectedTransactionsFenceOnlyTheirOwnDurableHeads() {
+        // given
+
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.create()) {
             DocumentSession originalA = start(engine, A);
@@ -280,8 +302,11 @@ final class MultiDocumentPublicationTransactionTest {
             updateA.commit();
             updateB.commit();
 
+            // when
             InMemoryDocumentStore.PublicationSnapshot after =
                     store.publicationSnapshot();
+
+            // then
             assertEquals(1L, after.requireHead(A).epoch());
             assertEquals(1L, after.requireHead(B).epoch());
             assertEquals(base.occurrenceInventoryGeneration(),

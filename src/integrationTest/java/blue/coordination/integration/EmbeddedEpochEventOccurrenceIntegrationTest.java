@@ -26,6 +26,7 @@ final class EmbeddedEpochEventOccurrenceIntegrationTest {
     void duplicateEventIdentitiesRetainBothOrderedOccurrencesInParentProcess()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             Timeline childTimeline = engine.timeline(
                     "examples/duplicate-events/child", "alice");
             engine.start(PARENT, resource(
@@ -33,6 +34,7 @@ final class EmbeddedEpochEventOccurrenceIntegrationTest {
             int parentHistoryBefore = engine.history(PARENT).size();
             EngineMetrics.MetricsSnapshot before = engine.metricsSnapshot();
 
+            // when
             TimelineEntry entry = engine.append(
                     childTimeline,
                     Operation.yaml("advance", "childChannel", "{}"));
@@ -46,6 +48,8 @@ final class EmbeddedEpochEventOccurrenceIntegrationTest {
             assertEquals(2, events.size());
             String eventBlueId = DirectBlueIdCalculator.calculateBlueId(
                     events.get(0));
+
+            // then
             assertEquals(eventBlueId,
                     DirectBlueIdCalculator.calculateBlueId(events.get(1)),
                     "the two semantic events deliberately share one BlueId");

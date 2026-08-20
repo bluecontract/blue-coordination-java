@@ -1,4 +1,0 @@
-# Supported local-composite Repository input matching the published rc.21 API.
-coordinate=blue.repo:blue-repo-java:3.0.0-rc.21
-baseCommit=2fcf29bf060ed114c971194adb6f8b747899aee2
-workspaceDiffSha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855

@@ -2,8 +2,8 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
-  assertEvidenceRelease,
-  evidenceRelease,
+  assertAuthorityRelease,
+  authorityRelease,
   nextVersionForCurrentRc,
   parseVersion,
 } = require('./prepare-rc-release.js');
@@ -32,24 +32,24 @@ test('advances an RC after the current tag exists', () => {
   assert.equal(nextVersionForCurrentRc('3.0.0-rc.1', 8), '3.0.0-rc.9');
 });
 
-test('reads the release bound by canonical evidence', () => {
-  assert.equal(evidenceRelease('{"release":"3.0.0-rc.1"}'), '3.0.0-rc.1');
+test('reads the release bound by the current authority', () => {
+  assert.equal(authorityRelease('RC3_VERSION: 3.0.0-rc.3\n'), '3.0.0-rc.3');
   assert.throws(
-    () => evidenceRelease('{}'),
-    /Canonical evidence is missing a release/,
+    () => authorityRelease('# missing marker\n'),
+    /Release authority is missing RC3_VERSION/,
   );
 });
 
-test('rejects a prepared RC that differs from canonical evidence', () => {
-  assert.doesNotThrow(() => assertEvidenceRelease(
-    '3.0.0-rc.1',
-    '{"release":"3.0.0-rc.1"}',
+test('rejects a prepared RC that differs from its authority', () => {
+  assert.doesNotThrow(() => assertAuthorityRelease(
+    '3.0.0-rc.3',
+    'RC3_VERSION: 3.0.0-rc.3\n',
   ));
   assert.throws(
-    () => assertEvidenceRelease(
-      '2.0.0-rc.9',
-      '{"release":"3.0.0-rc.1"}',
+    () => assertAuthorityRelease(
+      '3.0.0-rc.4',
+      'RC3_VERSION: 3.0.0-rc.3\n',
     ),
-    /Prepared RC 2\.0\.0-rc\.9 does not match canonical evidence release 3\.0\.0-rc\.1/,
+    /Prepared RC 3\.0\.0-rc\.4 does not match authorized release 3\.0\.0-rc\.3/,
   );
 });

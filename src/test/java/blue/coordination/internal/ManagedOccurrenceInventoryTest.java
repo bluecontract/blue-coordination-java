@@ -40,6 +40,8 @@ final class ManagedOccurrenceInventoryTest {
 
     @Test
     void c35RemovalCommitsSuccessorThenLaterInvocationReaddsIt() {
+        // given
+
         ManagedOccurrenceBinding aToB = asserted(
                 "sha256:f5d1cd1ca17ac4fa6547d53f85dadb18f4b37e1bca42588f5cb4fb9090023eca",
                 "sha256:8e0adfdc7abea06d373ff4aa63d4b828da81abc01479d4a94cc7afdfe7b0e6e8",
@@ -57,7 +59,10 @@ final class ManagedOccurrenceInventoryTest {
                 ManagedOccurrenceInventory.Change.retire(
                         A, "/b", B, AFTER_REMOVE_B)));
 
+        // when
         ManagedOccurrenceBinding successor = afterRemoval.row(A, "/b");
+
+        // then
         assertFalse(successor.active());
         assertEquals(2L, successor.activationGeneration());
         assertEquals(B.value(), successor.targetDocumentId().value());
@@ -111,11 +116,16 @@ final class ManagedOccurrenceInventoryTest {
 
     @Test
     void rejectedOrEmptyInvocationCannotAdvanceCommittedInventory() {
+        // given
+
         ManagedOccurrenceBinding active = row(
                 A, "/b", 1L, B, INPUT_B, true, null);
+
+        // when
         ManagedOccurrenceInventory inventory =
                 ManagedOccurrenceInventory.of(List.of(active));
 
+        // then
         assertSame(inventory, inventory.apply(List.of()));
         assertThrows(UnsupportedOperationException.class,
                 () -> inventory.apply(List.of(
@@ -152,6 +162,8 @@ final class ManagedOccurrenceInventoryTest {
 
     @Test
     void inactiveRowsStayOutOfEdgesButRemainInCompleteMembership() {
+        // given
+
         ManagedOccurrenceInventory inventory =
                 ManagedOccurrenceInventory.of(List.of(
                         row(A, "/b", 1L, B, INPUT_B, true, null),
@@ -159,11 +171,13 @@ final class ManagedOccurrenceInventoryTest {
                         row(C, "/a", 4L, A, INPUT_A, false, null),
                         row(A, "/d", 3L, D, INPUT_A, false, 7L)));
 
+        // when
         ProcessEmbeddedComponentIndex index =
                 ProcessEmbeddedComponentIndex
                         .fromDocumentsAndOccurrenceInventory(
                                 List.of(DocumentId.of("isolated")), inventory);
 
+        // then
         assertEquals(List.of(A, B, C, D, DocumentId.of("isolated")),
                 index.documents());
         assertTrue(index.component(A).cyclic());
@@ -177,6 +191,8 @@ final class ManagedOccurrenceInventoryTest {
 
     @Test
     void insertionOrderCannotChangeInventoryOrComponentProjection() {
+        // given
+
         List<ManagedOccurrenceBinding> forward = List.of(
                 row(A, "/b", 1L, B, INPUT_B, true, null),
                 row(B, "/a", 1L, A, INPUT_A, true, null),
@@ -187,8 +203,12 @@ final class ManagedOccurrenceInventoryTest {
 
         ManagedOccurrenceInventory first =
                 ManagedOccurrenceInventory.of(forward);
+
+        // when
         ManagedOccurrenceInventory second =
                 ManagedOccurrenceInventory.of(reverse);
+
+        // then
         assertEquals(rowIdentities(first.rows()),
                 rowIdentities(second.rows()));
         assertEquals(rowIdentities(first.activeRows()),
@@ -206,14 +226,19 @@ final class ManagedOccurrenceInventoryTest {
 
     @Test
     void exactIdentitiesAndPortableIntegersAreEnforcedAtTheBoundary() {
+        // given
+        String expectedOccurrenceIdentity =
+                "sha256:f5d1cd1ca17ac4fa6547d53f85dadb18f4b37e1bca42588f5cb4fb9090023eca";
+        String expectedBindingIdentity =
+                "sha256:8e0adfdc7abea06d373ff4aa63d4b828da81abc01479d4a94cc7afdfe7b0e6e8";
+
+        // when
         ManagedOccurrenceBinding exact = row(
                 A, "/b", 1L, B, INPUT_B, true, null);
-        assertEquals(
-                "sha256:f5d1cd1ca17ac4fa6547d53f85dadb18f4b37e1bca42588f5cb4fb9090023eca",
-                exact.occurrenceIdentity());
-        assertEquals(
-                "sha256:8e0adfdc7abea06d373ff4aa63d4b828da81abc01479d4a94cc7afdfe7b0e6e8",
-                exact.bindingIdentity());
+
+        // then
+        assertEquals(expectedOccurrenceIdentity, exact.occurrenceIdentity());
+        assertEquals(expectedBindingIdentity, exact.bindingIdentity());
 
         assertThrows(IllegalArgumentException.class,
                 () -> asserted(

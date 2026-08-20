@@ -19,33 +19,50 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class SourceSurfaceIdentityTest {
     @Test
     void unrelatedBusinessStateDoesNotInvalidateCompletenessIdentity() {
+        // given
         EmbeddingBinding stateA = binding(
                 "parent", "/child", "child", "state-A", 1L);
         EmbeddingBinding stateB = binding(
                 "parent", "/child", "child", "state-B", 1L);
 
-        assertEquals(identity(stateA), identity(stateB),
+        // when
+        String identityA = identity(stateA);
+        String identityB = identity(stateB);
+
+        // then
+        assertEquals(identityA, identityB,
                 "admitted/current business-state identity is not a source surface");
     }
 
     @Test
     void bindingLineageUsesCanonicalFieldsInsteadOfDelimitedDiagnosticId() {
+        // given
         EmbeddingBinding left = binding(
                 "parent|/slot", "/child", "child", "state", 1L);
         EmbeddingBinding right = binding(
                 "parent", "/slot|/child", "child", "state", 1L);
 
+        // when
+        String leftIdentity = identity(left);
+        String rightIdentity = identity(right);
+
+        // then
         assertEquals(left.bindingId(), right.bindingId(),
                 "the legacy diagnostic encoding must demonstrate the collision");
-        assertNotEquals(identity(left), identity(right),
+        assertNotEquals(leftIdentity, rightIdentity,
                 "parent DocumentId and path must be encoded independently");
     }
 
     @Test
     void stableBindingDimensionsInvalidateIdentity() {
-        String baseline = identity(binding(
-                "parent", "/child", "child", "state", 1L));
+        // given
+        EmbeddingBinding binding = binding(
+                "parent", "/child", "child", "state", 1L);
 
+        // when
+        String baseline = identity(binding);
+
+        // then
         assertAll(
                 () -> assertNotEquals(baseline, identity(binding(
                         "other-parent", "/child", "child", "state", 1L))),
@@ -59,6 +76,7 @@ final class SourceSurfaceIdentityTest {
 
     @Test
     void canonicalSubscriptionOrderDoesNotChangeIdentity() {
+        // given
         SubscriptionDelta.Entry first = subscription(
                 "/", "channelA", "channel-type", "source", 0,
                 "timeline-key", "checkpoint", dependencies("intrinsic"),
@@ -69,18 +87,21 @@ final class SourceSurfaceIdentityTest {
                 0L, order(100L), null);
         EmbeddingBinding binding = defaultBinding();
 
-        assertEquals(
-                identity(binding, List.of(first, second), routing()),
-                identity(binding, List.of(second, first), routing()));
+        // when
+        String forward = identity(
+                binding, List.of(first, second), routing());
+        String reverse = identity(
+                binding, List.of(second, first), routing());
+
+        // then
+        assertEquals(forward, reverse);
     }
 
     @Test
     void subscriptionTextDimensionsUseUnicodeCodePointOrder() {
+        // given
         String privateUse = "\uE000";
         String supplementary = "\uD800\uDC00";
-        assertTrue(privateUse.compareTo(supplementary) > 0,
-                "the fixture must oppose Java UTF-16 ordering");
-
         List<SubscriptionDelta.Entry> channelKeys = new ArrayList<>(List.of(
                 subscription("/", supplementary, "type", "source", 0,
                         "key", "checkpoint", dependencies("intrinsic"),
@@ -88,10 +109,9 @@ final class SourceSurfaceIdentityTest {
                 subscription("/", privateUse, "type", "source", 0,
                         "key", "checkpoint", dependencies("intrinsic"),
                         0L, order(100L), null)));
-        channelKeys.sort(SourceSurfaceIdentity.ENTRY_ORDER);
-        assertEquals(List.of(privateUse, supplementary), channelKeys.stream()
-                .map(SubscriptionDelta.Entry::channelKey).toList());
 
+        // when
+        channelKeys.sort(SourceSurfaceIdentity.ENTRY_ORDER);
         List<SubscriptionDelta.Entry> sourceLists = new ArrayList<>(List.of(
                 subscription("/", "channel", "type", supplementary, 0,
                         "key", "checkpoint", dependencies("intrinsic"),
@@ -100,6 +120,12 @@ final class SourceSurfaceIdentityTest {
                         "key", "checkpoint", dependencies("intrinsic"),
                         0L, order(100L), null)));
         sourceLists.sort(SourceSurfaceIdentity.ENTRY_ORDER);
+
+        // then
+        assertTrue(privateUse.compareTo(supplementary) > 0,
+                "the fixture must oppose Java UTF-16 ordering");
+        assertEquals(List.of(privateUse, supplementary), channelKeys.stream()
+                .map(SubscriptionDelta.Entry::channelKey).toList());
         assertEquals(List.of(privateUse, supplementary), sourceLists.stream()
                 .map(entry -> entry.sourceContributionNodeBlueIds().get(0))
                 .toList());
@@ -107,6 +133,7 @@ final class SourceSurfaceIdentityTest {
 
     @Test
     void tiedCanonicalSubscriptionPrefixesStillHaveTotalOrder() {
+        // given
         SubscriptionDelta.Entry sourceA = subscription(
                 "/", "ownerChannel", "channel-type", "source-A", 0,
                 "timeline-key", "checkpoint", dependencies("intrinsic-A"),
@@ -116,23 +143,30 @@ final class SourceSurfaceIdentityTest {
                 "timeline-key", "checkpoint", dependencies("intrinsic-B"),
                 0L, order(100L), null);
 
-        assertEquals(
-                identity(defaultBinding(),
-                        List.of(sourceA, sourceB), routing()),
-                identity(defaultBinding(),
-                        List.of(sourceB, sourceA), routing()));
+        // when
+        String forward = identity(defaultBinding(),
+                List.of(sourceA, sourceB), routing());
+        String reverse = identity(defaultBinding(),
+                List.of(sourceB, sourceA), routing());
+
+        // then
+        assertEquals(forward, reverse);
     }
 
     @Test
     void everySubscriptionIdentityDimensionInvalidatesIdentity() {
+        // given
         EmbeddingBinding binding = defaultBinding();
         SubscriptionDelta.Entry baselineEntry = subscription(
                 "/", "ownerChannel", "channel-type", "source-A", 0,
                 "timeline-key", "checkpoint-A", dependencies("intrinsic-A"),
                 1L, order(100L), null);
+
+        // when
         String baseline = identity(
                 binding, List.of(baselineEntry), routing());
 
+        // then
         assertAll(
                 () -> changed(baseline, subscription(
                         "/nested", "ownerChannel", "channel-type", "source-A",
@@ -182,6 +216,7 @@ final class SourceSurfaceIdentityTest {
 
     @Test
     void wholeSurfaceAndChannelCatalogEvidenceInvalidateIdentity() {
+        // given
         EmbeddingBinding binding = defaultBinding();
         ExternalChannelDependencySnapshot none =
                 ExternalChannelDependencySnapshot.none();
@@ -189,9 +224,12 @@ final class SourceSurfaceIdentityTest {
                 List.of(), true, false, List.of());
         ExternalChannelDependencySnapshot wholeCatalog = dependencies(
                 List.of(), false, true, List.of("contract-A"));
+
+        // when
         String baseline = identity(
                 binding, List.of(subscription(none)), routing());
 
+        // then
         assertAll(
                 () -> changed(baseline, subscription(wholeSurface)),
                 () -> changed(baseline, subscription(wholeCatalog)));
@@ -199,6 +237,7 @@ final class SourceSurfaceIdentityTest {
 
     @Test
     void exactDependencyAndCatalogEvidenceInvalidateIdentity() {
+        // given
         ExternalChannelDependencySnapshot dependencyA = dependencies(
                 List.of("intrinsic"), false, false, List.of());
         ExternalChannelDependencySnapshot dependencyB = dependencies(
@@ -211,22 +250,33 @@ final class SourceSurfaceIdentityTest {
                 List.of("intrinsic"), false, true,
                 List.of("contract-B"));
 
+        // when
+        String identityDependencyA = identityWith(dependencyA);
+        String identityDependencyB = identityWith(dependencyB);
+        String identityCatalogA = identityWith(catalogA);
+        String identityCatalogB = identityWith(catalogB);
+
+        // then
         assertAll(
                 () -> assertNotEquals(
-                        identityWith(dependencyA), identityWith(dependencyB)),
+                        identityDependencyA, identityDependencyB),
                 () -> assertNotEquals(
-                        identityWith(catalogA), identityWith(catalogB),
+                        identityCatalogA, identityCatalogB,
                         "raw catalog membership is completeness evidence"));
     }
 
     @Test
     void compiledRoutesAndEmbeddedReceiverCapabilityInvalidateIdentity() {
+        // given
         EmbeddingBinding binding = defaultBinding();
         List<SubscriptionDelta.Entry> subscriptions =
                 List.of(subscription(ExternalChannelDependencySnapshot.none()));
+
+        // when
         String baseline = identity(binding, subscriptions, routing(
                 "/", "increment", "ownerChannel", "timeline", "alice", false));
 
+        // then
         assertAll(
                 () -> changed(baseline, routing(
                         "/nested", "increment", "ownerChannel",
@@ -250,6 +300,7 @@ final class SourceSurfaceIdentityTest {
 
     @Test
     void canonicalRouteAndSourceOrderingDoesNotChangeIdentity() {
+        // given
         RoutingSurface.Definition increment = new RoutingSurface.Definition(
                 "/", "increment", "ownerChannel", List.of(
                 new RoutingSurface.SourceAddress("timeline-b", "bob"),
@@ -267,13 +318,18 @@ final class SourceSurfaceIdentityTest {
                         new RoutingSurface.SourceAddress(
                                 "timeline-b", "bob")))), false);
 
-        assertEquals(
-                identity(defaultBinding(), subscriptions(), left),
-                identity(defaultBinding(), subscriptions(), right));
+        // when
+        String leftIdentity = identity(defaultBinding(), subscriptions(), left);
+        String rightIdentity = identity(
+                defaultBinding(), subscriptions(), right);
+
+        // then
+        assertEquals(leftIdentity, rightIdentity);
     }
 
     @Test
     void tiedRoutePrefixesStillHaveCanonicalDefinitionOrder() {
+        // given
         RoutingSurface.Definition alice = new RoutingSurface.Definition(
                 "/", "increment", "ownerChannel", List.of(
                 new RoutingSurface.SourceAddress("timeline-b", "bob"),
@@ -282,11 +338,14 @@ final class SourceSurfaceIdentityTest {
                 "/", "increment", "ownerChannel",
                 "timeline-c", "carol");
 
-        assertEquals(
-                identity(defaultBinding(), subscriptions(),
-                        new RoutingSurface(List.of(alice, carol), false)),
-                identity(defaultBinding(), subscriptions(),
-                        new RoutingSurface(List.of(carol, alice), false)));
+        // when
+        String aliceFirst = identity(defaultBinding(), subscriptions(),
+                new RoutingSurface(List.of(alice, carol), false));
+        String carolFirst = identity(defaultBinding(), subscriptions(),
+                new RoutingSurface(List.of(carol, alice), false));
+
+        // then
+        assertEquals(aliceFirst, carolFirst);
     }
 
     private static void changed(

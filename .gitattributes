@@ -25,3 +25,7 @@ __MACOSX/** export-ignore
 *.hprof export-ignore
 hs_err_pid*.log export-ignore
 replay_pid*.log export-ignore
+
+# These retained evidence bytes are checksum-bound and must not be normalized.
+stabilization/sdk-freeze-final/FINAL_RECEIPT.md -whitespace
+stabilization/sdk-freeze-final/changed-files.sha256 -whitespace

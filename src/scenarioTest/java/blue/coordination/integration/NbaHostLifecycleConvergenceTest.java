@@ -24,16 +24,20 @@ final class NbaHostLifecycleConvergenceTest {
 
     @Test
     void allHostAndHistoricalGameAdmissionOrdersConverge() throws Exception {
+        // given
         String gameInitial = resource("examples/clean/nba-game.yaml")
                 .replace("accountId: nba-feed", "accountId: nba-commissioner");
         String hostInitial = resource("examples/clean/nba-game-host.yaml");
 
         List<VariationResult> results = new ArrayList<>(4);
+
+        // when
         results.add(hostFirst(gameInitial, hostInitial));
         results.add(completedGameFirst(gameInitial, hostInitial));
         results.add(partialHistoryFirst(gameInitial, hostInitial));
         results.add(replayGameFirst(gameInitial, hostInitial));
 
+        // then
         HostState expected = results.get(0).host();
         results.forEach(result -> assertEquals(
                 expected, result.host(), result.name()));

@@ -14,7 +14,6 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Set;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -30,16 +29,22 @@ final class ContractsClosureExecutionMetricsObserverTest {
 
     @Test
     void observerIgnoresNullEvidenceWithoutPublishingDiagnostics() {
+        // given
         ContractsClosureExecutionMetricsObserver observer =
                 new ContractsClosureExecutionMetricsObserver(
                         new EngineMetrics());
 
-        assertDoesNotThrow(() -> observer.onExecutionEvidence(null));
+        // when
+        observer.onExecutionEvidence(null);
+
+        // then
         assertTrue(observer.lastEvidence().isEmpty());
     }
 
     @Test
     void admissionAndProcessPublishExactEvidenceAndMatchingRawMetrics() {
+        // given
+
         try (CoordinationEngine publicEngine =
                      CoordinationEngine.inMemoryContracts10(
                              new Contracts10Configuration(
@@ -54,9 +59,13 @@ final class ContractsClosureExecutionMetricsObserverTest {
 
             CoordinationTestControl.MetricsSnapshot beforeAdmission =
                     control.metricsSnapshot();
+
+            // when
             ContractsClosureAdmissionReceipt admission = builder
                     .admitTo(publicEngine)
                     .admissionReceipt();
+
+            // then
             assertEquals(
                     ContractsClosureAdmissionReceipt.PublicationOutcome
                             .PUBLISHED,

@@ -18,6 +18,7 @@ final class ConcurrentEmbeddedChildCreationTest {
     @Test
     void twoParentsAttachingSameUnseenChildCreateOneSession() throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String childInitial = resource(
                     "examples/clean/embedded-counter.yaml");
             Timeline childTimeline = engine.timeline(
@@ -54,6 +55,8 @@ final class ConcurrentEmbeddedChildCreationTest {
 
             EngineMetrics.MetricsSnapshot before = engine.metricsSnapshot();
             ExecutorService executor = Executors.newFixedThreadPool(2);
+
+            // when
             try {
                 CountDownLatch ready = new CountDownLatch(2);
                 CountDownLatch start = new CountDownLatch(1);
@@ -77,6 +80,7 @@ final class ConcurrentEmbeddedChildCreationTest {
             EngineTestSupport.MetricDelta work = delta(
                     before, engine.metricsSnapshot());
 
+            // then
             assertEquals(1L, work.counter("embedding.childSessionsCreated"));
             assertEquals(1L, work.counter("embedding.childSessionsReused"));
             assertEquals(1L, work.counter("preparedRuntimeCompilations"),

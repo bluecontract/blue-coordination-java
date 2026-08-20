@@ -22,6 +22,7 @@ final class SdkAcceptanceTest {
 
     @Test
     void counterAppliesPlusThreeThenMinusOne() {
+        // given
         String timelineId = "sdk/counter/alice";
         DocumentId counterId = DocumentId.of("sdk-counter");
         try (BlueCoordination coordination = BlueCoordination.inMemory()) {
@@ -34,6 +35,7 @@ final class SdkAcceptanceTest {
                             .publicRoot()
                             .fromNow());
 
+            // when
             EntryResult increment = coordination.operations().on(counter)
                     .from(timeline)
                     .call("increment")
@@ -47,6 +49,7 @@ final class SdkAcceptanceTest {
                     .requestYaml("amount: 1")
                     .execute();
 
+            // then
             assertApplied(increment, counterId);
             assertApplied(decrement, counterId);
             assertEquals(2L, counter.snapshot().longAt("/counter"));
@@ -65,6 +68,7 @@ final class SdkAcceptanceTest {
 
     @Test
     void exactOrderTargetDoesNotProcessStandalonePayNote() {
+        // given
         String timelineId = "sdk/targeting/alice";
         DocumentId orderId = DocumentId.of("sdk-order");
         DocumentId payNoteId = DocumentId.of("sdk-paynote");
@@ -83,12 +87,14 @@ final class SdkAcceptanceTest {
                             .fromNow());
             String payNoteBefore = payNote.snapshot().blueId();
 
+            // when
             EntryResult result = coordination.operations().on(order)
                     .from(timeline)
                     .call("markProcessed")
                     .through("ownerChannel")
                     .execute();
 
+            // then
             assertApplied(result, orderId);
             assertEquals(1L, order.snapshot().longAt("/processed"));
             assertEquals(0L, payNote.snapshot().longAt("/processed"));
@@ -100,6 +106,7 @@ final class SdkAcceptanceTest {
 
     @Test
     void validBroadcastWithNoAcceptingChannelIsTerminalNoMatch() {
+        // given
         String timelineId = "sdk/no-match/source";
         String accountId = "outsider";
         try (BlueCoordination coordination = BlueCoordination.inMemory()) {
@@ -121,10 +128,12 @@ final class SdkAcceptanceTest {
                       request: {fact: valid-but-unmatched}
                     """.formatted(timelineId, accountId));
 
+            // when
             EntryResult result = coordination.events().from(timeline)
                     .exact(event)
                     .execute();
 
+            // then
             assertEquals(EntryDisposition.NO_MATCH, result.disposition());
             assertTrue(result.closures().isEmpty());
             assertTrue(result.publicEvents().isEmpty());
@@ -135,18 +144,21 @@ final class SdkAcceptanceTest {
 
     @Test
     void missingExactTargetIsRejectedWithPreciseDiagnostic() {
+        // given
         DocumentId missingId = DocumentId.of("sdk-missing-target");
         String timelineId = "sdk/missing/alice";
         try (BlueCoordination coordination = BlueCoordination.inMemory()) {
             TimelineHandle timeline = coordination.timelines().register(
                     timelineId, ACTOR);
 
+            // when
             EntryResult result = coordination.operations().on(missingId)
                     .from(timeline)
                     .call("advance")
                     .through("ownerChannel")
                     .execute();
 
+            // then
             assertEquals(EntryDisposition.REJECTED,
                     result.disposition());
             assertEquals("TARGET_DOCUMENT_NOT_FOUND",
@@ -164,22 +176,52 @@ final class SdkAcceptanceTest {
 
     @Test
     void finiteTwoMemberCycleReportsExactPublicEvidence() {
-        assertFiniteRing("sdk-two-ring", 2,
-                List.of("sdk-two-ring-0", "sdk-two-ring-1",
-                        "sdk-two-ring-0"),
-                1_364L);
+        // given
+        String prefix = "sdk-two-ring";
+        List<String> expectedStepOrder = List.of(
+                "sdk-two-ring-0", "sdk-two-ring-1", "sdk-two-ring-0");
+        try (FiniteRingFixture fixture = finiteRingFixture(prefix, 2)) {
+            String initialMaster = assertCyclicComponent(
+                    fixture.handles(), fixture.ids());
+            fixture.handles().values().forEach(handle ->
+                    assertCurrentHistory(handle, 0L));
+
+            // when
+            EntryResult result = executeFiniteRing(fixture);
+
+            // then
+            assertFiniteRingResult(
+                    fixture, result, initialMaster,
+                    expectedStepOrder, 1_364L);
+        }
     }
 
     @Test
     void finiteThreeMemberCycleReportsExactPublicEvidence() {
-        assertFiniteRing("sdk-three-ring", 3,
-                List.of("sdk-three-ring-0", "sdk-three-ring-1",
-                        "sdk-three-ring-2", "sdk-three-ring-0"),
-                1_787L);
+        // given
+        String prefix = "sdk-three-ring";
+        List<String> expectedStepOrder = List.of(
+                "sdk-three-ring-0", "sdk-three-ring-1",
+                "sdk-three-ring-2", "sdk-three-ring-0");
+        try (FiniteRingFixture fixture = finiteRingFixture(prefix, 3)) {
+            String initialMaster = assertCyclicComponent(
+                    fixture.handles(), fixture.ids());
+            fixture.handles().values().forEach(handle ->
+                    assertCurrentHistory(handle, 0L));
+
+            // when
+            EntryResult result = executeFiniteRing(fixture);
+
+            // then
+            assertFiniteRingResult(
+                    fixture, result, initialMaster,
+                    expectedStepOrder, 1_787L);
+        }
     }
 
     @Test
     void fiveMemberSharedAnchorCyclePreservesExactStepOrder() {
+        // given
         DocumentId a = DocumentId.of("sdk-branch-a");
         DocumentId b1 = DocumentId.of("sdk-branch-b1");
         DocumentId b2 = DocumentId.of("sdk-branch-b2");
@@ -217,6 +259,7 @@ final class SdkAcceptanceTest {
             handles.values().forEach(handle ->
                     assertCurrentHistory(handle, 0L));
 
+            // when
             EntryResult result = coordination.operations()
                     .on(admitted.document("a"))
                     .from(timeline)
@@ -224,6 +267,7 @@ final class SdkAcceptanceTest {
                     .through("ownerChannel")
                     .execute();
 
+            // then
             assertEquals(EntryDisposition.APPLIED, result.disposition());
             assertEquals(1, result.closures().size());
             assertEquals(List.of(a, c1, b1, a, c2, b2, a),
@@ -265,6 +309,7 @@ final class SdkAcceptanceTest {
 
     @Test
     void oneBroadcastPreservesTwoDisconnectedCycleResults() {
+        // given
         DocumentId a1 = DocumentId.of("sdk-disjoint-a1");
         DocumentId b1 = DocumentId.of("sdk-disjoint-b1");
         DocumentId a2 = DocumentId.of("sdk-disjoint-a2");
@@ -317,10 +362,12 @@ final class SdkAcceptanceTest {
                       request: {}
                     """.formatted(timelineId, ACTOR));
 
+            // when
             EntryResult result = coordination.events().from(timeline)
                     .exact(event)
                     .execute();
 
+            // then
             assertEquals(EntryDisposition.APPLIED, result.disposition());
             assertEquals(2, result.closures().size());
             assertTrue(result.closures().stream().allMatch(
@@ -379,20 +426,25 @@ final class SdkAcceptanceTest {
 
     @Test
     void gasLoopRollsBackAndIsExactlyRepeatable() {
+        // given
+        List<DocumentId> expectedOrder = expectedAlternatingLoopOrder(
+                DocumentId.of("sdk-gas-loop-a"),
+                DocumentId.of("sdk-gas-loop-b"),
+                742);
+
+        // when
         GasLoopEvidence first = runGasLoop();
         GasLoopEvidence retry = runGasLoop();
 
+        // then
         assertEquals(first, retry);
-        assertEquals(expectedAlternatingLoopOrder(
-                        DocumentId.of("sdk-gas-loop-a"),
-                        DocumentId.of("sdk-gas-loop-b"),
-                        742),
-                first.documentStepOrder());
+        assertEquals(expectedOrder, first.documentStepOrder());
         assertEquals(99_967L, first.gas());
     }
 
     @Test
     void detachBreaksTheLoopAndTheLaterCallTerminates() {
+        // given
         try (BlueCoordination coordination = BlueCoordination.inMemory()) {
             DynamicLoop scenario = admitDynamicLoop(
                     coordination, "sdk-detach");
@@ -404,6 +456,7 @@ final class SdkAcceptanceTest {
             handles.values().forEach(handle ->
                     assertCurrentHistory(handle, 0L));
 
+            // when
             EntryResult rejected = coordination.operations()
                     .on(scenario.a())
                     .from(scenario.signalTimeline())
@@ -411,6 +464,7 @@ final class SdkAcceptanceTest {
                     .through("signalChannel")
                     .execute();
 
+            // then
             assertEquals(EntryDisposition.GAS_LIMIT_EXCEEDED,
                     rejected.disposition());
             assertEquals(1, rejected.closures().size());
@@ -504,6 +558,7 @@ final class SdkAcceptanceTest {
 
     @Test
     void removeAndReaddProducesFreshAuthenticatedCycleIdentity() {
+        // given
         try (BlueCoordination coordination = BlueCoordination.inMemory()) {
             DynamicLoop scenario = admitDynamicLoop(
                     coordination, "sdk-reactivation");
@@ -526,12 +581,15 @@ final class SdkAcceptanceTest {
                     1L,
                     true);
 
+            // when
             EntryResult detached = coordination.operations()
                     .on(scenario.b())
                     .from(scenario.controlTimeline())
                     .call("detach")
                     .through("controlChannel")
                     .execute();
+
+            // then
             assertEquals(EntryDisposition.APPLIED,
                     detached.disposition());
             assertSingleAppliedClosure(detached);
@@ -640,10 +698,13 @@ final class SdkAcceptanceTest {
 
     @Test
     void submitIsAppendOnlyAndDrainMatchesExecute() {
+        // given
         String timelineId = "sdk/parity/alice";
         DocumentId id = DocumentId.of("sdk-parity-counter");
         EntryResult submittedResult;
         DocumentSnapshot submittedSnapshot;
+
+        // when
         try (BlueCoordination coordination = BlueCoordination.inMemory()) {
             TimelineHandle timeline = coordination.timelines().register(
                     timelineId, ACTOR);
@@ -683,6 +744,7 @@ final class SdkAcceptanceTest {
                     .requestYaml("amount: 3")
                     .execute();
 
+            // then
             assertEquals(executed.disposition(),
                     submittedResult.disposition());
             assertEquals(executed.stats().gas(),
@@ -702,11 +764,9 @@ final class SdkAcceptanceTest {
         }
     }
 
-    private static void assertFiniteRing(
+    private static FiniteRingFixture finiteRingFixture(
             String prefix,
-            int size,
-            List<String> expectedStepOrder,
-            long expectedGas) {
+            int size) {
         String timelineId = prefix + "/alice";
         List<DocumentId> ids = IntStream.range(0, size)
                 .mapToObj(index -> DocumentId.of(prefix + "-" + index))
@@ -723,50 +783,63 @@ final class SdkAcceptanceTest {
                 .fromNow()
                 .build();
 
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        BlueCoordination coordination = BlueCoordination.inMemory();
+        try {
             TimelineHandle timeline = coordination.timelines().register(
                     timelineId, ACTOR);
             ClosureHandle closure = coordination.documents().admit(
                     definition);
             Map<DocumentId, DocumentHandle> handles = handles(closure);
             Map<DocumentId, String> before = blueIds(handles);
-            String initialMaster = assertCyclicComponent(handles, ids);
-            handles.values().forEach(handle ->
-                    assertCurrentHistory(handle, 0L));
+            return new FiniteRingFixture(
+                    coordination, ids, closure, handles, before, timeline);
+        } catch (RuntimeException | Error failure) {
+            coordination.close();
+            throw failure;
+        }
+    }
 
-            EntryResult result = coordination.operations()
-                    .on(closure.document("m0"))
-                    .from(timeline)
-                    .call("start")
-                    .through("ownerChannel")
-                    .execute();
+    private static EntryResult executeFiniteRing(FiniteRingFixture fixture) {
+        return fixture.coordination().operations()
+                .on(fixture.closure().document("m0"))
+                .from(fixture.timeline())
+                .call("start")
+                .through("ownerChannel")
+                .execute();
+    }
 
-            assertEquals(EntryDisposition.APPLIED, result.disposition());
-            assertEquals(1, result.closures().size());
-            assertEquals(expectedStepOrder.stream()
-                            .map(DocumentId::of)
-                            .toList(),
-                    result.stats().documentStepOrder());
-            assertExactPublicEvents(
-                    coordination,
-                    result.publicEvents(),
-                    List.of(new ExpectedPublicEvent(ids.get(0), "ring-0")));
-            assertAllExactEvidence(
-                    result,
-                    handles,
-                    List.of(ids),
-                    before,
-                    1L,
-                    expectedGas);
-            assertNotEquals(initialMaster,
-                    assertCyclicComponent(handles, ids));
-            assertEquals("done", closure.document("m0")
-                    .snapshot().textAt("/phase"));
-            for (int index = 1; index < size; index++) {
-                assertEquals("relayed-" + index,
-                        closure.document("m" + index)
-                                .snapshot().textAt("/phase"));
-            }
+    private static void assertFiniteRingResult(
+            FiniteRingFixture fixture,
+            EntryResult result,
+            String initialMaster,
+            List<String> expectedStepOrder,
+            long expectedGas) {
+        assertEquals(EntryDisposition.APPLIED, result.disposition());
+        assertEquals(1, result.closures().size());
+        assertEquals(expectedStepOrder.stream()
+                        .map(DocumentId::of)
+                        .toList(),
+                result.stats().documentStepOrder());
+        assertExactPublicEvents(
+                fixture.coordination(),
+                result.publicEvents(),
+                List.of(new ExpectedPublicEvent(
+                        fixture.ids().get(0), "ring-0")));
+        assertAllExactEvidence(
+                result,
+                fixture.handles(),
+                List.of(fixture.ids()),
+                fixture.before(),
+                1L,
+                expectedGas);
+        assertNotEquals(initialMaster,
+                assertCyclicComponent(fixture.handles(), fixture.ids()));
+        assertEquals("done", fixture.closure().document("m0")
+                .snapshot().textAt("/phase"));
+        for (int index = 1; index < fixture.ids().size(); index++) {
+            assertEquals("relayed-" + index,
+                    fixture.closure().document("m" + index)
+                            .snapshot().textAt("/phase"));
         }
     }
 
@@ -1607,6 +1680,25 @@ final class SdkAcceptanceTest {
                       - type: Coordination/Trigger Event
                         event: {type: Coordination/Event, kind: LOOP}
                 """.formatted(id.value(), timelineId, ACTOR);
+    }
+
+    private record FiniteRingFixture(
+            BlueCoordination coordination,
+            List<DocumentId> ids,
+            ClosureHandle closure,
+            Map<DocumentId, DocumentHandle> handles,
+            Map<DocumentId, String> before,
+            TimelineHandle timeline) implements AutoCloseable {
+        private FiniteRingFixture {
+            ids = List.copyOf(ids);
+            handles = Map.copyOf(handles);
+            before = Map.copyOf(before);
+        }
+
+        @Override
+        public void close() {
+            coordination.close();
+        }
     }
 
     private record GasLoopEvidence(

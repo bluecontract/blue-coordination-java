@@ -63,11 +63,15 @@ final class Round101NbaFlagshipScenarioTest {
     @Test
     void threeGameCollectionConvergesAcrossAdmissionOrders()
             throws Exception {
+        // given
         List<Outcome> outcomes = new ArrayList<>();
+
+        // when
         for (AdmissionOrder order : AdmissionOrder.values()) {
             outcomes.add(run(order));
         }
 
+        // then
         Outcome expected = outcomes.get(0);
         SlateState expectedState = new SlateState(
                 15L,

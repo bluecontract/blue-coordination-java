@@ -118,8 +118,14 @@ final class CoordinationProcessorsTest {
 
     @Test
     void unionChannelTieBreaksUseUnicodeCodePointOrder() {
+        // given
+
         String privateUse = "\uE000";
+
+        // when
         String supplementary = "\uD800\uDC00";
+
+        // then
         assertTrue(privateUse.compareTo(supplementary) > 0,
                 "the fixture must oppose Java UTF-16 ordering");
         ChannelEvaluation evaluation = ChannelEvaluation.match(new Node());

@@ -4,6 +4,7 @@ import blue.coordination.api.Contracts10Configuration;
 import blue.coordination.api.CoordinationException;
 import blue.coordination.api.DocumentId;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 
 import java.util.Set;
 
@@ -19,6 +20,8 @@ final class Contracts10EngineLifecycleTest {
 
     @Test
     void optInFactoryOwnsFeederAndRetainsDurableProgressAcrossRestart() {
+        // given
+
         Contracts10Configuration configuration =
                 new Contracts10Configuration(
                         LANGUAGE_ID,
@@ -38,8 +41,11 @@ final class Contracts10EngineLifecycleTest {
 
             engine.restartFromStores();
 
+            // when
             ContractsRootFeederCoordinator after =
                     engine.contractsFeederCoordinator();
+
+            // then
             assertNotSame(before, after);
             assertSame(durable, after.durableState());
             ContractsJournalDrainCoordinator journalAfter =
@@ -51,22 +57,33 @@ final class Contracts10EngineLifecycleTest {
 
     @Test
     void legacyFactoryDoesNotSilentlyEnableContracts() {
+        // given
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.create()) {
+            // when
+            Executable feederAccess = engine::contractsFeederCoordinator;
+
+            // then
             assertThrows(IllegalStateException.class,
-                    engine::contractsFeederCoordinator);
+                    feederAccess);
         }
     }
 
     @Test
     void contractsFactoryRejectsLegacyDocumentAdmission() {
+        // given
+
         Contracts10Configuration configuration =
                 new Contracts10Configuration(
                         LANGUAGE_ID,
                         CONTRACTS_ID,
                         Set.of(DocumentId.of("public-root")));
+
+        // when
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.createContracts10(configuration)) {
+
+            // then
             assertThrows(CoordinationException.class,
                     () -> engine.startDocument(
                             DocumentId.of("public-root"),

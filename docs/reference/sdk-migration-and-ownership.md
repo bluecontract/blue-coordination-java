@@ -1,14 +1,15 @@
 # SDK migration and ownership ledger
 
-This ledger fixes the application boundary for the `3.0.0-rc.3` SDK freeze
+This ledger fixes the application boundary for the `3.0.0-rc.3` SDK release
 candidate. It is normative for package ownership and migration guidance, but it
 does not replace the Contracts 1.0 specification.
 
 ```text
 candidate: 3.0.0-rc.3
-distribution: local staged repository only
+distribution: Maven Central, bounded external-pilot tier
 normal default: BlueCoordination.inMemory() -> Contracts 1.0
-implementationConformanceClaimed: false
+implementationConformanceClaimed: true
+productionReleaseReady: false
 ```
 
 ## Default-profile decision
@@ -28,7 +29,7 @@ consumer fixtures, and Javadocs start at `BlueCoordination`.
 
 | Package | Owner and stability | Permitted use |
 | --- | --- | --- |
-| `blue.coordination.sdk` | application-facing SDK | normal application imports and built/staged-JAR consumer tests |
+| `blue.coordination.sdk` | application-facing SDK | normal application imports and built-JAR consumer tests |
 | `blue.coordination.api` | low-level host compatibility | advanced integration, existing-host migration, and SDK `DocumentId` interop |
 | `blue.coordination.processor` | semantic integration | assembling retained Contracts/BEX processors; not ordinary application code |
 | `blue.coordination.internal` | implementation | no application imports; exact build-governed public allowlist only |
@@ -102,12 +103,13 @@ an artifact-bound receipt decision, not a claim made from source shape alone.
 
 ## Candidate and release ownership
 
-The rc.3 coordinate is consumed only from the file repository supplied by
-`-PblueStagingRepository`. The `staged-artifact` lane owns dependency isolation,
-exact component versions, Java 17/21 extracted consumers, and candidate
-artifact checks. Historical rc.1 staging and receipts remain under their
-existing tasks and are not rewritten.
+The rc.3 build resolves only Maven Central artifacts. Dependency isolation,
+exact component versions, Java 17/21 verification, publication metadata, and
+built-artifact checks are owned by `releaseCheck` and
+`verifyRcReadiness`. Local composites, Maven Local, and file-staged
+repositories are not supported fallbacks.
 
-Passing the SDK artifact lane means the local bytes are coherent. It does not
-authorize upload, Maven Local publication, Git push, tag creation, or an
-implementation-conformance claim.
+Passing the gate authorizes only the bounded external-pilot tier documented in
+the [rc.3 release decision](../releases/3.0.0-rc.3.md). Remote publication and
+tagging remain owned by the release workflow, which pushes the tag only after
+Maven Central deployment succeeds.

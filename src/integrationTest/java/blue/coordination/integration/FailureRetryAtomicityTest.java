@@ -21,6 +21,7 @@ final class FailureRetryAtomicityTest {
     void stagedChildFailureRollsBackOnlyHostDeltaAndTerminalRetryReconciles()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String childInitial = resource(
                     "examples/clean/embedded-counter.yaml");
             Timeline childTimeline = engine.timeline(
@@ -91,8 +92,11 @@ final class FailureRetryAtomicityTest {
                     "terminal retry cannot rerun the committed parent PROCESS");
 
             engine.clearFailureInjection();
+
+            // when
             engine.dispatch(attachment);
 
+            // then
             assertEquals(2, engine.documentCount());
             assertEquals(SessionStatus.READY, engine.session(
                     "embedded-state-parent").status());
@@ -115,6 +119,7 @@ final class FailureRetryAtomicityTest {
     void childCommitSurvivesARepeatedFailureBeforeParentCommit()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String childInitial = resource(
                     "examples/clean/embedded-counter.yaml");
             Timeline childTimeline = engine.timeline(
@@ -171,10 +176,13 @@ final class FailureRetryAtomicityTest {
             engine.clearFailureInjection();
             EngineMetrics.MetricsSnapshot beforeRetry =
                     engine.metricsSnapshot();
+
+            // when
             engine.dispatch(liveChildEntry);
             EngineTestSupport.MetricDelta retry = delta(
                     beforeRetry, engine.metricsSnapshot());
 
+            // then
             assertEquals(1L, retry.counter("frozenProcessCalls"),
                     "retry runs only the missing parent application");
             assertEquals(2, engine.history("embedded-counter-A").size());
@@ -195,6 +203,7 @@ final class FailureRetryAtomicityTest {
     void restartRebuildsQueueAndAppliesOnlyTheMissingParentTransition()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String childInitial = resource(
                     "examples/clean/embedded-counter.yaml");
             Timeline childTimeline = engine.timeline(
@@ -244,6 +253,8 @@ final class FailureRetryAtomicityTest {
             assertNotReady(engine, "embedded-state-parent");
             EngineMetrics.MetricsSnapshot beforeRestart =
                     engine.metricsSnapshot();
+
+            // when
             engine.restartFromStores();
             EngineTestSupport.MetricDelta restart = delta(
                     beforeRestart, engine.metricsSnapshot());
@@ -259,6 +270,7 @@ final class FailureRetryAtomicityTest {
             EngineTestSupport.MetricDelta resume = delta(
                     beforeResume, engine.metricsSnapshot());
 
+            // then
             assertEquals(5L, integer(
                     engine, "embedded-state-parent", "/child/counter"));
             assertEquals(2, engine.history("embedded-counter-A").size(),
@@ -296,6 +308,7 @@ final class FailureRetryAtomicityTest {
     void committedEmbeddedEpochSurvivesRestartAndReconcilesItsCursorOnce()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String childInitial = resource(
                     "examples/clean/embedded-counter.yaml");
             Timeline childTimeline = engine.timeline(
@@ -332,6 +345,7 @@ final class FailureRetryAtomicityTest {
                     "embedded-state-parent").get("/child"));
             assertEquals(0L, engine.session("embedded-counter-A").epoch());
 
+            // when
             engine.restartFromStores();
             engine.dispatch(attachment);
             assertEquals(3L, integer(
@@ -345,6 +359,8 @@ final class FailureRetryAtomicityTest {
             engine.dispatch(attachment);
             EngineTestSupport.MetricDelta duplicate = delta(
                     beforeDuplicate, engine.metricsSnapshot());
+
+            // then
             assertEquals(0L, duplicate.counter("frozenProcessCalls"));
         }
     }
@@ -353,6 +369,7 @@ final class FailureRetryAtomicityTest {
     void committedStateWithLostResponseIsReconciledFromDeliveryReceipt()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             Timeline alice = engine.timeline(
                     "examples/clean-counter/alice", "alice");
             engine.start(
@@ -376,11 +393,15 @@ final class FailureRetryAtomicityTest {
             engine.clearFailureInjection();
             EngineMetrics.MetricsSnapshot beforeRetry =
                     engine.metricsSnapshot();
+
+            // when
             assertEquals(0, engine.dispatch(entry).outcomes().size(),
                     "receipt reconciliation commits no new transition in "
                             + "the retry call");
             EngineTestSupport.MetricDelta retry = delta(
                     beforeRetry, engine.metricsSnapshot());
+
+            // then
             assertEquals(0L, retry.counter("frozenProcessCalls"));
             assertEquals(0L, retry.counter("EXTERNAL_PROCESS_CALLS"));
             assertEquals(3L, integer(engine, "counter", "/counter"));
@@ -390,6 +411,7 @@ final class FailureRetryAtomicityTest {
     void privateEmbeddedInputNeverChangesExternalJournalFrontier()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String childInitial = resource(
                     "examples/clean/embedded-middle.yaml");
             engine.start("embedded-middle-A", childInitial);
@@ -421,6 +443,8 @@ final class FailureRetryAtomicityTest {
                     "embedded-root-B").get("/child"));
 
             engine.clearFailureInjection();
+
+            // when
             engine.dispatch(attachment);
             assertEquals(journalBeforeDispatch, engine.journalSize(),
                     "retry reconciles the document-local receipt only");
@@ -437,6 +461,8 @@ final class FailureRetryAtomicityTest {
             var next = engine.append(
                     rootTimeline,
                     Operation.yaml("ignored", "ownerChannel", "{}"));
+
+            // then
             assertEquals(attachment.timestampMicros() + 1L,
                     next.timestampMicros());
             assertEquals(attachment.globalSequence() + 1L,

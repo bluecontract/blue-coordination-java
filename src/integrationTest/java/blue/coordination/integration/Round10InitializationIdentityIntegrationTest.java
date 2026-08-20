@@ -28,9 +28,14 @@ final class Round10InitializationIdentityIntegrationTest {
     void authoredManagedChildGetsItsOwnEpochZeroBeforeParentApplication()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
-            engine.start("initial-embedded-parent", resource(
-                    "examples/clean/initial-embedded-parent.yaml"));
+            // given
+            String authored = resource(
+                    "examples/clean/initial-embedded-parent.yaml");
 
+            // when
+            engine.start("initial-embedded-parent", authored);
+
+            // then
             List<DocumentRevision> parent = engine.history(
                     "initial-embedded-parent");
             List<DocumentRevision> child = engine.history(
@@ -54,6 +59,7 @@ final class Round10InitializationIdentityIntegrationTest {
     void unavailableInitialChildHistoryCannotPublishReadyState()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             Timeline rootTimeline = engine.timeline(
                     "examples/embedded/initial-parent", "bob");
             engine.appendAt(
@@ -73,8 +79,13 @@ final class Round10InitializationIdentityIntegrationTest {
             engine.restartFromStores();
             assertEquals(SessionStatus.CATCHING_UP,
                     engine.session("initial-embedded-parent").status());
+
+            // when
             engine.makeHistoricalAvailable();
-            assertTrue(engine.drain().quiescent());
+            boolean quiescent = engine.drain().quiescent();
+
+            // then
+            assertTrue(quiescent);
             assertEquals(SessionStatus.READY,
                     engine.session("initial-embedded-parent").status());
             assertEquals(4L, integer(
@@ -86,6 +97,7 @@ final class Round10InitializationIdentityIntegrationTest {
     void initialChildAndRootHistoryMergeByGlobalSourceOrder()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             Timeline rootTimeline = engine.timeline(
                     "examples/embedded/initial-parent", "bob");
             Timeline childTimeline = engine.timeline(
@@ -101,12 +113,14 @@ final class Round10InitializationIdentityIntegrationTest {
                             "increment", "ownerChannel", "amount: 7"),
                     T0 + 200L);
 
+            // when
             engine.start(
                     "initial-embedded-parent",
                     resource("examples/clean/initial-embedded-parent.yaml"),
                     CoordinationEngine.AdmissionPolicy.FULL_HISTORY,
                     null);
 
+            // then
             List<DocumentRevision> history = engine.history(
                     "initial-embedded-parent");
             assertEquals(List.of(
@@ -136,6 +150,7 @@ final class Round10InitializationIdentityIntegrationTest {
     void failedHistoricalStartRetainsCommittedAdmissionAndRestartResumes()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             Timeline rootTimeline = engine.timeline(
                     "examples/embedded/initial-parent", "bob");
             engine.appendAt(
@@ -156,9 +171,13 @@ final class Round10InitializationIdentityIntegrationTest {
             assertEquals(SessionStatus.CATCHING_UP,
                     engine.session("initial-embedded-parent").status());
 
+            // when
             engine.clearFailureInjection();
             engine.restartFromStores();
-            assertTrue(engine.drain().quiescent());
+            boolean quiescent = engine.drain().quiescent();
+
+            // then
+            assertTrue(quiescent);
             assertEquals(SessionStatus.READY,
                     engine.session("initial-embedded-parent").status());
             assertEquals(4L, integer(
@@ -173,6 +192,7 @@ final class Round10InitializationIdentityIntegrationTest {
     @Test
     void failedHistoricalStartBeforeFirstCommitIsDeltaCleanAndRetryable()
             throws Exception {
+        // given
         String authored = resource(
                 "examples/clean/initial-embedded-parent.yaml");
         try (TestEngine engine = TestEngine.create()) {
@@ -188,12 +208,15 @@ final class Round10InitializationIdentityIntegrationTest {
                     "an admission with no committed transition must vanish");
             assertEquals(0, engine.routeRowCount());
 
+            // when
             engine.clearFailureInjection();
             engine.start(
                     "initial-embedded-parent",
                     authored,
                     CoordinationEngine.AdmissionPolicy.FULL_HISTORY,
                     null);
+
+            // then
             assertEquals(SessionStatus.READY,
                     engine.session("initial-embedded-parent").status());
             assertEquals(2, engine.documentCount());
@@ -204,6 +227,7 @@ final class Round10InitializationIdentityIntegrationTest {
     void invalidTopLevelCompletenessEvidenceBlocksPendingAdmission()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             Timeline rootTimeline = engine.timeline(
                     "examples/embedded/initial-parent", "bob");
             engine.appendAt(
@@ -218,6 +242,7 @@ final class Round10InitializationIdentityIntegrationTest {
                     CoordinationEngine.AdmissionPolicy.FULL_HISTORY,
                     null);
 
+            // when
             engine.invalidateHistoricalEvidence("invalid provider cursor");
             assertThrows(RuntimeException.class, engine::drain);
             assertEquals(SessionStatus.BLOCKED,
@@ -225,6 +250,8 @@ final class Round10InitializationIdentityIntegrationTest {
             engine.restartFromStores();
             assertEquals(SessionStatus.BLOCKED,
                     engine.session("initial-embedded-parent").status());
+
+            // then
             assertThrows(RuntimeException.class, engine::drain);
         }
     }
@@ -233,6 +260,7 @@ final class Round10InitializationIdentityIntegrationTest {
     void initializationEpochPrecedesHistoricalProcessEvenWhenHistoryIsEarlier()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String childInitial = resource(
                     "examples/clean/embedded-counter.yaml");
             Timeline childTimeline = engine.timeline(
@@ -265,10 +293,13 @@ final class Round10InitializationIdentityIntegrationTest {
                     "the child history must be strictly before attachment");
 
             EngineMetrics.MetricsSnapshot before = engine.metricsSnapshot();
+
+            // when
             engine.dispatch(attachment);
             EngineTestSupport.MetricDelta work = delta(
                     before, engine.metricsSnapshot());
 
+            // then
             List<DocumentRevision> applications = embeddedApplications(
                     engine, "embedded-state-parent");
             assertEquals(List.of(0L, 1L, 3L), applications.stream()
@@ -291,6 +322,7 @@ final class Round10InitializationIdentityIntegrationTest {
     void topLevelHistoryAdvancesNewChildBeforeTheRootsNextEntry()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String childInitial = resource(
                     "examples/clean/embedded-counter.yaml");
             Timeline rootTimeline = engine.timeline(
@@ -320,12 +352,14 @@ final class Round10InitializationIdentityIntegrationTest {
             assertTrue(c1.sourceOrderKey().compareTo(
                     r2.sourceOrderKey()) < 0);
 
+            // when
             engine.start(
                     "embedded-state-parent",
                     resource("examples/clean/embedded-state-parent.yaml"),
                     CoordinationEngine.AdmissionPolicy.FULL_HISTORY,
                     null);
 
+            // then
             List<DocumentRevision> rootHistory = engine.history(
                     "embedded-state-parent");
             assertEquals(List.of(
@@ -368,6 +402,7 @@ final class Round10InitializationIdentityIntegrationTest {
     void knownHistoricalStateAppliesOnlyEpochsAfterTheSuppliedState()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String childInitial = resource(
                     "examples/clean/embedded-counter.yaml");
             Timeline childTimeline = engine.timeline(
@@ -387,6 +422,8 @@ final class Round10InitializationIdentityIntegrationTest {
             Timeline parentTimeline = engine.timeline(
                     "examples/embedded/state-parent", "bob");
             EngineMetrics.MetricsSnapshot before = engine.metricsSnapshot();
+
+            // when
             engine.dispatch(engine.appendAt(
                     parentTimeline,
                     Operation.exact(
@@ -397,6 +434,7 @@ final class Round10InitializationIdentityIntegrationTest {
             EngineTestSupport.MetricDelta work = delta(
                     before, engine.metricsSnapshot());
 
+            // then
             List<DocumentRevision> parentHistory = engine.history(
                     "embedded-state-parent");
             assertEquals(1L, childCounter(parentHistory.get(1)),
@@ -420,6 +458,7 @@ final class Round10InitializationIdentityIntegrationTest {
     void unknownDivergentStateRejectsBeforeParentOrTopologyCommit()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String childInitial = resource(
                     "examples/clean/embedded-counter.yaml");
             Timeline childTimeline = engine.timeline(
@@ -446,6 +485,8 @@ final class Round10InitializationIdentityIntegrationTest {
 
             String divergent = childInitial.replace(
                     "counter: 0", "counter: 99");
+
+            // when
             IllegalStateException failure = assertThrows(
                     IllegalStateException.class,
                     () -> engine.appendAndDispatch(
@@ -457,6 +498,7 @@ final class Round10InitializationIdentityIntegrationTest {
             EngineTestSupport.MetricDelta work = delta(
                     before, engine.metricsSnapshot());
 
+            // then
             assertTrue(failure.getMessage().contains(
                     "Invalid admission evidence: unknown state"),
                     failure::getMessage);

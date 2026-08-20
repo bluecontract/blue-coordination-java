@@ -12,13 +12,30 @@ consumer checkout to prove that it works.
 | `integrationTest` | In-memory engine with public operations | Append/process separation, engine-selected drain, entry-frame ordering, admission, collection paths, catch-up barriers, identity, ownership, atomic retry and removal/re-addition |
 | `consumerTest` | Built production JAR only | SDK compilation without main-source output or test fixtures, runtime dependency completeness and representative managed-document behavior |
 | `scenarioTest` | Complete business lifecycles | Multi-order NBA convergence and the large host/PayNote lifecycle |
-| extracted SDK consumer | Staged JAR/POM/module graph only | Exact rc.3 dependency graph and standalone SDK execution on Java 17 and Java 21 without composites or Maven Local |
 
 The suites intentionally overlap at important boundaries. Atomicity has focused
 integration coverage and is exercised again by realistic scenarios. The
 consumer suite repeats representative behavior because compilation and
 execution against the JAR catch packaging and dependency mistakes that
-source-based tests cannot.
+source-based tests cannot. The complete graph resolves from Maven Central in
+every suite and CI repeats the release gate on Java 17 and Java 21.
+
+## Given/When/Then structure
+
+Every `@Test` has exactly one meaningful lowercase sequence:
+
+```java
+// given
+
+// when
+
+// then
+```
+
+Setup belongs under `given`, the behavior being exercised under `when`, and
+observable outcomes under `then`. Exception tests may prepare an `Executable`
+under `when` and assert it under `then`. `verifyTestArchitecture` rejects
+missing, duplicated, or misordered markers across all four source sets.
 
 ## SDK freeze acceptance
 
@@ -48,12 +65,8 @@ Operation-result managed admission is deliberately limited to new `FROM_NOW`
 lineages. Acceptance tests prove that a known imported epoch and every
 historical/frontier/attach-current/passive activation request fail before
 append, without partial document or topology mutation. The final conformance
-decision remains bound to the exact staged acceptance and fixture corpus; a
-source-suite pass alone does not set `implementationConformanceClaimed=true`.
-
-The extracted `staged-sdk-consumer/` is a second consumer boundary, not a
-duplicate source test. It resolves only the staged file repository and runs on
-both Java 17 and Java 21. A source-composite pass cannot substitute for it.
+decision is rechecked by the complete published-dependency acceptance and
+fixture corpus; a focused source-suite pass alone is insufficient.
 
 ## Recovered topology evidence
 

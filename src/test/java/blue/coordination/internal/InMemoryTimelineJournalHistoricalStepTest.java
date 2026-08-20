@@ -28,10 +28,13 @@ final class InMemoryTimelineJournalHistoricalStepTest {
 
     @Test
     void returnsEveryClosedOutcomeWithoutConflatingAbsence() {
+        // given
+
         EngineMetrics metrics = new EngineMetrics();
         WholeObjectStore objects = new WholeObjectStore(metrics);
         HistoricalAvailabilityControl availability =
                 new HistoricalAvailabilityControl();
+
         try (BlueRuntime runtime = BlueRuntime.create(objects)) {
             InMemoryTimelineJournal journal = new InMemoryTimelineJournal(
                     new WholeRequestEntryFactory(runtime, objects, metrics),
@@ -46,11 +49,14 @@ final class InMemoryTimelineJournalHistoricalStepTest {
             TimelineEntry second = journal.append(timeline, operation, 200L);
             TimelineEntry cutoff = journal.append(timeline, operation, 300L);
             AtomicInteger surfaceResolutions = new AtomicInteger();
+
+            // when
             Supplier<String> sourceSurface = () -> {
                 surfaceResolutions.incrementAndGet();
                 return "alice-owner-surface";
             };
 
+            // then
             HistoricalStep.EligibleEntry eligible = assertInstanceOf(
                     HistoricalStep.EligibleEntry.class,
                     journal.nextHistoricalStep(
@@ -139,11 +145,16 @@ final class InMemoryTimelineJournalHistoricalStepTest {
 
     @Test
     void completenessEvidenceFailsClosedForEveryStaleIdentity() {
+        // given
+
         ExternalOrderKey cutoff = ExternalOrderKey.of(List.of(
                 100L, "timeline", "cutoff"));
+
+        // when
         CompletenessEvidence evidence = new CompletenessEvidence(
                 5L, 7L, 11L, cutoff, "surface-v1");
 
+        // then
         assertTrue(evidence.isCurrentFor(
                 5L, 7L, 11L, cutoff, "surface-v1"));
         assertFalse(evidence.isCurrentFor(
@@ -165,8 +176,11 @@ final class InMemoryTimelineJournalHistoricalStepTest {
 
     @Test
     void shuffledSparseHistoryAdvancesByCursorWithoutRestartScanning() {
+        // given
+
         EngineMetrics metrics = new EngineMetrics();
         WholeObjectStore objects = new WholeObjectStore(metrics);
+
         try (BlueRuntime runtime = BlueRuntime.create(objects)) {
             InMemoryTimelineJournal journal = new InMemoryTimelineJournal(
                     new WholeRequestEntryFactory(runtime, objects, metrics),
@@ -190,10 +204,13 @@ final class InMemoryTimelineJournalHistoricalStepTest {
                 }
             }
 
+            // when
             List<TimelineEntry> canonicalOrder = insertionOrder.stream()
                     .sorted(Comparator.comparing(
                             TimelineEntry::sourceOrderKey))
                     .toList();
+
+            // then
             assertFalse(insertionOrder.equals(canonicalOrder),
                     "fixture must not accidentally use source order");
 

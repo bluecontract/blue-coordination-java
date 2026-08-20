@@ -20,6 +20,7 @@ final class ExistingEmbeddedStateOnlyCatchUpTest {
     void attachmentReusesChildHistoryAndProcessesEveryParentEpochExactlyOnce()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String childInitial = resource(
                     "examples/clean/embedded-counter.yaml");
             Timeline childTimeline = engine.timeline(
@@ -40,6 +41,8 @@ final class ExistingEmbeddedStateOnlyCatchUpTest {
                     "embedded-state-parent",
                     resource("examples/clean/embedded-state-parent.yaml"));
             EngineMetrics.MetricsSnapshot before = engine.metricsSnapshot();
+
+            // when
             engine.appendAndDispatch(
                     parentTimeline,
                     Operation.exact(
@@ -49,6 +52,7 @@ final class ExistingEmbeddedStateOnlyCatchUpTest {
             EngineTestSupport.MetricDelta work = delta(
                     before, engine.metricsSnapshot());
 
+            // then
             assertEquals(20L, integer(
                     engine, "embedded-state-parent", "/child/counter"));
             assertEquals(childRevisions, engine.history(

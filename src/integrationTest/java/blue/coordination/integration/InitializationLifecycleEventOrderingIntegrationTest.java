@@ -33,9 +33,12 @@ final class InitializationLifecycleEventOrderingIntegrationTest {
     @Test
     void lifecycleHandlerRetainsTwoIdenticalInitializationEvents()
             throws Exception {
+        // given
         String childId = "round12-duplicate-initialization-events";
         try (TestEngine engine = TestEngine.create()) {
             EngineMetrics.MetricsSnapshot before = engine.metricsSnapshot();
+
+            // when
             TimelineEntry attachment = attach(engine,
                     "examples/round12/initialization-duplicate-events-child.yaml");
 
@@ -49,6 +52,8 @@ final class InitializationLifecycleEventOrderingIntegrationTest {
 
             String eventBlueId = DirectBlueIdCalculator.calculateBlueId(
                     events.get(0));
+
+            // then
             assertEquals(eventBlueId,
                     DirectBlueIdCalculator.calculateBlueId(events.get(1)),
                     "the lifecycle handler deliberately emits one exact value twice");
@@ -64,9 +69,12 @@ final class InitializationLifecycleEventOrderingIntegrationTest {
     @Test
     void lifecycleHandlerRetainsInitializationEventsInEmissionOrder()
             throws Exception {
+        // given
         String childId = "round12-ordered-initialization-events";
         try (TestEngine engine = TestEngine.create()) {
             EngineMetrics.MetricsSnapshot before = engine.metricsSnapshot();
+
+            // when
             TimelineEntry attachment = attach(engine,
                     "examples/round12/initialization-ordered-events-child.yaml");
 
@@ -83,6 +91,8 @@ final class InitializationLifecycleEventOrderingIntegrationTest {
                     events.get(0));
             String secondBlueId = DirectBlueIdCalculator.calculateBlueId(
                     events.get(1));
+
+            // then
             assertNotEquals(firstBlueId, secondBlueId);
             assertParentEvidence(engine, firstBlueId, secondBlueId,
                     kind(events.get(0)), kind(events.get(1)));

@@ -30,9 +30,12 @@ final class Contracts10ScenarioBuilderTest {
 
     @Test
     void authorsThreeMemberRingWithCanonicalBindingsAndVerifiedProof() {
+        // given
+
         DocumentId a = DocumentId.of("builder-ring-a");
         DocumentId b = DocumentId.of("builder-ring-b");
         DocumentId c = DocumentId.of("builder-ring-c");
+
         try (CoordinationEngine publicEngine = engine(Set.of(a))) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
@@ -50,8 +53,11 @@ final class Contracts10ScenarioBuilderTest {
                                     Contracts10ScenarioBuilder.OccurrenceOrder
                                             .REVERSED);
 
+            // when
             Contracts10ScenarioBuilder.Scenario scenario =
                     builder.scenario();
+
+            // then
             assertEquals(List.of(List.of(a, b, c)),
                     scenario.expectedComponents());
             assertEquals(scenario.expectedComponents(),
@@ -85,8 +91,13 @@ final class Contracts10ScenarioBuilderTest {
 
     @Test
     void authorsCollectionBackedSharedAnchorAsOneFiveMemberComponent() {
+        // given
+
         TopologyIds ids = TopologyIds.sharedAnchor("builder-collection");
+
         try (CoordinationEngine publicEngine = engine(Set.of(ids.a()))) {
+
+            // when
             Contracts10ScenarioBuilder.Scenario scenario = sharedAnchor(
                     (DefaultCoordinationEngine) publicEngine,
                     ids,
@@ -94,6 +105,7 @@ final class Contracts10ScenarioBuilderTest {
                     Contracts10ScenarioBuilder.ReferenceRepresentation
                             .REFERENCE_ONLY).scenario();
 
+            // then
             assertEquals(List.of(List.of(
                     ids.a(), ids.b1(), ids.b2(), ids.c1(), ids.c2())),
                     scenario.componentMembers());
@@ -121,7 +133,10 @@ final class Contracts10ScenarioBuilderTest {
 
     @Test
     void insertionAndOccurrenceOrderPreserveMaterializedReferenceParity() {
+        // given
+
         TopologyIds ids = TopologyIds.sharedAnchor("builder-parity");
+
         try (CoordinationEngine publicEngine = engine(Set.of(ids.a()))) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
@@ -131,6 +146,8 @@ final class Contracts10ScenarioBuilderTest {
                     false,
                     Contracts10ScenarioBuilder.ReferenceRepresentation
                             .REFERENCE_ONLY).scenario();
+
+            // when
             Contracts10ScenarioBuilder.Scenario materialized = sharedAnchor(
                     engine,
                     ids,
@@ -138,6 +155,7 @@ final class Contracts10ScenarioBuilderTest {
                     Contracts10ScenarioBuilder.ReferenceRepresentation
                             .MATERIALIZED).scenario();
 
+            // then
             assertEquals(reference.componentMembers(),
                     materialized.componentMembers());
             assertEquals(reference.blueIds(), materialized.blueIds());
@@ -167,11 +185,16 @@ final class Contracts10ScenarioBuilderTest {
 
     @Test
     void literalPartitionKeepsTwoDisjointCyclesDistinct() {
+        // given
+
         DocumentId a1 = DocumentId.of("builder-disjoint-a1");
         DocumentId b1 = DocumentId.of("builder-disjoint-b1");
         DocumentId a2 = DocumentId.of("builder-disjoint-a2");
         DocumentId b2 = DocumentId.of("builder-disjoint-b2");
+
         try (CoordinationEngine publicEngine = engine(Set.of(a1, a2))) {
+
+            // when
             Contracts10ScenarioBuilder.Scenario scenario =
                     new Contracts10ScenarioBuilder(
                             (DefaultCoordinationEngine) publicEngine)
@@ -189,6 +212,7 @@ final class Contracts10ScenarioBuilderTest {
                             .expectedComponent(a2, b2)
                             .scenario();
 
+            // then
             assertEquals(List.of(
                             List.of(a1, b1),
                             List.of(a2, b2)),
@@ -201,12 +225,19 @@ final class Contracts10ScenarioBuilderTest {
 
     @Test
     void rejectsIncompleteEdgesOverlapsAndRuntimeDerivedPartitionClaims() {
+        // given
+
         DocumentId a = DocumentId.of("builder-invalid-a");
         DocumentId b = DocumentId.of("builder-invalid-b");
         DocumentId missing = DocumentId.of("builder-invalid-missing");
+
         try (CoordinationEngine publicEngine = engine(Set.of(a))) {
+
+            // when
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
+
+            // then
             assertThrows(IllegalArgumentException.class,
                     () -> new Contracts10ScenarioBuilder(engine)
                             .document(a, document("a"))

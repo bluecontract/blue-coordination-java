@@ -23,6 +23,7 @@ final class DynamicProcessEmbeddedPathActivationTest {
     @Test
     void addingProcessEmbeddedPathInitializesExistingInlineDocument()
             throws Exception {
+        // given
         String gameYaml = Round12NbaFixtures.game(
                 GAME_ID,
                 "examples/round12/dynamic/path/game",
@@ -45,6 +46,7 @@ final class DynamicProcessEmbeddedPathActivationTest {
             assertEquals(1L, integer(engine, HOST_ID,
                     "/hostInitializationCount"));
 
+            // when
             TimelineEntry activation = engine.append(
                     owner,
                     Operation.yaml(
@@ -86,6 +88,8 @@ final class DynamicProcessEmbeddedPathActivationTest {
 
             EngineTestSupport.MetricDelta work = delta(
                     before, engine.metricsSnapshot());
+
+            // then
             assertEquals(1L, work.counter(
                     "embedding.childSessionsCreated"));
             assertEquals(1L, work.counter(

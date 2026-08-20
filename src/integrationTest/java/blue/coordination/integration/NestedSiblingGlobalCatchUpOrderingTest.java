@@ -29,6 +29,7 @@ final class NestedSiblingGlobalCatchUpOrderingTest {
     void earlierSiblingHistoryPrecedesLaterNestedHistoryUnderOneRootBarrier()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String a11Source = leafSource();
             ExactValue a1 = engine.registerType(middleSource(a11Source));
             ExactValue a2 = engine.registerType(a2Source());
@@ -65,10 +66,13 @@ final class NestedSiblingGlobalCatchUpOrderingTest {
                     Operation.exact(
                             "attachBoth",
                             "ownerChannel",
-                            attachmentRequest(a1, a2)),
+                    attachmentRequest(a1, a2)),
                     T0 + 1_000L);
+
+            // when
             engine.dispatch(attachment);
 
+            // then
             assertEquals(List.of(
                             trace(DocumentRevision.Kind.INITIALIZATION,
                                     attachment),
@@ -146,6 +150,7 @@ final class NestedSiblingGlobalCatchUpOrderingTest {
     void unavailableHistoryDefersTheEntryFrameAndResumesWithoutOvertaking()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             ExactValue a1 = engine.registerType(middleSource(leafSource()));
             ExactValue a2 = engine.registerType(a2Source());
             Timeline a11Timeline = engine.timeline(
@@ -170,6 +175,8 @@ final class NestedSiblingGlobalCatchUpOrderingTest {
                     T0 + 1_000L);
 
             engine.makeHistoricalUnavailable("provider temporarily offline");
+
+            // when
             ProcessingDrainReceipt deferred = engine.dispatch(attachment);
 
             assertFalse(deferred.processedEntries().contains(attachment));
@@ -186,6 +193,7 @@ final class NestedSiblingGlobalCatchUpOrderingTest {
             engine.makeHistoricalAvailable();
             ProcessingDrainReceipt resumed = engine.dispatch(attachment);
 
+            // then
             assertEquals(List.of(attachment), resumed.processedEntries());
             assertTrue(resumed.quiescent());
             assertEquals(2L, integer(

@@ -12,6 +12,7 @@ final class StartAdmissionAtomicityTest {
     @Test
     void rejectedTopLevelSelfCyclePublishesNothingAndRetryMatchesFresh()
             throws Exception {
+        // given
         String parent = resource(
                 "examples/clean/root-isolation-parent.yaml");
         String child = resource(
@@ -30,6 +31,7 @@ final class StartAdmissionAtomicityTest {
             EngineMetrics.MetricsSnapshot metricsBefore =
                     engine.metricsSnapshot();
 
+            // when
             assertThrows(
                     IllegalStateException.class,
                     () -> engine.start(
@@ -48,6 +50,8 @@ final class StartAdmissionAtomicityTest {
 
             var retry = engine.start("root-isolation-parent", parent);
             var expected = fresh.start("root-isolation-parent", parent);
+
+            // then
             assertEquals(expected.authoredInitialBlueId(),
                     retry.authoredInitialBlueId());
             assertEquals(expected.layout().rootBlueId(),

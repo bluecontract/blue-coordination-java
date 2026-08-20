@@ -66,14 +66,21 @@ final class ContractsPublicCycleDetachmentTest {
 
     @Test
     void splitDissolveAndReaddChangeRealCausalityAndLineage() {
+        // given
+
         Set<DocumentId> publicRoots = Set.of(
                 BRANCHING.a(), BRANCHING.c1(), BRANCHING.c2());
+
         try (CoordinationEngine publicEngine = engine(publicRoots)) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
             Contracts10ScenarioBuilder builder = branchingBuilder(engine);
+
+            // when
             Contracts10ScenarioBuilder.ScenarioRuntime admitted =
                     builder.admitTo(publicEngine);
+
+            // then
             assertEquals(
                     ContractsClosureAdmissionReceipt.PublicationOutcome
                             .PUBLISHED,
@@ -584,6 +591,8 @@ final class ContractsPublicCycleDetachmentTest {
 
     @Test
     void retiredEdgeStillServesItsAlreadyFrozenSecondDelivery() {
+        // given
+
         try (CoordinationEngine publicEngine = engine(Set.of(FROZEN_B))) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
@@ -599,8 +608,12 @@ final class ContractsPublicCycleDetachmentTest {
                             .expectedComponent(FROZEN_A, FROZEN_B)
                             .admissionLabel(
                                     "contracts-public-frozen-edge-removal");
+
+            // when
             Contracts10ScenarioBuilder.ScenarioRuntime admitted =
                     builder.admitTo(publicEngine);
+
+            // then
             assertEquals(
                     ContractsClosureAdmissionReceipt.PublicationOutcome
                             .PUBLISHED,

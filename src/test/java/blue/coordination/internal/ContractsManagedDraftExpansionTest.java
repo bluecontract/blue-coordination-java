@@ -33,6 +33,8 @@ final class ContractsManagedDraftExpansionTest {
 
     @Test
     void atomicAppendPublishesOrRollsBackEntryAndPlanTogether() {
+        // given
+
         try (DefaultCoordinationEngine engine = admittedHost(
                 "managed/atomic")) {
             Timeline timeline = engine.timeline("managed/atomic", ACTOR);
@@ -50,8 +52,11 @@ final class ContractsManagedDraftExpansionTest {
                     "/orders/draft");
             long clockBefore = engine.logicalClockMicros();
 
+            // when
             engine.failOnceAt(DefaultCoordinationEngine.FailurePoint
                     .AFTER_MANAGED_DRAFT_PLAN_REGISTERED);
+
+            // then
             assertThrows(
                     DefaultCoordinationEngine.InjectedFailureException.class,
                     () -> engine.append(timeline, operation, plan));
@@ -67,16 +72,21 @@ final class ContractsManagedDraftExpansionTest {
 
     @Test
     void undeclaredManagedOccurrenceFailsBeforeConsumingJournalSequence() {
+        // given
+
         try (DefaultCoordinationEngine engine = admittedHost(
                 "managed/preflight")) {
             Timeline timeline = engine.timeline("managed/preflight", ACTOR);
             ExactValue target = engine.document(HOST).current();
             ExactValue draft = draft(engine);
             ExactValue request = engine.referenceRequest("order", draft);
+
+            // when
             Operation operation = Operation.exact(
                     "createOrder", "ownerChannel", request)
                     .targeting(target, true);
 
+            // then
             IllegalArgumentException failure = assertThrows(
                     IllegalArgumentException.class,
                     () -> engine.append(
@@ -99,6 +109,8 @@ final class ContractsManagedDraftExpansionTest {
 
     @Test
     void emptyDirectSelectionRemainsOrdinaryAndCreatesNoDraftSession() {
+        // given
+
         try (DefaultCoordinationEngine engine = admittedHost(
                 "managed/no-selection")) {
             Timeline timeline = engine.timeline(
@@ -113,8 +125,11 @@ final class ContractsManagedDraftExpansionTest {
                     plan(HOST, target, draft, "draft",
                             "/orders/unselected"));
 
+            // when
             ContractsClosureAdapter.FrozenBatch captured = engine
                     .contractsClosureAdapter().capture(entry);
+
+            // then
             assertTrue(captured.invocations().isEmpty());
             assertTrue(engine.contractsClosureAdapter()
                     .hasManagedDraftPlan(entry.blueId()));
@@ -130,6 +145,8 @@ final class ContractsManagedDraftExpansionTest {
 
     @Test
     void terminalNonCommitLeavesEveryManagedDraftAbsent() {
+        // given
+
         try (DefaultCoordinationEngine engine = admittedHost(
                 "managed/reject")) {
             Timeline timeline = engine.timeline(
@@ -152,9 +169,11 @@ final class ContractsManagedDraftExpansionTest {
             InMemoryDocumentStore.DocumentHead before = engine.documents()
                     .publicationSnapshot().requireHead(HOST);
 
+            // when
             ContractsClosureAdapter.CohortOutcome outcome = adapter
                     .executeAndPublish(batch, invocation);
 
+            // then
             assertTrue(outcome.attempt().isComplete());
             assertEquals(ProcessorStatus.INVALID_PROCESSING_DOCUMENT,
                     outcome.attempt().processResult().status());
@@ -192,6 +211,8 @@ final class ContractsManagedDraftExpansionTest {
 
     @Test
     void virtualRollbackReceiptSurvivesLaterAdmissionOfSameLineage() {
+        // given
+
         try (DefaultCoordinationEngine engine = admittedHost(
                 "managed/rollback-retry")) {
             Timeline timeline = engine.timeline(
@@ -207,8 +228,10 @@ final class ContractsManagedDraftExpansionTest {
                     plan(HOST, target, draft, "order",
                             "/orders/order-1"));
 
+            // when
             ProcessingDrainReceipt rejected = engine.drain();
 
+            // then
             assertEquals(List.of(rejectedEntry), rejected.processedEntries());
             assertEquals(ProcessorStatus.INVALID_PROCESSING_DOCUMENT,
                     rejected.contractsAttemptsFor(rejectedEntry.blueId())
@@ -239,6 +262,8 @@ final class ContractsManagedDraftExpansionTest {
 
     @Test
     void managedDraftPlanSurvivesFailedPublicationAndClearsAfterRetry() {
+        // given
+
         try (DefaultCoordinationEngine engine = admittedHost(
                 "managed/retry")) {
             Timeline timeline = engine.timeline("managed/retry", ACTOR);
@@ -254,10 +279,13 @@ final class ContractsManagedDraftExpansionTest {
                             "/orders/order-1"));
             ContractsClosureAdapter adapter = engine
                     .contractsClosureAdapter();
+
+            // when
             adapter.onPublicationFailurePoint(point -> {
                 throw new IllegalStateException("route publication failed");
             });
 
+            // then
             assertThrows(RuntimeException.class, engine::drain);
             assertTrue(adapter.hasManagedDraftPlan(entry.blueId()));
             assertTrue(engine.documents().find(DRAFT).isPresent());
@@ -272,6 +300,8 @@ final class ContractsManagedDraftExpansionTest {
 
     @Test
     void offSurfaceManagedDraftPlanClearsWhenJournalMarksEntryTerminal() {
+        // given
+
         try (DefaultCoordinationEngine engine = admittedHost(
                 "managed/active")) {
             Timeline offSurface = engine.registerTimeline(
@@ -286,8 +316,12 @@ final class ContractsManagedDraftExpansionTest {
                             .targeting(target, true),
                     plan(HOST, target, draft, "order",
                             "/orders/order-1"));
+
+            // when
             ContractsClosureAdapter adapter = engine
                     .contractsClosureAdapter();
+
+            // then
             assertTrue(adapter.hasManagedDraftPlan(entry.blueId()));
 
             ProcessingDrainReceipt terminal = engine.drain();
@@ -302,6 +336,8 @@ final class ContractsManagedDraftExpansionTest {
 
     @Test
     void oneProcessAtomicallyPublishesExistingAndNewManagedDocuments() {
+        // given
+
         try (DefaultCoordinationEngine engine = admittedHost(
                 "managed/success")) {
             Timeline timeline = engine.timeline(
@@ -320,9 +356,11 @@ final class ContractsManagedDraftExpansionTest {
                     .contractsClosureAdapter();
             ContractsClosureAdapter.FrozenBatch batch = adapter.capture(entry);
 
+            // when
             ContractsClosureAdapter.CohortOutcome outcome = adapter
                     .executeAndPublish(batch, batch.invocations().get(0));
 
+            // then
             assertTrue(outcome.published());
             assertTrue(outcome.attempt().processResult().commits());
             assertEquals(Set.of(HOST, DRAFT), Set.copyOf(outcome.members()));

@@ -59,18 +59,24 @@ final class ContractsPublicOrderingAcceptanceTest {
 
     @Test
     void publicDrainFormsCycleFromAcyclicBToAWithoutReplayingDirectWork() {
+        // given
+
         Contracts10Configuration configuration = new Contracts10Configuration(
                 SHA_A, SHA_B, Set.of(B));
+
         try (CoordinationEngine publicEngine =
                      CoordinationEngine.inMemoryContracts10(configuration)) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
+
+            // when
             ContractsClosureAdmissionReceipt admitted = publicEngine
                     .admitContractsClosure(
                             dynamicCycleAdmission(engine),
                             CoordinationEngine.AdmissionPolicy.FROM_NOW,
                             null);
 
+            // then
             assertEquals(
                     ContractsClosureAdmissionReceipt.PublicationOutcome
                             .PUBLISHED,
@@ -192,22 +198,30 @@ final class ContractsPublicOrderingAcceptanceTest {
 
     @Test
     void canonicalResultIgnoresEverySupportedConstructionOrder() {
+        // given
+        List<OrderingVariant> alternativeOrders = List.of(
+                OrderingVariant.REVERSED_DOCUMENT_ADMISSION,
+                OrderingVariant.REVERSED_BODY_MAP,
+                OrderingVariant.REVERSED_OCCURRENCES,
+                OrderingVariant.REVERSED_CYCLIC_INPUT);
+
+        // when
         OrderingEvidence baseline = runSameEntry(OrderingVariant.BASELINE);
 
-        assertEquals(baseline, runSameEntry(
-                OrderingVariant.REVERSED_DOCUMENT_ADMISSION));
-        assertEquals(baseline, runSameEntry(
-                OrderingVariant.REVERSED_BODY_MAP));
-        assertEquals(baseline, runSameEntry(
-                OrderingVariant.REVERSED_OCCURRENCES));
-        assertEquals(baseline, runSameEntry(
-                OrderingVariant.REVERSED_CYCLIC_INPUT));
+        // then
+        alternativeOrders.forEach(variant ->
+                assertEquals(baseline, runSameEntry(variant)));
     }
 
     @Test
     void sameEntryUsesCanonicalDirectSeedOrderAndClosesCausedWork() {
-        OrderingEvidence evidence = runSameEntry(OrderingVariant.BASELINE);
+        // given
+        OrderingVariant variant = OrderingVariant.BASELINE;
 
+        // when
+        OrderingEvidence evidence = runSameEntry(variant);
+
+        // then
         assertEquals(2, evidence.directTargetCount());
         assertEquals(List.of(
                         A.value(),

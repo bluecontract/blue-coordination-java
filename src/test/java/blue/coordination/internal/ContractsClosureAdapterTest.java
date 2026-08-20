@@ -80,14 +80,25 @@ final class ContractsClosureAdapterTest {
 
     @Test
     void capabilityFailureCannotAdvanceDurableFeederProgress() {
-        assertFalse(ContractsClosureAdapter.isDurablyTerminalStatus(
-                ProcessorStatus.CAPABILITY_FAILURE));
-        assertTrue(ContractsClosureAdapter.isDurablyTerminalStatus(
-                ProcessorStatus.NO_MATCH));
+        // given
+        ProcessorStatus retryable = ProcessorStatus.CAPABILITY_FAILURE;
+        ProcessorStatus terminal = ProcessorStatus.NO_MATCH;
+
+        // when
+        boolean capabilityFailureTerminal =
+                ContractsClosureAdapter.isDurablyTerminalStatus(retryable);
+        boolean noMatchTerminal =
+                ContractsClosureAdapter.isDurablyTerminalStatus(terminal);
+
+        // then
+        assertFalse(capabilityFailureTerminal);
+        assertTrue(noMatchTerminal);
     }
 
     @Test
     void partitionsOneFrozenRouteSelectionByConnectedCohort() {
+        // given
+
         ProcessEmbeddedComponentIndex components =
                 ProcessEmbeddedComponentIndex.fromDocumentsAndBindings(
                         List.of(A, B, C),
@@ -104,12 +115,15 @@ final class ContractsClosureAdapterTest {
         OperationRouteIndex.FrozenDirectDeliverySelection selection =
                 routes.selectDirectDeliveries(entry(
                         "timeline-a", "alice", "ownerChannel"));
+
+        // when
         List<ContractsClosureAdapter.CohortSelection> selected =
                 ContractsClosureAdapter.partitionSelection(
                         components,
                         ManagedOccurrenceInventory.empty(),
                         selection);
 
+        // then
         assertEquals(List.of(List.of(A, B), List.of(C)), selected.stream()
                 .map(ContractsClosureAdapter.CohortSelection::members)
                 .toList());
@@ -125,8 +139,11 @@ final class ContractsClosureAdapterTest {
 
     @Test
     void executesOneAcyclicRootAndPublishesItsExactResultAtomically() {
+        // given
+
         EngineMetrics metrics = new EngineMetrics();
         WholeObjectStore objects = new WholeObjectStore(metrics);
+
         try (BlueRuntime runtime = BlueRuntime.create(objects, metrics)) {
             EmbeddedOnlyLayoutBuilder layouts =
                     new EmbeddedOnlyLayoutBuilder(runtime, objects, metrics);
@@ -166,8 +183,12 @@ final class ContractsClosureAdapterTest {
                     1_800_000_000_000_001L,
                     1L,
                     1L);
+
+            // when
             OperationRouteIndex.FrozenDirectDeliverySelection selection =
                     routes.selectDirectDeliveries(entry);
+
+            // then
             assertEquals(List.of(COUNTER), selection.documentIds());
             assertEquals(
                     blue.coordination.processor.TimelineProviderSupport

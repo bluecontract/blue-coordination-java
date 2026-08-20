@@ -1,7 +1,8 @@
 # Known limitations
 
-- The rc.3 artifact is a local-only in-memory SDK freeze candidate. It is not
-  remotely published and is not a production MyOS runtime.
+- The rc.3 artifact is a bounded external-pilot release candidate resolved
+  from Maven Central. It is not stable, production-ready, or a production MyOS
+  runtime.
 - Managed-child admission from an operation result supports only new
   `FROM_NOW` lineages with exact draft/request evidence and a complete set of
   effective occurrence paths. Imported draft epochs and

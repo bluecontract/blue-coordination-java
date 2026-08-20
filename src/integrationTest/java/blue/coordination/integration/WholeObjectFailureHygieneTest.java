@@ -22,6 +22,7 @@ final class WholeObjectFailureHygieneTest {
     void identicalPrePublicationFailuresReachAStableWholeObjectCount()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             Timeline alice = engine.timeline(
                     "examples/clean-counter/alice", "alice");
             engine.start("counter", resource("examples/clean/counter.yaml"));
@@ -35,6 +36,7 @@ final class WholeObjectFailureHygieneTest {
                     engine.metricsSnapshot();
             List<Integer> retainedCounts = new ArrayList<>(ATTEMPTS);
 
+            // when
             for (int attempt = 0; attempt < ATTEMPTS; attempt++) {
                 engine.failOnceAt(TestEngine.FailurePoint
                         .AFTER_FROZEN_BEFORE_STAGE);
@@ -74,6 +76,8 @@ final class WholeObjectFailureHygieneTest {
             var next = engine.append(
                     alice,
                     Operation.yaml("ignored", "aliceChannel", "{}"));
+
+            // then
             assertEquals(entry.timestampMicros() + 1L,
                     next.timestampMicros());
             assertEquals(entry.globalSequence() + 1L,

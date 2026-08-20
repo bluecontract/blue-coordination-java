@@ -30,6 +30,7 @@ final class ManagedChildCollectionMembershipMutationIntegrationTest {
     void childApplicationAddsThenRemovesParentOwnedCollectionSibling()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String parent = parentFixture(
                     registeredBetaBlueId(engine),
                     engine.exactRequest("{}").blueId());
@@ -60,11 +61,14 @@ final class ManagedChildCollectionMembershipMutationIntegrationTest {
 
             EngineMetrics.MetricsSnapshot beforeRemoval =
                     engine.metricsSnapshot();
+
+            // when
             engine.appendAndDispatch(alpha, Operation.yaml(
                     "increment", "ownerChannel", "amount: 1"));
             EngineTestSupport.MetricDelta removal = delta(
                     beforeRemoval, engine.metricsSnapshot());
 
+            // then
             assertEquals(Map.of("/games/alpha", ALPHA),
                     engine.embeddedDocuments(PARENT));
             assertEquals(SessionStatus.READY, engine.session(PARENT).status());
@@ -88,6 +92,7 @@ final class ManagedChildCollectionMembershipMutationIntegrationTest {
     void childApplicationRevalidatesPortableCollectionLimit()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String parent = parentFixture(
                     registeredBetaBlueId(engine),
                     engine.exactRequest(overflowMembers()).blueId());
@@ -95,11 +100,13 @@ final class ManagedChildCollectionMembershipMutationIntegrationTest {
             engine.start(PARENT, parent);
             int parentHistory = engine.history(PARENT).size();
 
+            // when
             IllegalStateException failure = assertThrows(
                     IllegalStateException.class,
                     () -> engine.appendAndDispatch(alpha, Operation.yaml(
                             "increment", "ownerChannel", "amount: 2")));
 
+            // then
             assertTrue(failure.getMessage().contains(
                     "PORTABLE_LIMIT_EXCEEDED: Portable limit exceeded: "
                             + "processEmbeddedPathsPerScope"));

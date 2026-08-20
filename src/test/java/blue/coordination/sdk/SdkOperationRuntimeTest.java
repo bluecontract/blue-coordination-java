@@ -46,12 +46,15 @@ final class SdkOperationRuntimeTest {
 
     @Test
     void targetedOperationAppliesAndReportsExactWorkOrder() {
+        // given
         try (BlueCoordination blue = BlueCoordination.inMemory()) {
             TimelineHandle alice = blue.timelines().local("alice");
             DocumentHandle counter = admitCounter(blue);
 
+            // when
             EntryResult result = increment(blue, counter, alice, 3).execute();
 
+            // then
             assertEquals(EntryDisposition.APPLIED, result.disposition());
             assertTrue(result.applied());
             assertEquals(3L, counter.snapshot().longAt("/counter"));
@@ -64,10 +67,12 @@ final class SdkOperationRuntimeTest {
 
     @Test
     void missingTargetAndOperationReturnPreciseRejectedResults() {
+        // given
         try (BlueCoordination blue = BlueCoordination.inMemory()) {
             TimelineHandle alice = blue.timelines().local("alice");
             DocumentHandle counter = admitCounter(blue);
 
+            // when
             EntryResult missingTarget = blue.operations()
                     .on(DocumentId.of("missing"))
                     .from(alice)
@@ -75,11 +80,6 @@ final class SdkOperationRuntimeTest {
                     .through("aliceChannel")
                     .requestYaml("amount: 1")
                     .execute();
-            assertEquals(EntryDisposition.REJECTED,
-                    missingTarget.disposition());
-            assertEquals("TARGET_DOCUMENT_NOT_FOUND",
-                    missingTarget.diagnostic().code());
-
             EntryResult missingOperation = blue.operations()
                     .on(counter)
                     .from(alice)
@@ -87,6 +87,12 @@ final class SdkOperationRuntimeTest {
                     .through("aliceChannel")
                     .requestYaml("{}")
                     .execute();
+
+            // then
+            assertEquals(EntryDisposition.REJECTED,
+                    missingTarget.disposition());
+            assertEquals("TARGET_DOCUMENT_NOT_FOUND",
+                    missingTarget.diagnostic().code());
             assertEquals(EntryDisposition.REJECTED,
                     missingOperation.disposition());
             assertEquals("OPERATION_NOT_FOUND",
@@ -96,16 +102,20 @@ final class SdkOperationRuntimeTest {
 
     @Test
     void exactTargetCapturedBeforeAnotherCommitReturnsStale() {
+        // given
         try (BlueCoordination blue = BlueCoordination.inMemory()) {
             TimelineHandle alice = blue.timelines().local("alice");
             DocumentHandle counter = admitCounter(blue);
             OperationCall captured = increment(
                     blue, counter, alice, 10);
 
-            assertTrue(increment(blue, counter, alice, 1)
-                    .execute().applied());
+            // when
+            boolean interveningApplied = increment(blue, counter, alice, 1)
+                    .execute().applied();
             EntryResult stale = captured.execute();
 
+            // then
+            assertTrue(interveningApplied);
             assertEquals(EntryDisposition.STALE, stale.disposition());
             assertEquals("STALE_TARGET_DOCUMENT",
                     stale.diagnostic().code());
@@ -115,16 +125,20 @@ final class SdkOperationRuntimeTest {
 
     @Test
     void submitIsAppendOnlyAndExplicitDrainReturnsSameTypedResult() {
+        // given
         try (BlueCoordination blue = BlueCoordination.inMemory()) {
             TimelineHandle alice = blue.timelines().local("alice");
             DocumentHandle counter = admitCounter(blue);
 
+            // when
             EntryHandle submitted = increment(
                     blue, counter, alice, 4).submit();
-            assertEquals(0L, counter.snapshot().longAt("/counter"));
-
+            long counterBeforeDrain = counter.snapshot().longAt("/counter");
             DrainResult drained = blue.processing().drain();
             EntryResult result = drained.entry(submitted);
+
+            // then
+            assertEquals(0L, counterBeforeDrain);
             assertTrue(result.applied());
             assertEquals(4L, counter.snapshot().longAt("/counter"));
         }
@@ -132,6 +146,7 @@ final class SdkOperationRuntimeTest {
 
     @Test
     void validBroadcastWithNoAcceptingOperationIsNoMatch() {
+        // given
         try (BlueCoordination blue = BlueCoordination.inMemory()) {
             TimelineHandle alice = blue.timelines().local("alice");
             admitCounter(blue);
@@ -151,11 +166,13 @@ final class SdkOperationRuntimeTest {
                       request: {}
                     """);
 
+            // when
             EntryResult result = blue.events()
                     .from(alice)
                     .exact(event)
                     .execute();
 
+            // then
             assertEquals(EntryDisposition.NO_MATCH,
                     result.disposition());
             assertFalse(result.diagnostic().present());
@@ -165,6 +182,7 @@ final class SdkOperationRuntimeTest {
 
     @Test
     void managedRequestAndExpectationMustBeCoherentBeforeAppend() {
+        // given
         try (BlueCoordination blue = BlueCoordination.inMemory()) {
             TimelineHandle alice = blue.timelines().local("alice");
             DocumentHandle counter = admitCounter(blue);
@@ -174,6 +192,7 @@ final class SdkOperationRuntimeTest {
             int entriesBefore = blue.advanced().rawEngine()
                     .metrics().journalEntryCount();
 
+            // when
             IllegalArgumentException missingExpectation = assertThrows(
                     IllegalArgumentException.class,
                     () -> blue.operations()
@@ -184,9 +203,6 @@ final class SdkOperationRuntimeTest {
                             .request(request -> request.managed(
                                     "child", draft))
                             .submit());
-            assertTrue(missingExpectation.getMessage().startsWith(
-                    "MANAGED_DRAFT_NOT_EXPECTED:"));
-
             IllegalArgumentException missingRequest = assertThrows(
                     IllegalArgumentException.class,
                     () -> blue.operations()
@@ -197,6 +213,10 @@ final class SdkOperationRuntimeTest {
                             .requestYaml("{}")
                             .expectOccurrence("/child", draft)
                             .submit());
+
+            // then
+            assertTrue(missingExpectation.getMessage().startsWith(
+                    "MANAGED_DRAFT_NOT_EXPECTED:"));
             assertTrue(missingRequest.getMessage().startsWith(
                     "MANAGED_OCCURRENCE_DRAFT_NOT_REQUESTED:"));
             assertEquals(entriesBefore, blue.advanced().rawEngine()
@@ -206,6 +226,7 @@ final class SdkOperationRuntimeTest {
 
     @Test
     void managedDraftOwnershipAndImportPolicyFailBeforeAppend() {
+        // given
         try (BlueCoordination blue = BlueCoordination.inMemory();
                 BlueCoordination foreign = BlueCoordination.inMemory()) {
             TimelineHandle alice = blue.timelines().local("alice");
@@ -221,17 +242,19 @@ final class SdkOperationRuntimeTest {
             int entriesBefore = blue.advanced().rawEngine()
                     .metrics().journalEntryCount();
 
+            // when
             IllegalArgumentException ownerFailure = assertThrows(
                     IllegalArgumentException.class,
                     () -> managedCall(
                             blue, counter, alice, foreignDraft).submit());
-            assertTrue(ownerFailure.getMessage().startsWith(
-                    "MANAGED_DRAFT_OWNER_MISMATCH:"));
-
             UnsupportedOperationException importFailure = assertThrows(
                     UnsupportedOperationException.class,
                     () -> managedCall(
                             blue, counter, alice, imported).submit());
+
+            // then
+            assertTrue(ownerFailure.getMessage().startsWith(
+                    "MANAGED_DRAFT_OWNER_MISMATCH:"));
             assertTrue(importFailure.getMessage().startsWith(
                     "UNSUPPORTED_MANAGED_DRAFT_IMPORT:"));
             assertEquals(entriesBefore, blue.advanced().rawEngine()
@@ -241,6 +264,7 @@ final class SdkOperationRuntimeTest {
 
     @Test
     void defaultOccurrencePolicyUsesFinalCallActivationBeforeAppend() {
+        // given
         try (BlueCoordination blue = BlueCoordination.inMemory()) {
             TimelineHandle alice = blue.timelines().local("alice");
             DocumentHandle counter = admitCounter(blue);
@@ -250,12 +274,14 @@ final class SdkOperationRuntimeTest {
             int entriesBefore = blue.advanced().rawEngine()
                     .metrics().journalEntryCount();
 
+            // when
             UnsupportedOperationException failure = assertThrows(
                     UnsupportedOperationException.class,
                     () -> managedCall(blue, counter, alice, draft)
                             .activation(ActivationPolicy.importFullHistory())
                             .submit());
 
+            // then
             assertTrue(failure.getMessage().startsWith(
                     "UNSUPPORTED_MANAGED_DRAFT_ACTIVATION_POLICY:"));
             assertEquals(entriesBefore, blue.advanced().rawEngine()
@@ -265,6 +291,7 @@ final class SdkOperationRuntimeTest {
 
     @Test
     void advancedAuditProjectsRetainedManagedOccurrenceLineage() {
+        // given
         DocumentId a = DocumentId.of("audit-occurrence-a");
         DocumentId b = DocumentId.of("audit-occurrence-b");
         ManagedClosure closure = ManagedClosure.builder()
@@ -277,15 +304,18 @@ final class SdkOperationRuntimeTest {
                 .build();
 
         try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            // when
             blue.documents().admit(closure);
-
-            assertEquals(new ManagedOccurrenceAudit(a, 1L, true),
-                    blue.advanced()
-                            .auditManagedOccurrence(b, "/peer")
-                            .orElseThrow());
-            assertTrue(blue.advanced()
+            ManagedOccurrenceAudit occurrence = blue.advanced()
+                    .auditManagedOccurrence(b, "/peer")
+                    .orElseThrow();
+            boolean missing = blue.advanced()
                     .auditManagedOccurrence(b, "/missing")
-                    .isEmpty());
+                    .isEmpty();
+
+            // then
+            assertEquals(new ManagedOccurrenceAudit(a, 1L, true), occurrence);
+            assertTrue(missing);
         }
     }
 

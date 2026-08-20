@@ -10,7 +10,7 @@ document graph.
 
 ```groovy
 repositories {
-    maven { url = uri('/absolute/path/to/blue-sdk-staged-repository') }
+    mavenCentral()
 }
 
 dependencies {
@@ -18,11 +18,11 @@ dependencies {
 }
 ```
 
-`3.0.0-rc.3` is currently a local-only SDK freeze candidate. It is staged into
-an explicit file repository and is not published to Maven Central or Maven
-Local. The artifact is compiled with `--release 17`. Version 3 is a breaking
-API reset; the removed 2.x planning, fragmentation, session-store, and
-fast-path APIs are not shimmed.
+`3.0.0-rc.3` is the bounded external-pilot candidate. It consumes Language
+`3.1.0-rc.21`, BEX `1.1.0-rc.4`, and Repository `3.0.0-rc.21` from Maven
+Central and is compiled with `--release 17`. It is not a stable or production
+release. Version 3 is a breaking API reset; the removed 2.x planning,
+fragmentation, session-store, and fast-path APIs are not shimmed.
 
 ## Counter quickstart
 
@@ -142,64 +142,45 @@ state to operational tooling.
 
 ## Build and verification
 
-```bash
-./gradlew clean test
-./gradlew releaseCheck
-./gradlew sdkFreezePrepublicationCheck \
-  -PblueDependencyMode=staged-artifact \
-  -PblueStagingRepository=/absolute/path/to/blue-sdk-staged-repository
-./gradlew stageSdkFreezeCandidate \
-  -PblueDependencyMode=staged-artifact \
-  -PblueStagingRepository=/absolute/path/to/blue-sdk-staged-repository
-./gradlew verifySdkStagedDependencyGraph \
-  verifySdkStagedCandidateRepository \
-  verifyExtractedSdkConsumer sdkFreezeArtifactCheck \
-  -PblueDependencyMode=staged-artifact \
-  -PblueStagingRepository=/absolute/path/to/blue-sdk-staged-repository
-```
-
-The normal implementation build uses local composite substitution so the
-complete Language runtime and Contracts module graph resolves from
-`../blue-language-java` by default, together with the adjacent BEX and
-Repository checkouts. Override the Language checkout with
-`-PblueLanguageCompositePath=/absolute/path/to/blue-language-java`. The
-canonical specification and fixture inputs resolve separately from
-`../blue-spec/latest`; override that clean checkout with
-`-PblueSpecRoot=/absolute/path/to/blue-spec/latest`. Source-archive smoke tests
-forward the same path into the extracted build.
-
-The SDK freeze lane stages the coordinated prerequisites in exact order—
-Language, then BEX and Repository against that Language, then Coordination—
-into one explicit file repository. `staged-artifact` disables sibling
-composite substitution and Maven Local, consumes real POM and Gradle module
-metadata, and verifies the exact candidate graph. These tasks do not upload,
-publish remotely, push commits, or create tags. See the
-[release procedure](docs/development/releasing.md) for the complete commands.
-
-The historical published-artifact lane remains explicit and isolated.
-Resolution and source-API compatibility are separate claims:
+The normal and release builds use Maven Central artifacts only:
 
 ```bash
-./gradlew verifyPublishedDependencyIsolation dependencyPreflight \
-  -PblueDependencyMode=published-artifact
-./gradlew verifyPublishedArtifactDependencies \
-  -PblueDependencyMode=published-artifact
+./gradlew --no-daemon dependencyPreflight
+./gradlew --no-daemon --no-build-cache clean releaseCheck \
+  -PtestJavaVersion=17
+./gradlew --no-daemon --no-build-cache verifyRcReadiness \
+  -PtestJavaVersion=17
 ```
 
-Those commands describe the older remote-coordinate lane and are not part of
-the local-only rc.3 freeze. Do not infer remote availability from the SDK
-staged repository.
+`releaseCheck` owns the complete verification surface: unit tests, compact-
+engine integration tests, tests compiled against the built JAR, realistic
+convergence scenarios, publication metadata, dependency isolation, source
+archive extraction, and documentation. Every `@Test` follows one meaningful
+lowercase `// given`, `// when`, `// then` sequence, enforced by
+`verifyTestArchitecture`.
 
-`releaseCheck` owns the library's complete verification surface: unit tests,
-compact-engine integration tests, tests compiled against the built JAR, and
-realistic convergence scenarios. It does not read or execute `../blue-basic`.
-That sibling is retained only as a historical performance/metrics laboratory.
+`dependencyPreflight` resolves the exact conflict-free Blue graph from Maven
+Central. Repository rc.21 still advertises Language rc.20 transitively, so the
+build and published POM exclude that one edge and directly own Language
+rc.21. Local composites, Maven Local, and file-based staging repositories are
+retired from the live build.
+
+The release workflow runs the same gates, stages signed artifacts, publishes
+through JReleaser, and pushes the rc.3 tag only after publication succeeds. See
+the [release procedure](docs/development/releasing.md) and
+[rc.3 release decision](docs/releases/3.0.0-rc.3.md).
+
+`releaseCheck` does not read or execute `../blue-basic`. That sibling is
+retained only as a historical performance/metrics laboratory.
 
 Start with [START-HERE.md](START-HERE.md), then see the compact architecture,
 managed `Process Embedded` semantics, catch-up rules, performance
 interpretation, and limitations under `docs/`.
-
 ## Historical release-candidate evidence
+
+The current release authority is the
+[3.0.0-rc.3 decision](docs/releases/3.0.0-rc.3.md). The documents below are
+retained evidence for rc.1 and are not reused as current artifact hashes.
 
 The retained 3.0.0-rc.1 report covers the earlier Round 10.1 Process Embedded
 temporal profile, Round 11 readiness closure, and Round 12 initialization
@@ -226,6 +207,7 @@ Developer references:
 - [Initialization causality](docs/semantics/initialization-causality.md)
 - [Shared NBA Game lifecycle](docs/examples/nba-shared-game-lifecycle.md)
 - [Five-occurrence Playground API example](docs/examples/playground-five-occurrence.md)
+- [3.0.0-rc.3 release decision](docs/releases/3.0.0-rc.3.md)
 - [Canonical RC evidence report](docs/releases/3.0.0-rc.1-test-report.md)
 - [Public API](docs/reference/public-api.md)
 - [SDK migration and ownership ledger](docs/reference/sdk-migration-and-ownership.md)

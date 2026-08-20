@@ -37,10 +37,17 @@ final class ContractsRootFeederWindowTest {
 
     @Test
     void needsResourcesBlocksOnlyItsRootLaneAndDoesNotRedriveTerminalLane() {
+        // given
+
         Fixture fixture = fixture();
+
         try (fixture) {
+
+            // when
             ContractsClosureAdapter.FrozenBatch eventOne =
                     fixture.adapter().capture(fixture.eventOne());
+
+            // then
             assertEquals(2, eventOne.invocations().size());
 
             ContractsRootFeederWindow window =
@@ -87,13 +94,19 @@ final class ContractsRootFeederWindowTest {
 
     @Test
     void oneFrozenSelectionUsesPublicRootsAsIndependentLaneIdentities() {
+        // given
+
         Fixture fixture = fixture();
+
         try (fixture) {
             ContractsClosureAdapter.FrozenBatch batch =
                     fixture.adapter().capture(fixture.eventOne());
+
+            // when
             List<ContractsRootFeederWindow.AttemptTicket> selected =
                     new ContractsRootFeederWindow().select(batch);
 
+            // then
             assertEquals(2, selected.size());
             assertTrue(selected.stream().allMatch(ticket ->
                     ticket.lane().publicLane()));
@@ -107,7 +120,10 @@ final class ContractsRootFeederWindowTest {
 
     @Test
     void restartRetainsTerminalProgressAndExactResourceBarrier() {
+        // given
+
         Fixture fixture = fixture();
+
         try (fixture) {
             ContractsClosureAdapter.FrozenBatch batch =
                     fixture.adapter().capture(fixture.eventOne());
@@ -128,10 +144,13 @@ final class ContractsRootFeederWindowTest {
             ContractsRootFeederWindow restarted =
                     new ContractsRootFeederWindow(
                             beforeRestart.durableState().copy());
+
+            // when
             List<ContractsRootFeederWindow.AttemptTicket> retry =
                     restarted.select(fixture.adapter().capture(
                             fixture.eventOne()));
 
+            // then
             assertEquals(1, retry.size());
             assertEquals(List.of(A), retry.get(0).members());
             assertEquals(
@@ -146,14 +165,20 @@ final class ContractsRootFeederWindowTest {
 
     @Test
     void eachDisconnectedCohortExecutesAsAnIndependentRootInvocation() {
+        // given
+
         Fixture fixture = fixture();
+
         try (fixture;
                 BlueClosureContracts contracts = new BlueClosureContracts(
                         fixture.runtime().documentProcessor())) {
             ContractsClosureAdapter.FrozenBatch batch =
                     fixture.adapter().capture(fixture.eventOne());
 
+            // when
             batch.invocations().forEach(invocation -> {
+
+                // then
                 ClosureAttemptResult attempt = assertDoesNotThrow(
                         () -> contracts.processClosure(invocation.input()),
                         () -> "failed independently for "
@@ -167,16 +192,22 @@ final class ContractsRootFeederWindowTest {
 
     @Test
     void disconnectedCohortsPublishIndependentlyFromOneFrozenRootEvent() {
+        // given
+
         Fixture fixture = fixture();
+
         try (fixture) {
             ContractsClosureAdapter.FrozenBatch batch =
                     fixture.adapter().capture(fixture.eventOne());
             ContractsRootFeederWindow window =
                     new ContractsRootFeederWindow();
+
+            // when
             ContractsRootFeederCoordinator.EventProgress progress =
                     new ContractsRootFeederCoordinator(
                             fixture.adapter(), window).process(batch);
 
+            // then
             assertEquals(2, progress.cohorts().size());
             assertTrue(progress.cohorts().stream().allMatch(cohort ->
                     cohort.outcome().attempt().isComplete()
@@ -191,11 +222,16 @@ final class ContractsRootFeederWindowTest {
 
     @Test
     void freshCoordinatorRecoversCrashAfterPublicationBeforeWindowRecord() {
+        // given
+
         Fixture fixture = fixture();
+
         try (fixture) {
             ContractsRootFeederWindow abandonedWindow =
                     new ContractsRootFeederWindow();
             boolean[] crash = {true};
+
+            // when
             ContractsRootFeederCoordinator abandoned =
                     new ContractsRootFeederCoordinator(
                             fixture.adapter(),
@@ -212,6 +248,7 @@ final class ContractsRootFeederWindowTest {
                                 return outcome;
                             });
 
+            // then
             assertThrows(IllegalStateException.class, () ->
                     abandoned.process(fixture.eventOne()));
             assertEquals(1L, fixture.store().publicationSnapshot()
@@ -254,7 +291,10 @@ final class ContractsRootFeederWindowTest {
 
     @Test
     void feederContinuesUnrelatedRootLaneWhileFirstLaneNeedsResources() {
+        // given
+
         Fixture fixture = fixture();
+
         try (fixture) {
             ContractsRootFeederWindow window =
                     new ContractsRootFeederWindow();
@@ -279,8 +319,11 @@ final class ContractsRootFeederWindowTest {
                                         batch, invocation);
                             });
 
+            // when
             ContractsRootFeederCoordinator.EventProgress first =
                     coordinator.process(fixture.eventOne());
+
+            // then
             assertFalse(first.terminal());
             assertEquals(2, first.cohorts().size());
             assertEquals(0L, fixture.store().publicationSnapshot()
@@ -326,7 +369,10 @@ final class ContractsRootFeederWindowTest {
 
     @Test
     void journalRescansPastBlockedLaneWithoutAdvancingGlobalFrontier() {
+        // given
+
         Fixture fixture = fixture();
+
         try (fixture) {
             boolean[] resourceAvailable = {false};
             ContractsRootFeederCoordinator.CohortExecutor executor =
@@ -353,9 +399,11 @@ final class ContractsRootFeederWindowTest {
                                     .DurableState(),
                             () -> java.util.Set.of("shared/alice"));
 
+            // when
             ContractsJournalDrainCoordinator.DrainProgress first =
                     drain.drain();
 
+            // then
             assertNull(first.processedThrough());
             assertFalse(first.quiescent());
             assertEquals(List.of(

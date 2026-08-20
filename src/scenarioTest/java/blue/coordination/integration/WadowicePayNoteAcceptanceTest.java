@@ -63,12 +63,15 @@ final class WadowicePayNoteAcceptanceTest {
             TestReporter reporter) throws Exception {
         try (Campaign standalone = Campaign.standalone();
                 Campaign embedded = Campaign.embedded()) {
+            // given
             standalone.prepareCapturedPayment();
             embedded.prepareCapturedPayment();
 
+            // when
             standalone.completeRestaurant();
             embedded.completeRestaurant();
 
+            // then
             assertCompleted(standalone);
             assertCompleted(embedded);
             assertBusinessParity(standalone, embedded);
@@ -83,9 +86,13 @@ final class WadowicePayNoteAcceptanceTest {
     void embeddedCancellationRequestsAndCompletesOneRestaurantRefund(
             TestReporter reporter) throws Exception {
         try (Campaign campaign = Campaign.embedded()) {
+            // given
             campaign.prepareCapturedPayment();
+
+            // when
             campaign.cancelRestaurant();
 
+            // then
             assertTrue(campaign.bool(
                     "/productConditions/restaurant/product/cancelled"));
             assertTrue(campaign.bool(
@@ -107,9 +114,13 @@ final class WadowicePayNoteAcceptanceTest {
     void embeddedTenPercentAdjustmentCompletesOnePartialRefund(
             TestReporter reporter) throws Exception {
         try (Campaign campaign = Campaign.embedded()) {
+            // given
             campaign.prepareCapturedPayment();
+
+            // when
             campaign.discountRestaurant();
 
+            // then
             assertTrue(campaign.bool(
                     "/productConditions/restaurant/product/done"));
             assertTrue(campaign.bool(
@@ -136,14 +147,17 @@ final class WadowicePayNoteAcceptanceTest {
     void embeddedLateCancellationIsRefusedWithoutBusinessStateChange(
             TestReporter reporter) throws Exception {
         try (Campaign campaign = Campaign.embedded()) {
+            // given
             campaign.prepareCapturedPayment();
             List<String> unchangedBusinessState = campaign.businessIdentity(
                     LATE_CANCELLATION_BUSINESS_PATHS);
             int childHistoryBefore = campaign.engine.history(
                     RESTAURANT_PRODUCT).size();
 
+            // when
             campaign.refuseLateCancellation();
 
+            // then
             assertEquals(unchangedBusinessState, campaign.businessIdentity(
                     LATE_CANCELLATION_BUSINESS_PATHS));
             assertEquals(childHistoryBefore + 1,

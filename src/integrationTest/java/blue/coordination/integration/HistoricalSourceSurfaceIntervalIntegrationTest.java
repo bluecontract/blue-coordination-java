@@ -26,6 +26,7 @@ final class HistoricalSourceSurfaceIntervalIntegrationTest {
     void historicalAttachmentActivatesOnlyItsExactNestedSourceInterval()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String leaf = leafSource();
             String controller = parentSource(
                     CONTROLLER,
@@ -68,6 +69,7 @@ final class HistoricalSourceSurfaceIntervalIntegrationTest {
                     attach(engine, controller),
                     T0 + 1_000L);
 
+            // when
             engine.dispatch(rootAttachment);
 
             assertEquals(0, engine.routeTargetCount(excluded),
@@ -103,6 +105,8 @@ final class HistoricalSourceSurfaceIntervalIntegrationTest {
 
             int leafHistorySize = engine.history(LEAF).size();
             engine.dispatch(live);
+
+            // then
             assertEquals(leafHistorySize, engine.history(LEAF).size(),
                     "re-draining the live cutoff must be idempotent");
         }

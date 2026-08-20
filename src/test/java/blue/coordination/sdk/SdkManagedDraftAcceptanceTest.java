@@ -45,22 +45,41 @@ final class SdkManagedDraftAcceptanceTest {
 
     @Test
     void createOrderDraftInitializesOnceAndPublishesAtomically() {
-        runSingleDraft(Submission.EXECUTE);
+        // given
+        Submission submission = Submission.EXECUTE;
+
+        // when
+        RunEvidence evidence = runSingleDraft(submission);
+
+        // then
+        assertEquals(EntryDisposition.APPLIED, evidence.disposition());
     }
 
     @Test
     void managedSubmitIsAppendOnlyAndMatchesExecuteExactly() {
-        RunEvidence executed = runSingleDraft(Submission.EXECUTE);
-        RunEvidence submitted = runSingleDraft(Submission.SUBMIT);
+        // given
+        Submission execute = Submission.EXECUTE;
+        Submission submit = Submission.SUBMIT;
 
+        // when
+        RunEvidence executed = runSingleDraft(execute);
+        RunEvidence submitted = runSingleDraft(submit);
+
+        // then
         assertEquals(executed, submitted);
     }
 
     @Test
     void fiveOccurrencesInitializeThreeLineagesAndDeliverFiveEvents() {
-        RunEvidence scrambled = runMultiplicity(Variant.SCRAMBLED);
-        RunEvidence reversed = runMultiplicity(Variant.REVERSED);
+        // given
+        Variant firstVariant = Variant.SCRAMBLED;
+        Variant secondVariant = Variant.REVERSED;
 
+        // when
+        RunEvidence scrambled = runMultiplicity(firstVariant);
+        RunEvidence reversed = runMultiplicity(secondVariant);
+
+        // then
         assertEquals(scrambled, reversed,
                 "request, expectation, and object authoring order must not "
                         + "change exact managed-publication evidence");
@@ -68,13 +87,29 @@ final class SdkManagedDraftAcceptanceTest {
 
     @Test
     void managedFailureMatrixRollsBackHostAndEveryDraft() {
-        for (TerminalFailure failure : TerminalFailure.values()) {
-            assertTerminalFailure(failure);
-        }
+        // given
+        List<TerminalFailure> failures = List.of(TerminalFailure.values());
+
+        // when
+        List<TerminalFailureEvidence> evidence = failures.stream()
+                .map(SdkManagedDraftAcceptanceTest::runTerminalFailure)
+                .toList();
+
+        // then
+        assertEquals(TerminalFailure.values().length, evidence.size());
+        evidence.forEach(item -> {
+            assertEquals(EntryDisposition.REJECTED, item.disposition(),
+                    item.failure().name());
+            assertEquals(item.failure().diagnosticCode,
+                    item.diagnosticCode(), item.failure().name());
+            assertTrue(item.rollbackPreserved(), item.failure().name());
+            assertTrue(item.retryRecovered(), item.failure().name());
+        });
     }
 
     @Test
     void malformedManagedEvidenceFailsBeforeTheFirstAppend() {
+        // given
         DocumentId hostId = DocumentId.of("sdk-managed-preflight-host");
         DocumentId childId = DocumentId.of("sdk-managed-preflight-child");
         DocumentId otherId = DocumentId.of(
@@ -103,6 +138,7 @@ final class SdkManagedDraftAcceptanceTest {
                     false);
             String before = host.snapshot().blueId();
 
+            // when
             IllegalArgumentException duplicate = assertThrows(
                     IllegalArgumentException.class,
                     () -> managedCall(
@@ -114,6 +150,8 @@ final class SdkManagedDraftAcceptanceTest {
                             "/orders/order-456")
                             .expectOccurrence("/orders/order-456", child)
                             .submit());
+
+            // then
             assertTrue(duplicate.getMessage().startsWith(
                     "DUPLICATE_MANAGED_OCCURRENCE_PATH:"));
 
@@ -550,7 +588,8 @@ final class SdkManagedDraftAcceptanceTest {
         assertEquals(result.stats().gas(), revisionGas);
     }
 
-    private static void assertTerminalFailure(TerminalFailure failure) {
+    private static TerminalFailureEvidence runTerminalFailure(
+            TerminalFailure failure) {
         String suffix = failure.name().toLowerCase(Locale.ROOT);
         DocumentId hostId = DocumentId.of(
                 "sdk-managed-failure-host-" + suffix);
@@ -635,6 +674,11 @@ final class SdkManagedDraftAcceptanceTest {
             assertEquals(historyBefore, host.history().size(),
                     failure.name());
             assertDocumentAbsent(coordination, childId);
+            boolean rollbackPreserved = hostBefore.equals(
+                    host.snapshot().blueId())
+                    && host.snapshot().epoch() == 0L
+                    && host.history().size() == historyBefore;
+            boolean retryRecovered = true;
 
             if (failure == TerminalFailure.ZERO_MATCHES) {
                 EntryResult retry = managedCall(
@@ -657,7 +701,15 @@ final class SdkManagedDraftAcceptanceTest {
                         .require(childId)
                         .snapshot()
                         .longAt("/initializationCount"));
+                retryRecovered = retry.disposition()
+                        == EntryDisposition.APPLIED;
             }
+            return new TerminalFailureEvidence(
+                    failure,
+                    result.disposition(),
+                    result.diagnostic().code(),
+                    rollbackPreserved,
+                    retryRecovered);
         }
     }
 
@@ -1217,6 +1269,14 @@ final class SdkManagedDraftAcceptanceTest {
             this.operation = operation;
             this.diagnosticCode = diagnosticCode;
         }
+    }
+
+    private record TerminalFailureEvidence(
+            TerminalFailure failure,
+            EntryDisposition disposition,
+            String diagnosticCode,
+            boolean rollbackPreserved,
+            boolean retryRecovered) {
     }
 
     private record RunEvidence(

@@ -24,6 +24,8 @@ final class ContractsRootSourceSurfaceTest {
 
     @Test
     void rootLaneOwnsUnionOfRootAndActiveEmbeddedTimelinesOnly() {
+        // given
+
         ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(
                 List.of(
                         active(ROOT, "/child", CHILD),
@@ -37,6 +39,7 @@ final class ContractsRootSourceSurfaceTest {
                 INACTIVE, Set.of("timeline/inactive"),
                 OTHER_ROOT, Set.of("timeline/other"));
 
+        // when
         ContractsRootSourceSurface.Surface surface =
                 ContractsRootSourceSurface.resolve(
                         ContractsRootFeederWindow.LaneId.publicRoots(
@@ -44,6 +47,7 @@ final class ContractsRootSourceSurfaceTest {
                         inventory,
                         document -> timelines.getOrDefault(document, Set.of()));
 
+        // then
         assertEquals(List.of(CHILD, LEAF, ROOT),
                 surface.managedDocuments());
         assertEquals(Set.of(
@@ -56,6 +60,8 @@ final class ContractsRootSourceSurfaceTest {
 
     @Test
     void disconnectedPublicRootKeepsAnIndependentSourceSurface() {
+        // given
+
         ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(
                 List.of(active(ROOT, "/child", CHILD)));
         Map<DocumentId, Set<String>> timelines = Map.of(
@@ -69,6 +75,8 @@ final class ContractsRootSourceSurfaceTest {
                                 List.of(ROOT)),
                         inventory,
                         document -> timelines.getOrDefault(document, Set.of()));
+
+        // when
         ContractsRootSourceSurface.Surface second =
                 ContractsRootSourceSurface.resolve(
                         ContractsRootFeederWindow.LaneId.publicRoots(
@@ -76,6 +84,7 @@ final class ContractsRootSourceSurfaceTest {
                         inventory,
                         document -> timelines.getOrDefault(document, Set.of()));
 
+        // then
         assertEquals(List.of(CHILD, ROOT), first.managedDocuments());
         assertEquals(Set.of("timeline/root", "timeline/child"),
                 first.timelineIds());

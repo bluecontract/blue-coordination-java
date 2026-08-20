@@ -71,14 +71,20 @@ final class ContractsPublicComponentMergeSplitTest {
 
     @Test
     void twoTwoMemberCyclesMergeIntoOneFourMemberCycle() {
+        // given
+
         try (CoordinationEngine publicEngine = engine(Set.of(A))) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
+
+            // when
             ContractsClosureAdmissionReceipt admitted = publicEngine
                     .admitContractsClosure(
                             mergeAdmission(engine),
                             CoordinationEngine.AdmissionPolicy.FROM_NOW,
                             null);
+
+            // then
             assertEquals(
                     ContractsClosureAdmissionReceipt.PublicationOutcome
                             .PUBLISHED,
@@ -153,9 +159,13 @@ final class ContractsPublicComponentMergeSplitTest {
 
     @Test
     void oneFourMemberCycleSplitsIntoTwoTwoMemberCycles() {
+        // given
+
         try (CoordinationEngine publicEngine = engine(Set.of(A))) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
+
+            // when
             Contracts10ScenarioBuilder builder =
                     new Contracts10ScenarioBuilder(engine)
                             .document(A, splitFourA())
@@ -172,6 +182,8 @@ final class ContractsPublicComponentMergeSplitTest {
                             .publicRoot(A)
                             .expectedComponent(A, B, C, D)
                             .admissionLabel("contracts-public-split-four");
+
+            // then
             assertPublished(builder.admitTo(publicEngine));
             assertVerifiedCycle(component(engine, A), FOUR, 1L);
             String oldMaster = component(engine, A).masterBlueId();
@@ -240,9 +252,13 @@ final class ContractsPublicComponentMergeSplitTest {
 
     @Test
     void oneTwoMemberCycleSplitsIntoTwoOrdinarySingletons() {
+        // given
+
         try (CoordinationEngine publicEngine = engine(Set.of(A))) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
+
+            // when
             Contracts10ScenarioBuilder builder =
                     new Contracts10ScenarioBuilder(engine)
                             .document(A, splitPairA())
@@ -252,6 +268,8 @@ final class ContractsPublicComponentMergeSplitTest {
                             .publicRoot(A)
                             .expectedComponent(A, B)
                             .admissionLabel("contracts-public-split-pair");
+
+            // then
             assertPublished(builder.admitTo(publicEngine));
             assertVerifiedCycle(component(engine, A), List.of(A, B), 1L);
 
@@ -303,9 +321,13 @@ final class ContractsPublicComponentMergeSplitTest {
 
     @Test
     void selfCycleDissolvesIntoOneOrdinaryDocument() {
+        // given
+
         try (CoordinationEngine publicEngine = engine(Set.of(A))) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
+
+            // when
             Contracts10ScenarioBuilder builder =
                     new Contracts10ScenarioBuilder(engine)
                             .document(A, dissolveSelfA())
@@ -313,6 +335,8 @@ final class ContractsPublicComponentMergeSplitTest {
                             .publicRoot(A)
                             .expectedComponent(A)
                             .admissionLabel("contracts-public-dissolve-self");
+
+            // then
             assertPublished(builder.admitTo(publicEngine));
             assertVerifiedCycle(component(engine, A), List.of(A), 1L);
 
@@ -357,9 +381,13 @@ final class ContractsPublicComponentMergeSplitTest {
 
     @Test
     void laterHandlerFailureRollsBackAlreadyStagedSplitExactly() {
+        // given
+
         try (CoordinationEngine publicEngine = engine(Set.of(A, B))) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
+
+            // when
             Contracts10ScenarioBuilder builder =
                     new Contracts10ScenarioBuilder(engine)
                             .document(A, failingSplitA())
@@ -371,6 +399,8 @@ final class ContractsPublicComponentMergeSplitTest {
                             .expectedComponent(A, B)
                             .admissionLabel(
                                     "contracts-public-failing-split");
+
+            // then
             assertPublished(builder.admitTo(publicEngine));
             InMemoryDocumentStore.PublicationSnapshot before = engine
                     .documents().publicationSnapshot();

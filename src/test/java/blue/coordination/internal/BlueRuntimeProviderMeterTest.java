@@ -18,9 +18,15 @@ final class BlueRuntimeProviderMeterTest {
 
     @Test
     void leafMeteringPreservesSequentialAndCyclicProviderCapabilities() {
+        // given
+
         EngineMetrics metrics = new EngineMetrics();
         WholeObjectStore objects = new WholeObjectStore(metrics);
+
+        // when
         try (BlueRuntime runtime = BlueRuntime.create(objects, metrics)) {
+
+            // then
             assertEquals(SequentialNodeProvider.class,
                     runtime.nodeProvider().getClass());
             SequentialNodeProvider sequential =

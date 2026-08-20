@@ -44,8 +44,11 @@ final class Contracts10AuthoredFacadeParityTest {
 
     @Test
     void authoredDocumentsDeriveTheExactLowLevelAdmissionIdentity() {
+        // given
+
         DocumentId a = DocumentId.of("phase10-authored-a");
         DocumentId b = DocumentId.of("phase10-authored-b");
+
         try (CoordinationEngine publicEngine = engine(Set.of(a))) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
@@ -63,9 +66,12 @@ final class Contracts10AuthoredFacadeParityTest {
                             .scenario();
 
             ClosureInvocationInput facadeInput = authored.admission();
+
+            // when
             ClosureInvocationInput lowLevelInput = lowLevelAdmission(
                     engine, authored, a, b);
 
+            // then
             assertEquals(ClosureInvocationInput.Operation.ADMIT_CLOSURE,
                     facadeInput.operation());
             assertEquals(facadeInput.operation(), lowLevelInput.operation());

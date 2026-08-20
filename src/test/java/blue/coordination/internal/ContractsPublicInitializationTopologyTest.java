@@ -59,15 +59,19 @@ final class ContractsPublicInitializationTopologyTest {
     @Test
     void staticThreeMemberCycleInitializesOnceInCanonicalOrderAndPublishes()
             throws Exception {
+        // given
+
         try (CoordinationEngine publicEngine = engine(Set.of(A))) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
             Contracts10ScenarioBuilder builder = staticRing(
                     engine, false);
 
+            // when
             ContractsClosureAdmissionReceipt admitted = builder
                     .admitTo(publicEngine).admissionReceipt();
 
+            // then
             assertEquals(
                     ContractsClosureAdmissionReceipt.PublicationOutcome
                             .PUBLISHED,
@@ -139,17 +143,28 @@ final class ContractsPublicInitializationTopologyTest {
     @Test
     void staticInitializationOrderAndIdentitiesIgnoreInputPermutation()
             throws Exception {
-        assertEquals(
-                runStaticOrder(Variant.DECLARED),
-                runStaticOrder(Variant.REVERSED));
+        // given
+        Variant declared = Variant.DECLARED;
+        Variant reversed = Variant.REVERSED;
+
+        // when
+        StaticOrderEvidence declaredEvidence = runStaticOrder(declared);
+        StaticOrderEvidence reversedEvidence = runStaticOrder(reversed);
+
+        // then
+        assertEquals(declaredEvidence, reversedEvidence);
     }
 
     @Test
     void dynamicTopologyPatchInsideCycleFailsAtSubscriptionBoundary()
             throws Exception {
+        // given
         DynamicFailureEvidence declared = runDynamic(Variant.DECLARED);
+
+        // when
         DynamicFailureEvidence reversed = runDynamic(Variant.REVERSED);
 
+        // then
         assertEquals(declared, reversed,
                 "document and occurrence input order must not affect "
                         + "the deterministic dynamic-topology boundary");
@@ -199,18 +214,22 @@ final class ContractsPublicInitializationTopologyTest {
     @Test
     void laterMemberInitializationFailureRollsBackEveryMarkerAndPublication()
             throws Exception {
+        // given
+
         try (CoordinationEngine publicEngine = engine(Set.of(A))) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
             ClosureInvocationInput input = staticRing(engine, true)
                     .admission();
 
+            // when
             ContractsClosureAdmissionReceipt rejected = publicEngine
                     .admitContractsClosure(
                             input,
                             CoordinationEngine.AdmissionPolicy.FROM_NOW,
                             null);
 
+            // then
             assertEquals(
                     ContractsClosureAdmissionReceipt.PublicationOutcome
                             .NOT_PUBLISHED,
@@ -272,11 +291,16 @@ final class ContractsPublicInitializationTopologyTest {
     @Test
     void cClo08FirstFormationNeedsItsConformanceRuntimeAndAnEventBridgeFailsClosed()
             throws Exception {
+        // given
+
         try (CoordinationEngine publicEngine = engine(Set.of(A))) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
+
+            // when
             ClosureInvocationInput input = cClo08ShapedAdmission(engine);
 
+            // then
             assertEquals(1L, input.snapshot().occurrences().stream()
                     .filter(ManagedOccurrenceBinding::active).count());
             assertEquals(1L, input.snapshot().occurrences().stream()

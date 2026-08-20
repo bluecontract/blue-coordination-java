@@ -18,6 +18,7 @@ final class SdkEdgeResultTest {
 
     @Test
     void missingTargetChannelReturnsPreciseRejectedResult() {
+        // given
         DocumentId counterId = DocumentId.of("sdk-edge-counter");
         String timelineId = "sdk/edge/counter";
         try (BlueCoordination coordination = BlueCoordination.inMemory()) {
@@ -31,6 +32,7 @@ final class SdkEdgeResultTest {
                             .fromNow());
             String before = counter.snapshot().blueId();
 
+            // when
             EntryResult result = coordination.operations()
                     .on(counter)
                     .from(timeline)
@@ -39,6 +41,7 @@ final class SdkEdgeResultTest {
                     .requestYaml("amount: 1")
                     .execute();
 
+            // then
             assertEquals(EntryDisposition.REJECTED, result.disposition());
             assertEquals("TARGET_CHANNEL_NOT_FOUND",
                     result.diagnostic().code());
@@ -58,6 +61,7 @@ final class SdkEdgeResultTest {
 
     @Test
     void disconnectedSuccessAndFailureProduceMixedResult() {
+        // given
         DocumentId successId = DocumentId.of("sdk-edge-a-success");
         DocumentId failureId = DocumentId.of("sdk-edge-z-failure");
         String timelineId = "sdk/edge/mixed";
@@ -96,10 +100,12 @@ final class SdkEdgeResultTest {
                         amount: 1
                     """.formatted(timelineId, ACTOR));
 
+            // when
             EntryResult result = coordination.events().from(timeline)
                     .exact(event)
                     .execute();
 
+            // then
             assertEquals(EntryDisposition.MIXED, result.disposition());
             assertFalse(result.applied());
             assertEquals("MIXED_CLOSURE_OUTCOMES",

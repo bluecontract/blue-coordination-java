@@ -3,7 +3,7 @@
 This project follows Semantic Versioning. Release candidates may still refine
 the new 3.x API before the first stable 3.0.0 release.
 
-## 3.0.0-rc.3 - local-only cyclic-topology SDK candidate
+## 3.0.0-rc.3 - bounded external-pilot cyclic-topology SDK candidate
 
 ### Added
 
@@ -21,8 +21,14 @@ the new 3.x API before the first stable 3.0.0 release.
 
 ### Changed
 
-- The isolated staged graph is pinned to Language `3.1.0-rc.21`, BEX
+- The Maven Central graph is pinned to Language `3.1.0-rc.21`, BEX
   `1.1.0-rc.4`, Repository `3.0.0-rc.21`, and Coordination `3.0.0-rc.3`.
+  Repository rc.21's stale Language rc.20 edge is excluded in favor of the
+  direct rc.21 runtime pin.
+- Local composites, Maven Local, staged file repositories, source locks, and
+  the standalone staged-consumer fixture were retired from the live build.
+- Every test now follows the enforced lowercase `// given`, `// when`,
+  `// then` structure.
 - Managed-draft plans are preflighted before journal append and retained only
   while retry can make progress; terminal results retire the plan without
   erasing rollback evidence.
@@ -38,8 +44,10 @@ the new 3.x API before the first stable 3.0.0 release.
 
 ### Distribution status
 
-- `3.0.0-rc.3` is staged locally only. The freeze workflow does not upload
-  packages, publish to Maven Local, push commits, or create/push tags.
+- `3.0.0-rc.3` is published by the RC workflow from the exact Maven Central
+  dependency graph. The release tag is pushed only after deployment succeeds.
+- The release tier remains bounded external pilot; stable and production
+  readiness are explicitly false.
 
 ## 3.0.0-rc.2 - local-only freeze candidate
 
@@ -170,12 +178,7 @@ performance policy are historical evidence, not evidence for rc.2.
 
 ### Release prerequisites
 
-The explicit published-artifact isolation lane resolves Language rc.20,
-`blue.repo:blue-repo-java:3.0.0-rc.21`, `blue.bex:blue-bex-core:1.1.0-rc.3`,
-and `blue.bex:blue-bex-contracts:1.1.0-rc.3` from Maven Central without sibling
-substitution. That proves repository isolation and a conflict-checked resolved
-graph only. The current Contracts 1.0 source requires Language and BEX APIs
-newer than those published bytes, so published compile/API compatibility
-remains red until matching artifacts are published. Until then,
-`local-composite` is the supported implementation lane and release automation
-must not describe the candidate as staging-ready.
+At rc.1 time, matching Contracts and BEX artifacts were not yet available, so
+the published lane could not compile the later Contracts 1.0 source. This is a
+historical constraint only; rc.3 uses the published rc.21/rc.4 graph described
+above.

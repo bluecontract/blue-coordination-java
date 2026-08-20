@@ -23,13 +23,16 @@ final class ProcessEmbeddedComponentIndexTest {
 
     @Test
     void selfCycleIsOneCyclicComponentWithoutCondensationEdges() {
-        ProcessEmbeddedComponentIndex index =
-                ProcessEmbeddedComponentIndex.fromBindings(List.of(
-                        binding("a-a", A, A)));
+        // given
+        List<EmbeddingBinding> bindings = List.of(binding("a-a", A, A));
 
+        // when
+        ProcessEmbeddedComponentIndex index =
+                ProcessEmbeddedComponentIndex.fromBindings(bindings);
         ProcessEmbeddedComponentIndex.Component component =
                 index.component(A);
 
+        // then
         assertEquals(List.of(A), component.members());
         assertTrue(component.cyclic());
         assertEquals(List.of(component), index.components());
@@ -40,14 +43,18 @@ final class ProcessEmbeddedComponentIndexTest {
 
     @Test
     void twoCycleCollapsesToOneScalarOrderedComponent() {
-        ProcessEmbeddedComponentIndex index =
-                ProcessEmbeddedComponentIndex.fromBindings(List.of(
-                        binding("b-a", B, A),
-                        binding("a-b", A, B)));
+        // given
+        List<EmbeddingBinding> bindings = List.of(
+                binding("b-a", B, A),
+                binding("a-b", A, B));
 
+        // when
+        ProcessEmbeddedComponentIndex index =
+                ProcessEmbeddedComponentIndex.fromBindings(bindings);
         ProcessEmbeddedComponentIndex.Component component =
                 index.component(A);
 
+        // then
         assertEquals(component, index.component(B));
         assertEquals(List.of(A, B), component.members());
         assertTrue(component.cyclic());
@@ -56,13 +63,18 @@ final class ProcessEmbeddedComponentIndexTest {
 
     @Test
     void dagCondensationOrdersEveryTargetBeforeItsSource() {
-        ProcessEmbeddedComponentIndex index =
-                ProcessEmbeddedComponentIndex.fromBindings(List.of(
-                        binding("a-c", A, C),
-                        binding("c-d", C, D),
-                        binding("a-b", A, B),
-                        binding("b-d", B, D)));
+        // given
+        List<EmbeddingBinding> bindings = List.of(
+                binding("a-c", A, C),
+                binding("c-d", C, D),
+                binding("a-b", A, B),
+                binding("b-d", B, D));
 
+        // when
+        ProcessEmbeddedComponentIndex index =
+                ProcessEmbeddedComponentIndex.fromBindings(bindings);
+
+        // then
         assertEquals(List.of(
                         List.of(D),
                         List.of(B),
@@ -78,12 +90,16 @@ final class ProcessEmbeddedComponentIndexTest {
 
     @Test
     void disconnectedCohortsUseMinimumMemberScalarOrder() {
+        // given
         DocumentId z = DocumentId.of("z");
+
+        // when
         ProcessEmbeddedComponentIndex index =
                 ProcessEmbeddedComponentIndex.fromBindings(List.of(
                         binding("z-a", z, A),
                         binding("b-c", B, C)));
 
+        // then
         assertEquals(List.of(
                         List.of(A, z),
                         List.of(B, C)),
@@ -100,6 +116,7 @@ final class ProcessEmbeddedComponentIndexTest {
 
     @Test
     void bindingInsertionOrderCannotChangeAnyIndexSurface() {
+        // given
         List<EmbeddingBinding> forward = List.of(
                 binding("a-b", A, B),
                 binding("b-a", B, A),
@@ -108,11 +125,13 @@ final class ProcessEmbeddedComponentIndexTest {
         List<EmbeddingBinding> reverse = new ArrayList<>(forward);
         java.util.Collections.reverse(reverse);
 
+        // when
         ProcessEmbeddedComponentIndex first =
                 ProcessEmbeddedComponentIndex.fromBindings(forward);
         ProcessEmbeddedComponentIndex second =
                 ProcessEmbeddedComponentIndex.fromBindings(reverse);
 
+        // then
         assertEquals(first.documents(), second.documents());
         assertEquals(first.components(), second.components());
         assertEquals(first.cohorts(), second.cohorts());
@@ -128,18 +147,22 @@ final class ProcessEmbeddedComponentIndexTest {
 
     @Test
     void everyEndpointAndExplicitIsolatedDocumentIsCoveredExactlyOnce() {
+        // given
         DocumentId isolated = DocumentId.of("isolated");
+
+        // when
         ProcessEmbeddedComponentIndex index =
                 ProcessEmbeddedComponentIndex.fromDocumentsAndBindings(
                         List.of(isolated, D, A),
                         List.of(
                                 binding("a-b", A, B),
                                 binding("b-c", B, C)));
-
-        assertEquals(List.of(A, B, C, D, isolated), index.documents());
         List<DocumentId> componentMembers = index.components().stream()
                 .flatMap(component -> component.members().stream())
                 .toList();
+
+        // then
+        assertEquals(List.of(A, B, C, D, isolated), index.documents());
         assertEquals(index.documents().size(),
                 new LinkedHashSet<>(componentMembers).size());
         assertEquals(new LinkedHashSet<>(index.documents()),
@@ -156,13 +179,16 @@ final class ProcessEmbeddedComponentIndexTest {
 
     @Test
     void documentOrderingUsesUnicodeScalarValuesInsteadOfUtf16Units() {
+        // given
         DocumentId privateUseBmp = DocumentId.of("\uE000");
         DocumentId supplementary = DocumentId.of("\uD800\uDC00");
 
+        // when
         ProcessEmbeddedComponentIndex index =
                 ProcessEmbeddedComponentIndex.fromDocumentsAndBindings(
                         List.of(supplementary, privateUseBmp), List.of());
 
+        // then
         assertTrue(privateUseBmp.compareTo(supplementary) < 0);
         assertEquals(List.of(privateUseBmp, supplementary),
                 index.documents());
@@ -176,18 +202,21 @@ final class ProcessEmbeddedComponentIndexTest {
 
     @Test
     void legacySnapshotRejectsCyclesUntilCoordinatorSelectsExplicitIndex() {
+        // given
         EmbeddingBinding aToB = binding("a-b", A, B);
         EmbeddingBinding bToA = binding("b-a", B, A);
         ProcessEmbeddedGraphSnapshot legacy =
                 ProcessEmbeddedGraphSnapshot.empty()
                         .reconcileParent(A, List.of(aToB));
 
+        // when
         assertThrows(IllegalStateException.class,
                 () -> legacy.reconcileParent(B, List.of(bToA)));
-
         ProcessEmbeddedComponentIndex explicit =
                 ProcessEmbeddedComponentIndex.fromBindings(
                         List.of(aToB, bToA));
+
+        // then
         assertTrue(explicit.component(A).cyclic());
         assertEquals(List.of(A, B), explicit.component(A).members());
         assertEquals(legacy.componentIndex().documents(), List.of(A, B));
@@ -195,10 +224,20 @@ final class ProcessEmbeddedComponentIndexTest {
 
     @Test
     void duplicateBindingIdentityIsRejectedDeterministically() {
-        assertThrows(IllegalStateException.class,
-                () -> ProcessEmbeddedComponentIndex.fromBindings(List.of(
-                        binding("duplicate", A, B),
-                        binding("duplicate", C, D))));
+        // given
+        List<EmbeddingBinding> duplicateBindings = List.of(
+                binding("duplicate", A, B),
+                binding("duplicate", C, D));
+
+        // when
+        IllegalStateException failure = assertThrows(
+                IllegalStateException.class,
+                () -> ProcessEmbeddedComponentIndex.fromBindings(
+                        duplicateBindings));
+
+        // then
+        assertTrue(failure.getMessage().contains(
+                "Duplicate Process Embedded binding"));
     }
 
     private static void assertTargetBeforeSource(

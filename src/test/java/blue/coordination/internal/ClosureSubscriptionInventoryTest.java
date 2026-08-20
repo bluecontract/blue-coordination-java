@@ -54,9 +54,14 @@ final class ClosureSubscriptionInventoryTest {
 
     @Test
     void appliesVerifiedAddReplaceAndRemoveWithoutErasingDisconnectedRows() {
+        // given
+
         ClosureProcessResult resultA = fixture.result(A);
+
+        // when
         ClosureProcessResult resultB = fixture.result(B);
 
+        // then
         assertEquals(EnumSet.allOf(SubscriptionDelta.Operation.class),
                 operations(resultA));
         assertEquals(EnumSet.allOf(SubscriptionDelta.Operation.class),
@@ -86,16 +91,21 @@ final class ClosureSubscriptionInventoryTest {
 
     @Test
     void rejectsMismatchedBeforeStateAndStaleDurableHead() {
+        // given
+
         ClosureProcessResult result = fixture.result(A);
         SubscriptionState before = delta(
                 result, SubscriptionDelta.Operation.REPLACE)
                 .beforeSubscription();
+
+        // when
         SubscriptionState conflicting = SubscriptionState.identified(
                 before.channelOccurrence(),
                 before.documentBlueId(),
                 before.graphGeneration(),
                 before.componentGeneration() + 1L);
 
+        // then
         IllegalStateException stateFailure = assertThrows(
                 IllegalStateException.class,
                 () -> ClosureSubscriptionInventory.of(List.of(conflicting))
@@ -127,9 +137,14 @@ final class ClosureSubscriptionInventoryTest {
 
     @Test
     void validatesFinalDocumentGraphAndComponentGenerations() {
+        // given
+
         ClosureProcessResult result = fixture.result(A);
+
+        // when
         ResultingDocument document = resultingDocument(result, A);
 
+        // then
         assertFinalStateRejected(
                 result,
                 state -> SubscriptionState.identified(
@@ -155,17 +170,23 @@ final class ClosureSubscriptionInventoryTest {
 
     @Test
     void publishesRoutesWithExactCheckpointAndStartAfterIntervals() {
-        assertEquals(List.of(), fixture.routes()
-                .selectDirectDeliveries(fixture.addedAtBoundary())
-                .documentIds(),
+        // given
+        OperationRouteIndex routes = fixture.routes();
+
+        // when
+        var atBoundary = routes.selectDirectDeliveries(
+                fixture.addedAtBoundary()).documentIds();
+        var afterBoundary = routes.selectDirectDeliveries(
+                fixture.addedAfterBoundary()).documentIds();
+        var retiring = routes.selectDirectDeliveries(
+                fixture.retiringAfterBoundary()).documentIds();
+
+        // then
+        assertEquals(List.of(), atBoundary,
                 "a Channel added by an event cannot receive that event");
-        assertEquals(List.of(A, B), fixture.routes()
-                .selectDirectDeliveries(fixture.addedAfterBoundary())
-                .documentIds());
-        assertEquals(List.of(), fixture.routes()
-                .selectDirectDeliveries(fixture.retiringAfterBoundary())
-                .documentIds());
-        assertTrue(fixture.routes().generation()
+        assertEquals(List.of(A, B), afterBoundary);
+        assertEquals(List.of(), retiring);
+        assertTrue(routes.generation()
                 > fixture.routeGenerationBefore());
 
         for (DocumentId documentId : List.of(A, B)) {

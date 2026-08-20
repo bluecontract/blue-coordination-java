@@ -235,6 +235,8 @@ class ComputeEffectPlanTest {
 
     @Test
     void shouldPreserveAuthenticatedExactReferencesWithoutRematerializing() {
+        // given
+
         BexProcessingMetrics metrics = new BexProcessingMetrics();
         ComputeResultEmitter emitter = new ComputeResultEmitter(metrics);
         FrozenNode exact = FrozenNode.fromNode(new Node()
@@ -244,8 +246,10 @@ class ComputeEffectPlanTest {
         BexValue resolvedCursor = BexValues.exact(
                 reference, exact, exact.blueId());
 
+        // when
         FrozenNode frozen = emitter.freezePatchValue(resolvedCursor);
 
+        // then
         assertSame(reference, frozen);
         assertTrue(frozen.isReferenceOnly());
         assertEquals(exact.blueId(), frozen.getReferenceBlueId());
@@ -255,14 +259,19 @@ class ComputeEffectPlanTest {
 
     @Test
     void shouldRejectExactPatchContentWithAnUnrelatedAssertedIdentity() {
+        // given
+
         ComputeResultEmitter emitter = new ComputeResultEmitter();
         FrozenNode content = FrozenNode.fromNode(new Node()
                 .properties("kind", new Node().value("content")));
         FrozenNode other = FrozenNode.fromNode(new Node()
                 .properties("kind", new Node().value("other")));
+
+        // when
         BexValue mismatched = BexValues.exact(
                 content, content, other.blueId());
 
+        // then
         ComputeResultValidationException failure = assertThrows(
                 ComputeResultValidationException.class,
                 () -> emitter.freezePatchValue(mismatched));

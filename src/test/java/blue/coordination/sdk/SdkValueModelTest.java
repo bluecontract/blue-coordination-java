@@ -22,10 +22,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class SdkValueModelTest {
     @Test
     void managedDocumentFluentDefinitionIsImmutableAndFailsClosed() {
+        // given
         ManagedDocument base = ManagedDocument.yaml(
                 "counter", "counter: 0");
+
+        // when
         ManagedDocument admitted = base.publicRoot().fromNow();
 
+        // then
         assertFalse(base.isPublicRoot());
         assertThrows(IllegalStateException.class, base::activationPolicy);
         assertTrue(admitted.isPublicRoot());
@@ -36,15 +40,19 @@ final class SdkValueModelTest {
 
     @Test
     void managedClosurePreservesOrderAndRejectsAmbiguousEvidence() {
-        ManagedClosure closure = ManagedClosure.builder()
+        // given
+        ManagedClosure.Builder builder = ManagedClosure.builder()
                 .document("b", "marker: b")
                 .document("a", "marker: a")
                 .bindOccurrence("b", "/a", "a")
                 .bindOccurrence("a", "/b", "b")
                 .publicRoot("a")
-                .fromNow()
-                .build();
+                .fromNow();
 
+        // when
+        ManagedClosure closure = builder.build();
+
+        // then
         assertEquals(List.of("b", "a"), closure.documentAliases());
         assertEquals(Set.of("a"), closure.publicRootAliases());
         assertThrows(UnsupportedOperationException.class,
@@ -64,10 +72,13 @@ final class SdkValueModelTest {
 
     @Test
     void exactValuesAndReadySnapshotsDetachMutableInput() {
+        // given
         Node source = new Node().properties(
                 "counter", new Node().value(BigInteger.valueOf(2L)),
                 "enabled", new Node().value(true),
                 "name", new Node().value("blue"));
+
+        // when
         ExactBlueValue exact = new ExactBlueValue(
                 ExactValue.verified(source));
         source.getProperties().get("counter").value(BigInteger.TEN);
@@ -76,6 +87,7 @@ final class SdkValueModelTest {
                 DocumentId.of("counter"), 3L, true, exact, events);
         events.add(new PublicEvent(exact));
 
+        // then
         assertEquals(2L, snapshot.longAt("/counter"));
         assertTrue(snapshot.booleanAt("/enabled"));
         assertEquals("blue", snapshot.textAt("/name"));
@@ -89,8 +101,11 @@ final class SdkValueModelTest {
 
     @Test
     void draftsAndHandlesCannotBeSilentlyReusedAcrossOwners() {
+        // given
         Object firstOwner = new Object();
         Object secondOwner = new Object();
+
+        // when
         TimelineHandle firstTimeline = new TimelineHandle(
                 firstOwner, "alice", "alice");
         TimelineHandle otherTimeline = new TimelineHandle(
@@ -103,6 +118,7 @@ final class SdkValueModelTest {
         ManagedDocumentDraft draft = new ManagedDocumentDraft(
                 firstOwner, DocumentId.of("draft"), exact).atEpoch(5L);
 
+        // then
         assertEquals(first, sameEvidence);
         assertNotEquals(first, foreign);
         assertNotEquals(firstTimeline, otherTimeline);
@@ -114,6 +130,7 @@ final class SdkValueModelTest {
 
     @Test
     void resultsDefensivelyRetainIndependentClosureOutcomes() {
+        // given
         Object owner = new Object();
         EntryHandle entry = new EntryHandle(owner, "entry");
         ExactBlueValue after = exactScalar("after");
@@ -124,6 +141,8 @@ final class SdkValueModelTest {
         counters.put("COMPONENTS", 1L);
         ProcessingStats stats = new ProcessingStats(
                 7L, 1L, 1L, 10L, List.of(DocumentId.of("a")), counters);
+
+        // when
         ClosureResult applied = new ClosureResult(
                 "closure-a", EntryDisposition.APPLIED, changes,
                 List.of(), stats, Diagnostic.none());
@@ -137,6 +156,7 @@ final class SdkValueModelTest {
         DrainResult drain = new DrainResult(
                 List.of(result), stats, true, false, Diagnostic.none());
 
+        // then
         assertTrue(result.applied());
         assertEquals(1, result.closures().size());
         assertEquals(1, applied.changes().size());
@@ -151,15 +171,19 @@ final class SdkValueModelTest {
 
     @Test
     void frontierActivationAndDiagnosticsAreExactImmutableValues() {
+        // given
         ExactBlueValue frontier = exactScalar("frontier");
-        ActivationPolicy policy = ActivationPolicy.importFromFrontier(
-                frontier);
         Map<String, String> details = new LinkedHashMap<>();
         details.put("documentId", "missing");
+
+        // when
+        ActivationPolicy policy = ActivationPolicy.importFromFrontier(
+                frontier);
         Diagnostic diagnostic = new Diagnostic(
                 "TARGET_DOCUMENT_NOT_FOUND", "Missing target", details);
         details.put("documentId", "changed");
 
+        // then
         assertEquals(frontier, policy.frontierEvidence().orElseThrow());
         assertEquals(ActivationPolicy.Kind.IMPORT_FROM_FRONTIER,
                 policy.kind());

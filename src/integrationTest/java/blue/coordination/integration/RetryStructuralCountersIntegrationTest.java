@@ -18,6 +18,7 @@ final class RetryStructuralCountersIntegrationTest {
     void graphRetryReconcilesACommittedParentWithoutAnotherProcess()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             engine.start(
                     "embedded-state-parent",
                     resource("examples/clean/embedded-state-parent.yaml"));
@@ -44,10 +45,13 @@ final class RetryStructuralCountersIntegrationTest {
             engine.clearFailureInjection();
             EngineMetrics.MetricsSnapshot beforeRetry =
                     engine.metricsSnapshot();
+
+            // when
             engine.dispatch(attachment);
             EngineTestSupport.MetricDelta retry = delta(
                     beforeRetry, engine.metricsSnapshot());
 
+            // then
             assertTrue(retry.counters().containsKey(
                     "temporal.parentProcessRerunsOnGraphRetry"),
                     "the graph-retry monitor must produce its raw source");
@@ -67,6 +71,7 @@ final class RetryStructuralCountersIntegrationTest {
     void parentRetryReconcilesACommittedChildWithoutAnotherProcess()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String childSource = resource(
                     "examples/clean/embedded-counter.yaml");
             engine.start("embedded-counter-A", childSource);
@@ -101,10 +106,13 @@ final class RetryStructuralCountersIntegrationTest {
             engine.clearFailureInjection();
             EngineMetrics.MetricsSnapshot beforeRetry =
                     engine.metricsSnapshot();
+
+            // when
             engine.dispatch(childEntry);
             EngineTestSupport.MetricDelta retry = delta(
                     beforeRetry, engine.metricsSnapshot());
 
+            // then
             assertTrue(retry.counters().containsKey(
                     "temporal.childProcessRerunsOnParentRetry"),
                     "the parent-retry monitor must produce its raw source");

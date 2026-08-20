@@ -40,6 +40,8 @@ final class ContractsPublicNestedScopeBoundaryTest {
     @Test
     void ordinaryPublicEngineExecutesTheNestedScopeNormally()
             throws Exception {
+        // given
+
         try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
             engine.startDocument(DOCUMENT, ordinaryNestedDocument());
             String beforeBlueId = null;
@@ -51,12 +53,15 @@ final class ContractsPublicNestedScopeBoundaryTest {
 
             Timeline nested = engine.registerTimeline(
                     NESTED_TIMELINE, ACTOR);
+
+            // when
             TimelineEntry entry = engine.appendAt(
                     nested,
                     Operation.yaml(
                             "nestedTouch", "nestedChannel", "amount: 2"),
                     T0);
 
+            // then
             assertEquals(1, engine.routeTargetCount(entry));
             ProcessingDrainReceipt drained = engine.drain();
             assertTrue(drained.quiescent());
@@ -99,16 +104,21 @@ final class ContractsPublicNestedScopeBoundaryTest {
     @Test
     void contractsDirectSeedsAndManagedStepsRemainPreciselyRootOnly()
             throws Exception {
+        // given
+
         Contracts10Configuration configuration = new Contracts10Configuration(
                 "sha256:01b038b64e3f0a9a11f3f70d544a63ff78a01d5169f1"
                         + "a03f8b8629cf73645a7d",
                 "sha256:dfb444962a5a17b3a6519e8d148c2bf4a975a921b1fc"
                         + "b1277710052caaecd930",
                 Set.of(DOCUMENT));
+
         try (CoordinationEngine publicEngine =
                      CoordinationEngine.inMemoryContracts10(configuration)) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;
+
+            // when
             ContractsClosureAdmissionReceipt admitted =
                     new Contracts10ScenarioBuilder(engine)
                             .document(DOCUMENT, nestedDocument())
@@ -122,6 +132,7 @@ final class ContractsPublicNestedScopeBoundaryTest {
                             .admitTo(publicEngine)
                             .admissionReceipt();
 
+            // then
             assertEquals(
                     ContractsClosureAdmissionReceipt.PublicationOutcome
                             .PUBLISHED,
