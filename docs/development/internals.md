@@ -36,10 +36,17 @@ The result mapper consumes retained per-entry Contracts attempts directly; it
 does not call `onlyOutcome()` and therefore preserves valid zero-recipient
 `NO_MATCH` and independent disconnected closure outcomes.
 
-Managed drafts stop before append with
-`UNSUPPORTED_MANAGED_DRAFT_ADMISSION`. This guard is intentional. Removing it
-without a real Contracts host-invocation bridge would manufacture admission
-semantics in Coordination and is prohibited.
+From-now managed drafts use the same Contracts execution and publication path.
+`SdkCoordinationRuntime` converts owner-bound exact drafts, managed request
+fields, and expected effective paths into one `ContractsManagedDraftPlan`.
+`ContractsClosureAdapter` preflights the target and declared paths before
+journal append, then validates the PROCESS result against the request evidence,
+expands the affected closure, and stages every new head, occurrence row,
+component, route, checkpoint, event, and receipt in the existing atomic
+publication. It does not call the legacy child/parent lane or introduce a
+second graph. A retry retains the plan while progress remains possible; a
+terminal result retires it. Known-epoch imports and activation modes other than
+new `FROM_NOW` fail closed before append.
 
 The append path validates and retains one exact request and Timeline Entry,
 then commits its journal coordinates and logical clock. It does not scan
@@ -69,6 +76,12 @@ Retirement and later activation are separate atomic inventory transitions.
 All authoritative rows, including inactive reservations, connect the affected
 closure publication cohort. Building the active component index does not alter
 that durable all-row cohort boundary.
+
+The SDK exposes only the narrow operational projection of one retained row:
+`AdvancedCoordination.auditManagedOccurrence(sourceId, path)` returns the
+target lineage, activation generation, and active flag as a
+`ManagedOccurrenceAudit`. It does not expose inventory records, components,
+proofs, or mutable topology state.
 
 `InMemoryDocumentStore` exposes the package-internal Contracts publication
 seam. One attempt fences every selected document head by durable

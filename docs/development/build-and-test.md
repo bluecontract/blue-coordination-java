@@ -36,13 +36,13 @@ This lane is development evidence; it is not a staged-JAR consumer proof.
 ## Local-only SDK freeze lane
 
 The candidate coordinate is exactly
-`blue.coordination:blue-coordination-java:3.0.0-rc.2`. Its exact prerequisite
+`blue.coordination:blue-coordination-java:3.0.0-rc.3`. Its exact prerequisite
 order is:
 
 ```text
-Language 3.1.0-rc.20
-  -> BEX 1.1.0-rc.3 and Repository 3.0.0-rc.21
-  -> Coordination 3.0.0-rc.2
+Language 3.1.0-rc.21
+  -> BEX 1.1.0-rc.4 and Repository 3.0.0-rc.21
+  -> Coordination 3.0.0-rc.3
 ```
 
 Stage Language first. BEX and Repository must both resolve that staged
@@ -51,16 +51,16 @@ Language repository rather than a sibling build or Maven Local:
 ```bash
 # Language worktree
 ./gradlew stagePublications verifyPublishedRepository \
-  -PreleaseVersion=3.1.0-rc.20
+  -PreleaseVersion=3.1.0-rc.21
 
 mkdir -p /absolute/path/to/blue-sdk-staged-repository
 rsync -a --checksum build/staging-deploy/ \
   /absolute/path/to/blue-sdk-staged-repository/
 
 # BEX staging worktree
-./gradlew bexSdkStageVerify \
+./gradlew publish bexSdkStageVerify \
   -PblueLanguageRepository=/absolute/path/to/language/build/staging-deploy \
-  -PbexLocalStageVersion=1.1.0-rc.3 \
+  -PbexLocalStageVersion=1.1.0-rc.4 \
   -PbexSdkStagingRepository=/absolute/path/to/blue-sdk-staged-repository
 
 # Repository staging worktree
@@ -70,10 +70,12 @@ rsync -a --checksum build/staging-deploy/ \
   -PrepositorySdkStagingRepository=/absolute/path/to/blue-sdk-staged-repository
 ```
 
-The `rsync` step seeds the unified repository with the verified Language bytes;
-BEX and Repository then append only their locally staged coordinates. Before
-running Coordination, the unified repository must contain real JAR, POM, and
-Gradle module metadata for every coordinate.
+The `rsync` step seeds the unified repository with the verified Language bytes.
+The BEX command must include `publish`: `bexSdkStageVerify` is a verification
+gate and does not itself write BEX artifacts. BEX and Repository then append
+only their locally staged coordinates. Before running Coordination, the
+unified repository must contain real JAR, POM, and Gradle module metadata for
+every coordinate.
 
 ```bash
 ./gradlew sdkFreezePrepublicationCheck \
@@ -99,12 +101,12 @@ The gates mean:
   signature, Javadoc, built-JAR consumer, documentation, and artifact
   prerequisites.
 - `stageSdkFreezeCandidate` refuses an effective Coordination version other
-  than rc.2. Only `staged-artifact` selects that override; `.cz.toml` remains
+  than rc.3. Only `staged-artifact` selects that override; `.cz.toml` remains
   the historical rc.1 authority for unchanged `stageRelease` behavior.
 - `verifySdkStagedDependencyGraph` requires module components at the exact
   versions above and rejects project/composite substitutions.
 - `verifySdkStagedCandidateRepository` checks the locally staged Coordination
-  rc.2 POM, module metadata, main/sources/Javadoc JARs, and required SDK/release
+  rc.3 POM, module metadata, main/sources/Javadoc JARs, and required SDK/release
   manifest entries before a consumer can use them.
 - `verifyExtractedSdkConsumerJava17` and
   `verifyExtractedSdkConsumerJava21` compile and run
@@ -133,7 +135,8 @@ The repository-owned suites have distinct responsibilities:
 - `test` covers SDK immutable values and authored compilation as well as public
   API values, atomic internals, and retained processor semantics. Its SDK
   acceptance cases exercise the public facade without casts to engine
-  internals or hand-built closure proof values.
+  internals or hand-built closure proof values, including the from-now
+  operation-produced Order draft and five-occurrence/three-lineage cases.
 - `integrationTest` covers exact append, engine-selected drain, entry-frame
   ordering, closure admission/publication, embedded topology, catch-up,
   ownership, and atomic retry.
@@ -152,7 +155,7 @@ worktree has passed.
 
 `published-artifact`, `stageRelease`, and the rc.1 GitHub publication workflows
 are retained for historical compatibility. They are not part of the local-only
-rc.2 SDK freeze. Likewise, the older `blue-basic` performance workflow used
+rc.3 SDK freeze. Likewise, the older `blue-basic` performance workflow used
 Maven Local; do not run it for this candidate. Its receipts remain unchanged as
 audit evidence, and a missing `../blue-basic` checkout cannot affect
 `sdkFreezeArtifactCheck`.

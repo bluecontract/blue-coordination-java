@@ -113,18 +113,36 @@ silently converted into a broadcast.
 `requestYaml(yaml)` supplies one ordinary authored request. The structured
 request builder uses `exact(field, value)` to preserve whole exact values.
 
-## Managed drafts: fail-closed candidate boundary
+## Managed drafts produced by operations
 
 `documents().draft(id, exactInitial)` creates immutable stable-lineage evidence
-for a future managed occurrence. `RequestBuilder.managed(...)`,
-`expectOccurrence(...)`, and `ActivationPolicy` express the intended public
-shape, but operation-result admission is not enabled in rc.2.
+for a new managed occurrence. Supply the same draft in the exact request and
+declare every effective result path that must bind it:
 
-Any call carrying managed-draft evidence fails before journal append with
-`UnsupportedOperationException` whose stable prefix is
-`UNSUPPORTED_MANAGED_DRAFT_ADMISSION`. No host state is mutated. A real
-Contracts host-invocation bridge must authenticate the resulting occurrence;
-the SDK never emulates it through legacy child/parent admission.
+```java
+ManagedDocumentDraft child = blue.documents().draft(
+        childId, blue.values().yaml(childYaml));
+
+EntryResult result = blue.operations().on(parent)
+        .from(alice)
+        .call("createChild")
+        .through("ownerChannel")
+        .request(request -> request.managed("child", child))
+        .expectOccurrence("/children/child-456", child)
+        .activation(ActivationPolicy.fromNow())
+        .execute();
+```
+
+The SDK verifies owner identity, exact request value, canonical effective
+`Process Embedded` paths, and complete result agreement. A single draft may be
+bound at several paths to express one stable lineage with multiple
+occurrences. All new heads and topology changes publish atomically with the
+parent result; a terminal failure leaves no partial expansion.
+
+This candidate supports only new `FROM_NOW` lineages. Imported-state evidence
+created with `draft.atEpoch(...)` and historical, frontier, attach-current, or
+passive operation-result activation fail closed. The SDK never emulates this
+lane through legacy child/parent admission.
 
 ## Broadcast events
 
@@ -186,6 +204,12 @@ proofs, and storage layout are not part of the normal snapshot.
 `auditDocument(id)` deliberately permits non-READY reads. Advanced identity
 accessors expose the exact Language, Contracts, fixture package, gas manifest,
 cyclic finalizer, and proof-verifier identities used by evidence tooling.
+
+`auditManagedOccurrence(sourceId, occurrencePath)` returns an optional
+`ManagedOccurrenceAudit` for a retained occurrence row. The value contains the
+target `DocumentId`, positive activation generation, and active/inactive flag;
+it intentionally omits component snapshots, proof values, and mutable
+inventory internals.
 
 Low-level types such as `ClosureInvocationInput`, occurrence bindings,
 component/closure snapshots, cyclic proofs, closure environments, and execution

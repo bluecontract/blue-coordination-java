@@ -1,11 +1,11 @@
 # SDK migration and ownership ledger
 
-This ledger fixes the application boundary for the `3.0.0-rc.2` SDK freeze
+This ledger fixes the application boundary for the `3.0.0-rc.3` SDK freeze
 candidate. It is normative for package ownership and migration guidance, but it
 does not replace the Contracts 1.0 specification.
 
 ```text
-candidate: 3.0.0-rc.2
+candidate: 3.0.0-rc.3
 distribution: local staged repository only
 normal default: BlueCoordination.inMemory() -> Contracts 1.0
 implementationConformanceClaimed: false
@@ -55,6 +55,7 @@ explicit `advanced()` choice.
 | canonical entry and closure scheduling | Coordination engine | delegate; never introduce a facade queue or graph |
 | gas weights, limits, trace, and rollback | Contracts | preserve typed results and exact statistics |
 | atomic multi-document publication | Coordination store/Contracts adapter | expose independent immutable closure results |
+| operation-result managed expansion | Contracts processor plus Coordination publication adapter | bind exact draft/request/path evidence; support new `FROM_NOW` lineages only |
 | target evidence | selected Contracts/Repository profile | bind exact document evidence; never accept final recipient sets |
 | public broadcast | Coordination environment | keep explicit through `events()` and preserve terminal `NO_MATCH` |
 | physical storage/proofs/topology generations | advanced diagnostics | exclude from normal snapshots |
@@ -73,31 +74,35 @@ explicit `advanced()` choice.
 | `onlyOutcome()` | `DrainResult.entry(handle)` / `EntryResult.closures()` | `NO_MATCH` is terminal and multi-closure results are not collapsed |
 | `engine.document(id)` | `DocumentHandle.snapshot()` | READY-only application state without physical layout |
 | `auditDocument(id)` | `advanced().auditDocument(id)` | explicit non-READY operational read |
+| retained occurrence inventory inspection | `advanced().auditManagedOccurrence(sourceId, path)` | returns only target lineage, activation generation, and active state |
+| host-specific managed-child call | `request.managed(...)` plus `expectOccurrence(...)` | exact new-lineage value and every effective path are required; duplicate occurrences may share one draft |
 | raw release SHA strings in normal construction | bundled release manifest | explicit SHA pairs remain builder/advanced only |
 
 Migration is additive. Existing hosts can keep the low-level boundary while
 moving one workflow at a time, but they must not mix handles or semantics from
 the legacy and SDK runtimes.
 
-## Managed-draft gap
+## Managed-draft boundary
 
 `ManagedDocumentDraft`, `RequestBuilder.managed(...)`, and
-`expectOccurrence(...)` reserve the intended SDK vocabulary. They do not claim
-that rc.2 can admit an operation-produced managed child. Such a call fails
-before append with `UNSUPPORTED_MANAGED_DRAFT_ADMISSION`.
+`expectOccurrence(...)` are the supported rc.3 boundary for a new managed
+lineage produced by an operation. Request content remains separate from the
+stable draft identity and activation evidence. Before append, the SDK verifies
+ownership, draft consistency, canonical unique paths, and effective
+`Process Embedded` declarations. During PROCESS, the bridge verifies the exact
+result value and complete occurrence set, rejects zero, missing, extra, or
+ambiguous matches, and publishes the expanded affected closure atomically. It
+does not call the legacy child/parent path or create a second dependency graph.
 
-Completion requires a real host-invocation bridge that keeps exact request
-content separate from stable managed identity and activation evidence, verifies
-the resulting effective occurrence path and exact state, rejects zero or
-ambiguous matches, and admits the affected closure atomically. The bridge may
-not call the legacy child/parent path or create a second dependency graph.
-
-Until that exists, the Order-draft and five-child/duplicate-lineage acceptance
-gates remain open and `implementationConformanceClaimed` remains false.
+This lane supports only new `FROM_NOW` lineages. `draft.atEpoch(...)` and
+historical, frontier, attach-current, or passive operation-result activation
+fail closed. The Order-draft and five-occurrence/three-lineage cases are part of
+the rc.3 acceptance corpus. The final implementation-conformance value remains
+an artifact-bound receipt decision, not a claim made from source shape alone.
 
 ## Candidate and release ownership
 
-The rc.2 coordinate is consumed only from the file repository supplied by
+The rc.3 coordinate is consumed only from the file repository supplied by
 `-PblueStagingRepository`. The `staged-artifact` lane owns dependency isolation,
 exact component versions, Java 17/21 extracted consumers, and candidate
 artifact checks. Historical rc.1 staging and receipts remain under their

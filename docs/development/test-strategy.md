@@ -12,7 +12,7 @@ consumer checkout to prove that it works.
 | `integrationTest` | In-memory engine with public operations | Append/process separation, engine-selected drain, entry-frame ordering, admission, collection paths, catch-up barriers, identity, ownership, atomic retry and removal/re-addition |
 | `consumerTest` | Built production JAR only | SDK compilation without main-source output or test fixtures, runtime dependency completeness and representative managed-document behavior |
 | `scenarioTest` | Complete business lifecycles | Multi-order NBA convergence and the large host/PayNote lifecycle |
-| extracted SDK consumer | Staged JAR/POM/module graph only | Exact rc.2 dependency graph and standalone SDK execution on Java 17 and Java 21 without composites or Maven Local |
+| extracted SDK consumer | Staged JAR/POM/module graph only | Exact rc.3 dependency graph and standalone SDK execution on Java 17 and Java 21 without composites or Maven Local |
 
 The suites intentionally overlap at important boundaries. Atomicity has focused
 integration coverage and is exercised again by realistic scenarios. The
@@ -37,16 +37,19 @@ proves:
 - detach followed by a terminating call;
 - remove/re-add with fresh authenticated cyclic identities;
 - append-only `submit()` parity with `execute()`;
+- an operation-produced Order draft admitted as a new `FROM_NOW` lineage;
+- five effective occurrences mapped to three new lineages, including duplicate
+  lineage reuse and declaration-order permutations;
+- managed-draft preflight, exact-path/value completeness, atomic rollback, and
+  deterministic retry failure matrices;
 - immutable owner-bound values and a consumer compiled from the built JAR.
 
-Managed-child creation is a characterized unsupported boundary, not a passing
-semantic claim. The test verifies that `request.managed(...)` plus
-`expectOccurrence(...)` fails before append with
-`UNSUPPORTED_MANAGED_DRAFT_ADMISSION` and leaves state unchanged. The requested
-Order-draft and five-child/duplicate-lineage acceptance scenarios remain open
-until a real Contracts host-invocation bridge exists. The conformance receipt
-must list those gates as unresolved and keep
-`implementationConformanceClaimed=false`.
+Operation-result managed admission is deliberately limited to new `FROM_NOW`
+lineages. Acceptance tests prove that a known imported epoch and every
+historical/frontier/attach-current/passive activation request fail before
+append, without partial document or topology mutation. The final conformance
+decision remains bound to the exact staged acceptance and fixture corpus; a
+source-suite pass alone does not set `implementationConformanceClaimed=true`.
 
 The extracted `staged-sdk-consumer/` is a second consumer boundary, not a
 duplicate source test. It resolves only the staged file repository and runs on

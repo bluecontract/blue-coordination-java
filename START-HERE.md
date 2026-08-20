@@ -1,7 +1,7 @@
 # Start here
 
 1. Use Java 17 or newer.
-2. Resolve the local-only `3.0.0-rc.2` candidate from the explicit staged file
+2. Resolve the local-only `3.0.0-rc.3` candidate from the explicit staged file
    repository. It is not available from Maven Central or Maven Local.
 3. Create `BlueCoordination.inMemory()` in a try-with-resources block. This is
    the one normal default and uses the bundled Contracts 1.0 identities.
@@ -25,11 +25,15 @@ boundary. Its plain `inMemory()` factory retains the earlier acyclic profile;
 it does not share the SDK default's Contracts semantics. New application code
 should stay in `blue.coordination.sdk`.
 
-The rc.2 SDK does not yet admit a managed child produced by an operation.
-`request.managed(...)` and `expectOccurrence(...)` fail before append with
-`UNSUPPORTED_MANAGED_DRAFT_ADMISSION`; no partial journal or document mutation
-is allowed. This unresolved host-invocation bridge keeps the implementation
-conformance claim false.
+The rc.3 SDK admits a new managed child produced by an operation when its exact
+initial value is supplied with `request.managed(...)`, every effective path is
+declared with `expectOccurrence(...)`, and the activation policy is `fromNow`.
+Duplicate occurrences may share one stable draft lineage. Invalid or
+incomplete evidence fails closed, and a terminal processing failure publishes
+neither a partial child nor a partial topology expansion. Imported draft state
+and historical operation-result activation are not supported in this
+candidate. Final implementation conformance remains an artifact-bound decision
+made only after the complete staged acceptance and fixture corpus passes.
 
 The runtime is deliberately single-process and sequential. Each document
 transition atomically commits its exact state, epoch, events, graph and

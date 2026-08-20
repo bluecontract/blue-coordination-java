@@ -2,7 +2,7 @@
 
 ## Current decision: local-only SDK freeze candidate
 
-`3.0.0-rc.2` is a prepublication candidate. The authorized workflow stages and
+`3.0.0-rc.3` is a prepublication candidate. The authorized workflow stages and
 verifies artifacts in an explicit local file repository. It does not upload a
 package, publish to Maven Local, push a branch/commit/tag, or create a remote
 release.
@@ -17,10 +17,10 @@ The coordinated inputs must be exact and clean:
 
 | Component | Candidate | Required source of bytes |
 | --- | --- | --- |
-| Language | `3.1.0-rc.20` | locally staged JAR/POM/module metadata |
-| BEX core/contracts | `1.1.0-rc.3` | locally staged against that Language |
+| Language | `3.1.0-rc.21` | locally staged JAR/POM/module metadata |
+| BEX core/contracts | `1.1.0-rc.4` | locally staged against that Language |
 | Repository | `3.0.0-rc.21` | locally staged against that Language |
-| Coordination | `3.0.0-rc.2` | this SDK candidate |
+| Coordination | `3.0.0-rc.3` | this SDK candidate |
 
 The specification and fixtures are read from the clean `../blue-spec/latest`
 checkout, not an archived copy under `docs/`. The recovered topology commits,
@@ -41,7 +41,9 @@ Before artifact staging:
 Stage prerequisites in the order documented in
 [Build and test](build-and-test.md): Language first, then BEX and Repository
 against those Language bytes, then Coordination. Merge their verified Maven
-repository contents into one absolute directory and run:
+repository contents into one fresh absolute directory. In the BEX worktree,
+run `publish bexSdkStageVerify` with the staging properties; the verification
+task alone does not write artifacts. Then run:
 
 ```bash
 ./gradlew sdkFreezePrepublicationCheck \
@@ -62,7 +64,7 @@ repository contents into one absolute directory and run:
 ```
 
 `.cz.toml` intentionally remains the historical rc.1 authority for the existing
-`stageRelease` workflow. Only `staged-artifact` selects the explicit rc.2 SDK
+`stageRelease` workflow. Only `staged-artifact` selects the explicit rc.3 SDK
 candidate override; the prepublication and candidate-repository checks require
 that effective version and verify that the JAR manifest, POM, and Gradle module
 metadata agree. This mode contains no included sibling builds and ignores Maven
@@ -90,12 +92,13 @@ The external evidence directory, not a historical receipt path, must bind:
   component membership, document BlueIds, and structural counters;
 - SDK unit/acceptance, built-JAR consumer, and extracted Java 17/21 consumer
   results;
-- the exact unsupported managed-draft gate.
+- the supported from-now managed-draft cases, their malformed-evidence and
+  rollback matrix, and the explicit imported/history activation exclusions.
 
 Generate `FINAL_RECEIPT.md`, `final-receipt.json`, and
 `changed-files.sha256` only from the final candidate state. Do not edit the
 retained rc.1 Round 13 Markdown, JSON, schemas, or provenance files to make
-them describe rc.2.
+them describe rc.3.
 
 ## Conformance decision
 
@@ -103,19 +106,22 @@ The semantic freeze and artifact readiness decisions are independent.
 The recovered topology architecture and staged SDK artifacts can be valid while
 the implementation-conformance claim remains false.
 
-For rc.2, managed-child admission produced by an operation is still missing.
-`request.managed(...)` and `expectOccurrence(...)` fail before append with
-`UNSUPPORTED_MANAGED_DRAFT_ADMISSION`. Therefore the Order-draft and
-five-child/duplicate-lineage acceptance requirements are unresolved. The final
-receipt must report them explicitly and retain:
+For rc.3, the public SDK supports the required new-lineage `FROM_NOW`
+operation-result lane, including the Order draft and the five-occurrence,
+three-lineage duplicate-lineage case. Imported known-epoch drafts and
+historical/frontier/attach-current/passive activation remain deliberately
+unsupported. The source tree alone does not decide the release claim. Until
+the complete final staged acceptance, fixture, artifact, and Java 17/21
+consumer corpus passes, the working receipt must retain:
 
 ```text
 implementationConformanceClaimed = false
 ```
 
-Only a real Contracts host-invocation bridge, the complete acceptance corpus,
-and artifact-bound fixture execution can make that value eligible for review.
-A local staging success alone cannot.
+Only the exact final source commits, immutable staged bytes, complete
+acceptance/fixture execution, and artifact-bound Java 17/21 consumers can make
+that value eligible for review. A partial source-suite or staging success alone
+cannot.
 
 ## External-pilot tier
 
@@ -129,7 +135,8 @@ limits:
 - no provider-backed Mandate resolver;
 - sequential drain and no distributed scheduling;
 - public-Root-scope closure profile with bounded cyclic components;
-- managed drafts produced by operations are unsupported;
+- new from-now managed drafts produced by operations are supported; imported
+  state and historical occurrence activation are unsupported;
 - no stable latency SLA;
 - not a production MyOS durability, tenant-isolation, outbox-recovery,
   backpressure, or operational profile.
@@ -144,7 +151,7 @@ GitHub publication tasks remain bound to the earlier rc.1 workflow. They are
 deliberately unchanged by the SDK freeze lane. The retained campaign failed
 append and Coordination-host p95 hard limits and claimed no latency pass; its
 narrow `PASS_WITH_KNOWN_PERFORMANCE_LIMITATION` policy was rc.1-specific and
-cannot be inherited by rc.2 or a stable release.
+cannot be inherited by rc.3 or a stable release.
 
 Historical receipts remain useful audit evidence, but none of them proves the
 SDK candidate. Performance remediation, durable production adapters, complete

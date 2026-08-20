@@ -3,6 +3,44 @@
 This project follows Semantic Versioning. Release candidates may still refine
 the new 3.x API before the first stable 3.0.0 release.
 
+## 3.0.0-rc.3 - local-only cyclic-topology SDK candidate
+
+### Added
+
+- From-now admission of new managed lineages produced by an operation result.
+  The SDK binds exact draft values from `request.managed(...)` to complete
+  effective paths declared with `expectOccurrence(...)`, including multiple
+  occurrences that share one stable lineage, and publishes the affected
+  closure atomically.
+- The advanced `ManagedOccurrenceAudit` diagnostic, exposed through
+  `AdvancedCoordination.auditManagedOccurrence(...)`, for the retained target
+  lineage, activation generation, and active/inactive state.
+- Public SDK acceptance cases for the operation-produced Order draft and the
+  five-occurrence/three-lineage permutation, plus fail-closed malformed,
+  ambiguous, retry, and rollback coverage.
+
+### Changed
+
+- The isolated staged graph is pinned to Language `3.1.0-rc.21`, BEX
+  `1.1.0-rc.4`, Repository `3.0.0-rc.21`, and Coordination `3.0.0-rc.3`.
+- Managed-draft plans are preflighted before journal append and retained only
+  while retry can make progress; terminal results retire the plan without
+  erasing rollback evidence.
+
+### Known limitations
+
+- Operation-result managed admission supports only new `FROM_NOW` lineages.
+  Imported draft epochs and historical, frontier, attach-current, or passive
+  occurrence activation remain unsupported and fail closed.
+- The candidate remains in-memory, one-JVM, and sequential. It makes no
+  provider-completeness, provider-backed Mandate, parallel/distributed,
+  production MyOS durability, latency, or throughput claim.
+
+### Distribution status
+
+- `3.0.0-rc.3` is staged locally only. The freeze workflow does not upload
+  packages, publish to Maven Local, push commits, or create/push tags.
+
 ## 3.0.0-rc.2 - local-only freeze candidate
 
 ### Added

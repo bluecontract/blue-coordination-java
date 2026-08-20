@@ -14,11 +14,11 @@ repositories {
 }
 
 dependencies {
-    implementation 'blue.coordination:blue-coordination-java:3.0.0-rc.2'
+    implementation 'blue.coordination:blue-coordination-java:3.0.0-rc.3'
 }
 ```
 
-`3.0.0-rc.2` is currently a local-only SDK freeze candidate. It is staged into
+`3.0.0-rc.3` is currently a local-only SDK freeze candidate. It is staged into
 an explicit file repository and is not published to Maven Central or Maven
 Local. The artifact is compiled with `--release 17`. Version 3 is a breaking
 API reset; the removed 2.x planning, fragmentation, session-store, and
@@ -113,11 +113,21 @@ try (BlueCoordination blue = BlueCoordination.builder()
 }
 ```
 
-Managed-document drafts can be described by the SDK, but operation-result
-admission is deliberately not enabled in this candidate. Calls using
-`request.managed(...)` or `expectOccurrence(...)` fail before append with
-`UNSUPPORTED_MANAGED_DRAFT_ADMISSION`. A real Contracts host-invocation bridge
-is required; the runtime never falls back to the legacy child/parent path.
+The SDK admits new managed lineages produced by an operation when the caller
+supplies the exact initial value with `request.managed(...)`, binds every
+effective occurrence with `expectOccurrence(...)`, and selects `fromNow`
+activation. One draft can bind several occurrences without duplicating the
+lineage. The runtime verifies the request fields, occurrence paths, exact
+values, and complete affected closure before one atomic publication; a
+terminal failure leaves no partial document or topology mutation. Imported
+state (`ManagedDocumentDraft.atEpoch(...)`) and historical occurrence
+activation remain unsupported and fail closed.
+
+Operational tooling can inspect a retained occurrence without exposing graph
+internals through
+`blue.advanced().auditManagedOccurrence(sourceId, occurrencePath)`. The
+returned `ManagedOccurrenceAudit` reports the target `DocumentId`, activation
+generation, and active/inactive state.
 
 `Operation.exact(...)` and `CoordinationEngine.referenceRequest(...)` expose the
 optimized whole-object request path without YAML reserialization. For a
@@ -177,7 +187,7 @@ Resolution and source-API compatibility are separate claims:
 ```
 
 Those commands describe the older remote-coordinate lane and are not part of
-the local-only rc.2 freeze. Do not infer remote availability from the SDK
+the local-only rc.3 freeze. Do not infer remote availability from the SDK
 staged repository.
 
 `releaseCheck` owns the library's complete verification surface: unit tests,

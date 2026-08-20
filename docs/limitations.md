@@ -1,13 +1,12 @@
 # Known limitations
 
-- The rc.2 artifact is a local-only in-memory SDK freeze candidate. It is not
+- The rc.3 artifact is a local-only in-memory SDK freeze candidate. It is not
   remotely published and is not a production MyOS runtime.
-- Managed-child admission from an operation result is deliberately unsupported.
-  The SDK can create `ManagedDocumentDraft` values, but a call using
-  `request.managed(...)` or `expectOccurrence(...)` fails before append with
-  `UNSUPPORTED_MANAGED_DRAFT_ADMISSION`. There is no partial mutation and no
-  fallback to legacy child/parent admission. A real Contracts host-invocation
-  bridge remains required.
+- Managed-child admission from an operation result supports only new
+  `FROM_NOW` lineages with exact draft/request evidence and a complete set of
+  effective occurrence paths. Imported draft epochs and
+  full-history/frontier/attach-current/passive activation are unsupported and
+  fail closed. There is no fallback to legacy child/parent admission.
 - The supported external-pilot profile is one JVM, in-memory, sequential drain,
   public-Root-scope closures, and bounded cyclic components. It has no
   fresh-process durable recovery, provider-completeness adapter, provider-backed
@@ -65,7 +64,7 @@
   250.000000 ms hard limit); route and total passed hard, while all four metrics
   missed their preferred targets. The historical 3.0.0-rc.1 workflow policy
   permitted only `PASS_WITH_KNOWN_PERFORMANCE_LIMITATION`. It does not claim a
-  latency pass and cannot be applied to rc.2 or a stable release.
+  latency pass and cannot be applied to rc.3 or a stable release.
 - Immutable graph generations structurally share unchanged forward/reverse
   buckets and binding records, but a topology-changing publication still makes
   shallow copies of the three top-level in-memory directory maps. This RC does
