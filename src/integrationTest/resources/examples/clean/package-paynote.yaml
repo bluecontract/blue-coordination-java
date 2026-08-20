@@ -411,10 +411,8 @@ contracts:
               then:
                 - $appendChange:
                     op: replace
-                    path: /attachedConditions
-                    val:
-                      hotel: true
-                      restaurant: {$document: /restaurantConditionAttachedState}
+                    path: /attachedConditions/hotel
+                    val: true
                 - $appendChange: {op: replace, path: /hotelConditionAttachedState, val: true}
                 - $appendChange: {op: replace, path: /status, val: Awaiting Product Confirmations}
                 - $appendEvent:
@@ -450,10 +448,8 @@ contracts:
               then:
                 - $appendChange:
                     op: replace
-                    path: /attachedConditions
-                    val:
-                      hotel: {$document: /hotelConditionAttachedState}
-                      restaurant: true
+                    path: /attachedConditions/restaurant
+                    val: true
                 - $appendChange: {op: replace, path: /restaurantConditionAttachedState, val: true}
                 - $appendChange: {op: replace, path: /status, val: Awaiting Product Confirmations}
                 - $appendEvent:
@@ -787,14 +783,12 @@ contracts:
               then:
                 - $appendChange:
                     op: replace
-                    path: /refund
-                    val:
-                      requested: true
-                      requestId: {$document: /refundRequestIdState}
-                      amountMinor: {$document: /refundAmountMinorState}
-                      reason: {$document: /refundReasonState}
-                      completed: true
-                      completedAt: {$binding: event/timestamp}
+                    path: /refund/completed
+                    val: true
+                - $appendChange:
+                    op: replace
+                    path: /refund/completedAt
+                    val: {$binding: event/timestamp}
                 - $appendChange: {op: replace, path: /refundCompletedState, val: true}
                 - $appendChange:
                     op: replace

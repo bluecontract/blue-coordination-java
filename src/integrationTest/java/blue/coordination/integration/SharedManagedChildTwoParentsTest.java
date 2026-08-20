@@ -21,6 +21,7 @@ final class SharedManagedChildTwoParentsTest {
     void oneChildRevisionConvergesTwoParentsWithoutReprocessingTheChild()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String childInitial = resource(
                     "examples/clean/embedded-counter.yaml");
             Timeline childTimeline = engine.timeline(
@@ -77,6 +78,7 @@ final class SharedManagedChildTwoParentsTest {
                     "embedded-parent-two").size();
             EngineMetrics.MetricsSnapshot before = engine.metricsSnapshot();
 
+            // when
             engine.appendAndDispatch(
                     childTimeline,
                     Operation.yaml(
@@ -84,6 +86,7 @@ final class SharedManagedChildTwoParentsTest {
             EngineTestSupport.MetricDelta work = delta(
                     before, engine.metricsSnapshot());
 
+            // then
             assertEquals(7L, integer(
                     engine, "embedded-counter-A", "/counter"));
             assertEquals(7L, integer(
@@ -114,6 +117,7 @@ final class SharedManagedChildTwoParentsTest {
     void failedSharedParentRetryRunsOnlyItsMissingApplication()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String childInitial = resource(
                     "examples/clean/embedded-counter.yaml");
             Timeline childTimeline = engine.timeline(
@@ -206,10 +210,13 @@ final class SharedManagedChildTwoParentsTest {
             engine.clearFailureInjection();
             EngineMetrics.MetricsSnapshot beforeRetry =
                     engine.metricsSnapshot();
+
+            // when
             assertTrue(engine.drain().quiescent());
             EngineTestSupport.MetricDelta retry = delta(
                     beforeRetry, engine.metricsSnapshot());
 
+            // then
             assertEquals(1L, retry.counter("frozenProcessCalls"),
                     "retry runs only the failed second-parent application");
             assertEquals(0L, retry.counter("temporal.externalProcessCalls"));

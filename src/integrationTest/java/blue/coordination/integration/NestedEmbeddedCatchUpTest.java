@@ -21,6 +21,7 @@ final class NestedEmbeddedCatchUpTest {
     void nestedInitialStatesCatchUpRecursivelyAndLiveRevisionPropagatesOnce()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String leafInitial = resource(
                     "examples/clean/embedded-counter.yaml");
             String middleInitial = resource(
@@ -100,6 +101,8 @@ final class NestedEmbeddedCatchUpTest {
             assertNoGenericSplitting(rootAttachWork);
 
             EngineMetrics.MetricsSnapshot beforeLive = engine.metricsSnapshot();
+
+            // when
             var plusThree = engine.appendAt(
                     leafTimeline,
                     Operation.yaml(
@@ -109,6 +112,7 @@ final class NestedEmbeddedCatchUpTest {
             EngineTestSupport.MetricDelta liveWork = delta(
                     beforeLive, engine.metricsSnapshot());
 
+            // then
             assertEquals(5L, integer(
                     engine, "embedded-counter-A", "/counter"));
             assertEquals(5L, integer(

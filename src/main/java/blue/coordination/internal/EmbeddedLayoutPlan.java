@@ -99,6 +99,18 @@ final class EmbeddedLayoutPlan {
                 rules);
     }
 
+    /**
+     * Creates the Root-only plan for one processor-authenticated independently
+     * managed document. Managed occurrence inventory, not an ambient
+     * fragmentation walk, owns every cross-document edge.
+     */
+    static EmbeddedLayoutPlan managedRoot(RoutingSurface routingSurface) {
+        return new EmbeddedLayoutPlan(
+                Map.of(),
+                Objects.requireNonNull(routingSurface, "routingSurface"),
+                Map.of());
+    }
+
     public RoutingSurface routingSurface() {
         return routingSurface;
     }

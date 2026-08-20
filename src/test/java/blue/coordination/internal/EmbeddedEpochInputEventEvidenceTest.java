@@ -23,8 +23,11 @@ final class EmbeddedEpochInputEventEvidenceTest {
 
     @Test
     void eventWithoutExactEffectiveTypeCannotCreateAParentProcessInput() {
+        // given
+
         EngineMetrics metrics = new EngineMetrics();
         WholeObjectStore objects = new WholeObjectStore(metrics);
+
         try (BlueRuntime runtime = BlueRuntime.create(objects)) {
             WholeRequestEntryFactory entryFactory =
                     new WholeRequestEntryFactory(runtime, objects, metrics);
@@ -49,6 +52,8 @@ final class EmbeddedEpochInputEventEvidenceTest {
                     null,
                     List.of(eventWithoutType),
                     0L);
+
+            // when
             EmbeddingBinding binding = new EmbeddingBinding(
                     "event-binding",
                     PARENT,
@@ -63,6 +68,7 @@ final class EmbeddedEpochInputEventEvidenceTest {
                     childState.blueId(),
                     ATTACHMENT_ORDER);
 
+            // then
             IllegalStateException failure = assertThrows(
                     IllegalStateException.class,
                     () -> EmbeddedEpochInput.create(

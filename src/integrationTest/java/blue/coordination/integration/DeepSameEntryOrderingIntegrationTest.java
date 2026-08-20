@@ -27,6 +27,7 @@ final class DeepSameEntryOrderingIntegrationTest {
     void oneEntryProcessesDeepestFirstAndSettlesEveryEpochBeforeItsParent()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String leafSource = resource(
                     "examples/clean/deep-same-entry-a11.yaml");
             String middleSource = resource(
@@ -68,10 +69,12 @@ final class DeepSameEntryOrderingIntegrationTest {
             assertEquals(3, engine.routeTargetCount(entry));
             EngineMetrics.MetricsSnapshot before = engine.metricsSnapshot();
 
+            // when
             ProcessingDrainReceipt receipt = engine.dispatch(entry);
             EngineTestSupport.MetricDelta work = delta(
                     before, engine.metricsSnapshot());
 
+            // then
             assertEquals(List.of(entry), receipt.processedEntries());
             assertEquals(List.of(
                             "deep-same-entry-a11|TIMELINE_ENTRY",

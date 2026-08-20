@@ -4,6 +4,7 @@ import blue.coordination.internal.DefaultCoordinationEngine;
 
 import blue.language.model.Node;
 import blue.language.processor.ExternalOrderKey;
+import blue.language.processor.closure.ClosureInvocationInput;
 
 import java.util.List;
 import java.util.Set;
@@ -15,9 +16,33 @@ import java.util.Set;
  * the engine releases its borrowed Language, Contracts, and BEX runtimes.</p>
  */
 public interface CoordinationEngine extends AutoCloseable {
-    /** Creates the supported single-process in-memory engine. */
+    /**
+     * Creates the legacy single-document in-memory engine.
+     *
+     * @deprecated normal applications should use
+     *         {@link blue.coordination.sdk.BlueCoordination#inMemory()};
+     *         advanced compatibility callers should name
+     *         {@link #legacyInMemory()} explicitly
+     */
+    @Deprecated(since = "3.0.0-rc.2", forRemoval = false)
     static CoordinationEngine inMemory() {
+        return legacyInMemory();
+    }
+
+    /** Creates the explicitly named legacy in-memory compatibility engine. */
+    static CoordinationEngine legacyInMemory() {
         return builder().inMemory().build();
+    }
+
+    /**
+     * Creates the in-memory Contracts 1.0 engine for exact release artifacts.
+     *
+     * @param configuration final artifact identities and public Root lineages
+     * @return a new Contracts 1.0 engine
+     */
+    static CoordinationEngine inMemoryContracts10(
+            Contracts10Configuration configuration) {
+        return DefaultCoordinationEngine.createContracts10(configuration);
     }
 
     /** Starts configuration of a Coordination engine. */
@@ -38,6 +63,26 @@ public interface CoordinationEngine extends AutoCloseable {
     DocumentSnapshot startDocument(
             DocumentId documentId,
             String authoredYaml,
+            AdmissionPolicy policy,
+            ExternalOrderKey verifiedFrontier);
+
+    /**
+     * Verifies and atomically admits one complete Contracts 1.0 closure.
+     *
+     * <p>This explicit multi-document boundary is available only on an engine
+     * created by {@link #inMemoryContracts10(Contracts10Configuration)}.
+     * Cyclic member bodies remain authenticated by the supplied complete
+     * closure proof; this method never degrades them into independent legacy
+     * document starts.</p>
+     *
+     * @param input exact typed {@code ADMIT_CLOSURE} invocation
+     * @param policy host temporal admission policy for every new member
+     * @param verifiedFrontier retained frontier required by
+     *        {@link AdmissionPolicy#FROM_FRONTIER}, otherwise {@code null}
+     * @return exact Contracts attempt and publication receipt
+     */
+    ContractsClosureAdmissionReceipt admitContractsClosure(
+            ClosureInvocationInput input,
             AdmissionPolicy policy,
             ExternalOrderKey verifiedFrontier);
 

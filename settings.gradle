@@ -10,33 +10,9 @@ rootProject.name = 'blue-coordination-java'
 def dependencyMode = providers.gradleProperty('blueDependencyMode')
         .getOrElse('published-artifact')
         .trim()
-if (!(dependencyMode in ['local-composite', 'published-artifact'])) {
+if (dependencyMode != 'published-artifact') {
     throw new GradleException(
-            'blueDependencyMode must be local-composite or published-artifact')
-}
-
-if (dependencyMode == 'local-composite') {
-    def localBex = file(providers.gradleProperty('blueBexCompositePath')
-            .getOrElse('../blue-bex-java'))
-    if (localBex.isDirectory()) {
-        includeBuild(localBex) {
-            dependencySubstitution {
-                substitute(module('blue.bex:blue-bex-core'))
-                        .using(project(':blue-bex-core'))
-                substitute(module('blue.bex:blue-bex-contracts'))
-                        .using(project(':blue-bex-contracts'))
-            }
-        }
-    }
-    def localRepository = file(providers.gradleProperty(
-            'blueRepositoryCompositePath')
-            .getOrElse('../blue-repository-java'))
-    if (localRepository.isDirectory()) {
-        includeBuild(localRepository) {
-            dependencySubstitution {
-                substitute(module('blue.repo:blue-repo-java'))
-                        .using(project(':'))
-            }
-        }
-    }
+            'Only blueDependencyMode=published-artifact is supported; '
+                    + 'local composite and staged file-repository modes '
+                    + 'were retired for the 3.0.0-rc.3 release line')
 }

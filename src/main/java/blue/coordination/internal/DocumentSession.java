@@ -70,6 +70,32 @@ final class DocumentSession {
                 "initialization|" + documentId.value());
     }
 
+    private DocumentSession(DocumentSession source) {
+        this.documentId = source.documentId;
+        this.authoredInitialBlueId = source.authoredInitialBlueId;
+        this.activeSubscriptions = source.activeSubscriptions;
+        this.revisions.addAll(source.revisions);
+        this.terminalEntryBlueIds.addAll(source.terminalEntryBlueIds);
+        this.transitionReceipts.addAll(source.transitionReceipts);
+        this.stateEpochs.copyFrom(source.stateEpochs);
+        this.layout = source.layout;
+        this.status = source.status;
+        this.readyThrough = source.readyThrough;
+        this.epoch = source.epoch;
+        this.readyEpoch = source.readyEpoch;
+        this.graphPublishedEpoch = source.graphPublishedEpoch;
+        this.applicationSequence = source.applicationSequence;
+    }
+
+    /**
+     * Returns an independent mutable session image for a store-level atomic
+     * publication. Exact revisions, layouts, and subscription entries are
+     * immutable and therefore remain structurally shared.
+     */
+    synchronized DocumentSession copyForAtomicPublication() {
+        return new DocumentSession(this);
+    }
+
     public DocumentId documentId() {
         return documentId;
     }
@@ -302,6 +328,12 @@ final class DocumentSession {
             Long epoch = first.get(Objects.requireNonNull(
                     stateBlueId, "stateBlueId"));
             return epoch == null ? OptionalLong.empty() : OptionalLong.of(epoch);
+        }
+
+        void copyFrom(StateEpochs source) {
+            Objects.requireNonNull(source, "source");
+            first.putAll(source.first);
+            ambiguous.addAll(source.ambiguous);
         }
 
         long resolve(

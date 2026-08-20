@@ -18,6 +18,7 @@ final class ThousandDocumentLocalityScenarioTest {
     @Test
     void oneTargetDoesNotOpenUnrelatedDocumentsOrTimelines() throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             for (int index = 1; index < 1_000; index++) {
                 String id = "locality-unrelated-" + index;
                 engine.timeline("examples/locality/" + index, id);
@@ -30,12 +31,15 @@ final class ThousandDocumentLocalityScenarioTest {
             assertEquals(1_000, engine.documentCount());
 
             EngineMetrics.MetricsSnapshot before = engine.metricsSnapshot();
+
+            // when
             ProcessingDrainReceipt receipt = engine.appendAndDispatch(
                     target, Operation.yaml(
                             "increment", "aliceChannel", "amount: 1"));
             EngineTestSupport.MetricDelta work = delta(
                     before, engine.metricsSnapshot());
 
+            // then
             assertEquals(1, receipt.outcomes().size());
             assertEquals("counter", receipt.onlyOutcome().documentId().value());
             assertEquals(1L, work.counter("ROUTE_INDEX_LOOKUPS"));

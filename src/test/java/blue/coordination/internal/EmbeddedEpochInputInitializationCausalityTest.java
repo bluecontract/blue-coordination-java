@@ -23,8 +23,11 @@ final class EmbeddedEpochInputInitializationCausalityTest {
 
     @Test
     void parentInputKeepsAttachmentOrderAndSeparateApplicationOrder() {
+        // given
+
         EngineMetrics metrics = new EngineMetrics();
         WholeObjectStore objects = new WholeObjectStore(metrics);
+
         try (BlueRuntime runtime = BlueRuntime.create(objects)) {
             WholeRequestEntryFactory entryFactory =
                     new WholeRequestEntryFactory(runtime, objects, metrics);
@@ -62,6 +65,7 @@ final class EmbeddedEpochInputInitializationCausalityTest {
                     childState.blueId(),
                     ATTACHMENT_ORDER);
 
+            // when
             EmbeddedEpochInput input = EmbeddedEpochInput.create(
                     entryFactory,
                     objects,
@@ -70,6 +74,7 @@ final class EmbeddedEpochInputInitializationCausalityTest {
                     500L,
                     null);
 
+            // then
             assertEquals(ATTACHMENT_ORDER, input.sourceOrder());
             assertEquals(childState.blueId(), input.originalEntryBlueId());
             assertEquals(500L, input.applicationTimestampMicros());

@@ -14,6 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 final class CatchUpBarrierTest {
     @Test
     void persistsPerBindingEvidenceAndCopiesItIndependently() {
+        // given
+
         ExternalOrderKey cutoff = ExternalOrderKey.of(List.of(
                 200L, "timeline", "attachment"));
         CatchUpBarrier barrier = new CatchUpBarrier(
@@ -27,7 +29,10 @@ final class CatchUpBarrierTest {
         barrier.recordCompletenessEvidence("binding-a", evidence);
         barrier.defer("another source is unavailable");
 
+        // when
         CatchUpBarrier copy = barrier.copy();
+
+        // then
         assertEquals(evidence, copy.completenessEvidence("binding-a"));
         assertEquals(evidence,
                 copy.completenessEvidence().get("binding-a"));
@@ -44,14 +49,19 @@ final class CatchUpBarrierTest {
 
     @Test
     void rejectsEvidenceForAnotherBindingOrCutoff() {
+        // given
+
         ExternalOrderKey cutoff = ExternalOrderKey.of(List.of(200L));
         CatchUpBarrier barrier = new CatchUpBarrier(
                 "barrier-1",
                 DocumentId.of("parent"),
                 "attachment-entry",
                 cutoff);
+
+        // when
         barrier.extend("binding-a");
 
+        // then
         assertThrows(IllegalArgumentException.class,
                 () -> barrier.recordCompletenessEvidence(
                         "binding-b",

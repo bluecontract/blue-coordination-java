@@ -26,6 +26,7 @@ final class DynamicProcessEmbeddedCollectionActivationTest {
     @Test
     void collectionMembersInitializeByCanonicalPathNotInsertionOrBlueIdOrder()
             throws Exception {
+        // given
         Map<String, String> games =
                 Round12NbaFixtures.deliberatelyUnorderedGames();
         String hostYaml = Round12NbaFixtures.dynamicCollectionHost(games);
@@ -46,12 +47,14 @@ final class DynamicProcessEmbeddedCollectionActivationTest {
             assertEquals(1, engine.documentCount());
             assertEquals(Map.of(), engine.embeddedDocuments(HOST_ID));
 
+            // when
             TimelineEntry activation = engine.append(
                     owner,
                     Operation.yaml(
                             "activateGameCollection", "ownerChannel", "{}"));
             engine.dispatch(activation);
 
+            // then
             assertEquals(4, engine.documentCount());
             List<String> canonicalChildren = List.of(
                     "round12-game-alpha",

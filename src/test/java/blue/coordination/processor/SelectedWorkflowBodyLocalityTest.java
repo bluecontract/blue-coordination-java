@@ -29,6 +29,7 @@ final class SelectedWorkflowBodyLocalityTest {
 
     @Test
     void processReadsOnlyTheSelectedWorkflowBodyByExactBlueId() {
+        // given
         RecordingBodyProvider bodies = new RecordingBodyProvider();
         try (CoordinationTestRuntime runtime = CoordinationTestRuntime.create(
                 BlueRepository.current(),
@@ -53,7 +54,6 @@ final class SelectedWorkflowBodyLocalityTest {
             DocumentProcessingResult initialized = runtime.initializeDocument(
                     runtime.yamlToNode(document(
                             selected.blueId(), rejected.blueId())));
-            assertEquals(ProcessorStatus.SUCCESS, initialized.status());
             ExternalOrderKey activation = ExternalOrderKey.of(List.of(0L));
             SubscriptionDelta initial = runtime.contracts()
                     .subscriptionSurfaceProjection().projectInitial(
@@ -64,6 +64,7 @@ final class SelectedWorkflowBodyLocalityTest {
                     "gate/selected",
                     DirectBlueIdCalculator.calculateBlueId(event)));
 
+            // when
             runtime.clearResolvedSnapshotCache();
             bodies.resetReads();
             ExternalDeliveryPlan plan = runtime.contracts()
@@ -79,6 +80,8 @@ final class SelectedWorkflowBodyLocalityTest {
                                     .nodeProvider(runtime.nodeProvider())
                                     .build());
 
+            // then
+            assertEquals(ProcessorStatus.SUCCESS, initialized.status());
             assertEquals(ProcessorStatus.SUCCESS,
                     processed.processResult().status());
             assertEquals(BigInteger.ONE, processed.processResult().document()

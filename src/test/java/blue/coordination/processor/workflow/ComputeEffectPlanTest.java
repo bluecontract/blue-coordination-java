@@ -229,8 +229,55 @@ class ComputeEffectPlanTest {
         assertFalse(frozenPatchValue.isReferenceOnly());
         assertEquals("admitted", frozenPatchValue.getValue());
         assertEquals(admittedContent.blueId(), frozenPatchValue.blueId());
-        assertEquals(0L, metrics.bexPatchFrozenDirectConversions());
-        assertEquals(1L, metrics.bexPatchNodeMaterializations());
+        assertEquals(1L, metrics.bexPatchFrozenDirectConversions());
+        assertEquals(0L, metrics.bexPatchNodeMaterializations());
+    }
+
+    @Test
+    void shouldPreserveAuthenticatedExactReferencesWithoutRematerializing() {
+        // given
+
+        BexProcessingMetrics metrics = new BexProcessingMetrics();
+        ComputeResultEmitter emitter = new ComputeResultEmitter(metrics);
+        FrozenNode exact = FrozenNode.fromNode(new Node()
+                .properties("kind", new Node().value("exact")));
+        FrozenNode reference = FrozenNode.fromNode(
+                new Node().blueId(exact.blueId()));
+        BexValue resolvedCursor = BexValues.exact(
+                reference, exact, exact.blueId());
+
+        // when
+        FrozenNode frozen = emitter.freezePatchValue(resolvedCursor);
+
+        // then
+        assertSame(reference, frozen);
+        assertTrue(frozen.isReferenceOnly());
+        assertEquals(exact.blueId(), frozen.getReferenceBlueId());
+        assertEquals(1L, metrics.bexPatchFrozenDirectConversions());
+        assertEquals(0L, metrics.bexPatchNodeMaterializations());
+    }
+
+    @Test
+    void shouldRejectExactPatchContentWithAnUnrelatedAssertedIdentity() {
+        // given
+
+        ComputeResultEmitter emitter = new ComputeResultEmitter();
+        FrozenNode content = FrozenNode.fromNode(new Node()
+                .properties("kind", new Node().value("content")));
+        FrozenNode other = FrozenNode.fromNode(new Node()
+                .properties("kind", new Node().value("other")));
+
+        // when
+        BexValue mismatched = BexValues.exact(
+                content, content, other.blueId());
+
+        // then
+        ComputeResultValidationException failure = assertThrows(
+                ComputeResultValidationException.class,
+                () -> emitter.freezePatchValue(mismatched));
+
+        assertTrue(failure.getMessage().contains(
+                "mismatched authenticated content"));
     }
 
     @Test

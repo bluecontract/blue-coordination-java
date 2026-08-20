@@ -25,9 +25,15 @@ final class MultiChildSynchronizedCatchUpTest {
     @Test
     void threeHistoriesMergeByCanonicalOrderUnderOneBarrier()
             throws Exception {
-        Outcome canonical = run(AppendOrder.CANONICAL);
-        Outcome shuffled = run(AppendOrder.SHUFFLED);
+        // given
+        AppendOrder canonicalOrder = AppendOrder.CANONICAL;
+        AppendOrder shuffledOrder = AppendOrder.SHUFFLED;
 
+        // when
+        Outcome canonical = run(canonicalOrder);
+        Outcome shuffled = run(shuffledOrder);
+
+        // then
         assertNotEquals(canonical.appendSequences(),
                 shuffled.appendSequences(),
                 "the two runs must use genuinely different insertion order");

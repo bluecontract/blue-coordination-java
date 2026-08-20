@@ -18,6 +18,7 @@ final class SharedManagedChildTwoOccurrencesTest {
     void oneDirectChildProcessAdvancesBothOccurrenceCursors()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String child = resource("examples/clean/embedded-counter.yaml");
             Timeline childTimeline = engine.timeline(
                     "examples/embedded/A", "alice");
@@ -61,6 +62,7 @@ final class SharedManagedChildTwoOccurrencesTest {
             assertOccurrenceCursors(engine, 0L);
             EngineMetrics.MetricsSnapshot before = engine.metricsSnapshot();
 
+            // when
             engine.appendAndDispatch(
                     childTimeline,
                     Operation.yaml(
@@ -68,6 +70,7 @@ final class SharedManagedChildTwoOccurrencesTest {
             EngineTestSupport.MetricDelta work = delta(
                     before, engine.metricsSnapshot());
 
+            // then
             assertEquals(3L, integer(
                     engine, "embedded-counter-A", "/counter"));
             assertEquals(3L, integer(

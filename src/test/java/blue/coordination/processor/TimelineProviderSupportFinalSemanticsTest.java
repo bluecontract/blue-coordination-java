@@ -76,14 +76,22 @@ class TimelineProviderSupportFinalSemanticsTest {
     @Test
     void shouldEnsureThatCheckpointSubjectSemanticsAreRotatedTogether() {
         // given
+        String expectedVersionSuffix = "-v3";
+
         // when
+        String timelineVersion = TimelineExternalSubscriptionFunctions
+                .TIMELINE_ORDER_SUBJECT_VERSION;
+        String compositeVersion =
+                CompositeTimelineExternalSubscriptionFunctions
+                        .ORDER_SUBJECT_VERSION;
+        String allTimelinesVersion =
+                AllTimelinesExternalSubscriptionFunctions
+                        .ORDER_SUBJECT_VERSION;
+
         // then
-        assertTrue(TimelineExternalSubscriptionFunctions
-                .TIMELINE_ORDER_SUBJECT_VERSION.endsWith("-v3"));
-        assertTrue(CompositeTimelineExternalSubscriptionFunctions
-                .ORDER_SUBJECT_VERSION.endsWith("-v3"));
-        assertTrue(AllTimelinesExternalSubscriptionFunctions
-                .ORDER_SUBJECT_VERSION.endsWith("-v3"));
+        assertTrue(timelineVersion.endsWith(expectedVersionSuffix));
+        assertTrue(compositeVersion.endsWith(expectedVersionSuffix));
+        assertTrue(allTimelinesVersion.endsWith(expectedVersionSuffix));
     }
 
     @Test
@@ -363,15 +371,16 @@ class TimelineProviderSupportFinalSemanticsTest {
                 BigInteger.valueOf(120));
 
         // when
-        // then
-        assertThrows(IllegalArgumentException.class,
+        IllegalArgumentException extraTimeline = assertThrows(
+                IllegalArgumentException.class,
                 () -> TimelineProviderSupport
                         .evaluateCompletenessWindow(
                                 Arrays.asList(a1, b1),
                                 Arrays.asList(
                                         timelineA, timelineB),
                                 extra));
-        assertThrows(IllegalArgumentException.class,
+        IllegalArgumentException missingTimeline = assertThrows(
+                IllegalArgumentException.class,
                 () -> TimelineProviderSupport
                         .evaluateCompletenessWindow(
                                 Arrays.asList(a1, b1),
@@ -379,6 +388,10 @@ class TimelineProviderSupportFinalSemanticsTest {
                                 Collections.singletonMap(
                                         timelineA.getBlueId(),
                                         BigInteger.valueOf(120))));
+
+        // then
+        assertFalse(extraTimeline.getMessage().isBlank());
+        assertFalse(missingTimeline.getMessage().isBlank());
     }
 
     private static Node entry(

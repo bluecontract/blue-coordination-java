@@ -38,7 +38,7 @@ final class TestEngine implements AutoCloseable {
     }
 
     static TestEngine create() {
-        return new TestEngine(CoordinationEngine.inMemory());
+        return new TestEngine(CoordinationEngine.legacyInMemory());
     }
 
     Timeline timeline(String timelineId, String actorId) {

@@ -23,6 +23,7 @@ final class ProcessEmbeddedCollectionPathsIntegrationTest {
     void discoversAddsAndRemovesCanonicalMapMembersWithoutOrdinarySplitting()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             Timeline owner = engine.timeline(
                     "examples/embedded/collection-parent", "bob");
             engine.start("embedded-collection-parent", resource(
@@ -35,6 +36,8 @@ final class ProcessEmbeddedCollectionPathsIntegrationTest {
 
             EngineMetrics.MetricsSnapshot beforeFirst =
                     engine.metricsSnapshot();
+
+            // when
             engine.appendAndDispatch(owner, Operation.exact(
                     "attachGameA",
                     "ownerChannel",
@@ -91,6 +94,7 @@ final class ProcessEmbeddedCollectionPathsIntegrationTest {
             EngineTestSupport.MetricDelta removal = delta(
                     beforeRemoval, engine.metricsSnapshot());
 
+            // then
             assertEquals(Map.of(
                             "/games/game~1a~0b", "embedded-counter-B"),
                     engine.embeddedDocuments("embedded-collection-parent"));

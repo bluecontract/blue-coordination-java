@@ -1,88 +1,97 @@
 # Build and test
 
-## Prerequisites
+## Requirements
 
-Use Java 17+ and the checked-in Gradle wrapper. Production compiles with Java 17,
-`-Xlint:all` and `-Werror`. Tests can run on a newer LTS with
-`-PtestJavaVersion=21`.
+Use the checked-in Gradle wrapper and JDK 17 or newer. Production classes are
+compiled with `--release 17`; CI executes the complete suite on Java 17 and
+Java 21.
 
-Published Maven Central artifacts are the default and are used by ordinary
-development, consumer, CI, and release builds. This mode runs no Git commands
-and never reads sibling checkouts.
+## Published dependency graph
 
-`local-composite` remains an explicit diagnostic mode for coordinated changes
-that have not been published. It substitutes `../blue-bex-java` and
-`../blue-repository-java`, or paths supplied with `-PblueBexCompositePath` and
-`-PblueRepositoryCompositePath`; it must not be used as release evidence.
+Maven Central is the only live dependency source. The default and only accepted
+`blueDependencyMode` is `published-artifact`; the property may be omitted.
+Sibling composite builds, Maven Local, and file-based staging repositories are
+rejected.
 
-## Coordination gates
+| Modules | Version |
+| --- | --- |
+| `blue.language:*` | `3.1.0-rc.21` |
+| `blue.bex:blue-bex-core`, `blue-bex-contracts` | `1.1.0-rc.4` |
+| `blue.repo:blue-repo-java` | `3.0.0-rc.21` |
 
-```bash
-./gradlew test
-./gradlew integrationTest consumerTest scenarioTest
-./gradlew releaseCheck
-./gradlew stageRelease
-```
+Repository rc.21 advertises `blue-language-java:3.1.0-rc.20`. The project
+excludes that one stale transitive edge and directly owns Language rc.21. The
+same exclusion is published in the Coordination POM. The exact graph is locked
+in `gradle/published-artifact.lockfile`.
 
-The release-owned suites have distinct responsibilities:
-
-- `test` exercises public value contracts, internal atomic primitives and
-  retained workflow/BEX processor semantics.
-- `integrationTest` exercises exact append, engine-selected drain, entry-frame
-  ordering, document-local atomic retry, embedded-only storage, `paths` and
-  `collectionPaths`, synchronized catch-up, reattachment and ownership.
-- `consumerTest` compiles against the built production JAR, never main source
-  output or test fixtures, and verifies the supported public API as a real
-  consumer sees it.
-- `scenarioTest` runs NBA admission-order/multi-game convergence and the
-  complete large-host/PayNote lifecycle.
-
-`releaseCheck` runs all four suites. It also enforces minimum suite depth,
-validates the production class/line budget and small application API boundary,
-scans the production JAR, validates POM scopes and versions, and checks legal,
-documentation, source and Javadoc artifacts. The current verified status is
-recorded in the RC report; commands listed here are gates to run, not claims
-that a changed source snapshot has passed them.
-`stageRelease` creates a Maven Central-shaped repository at
-`build/staging-deploy`.
-
-To prove external dependency availability:
+Verify fresh remote availability and the conflict-free graph with:
 
 ```bash
-./gradlew dependencyPreflight
+./gradlew --no-daemon dependencyPreflight --refresh-dependencies
+./gradlew --no-daemon verifyPublishedDependencyIsolation
 ```
 
-That command fails closed unless every pinned prerequisite is published.
+## Verification
 
-## Historical performance evidence
-
-`../blue-basic` is deliberately outside the library's correctness and release
-gate. It retains historical step timings, percentile campaigns and comparative
-metrics so performance investigations remain reproducible without coupling the
-published library to a sibling checkout. Run it only when collecting or
-comparing performance evidence:
+The complete local release gate is:
 
 ```bash
-./gradlew publishToMavenLocal
-../blue-basic/gradlew -p ../blue-basic performanceTest runtimeCampaign
+./gradlew --no-daemon --no-build-cache clean releaseCheck \
+  -PtestJavaVersion=17
 ```
 
-The runtime campaign is deliberately slower: it collects repeated samples so
-percentile comparisons are not based on one noisy run. A missing or failing
-`../blue-basic` checkout cannot make `releaseCheck` pass or fail.
+Repeat with `-PtestJavaVersion=21` before release. The suites are:
 
-See [test strategy](test-strategy.md) for the behavior-to-suite map and the
-rules that prevent release verification from drifting back into a demo module.
+| Task | Boundary |
+| --- | --- |
+| `test` | SDK, compiler, immutable values, and compact internals |
+| `integrationTest` | In-memory engine behavior, retries, topology, and atomicity |
+| `consumerTest` | Compilation and execution against the built production JAR |
+| `scenarioTest` | Complete business and convergence scenarios |
 
-## Lock files
+Every `@Test` must contain exactly one ordered, meaningful lowercase
+`// given`, `// when`, `// then` sequence.
+`verifyTestArchitecture` enforces that source shape together with suite depth
+and built-JAR consumer isolation.
 
-Regenerate the appropriate dependency lock only after an intentional version
-change:
+`releaseCheck` also verifies public API boundaries, artifact contents,
+publication POM metadata and exclusions, documentation links, dependency
+isolation, source-archive hygiene, and an extracted source-archive build.
+
+## RC readiness
+
+For the current bounded external-pilot candidate, run:
 
 ```bash
-./gradlew dependencies --write-locks
+./gradlew --no-daemon --no-build-cache verifyRcReadiness \
+  -PtestJavaVersion=17
 ```
 
-Review the entire lock diff. Never hand-wave an unexpected transitive version.
-Only regenerate the local-composite lock during an explicit cross-repository
-diagnostic by adding `-PblueDependencyMode=local-composite`.
+This task includes `releaseCheck` and `dependencyPreflight`, validates the
+rc.3 release authority and explicit non-claims, then records the freshly built
+artifact hashes in
+`build/reports/release/3.0.0-rc.3-readiness.json`.
+
+The source distribution and checksum can be built independently with:
+
+```bash
+./gradlew coordinationSourceArchive coordinationSourceArchiveChecksum
+./gradlew verifyExtractedSourceArchive
+```
+
+The extracted archive resolves the same Maven Central graph and never reaches
+an adjacent checkout.
+
+## Focused development
+
+Use focused Gradle test filters while iterating, but finish with
+`releaseCheck`. Tests compiled against the built JAR must not import
+`blue.coordination.internal`, processor implementations, integration
+fixtures, Language, or BEX types.
+
+The optional `../blue-basic` checkout is historical performance tooling. It
+is not read by the build and is not release evidence.
+
+See [Test strategy](test-strategy.md),
+[Releasing](releasing.md), and the
+[3.0.0-rc.3 decision](../releases/3.0.0-rc.3.md).

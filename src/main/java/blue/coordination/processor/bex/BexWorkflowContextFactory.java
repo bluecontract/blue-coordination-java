@@ -86,12 +86,13 @@ public final class BexWorkflowContextFactory {
          * while computed event aggregates still cross the hosted semantic
          * boundary normally.
          */
-        BexValue event =
-                BexValues.nodeSnapshot(
-                        context.eventRef());
+        ProcessorExecutionContext processorContext = context.processorContext();
+        FrozenNode exactHandlerEvent = processorContext.frozenEvent();
+        BexValue event = exactHandlerEvent != null
+                ? BexValues.frozen(exactHandlerEvent)
+                : BexValues.nodeSnapshot(context.eventRef());
         BexValue currentContract = currentContractBinding(context);
         BexStepResults steps = stepResults(context.stepResults());
-        ProcessorExecutionContext processorContext = context.processorContext();
         FrozenNode processingEventSnapshot =
                 processingEventRequired
                         && processorContext.hasProcessEvent()

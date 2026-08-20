@@ -64,6 +64,25 @@ public final class TimelineProviderSupport {
     }
 
     /**
+     * Returns the exact logical-delivery key used by the registered Operation
+     * Request runtime for one resolved operation and target channel.
+     *
+     * <p>Feeder selection must freeze this value rather than the authored
+     * operation name so Contracts can verify the selected delivery against
+     * the same runtime function that will execute it.</p>
+     *
+     * @param operation resolved operation name
+     * @param channel resolved target channel key
+     * @return canonical runtime logical-delivery key
+     */
+    public static String operationRequestLogicalDeliveryKey(
+            String operation,
+            String channel) {
+        return OperationRequestRoutingFunctions.logicalDeliveryKey(
+                operation, channel);
+    }
+
+    /**
      * Validates the immutable envelope accepted by the compact Timeline
      * feeder. The check uses the registered Timeline Entry and Operation
      * Request identities; it does not invent document-targeting semantics.

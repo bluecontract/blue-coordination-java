@@ -171,25 +171,30 @@ class TimelineCheckpointSubjectTest {
     @Test
     void shouldEnsureThatAggregateSubjectsRejectEmptyMemberLineage() {
         // given
-        // when
         AllTimelinesChannelProcessor processor =
                 new AllTimelinesChannelProcessor();
 
-        // then
-        assertThrows(IllegalArgumentException.class,
+        // when
+        IllegalArgumentException emptyMember = assertThrows(
+                IllegalArgumentException.class,
                 () -> processor.isNewerEvent(
                         new AllTimelinesChannel(),
                         context(allSubject(
                                         10, "timeline-a", "entry-a",
                                         "", "domain"),
                                 null)));
-        assertThrows(IllegalArgumentException.class,
+        IllegalArgumentException emptyDomain = assertThrows(
+                IllegalArgumentException.class,
                 () -> processor.isNewerEvent(
                         new AllTimelinesChannel(),
                         context(allSubject(
                                         10, "timeline-a", "entry-a",
                                         "member", ""),
                                 null)));
+
+        // then
+        assertFalse(emptyMember.getMessage().isBlank());
+        assertFalse(emptyDomain.getMessage().isBlank());
     }
 
     private static ChannelCheckpointContext context(Node current,

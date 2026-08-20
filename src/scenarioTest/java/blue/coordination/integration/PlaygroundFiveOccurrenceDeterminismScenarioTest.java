@@ -26,16 +26,22 @@ final class PlaygroundFiveOccurrenceDeterminismScenarioTest {
     @Test
     void reverseRequestInsertionOrderPreservesBlueIdsHistoriesAndEvents()
             throws Exception {
+        // given
+        List<String> deliberatelyUnorderedKeys =
+                PlaygroundFiveOccurrenceFixtures.DELIBERATELY_UNORDERED_KEYS;
+        List<String> reverseKeys =
+                PlaygroundFiveOccurrenceFixtures.REVERSE_KEYS;
+
+        // when
         RunResult deliberatelyUnordered = run(
-                PlaygroundFiveOccurrenceFixtures.DELIBERATELY_UNORDERED_KEYS,
+                deliberatelyUnorderedKeys,
                 false);
         RunResult reversed = run(
-                PlaygroundFiveOccurrenceFixtures.REVERSE_KEYS,
+                reverseKeys,
                 false);
 
-        assertFalse(PlaygroundFiveOccurrenceFixtures
-                .DELIBERATELY_UNORDERED_KEYS.equals(
-                        PlaygroundFiveOccurrenceFixtures.REVERSE_KEYS));
+        // then
+        assertFalse(deliberatelyUnorderedKeys.equals(reverseKeys));
         assertEquals(deliberatelyUnordered.outcome(), reversed.outcome(),
                 "map authoring order cannot affect Host/child exact identity, "
                         + "application order, history, or event multiplicity");
@@ -44,13 +50,17 @@ final class PlaygroundFiveOccurrenceDeterminismScenarioTest {
     @Test
     void boundedDrainPauseAndResumeMatchesUnlimitedCommittedHistory()
             throws Exception {
-        RunResult unlimited = run(
-                PlaygroundFiveOccurrenceFixtures.DELIBERATELY_UNORDERED_KEYS,
-                false);
-        RunResult bounded = run(
-                PlaygroundFiveOccurrenceFixtures.DELIBERATELY_UNORDERED_KEYS,
-                true);
+        // given
+        List<String> requestOrder = PlaygroundFiveOccurrenceFixtures
+                .DELIBERATELY_UNORDERED_KEYS;
 
+        // when
+        RunResult unlimited = run(
+                requestOrder, false);
+        RunResult bounded = run(
+                requestOrder, true);
+
+        // then
         assertTrue(bounded.pausedAtLeastOnce(),
                 "the deterministic one-transition budget must force a pause");
         assertFalse(unlimited.pausedAtLeastOnce());

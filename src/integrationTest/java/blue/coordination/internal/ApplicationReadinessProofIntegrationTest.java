@@ -34,10 +34,14 @@ final class ApplicationReadinessProofIntegrationTest {
     void rejectsCurrentReadyMarkerWhileAnEmbeddedBarrierIsOpen()
             throws Exception {
         try (ReadyFixture fixture = readyFixture()) {
+            // given
             Map<DocumentId, String> openBarriers = mapField(
                     fixture.coordinator(), "openBarrierByParent");
+
+            // when
             openBarriers.put(PARENT, "test-open-barrier");
 
+            // then
             assertRejectedButAuditable(
                     fixture, "an embedded catch-up barrier remains open");
         }
@@ -47,11 +51,15 @@ final class ApplicationReadinessProofIntegrationTest {
     void rejectsCurrentReadyMarkerWhenTheCommittedOccurrenceHasNoBinding()
             throws Exception {
         try (ReadyFixture fixture = readyFixture()) {
+            // given
             ProcessEmbeddedGraphSnapshot withoutBinding = fixture
                     .coordinator().graphSnapshot().reconcileParent(
                             PARENT, List.of());
+
+            // when
             setField(fixture.coordinator(), "graph", withoutBinding);
 
+            // then
             assertRejectedButAuditable(
                     fixture, "published graph does not match current "
                             + "Process Embedded occurrence count");
@@ -62,10 +70,14 @@ final class ApplicationReadinessProofIntegrationTest {
     void rejectsCurrentReadyMarkerWhenTheBindingHasNoCursor()
             throws Exception {
         try (ReadyFixture fixture = readyFixture()) {
+            // given
             Map<String, EmbeddedEpochCursor> cursors = mapField(
                     fixture.coordinator(), "cursors");
+
+            // when
             cursors.remove(fixture.binding().bindingId());
 
+            // then
             assertRejectedButAuditable(
                     fixture, "missing embedded epoch cursor");
         }
@@ -75,14 +87,18 @@ final class ApplicationReadinessProofIntegrationTest {
     void rejectsCurrentReadyMarkerWhenTheCursorIsBehindItsChild()
             throws Exception {
         try (ReadyFixture fixture = readyFixture()) {
+            // given
             Map<String, EmbeddedEpochCursor> cursors = mapField(
                     fixture.coordinator(), "cursors");
+            assertEquals(0L, fixture.child().epoch());
+
+            // when
             cursors.put(
                     fixture.binding().bindingId(),
                     new EmbeddedEpochCursor(
                             fixture.binding().bindingId(), -1L));
 
-            assertEquals(0L, fixture.child().epoch());
+            // then
             assertRejectedButAuditable(
                     fixture, "parent cursor -1 is behind child epoch 0");
         }
@@ -92,8 +108,13 @@ final class ApplicationReadinessProofIntegrationTest {
     void rejectsCurrentReadyMarkerWhenParentStateDiffersFromCursorState()
             throws Exception {
         try (ReadyFixture fixture = readyFixture()) {
-            replaceCurrentParentStateWithMismatch(fixture.parent());
+            // given
+            DocumentSession parent = fixture.parent();
 
+            // when
+            replaceCurrentParentStateWithMismatch(parent);
+
+            // then
             assertRejectedButAuditable(
                     fixture, "parent state/cursor mismatch at /child");
         }

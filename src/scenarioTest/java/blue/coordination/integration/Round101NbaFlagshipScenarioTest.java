@@ -63,11 +63,15 @@ final class Round101NbaFlagshipScenarioTest {
     @Test
     void threeGameCollectionConvergesAcrossAdmissionOrders()
             throws Exception {
+        // given
         List<Outcome> outcomes = new ArrayList<>();
+
+        // when
         for (AdmissionOrder order : AdmissionOrder.values()) {
             outcomes.add(run(order));
         }
 
+        // then
         Outcome expected = outcomes.get(0);
         SlateState expectedState = new SlateState(
                 15L,
@@ -97,7 +101,7 @@ final class Round101NbaFlagshipScenarioTest {
     }
 
     private static Outcome run(AdmissionOrder order) throws Exception {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
             Map<RootSpec, Timeline> rootTimelines = registerRootTimelines(
                     engine);
             Map<GameSpec, Timeline> gameTimelines = registerGameTimelines(

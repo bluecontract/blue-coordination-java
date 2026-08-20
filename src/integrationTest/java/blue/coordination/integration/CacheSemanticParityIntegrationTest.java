@@ -25,6 +25,7 @@ final class CacheSemanticParityIntegrationTest {
             throws Exception {
         try (TestEngine cold = TestEngine.create();
              TestEngine warm = TestEngine.create()) {
+            // given
             String source = resource("examples/clean/counter.yaml");
             Timeline coldTimeline = cold.timeline(
                     "examples/clean-counter/alice", "alice");
@@ -53,6 +54,7 @@ final class CacheSemanticParityIntegrationTest {
                     "the retry must run against a populated runtime cache");
             warm.clearFailureInjection();
 
+            // when
             cold.dispatch(coldEntry);
             warm.dispatch(warmEntry);
 
@@ -60,6 +62,8 @@ final class CacheSemanticParityIntegrationTest {
                     cold.history("counter"));
             List<RevisionEvidence> warmTrace = evidence(
                     warm.history("counter"));
+
+            // then
             assertEquals(coldTrace, warmTrace);
             assertEquals(cold.session("counter").current().blueId(),
                     warm.session("counter").current().blueId());

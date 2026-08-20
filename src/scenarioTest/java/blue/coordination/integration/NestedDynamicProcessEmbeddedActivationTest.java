@@ -37,6 +37,7 @@ final class NestedDynamicProcessEmbeddedActivationTest {
     @Test
     void childInitializationRecursivelySettlesGrandchildBeforeHostReady()
             throws Exception {
+        // given
         String gameYaml = Round12NbaFixtures.game(
                 GAME_ID,
                 "examples/round12/dynamic/nested/game",
@@ -60,6 +61,8 @@ final class NestedDynamicProcessEmbeddedActivationTest {
             assertEquals(Map.of(), engine.embeddedDocuments(HOST_ID));
 
             EngineMetrics.MetricsSnapshot before = engine.metricsSnapshot();
+
+            // when
             TimelineEntry activation = engine.append(
                     owner,
                     Operation.yaml(
@@ -68,6 +71,7 @@ final class NestedDynamicProcessEmbeddedActivationTest {
             EngineTestSupport.MetricDelta work = delta(
                     before, engine.metricsSnapshot());
 
+            // then
             assertEquals(3, engine.documentCount());
             assertEquals(Map.of("/children/alpha", CHILD_ID),
                     engine.embeddedDocuments(HOST_ID));

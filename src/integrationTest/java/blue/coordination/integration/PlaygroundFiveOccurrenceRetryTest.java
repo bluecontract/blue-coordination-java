@@ -21,6 +21,7 @@ final class PlaygroundFiveOccurrenceRetryTest {
     void retryCompletesFiveOccurrenceFanoutWithoutReinitializingChildren()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             Timeline owner = engine.timeline(
                     PlaygroundFiveOccurrenceFixtures.HOST_TIMELINE,
                     PlaygroundFiveOccurrenceFixtures.HOST_ACTOR);
@@ -33,6 +34,7 @@ final class PlaygroundFiveOccurrenceRetryTest {
                     PlaygroundFiveOccurrenceFixtures.attachFive(engine));
             EngineMetrics.MetricsSnapshot before = engine.metricsSnapshot();
 
+            // when
             engine.failOnceAt(
                     TestEngine.FailurePoint.AFTER_APPLYING_CHILD_REVISION);
             assertThrows(TestEngine.InjectedFailureException.class,
@@ -74,6 +76,7 @@ final class PlaygroundFiveOccurrenceRetryTest {
             EngineTestSupport.MetricDelta completed = delta(
                     before, engine.metricsSnapshot());
 
+            // then
             assertEquals(SessionStatus.READY,
                     engine.readyDocument(
                             PlaygroundFiveOccurrenceFixtures.HOST_ID).status());

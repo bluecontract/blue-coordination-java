@@ -20,7 +20,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class DocumentAdmissionCauseTest {
     @Test
     void causeBlueIdBindsAdmissionTupleAndIsStableAcrossRestart() {
+        // given
+
         DocumentId id = DocumentId.of("admission-cause-document");
+
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.create()) {
             DocumentSession session = engine.start(id, """
@@ -29,8 +32,11 @@ final class DocumentAdmissionCauseTest {
                     """);
             DocumentRevision revision = session.revision(0L);
             String causeId = revision.causalEntryBlueId().orElseThrow();
+
+            // when
             WholeObjectStore objects = engine.objects();
 
+            // then
             assertFalse(causeId.startsWith("admission|"));
             assertTrue(objects.contains(causeId));
             ExactValue cause = objects.require(causeId);

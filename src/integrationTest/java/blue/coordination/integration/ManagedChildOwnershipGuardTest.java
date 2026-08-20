@@ -19,6 +19,7 @@ final class ManagedChildOwnershipGuardTest {
     void rejectedParentMutationRollsBackAndCreatesNoDeliveryReceipt()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             Timeline shared = engine.timeline(
                     "examples/root-isolation/shared", "alice");
             engine.start(
@@ -42,6 +43,7 @@ final class ManagedChildOwnershipGuardTest {
                             "amount: 7"));
             EngineMetrics.MetricsSnapshot before = engine.metricsSnapshot();
 
+            // when
             IllegalStateException first = assertThrows(
                     IllegalStateException.class,
                     () -> engine.dispatch(illegal));
@@ -51,6 +53,7 @@ final class ManagedChildOwnershipGuardTest {
             EngineTestSupport.MetricDelta work = delta(
                     before, engine.metricsSnapshot());
 
+            // then
             assertTrue(first.getMessage().contains(
                     "attempted to mutate managed child"),
                     first::getMessage);

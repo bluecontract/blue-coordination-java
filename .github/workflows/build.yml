@@ -30,7 +30,7 @@ jobs:
           - test-java: '17'
             setup-java: '17.0.19+10'
           - test-java: '21'
-            setup-java: '21.0.11+10'
+            setup-java: '21.0.11+10.0.LTS'
     env:
       CI: true
     defaults:
@@ -103,9 +103,8 @@ jobs:
       - name: Verify RC staging readiness
         if: ${{ matrix.test-java == '17' }}
         run: >-
-          ./gradlew --no-daemon --no-build-cache verifyRound13Readiness
+          ./gradlew --no-daemon --no-build-cache verifyRcReadiness
           -PblueDependencyMode=published-artifact
-          -PallowRound13LatencyException=true
           -PtestJavaVersion=17
 
       - name: Archive verification evidence

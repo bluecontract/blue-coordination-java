@@ -17,6 +17,9 @@ import blue.coordination.api.CoordinationEngine;
 import blue.coordination.api.CoordinationErrorCode;
 import blue.coordination.api.CoordinationException;
 import blue.coordination.api.CoordinationMetrics;
+import blue.coordination.api.Contracts10Configuration;
+import blue.coordination.api.ContractsClosureAdmissionReceipt;
+import blue.coordination.api.ContractsClosureDispatchAttempt;
 import blue.coordination.api.ProcessingDrainReceipt;
 import blue.coordination.api.TimelineAppendReceipt;
 import blue.coordination.api.ActivationMode;
@@ -28,6 +31,7 @@ import blue.language.api.BlueCacheStats;
 import blue.language.model.Node;
 import blue.language.model.NodePathEditor;
 import blue.language.processor.ExternalOrderKey;
+import blue.language.processor.closure.ClosureInvocationInput;
 
 import java.math.BigInteger;
 import java.util.ArrayList;
@@ -38,6 +42,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 
@@ -45,6 +50,7 @@ import java.util.function.Consumer;
 public final class DefaultCoordinationEngine
         implements CoordinationEngine {
     enum FailurePoint {
+        AFTER_MANAGED_DRAFT_PLAN_REGISTERED,
         BEFORE_FROZEN_PROCESS,
         AFTER_FROZEN_BEFORE_STAGE,
         AFTER_STAGING_CHILD_SESSION,
@@ -61,6 +67,21 @@ public final class DefaultCoordinationEngine
         }
     }
 
+    /** Narrow immutable projection used by advanced diagnostic adapters. */
+    public record ManagedOccurrenceAuditView(
+            DocumentId targetDocumentId,
+            long activationGeneration,
+            boolean active) {
+        public ManagedOccurrenceAuditView {
+            targetDocumentId = Objects.requireNonNull(
+                    targetDocumentId, "targetDocumentId");
+            if (activationGeneration < 1L) {
+                throw new IllegalArgumentException(
+                        "activationGeneration must be positive");
+            }
+        }
+    }
+
     private static final long BASE_TIMESTAMP_MICROS =
             1_800_000_000_000_000L;
 
@@ -73,20 +94,30 @@ public final class DefaultCoordinationEngine
     private final EmbeddedOnlyLayoutBuilder layoutBuilder;
     private final DocumentTransitionProcessor processor;
     private final InMemoryDocumentStore documents;
+    private final ContractsClosureAdapter contractsClosureAdapter;
+    private final ContractsClosureAdmissionAdapter
+            contractsClosureAdmissionAdapter;
+    private final ContractsClosureProfile contractsClosureProfile;
+    private final ContractsActiveSourceTimelineIndex
+            contractsActiveSourceTimelines;
+    private final ContractsRecoveryState contractsRecoveryState;
     private SequentialDrainCoordinator drainCoordinator;
+    private ContractsRootFeederCoordinator contractsFeederCoordinator;
+    private ContractsJournalDrainCoordinator contractsJournalCoordinator;
     private final Map<String, Timeline> timelines = new LinkedHashMap<>();
     private Consumer<FailurePoint> failureInjector = ignored -> { };
     private long logicalClockMicros = BASE_TIMESTAMP_MICROS;
     private long applicationClockMicros = BASE_TIMESTAMP_MICROS;
     private boolean closed;
 
-    private DefaultCoordinationEngine() {
+    private DefaultCoordinationEngine(
+            ContractsBootstrap contractsConfiguration) {
         metrics = new EngineMetrics();
         objects = new WholeObjectStore(metrics);
         runtime = BlueRuntime.create(objects, metrics);
         entryFactory = new WholeRequestEntryFactory(runtime, objects, metrics);
         journal = new InMemoryTimelineJournal(entryFactory, metrics);
-        documents = new InMemoryDocumentStore();
+        documents = new InMemoryDocumentStore(metrics);
         routeIndex = new OperationRouteIndex(
                 metrics, documentId -> documents.find(documentId).orElse(null));
         layoutBuilder = new EmbeddedOnlyLayoutBuilder(
@@ -105,10 +136,105 @@ public final class DefaultCoordinationEngine
                 metrics,
                 this::nextApplicationTimestamp,
                 this::inject);
+        if (contractsConfiguration == null) {
+            contractsClosureAdapter = null;
+            contractsClosureAdmissionAdapter = null;
+            contractsClosureProfile = null;
+            contractsActiveSourceTimelines = null;
+            contractsRecoveryState = null;
+            contractsFeederCoordinator = null;
+            contractsJournalCoordinator = null;
+        } else {
+            ContractsClosureProfile profile = ContractsClosureProfile
+                    .release10(
+                            contractsConfiguration
+                                    .blueLanguageSpecificationIdentity(),
+                            contractsConfiguration
+                                    .contractsSpecificationIdentity(),
+                            contractsConfiguration.publicRootDocumentIds());
+            contractsClosureProfile = profile;
+            contractsActiveSourceTimelines =
+                    new ContractsActiveSourceTimelineIndex(
+                            profile.publicRoots());
+            contractsClosureAdapter = new ContractsClosureAdapter(
+                    runtime,
+                    objects,
+                    layoutBuilder,
+                    documents,
+                    routeIndex,
+                    profile,
+                    contractsActiveSourceTimelines);
+            contractsClosureAdmissionAdapter =
+                    new ContractsClosureAdmissionAdapter(
+                            runtime,
+                            objects,
+                            layoutBuilder,
+                            documents,
+                            routeIndex,
+                            profile,
+                            contractsActiveSourceTimelines);
+            contractsRecoveryState = new ContractsRecoveryState();
+            contractsFeederCoordinator = createContractsFeederCoordinator();
+            contractsJournalCoordinator = createContractsJournalCoordinator();
+        }
     }
 
+    /** Creates the legacy Process Embedded temporal-profile engine. */
     public static DefaultCoordinationEngine create() {
-        return new DefaultCoordinationEngine();
+        return new DefaultCoordinationEngine(null);
+    }
+
+    /**
+     * Creates an engine that owns a Contracts 1.0 closure runtime.
+     *
+     * <p>The caller supplies the exact final artifact identities and public
+     * Root lineages; the engine never substitutes placeholder identities.</p>
+     *
+     * @param configuration exact Contracts 1.0 host configuration
+     * @return a new closure-capable engine
+     */
+    public static DefaultCoordinationEngine createContracts10(
+            Contracts10Configuration configuration) {
+        Contracts10Configuration selected = Objects.requireNonNull(
+                configuration, "configuration");
+        return new DefaultCoordinationEngine(new ContractsBootstrap(
+                selected.blueLanguageSpecificationIdentity(),
+                selected.contractsSpecificationIdentity(),
+                selected.publicRootDocumentIds()));
+    }
+
+    /**
+     * Creates the SDK Contracts runtime before authored public Roots are known.
+     * Every Root must still be authorized before its atomic admission.
+     */
+    public static DefaultCoordinationEngine createContracts10Sdk(
+            String blueLanguageSpecificationIdentity,
+            String contractsSpecificationIdentity) {
+        return new DefaultCoordinationEngine(new ContractsBootstrap(
+                blueLanguageSpecificationIdentity,
+                contractsSpecificationIdentity,
+                Set.of()));
+    }
+
+    /**
+     * Authorizes additional public Root lineages for the SDK host profile.
+     *
+     * <p>This mutates only host routing configuration. It does not admit a
+     * document, create graph evidence, or select recipients. The following
+     * closure admission remains responsible for proving and atomically
+     * publishing every declared Root.</p>
+     */
+    public synchronized void authorizeContractsPublicRoots(
+            java.util.Collection<DocumentId> publicRoots) {
+        ensureOpen();
+        if (contractsClosureProfile == null) {
+            throw new IllegalStateException(
+                    "Contracts 1.0 was not enabled for this engine");
+        }
+        java.util.Collection<DocumentId> checked = Objects.requireNonNull(
+                publicRoots, "publicRoots");
+        contractsClosureProfile.addPublicRoots(checked);
+        contractsActiveSourceTimelines.addPublicRoots(checked);
     }
 
     @Override
@@ -203,6 +329,7 @@ public final class DefaultCoordinationEngine
     public synchronized DocumentSnapshot startDocument(
             DocumentId documentId,
             String authoredYaml) {
+        requireLegacyOnly("startDocument");
         try {
             return snapshot(start(documentId, authoredYaml));
         } catch (RuntimeException failure) {
@@ -211,11 +338,46 @@ public final class DefaultCoordinationEngine
     }
 
     @Override
+    public synchronized ContractsClosureAdmissionReceipt
+            admitContractsClosure(
+                    ClosureInvocationInput input,
+                    CoordinationEngine.AdmissionPolicy policy,
+                    ExternalOrderKey verifiedFrontier) {
+        ensureOpen();
+        if (contractsClosureAdapter == null) {
+            throw new CoordinationException(
+                    CoordinationErrorCode.ATOMIC_COMMIT_FAILED,
+                    "admitContractsClosure requires Contracts 1.0 mode");
+        }
+        CoordinationEngine.AdmissionPolicy selectedPolicy =
+                Objects.requireNonNull(policy, "policy");
+        ExternalOrderKey frontier = switch (selectedPolicy) {
+            case FULL_HISTORY -> {
+                requireNoExplicitFrontier(selectedPolicy, verifiedFrontier);
+                yield ExternalOrderKey.of(List.of(
+                        BigInteger.valueOf(Long.MIN_VALUE),
+                        "contracts-full-history-admission",
+                        Objects.requireNonNull(input, "input")
+                                .invocationIdentity()));
+            }
+            case FROM_FRONTIER -> requireRetainedFrontier(verifiedFrontier);
+            case FROM_NOW -> {
+                requireNoExplicitFrontier(selectedPolicy, verifiedFrontier);
+                yield currentContractsAdmissionFrontier(
+                        Objects.requireNonNull(input, "input"));
+            }
+        };
+        return contractsClosureAdmissionAdapter.admitAndPublish(
+                input, selectedPolicy, frontier);
+    }
+
+    @Override
     public synchronized void configureEmbeddedAdmission(
             DocumentId documentId,
             ActivationMode mode,
             ExternalOrderKey verifiedCompleteThrough) {
         ensureOpen();
+        requireLegacyOnly("configureEmbeddedAdmission");
         drainCoordinator.configureEmbeddedAdmission(
                 documentId, mode, verifiedCompleteThrough);
     }
@@ -232,6 +394,7 @@ public final class DefaultCoordinationEngine
             String completenessProofIdentity,
             String expectedAttachmentEntryBlueId) {
         ensureOpen();
+        requireLegacyOnly("configureEmbeddedAdmission");
         drainCoordinator.configureEmbeddedAdmission(
                 parentDocumentId, absoluteChildPath, childDocumentId,
                 admittedStateBlueId, admittedEpoch, mode,
@@ -245,6 +408,7 @@ public final class DefaultCoordinationEngine
             String authoredYaml,
             CoordinationEngine.AdmissionPolicy policy,
             ExternalOrderKey verifiedFrontier) {
+        requireLegacyOnly("startDocument");
         try {
             return snapshot(start(
                     documentId,
@@ -339,6 +503,71 @@ public final class DefaultCoordinationEngine
         }
     }
 
+    /**
+     * Atomically appends one Contracts operation and its exact managed-draft
+     * host evidence before either can be observed by the drain.
+     */
+    public synchronized TimelineEntry append(
+            Timeline timeline,
+            Operation operation,
+            ContractsManagedDraftPlan managedDraftPlan) {
+        ensureOpen();
+        if (contractsClosureAdapter == null) {
+            throw new IllegalStateException(
+                    "Contracts 1.0 was not enabled for this engine");
+        }
+        Timeline canonicalTimeline = requireRegisteredTimeline(timeline);
+        ContractsManagedDraftPlan plan = Objects.requireNonNull(
+                managedDraftPlan, "managedDraftPlan");
+        contractsClosureAdapter.preflightManagedDraftPlan(plan);
+        long previousLogicalClock = logicalClockMicros;
+        long candidateTimestamp = Math.addExact(logicalClockMicros, 1L);
+        InMemoryTimelineJournal.Mark mark = journal.mark();
+        WholeObjectStore.Mark objectMark = objects.mark();
+        String registeredEntryBlueId = null;
+        try {
+            TimelineEntry entry = metrics.timed(
+                    "append.total",
+                    () -> journal.append(
+                            canonicalTimeline,
+                            operation,
+                            candidateTimestamp));
+            requireAfterProcessedFrontier(entry);
+            if (!contractsClosureAdapter.registerManagedDraftPlan(
+                    entry.blueId(), plan)) {
+                throw new IllegalStateException(
+                        "Managed draft plan already exists for new entry "
+                                + entry.blueId());
+            }
+            registeredEntryBlueId = entry.blueId();
+            inject(FailurePoint.AFTER_MANAGED_DRAFT_PLAN_REGISTERED);
+            logicalClockMicros = candidateTimestamp;
+            objects.commit(objectMark);
+            return entry;
+        } catch (RuntimeException failure) {
+            if (registeredEntryBlueId != null) {
+                try {
+                    contractsClosureAdapter.unregisterManagedDraftPlan(
+                            registeredEntryBlueId, plan);
+                } catch (RuntimeException cleanupFailure) {
+                    failure.addSuppressed(cleanupFailure);
+                }
+            }
+            try {
+                journal.rollbackTo(mark);
+            } catch (RuntimeException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            try {
+                objects.rollbackTo(objectMark);
+            } catch (RuntimeException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            logicalClockMicros = previousLogicalClock;
+            throw failure;
+        }
+    }
+
     @Override
     public synchronized TimelineEntry appendAt(
             Timeline timeline,
@@ -421,6 +650,10 @@ public final class DefaultCoordinationEngine
             CoordinationEngine.DrainBudget budget) {
         try {
             ensureOpen();
+            if (contractsJournalCoordinator != null) {
+                return drainContracts(
+                        null, Objects.requireNonNull(budget, "budget"));
+            }
             return drainCoordinator.drain(null, Objects.requireNonNull(
                     budget, "budget"));
         } catch (RuntimeException failure) {
@@ -433,6 +666,12 @@ public final class DefaultCoordinationEngine
             ExternalOrderKey inclusiveCutoff) {
         try {
             ensureOpen();
+            if (contractsJournalCoordinator != null) {
+                return drainContracts(
+                        Objects.requireNonNull(
+                                inclusiveCutoff, "inclusiveCutoff"),
+                        CoordinationEngine.DrainBudget.unlimited());
+            }
             return drainCoordinator.drain(Objects.requireNonNull(
                     inclusiveCutoff, "inclusiveCutoff"),
                     CoordinationEngine.DrainBudget.unlimited());
@@ -472,6 +711,49 @@ public final class DefaultCoordinationEngine
                         session.layout().routingSurface(),
                         session.activeSubscriptions()));
         drainCoordinator = drainCoordinator.restartFromStores(this::inject);
+        if (contractsClosureAdapter != null) {
+            contractsActiveSourceTimelines.rebuild(documents);
+            contractsFeederCoordinator = createContractsFeederCoordinator();
+            contractsJournalCoordinator = createContractsJournalCoordinator();
+        }
+    }
+
+    synchronized ContractsRootFeederCoordinator contractsFeederCoordinator() {
+        ensureOpen();
+        if (contractsFeederCoordinator == null) {
+            throw new IllegalStateException(
+                    "Contracts 1.0 was not enabled for this engine");
+        }
+        return contractsFeederCoordinator;
+    }
+
+    synchronized ContractsClosureAdmissionAdapter
+            contractsClosureAdmissionAdapter() {
+        ensureOpen();
+        if (contractsClosureAdmissionAdapter == null) {
+            throw new IllegalStateException(
+                    "Contracts 1.0 was not enabled for this engine");
+        }
+        return contractsClosureAdmissionAdapter;
+    }
+
+    synchronized ContractsClosureAdapter contractsClosureAdapter() {
+        ensureOpen();
+        if (contractsClosureAdapter == null) {
+            throw new IllegalStateException(
+                    "Contracts 1.0 was not enabled for this engine");
+        }
+        return contractsClosureAdapter;
+    }
+
+    synchronized ContractsJournalDrainCoordinator
+            contractsJournalCoordinator() {
+        ensureOpen();
+        if (contractsJournalCoordinator == null) {
+            throw new IllegalStateException(
+                    "Contracts 1.0 was not enabled for this engine");
+        }
+        return contractsJournalCoordinator;
     }
 
     synchronized void makeHistoricalUnavailable(String diagnostic) {
@@ -516,6 +798,7 @@ public final class DefaultCoordinationEngine
     }
 
     synchronized List<TemporalCatchUpEvidence> catchUpEvidence() {
+        requireLegacyOnly("catchUpEvidence");
         Map<String, CatchUpBarrier.Status> statusByBinding =
                 new LinkedHashMap<>();
         drainCoordinator.barrierEvidence().forEach(barrier ->
@@ -537,6 +820,10 @@ public final class DefaultCoordinationEngine
 
     synchronized Set<String> effectiveTimelineIds(String documentId) {
         ensureOpen();
+        if (contractsClosureAdapter != null) {
+            return contractsSourceSurface(DocumentId.of(documentId))
+                    .timelineIds();
+        }
         LinkedHashSet<String> result = new LinkedHashSet<>();
         result.addAll(drainCoordinator.effectiveTimelineIds(
                 DocumentId.of(documentId)));
@@ -546,6 +833,12 @@ public final class DefaultCoordinationEngine
     synchronized Map<String, String> embeddedDocuments(
             String documentId) {
         ensureOpen();
+        if (contractsClosureAdapter != null) {
+            Map<String, String> result = new LinkedHashMap<>();
+            closureChildren(DocumentId.of(documentId)).forEach(
+                    (path, child) -> result.put(path, child.value()));
+            return Collections.unmodifiableMap(result);
+        }
         Map<String, String> result = new LinkedHashMap<>();
         drainCoordinator.bindingsForParent(DocumentId.of(documentId))
                 .forEach(binding -> result.put(
@@ -559,6 +852,7 @@ public final class DefaultCoordinationEngine
     }
     synchronized void observeTransitions(
             Consumer<SequentialDrainCoordinator.TransitionTrace> observer) {
+        requireLegacyOnly("observeTransitions");
         drainCoordinator.observeTransitions(observer);
     }
     synchronized BlueCacheStats languageCacheStats() {
@@ -603,8 +897,9 @@ public final class DefaultCoordinationEngine
     @Override
     public synchronized DocumentSnapshot document(DocumentId documentId) {
         DocumentSession session = requireDocument(documentId);
-        String readinessFailure = drainCoordinator.applicationReadinessFailure(
-                session);
+        String readinessFailure = contractsClosureAdapter == null
+                ? drainCoordinator.applicationReadinessFailure(session)
+                : contractsReadinessFailure(session);
         if (readinessFailure != null) {
             metrics.increment("temporal.applicationReadsRejected");
             throw new CoordinationException(
@@ -626,6 +921,20 @@ public final class DefaultCoordinationEngine
     public synchronized DocumentSnapshot auditDocument(
             DocumentId documentId) {
         return snapshot(requireDocument(documentId));
+    }
+
+    /** Reads one retained managed occurrence without opening document heads. */
+    public synchronized Optional<ManagedOccurrenceAuditView>
+            auditManagedOccurrence(
+                    DocumentId sourceDocumentId,
+                    String sourcePath) {
+        ensureOpen();
+        return documents.occurrenceInventory()
+                .find(sourceDocumentId, sourcePath)
+                .map(row -> new ManagedOccurrenceAuditView(
+                        DocumentId.of(row.targetDocumentId().value()),
+                        row.activationGeneration(),
+                        row.active()));
     }
 
     private DocumentSession requireDocument(DocumentId documentId) {
@@ -668,11 +977,9 @@ public final class DefaultCoordinationEngine
     }
 
     private DocumentSnapshot snapshot(DocumentSession session) {
-        Map<String, DocumentId> children = new LinkedHashMap<>();
-        drainCoordinator.bindingsForParent(session.documentId())
-                .forEach(binding -> children.put(
-                        binding.absolutePath(),
-                        binding.childDocumentId()));
+        Map<String, DocumentId> children = contractsClosureAdapter == null
+                ? legacyChildren(session.documentId())
+                : closureChildren(session.documentId());
         EmbeddedOnlyLayout layout = session.layout();
         Map<String, ExactValue> physicalObjects = new LinkedHashMap<>();
         layout.scopePaths().forEach(path -> physicalObjects.put(
@@ -743,13 +1050,228 @@ public final class DefaultCoordinationEngine
                 code, message, failure, Map.of());
     }
 
+    private Map<String, DocumentId> legacyChildren(DocumentId parent) {
+        Map<String, DocumentId> result = new LinkedHashMap<>();
+        drainCoordinator.bindingsForParent(parent).forEach(binding ->
+                result.put(
+                        binding.absolutePath(),
+                        binding.childDocumentId()));
+        return result;
+    }
+
+    private Map<String, DocumentId> closureChildren(DocumentId parent) {
+        Map<String, DocumentId> result = new LinkedHashMap<>();
+        documents.publicationSnapshot().occurrenceInventory().activeRows()
+                .stream()
+                .filter(row -> row.sourceDocumentId().value().equals(
+                        parent.value()))
+                .forEach(row -> {
+                    DocumentId child = DocumentId.of(
+                            row.targetDocumentId().value());
+                    DocumentId duplicate = result.putIfAbsent(
+                            row.sourcePath(), child);
+                    if (duplicate != null && !duplicate.equals(child)) {
+                        throw new IllegalStateException(
+                                "Active closure occurrences disagree at "
+                                        + parent + row.sourcePath());
+                    }
+                });
+        return Collections.unmodifiableMap(result);
+    }
+
+    private String contractsReadinessFailure(DocumentSession session) {
+        if (session.status() == SessionStatus.BLOCKED) {
+            return "session is administratively blocked";
+        }
+        InMemoryDocumentStore.PublicationSnapshot publication =
+                documents.publicationSnapshot();
+        InMemoryDocumentStore.DocumentHead head = publication.requireHead(
+                session.documentId());
+        if (head.epoch() != session.epoch()
+                || !head.blueId().equals(
+                        session.currentRevision().after().blueId())) {
+            return "session state disagrees with the durable document head";
+        }
+        try {
+            publication.graphGenerations().require(
+                    session.documentId());
+        } catch (RuntimeException missing) {
+            return "no durable Contracts graph generation";
+        }
+        for (blue.language.processor.closure.ComponentSnapshot component
+                : publication.componentStates()) {
+            for (int index = 0;
+                    index < component.orderedMemberDocumentIds().size();
+                    index++) {
+                if (!component.orderedMemberDocumentIds().get(index).value()
+                        .equals(session.documentId().value())) {
+                    continue;
+                }
+                return component.orderedMemberBlueIds().get(index)
+                        .equals(head.blueId())
+                        ? null
+                        : "durable component state has a stale document head";
+            }
+        }
+        return "no durable Contracts component state";
+    }
+
+    private void requireLegacyOnly(String operation) {
+        ensureOpen();
+        if (contractsClosureAdapter != null) {
+            throw new CoordinationException(
+                    CoordinationErrorCode.ATOMIC_COMMIT_FAILED,
+                    operation + " requires ADMIT_CLOSURE support in "
+                            + "Contracts 1.0 mode; legacy admission state is "
+                            + "not accepted",
+                    null,
+                    Map.of("operation", operation));
+        }
+    }
+
     @Override
     public synchronized void close() {
         if (closed) {
             return;
         }
         closed = true;
-        runtime.close();
+        try {
+            if (contractsClosureAdapter != null) {
+                try {
+                    contractsClosureAdmissionAdapter.close();
+                } finally {
+                    contractsClosureAdapter.close();
+                }
+            }
+        } finally {
+            runtime.close();
+        }
+    }
+
+    private ContractsRootFeederCoordinator createContractsFeederCoordinator() {
+        return new ContractsRootFeederCoordinator(
+                contractsClosureAdapter,
+                new ContractsRootFeederWindow(
+                        contractsRecoveryState.feederWindow));
+    }
+
+    private ProcessingDrainReceipt drainContracts(
+            ExternalOrderKey inclusiveCutoff,
+            CoordinationEngine.DrainBudget budget) {
+        long started = System.nanoTime();
+        ContractsJournalDrainCoordinator.DrainProgress progress =
+                contractsJournalCoordinator.drainThrough(
+                        inclusiveCutoff, budget);
+        Map<String, List<DocumentDispatchOutcome>> outcomes =
+                new LinkedHashMap<>();
+        Map<String, List<ContractsClosureDispatchAttempt>> attempts =
+                new LinkedHashMap<>();
+        for (ContractsRootFeederCoordinator.EventProgress attempt
+                : progress.attempts()) {
+            TimelineEntry entry = attempt.batch().entry();
+            List<DocumentDispatchOutcome> entryOutcomes = new ArrayList<>();
+            List<ContractsClosureDispatchAttempt> entryAttempts =
+                    new ArrayList<>();
+            for (ContractsRootFeederCoordinator.CohortProgress cohort
+                    : attempt.cohorts()) {
+                ContractsClosureAdapter.CohortOutcome exact =
+                        cohort.outcome();
+                entryAttempts.add(new ContractsClosureDispatchAttempt(
+                        entry.blueId(),
+                        exact.members(),
+                        exact.attempt(),
+                        exact.published(),
+                        exact.publicationIdentity(),
+                        exact.replayed()));
+                if (!cohort.outcome().published()
+                        || cohort.outcome().replayed()) {
+                    continue;
+                }
+                for (DocumentId member : cohort.outcome().members()) {
+                    documents.require(member).revisionForEntry(entry.blueId())
+                            .ifPresent(revision -> entryOutcomes.add(
+                                    new DocumentDispatchOutcome(
+                                            member, revision, 0L)));
+                }
+            }
+            if (!entryOutcomes.isEmpty()) {
+                outcomes.put(entry.blueId(), List.copyOf(entryOutcomes));
+            }
+            if (!entryAttempts.isEmpty()) {
+                attempts.computeIfAbsent(
+                        entry.blueId(), ignored -> new ArrayList<>())
+                        .addAll(entryAttempts);
+            }
+        }
+        long committed = outcomes.values().stream()
+                .mapToLong(List::size)
+                .sum();
+        return new ProcessingDrainReceipt(
+                progress.completedEntries(),
+                outcomes,
+                attempts,
+                progress.processedThrough(),
+                progress.quiescent(),
+                progress.paused(),
+                committed,
+                System.nanoTime() - started);
+    }
+
+    private ContractsJournalDrainCoordinator createContractsJournalCoordinator() {
+        return new ContractsJournalDrainCoordinator(
+                journal,
+                contractsFeederCoordinator,
+                contractsRecoveryState.journalDrain,
+                contractsActiveSourceTimelines::timelineIds,
+                entry -> contractsClosureAdapter.completeManagedDraftPlan(
+                        entry.blueId()));
+    }
+
+    private ContractsRootSourceSurface.Surface contractsSourceSurface(
+            DocumentId root) {
+        return ContractsRootSourceSurface.resolve(
+                ContractsRootFeederWindow.LaneId.publicRoots(List.of(root)),
+                documents.occurrenceInventory(),
+                documentId -> documents.find(documentId)
+                        .map(session -> session.layout().routingSurface()
+                                .externalTimelineIds())
+                        .orElse(List.of()));
+    }
+
+    private record ContractsBootstrap(
+            String blueLanguageSpecificationIdentity,
+            String contractsSpecificationIdentity,
+            Set<DocumentId> publicRootDocumentIds) {
+        private ContractsBootstrap {
+            blueLanguageSpecificationIdentity = requireSha256Identity(
+                    blueLanguageSpecificationIdentity,
+                    "blueLanguageSpecificationIdentity");
+            contractsSpecificationIdentity = requireSha256Identity(
+                    contractsSpecificationIdentity,
+                    "contractsSpecificationIdentity");
+            publicRootDocumentIds = Set.copyOf(Objects.requireNonNull(
+                    publicRootDocumentIds, "publicRootDocumentIds"));
+        }
+
+        private static String requireSha256Identity(
+                String value,
+                String label) {
+            String checked = Objects.requireNonNull(value, label);
+            if (!checked.matches("sha256:[0-9a-f]{64}")) {
+                throw new IllegalArgumentException(
+                        label + " must be a lowercase sha256 identity");
+            }
+            return checked;
+        }
+    }
+
+    /** In-memory stand-in for the durable feeder publication boundary. */
+    private static final class ContractsRecoveryState {
+        private final ContractsRootFeederWindow.DurableState feederWindow =
+                new ContractsRootFeederWindow.DurableState();
+        private final ContractsJournalDrainCoordinator.DurableState
+                journalDrain =
+                new ContractsJournalDrainCoordinator.DurableState();
     }
 
     private long nextApplicationTimestamp() {
@@ -767,6 +1289,27 @@ public final class DefaultCoordinationEngine
                     documentId.value()));
         }
         return latest;
+    }
+
+    private ExternalOrderKey currentContractsAdmissionFrontier(
+            ClosureInvocationInput input) {
+        ExternalOrderKey latest = journal.latestExternalOrder();
+        if (latest != null) {
+            return latest;
+        }
+        return ExternalOrderKey.of(List.of(
+                BigInteger.ZERO,
+                "contracts-admission",
+                input.invocationIdentity()));
+    }
+
+    private static void requireNoExplicitFrontier(
+            CoordinationEngine.AdmissionPolicy policy,
+            ExternalOrderKey verifiedFrontier) {
+        if (verifiedFrontier != null) {
+            throw new IllegalArgumentException(
+                    policy + " does not accept verifiedFrontier");
+        }
     }
 
     private ExternalOrderKey requireRetainedFrontier(
@@ -797,7 +1340,9 @@ public final class DefaultCoordinationEngine
     }
 
     private void requireAfterProcessedFrontier(TimelineEntry entry) {
-        ExternalOrderKey processed = drainCoordinator.processedThrough();
+        ExternalOrderKey processed = contractsJournalCoordinator == null
+                ? drainCoordinator.processedThrough()
+                : contractsJournalCoordinator.processedThrough();
         if (processed != null
                 && entry.sourceOrderKey().compareTo(processed) <= 0) {
             throw new IllegalArgumentException(

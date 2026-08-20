@@ -25,6 +25,7 @@ final class PlaygroundFiveOccurrenceInitializationTest {
     void fiveOccurrencesReuseThreeSessionsAndForwardFiveInitializationEvents()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             Timeline owner = engine.timeline(
                     PlaygroundFiveOccurrenceFixtures.HOST_TIMELINE,
                     PlaygroundFiveOccurrenceFixtures.HOST_ACTOR);
@@ -35,16 +36,20 @@ final class PlaygroundFiveOccurrenceInitializationTest {
 
             int wholeObjectsBeforeRequest = engine.wholeObjectCount();
             var attachFive = PlaygroundFiveOccurrenceFixtures.attachFive(engine);
-            assertEquals(4,
-                    engine.wholeObjectCount() - wholeObjectsBeforeRequest,
-                    "three unique child bodies plus one whole request");
+            int requestWholeObjects =
+                    engine.wholeObjectCount() - wholeObjectsBeforeRequest;
 
             EngineMetrics.MetricsSnapshot before = engine.metricsSnapshot();
+
+            // when
             TimelineEntry attachment = engine.append(owner, attachFive);
             engine.dispatch(attachment);
             EngineTestSupport.MetricDelta work = delta(
                     before, engine.metricsSnapshot());
 
+            // then
+            assertEquals(4, requestWholeObjects,
+                    "three unique child bodies plus one whole request");
             assertEquals(4, engine.documentCount(),
                     "one Host plus three unique managed Game sessions");
             assertEquals(PlaygroundFiveOccurrenceFixtures.expectedBindings(),

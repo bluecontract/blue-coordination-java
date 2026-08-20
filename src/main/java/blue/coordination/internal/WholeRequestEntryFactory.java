@@ -30,8 +30,11 @@ import java.util.Set;
  * Language-supported canonical edit, not an approximate hand-built event.</p>
  */
 final class WholeRequestEntryFactory {
+    static final String REQUEST_SOURCES_PARSED =
+            "append.requestSourcesParsed";
+
     private static final Set<String> PRESERVED_EVENT_PATHS =
-            Set.of("/message/request");
+            Set.of("/message/document", "/message/request");
 
     private final BlueRuntime runtime;
     private final WholeObjectStore objects;
@@ -166,6 +169,7 @@ final class WholeRequestEntryFactory {
                     operation.exactRequest().orElseThrow(),
                     "timeline-request");
         }
+        metrics.increment(REQUEST_SOURCES_PARSED);
         Node source = runtime.parseSourceYaml(
                 operation.requestYaml().orElseThrow());
         Node preprocessed = runtime.preprocess(source);
@@ -186,7 +190,9 @@ final class WholeRequestEntryFactory {
                 timeline.actorId(),
                 operation.operation(),
                 operation.channel(),
-                previousEntryBlueId != null);
+                previousEntryBlueId != null,
+                operation.targetDocument().isPresent(),
+                operation.requireExactDocumentVersion());
         FrozenNode template;
         synchronized (eventTemplates) {
             template = eventTemplates.get(key);
@@ -206,6 +212,13 @@ final class WholeRequestEntryFactory {
 
         FrozenNode message = requireChild(template, "message")
                 .withProperty("request", reference(request.blueId()));
+        if (operation.targetDocument().isPresent()) {
+            ExactValue target = objects.put(
+                    operation.targetDocument().orElseThrow(),
+                    "operation-document-target");
+            message = message.withProperty(
+                    "document", reference(target.blueId()));
+        }
         FrozenNode event = template
                 .withProperty("timestamp", scalar(timestampMicros))
                 .withProperty("message", message)
@@ -241,6 +254,14 @@ final class WholeRequestEntryFactory {
                         "operation", scalarNode(operation.operation()),
                         "channel", scalarNode(operation.channel()),
                         "request", request.referenceNode())));
+        operation.targetDocument().ifPresent(target -> {
+            messageNode.properties("document", target.referenceNode());
+            if (operation.requireExactDocumentVersion()) {
+                messageNode.properties(
+                        "requireExactDocumentVersion",
+                        new Node().value(true));
+            }
+        });
         Map<String, Node> properties = new LinkedHashMap<>();
         properties.put("timeline", timelineNode);
         if (previousEntryBlueId != null) {
@@ -286,7 +307,9 @@ final class WholeRequestEntryFactory {
             String actorId,
             String operation,
             String channel,
-            boolean hasPreviousEntry) {
+            boolean hasPreviousEntry,
+            boolean hasDocumentTarget,
+            boolean requireExactDocumentVersion) {
         private EventShapeKey {
             timelineId = requireText(timelineId, "timelineId");
             actorId = requireText(actorId, "actorId");

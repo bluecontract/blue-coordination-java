@@ -30,24 +30,41 @@ final class NonScalarRoutingIntegrationTest {
     @Test
     void compositeTimelineRoutesOnlyItsDeclaredMemberSources()
             throws Exception {
-        verifyAggregateRouting(
-                DocumentId.of("composite-routing-counter"),
-                "examples/clean/composite-routing-counter.yaml");
+        // given
+        DocumentId documentId = DocumentId.of("composite-routing-counter");
+        String fixture = "examples/clean/composite-routing-counter.yaml";
+
+        // when
+        AggregateRoutingEvidence evidence = runAggregateRouting(
+                documentId,
+                fixture);
+
+        // then
+        assertAggregateRouting(evidence);
     }
 
     @Test
     void allTimelinesRoutesOnlyTheFrozenSameScopeTimelineFamily()
             throws Exception {
-        verifyAggregateRouting(
-                DocumentId.of("all-timelines-routing-counter"),
-                "examples/clean/all-timelines-routing-counter.yaml");
+        // given
+        DocumentId documentId = DocumentId.of("all-timelines-routing-counter");
+        String fixture = "examples/clean/all-timelines-routing-counter.yaml";
+
+        // when
+        AggregateRoutingEvidence evidence = runAggregateRouting(
+                documentId,
+                fixture);
+
+        // then
+        assertAggregateRouting(evidence);
     }
 
     @Test
     void fromNowRouteIntervalExcludesBacklogStillInTheGlobalJournal()
             throws Exception {
+        // given
         DocumentId counter = DocumentId.of("counter");
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
             Timeline alice = engine.registerTimeline(
                     "examples/clean-counter/alice", "alice");
             TimelineEntry oldOne = engine.appendAt(
@@ -69,8 +86,10 @@ final class NonScalarRoutingIntegrationTest {
             long processBefore = engine.metrics().counter(
                     CoordinationMetrics.Counter.EXTERNAL_PROCESS_CALLS);
 
+            // when
             ProcessingDrainReceipt receipt = engine.drain();
 
+            // then
             assertEquals(
                     List.of(oldOne.blueId(), oldTwo.blueId(), live.blueId()),
                     entryIds(receipt.processedEntries()));
@@ -90,10 +109,10 @@ final class NonScalarRoutingIntegrationTest {
         }
     }
 
-    private static void verifyAggregateRouting(
+    private static AggregateRoutingEvidence runAggregateRouting(
             DocumentId documentId,
             String resourcePath) throws Exception {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
             Timeline alice = engine.registerTimeline(
                     ALICE_TIMELINE, "alice");
             Timeline bob = engine.registerTimeline(
@@ -109,26 +128,64 @@ final class NonScalarRoutingIntegrationTest {
             TimelineEntry unrelated = engine.appendAt(
                     charlie, add(7), T0 + 300L);
 
-            assertEquals(1, engine.routeTargetCount(aliceEntry));
-            assertEquals(1, engine.routeTargetCount(bobEntry));
-            assertEquals(0, engine.routeTargetCount(unrelated));
-            assertEquals(
-                    Set.of(ALICE_TIMELINE, BOB_TIMELINE),
-                    engine.effectiveTimelineIds(documentId));
+            int aliceTargets = engine.routeTargetCount(aliceEntry);
+            int bobTargets = engine.routeTargetCount(bobEntry);
+            int unrelatedTargets = engine.routeTargetCount(unrelated);
+            Set<String> effectiveTimelineIds =
+                    engine.effectiveTimelineIds(documentId);
 
             ProcessingDrainReceipt receipt = engine.drain();
 
-            assertEquals(
+            return new AggregateRoutingEvidence(
+                    aliceTargets,
+                    bobTargets,
+                    unrelatedTargets,
+                    effectiveTimelineIds,
                     List.of(
                             aliceEntry.blueId(),
                             bobEntry.blueId(),
                             unrelated.blueId()),
-                    entryIds(receipt.processedEntries()));
-            assertEquals(1, receipt.outcomesFor(aliceEntry.blueId()).size());
-            assertEquals(1, receipt.outcomesFor(bobEntry.blueId()).size());
-            assertTrue(receipt.outcomesFor(unrelated.blueId()).isEmpty());
-            assertEquals(5L, counter(engine, documentId));
-            assertEquals(2L, engine.document(documentId).epoch());
+                    entryIds(receipt.processedEntries()),
+                    receipt.outcomesFor(aliceEntry.blueId()).size(),
+                    receipt.outcomesFor(bobEntry.blueId()).size(),
+                    receipt.outcomesFor(unrelated.blueId()).isEmpty(),
+                    counter(engine, documentId),
+                    engine.document(documentId).epoch());
+        }
+    }
+
+    private static void assertAggregateRouting(
+            AggregateRoutingEvidence evidence) {
+        assertEquals(1, evidence.aliceTargets());
+        assertEquals(1, evidence.bobTargets());
+        assertEquals(0, evidence.unrelatedTargets());
+        assertEquals(Set.of(ALICE_TIMELINE, BOB_TIMELINE),
+                evidence.effectiveTimelineIds());
+        assertEquals(evidence.expectedEntryIds(),
+                evidence.processedEntryIds());
+        assertEquals(1, evidence.aliceOutcomes());
+        assertEquals(1, evidence.bobOutcomes());
+        assertTrue(evidence.unrelatedOutcomeEmpty());
+        assertEquals(5L, evidence.counter());
+        assertEquals(2L, evidence.epoch());
+    }
+
+    private record AggregateRoutingEvidence(
+            int aliceTargets,
+            int bobTargets,
+            int unrelatedTargets,
+            Set<String> effectiveTimelineIds,
+            List<String> expectedEntryIds,
+            List<String> processedEntryIds,
+            int aliceOutcomes,
+            int bobOutcomes,
+            boolean unrelatedOutcomeEmpty,
+            long counter,
+            long epoch) {
+        private AggregateRoutingEvidence {
+            effectiveTimelineIds = Set.copyOf(effectiveTimelineIds);
+            expectedEntryIds = List.copyOf(expectedEntryIds);
+            processedEntryIds = List.copyOf(processedEntryIds);
         }
     }
 

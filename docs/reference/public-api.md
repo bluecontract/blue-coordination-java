@@ -1,116 +1,228 @@
 # Public API reference
 
-The supported application boundary is the small set of types in
-`blue.coordination.api`. Full signatures and contracts are in the generated
-Javadocs.
+The normal application boundary is `blue.coordination.sdk`.
+`BlueCoordination.inMemory()` is the single default: it owns an in-memory
+Contracts 1.0 environment pinned to the release manifest bundled in the JAR.
+Full signatures are in the generated Javadocs.
 
-## Lifecycle and commands
+`blue.coordination.api` remains available for advanced host integration and
+legacy migration. Its plain `CoordinationEngine.inMemory()` factory is the
+earlier acyclic compatibility profile and must not be treated as equivalent to
+the SDK default.
 
-- `CoordinationEngine` creates the in-memory environment and owns resources.
-- `Timeline` identifies one authenticated append-only stream.
-- `Operation` describes an operation/channel and either YAML or an `ExactValue`
-  request.
-- `DocumentId` identifies one continuing managed document history; a state
-  BlueId identifies one exact immutable state within that history.
-- `ActivationMode` names supported embedded-document temporal behavior.
-- `startDocument(..., AdmissionPolicy, verifiedFrontier)` selects top-level
-  `FULL_HISTORY`, `FROM_FRONTIER`, or `FROM_NOW` behavior.
-- `appendTimelineEntry(Node)` validates and stores one externally supplied exact
-  entry without routing or PROCESS. `append` and `appendAt` are convenience
-  builders with the same append/process separation.
-- `drain()` selects canonical work to quiescence; `drainThrough(cutoff)` stops at
-  an inclusive upper bound without skipping earlier eligible work.
-- `drain(new DrainBudget(processCommits, selectedEntries))` pauses only at a
-  deterministic safe boundary. Its receipt reports `paused()` and the exact
-  frozen PROCESS transitions committed by that call; a later drain resumes the
-  retained entry frame without repeating them.
-- `document(id)` returns only a coherent `READY` snapshot. Operational audit and
-  recovery tooling can use `auditDocument(id)` to inspect committed
-  `CATCHING_UP` or `BLOCKED` state deliberately.
+## Runtime owner and catalogs
 
-The caller never supplies document recipients and cannot select an exact entry
-to process ahead of earlier eligible work. `routeTargetCount` is diagnostic; it
-uses canonical journal evidence, reports only targets expressible by the pinned
-provider model, and does not process the entry.
+`BlueCoordination` is `AutoCloseable` and exposes these owned catalogs:
 
-## Embedded admission evidence
+- `timelines()` registers authenticated local Timeline handles.
+- `documents()` admits and reads managed lineages and complete closures.
+- `operations()` starts exact document-targeted operation calls.
+- `events()` starts deliberate broadcast Timeline Entry admission.
+- `processing()` performs a canonical drain of submitted work.
+- `values()` resolves authored YAML to an immutable exact value.
+- `advanced()` exposes explicit diagnostics and low-level compatibility.
 
-The three-argument `configureEmbeddedAdmission(childId, mode, frontier)` is a
-convenience default for future occurrences of that child. When attachment
-identity matters, append the attachment entry first, then register the
-occurrence-specific overload before draining it. That plan binds the parent
-DocumentId, canonical absolute occurrence path, child DocumentId, supplied
-state BlueId, optional exact child epoch, activation mode, verified frontier,
-completeness-proof identity, and expected attachment-entry BlueId.
+Handles are owner-bound. Passing a Timeline, document, draft, entry, or other
+owned value to a different `BlueCoordination` instance fails instead of
+silently crossing environments.
 
-Occurrence plans take precedence over the child default and are consumed only
-with successful graph publication. A failed publication restores the plan for
-an exact retry. If the same exact child-state BlueId occurs at more than one
-committed epoch, omitting `admittedEpoch` fails closed; content identity alone
-cannot choose temporal position.
+`BlueCoordination.builder().release(languageIdentity, contractsIdentity)` is
+an advanced custom-release option. Both values must be lowercase `sha256:`
+identities. Ordinary callers use `inMemory()` and never type release hashes.
 
-`DrainBudget` limits selected canonical entries and committed frozen PROCESS
-transitions, not elapsed time. One frozen PROCESS invocation is atomic and
-non-preemptible, and epoch-zero INITIALIZE work performed by an attachment is
-outside the PROCESS-commit count. Use `elapsedNanos()` for observed duration,
-not as evidence of a deadline guarantee.
+## Timelines and exact values
 
-## Target derivation and upstream boundary
+`timelines().local(accountId)` registers a Timeline whose id and actor account
+are the same. `register(timelineId, accountId)` keeps them explicit.
 
-The environment derives recipients from exact active subscription intervals.
-Scalar Timeline Channels, Composite Timeline Channels, and the frozen
-same-scope All Timelines family are supported. The caller never supplies a
-recipient set.
+`values().yaml(source)` resolves with the runtime's pinned Language release and
+returns `ExactBlueValue`. An exact value exposes its authoritative BlueId and
+cyclic-member status while retaining immutable verified content. Snapshot
+scalar helpers provide exact long, text, and boolean reads by JSON Pointer.
 
-Repository-native `OperationRequest.document` targeting is supported as a
-separate feature. With `requireExactDocumentVersion: true`, only a candidate at
-that exact current state is eligible. With a false or absent flag, any retained
-known epoch of that candidate is eligible. An absent document leaves routing
-unrestricted.
+## Ordinary document admission
 
-The pinned generic Timeline Entry model has no universal literal `documentId`
-target. That is an optional generalized-profile capability, not a blocker for
-environment-derived routing; concrete Channel/message profiles may define exact
-target derivation and must continue to fail closed when their evidence is
-missing.
+An ordinary top-level document is authored, explicitly authorized as a public
+Root, and given a temporal policy:
 
-The pinned provider boundary separately has no general Mandate-state resolver
-for per-target eligibility. This RC does not infer or simulate authority;
-authority-bearing `onBehalfOf` entries fail closed. Exact provider-backed
-Mandate resolution remains an upstream blocker.
+```java
+DocumentHandle order = blue.documents().admit(
+        ManagedDocument.yaml("order-123", orderYaml)
+                .publicRoot()
+                .fromNow());
+```
 
-## Immutable results
+The SDK resolves the authored value, compiles a one-member complete closure,
+authenticates its public Root, and atomically admits it through Contracts. It
+does not seed a legacy singleton session. A top-level definition without
+`publicRoot()` or an explicit activation policy fails closed. Top-level SDK
+admission currently supports `fromNow()`, `importFullHistory()`, and
+`importFromFrontier(exactEvidence)`; attach-current and passive-snapshot values
+remain vocabulary for future occurrence evidence and are rejected at this
+boundary.
 
-- `TimelineEntry` is the exact journaled event.
-- `TimelineAppendReceipt` proves exact journal admission.
-- `ProcessingDrainReceipt` reports environment-selected entry order and groups
-  `DocumentDispatchOutcome` values by entry. For a bounded call, it contains
-  only work committed by that call, even when it pauses or resumes an older
-  entry frame. `quiescent()`, `paused()`, and `blocked()` distinguish completion,
-  a caller-selected work boundary, and unavailable prerequisite evidence.
-- `DocumentSnapshot` is current state plus readiness/frontier evidence.
-- `DocumentRevision` is one immutable state transition with provenance.
-- `ExactValue` retains verified content identity and frozen form.
-- `CoordinationMetrics` exposes cumulative phase timers, work counters and
-  gauges.
+## Complete closure admission
 
-## Failures
+```java
+ClosureHandle closure = blue.documents().admit(
+        ManagedClosure.builder()
+                .document("a", yamlA)
+                .document("b", yamlB)
+                .bindOccurrence("a", "/b", "b")
+                .bindOccurrence("b", "/a", "a")
+                .publicRoot("a")
+                .fromNow()
+                .build());
+```
 
-`CoordinationException` carries a stable `CoordinationErrorCode` plus immutable
-details. Invalid identities, missing/not-ready documents, unavailable or
-invalid history evidence, route misses, frozen processing failures, atomic
-commit failures and ownership violations are explicit.
+Aliases are immutable construction names; each member has a stable
+`DocumentId`. `bindOccurrence(sourceAlias, path, targetAlias)` is managed
+lineage evidence, not an authored graph. The SDK requires the source's
+effective `Process Embedded` catalog to declare the canonical path, verifies
+that the exact value at that path agrees with the target, and rejects missing,
+duplicate, extra, or ambiguous bindings. Language owns cyclic finalization and
+complete-proof verification; the SDK only supplies the authored boundary.
 
-## Dependency surface
+`ClosureHandle` exposes the authenticated closure identity, members by alias,
+and public Roots. It does not expose component snapshots, occurrence internals,
+proof objects, or invocation environments.
 
-The POM exposes `blue-contracts-core`, `blue-bex-core` and
-`blue-bex-contracts` at compile scope because public API values and processor
-signatures expose their types. Repository and Bouncy Castle remain
-runtime-scoped implementation dependencies. All coordinates are exact and
-dependency locked.
+## Targeted operations
 
-`blue.coordination.processor` is an advanced semantic integration surface used
-to assemble the retained Contracts/BEX processors. It is documented in the
-Javadoc JAR, but ordinary applications should start at `CoordinationEngine`.
-`blue.coordination.internal` is never an application API and may change between
-release candidates.
+```java
+EntryResult result = blue.operations().on(order)
+        .from(alice)
+        .call("attachPayNoteAsCustomer")
+        .through("customerChannel")
+        .request(request -> request.exact("payNote", payNote))
+        .execute();
+```
+
+`on(DocumentHandle)` binds the exact current state. `on(DocumentId)` can name a
+currently absent lineage so execution returns a terminal `REJECTED` result with
+`TARGET_DOCUMENT_NOT_FOUND`; constructing the call does not throw merely
+because the target is missing. A changed exact target returns `STALE`.
+Missing operations, target Channels, and source/Channel matches return precise
+diagnostics such as `OPERATION_NOT_FOUND`, `TARGET_CHANNEL_NOT_FOUND`, and
+`TARGET_CHANNEL_SOURCE_MISMATCH`.
+
+The target is evidence used by the selected Contracts profile. The caller does
+not supply the final recipient set, and an Order-specific request is not
+silently converted into a broadcast.
+
+`requestYaml(yaml)` supplies one ordinary authored request. The structured
+request builder uses `exact(field, value)` to preserve whole exact values.
+
+## Managed drafts produced by operations
+
+`documents().draft(id, exactInitial)` creates immutable stable-lineage evidence
+for a new managed occurrence. Supply the same draft in the exact request and
+declare every effective result path that must bind it:
+
+```java
+ManagedDocumentDraft child = blue.documents().draft(
+        childId, blue.values().yaml(childYaml));
+
+EntryResult result = blue.operations().on(parent)
+        .from(alice)
+        .call("createChild")
+        .through("ownerChannel")
+        .request(request -> request.managed("child", child))
+        .expectOccurrence("/children/child-456", child)
+        .activation(ActivationPolicy.fromNow())
+        .execute();
+```
+
+The SDK verifies owner identity, exact request value, canonical effective
+`Process Embedded` paths, and complete result agreement. A single draft may be
+bound at several paths to express one stable lineage with multiple
+occurrences. All new heads and topology changes publish atomically with the
+parent result; a terminal failure leaves no partial expansion.
+
+This candidate supports only new `FROM_NOW` lineages. Imported-state evidence
+created with `draft.atEpoch(...)` and historical, frontier, attach-current, or
+passive operation-result activation fail closed. The SDK never emulates this
+lane through legacy child/parent admission.
+
+## Broadcast events
+
+```java
+EntryResult result = blue.events()
+        .from(alice)
+        .exact(completeTimelineEntry)
+        .execute();
+```
+
+`exact(...)` accepts a complete exact Timeline Entry envelope whose source
+Timeline and actor agree with the selected handle. Broadcast is explicit and
+still environment-routed. A valid entry accepted by no active Channel is a
+terminal `NO_MATCH`, not an empty low-level receipt error.
+
+## Append and process separation
+
+Every operation and event call is single-use and supports:
+
+- `submit()`: validate and append exactly once without PROCESS;
+- `execute()`: append, then canonically drain through that entry.
+
+`execute()` includes earlier eligible entries and cannot overtake them. The
+portable split is:
+
+```java
+EntryHandle submitted = call.submit();
+DrainResult drained = blue.processing().drain();
+EntryResult result = drained.entry(submitted);
+```
+
+`DrainResult.entries()` is in canonical processing order. `find(handle)` keeps
+absence distinct from `NO_MATCH`; `entry(handle)` requires a result in that
+specific drain. Drain-wide state distinguishes quiescent, paused, and blocked
+frontiers.
+
+## Results and reads
+
+`EntryDisposition` contains `APPLIED`, `NO_MATCH`, `STALE`, `MIXED`,
+`REJECTED`, `NEEDS_RESOURCES`, `GAS_LIMIT_EXCEEDED`,
+`PORTABLE_LIMIT_EXCEEDED`, and `BLOCKED`.
+
+One appended entry can affect disconnected closures independently.
+`EntryResult.closures()` therefore retains each `ClosureResult`, its committed
+`DocumentChange` values, public events, processing statistics, and diagnostic.
+The aggregate disposition is `MIXED` when terminal closure dispositions differ.
+`ProcessingStats` reports gas, committed transitions, documents opened, exact
+document-step order, elapsed time, and named counters.
+
+`DocumentHandle.snapshot()` is READY-only and exposes application state,
+DocumentId, epoch, BlueId, exact content, and public events. `history()` returns
+immutable application-safe revisions. Physical objects, topology generations,
+proofs, and storage layout are not part of the normal snapshot.
+
+## Advanced boundary
+
+`AdvancedCoordination.rawEngine()` returns the owned low-level
+`CoordinationEngine` for a host that must migrate an existing integration.
+`auditDocument(id)` deliberately permits non-READY reads. Advanced identity
+accessors expose the exact Language, Contracts, fixture package, gas manifest,
+cyclic finalizer, and proof-verifier identities used by evidence tooling.
+
+`auditManagedOccurrence(sourceId, occurrencePath)` returns an optional
+`ManagedOccurrenceAudit` for a retained occurrence row. The value contains the
+target `DocumentId`, positive activation generation, and active/inactive flag;
+it intentionally omits component snapshots, proof values, and mutable
+inventory internals.
+
+Low-level types such as `ClosureInvocationInput`, occurrence bindings,
+component/closure snapshots, cyclic proofs, closure environments, and execution
+policies are not permitted in normal SDK signatures.
+
+## Dependency and package surface
+
+The POM exposes Contracts and BEX artifacts at compile scope where retained
+advanced API and processor signatures require their types. Repository and
+Bouncy Castle remain runtime implementation dependencies. Every coordinate is
+exact and dependency-locked.
+
+`blue.coordination.processor` is an advanced semantic-integration surface.
+`blue.coordination.internal` is not application API and may change between
+release candidates. The exact package ownership and migration policy are in the
+[SDK migration and ownership ledger](sdk-migration-and-ownership.md).

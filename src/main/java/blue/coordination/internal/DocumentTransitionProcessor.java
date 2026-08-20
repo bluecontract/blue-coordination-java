@@ -523,6 +523,23 @@ final class DocumentTransitionProcessor {
                 resultingRootRevision, transitionOrder, metrics, false);
     }
 
+    static List<SubscriptionDelta.Entry> applyManagedRootSubscriptionDelta(
+            List<SubscriptionDelta.Entry> previous,
+            SubscriptionDelta delta,
+            long resultingRootRevision,
+            ExternalOrderKey transitionOrder,
+            EngineMetrics metrics) {
+        return applyActiveSubscriptionDelta(
+                previous,
+                delta,
+                List.of(),
+                List.of(),
+                resultingRootRevision,
+                transitionOrder,
+                metrics,
+                true);
+    }
+
     private static List<SubscriptionDelta.Entry> applyActiveSubscriptionDelta(
             List<SubscriptionDelta.Entry> previous,
             SubscriptionDelta delta,

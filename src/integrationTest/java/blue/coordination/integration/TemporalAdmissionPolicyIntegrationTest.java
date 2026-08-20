@@ -27,15 +27,19 @@ final class TemporalAdmissionPolicyIntegrationTest {
     @Test
     void rejectsFrontiersWithoutExactJournalEvidence() throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             ExternalOrderKey forged = ExternalOrderKey.of(
                     List.of(T0 + 999L, "forged-frontier"));
             String counter = resource("examples/clean/counter.yaml");
 
+            // when
             assertThrows(IllegalArgumentException.class, () -> engine.start(
                     "counter-forged",
                     document(counter, "counter-forged"),
                     CoordinationEngine.AdmissionPolicy.FROM_FRONTIER,
                     forged));
+
+            // then
             assertThrows(IllegalArgumentException.class,
                     () -> engine.configureEmbeddedAdmission(
                             "child-forged",
@@ -48,6 +52,7 @@ final class TemporalAdmissionPolicyIntegrationTest {
     void topLevelHistoryPoliciesUseExclusiveVerifiedFrontiers()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             Timeline alice = engine.timeline(
                     "examples/clean-counter/alice", "alice");
             var one = engine.appendAt(alice, counterIncrement(1), T0 + 100L);
@@ -55,6 +60,7 @@ final class TemporalAdmissionPolicyIntegrationTest {
             engine.appendAt(alice, counterIncrement(3), T0 + 300L);
             String counter = resource("examples/clean/counter.yaml");
 
+            // when
             engine.start(
                     "counter-full",
                     document(counter, "counter-full"),
@@ -71,6 +77,7 @@ final class TemporalAdmissionPolicyIntegrationTest {
                     CoordinationEngine.AdmissionPolicy.FROM_NOW,
                     null);
 
+            // then
             assertEquals(6L, integer(engine, "counter-full", "/counter"));
             assertEquals(5L, integer(
                     engine, "counter-frontier", "/counter"));
@@ -85,11 +92,13 @@ final class TemporalAdmissionPolicyIntegrationTest {
     void embeddedBirthFrontierFullAndPassivePoliciesAreHostMetadata()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             Timeline feed = engine.timeline("examples/embedded/A", "alice");
             var one = engine.appendAt(feed, increment(1), T0 + 100L);
             engine.appendAt(feed, increment(2), T0 + 200L);
             engine.appendAt(feed, increment(3), T0 + 300L);
 
+            // when
             engine.configureEmbeddedAdmission(
                     "child-birth", ActivationMode.BIRTH_AT_ATTACHMENT, null);
             attachVariant(engine, "birth", "child-birth", 0L,
@@ -110,6 +119,7 @@ final class TemporalAdmissionPolicyIntegrationTest {
             attachVariant(engine, "passive", "child-passive", 0L,
                     T0 + 1_300L);
 
+            // then
             assertEquals(0L, integer(
                     engine, "parent-birth", "/child/counter"));
             assertEquals(6L, integer(
@@ -132,6 +142,7 @@ final class TemporalAdmissionPolicyIntegrationTest {
     void attachCurrentRequiresExistingCurrentStateAndCompletenessThroughT()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             Timeline feed = engine.timeline("examples/embedded/A", "alice");
             engine.appendAt(feed, increment(1), T0 + 100L);
             engine.appendAt(feed, increment(2), T0 + 200L);
@@ -161,8 +172,11 @@ final class TemporalAdmissionPolicyIntegrationTest {
                     "child-current",
                     ActivationMode.ATTACH_CURRENT_STATE,
                     attachment.sourceOrderKey());
+
+            // when
             engine.dispatch(attachment);
 
+            // then
             assertEquals(3L, integer(
                     engine, parentId, "/child/counter"));
             assertEquals(1L, engine.session(parentId).epoch());
@@ -174,6 +188,7 @@ final class TemporalAdmissionPolicyIntegrationTest {
     void exactOccurrencePlansSelectIndependentEpochs()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             Timeline feed = engine.timeline("examples/embedded/A", "alice");
             engine.appendAt(feed, increment(1), T0 + 100L);
             engine.appendAt(feed, increment(-1), T0 + 200L);
@@ -184,11 +199,13 @@ final class TemporalAdmissionPolicyIntegrationTest {
             ExactValue first = engine.history(childId).get(1).after();
             ExactValue latest = engine.history(childId).get(3).after();
 
+            // when
             attachAtEpoch(engine, "first", childId, first, 1L,
                     T0 + 1_000L, true);
             attachAtEpoch(engine, "latest", childId, latest, 3L,
                     T0 + 1_100L, true);
 
+            // then
             assertEquals(3L, engine.session("parent-first").epoch());
             assertEquals(1L, engine.session("parent-latest").epoch());
             assertEquals(1L, integer(engine, "parent-first", "/child/counter"));
@@ -199,6 +216,7 @@ final class TemporalAdmissionPolicyIntegrationTest {
     @Test
     void failedPublicationRetainsExactOccurrencePlan() throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             String childId = "child-retry-plan";
             ExactValue child = engine.registerType(child(childId, 0L));
             TimelineEntry attachment = attachAtEpoch(
@@ -216,10 +234,12 @@ final class TemporalAdmissionPolicyIntegrationTest {
                     notReady.code());
             engine.clearFailureInjection();
 
+            // when
             engine.dispatch(attachment);
+
+            // then
             assertEquals(SessionStatus.READY,
                     engine.session("parent-retry-plan").status());
-
             assertEquals(2L, engine.session("parent-retry-plan").epoch());
             assertEquals(0L, integer(
                     engine, "parent-retry-plan", "/child/counter"));

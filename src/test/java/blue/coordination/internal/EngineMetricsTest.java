@@ -2,6 +2,7 @@ package blue.coordination.internal;
 
 import blue.coordination.api.CoordinationMetrics;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -19,10 +20,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class EngineMetricsTest {
     @Test
     void absentMeasurementsReadAsZeroAndNamesAreValidated() {
+        // given
         EngineMetrics metrics = new EngineMetrics();
 
-        assertEquals(0L, metrics.counter("missing"));
-        assertEquals(0L, metrics.phaseNanos("missing"));
+        // when
+        long missingCounter = metrics.counter("missing");
+        long missingPhase = metrics.phaseNanos("missing");
+
+        // then
+        assertEquals(0L, missingCounter);
+        assertEquals(0L, missingPhase);
         assertThrows(IllegalArgumentException.class,
                 () -> metrics.increment(" "));
         assertThrows(NullPointerException.class,
@@ -31,19 +38,30 @@ final class EngineMetricsTest {
 
     @Test
     void negativeCounterAndTimerDeltasFailClosed() {
+        // given
         EngineMetrics metrics = new EngineMetrics();
 
+        // when
+        Executable negativeCounter = () -> metrics.add("work", -1L);
+        Executable negativeTimer = () -> metrics.addNanos("phase", -1L);
+
+        // then
         assertThrows(IllegalArgumentException.class,
-                () -> metrics.add("work", -1L));
+                negativeCounter);
         assertThrows(IllegalArgumentException.class,
-                () -> metrics.addNanos("phase", -1L));
+                negativeTimer);
     }
 
     @Test
     void timedRecordsSuccessfulAndFailedWork() {
+        // given
         EngineMetrics metrics = new EngineMetrics();
 
-        assertEquals("done", metrics.timed("success", () -> "done"));
+        // when
+        String successful = metrics.timed("success", () -> "done");
+
+        // then
+        assertEquals("done", successful);
         assertThrows(IllegalStateException.class,
                 () -> metrics.timed("failure", () -> {
                     throw new IllegalStateException("expected");
@@ -55,13 +73,18 @@ final class EngineMetricsTest {
 
     @Test
     void snapshotsAreImmutableAndUnaffectedByLaterUpdates() {
+        // given
+
         EngineMetrics metrics = new EngineMetrics();
         metrics.add("work", 2L);
         metrics.addNanos("phase", 3L);
         EngineMetrics.MetricsSnapshot snapshot = metrics.snapshot();
         metrics.increment("work");
+
+        // when
         metrics.addNanos("phase", 4L);
 
+        // then
         assertEquals(2L, snapshot.counters().get("work"));
         assertEquals(3L, snapshot.phaseNanos().get("phase"));
         assertThrows(UnsupportedOperationException.class,
@@ -74,6 +97,8 @@ final class EngineMetricsTest {
 
     @Test
     void snapshotsProjectCanonicalCountersAndRetainInternalDeltas() {
+        // given
+
         EngineMetrics metrics = new EngineMetrics();
         metrics.add("journal.entriesStoredWhole", 2L);
         metrics.add("routing.lookups", 3L);
@@ -92,8 +117,10 @@ final class EngineMetricsTest {
         metrics.add("temporal.catchUpBarriersCompleted", 14L);
         metrics.add("diagnostic.internalDelta", 15L);
 
+        // when
         Map<String, Long> snapshot = metrics.snapshot().counters();
 
+        // then
         assertEquals(2L, snapshot.get("ENTRIES_STORED_WHOLE"));
         assertEquals(3L, snapshot.get("ROUTE_INDEX_LOOKUPS"));
         assertEquals(4L, snapshot.get("GRAPH_SNAPSHOTS_REUSED"));
@@ -120,6 +147,7 @@ final class EngineMetricsTest {
 
     @Test
     void forbiddenWorkSourcesCannotDisappearBehindDefaultZero() {
+        // given
         EngineMetrics metrics = new EngineMetrics();
         Map<String, CoordinationMetrics.Counter> sources = Map.of(
                 "temporal.unrelatedDocumentReads",
@@ -143,21 +171,26 @@ final class EngineMetricsTest {
                 CoordinationMetrics.Counter
                         .CHILD_PROCESS_RERUNS_ON_PARENT_RETRY);
 
+        // when
         sources.forEach((source, ignored) -> metrics.increment(source));
         Map<String, Long> snapshot = metrics.publicSnapshot().counters();
 
+        // then
         sources.values().forEach(counter -> assertEquals(
                 1L, snapshot.get(counter.name()), counter.name()));
     }
 
     @Test
     void concurrentUpdatesAreNotLost() throws Exception {
+        // given
         EngineMetrics metrics = new EngineMetrics();
         int workers = 8;
         int increments = 1_000;
         ExecutorService executor = Executors.newFixedThreadPool(workers);
         CountDownLatch start = new CountDownLatch(1);
         List<Future<?>> futures = new ArrayList<>();
+
+        // when
         try {
             for (int worker = 0; worker < workers; worker++) {
                 futures.add(executor.submit(() -> {
@@ -176,6 +209,7 @@ final class EngineMetricsTest {
             executor.shutdownNow();
         }
 
+        // then
         assertEquals((long) workers * increments,
                 metrics.counter("concurrent"));
     }

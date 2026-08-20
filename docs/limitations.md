@@ -1,5 +1,21 @@
 # Known limitations
 
+- The rc.3 artifact is a bounded external-pilot release candidate resolved
+  from Maven Central. It is not stable, production-ready, or a production MyOS
+  runtime.
+- Managed-child admission from an operation result supports only new
+  `FROM_NOW` lineages with exact draft/request evidence and a complete set of
+  effective occurrence paths. Imported draft epochs and
+  full-history/frontier/attach-current/passive activation are unsupported and
+  fail closed. There is no fallback to legacy child/parent admission.
+- The supported external-pilot profile is one JVM, in-memory, sequential drain,
+  public-Root-scope closures, and bounded cyclic components. It has no
+  fresh-process durable recovery, provider-completeness adapter, provider-backed
+  Mandate resolver, parallel/distributed scheduling, or stable latency SLA.
+- Production MyOS still requires durable stores, exact restart recovery,
+  authorization and tenant isolation, provider completeness, outbox recovery,
+  operational backpressure, and production observability. Those are separate
+  adapter/profile phases and are not simulated by the SDK.
 - Managed embedded-document epochs and historical synchronization are a
   next-version Coordination temporal profile. They are not claimed as frozen
   Contracts 1.0 semantics.
@@ -9,6 +25,11 @@
   subscription surface remains a frozen-API gap.
 - Journal completeness is proven only for the current in-memory journal. There
   is no durable or distributed transaction protocol.
+- The copy-on-write multi-document publication API is currently package
+  internal and in-memory. It proves selected-head and managed-topology CAS plus
+  one-swap rollback, but `SequentialDrainCoordinator` is not wired to it and no
+  serialized adapter yet reloads its inventory, component state, outbox,
+  checkpoint evidence, or publication receipts.
 - The pinned generic Timeline Entry has no universal literal `documentId`
   field. This is an optional generalized targeting-profile gap, not a blocker
   for append-once/environment-derived routing: concrete Channel/message types
@@ -28,8 +49,9 @@
   cursor, epoch, entry-frame, commit-companion, and provider-completeness
   evidence is durably available.
 - Drain is intentionally sequential. Parallel document processing, leasing,
-  distributed scheduling, SCC planning, and caller-selected target sets are out
-  of scope.
+  distributed scheduling, a second SCC planner, and caller-selected recipient
+  sets are out of scope. The normal SDK may select an exact operation target;
+  the environment still derives the resulting recipients.
 - `DrainBudget` bounds selected entries and committed PROCESS transitions. It
   cannot preempt one frozen processor call, does not count epoch-zero
   INITIALIZE inside an atomic attachment, and is not a hard latency deadline.
@@ -41,10 +63,9 @@
 - The retained Round 13 campaign failed append p95 (18.680667 ms against a
   1.000000 ms hard limit) and Coordination-host p95 (872.356126 ms against a
   250.000000 ms hard limit); route and total passed hard, while all four metrics
-  missed their preferred targets. The exact 3.0.0-rc.1 workflow policy permits
-  publication only as `PASS_WITH_KNOWN_PERFORMANCE_LIMITATION`. It does not
-  claim a latency pass, cannot apply to a stable release, and does not waive any
-  non-performance release gate.
+  missed their preferred targets. The historical 3.0.0-rc.1 workflow policy
+  permitted only `PASS_WITH_KNOWN_PERFORMANCE_LIMITATION`. It does not claim a
+  latency pass and cannot be applied to rc.3 or a stable release.
 - Immutable graph generations structurally share unchanged forward/reverse
   buckets and binding records, but a topology-changing publication still makes
   shallow copies of the three top-level in-memory directory maps. This RC does

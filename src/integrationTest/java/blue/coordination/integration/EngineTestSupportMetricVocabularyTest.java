@@ -13,18 +13,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class EngineTestSupportMetricVocabularyTest {
     @Test
     void unknownCounterAndTimerNamesCannotMasqueradeAsZero() {
-        EngineTestSupport.MetricDelta work = delta(
-                snapshot(
-                        Map.of(
-                                "REQUEST_FRAGMENTS", 0L,
-                                "temporal.parentEpochApplications", 7L),
-                        Map.of("process.frozen", 11L)),
-                snapshot(
-                        Map.of(
-                                "REQUEST_FRAGMENTS", 0L,
-                                "temporal.parentEpochApplications", 7L),
-                        Map.of("process.frozen", 11L)));
+        // given
+        EngineMetrics.MetricsSnapshot before = snapshot(
+                Map.of(
+                        "REQUEST_FRAGMENTS", 0L,
+                        "temporal.parentEpochApplications", 7L),
+                Map.of("process.frozen", 11L));
+        EngineMetrics.MetricsSnapshot after = snapshot(
+                Map.of(
+                        "REQUEST_FRAGMENTS", 0L,
+                        "temporal.parentEpochApplications", 7L),
+                Map.of("process.frozen", 11L));
 
+        // when
+        EngineTestSupport.MetricDelta work = delta(
+                before, after);
+
+        // then
         assertEquals(0L, work.counter("REQUEST_FRAGMENTS"),
                 "a registered canonical counter may legitimately stay zero");
         assertEquals(0L,

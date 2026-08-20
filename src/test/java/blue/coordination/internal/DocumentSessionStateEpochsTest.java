@@ -22,12 +22,17 @@ final class DocumentSessionStateEpochsTest {
 
     @Test
     void recurrentExactStateRequiresAnExplicitEpoch() {
+        // given
+
         ExactValue x = exact("X");
         ExactValue y = exact("Y");
         DocumentSession.StateEpochs epochs = new DocumentSession.StateEpochs();
         epochs.record(revision(4L, x));
+
+        // when
         epochs.record(revision(5L, y));
 
+        // then
         assertEquals(4L, epochs.resolve(CHILD, "authored", x.blueId()));
 
         epochs.record(revision(7L, x));
@@ -40,16 +45,23 @@ final class DocumentSessionStateEpochsTest {
 
     @Test
     void authoredStateMatchingInitializedEpochZeroKeepsPreInitCursor() {
+        // given
+
         ExactValue authored = exact("authored");
         DocumentSession.StateEpochs epochs = new DocumentSession.StateEpochs();
+
+        // when
         epochs.record(revision(0L, authored));
 
+        // then
         assertEquals(-1L, epochs.resolve(
                 CHILD, authored.blueId(), authored.blueId()));
     }
 
     @Test
     void explicitEpochSelectsEitherOccurrenceOfARepeatedExactState() {
+        // given
+
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.create()) {
             DocumentSession session = engine.start(CHILD, """
@@ -58,6 +70,8 @@ final class DocumentSessionStateEpochsTest {
                     """);
             ExactValue x = exact("X");
             ExactValue previous = session.currentRevision().after();
+
+            // when
             for (long epoch = 1L; epoch <= 7L; epoch++) {
                 ExactValue after = epoch == 4L || epoch == 7L
                         ? x : exact("state-" + epoch);
@@ -70,6 +84,7 @@ final class DocumentSessionStateEpochsTest {
                 previous = after;
             }
 
+            // then
             assertEquals(4L, session.resolveAdmissionEpoch(x.blueId(), 4L));
             assertEquals(7L, session.resolveAdmissionEpoch(x.blueId(), 7L));
             assertThrows(IllegalStateException.class,
@@ -81,13 +96,18 @@ final class DocumentSessionStateEpochsTest {
 
     @Test
     void readyPublicationRequiresTheCurrentGraphEpoch() {
+        // given
+
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.create()) {
+
+            // when
             DocumentSession session = engine.start(CHILD, """
                     documentId: recurrent-child
                     state: initial
                     """);
 
+            // then
             assertEquals(0L, session.epoch());
             assertEquals(0L, session.readyEpoch());
             assertEquals(0L, session.graphPublishedEpoch());
@@ -123,6 +143,8 @@ final class DocumentSessionStateEpochsTest {
 
     @Test
     void applicationReadRejectsEachStaleLocalPublicationEpoch() {
+        // given
+
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.create()) {
             DocumentSession session = engine.start(CHILD, """
@@ -137,8 +159,11 @@ final class DocumentSessionStateEpochsTest {
                     session.activeSubscriptions(),
                     "synthetic|application-read");
 
+            // when
             session.restoreCoordinationState(
                     SessionStatus.READY, session.readyThrough(), 0L, 1L);
+
+            // then
             assertNotReady(engine);
 
             session.restoreCoordinationState(
@@ -153,6 +178,8 @@ final class DocumentSessionStateEpochsTest {
 
     @Test
     void restartNormalizesLegacyReadyWithPendingTopLevelAdmission() {
+        // given
+
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.create()) {
             engine.makeHistoricalUnavailable("provider window pending");
@@ -164,7 +191,11 @@ final class DocumentSessionStateEpochsTest {
                     """,
                     CoordinationEngine.AdmissionPolicy.FULL_HISTORY,
                     null);
+
+            // when
             DocumentSession session = engine.session(CHILD.value());
+
+            // then
             assertEquals(SessionStatus.CATCHING_UP, session.status());
 
             session.restoreCoordinationState(

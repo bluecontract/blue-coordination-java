@@ -12,6 +12,8 @@ import blue.language.merge.ResolvedSnapshot;
 import blue.language.model.Node;
 import blue.language.model.NodeWireForm;
 import blue.language.processor.BlueContracts;
+import blue.language.processor.ContractProcessorRegistry;
+import blue.language.processor.ContractProcessorRegistryBuilder;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.DocumentProcessor;
 import blue.language.processor.EffectiveFragmentationCatalog;
@@ -22,7 +24,10 @@ import blue.language.processor.PlatformProcessingResult;
 import blue.language.processor.SubscriptionDelta;
 import blue.language.processor.registry.BlueRuntimeTypeRegistry;
 import blue.language.processor.registry.RuntimeTypeAliases;
+import blue.language.provider.CyclicAwareNodeProvider;
+import blue.language.provider.CyclicSetProofResult;
 import blue.language.provider.NodeProvider;
+import blue.language.provider.NodeProviderResult;
 import blue.language.provider.SequentialNodeProvider;
 import blue.language.runtime.BlueLanguage;
 import blue.language.snapshot.FrozenNode;
@@ -46,6 +51,9 @@ import java.util.Set;
  * current generated Repository.
  */
 final class BlueRuntime implements AutoCloseable {
+    static final String PROVIDER_EXACT_NODE_READS =
+            "provider.exactNodeReads";
+
     private final NodeProvider nodeProvider;
     private final BlueLanguage language;
     private final BlueContracts contracts;
@@ -76,11 +84,14 @@ final class BlueRuntime implements AutoCloseable {
             EngineMetrics metrics) {
         BlueRepository repository = BlueRepository.current();
         List<NodeProvider> providers = new ArrayList<>();
-        providers.add(Objects.requireNonNull(wholeObjects, "wholeObjects"));
-        providers.add(BlueRuntimeTypeRegistry.getDefault()
-                .asProcessorSnapshotProvider());
-        providers.add(repository.nodeProvider());
-        providers.add(new RepositoryExactNodeProvider(repository));
+        providers.add(metered(
+                Objects.requireNonNull(wholeObjects, "wholeObjects"),
+                metrics));
+        providers.add(metered(BlueRuntimeTypeRegistry.getDefault()
+                .asProcessorSnapshotProvider(), metrics));
+        providers.add(metered(repository.nodeProvider(), metrics));
+        providers.add(metered(
+                new RepositoryExactNodeProvider(repository), metrics));
         NodeProvider nodeProvider = new SequentialNodeProvider(providers);
 
         Map<String, String> imports = new LinkedHashMap<>();
@@ -96,14 +107,22 @@ final class BlueRuntime implements AutoCloseable {
                 CoordinationProcessorOptions.builder()
                         .language(language)
                         .build();
-        BlueContracts contracts = CoordinationProcessors.contracts(
-                language, options);
-        DocumentProcessor processor = CoordinationProcessors.configure(
-                        DocumentProcessor.builder()
-                                .runtimeAccess(contracts.runtimeAccess()),
+        ContractProcessorRegistry runtimeRegistry =
+                CoordinationProcessors.configure(
+                        ContractProcessorRegistryBuilder.create()
+                                .registerDefaults(),
                         options)
-                .runtimeRegistryIdentity(
-                        "blue.coordination/in-memory-runtime/3.0")
+                .build();
+        String runtimeRegistryIdentity =
+                runtimeRegistry.generationIdentity();
+        BlueContracts contracts = BlueContracts.builder(
+                        language.processing())
+                .runtimeRegistry(runtimeRegistry)
+                .build();
+        DocumentProcessor processor = DocumentProcessor.builder()
+                .runtimeAccess(contracts.runtimeAccess())
+                .runtimeRegistry(runtimeRegistry)
+                .runtimeRegistryIdentity(runtimeRegistryIdentity)
                 .build();
         return new BlueRuntime(
                 nodeProvider, language, contracts, processor, metrics);
@@ -255,6 +274,17 @@ final class BlueRuntime implements AutoCloseable {
         return nodeProvider;
     }
 
+    /** Returns the exact configured processor borrowed by closure execution. */
+    DocumentProcessor documentProcessor() {
+        ensureOpen();
+        return processor;
+    }
+
+    EngineMetrics metrics() {
+        ensureOpen();
+        return metrics;
+    }
+
     @Override
     public void close() {
         if (closed) {
@@ -280,6 +310,65 @@ final class BlueRuntime implements AutoCloseable {
         } catch (Exception failure) {
             throw new IllegalStateException(
                     "Could not close Blue runtime component", failure);
+        }
+    }
+
+    private static NodeProvider metered(
+            NodeProvider delegate,
+            EngineMetrics metrics) {
+        return delegate instanceof CyclicAwareNodeProvider cyclic
+                ? new MeteredCyclicAwareNodeProvider(
+                        delegate, cyclic, metrics)
+                : new MeteredNodeProvider(delegate, metrics);
+    }
+
+    /** Transparent leaf meter preserving the provider graph seen by Language. */
+    private static class MeteredNodeProvider implements NodeProvider {
+        private final NodeProvider delegate;
+        private final EngineMetrics metrics;
+
+        private MeteredNodeProvider(
+                NodeProvider delegate,
+                EngineMetrics metrics) {
+            this.delegate = Objects.requireNonNull(delegate, "delegate");
+            this.metrics = Objects.requireNonNull(metrics, "metrics");
+        }
+
+        @Override
+        public List<Node> fetchByBlueId(String blueId) {
+            metrics.increment(PROVIDER_EXACT_NODE_READS);
+            return delegate.fetchByBlueId(blueId);
+        }
+
+        @Override
+        public NodeProviderResult fetchResultByBlueId(String blueId) {
+            metrics.increment(PROVIDER_EXACT_NODE_READS);
+            return delegate.fetchResultByBlueId(blueId);
+        }
+    }
+
+    /** Leaf meter retaining complete cyclic-set proof capability. */
+    private static final class MeteredCyclicAwareNodeProvider
+            extends MeteredNodeProvider implements CyclicAwareNodeProvider {
+        private final CyclicAwareNodeProvider cyclicDelegate;
+
+        private MeteredCyclicAwareNodeProvider(
+                NodeProvider delegate,
+                CyclicAwareNodeProvider cyclicDelegate,
+                EngineMetrics metrics) {
+            super(delegate, metrics);
+            this.cyclicDelegate = Objects.requireNonNull(
+                    cyclicDelegate, "cyclicDelegate");
+        }
+
+        @Override
+        public boolean hasVerifiedContentForBlueId(String blueId) {
+            return cyclicDelegate.hasVerifiedContentForBlueId(blueId);
+        }
+
+        @Override
+        public CyclicSetProofResult cyclicSetProofFor(String blueId) {
+            return cyclicDelegate.cyclicSetProofFor(blueId);
         }
     }
 

@@ -39,8 +39,9 @@ final class PublicTemporalFeederIntegrationTest {
     @Test
     void exactNodeAdmissionIsIdempotentAndRejectsClaimedIdentityForgery()
             throws Exception {
-        try (CoordinationEngine source = CoordinationEngine.inMemory();
-                CoordinationEngine target = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine source = CoordinationEngine.legacyInMemory();
+                CoordinationEngine target = CoordinationEngine.legacyInMemory()) {
+            // given
             Timeline sourceAlice = source.registerTimeline(
                     ALICE_TIMELINE, "alice");
             TimelineEntry canonical = source.append(
@@ -52,6 +53,7 @@ final class PublicTemporalFeederIntegrationTest {
             target.exactValue("amount: 3");
             Node exactEntry = canonical.exactEvent().copyNode();
 
+            // when
             TimelineAppendReceipt admitted =
                     target.appendTimelineEntry(exactEntry);
             assertTrue(admitted.stored());
@@ -103,6 +105,8 @@ final class PublicTemporalFeederIntegrationTest {
             target.drain();
             TimelineAppendReceipt replayAfterDrain =
                     target.appendTimelineEntry(canonical.exactEvent().copyNode());
+
+            // then
             assertFalse(replayAfterDrain.stored());
             assertEquals(1, replayAfterDrain.journalEntryCount());
         }
@@ -111,8 +115,9 @@ final class PublicTemporalFeederIntegrationTest {
     @Test
     void oneExactAdmissionBuildsAndStoresOneEntryForSeveralRecipients()
             throws Exception {
-        try (CoordinationEngine source = CoordinationEngine.inMemory();
-                CoordinationEngine target = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine source = CoordinationEngine.legacyInMemory();
+                CoordinationEngine target = CoordinationEngine.legacyInMemory()) {
+            // given
             Timeline sourceAlice = source.registerTimeline(
                     ALICE_TIMELINE, "alice");
             TimelineEntry canonical = source.append(
@@ -131,11 +136,16 @@ final class PublicTemporalFeederIntegrationTest {
             CoordinationTestControl.MetricsSnapshot before =
                     control.metricsSnapshot();
 
+            // when
             TimelineAppendReceipt admission = target.appendTimelineEntry(
                     canonical.exactEvent().copyNode());
             CoordinationTestControl.MetricsSnapshot after =
                     control.metricsSnapshot();
+            int routeTargetCountAfterAdmission =
+                    target.routeTargetCount(admission.entry());
+            ProcessingDrainReceipt drained = target.drain();
 
+            // then
             assertTrue(admission.stored());
             assertEquals(canonical.blueId(), admission.entry().blueId());
             assertEquals(1, admission.journalEntryCount());
@@ -145,9 +155,8 @@ final class PublicTemporalFeederIntegrationTest {
                     before, after, "wholeObjectStore.insertions"));
             assertEquals(1L, diagnosticDelta(
                     before, after, "journal.entriesStoredWhole"));
-            assertEquals(2, target.routeTargetCount(admission.entry()));
+            assertEquals(2, routeTargetCountAfterAdmission);
 
-            ProcessingDrainReceipt drained = target.drain();
             assertEquals(List.of(COUNTER_A, COUNTER_B),
                     drained.outcomesFor(admission.entry().blueId()).stream()
                             .map(outcome -> outcome.documentId())
@@ -160,7 +169,8 @@ final class PublicTemporalFeederIntegrationTest {
 
     @Test
     void normalReadsFailClosedUntilAuditStateBecomesReady() throws Exception {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
+            // given
             Timeline alice = engine.registerTimeline(ALICE_TIMELINE, "alice");
             engine.append(alice, Operation.yaml(
                     "increment", "aliceChannel", "amount: 3"));
@@ -184,8 +194,12 @@ final class PublicTemporalFeederIntegrationTest {
             assertEquals(1, engine.history(COUNTER).size(),
                     "audit history stays available during catch-up");
 
+            // when
             control.makeHistoricalAvailable();
-            assertTrue(engine.drain().quiescent());
+            boolean quiescent = engine.drain().quiescent();
+
+            // then
+            assertTrue(quiescent);
             assertEquals(SessionStatus.READY,
                     engine.document(COUNTER).status());
             assertEquals(3L, counter(engine));
@@ -195,7 +209,8 @@ final class PublicTemporalFeederIntegrationTest {
     @Test
     void boundedDrainResumesAnOpenEntryWithoutRepeatingFrozenProcess()
             throws Exception {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
+            // given
             Timeline alice = engine.registerTimeline(ALICE_TIMELINE, "alice");
             engine.startDocument(COUNTER_A, counterYaml(COUNTER_A));
             engine.startDocument(COUNTER_B, counterYaml(COUNTER_B));
@@ -208,6 +223,7 @@ final class PublicTemporalFeederIntegrationTest {
             long callsBefore = engine.metrics().counter(
                     CoordinationMetrics.Counter.EXTERNAL_PROCESS_CALLS);
 
+            // when
             ProcessingDrainReceipt transitionPause = engine.drain(
                     new CoordinationEngine.DrainBudget(1L, 10L));
             assertTrue(transitionPause.paused());
@@ -234,6 +250,8 @@ final class PublicTemporalFeederIntegrationTest {
 
             ProcessingDrainReceipt completed = engine.drain(
                     new CoordinationEngine.DrainBudget(10L, 1L));
+
+            // then
             assertFalse(completed.paused());
             assertFalse(completed.blocked());
             assertTrue(completed.quiescent());
@@ -257,7 +275,8 @@ final class PublicTemporalFeederIntegrationTest {
 
     @Test
     void appendStoresWorkWithoutInvokingProcess() throws Exception {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
+            // given
             Timeline alice = engine.registerTimeline(
                     ALICE_TIMELINE, "alice");
             engine.startDocument(
@@ -265,18 +284,23 @@ final class PublicTemporalFeederIntegrationTest {
             long processBefore = engine.metrics().counter(
                     CoordinationMetrics.Counter.EXTERNAL_PROCESS_CALLS);
 
+            // when
             TimelineEntry entry = engine.append(
                     alice,
                     Operation.yaml(
                             "increment", "aliceChannel", "amount: 3"));
-
-            assertEquals(1, engine.metrics().journalEntryCount());
-            assertEquals(0L, counter(engine));
-            assertEquals(0L, engine.document(COUNTER).epoch());
-            assertEquals(processBefore, engine.metrics().counter(
-                    CoordinationMetrics.Counter.EXTERNAL_PROCESS_CALLS));
-
+            int journalEntriesAfterAppend = engine.metrics().journalEntryCount();
+            long counterAfterAppend = counter(engine);
+            long epochAfterAppend = engine.document(COUNTER).epoch();
+            long processAfterAppend = engine.metrics().counter(
+                    CoordinationMetrics.Counter.EXTERNAL_PROCESS_CALLS);
             ProcessingDrainReceipt drained = engine.drain();
+
+            // then
+            assertEquals(1, journalEntriesAfterAppend);
+            assertEquals(0L, counterAfterAppend);
+            assertEquals(0L, epochAfterAppend);
+            assertEquals(processBefore, processAfterAppend);
             assertEquals(List.of(entry.blueId()), entryIds(
                     drained.processedEntries()));
             assertEquals(1, drained.outcomesFor(entry.blueId()).size());
@@ -291,8 +315,9 @@ final class PublicTemporalFeederIntegrationTest {
     @Test
     void exactDocumentTargetUsesCurrentOrAnyRetainedEpochWithoutProcessingOnAppend()
             throws Exception {
-        try (CoordinationEngine source = CoordinationEngine.inMemory();
-                CoordinationEngine target = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine source = CoordinationEngine.legacyInMemory();
+                CoordinationEngine target = CoordinationEngine.legacyInMemory()) {
+            // given
             Timeline sourceAlice = source.registerTimeline(
                     ALICE_TIMELINE, "alice");
             TimelineEntry template1 = source.appendAt(sourceAlice,
@@ -316,6 +341,7 @@ final class PublicTemporalFeederIntegrationTest {
             long processBefore = target.metrics().counter(
                     CoordinationMetrics.Counter.EXTERNAL_PROCESS_CALLS);
 
+            // when
             TimelineAppendReceipt current = target.appendTimelineEntry(
                     targeted(template1, initialA, true, null));
             TimelineAppendReceipt staleExact = target.appendTimelineEntry(
@@ -327,9 +353,12 @@ final class PublicTemporalFeederIntegrationTest {
             TimelineAppendReceipt implicitRetained = target.appendTimelineEntry(
                     targeted(template4, initialA, null,
                             retained.entry().blueId()));
+            long processAfterAppend = target.metrics().counter(
+                    CoordinationMetrics.Counter.EXTERNAL_PROCESS_CALLS);
+            ProcessingDrainReceipt drained = target.drain();
 
-            assertEquals(processBefore, target.metrics().counter(
-                    CoordinationMetrics.Counter.EXTERNAL_PROCESS_CALLS));
+            // then
+            assertEquals(processBefore, processAfterAppend);
             assertEquals("external-provider", current.entry().exactEvent()
                     .canonicalAt("/source").getValue());
             assertEquals(initialA.blueId(), current.entry().exactEvent()
@@ -338,7 +367,6 @@ final class PublicTemporalFeederIntegrationTest {
                     .canonicalAt("/message/requireExactDocumentVersion")
                     .getValue());
 
-            ProcessingDrainReceipt drained = target.drain();
             assertEquals(List.of(current.entry().blueId(),
                             staleExact.entry().blueId(),
                             retained.entry().blueId(),
@@ -364,6 +392,7 @@ final class PublicTemporalFeederIntegrationTest {
     void drainSelectsShuffledCrossTimelineEntriesByExternalOrder()
             throws Exception {
         try (CoordinationEngine engine = counterEngine()) {
+            // given
             Timeline alice = engine.registerTimeline(
                     ALICE_TIMELINE, "alice");
             Timeline bob = engine.registerTimeline(BOB_TIMELINE, "bob");
@@ -391,8 +420,10 @@ final class PublicTemporalFeederIntegrationTest {
                             early.globalSequence(),
                             late.globalSequence()));
 
+            // when
             ProcessingDrainReceipt drained = engine.drain();
 
+            // then
             assertEquals(
                     List.of(early.blueId(), middle.blueId(), late.blueId()),
                     entryIds(drained.processedEntries()));
@@ -408,6 +439,7 @@ final class PublicTemporalFeederIntegrationTest {
     void drainThroughProcessesEveryEarlierEntryAndIsIdempotent()
             throws Exception {
         try (CoordinationEngine engine = counterEngine()) {
+            // given
             Timeline alice = engine.registerTimeline(
                     ALICE_TIMELINE, "alice");
             Timeline bob = engine.registerTimeline(BOB_TIMELINE, "bob");
@@ -428,6 +460,7 @@ final class PublicTemporalFeederIntegrationTest {
                             "increment", "aliceChannel", "amount: 10"),
                     T0 + 300L);
 
+            // when
             ProcessingDrainReceipt first = engine.drainThrough(
                     middle.sourceOrderKey());
             assertEquals(
@@ -450,6 +483,8 @@ final class PublicTemporalFeederIntegrationTest {
 
             ProcessingDrainReceipt remainder = engine.drainThrough(
                     late.sourceOrderKey());
+
+            // then
             assertEquals(
                     List.of(late.blueId()),
                     entryIds(remainder.processedEntries()));
@@ -460,7 +495,7 @@ final class PublicTemporalFeederIntegrationTest {
     }
 
     private static CoordinationEngine counterEngine() throws Exception {
-        CoordinationEngine engine = CoordinationEngine.inMemory();
+        CoordinationEngine engine = CoordinationEngine.legacyInMemory();
         try {
             engine.startDocument(
                     COUNTER, resource("examples/clean/counter.yaml"));

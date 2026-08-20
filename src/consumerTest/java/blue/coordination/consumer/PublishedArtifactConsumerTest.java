@@ -22,7 +22,8 @@ final class PublishedArtifactConsumerTest {
 
     @Test
     void counterExternalApiExample() throws Exception {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
+            // given
             Timeline alice = engine.registerTimeline(
                     "examples/clean-counter/alice", "alice");
             Timeline bob = engine.registerTimeline(
@@ -34,12 +35,16 @@ final class PublishedArtifactConsumerTest {
                     "increment", "aliceChannel", "amount: 3"));
             engine.append(bob, Operation.yaml(
                     "decrement", "bobChannel", "amount: 1"));
+
+            // when
             var first = engine.drain(
                     new CoordinationEngine.DrainBudget(1L, 1L));
-            assertTrue(first.paused());
-            assertEquals(1L, first.committedProcessTransitions());
             var second = engine.drain(
                     new CoordinationEngine.DrainBudget(1L, 1L));
+
+            // then
+            assertTrue(first.paused());
+            assertEquals(1L, first.committedProcessTransitions());
             assertTrue(second.quiescent());
             assertEquals(1L, second.committedProcessTransitions());
             assertEquals(engine.document(counter).blueId(),
@@ -50,15 +55,20 @@ final class PublishedArtifactConsumerTest {
 
     @Test
     void largeOrdinaryRequestAppendsWholeWithoutTarget() throws Exception {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
+            // given
             Timeline unmatched = engine.registerTimeline(
                     "consumer/unmatched", "consumer");
             ExactValue payNote = engine.exactValue(
                     resource("examples/clean/large-paynote.yaml"));
             ExactValue request = engine.referenceRequest("payload", payNote);
+
+            // when
             var entry = engine.append(
                     unmatched,
                     Operation.exact("store", "unmatchedChannel", request));
+
+            // then
             assertEquals(0, engine.routeTargetCount(entry));
             assertEquals(1, engine.metrics().journalEntryCount());
             assertEquals(0L, engine.metrics().counter(
@@ -70,7 +80,8 @@ final class PublishedArtifactConsumerTest {
 
     @Test
     void largeHostCanAttachAuthorizeAndConfirmPayNote() throws Exception {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
+            // given
             Timeline alice = engine.registerTimeline(
                     "examples/large-order/alice", "alice");
             Timeline admin = engine.registerTimeline(
@@ -83,6 +94,8 @@ final class PublishedArtifactConsumerTest {
                     "examples/clean/large-paynote.yaml");
             engine.startDocument(
                     host, resource("examples/clean/large-order-host.yaml"));
+
+            // when
             appendAndDrain(engine,
                     alice,
                     Operation.exact(
@@ -114,6 +127,7 @@ final class PublishedArtifactConsumerTest {
                             "providerChannel",
                             "confirmationReference: CONSUMER-DINNER"));
 
+            // then
             assertEquals("Authorized", text(
                     engine, payNote, "/authorization/state"));
             assertEquals("Authorized", text(
@@ -127,7 +141,8 @@ final class PublishedArtifactConsumerTest {
 
     @Test
     void existingSharedChildAdvancesTwoParents() throws Exception {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
+            // given
             String childYaml = resource(
                     "examples/clean/embedded-counter.yaml");
             Timeline childTimeline = engine.registerTimeline(
@@ -152,6 +167,8 @@ final class PublishedArtifactConsumerTest {
                     "bob-two"));
             ExactValue childReference = engine.referenceRequest(
                     "document", engine.exactValue(childYaml));
+
+            // when
             appendAndDrain(engine, firstTimeline, Operation.exact(
                     "attachChild", "ownerChannel", childReference));
             appendAndDrain(engine, secondTimeline, Operation.exact(
@@ -159,6 +176,7 @@ final class PublishedArtifactConsumerTest {
             appendAndDrain(engine, childTimeline, Operation.yaml(
                     "increment", "ownerChannel", "amount: 5"));
 
+            // then
             assertEquals(7L, integer(engine, child, "/counter"));
             assertEquals(7L, integer(engine, first, "/child/counter"));
             assertEquals(7L, integer(engine, second, "/child/counter"));
@@ -167,7 +185,8 @@ final class PublishedArtifactConsumerTest {
 
     @Test
     void nbaHistoricalGameCatchesStatisticsUp() throws Exception {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
+            // given
             String gameYaml = resource("examples/clean/nba-game.yaml");
             Timeline gameFeed = engine.registerTimeline(
                     "examples/nba/game-2016-lal-min", "nba-feed");
@@ -184,6 +203,8 @@ final class PublishedArtifactConsumerTest {
             engine.startDocument(
                     statistics,
                     resource("examples/clean/nba-statistics.yaml"));
+
+            // when
             appendAndDrain(engine,
                     commissioner,
                     Operation.exact(
@@ -192,6 +213,7 @@ final class PublishedArtifactConsumerTest {
                             engine.referenceRequest(
                                     "document", engine.exactValue(gameYaml))));
 
+            // then
             assertEquals("Final", text(
                     engine, statistics, "/observedStatus"));
             assertEquals(2L, integer(
@@ -206,7 +228,8 @@ final class PublishedArtifactConsumerTest {
 
     @Test
     void fiveEmbeddedOccurrencesReuseThreeManagedDocuments() throws Exception {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
+            // given
             Timeline owner = engine.registerTimeline(
                     "examples/playground/five-occurrence/host",
                     "playground-owner");
@@ -228,15 +251,19 @@ final class PublishedArtifactConsumerTest {
                     engine.metrics().wholeObjectCount();
             ExactValue request = engine.exactValue(
                     fiveDocumentRequest(engine));
-            assertEquals(4,
+            int wholeObjectsRetainedByRequest =
                     engine.metrics().wholeObjectCount()
-                            - wholeObjectsBeforeRequest,
-                    "three unique child bodies plus one whole request");
+                            - wholeObjectsBeforeRequest;
+
+            // when
             appendAndDrain(engine, owner, Operation.exact(
                     "attachFiveDocuments",
                     "ownerChannel",
                     request));
 
+            // then
+            assertEquals(4, wholeObjectsRetainedByRequest,
+                    "three unique child bodies plus one whole request");
             assertEquals(4, engine.metrics().documentCount());
             assertEquals(5, engine.document(host).embeddedChildren().size());
             assertEquals(5L, integer(

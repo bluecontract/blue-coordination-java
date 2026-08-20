@@ -17,10 +17,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class PublicValueContractTest {
     @Test
     void documentIdsAreValidatedOrderedAndStableAsText() {
+        // given
         DocumentId first = DocumentId.of("a");
         DocumentId second = DocumentId.of("b");
 
-        assertTrue(first.compareTo(second) < 0);
+        // when
+        int comparison = first.compareTo(second);
+
+        // then
+        assertTrue(comparison < 0);
         assertEquals("a", first.toString());
         assertThrows(IllegalArgumentException.class,
                 () -> DocumentId.of("  "));
@@ -30,7 +35,15 @@ final class PublicValueContractTest {
 
     @Test
     void timelinesRequireBothAuthenticatedIdentities() {
-        assertEquals("feed", new Timeline("feed", "alice").timelineId());
+        // given
+        String timelineId = "feed";
+        String accountId = "alice";
+
+        // when
+        Timeline timeline = new Timeline(timelineId, accountId);
+
+        // then
+        assertEquals("feed", timeline.timelineId());
         assertThrows(IllegalArgumentException.class,
                 () -> new Timeline("", "alice"));
         assertThrows(IllegalArgumentException.class,
@@ -39,10 +52,14 @@ final class PublicValueContractTest {
 
     @Test
     void operationsHaveExactlyOneNormalizedRequestRepresentation() {
-        Operation empty = Operation.yaml("touch", "owner", "  ");
+        // given
         ExactValue exact = ExactValue.verified(new Node().value("request"));
+
+        // when
+        Operation empty = Operation.yaml("touch", "owner", "  ");
         Operation reused = Operation.exact("touch", "owner", exact);
 
+        // then
         assertEquals("{}", empty.requestYaml().orElseThrow());
         assertTrue(empty.exactRequest().isEmpty());
         assertEquals(exact, reused.exactRequest().orElseThrow());
@@ -55,13 +72,17 @@ final class PublicValueContractTest {
 
     @Test
     void exactValuesDetachMutableNodesAndVerifyIdentity() {
+        // given
         Node source = new Node().properties(
                 "value", new Node().value("original"));
+
+        // when
         ExactValue exact = ExactValue.verified(source);
         source.getProperties().get("value").value("mutated");
         Node firstCopy = exact.copyNode();
         firstCopy.getProperties().get("value").value("copy-mutated");
 
+        // then
         assertEquals("original", exact.copyNode()
                 .getProperties().get("value").getValue());
         assertEquals(exact.blueId(), exact.referenceNode().getBlueId());
@@ -73,13 +94,17 @@ final class PublicValueContractTest {
 
     @Test
     void metricsAreStableDefensiveSnapshots() {
+        // given
         Map<String, Long> counters = new LinkedHashMap<>();
         counters.put("ENTRIES_STORED_WHOLE", 2L);
+
+        // when
         CoordinationMetrics metrics = new CoordinationMetrics(
                 counters, Map.of("append.total", 2_500_000L),
                 1, 2, 3, 4, 5L);
         counters.put("ENTRIES_STORED_WHOLE", 99L);
 
+        // then
         for (CoordinationMetrics.Counter counter
                 : CoordinationMetrics.Counter.values()) {
             long expected = counter
@@ -109,14 +134,18 @@ final class PublicValueContractTest {
 
     @Test
     void typedFailuresPreserveCauseAndImmutableDetails() {
+        // given
         RuntimeException cause = new RuntimeException("root cause");
         Map<String, String> details = new LinkedHashMap<>();
         details.put("documentId", "counter");
+
+        // when
         CoordinationException failure = new CoordinationException(
                 CoordinationErrorCode.DOCUMENT_NOT_FOUND,
                 "missing", cause, details);
         details.put("documentId", "changed");
 
+        // then
         assertEquals(CoordinationErrorCode.DOCUMENT_NOT_FOUND,
                 failure.code());
         assertEquals(cause, failure.getCause());
@@ -127,21 +156,30 @@ final class PublicValueContractTest {
 
     @Test
     void builderFailsClosedUntilInMemoryModeIsSelected() {
+        // given
+        CoordinationEngine.Builder builder = CoordinationEngine.builder();
+
+        // when
         CoordinationException failure = assertThrows(
                 CoordinationException.class,
-                () -> CoordinationEngine.builder().build());
+                builder::build);
 
+        // then
         assertEquals(CoordinationErrorCode.ATOMIC_COMMIT_FAILED,
                 failure.code());
     }
 
     @Test
     void appendProducesSelfContainedExactImmutableEvidence() {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
+            // given
             Timeline timeline = engine.registerTimeline("feed", "alice");
+
+            // when
             TimelineEntry entry = engine.append(timeline, Operation.yaml(
                     "touch", "owner", "value: 1"));
 
+            // then
             assertEquals(1L, entry.globalSequence());
             assertEquals(1L, entry.timelineSequence());
             assertEquals(entry.blueId(), entry.exactEvent().blueId());
@@ -152,13 +190,17 @@ final class PublicValueContractTest {
 
     @Test
     void zeroTargetDispatchIsImmutableAndOnlyOutcomeFailsClearly() {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
+            // given
             Timeline timeline = engine.registerTimeline("feed", "alice");
+
+            // when
             TimelineEntry entry = engine.append(
                     timeline, Operation.yaml("unknown", "owner", "{}"));
             ProcessingDrainReceipt result = engine.drainThrough(
                     entry.sourceOrderKey());
 
+            // then
             assertTrue(result.outcomes().isEmpty());
             assertTrue(result.elapsedNanos() >= 0L);
             assertThrows(UnsupportedOperationException.class,
@@ -172,11 +214,16 @@ final class PublicValueContractTest {
 
     @Test
     void missingDocumentsUseTheStableTypedErrorModel() {
-        try (CoordinationEngine engine = CoordinationEngine.inMemory()) {
+        try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
+            // given
+            DocumentId missing = DocumentId.of("missing");
+
+            // when
             CoordinationException failure = assertThrows(
                     CoordinationException.class,
-                    () -> engine.document(DocumentId.of("missing")));
+                    () -> engine.document(missing));
 
+            // then
             assertEquals(CoordinationErrorCode.DOCUMENT_NOT_FOUND,
                     failure.code());
             assertEquals("missing", failure.details().get("documentId"));
@@ -185,12 +232,17 @@ final class PublicValueContractTest {
 
     @Test
     void closeIsIdempotentAndFurtherMutationFails() {
-        CoordinationEngine engine = CoordinationEngine.inMemory();
+        // given
+        CoordinationEngine engine = CoordinationEngine.legacyInMemory();
+
+        // when
         engine.close();
         engine.close();
 
         RuntimeException failure = assertThrows(RuntimeException.class,
                 () -> engine.registerTimeline("feed", "alice"));
+
+        // then
         assertNotEquals("", failure.getMessage());
     }
 }

@@ -39,7 +39,15 @@ jobs:
           architecture: x64
           check-latest: false
 
-      - name: Restrict Gradle to the pinned JDK
+      - name: Set up Java 21 test JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21.0.11+10.0.LTS'
+          architecture: x64
+          check-latest: false
+
+      - name: Restrict Gradle to the pinned JDKs
         shell: bash
         run: |
           set -euo pipefail
@@ -47,7 +55,7 @@ jobs:
           {
             echo "org.gradle.java.installations.auto-detect=false"
             echo "org.gradle.java.installations.auto-download=false"
-            echo "org.gradle.java.installations.paths=$JAVA_HOME_17_X64"
+            echo "org.gradle.java.installations.paths=$JAVA_HOME_17_X64,$JAVA_HOME_21_X64"
           } >> "$GRADLE_USER_HOME/gradle.properties"
 
       - name: Set up Node 22
@@ -109,13 +117,19 @@ jobs:
           ./gradlew --no-daemon dependencyPreflight \
             -PblueDependencyMode=published-artifact
 
-      - name: Build and stage from published dependencies
-        # RC-only policy: Gradle rejects this exception unless the declared
-        # canonical 3.0.0-rc.1 Round 13 evidence satisfies its exact guard.
+      - name: Verify the Java 21 release gate
         run: >-
-          ./gradlew --no-daemon --no-build-cache clean stageRelease
+          ./gradlew --no-daemon --no-build-cache clean releaseCheck
           -PblueDependencyMode=published-artifact
-          -PallowRound13LatencyException=true
+          -PtestJavaVersion=21
+
+      - name: Build and stage from published dependencies
+        run: |
+          set -euo pipefail
+          JAVA_HOME="$JAVA_HOME_17_X64" \
+            ./gradlew --no-daemon --no-build-cache clean stageRelease \
+            -PblueDependencyMode=published-artifact \
+            -PtestJavaVersion=17
 
       - name: Publish to Maven Central
         env:
@@ -126,10 +140,12 @@ jobs:
           JRELEASER_GPG_PUBLIC_KEY: ${{ secrets.GPG_PUBLIC_KEY }}
           JRELEASER_GPG_SECRET_KEY: ${{ secrets.GPG_SECRET_KEY }}
           JRELEASER_REPRODUCIBLE: true
-        run: >-
-          ./gradlew --no-daemon --no-build-cache jreleaserDeploy
-          -PblueDependencyMode=published-artifact
-          -PallowRound13LatencyException=true
+        run: |
+          set -euo pipefail
+          JAVA_HOME="$JAVA_HOME_17_X64" \
+            ./gradlew --no-daemon --no-build-cache jreleaserDeploy \
+            -PblueDependencyMode=published-artifact \
+            -PtestJavaVersion=17
 
       - name: Push release commit and tag
         run: git push origin HEAD:next --follow-tags

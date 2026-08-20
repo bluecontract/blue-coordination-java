@@ -21,8 +21,14 @@ final class EmbeddingBindingCanonicalOrderTest {
 
     @Test
     void supplementaryCodePointUsesCanonicalTextOrderRatherThanUtf16Order() {
+        // given
+
         String privateUse = "/games/\uE000";
+
+        // when
         String supplementary = "/games/\uD800\uDC00";
+
+        // then
         assertNotEquals(
                 Integer.signum(privateUse.compareTo(supplementary)),
                 Integer.signum(ExternalOrderKey.compareTextCodePoints(
@@ -41,12 +47,17 @@ final class EmbeddingBindingCanonicalOrderTest {
 
     @Test
     void absolutePathPrecedesChildIdentityAndActivationGeneration() {
+        // given
+
         List<EmbeddingBinding> bindings = new ArrayList<>(List.of(
                 binding("/games/zulu", "aaa-child", 1L),
                 binding("/games/alpha", "zzz-child", 9L),
                 binding("/games/middle", "middle-child", 3L)));
+
+        // when
         bindings.sort(EmbeddingBinding.WITHIN_PARENT_ORDER);
 
+        // then
         assertEquals(List.of(
                         "/games/alpha",
                         "/games/middle",
@@ -57,12 +68,18 @@ final class EmbeddingBindingCanonicalOrderTest {
 
     @Test
     void documentAndRoutingTextUseTheSameCodePointOrder() {
+        // given
+
         String privateUse = "\uE000";
         String supplementary = "\uD800\uDC00";
         List<EmbeddingBinding> bindings = new ArrayList<>(List.of(
                 binding("/same", supplementary),
                 binding("/same", privateUse)));
+
+        // when
         bindings.sort(EmbeddingBinding.WITHIN_PARENT_ORDER);
+
+        // then
         assertEquals(List.of(privateUse, supplementary), bindings.stream()
                 .map(binding -> binding.childDocumentId().value()).toList());
         assertEquals(-1, Integer.signum(
@@ -82,6 +99,8 @@ final class EmbeddingBindingCanonicalOrderTest {
 
     @Test
     void barrierCandidatesUseActivationGenerationBeforeChildEpoch() {
+        // given
+
         ExactValue state = ExactValue.verified(new Node().value("state"));
         DocumentRevision laterEpoch = revision(state, 9L);
         DocumentRevision earlierEpoch = revision(state, 0L);
@@ -96,8 +115,10 @@ final class EmbeddingBindingCanonicalOrderTest {
                                 binding("/same", "same-child", 1L),
                                 laterEpoch, ORDER)));
 
+        // when
         candidates.sort(SequentialDrainCoordinator.BarrierCandidate.ORDER);
 
+        // then
         assertEquals(List.of(1L, 2L), candidates.stream()
                 .map(candidate -> candidate.binding().activationGeneration())
                 .toList(), "activation generation must precede child epoch");
@@ -105,10 +126,16 @@ final class EmbeddingBindingCanonicalOrderTest {
 
     @Test
     void bindingIdentityIsInjectiveWhenParentAndPathContainDelimiters() {
+        // given
+
         DocumentId firstParent = DocumentId.of("tenant");
         String firstPath = "/offers|/summer";
         DocumentId secondParent = DocumentId.of("tenant|/offers");
+
+        // when
         String secondPath = "/summer";
+
+        // then
         assertEquals(
                 firstParent.value() + "|" + firstPath + "|1",
                 secondParent.value() + "|" + secondPath + "|1",

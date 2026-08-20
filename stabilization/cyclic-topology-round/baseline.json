@@ -1,0 +1,401 @@
+{
+  "schemaVersion": "blue-cyclic-topology-baseline/1",
+  "capture": {
+    "phase": "phase-0-static",
+    "capturedAtUtc": "2026-08-19T12:57:24Z",
+    "capturedAtLocal": "2026-08-19T14:57:24+0200 CEST",
+    "gradleExecutedDuringStaticCapture": false,
+    "productionFilesEdited": false,
+    "testFilesEdited": false,
+    "serialBaselineRunsExecutedByRoot": true,
+    "note": "The static snapshot was taken without Gradle. The root agent subsequently executed the three baseline gates serially against the unchanged source commits."
+  },
+  "prompt": {
+    "path": "/Users/piotr/Downloads/CODEX_CYCLIC_TOPOLOGY_AND_PERFORMANCE_COMPLETION_PROMPT.md",
+    "sha256": "568c6bf6cf7a4be81af60a6a932ab322997f87fcd07ba17bcdd6ca3a6a8ae136"
+  },
+  "repositories": [
+    {
+      "name": "blue-language-java",
+      "path": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-language-java",
+      "branch": "codex/cyclic-topology-language",
+      "head": "2cff37bc48bda44e800ae82b4d0a706dda6d6258",
+      "tree": "b683e83242bb714c3b08dbeee5b3067297c0fe25",
+      "commitTimestamp": "2026-08-19T13:15:02+02:00",
+      "commitSubject": "chore(api): approve Contracts 1.0 semantic baseline",
+      "gitStatusShortBranch": "## codex/cyclic-topology-language",
+      "workingTree": {
+        "clean": true,
+        "porcelainV1Z": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "unstagedBinaryPatch": {
+          "command": "git diff --binary --full-index",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "artifact": null,
+          "reason": "No unstaged change existed."
+        },
+        "stagedBinaryPatch": {
+          "command": "git diff --cached --binary --full-index",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "artifact": null,
+          "reason": "No staged change existed."
+        },
+        "untrackedPathsZ": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "gradleWrapper": {
+        "version": "9.6.0",
+        "distributionSha256": "bbaeb2fef8710818cf0e261201dab964c572f92b942812df0c3620d62a529a01",
+        "propertiesSha256": "3bd25ed161cc4dd201df37990b9dcfc7173eff6ea9174ff57d5acfdd9455cb1c",
+        "jarSha256": "497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9c7"
+      },
+      "selectedFileSha256": [
+        {"path": "blue-language-core/src/main/resources/specifications/blue-language-specification-1.0.md", "sha256": "01b038b64e3f0a9a11f3f70d544a63ff78a01d5169f1a03f8b8629cf73645a7d"},
+        {"path": "api/semantic-baseline-1.0.json", "sha256": "abc625ba14638bf5caf4004fdb5040d5f9ec40d9d944bb0d9620f05f6d85fb19"},
+        {"path": "blue-language-core/src/main/java/blue/language/identity/CircularSetIdentityCalculator.java", "sha256": "66a5d2e70757c9426a5ab922bcdafd951c7145ae7dcefab491dc533e95922283"},
+        {"path": "blue-language-core/src/main/java/blue/language/identity/CyclicMemberFinalization.java", "sha256": "38c4f46e1731247c25469d7d68f0bfff160b68cfa7ab9094ba81811d9ffccf62"},
+        {"path": "blue-language-core/src/main/java/blue/language/identity/CyclicSetFinalization.java", "sha256": "5c29563118ed6cb704e2b0f17445eb7d17ce8f9ac02f00ac0143dc0d753dd5b3"},
+        {"path": "blue-language-core/src/main/java/blue/language/provider/CyclicAwareNodeProvider.java", "sha256": "618ee825785f86697ca06e3fb1670609617da58e0548775cc2717aee2d317204"},
+        {"path": "blue-language-core/src/main/java/blue/language/provider/CyclicProofMemberComparator.java", "sha256": "db33225ee9243fa4bae09572ac40733dffa5e7d90c9b3d446694caf39e33f83c"},
+        {"path": "blue-language-core/src/main/java/blue/language/provider/CyclicSetProof.java", "sha256": "3ce68fa55e89299e4c2e57ccba6db264cc9c3416706b1d29a79b7ab47eb071f1"},
+        {"path": "blue-language-core/src/main/java/blue/language/provider/CyclicSetProofResult.java", "sha256": "eaad1e3a012454b4486b7283275fc6025af2007608ebcfbf4f1c4e9abf107474"},
+        {"path": "blue-contracts-core/src/main/java/blue/language/processor/ParticipatingClosurePreflight.java", "sha256": "5b905b9d70660db170d074bb5d9825c3b6e88119e7db87fea259d9ae8ffc297a"},
+        {"path": "blue-contracts-core/src/main/java/blue/language/processor/model/ProcessEmbedded.java", "sha256": "50039fa0d8f3aeb5000c971cb0371ee87356dcc54d6b17e9224a64a114a30101"},
+        {"path": "blue-contracts-core/src/main/java/blue/language/processor/closure/AffectedClosureSnapshot.java", "sha256": "182197c7f8d15fd1a7634d6bc64fa71f65152fc5f6f02cd49ffbe67ad2768967"},
+        {"path": "blue-contracts-core/src/main/java/blue/language/processor/closure/ClosureDirectSeedPlanner.java", "sha256": "21a8f6a37d7804f833394e26e5f8f84c86a050c24379e6f005fc63994ec88729"},
+        {"path": "blue-contracts-core/src/main/java/blue/language/processor/closure/ClosureExecutionSession.java", "sha256": "6797d02f22da15797b3be65f6515bed6a7aada0c742e3390118e682ac83bdacc"},
+        {"path": "blue-contracts-core/src/main/java/blue/language/processor/closure/ClosureFinalizationGasCharger.java", "sha256": "45e67c253429a81b2ab91f88a1a19368bb7ee2b7a4dd8b772e8acee87bf25b7e"},
+        {"path": "blue-contracts-core/src/main/java/blue/language/processor/closure/ClosureGraphGenerationTransition.java", "sha256": "a4a45f657d9e3c20f821ed640c2cad3c8ac9a5d6cc3216f512d32215e47dfb48"},
+        {"path": "blue-contracts-core/src/main/java/blue/language/processor/closure/ClosureIdentityService.java", "sha256": "839cfb915a4b659b991f1ec7bda6ce3112a88dd102b70169c43c5b6abf411964"},
+        {"path": "blue-contracts-core/src/main/java/blue/language/processor/closure/ClosureInvocationInput.java", "sha256": "8a89552cce3603926f2b0686a9c81863f672be933ccedb00e4ad4a236ab9e2a1"},
+        {"path": "blue-contracts-core/src/main/java/blue/language/processor/closure/ClosureInvocationVerifier.java", "sha256": "409b85fde6ae8c772b69cbfe35da8a3c3b218db7fd53b5de9a86965854e30a7c"},
+        {"path": "blue-contracts-core/src/main/java/blue/language/processor/closure/ClosureProcessor.java", "sha256": "50e36b02447e6eee76cdd35d566e434e5cbf11fc45db31f0458a55d84bc21504"},
+        {"path": "blue-contracts-core/src/main/java/blue/language/processor/closure/ClosureWorkOccurrence.java", "sha256": "9207b2fdc69ecdb9677f70a719cfd550dfc4683448c535bc791746340f2126d1"},
+        {"path": "blue-contracts-core/src/main/java/blue/language/processor/closure/ClosureWorkQueue.java", "sha256": "7004532c3747024a79cc80b1fc3f3cdb4c42dd4df7246a8dc3e7c6831ddb3bee"},
+        {"path": "blue-contracts-core/src/main/java/blue/language/processor/closure/DefaultClosureProcessor.java", "sha256": "e52988c53032733f217cc545ad4d08f608882f3d93248250a7876e76faea8b92"},
+        {"path": "blue-contracts-core/src/main/java/blue/language/processor/closure/ManagedDocumentStepProcessor.java", "sha256": "ae1ab722b1e425da94d866de978aba2f80312aa850b6a159d67ff04e3c5f4c1e"},
+        {"path": "blue-conformance/src/main/java/blue/language/conformance/contracts/closure/ClosureConformanceHarness.java", "sha256": "ec6c00053516d28a805e3ea045695bb5b62c0757d6119b299cb63daebb928eeb"},
+        {"path": "blue-conformance/src/test/java/blue/language/conformance/contracts/closure/DynamicClosureCorpusConformanceTest.java", "sha256": "35cbef140eba433761441c65914decd4c9fe4e9d5dcde04c8fc706b6bd7983e5"},
+        {"path": "blue-conformance/src/test/java/blue/language/conformance/contracts/closure/FullClosureCorpusConformanceTest.java", "sha256": "802abf24f1e14bf153414c4712f27000a5b0c0b7d6e26221fcc7fb999424f25d"},
+        {"path": "blue-conformance/src/main/resources/blue-contracts-1.0/fixtures/manifest.yaml", "sha256": "4b225182b110a2c808d539b614056b70c1ee449396c0d29d1b07f1d407647c84"}
+      ]
+    },
+    {
+      "name": "blue-bex-java",
+      "path": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-bex-java",
+      "branch": "codex/cyclic-topology-bex",
+      "head": "821fe877fef5b04a729b7422cdda05a7ace55a1f",
+      "tree": "bd11323bbe7c9ce0dff51d416ac2838aa5cedc5d",
+      "commitTimestamp": "2026-08-19T13:28:57+02:00",
+      "commitSubject": "feat(bex): bridge Contracts exact-value capabilities",
+      "gitStatusShortBranch": "## codex/cyclic-topology-bex",
+      "workingTree": {
+        "clean": true,
+        "porcelainV1Z": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+        "unstagedBinaryPatch": {"command": "git diff --binary --full-index", "bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "artifact": null, "reason": "No unstaged change existed."},
+        "stagedBinaryPatch": {"command": "git diff --cached --binary --full-index", "bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "artifact": null, "reason": "No staged change existed."},
+        "untrackedPathsZ": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+      },
+      "gradleWrapper": {
+        "version": "9.6.0",
+        "distributionSha256": null,
+        "distributionSha256Note": "The BEX wrapper properties do not declare distributionSha256Sum.",
+        "propertiesSha256": "e74d4f107d2feab989b9a041a02e2d2b85567ff48415c9c7add5ecc19abd19f9",
+        "jarSha256": "497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9c7"
+      },
+      "selectedFileSha256": [
+        {"path": "blue-bex-contracts/src/main/java/blue/bex/contracts/BexContractsExecutionContext.java", "sha256": "5632a56b5868ad4ea08cfed6998cba17b46ec9126273d3f541021c3a39c25293"},
+        {"path": "blue-bex-contracts/src/main/java/blue/bex/contracts/ProcessorExecutionContextBexGasLedgerHost.java", "sha256": "cdf168eb926010bfb04f2119a4a4f66d01b6b0a56e532ce93a037ba619b5a247"},
+        {"path": "blue-bex-contracts/src/main/java/blue/bex/contracts/BexContractsFailureBoundary.java", "sha256": "eeecc0f8837f96f20f1ac7e33d7417dcaeed2d3dd68a40a58066faf7d6a6abca"},
+        {"path": "blue-bex-core/src/main/java/blue/bex/api/BexGasLedgerHost.java", "sha256": "c4f1f1a2365cad0cefa8088db32927aad4b90ced4cc1f1ea3124f2d0f0d9d36f"},
+        {"path": "blue-bex-core/src/main/java/blue/bex/gas/BexGasAdmission.java", "sha256": "5fc5c46610aac7e88ee74ad46b3a99295b7d6a71c644391a3e2910ba42068af0"},
+        {"path": "blue-bex-core/src/main/java/blue/bex/gas/BexGasBudget.java", "sha256": "5505175843b44de4ca467f43d20ffdef3eb5e42320d490dccb26b27b6a4b1295"},
+        {"path": "blue-bex-core/src/main/java/blue/bex/gas/BexGasHostSession.java", "sha256": "fcf8f4dec1c98fd2ac4949e9838237ca784527a9ff0f5ddd966c14e7e438f818"},
+        {"path": "blue-bex-core/src/main/java/blue/bex/gas/BexGasLedger.java", "sha256": "33eed3464ba8ec7b49ef3d917f6a47e9e0b3e825244f23df690beda9e4c3800b"},
+        {"path": "blue-bex-core/src/main/java/blue/bex/gas/BexGasTraceRecorder.java", "sha256": "2bf5fd8ad2f9337f9a40677b4cfe3f747fc4450e20dff97e760eeef466d2ada5"},
+        {"path": "blue-bex-core/src/main/java/blue/bex/gas/BexSharedGasBudget.java", "sha256": "cc2d6d746dc9185d1d1b11c7faf93c522eef9d02b6c66439bd5b3f8c73fd6a28"},
+        {"path": "blue-bex-core/src/main/java/blue/bex/runtime/BexRuntimeGasSession.java", "sha256": "2b772dc28839ab0efbee31af578e09075f845cffc9eb3df33684c8a44c579660"},
+        {"path": "blue-bex-contracts/src/test/java/blue/bex/contracts/ProcessorExecutionContextBexGasLedgerHostTest.java", "sha256": "3994a4f097827ccc150bffc4c34b5d36461920f63944abff7ea3cbf9dc435f0d"},
+        {"path": "src/test/java/blue/bex/BexExactGasRuleTest.java", "sha256": "9d35cef7c158576b64c45bb8636c557a5d84806c513bb029e7f385823679152e"},
+        {"path": "src/test/resources/conformance/bex/gas-manifest.yaml", "sha256": "1f689e0cf51b0f9afa6b18a640e0c755470921a7b0d66f62bfc2206679de640d"},
+        {"path": "src/test/resources/hosted-release/baseline.properties", "sha256": "cad18f411b69b890c7e1a2d23eb54bd602218e6764bdc32a20cae5049153e1b6"}
+      ]
+    },
+    {
+      "name": "blue-contract-java",
+      "path": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-contract-java",
+      "branch": "codex/cyclic-topology-coordination",
+      "head": "3fd8b5a6f1aa5db295b2de5d03b617281a080e5b",
+      "tree": "23de1fcfc1ae21772a23d16c5b4a8dadbd3ea46c",
+      "commitTimestamp": "2026-08-19T13:34:42+02:00",
+      "commitSubject": "build(coordination): bind Contracts 1.0 local release inputs",
+      "gitStatusShortBranch": "## codex/cyclic-topology-coordination",
+      "workingTree": {
+        "clean": true,
+        "porcelainV1Z": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+        "unstagedBinaryPatch": {"command": "git diff --binary --full-index", "bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "artifact": null, "reason": "No unstaged change existed."},
+        "stagedBinaryPatch": {"command": "git diff --cached --binary --full-index", "bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "artifact": null, "reason": "No staged change existed."},
+        "untrackedPathsZ": {"bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+      },
+      "gradleWrapper": {
+        "version": "9.6.0",
+        "distributionSha256": null,
+        "distributionSha256Note": "The Coordination wrapper properties do not declare distributionSha256Sum.",
+        "propertiesSha256": "e74d4f107d2feab989b9a041a02e2d2b85567ff48415c9c7add5ecc19abd19f9",
+        "jarSha256": "497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9c7"
+      },
+      "selectedFileSha256": [
+        {"path": "src/main/java/blue/coordination/api/Contracts10Configuration.java", "sha256": "ebbfb23b65939ef0e9633421a8e229f85240eb72bdba4e631f41c159a7b92426"},
+        {"path": "src/main/java/blue/coordination/api/ContractsClosureAdmissionReceipt.java", "sha256": "80f4cd55c4aa753b8daf9c53a543540589d24cb7d46e631a6d8a4a1bf0e00486"},
+        {"path": "src/main/java/blue/coordination/api/CoordinationEngine.java", "sha256": "fe1dcff989878666dd475c1f1474760ed7ed76a2df13097e63e2c80462f20654"},
+        {"path": "src/main/java/blue/coordination/api/CoordinationMetrics.java", "sha256": "0e0eb9e94596e9aa43c717528219a9b7687c0a46077a2493f660603e3d7e22c1"},
+        {"path": "src/main/java/blue/coordination/api/ProcessingDrainReceipt.java", "sha256": "b291f998ca2e408b82dc333918f03263a8b24d8dbc4aecb57e2e9d73c0d039e1"},
+        {"path": "src/main/java/blue/coordination/internal/ClosureGraphGenerationInventory.java", "sha256": "8d07a7e35da30fdf9bedc977f58887a913dadedecc514a0a76c8ea37b7d12a41"},
+        {"path": "src/main/java/blue/coordination/internal/ClosureSubscriptionInventory.java", "sha256": "5e75528771237acce312b4bcdf7f9c171a033308e0821ee55ad1f74c37daaf85"},
+        {"path": "src/main/java/blue/coordination/internal/ContractsClosureAdapter.java", "sha256": "7be82c467100906d83ff4677b8f337919bd018f3218d9b0e839e0b6af4fc431d"},
+        {"path": "src/main/java/blue/coordination/internal/ContractsClosureAdmissionAdapter.java", "sha256": "0d82728ce28e3cff2a121de1c50b1e7c44108296c924340eb3be89166311d4e4"},
+        {"path": "src/main/java/blue/coordination/internal/ContractsClosureProfile.java", "sha256": "d02efa383fdff3fdf3553be8ee2c620afa3cd1fcc01fdbb872ca346301657cad"},
+        {"path": "src/main/java/blue/coordination/internal/ContractsClosurePublicationReceipt.java", "sha256": "3ba6120e585a8895a628fd54bdb1f9de8e0a5c40f99cd36cee6089ad39ed2cc3"},
+        {"path": "src/main/java/blue/coordination/internal/ContractsJournalDrainCoordinator.java", "sha256": "60ab21555eb97e308a104657ecf76a1132d58a2694670443b7facd0e070d64f1"},
+        {"path": "src/main/java/blue/coordination/internal/ContractsRootFeederCoordinator.java", "sha256": "3f3272f786badf990bd1d8c10e97a2b4d61f3d5d525591ac26e5b20e44991fab"},
+        {"path": "src/main/java/blue/coordination/internal/DefaultCoordinationEngine.java", "sha256": "f0fb6e47d6137233fd5d14140deeba3d2bfb8832df38795046c059a5a4f65c98"},
+        {"path": "src/main/java/blue/coordination/internal/InMemoryDocumentStore.java", "sha256": "ae5787ee964098544d327c0568326c8d1bdcbad4bcd9cd7383b8eaf50f4106c0"},
+        {"path": "src/main/java/blue/coordination/internal/InMemoryTimelineJournal.java", "sha256": "b1888f16d53934d7950a16c27b94527040eefe2c7b342d3c645201df5c452fb0"},
+        {"path": "src/main/java/blue/coordination/internal/ManagedOccurrenceInventory.java", "sha256": "651d292175349bc4417cbcd8aab76129af05ea55137d4cbfa9f40670455d51d0"},
+        {"path": "src/main/java/blue/coordination/internal/MultiDocumentPublicationTransaction.java", "sha256": "8b925ca058e6ed4d2a9700fb1057fe36945ab4ffe9f23f8e5639f85348434cb9"},
+        {"path": "src/main/java/blue/coordination/internal/OperationRouteIndex.java", "sha256": "126674ee18c82751b1005cd3a5ad27c9aae8e46a5c90be039e85de78ff6ee870"},
+        {"path": "src/main/java/blue/coordination/internal/ProcessEmbeddedComponentIndex.java", "sha256": "c89e2683919367e788ba52a2965e19b2cff476aab4dd58b4c6a5816642492905"},
+        {"path": "src/main/java/blue/coordination/internal/ProcessEmbeddedGraphSnapshot.java", "sha256": "85ab0a7d21b3f83e8b9b536aa155dc214938a48f4513f72c6ef15b3359785f8b"},
+        {"path": "src/test/java/blue/coordination/internal/ContractsClosureAdmissionAdapterTest.java", "sha256": "6c1b43cfcd4f5ccb9965839f0635ec7307e6032b1a10dafe166c58fb6051799e"},
+        {"path": "src/test/java/blue/coordination/internal/ContractsPublicLoopAndIsolationTest.java", "sha256": "cf60b3b06f9267e57322b8f56f5f5d430471aa8e9a241143f1409becf4d76890"},
+        {"path": "src/test/java/blue/coordination/internal/ContractsPublicOrderingAcceptanceTest.java", "sha256": "bc2e41d534bff39ed890cd19ab06ecbc8003ff496670f2baf36ef4c294f4ae58"},
+        {"path": "src/test/java/blue/coordination/internal/ProcessEmbeddedComponentIndexTest.java", "sha256": "83816a36b5c668ed86b191a02872cab39854597cb501fe74de5a0a60b8ca0644"},
+        {"path": "src/test/java/blue/coordination/internal/ProcessEmbeddedGraphSnapshotTest.java", "sha256": "a0ad7b6788c3d1d7406d97c6dea09aa6db1b512c0461ee4854ab6e6d6312c701"},
+        {"path": "build.gradle", "sha256": "78deec4011a416b55ba9150d36011cb963164a1f0b7d60a360511a90630c8345"},
+        {"path": "settings.gradle", "sha256": "5cb9d6c5ef3035512a8f3f0366ad601bf116f180f22ba0794fc5aa3a20d59045"},
+        {"path": "gradle/language-source.lock", "sha256": "ee7c89f342dfacbdc347296014737c205e305b40fbb4e9cf1367b38b6359c64d"},
+        {"path": "gradle/bex-source.lock", "sha256": "f24818f00251c6621d956fdd7670410107c7efaef0b8fd57e43a759d58ca55a4"},
+        {"path": "gradle/repository-source.lock", "sha256": "77730a6eb6145a1557546252dc438e6788cf877c925043311416b945459fe2d2"},
+        {"path": "gradle/published-artifact.lockfile", "sha256": "955a0fdd278ed86a61beda513942fa17dd8157c6939c1af006dffef608e528e0"},
+        {"path": "docs/releases/contracts-1.0-current-verification.md", "sha256": "d3d6eb58ab784ceb195d6aa3c045d879f581c9654e0b2143a1528f65325673ad"}
+      ]
+    }
+  ],
+  "sourceBindings": {
+    "mode": "local-composite",
+    "language": {
+      "coordinate": "blue.language:blue-contracts-core:3.1.0-rc.20",
+      "commit": "2cff37bc48bda44e800ae82b4d0a706dda6d6258",
+      "lockSha256": "ee7c89f342dfacbdc347296014737c205e305b40fbb4e9cf1367b38b6359c64d"
+    },
+    "bex": {
+      "coordinates": ["blue.bex:blue-bex-core:1.1.0-rc.3", "blue.bex:blue-bex-contracts:1.1.0-rc.3"],
+      "commit": "821fe877fef5b04a729b7422cdda05a7ace55a1f",
+      "lockSha256": "f24818f00251c6621d956fdd7670410107c7efaef0b8fd57e43a759d58ca55a4"
+    },
+    "repository": {
+      "coordinate": "blue.repo:blue-repo-java:3.0.0-rc.21",
+      "commit": "2fcf29bf060ed114c971194adb6f8b747899aee2",
+      "lockSha256": "77730a6eb6145a1557546252dc438e6788cf877c925043311416b945459fe2d2"
+    },
+    "blueSpec": {
+      "path": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-spec/latest",
+      "repositoryCommit": "5dc8096276652156e248c9c018a0850fcd8dbdbb",
+      "repositoryBranch": "codex/contracts-1.0-spec",
+      "repositoryClean": true
+    },
+    "publishedOrStagedArtifactsUsed": false
+  },
+  "normativeIdentities": {
+    "blueLanguageSpecificationSha256": "01b038b64e3f0a9a11f3f70d544a63ff78a01d5169f1a03f8b8629cf73645a7d",
+    "previousBlueLanguageCharacterizationSha256": "a234b0b42190a7982809781b5efdaa2e5f1ab4b7f8d870fbd1ffe7020cc7e869",
+    "previousHashIsCurrentInput": false,
+    "blueContractsSpecificationSha256": "dfb444962a5a17b3a6519e8d148c2bf4a975a921b1fcb1277710052caaecd930",
+    "contractsReleaseIdentity": "sha256:7e6c3717bc28d21ebadec9f81725913e944bb3b9b70094531f19f10510a10e50",
+    "fixturePackageIdentity": "sha256:071cecb68e1c4dcec2dbb0895de928629281d2b0a18f3e8a83a41a720e621bfa",
+    "registryPackageIdentity": "sha256:46a7744c1cbfa4b00e1d8a99f6ca3f0089ef697de968fee08547894ab02b0ca1",
+    "gasManifestIdentity": "sha256:03219c42eb3696ef8727fe8ae226c8a5eb4a6126859ba744f571d892c409626a",
+    "oraclePackageIdentity": "sha256:efbae749b6c076699e9fde1036fd5d84909d2f1b2cbdcb7d5116d7f06a6f0b71",
+    "cyclicSetFinalizerBaselineIdentity": "sha256:0b4bd3bbe4380faa52d14bc6baf8bb0a6dbc01acc576985676155ea0115969b4",
+    "cyclicSetProofVerifierBaselineIdentity": "sha256:eb0501a25ec5ac6a18fc86584c0afb6ecc2e6c1201c723f28ec56c80a2ae3bc5",
+    "counts": {
+      "closureFixtures": 67,
+      "ordinaryFixtures": 167,
+      "totalExecutableFixtures": 234,
+      "vectors": 135,
+      "oracles": 42,
+      "ordinaryGasFixtures": 71
+    },
+    "files": [
+      {"role": "canonical-release-manifest", "path": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-spec/latest/conformance/contracts/release-manifest.yaml", "sha256": "ba564dbe63f68358cc1b58067b4fb596639f0fc839e1c307d1516ca2364f73ce"},
+      {"role": "canonical-fixture-manifest", "path": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-spec/latest/conformance/contracts/fixtures/manifest.yaml", "sha256": "865d602fb6396e0459a822e5e151234a775ebf0c7219a646b099d7474a5232d9"},
+      {"role": "canonical-language-reference", "path": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-spec/latest/reference/blue-language-specification-1.0.md", "sha256": "01b038b64e3f0a9a11f3f70d544a63ff78a01d5169f1a03f8b8629cf73645a7d"},
+      {"role": "canonical-contracts-specification", "path": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-spec/latest/specifications/blue-contracts-and-processor-specification-1.0.md", "sha256": "dfb444962a5a17b3a6519e8d148c2bf4a975a921b1fcb1277710052caaecd930"}
+    ]
+  },
+  "slimPackage": {
+    "directory": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/evidence/contracts-package/blue-contracts-and-processor-specification-1.0-final",
+    "archive": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/evidence/contracts-package/archives/blue-contracts-and-processor-specification-1.0-final.zip",
+    "archiveSha256": "50b1ee092752b0ede42066967c8097709bccf8cd01d11bf53ba7725a319029c4",
+    "packageIdentity": "sha256:b67a400d676dedb48260733fadd2fcc66a70c2aff95b8b93cc1ca4342accb29b",
+    "status": "PACKAGE_VALID",
+    "referenceStatus": "SEMANTIC_REFERENCE_VALID",
+    "implementationConformanceClaimed": false,
+    "fileCountOnDisk": 408,
+    "manifestPayloadFileCount": 405,
+    "packageManifestSha256": "67cbec72020cae5da2c3f5d71a3b6b607744f0462e611742e77fd9d1040c9872",
+    "manifestSha256FileSha256": "68a1777f4387bf84b863213993903196f581cd452fb57ddc0bd8f0cc3d1d854d",
+    "validationOutputSha256": "490810977195f442dde4d44e60763bca0d08fe189e14645dd79853d7ef6e8964",
+    "packagedReleaseManifestSha256": "ba564dbe63f68358cc1b58067b4fb596639f0fc839e1c307d1516ca2364f73ce",
+    "packagedFixtureManifestSha256": "865d602fb6396e0459a822e5e151234a775ebf0c7219a646b099d7474a5232d9",
+    "packagedLanguageReferenceSha256": "01b038b64e3f0a9a11f3f70d544a63ff78a01d5169f1a03f8b8629cf73645a7d",
+    "packagedContractsSpecificationSha256": "dfb444962a5a17b3a6519e8d148c2bf4a975a921b1fcb1277710052caaecd930"
+  },
+  "machine": {
+    "modelName": "MacBook Pro",
+    "modelIdentifier": "Mac15,9",
+    "modelNumber": "Z1CM00064ZE/A",
+    "chip": "Apple M3 Max",
+    "architecture": "arm64",
+    "hostinfoProcessorType": "arm64e (ARM64E)",
+    "cores": {"total": 16, "performance": 12, "efficiency": 4, "physicalAvailable": 16, "logicalAvailable": 16},
+    "memoryReported": "64 GB",
+    "memoryBytes": null,
+    "memoryBytesNote": "Direct sysctl access was denied by sandbox; no byte count was inferred.",
+    "os": {"product": "macOS", "version": "26.5.2", "build": "25F84"},
+    "kernel": "Darwin 25.5.0; Darwin Kernel Version 25.5.0: Tue Jun 9 22:26:15 PDT 2026; root:xnu-12377.121.10~1/RELEASE_ARM64_T6031",
+    "loadAverageAtCapture": 6.85,
+    "defaultJava": {
+      "javaHome": "/Users/piotr/Library/Java/JavaVirtualMachines/openjdk-26.0.1/Contents/Home",
+      "command": "/usr/bin/java",
+      "version": "26.0.1",
+      "runtimeBuild": "26.0.1+8-34",
+      "vendor": "Oracle Corporation",
+      "architecture": "arm64"
+    },
+    "requiredComparisonJdks": [
+      {"version": "17.0.10", "architecture": "arm64", "vendor": "Oracle Corporation", "javaHome": "/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home"},
+      {"version": "21.0.2", "architecture": "arm64", "vendor": "Oracle Corporation", "javaHome": "/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home"}
+    ],
+    "locale": {"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"},
+    "gradleWrapperVersion": "9.6.0",
+    "gradleVersionCommandExecuted": false
+  },
+  "testRuns": [
+    {
+      "id": "phase0-focused-public-cycles",
+      "repository": "blue-contract-java",
+      "selection": [
+        "blue.coordination.internal.ContractsClosureAdmissionAdapterTest",
+        "blue.coordination.internal.ContractsPublicOrderingAcceptanceTest",
+        "blue.coordination.internal.ContractsPublicLoopAndIsolationTest"
+      ],
+      "status": "PASS",
+      "workingDirectory": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-contract-java",
+      "command": "env PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin ./gradlew --no-daemon --max-workers=1 test -PblueDependencyMode=local-composite -PblueLanguageCompositePath=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-language-java -PblueBexCompositePath=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-bex-java -PblueRepositoryCompositePath=/Users/piotr/data/blue-repository-java -PblueSpecRoot=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-spec/latest -PtestJavaVersion=17 --no-parallel --console=plain --tests blue.coordination.internal.ContractsClosureAdmissionAdapterTest --tests blue.coordination.internal.ContractsPublicOrderingAcceptanceTest --tests blue.coordination.internal.ContractsPublicLoopAndIsolationTest",
+      "javaHome": null,
+      "javaHomeStatus": "NOT_RECORDED_AT_EXECUTION",
+      "testJavaVersionProperty": 17,
+      "independentlyCapturedShellRuntimeReference": "$.machine.defaultJava",
+      "startedAtUtc": null,
+      "endedAtUtc": null,
+      "timestampStatus": "NOT_RECORDED_SEPARATELY",
+      "gradleDisplayedDuration": "1m30s",
+      "durationSeconds": 90,
+      "durationPrecision": "Gradle displayed duration",
+      "xmlSuiteTimeSeconds": 73.82,
+      "tests": 15,
+      "passed": 15,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0,
+      "gradleOutcome": "BUILD SUCCESSFUL",
+      "suites": [
+        {"name": "blue.coordination.internal.ContractsClosureAdmissionAdapterTest", "tests": 10, "passed": 10, "failed": 0, "skipped": 0, "errors": 0, "timeSeconds": 7.354},
+        {"name": "blue.coordination.internal.ContractsPublicOrderingAcceptanceTest", "tests": 3, "passed": 3, "failed": 0, "skipped": 0, "errors": 0, "timeSeconds": 8.366},
+        {"name": "blue.coordination.internal.ContractsPublicLoopAndIsolationTest", "tests": 2, "passed": 2, "failed": 0, "skipped": 0, "errors": 0, "timeSeconds": 58.1}
+      ],
+      "evidencePaths": [
+        {"path": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/evidence/cyclic-topology-round/baseline/coordination-focused/TEST-blue.coordination.internal.ContractsClosureAdmissionAdapterTest.xml", "sha256": "d8a23b120e90f1e3dcbddeb6e0e41d0bf62c63adc74db68e519e4bcce76e76c0"},
+        {"path": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/evidence/cyclic-topology-round/baseline/coordination-focused/TEST-blue.coordination.internal.ContractsPublicOrderingAcceptanceTest.xml", "sha256": "a1220ea274e67d955fcb9045bde7fd8f60414db214ce3a2f0ca17c2e76708b72"},
+        {"path": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/evidence/cyclic-topology-round/baseline/coordination-focused/TEST-blue.coordination.internal.ContractsPublicLoopAndIsolationTest.xml", "sha256": "a04a29c172202368f4b018232a9ddb2cacf0fda7d394aefe1bc683631543c43c"}
+      ]
+    },
+    {
+      "id": "phase0-dynamic-closure-corpus",
+      "repository": "blue-language-java",
+      "selection": ["blue.language.conformance.contracts.closure.DynamicClosureCorpusConformanceTest"],
+      "expectedClosureFixtureRows": 67,
+      "status": "PASS",
+      "workingDirectory": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-language-java",
+      "command": "env PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin BLUE_CONTRACTS_CLOSURE_PACKAGE_ROOT=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/evidence/contracts-package/extractions/fresh-build-1/blue-contracts-and-processor-specification-1.0-final ./gradlew --no-daemon --max-workers=1 :blue-conformance:test --tests blue.language.conformance.contracts.closure.DynamicClosureCorpusConformanceTest --no-parallel --console=plain -PblueSpecRoot=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-spec/latest",
+      "javaHome": null,
+      "javaHomeStatus": "NOT_RECORDED_AT_EXECUTION",
+      "testJavaVersionProperty": null,
+      "independentlyCapturedShellRuntimeReference": "$.machine.defaultJava",
+      "startedAtUtc": null,
+      "endedAtUtc": null,
+      "timestampStatus": "NOT_RECORDED_SEPARATELY",
+      "gradleDisplayedDuration": "1m",
+      "durationSeconds": 60,
+      "durationPrecision": "Gradle displayed duration",
+      "xmlSuiteTimeSeconds": 53.024,
+      "tests": 67,
+      "passed": 67,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0,
+      "gradleOutcome": "BUILD SUCCESSFUL",
+      "operationCounts": {"process-closure": 35, "admit-closure": 14, "limit-micro": 18},
+      "discrepancyRows": 67,
+      "discrepancyPassRows": 67,
+      "evidencePaths": [
+        {"path": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/evidence/cyclic-topology-round/baseline/closure-corpus/TEST-blue.language.conformance.contracts.closure.DynamicClosureCorpusConformanceTest.xml", "sha256": "7c85a27cb1d12a5326a323aa6decbcc965e1302d6386b53084919fc57e4b8c9b"},
+        {"path": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/evidence/cyclic-topology-round/baseline/closure-corpus/closure-discrepancy-report-67.json", "sha256": "1311fa5b90d6c2532a2f518d3fce3d61a75cf849473b557ee400d66bb8862cd0"}
+      ]
+    },
+    {
+      "id": "phase0-full-closure-corpus",
+      "repository": "blue-language-java",
+      "selection": ["blue.language.conformance.contracts.closure.FullClosureCorpusConformanceTest"],
+      "status": "PASS",
+      "workingDirectory": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-language-java",
+      "command": "env PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin BLUE_CONTRACTS_CLOSURE_PACKAGE_ROOT=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/evidence/contracts-package/extractions/fresh-build-1/blue-contracts-and-processor-specification-1.0-final ./gradlew --no-daemon --max-workers=1 :blue-conformance:test --tests blue.language.conformance.contracts.closure.FullClosureCorpusConformanceTest --no-parallel --console=plain -PblueSpecRoot=/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/worktrees/blue-spec/latest",
+      "javaHome": null,
+      "javaHomeStatus": "NOT_RECORDED_AT_EXECUTION",
+      "testJavaVersionProperty": null,
+      "independentlyCapturedShellRuntimeReference": "$.machine.defaultJava",
+      "startedAtUtc": null,
+      "endedAtUtc": null,
+      "timestampStatus": "NOT_RECORDED_SEPARATELY",
+      "gradleDisplayedDuration": "56s",
+      "durationSeconds": 56,
+      "durationPrecision": "Gradle displayed duration",
+      "xmlSuiteTimeSeconds": 49.719,
+      "tests": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0,
+      "gradleOutcome": "BUILD SUCCESSFUL",
+      "evidencePaths": [
+        {"path": "/private/tmp/blue-contracts-1.0-consolidation.btw1Cr/evidence/cyclic-topology-round/baseline/closure-corpus/TEST-blue.language.conformance.contracts.closure.FullClosureCorpusConformanceTest.xml", "sha256": "deb14dcd7db6ae1b577436f2f29e57bafcbf728f48371a90f2cce5050b244f7f"}
+      ]
+    }
+  ],
+  "policy": {
+    "architectureFrozen": true,
+    "normativePackageChanged": false,
+    "artifactPublished": false,
+    "artifactStaged": false,
+    "artifactInstalledToMavenLocal": false,
+    "gitPushed": false,
+    "implementationConformanceClaimed": false
+  }
+}

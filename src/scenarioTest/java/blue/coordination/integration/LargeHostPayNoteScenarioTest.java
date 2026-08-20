@@ -20,6 +20,7 @@ final class LargeHostPayNoteScenarioTest {
     void largeHostAndManagedPayNoteCompleteTheWadowiceWorkflow()
             throws Exception {
         try (TestEngine engine = TestEngine.create()) {
+            // given
             Timeline alice = engine.timeline(
                     "examples/large-order/alice", "alice");
             Timeline bob = engine.timeline(
@@ -32,6 +33,7 @@ final class LargeHostPayNoteScenarioTest {
                     "examples/clean/large-order-host.yaml"));
             EngineMetrics.MetricsSnapshot before = engine.metricsSnapshot();
 
+            // when
             engine.appendAndDispatch(alice, Operation.exact(
                     "attachPayNote", "ownerChannel",
                     engine.embeddedDocumentRequest(resource(
@@ -52,6 +54,8 @@ final class LargeHostPayNoteScenarioTest {
 
             EngineTestSupport.MetricDelta work = delta(
                     before, engine.metricsSnapshot());
+
+            // then
             assertEquals(2L, integer(
                     engine, "large-paynote", "/authorizationCountState"));
             assertEquals("Authorized", text(
@@ -63,6 +67,10 @@ final class LargeHostPayNoteScenarioTest {
             assertEquals(Boolean.TRUE, engine.value("large-paynote",
                     "/productConditions/restaurant/product/confirmed")
                     .getValue());
+            assertEquals(engine.session("large-paynote").current().blueId(),
+                    engine.session("large-order-host").current()
+                            .canonicalBlueIdAt("/payNote"),
+                    "the containing host must retain the current PayNote head");
             assertEquals(Boolean.TRUE, engine.value("large-order-host",
                     "/payNote/productConditions/restaurant/product/confirmed")
                     .getValue());

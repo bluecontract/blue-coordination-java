@@ -21,6 +21,7 @@ final class InitializationRetryIdempotencyTest {
     @Test
     void retryPublishesOneChildInitializationWithoutRepeatingParentOperation()
             throws Exception {
+        // given
         String gameYaml = Round12NbaFixtures.game(
                 GAME_ID,
                 "examples/round12/retry/game",
@@ -59,8 +60,11 @@ final class InitializationRetryIdempotencyTest {
                     "the already committed parent operation must not repeat");
 
             engine.clearFailureInjection();
+
+            // when
             engine.dispatch(activation);
 
+            // then
             assertEquals(SessionStatus.READY,
                     engine.readyDocument(HOST_ID).status());
             assertEquals(1L, engine.history(HOST_ID).stream()
@@ -87,6 +91,7 @@ final class InitializationRetryIdempotencyTest {
     @Test
     void failedParentInitializationApplicationDoesNotRollbackChildOrPeer()
             throws Exception {
+        // given
         String gameId = "round12-isolation-game";
         String firstHostId = "round12-isolation-host-one";
         String secondHostId = "round12-isolation-host-two";
@@ -180,10 +185,13 @@ final class InitializationRetryIdempotencyTest {
             engine.clearFailureInjection();
             EngineMetrics.MetricsSnapshot beforeRetry =
                     engine.metricsSnapshot();
+
+            // when
             engine.dispatch(secondAttachment);
             EngineTestSupport.MetricDelta retry = delta(
                     beforeRetry, engine.metricsSnapshot());
 
+            // then
             assertEquals(0L, retry.counter("temporal.externalProcessCalls"));
             assertEquals(1L, retry.counter(
                     "process.embeddedEpochProcessCalls"));
@@ -208,6 +216,7 @@ final class InitializationRetryIdempotencyTest {
     @Test
     void restartBeforeParentApplicationReusesCommittedInitializationEpoch()
             throws Exception {
+        // given
         String gameId = "round12-recovery-game";
         String firstHostId = "round12-recovery-host-one";
         String recoveringHostId = "round12-recovery-host-two";
@@ -268,6 +277,7 @@ final class InitializationRetryIdempotencyTest {
             assertEquals(initializationCause, engine.history(gameId).get(0)
                     .causalEntryBlueId().orElseThrow());
 
+            // when
             engine.restartFromStores();
             assertEquals(SessionStatus.CATCHING_UP,
                     engine.session(recoveringHostId).status());
@@ -280,6 +290,7 @@ final class InitializationRetryIdempotencyTest {
             EngineTestSupport.MetricDelta resume = delta(
                     beforeResume, engine.metricsSnapshot());
 
+            // then
             assertEquals(0L, resume.counter(
                     "temporal.externalProcessCalls"),
                     "the committed attachment must not run again");
@@ -311,6 +322,7 @@ final class InitializationRetryIdempotencyTest {
     @Test
     void postCommitInitializationRecoveryDoesNotCountTheReceiptTwice()
             throws Exception {
+        // given
         String gameYaml = Round12NbaFixtures.game(
                 GAME_ID,
                 "examples/round12/retry/game",
@@ -359,6 +371,7 @@ final class InitializationRetryIdempotencyTest {
             assertThrows(CoordinationException.class,
                     () -> engine.readyDocument(HOST_ID));
 
+            // when
             engine.restartFromStores();
             EngineMetrics.MetricsSnapshot beforeRetry =
                     engine.metricsSnapshot();
@@ -366,6 +379,7 @@ final class InitializationRetryIdempotencyTest {
             EngineTestSupport.MetricDelta retry = delta(
                     beforeRetry, engine.metricsSnapshot());
 
+            // then
             assertEquals(0L, retry.counter(
                     "process.embeddedEpochProcessCalls"));
             assertEquals(0L, retry.counter(

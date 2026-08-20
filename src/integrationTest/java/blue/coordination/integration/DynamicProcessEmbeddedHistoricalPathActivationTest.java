@@ -27,6 +27,7 @@ final class DynamicProcessEmbeddedHistoricalPathActivationTest {
     @Test
     void activationInitializesThenCatchesHistoryBeforeTheNextParentEntry()
             throws Exception {
+        // given
         String gameYaml = Round12NbaFixtures.game(
                 GAME_ID,
                 "examples/round12/dynamic/history/game",
@@ -68,10 +69,13 @@ final class DynamicProcessEmbeddedHistoricalPathActivationTest {
                     nextParent.sourceOrderKey()) < 0);
 
             EngineMetrics.MetricsSnapshot before = engine.metricsSnapshot();
+
+            // when
             engine.dispatch(nextParent);
             EngineTestSupport.MetricDelta work = delta(
                     before, engine.metricsSnapshot());
 
+            // then
             assertEquals(SessionStatus.READY,
                     engine.session(HOST_ID).status());
             assertEquals(SessionStatus.READY,
