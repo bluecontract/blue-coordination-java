@@ -13,6 +13,7 @@ import blue.coordination.api.TimelineAppendReceipt;
 import blue.coordination.api.TimelineEntry;
 import blue.coordination.internal.BundledContracts10Release;
 import blue.coordination.internal.Contracts10AuthoredClosureCompiler;
+import blue.coordination.internal.ContractsManagedDraftPlan;
 import blue.coordination.internal.DefaultCoordinationEngine;
 import blue.language.model.Node;
 import blue.language.model.NodePathEditor;
@@ -30,8 +31,6 @@ import java.util.Set;
 
 /** Package-private owner-safe adapter over the advanced Contracts engine. */
 final class SdkCoordinationRuntime implements AutoCloseable {
-    static final String UNSUPPORTED_MANAGED_DRAFT_ADMISSION =
-            "UNSUPPORTED_MANAGED_DRAFT_ADMISSION";
 
     private final Object owner;
     private final DefaultCoordinationEngine engine;
@@ -218,21 +217,38 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                     "Document handle belongs to another Coordination instance");
         }
         DocumentId id = handle.id();
+        blue.coordination.api.DocumentSnapshot snapshot = engine.document(id);
         return new TargetSelection(
-                id, handle.exact(), true, null);
+                id,
+                ExactBlueValue.wrap(snapshot.current()),
+                snapshot.epoch(),
+                true,
+                null);
     }
 
     synchronized TargetSelection selectTarget(DocumentId documentId) {
         ensureOpen();
         DocumentId id = Objects.requireNonNull(documentId, "documentId");
-        if (auditPresent(id)) {
-            return new TargetSelection(id, current(id), true, null);
+        try {
+            blue.coordination.api.DocumentSnapshot snapshot =
+                    engine.auditDocument(id);
+            return new TargetSelection(
+                    id,
+                    ExactBlueValue.wrap(snapshot.current()),
+                    snapshot.epoch(),
+                    true,
+                    null);
+        } catch (CoordinationException failure) {
+            ExactBlueValue lineageEvidence = ExactBlueValue.wrap(
+                    ExactValue.verified(new Node().properties(
+                            "documentId", new Node().value(id.value()))));
+            return new TargetSelection(
+                    id,
+                    lineageEvidence,
+                    -1L,
+                    false,
+                    "document is not managed");
         }
-        ExactBlueValue lineageEvidence = ExactBlueValue.wrap(
-                ExactValue.verified(new Node().properties(
-                        "documentId", new Node().value(id.value()))));
-        return new TargetSelection(
-                id, lineageEvidence, false, "document is not managed");
     }
 
     synchronized EntryHandle submitOperation(OperationCall call) {
@@ -366,14 +382,7 @@ final class SdkCoordinationRuntime implements AutoCloseable {
 
     private EntryHandle appendOperation(OperationCall call) {
         requireOwned(call.timeline());
-        if (!call.expectations().isEmpty()
-                || call.request() != null
-                && call.request().hasManagedEvidence()) {
-            throw new UnsupportedOperationException(
-                    UNSUPPORTED_MANAGED_DRAFT_ADMISSION
-                            + ": a real Contracts host invocation bridge is "
-                            + "required before managed occurrence admission");
-        }
+        ManagedDraftEvidence managed = managedDraftEvidence(call);
         ExactValue request;
         if (call.requestYaml() != null) {
             request = engine.exactValue(call.requestYaml());
@@ -386,16 +395,159 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         Operation operation = Operation.exact(
                 call.operation(), call.channel(), request)
                 .targeting(target.exact().unwrap(), true);
-        TimelineEntry appended = engine.append(
-                new Timeline(call.timeline().id(),
-                        call.timeline().accountId()),
-                operation);
+        Timeline timeline = new Timeline(
+                call.timeline().id(), call.timeline().accountId());
+        TimelineEntry appended;
+        if (managed == null || !target.presentAtSelection()) {
+            // Preserve the ordinary precise zero-attempt target diagnostic.
+            // A missing target cannot own an affected closure or new lineage.
+            appended = engine.append(timeline, operation);
+        } else {
+            ContractsManagedDraftPlan plan = new ContractsManagedDraftPlan(
+                    target.id(),
+                    target.epochAtSelection(),
+                    target.exact().blueId(),
+                    managed.drafts(),
+                    managed.requestFields(),
+                    managed.expectedOccurrences());
+            appended = engine.append(timeline, operation, plan);
+        }
         intents.put(appended.blueId(), EntryIntent.targeted(
                 target,
                 call.operation(),
                 call.channel(),
                 call.timeline()));
         return retainCoreEntry(appended);
+    }
+
+    private ManagedDraftEvidence managedDraftEvidence(OperationCall call) {
+        RequestBuilder request = call.request();
+        Map<String, ManagedDocumentDraft> requestDrafts = request == null
+                ? Map.of()
+                : request.managedEvidence();
+        List<OperationCall.OccurrenceExpectation> expectations =
+                call.expectations();
+        if (requestDrafts.isEmpty() && expectations.isEmpty()) {
+            return null;
+        }
+        if (requestDrafts.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "MANAGED_OCCURRENCE_DRAFT_NOT_REQUESTED: every expected "
+                            + "occurrence must name a managed request draft");
+        }
+        if (expectations.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "MANAGED_DRAFT_NOT_EXPECTED: every managed request draft "
+                            + "must have an expected occurrence");
+        }
+
+        LinkedHashMap<DocumentId, ContractsManagedDraftPlan.ManagedDraft>
+                drafts = new LinkedHashMap<>();
+        LinkedHashMap<String, DocumentId> requestFields =
+                new LinkedHashMap<>();
+        requestDrafts.forEach((field, draft) -> {
+            ManagedDocumentDraft selected = requireOwnedDraft(draft);
+            if (selected.id().equals(call.target().id())) {
+                throw new IllegalArgumentException(
+                        "MANAGED_DRAFT_TARGET_COLLISION: a new draft cannot "
+                                + "reuse the operation target lineage");
+            }
+            ContractsManagedDraftPlan.ManagedDraft exact = managedDraft(
+                    selected);
+            ContractsManagedDraftPlan.ManagedDraft prior = drafts.putIfAbsent(
+                    selected.id(), exact);
+            if (prior != null && !sameManagedDraft(prior, exact)) {
+                throw new IllegalArgumentException(
+                        "MANAGED_DRAFT_IDENTITY_CONFLICT: request fields "
+                                + "supply different evidence for "
+                                + selected.id());
+            }
+            requestFields.put(field, selected.id());
+        });
+
+        LinkedHashSet<String> paths = new LinkedHashSet<>();
+        LinkedHashSet<DocumentId> expectedDrafts = new LinkedHashSet<>();
+        ArrayList<ContractsManagedDraftPlan.ExpectedOccurrence> occurrences =
+                new ArrayList<>();
+        for (OperationCall.OccurrenceExpectation expectation : expectations) {
+            ManagedDocumentDraft draft = requireOwnedDraft(
+                    expectation.draft());
+            ContractsManagedDraftPlan.ManagedDraft requested = drafts.get(
+                    draft.id());
+            ContractsManagedDraftPlan.ManagedDraft expected = managedDraft(
+                    draft);
+            if (requested == null || !sameManagedDraft(requested, expected)) {
+                throw new IllegalArgumentException(
+                        "MANAGED_OCCURRENCE_DRAFT_NOT_REQUESTED: "
+                                + expectation.path() + " names draft "
+                                + draft.id() + " without matching managed "
+                                + "request evidence");
+            }
+            if (!paths.add(expectation.path())) {
+                throw new IllegalArgumentException(
+                        "DUPLICATE_MANAGED_OCCURRENCE_PATH: "
+                                + expectation.path());
+            }
+            ActivationPolicy policy = expectation.resolvedPolicy(
+                    call.activation());
+            if (policy.kind() != ActivationPolicy.Kind.FROM_NOW
+                    || policy.activationMode()
+                    != blue.coordination.api.ActivationMode
+                            .BIRTH_AT_ATTACHMENT) {
+                throw new UnsupportedOperationException(
+                        "UNSUPPORTED_MANAGED_DRAFT_ACTIVATION_POLICY: "
+                                + policy.kind()
+                                + "; only FROM_NOW is currently supported");
+            }
+            expectedDrafts.add(draft.id());
+            occurrences.add(new ContractsManagedDraftPlan.ExpectedOccurrence(
+                    expectation.path(),
+                    draft.id(),
+                    policy.activationMode()));
+        }
+        if (!expectedDrafts.equals(drafts.keySet())) {
+            LinkedHashSet<DocumentId> missing = new LinkedHashSet<>(
+                    drafts.keySet());
+            missing.removeAll(expectedDrafts);
+            throw new IllegalArgumentException(
+                    "MANAGED_DRAFT_NOT_EXPECTED: " + missing);
+        }
+        return new ManagedDraftEvidence(
+                drafts, requestFields, occurrences);
+    }
+
+    private ManagedDocumentDraft requireOwnedDraft(
+            ManagedDocumentDraft draft) {
+        ManagedDocumentDraft selected = Objects.requireNonNull(
+                draft, "draft");
+        if (selected.owner() != owner) {
+            throw new IllegalArgumentException(
+                    "MANAGED_DRAFT_OWNER_MISMATCH: draft " + selected.id()
+                            + " belongs to another Coordination instance");
+        }
+        return selected;
+    }
+
+    private static ContractsManagedDraftPlan.ManagedDraft managedDraft(
+            ManagedDocumentDraft draft) {
+        if (draft.knownEpoch().isPresent()) {
+            throw new UnsupportedOperationException(
+                    "UNSUPPORTED_MANAGED_DRAFT_IMPORT: draft " + draft.id()
+                            + " pins historical epoch "
+                            + draft.knownEpoch().getAsLong()
+                            + "; only new FROM_NOW lineages are currently "
+                            + "supported");
+        }
+        return new ContractsManagedDraftPlan.ManagedDraft(
+                draft.id(), draft.initial().unwrap(), null);
+    }
+
+    private static boolean sameManagedDraft(
+            ContractsManagedDraftPlan.ManagedDraft left,
+            ContractsManagedDraftPlan.ManagedDraft right) {
+        return left.documentId().equals(right.documentId())
+                && left.initial().sameExactValue(right.initial())
+                && Objects.equals(left.knownEpoch(), right.knownEpoch());
     }
 
     private EntryHandle appendEvent(EventCall call) {
@@ -563,15 +715,6 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         return text;
     }
 
-    private boolean auditPresent(DocumentId id) {
-        try {
-            engine.auditDocument(id);
-            return true;
-        } catch (CoordinationException failure) {
-            return false;
-        }
-    }
-
     private void requireOwned(TimelineHandle timeline) {
         if (Objects.requireNonNull(timeline, "timeline").owner() != owner) {
             throw new IllegalArgumentException(
@@ -596,11 +739,30 @@ final class SdkCoordinationRuntime implements AutoCloseable {
     record TargetSelection(
             DocumentId id,
             ExactBlueValue exact,
+            long epochAtSelection,
             boolean presentAtSelection,
             String selectionFailure) {
         TargetSelection {
             id = Objects.requireNonNull(id, "id");
             exact = Objects.requireNonNull(exact, "exact");
+            if (presentAtSelection != (epochAtSelection >= 0L)) {
+                throw new IllegalArgumentException(
+                        "Target epoch presence does not match selection");
+            }
+        }
+    }
+
+    private record ManagedDraftEvidence(
+            Map<DocumentId, ContractsManagedDraftPlan.ManagedDraft> drafts,
+            Map<String, DocumentId> requestFields,
+            List<ContractsManagedDraftPlan.ExpectedOccurrence>
+                    expectedOccurrences) {
+        private ManagedDraftEvidence {
+            drafts = Map.copyOf(Objects.requireNonNull(drafts, "drafts"));
+            requestFields = Map.copyOf(Objects.requireNonNull(
+                    requestFields, "requestFields"));
+            expectedOccurrences = List.copyOf(Objects.requireNonNull(
+                    expectedOccurrences, "expectedOccurrences"));
         }
     }
 

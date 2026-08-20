@@ -69,7 +69,12 @@ public final class OperationCall {
     public OperationCall expectOccurrence(
             String path,
             ManagedDocumentDraft draft) {
-        return expectOccurrence(path, draft, activation);
+        requireMutable();
+        expectations.add(new OccurrenceExpectation(
+                canonicalOccurrencePath(path),
+                Objects.requireNonNull(draft, "draft"),
+                null));
+        return this;
     }
 
     public OperationCall expectOccurrence(
@@ -77,14 +82,8 @@ public final class OperationCall {
             ManagedDocumentDraft draft,
             ActivationPolicy policy) {
         requireMutable();
-        String canonical = JsonPointer.canonicalize(
-                Objects.requireNonNull(path, "path"));
-        if (canonical.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "A managed occurrence cannot replace the document Root");
-        }
         expectations.add(new OccurrenceExpectation(
-                canonical,
+                canonicalOccurrencePath(path),
                 Objects.requireNonNull(draft, "draft"),
                 Objects.requireNonNull(policy, "policy")));
         return this;
@@ -148,9 +147,24 @@ public final class OperationCall {
         return checked;
     }
 
+    private static String canonicalOccurrencePath(String path) {
+        String canonical = JsonPointer.canonicalize(
+                Objects.requireNonNull(path, "path"));
+        if (canonical.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "A managed occurrence cannot replace the document Root");
+        }
+        return canonical;
+    }
+
     record OccurrenceExpectation(
             String path,
             ManagedDocumentDraft draft,
-            ActivationPolicy policy) {
+            ActivationPolicy explicitPolicy) {
+        ActivationPolicy resolvedPolicy(ActivationPolicy callPolicy) {
+            return explicitPolicy == null
+                    ? Objects.requireNonNull(callPolicy, "callPolicy")
+                    : explicitPolicy;
+        }
     }
 }

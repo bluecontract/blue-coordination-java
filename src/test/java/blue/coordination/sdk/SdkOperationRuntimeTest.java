@@ -164,7 +164,83 @@ final class SdkOperationRuntimeTest {
     }
 
     @Test
-    void managedDraftAdmissionFailsClosedBeforeAppend() {
+    void managedRequestAndExpectationMustBeCoherentBeforeAppend() {
+        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            TimelineHandle alice = blue.timelines().local("alice");
+            DocumentHandle counter = admitCounter(blue);
+            ManagedDocumentDraft draft = blue.documents().draft(
+                    DocumentId.of("child"),
+                    blue.values().yaml("documentId: child\nstate: 1"));
+            int entriesBefore = blue.advanced().rawEngine()
+                    .metrics().journalEntryCount();
+
+            IllegalArgumentException missingExpectation = assertThrows(
+                    IllegalArgumentException.class,
+                    () -> blue.operations()
+                            .on(counter)
+                            .from(alice)
+                            .call("increment")
+                            .through("aliceChannel")
+                            .request(request -> request.managed(
+                                    "child", draft))
+                            .submit());
+            assertTrue(missingExpectation.getMessage().startsWith(
+                    "MANAGED_DRAFT_NOT_EXPECTED:"));
+
+            IllegalArgumentException missingRequest = assertThrows(
+                    IllegalArgumentException.class,
+                    () -> blue.operations()
+                            .on(counter)
+                            .from(alice)
+                            .call("increment")
+                            .through("aliceChannel")
+                            .requestYaml("{}")
+                            .expectOccurrence("/child", draft)
+                            .submit());
+            assertTrue(missingRequest.getMessage().startsWith(
+                    "MANAGED_OCCURRENCE_DRAFT_NOT_REQUESTED:"));
+            assertEquals(entriesBefore, blue.advanced().rawEngine()
+                    .metrics().journalEntryCount());
+        }
+    }
+
+    @Test
+    void managedDraftOwnershipAndImportPolicyFailBeforeAppend() {
+        try (BlueCoordination blue = BlueCoordination.inMemory();
+                BlueCoordination foreign = BlueCoordination.inMemory()) {
+            TimelineHandle alice = blue.timelines().local("alice");
+            DocumentHandle counter = admitCounter(blue);
+            ExactBlueValue initial = blue.values().yaml(
+                    "documentId: child\nstate: 1");
+            ManagedDocumentDraft imported = blue.documents().draft(
+                    DocumentId.of("child"), initial).atEpoch(4L);
+            ManagedDocumentDraft foreignDraft = foreign.documents().draft(
+                    DocumentId.of("foreign-child"),
+                    foreign.values().yaml(
+                            "documentId: foreign-child\nstate: 1"));
+            int entriesBefore = blue.advanced().rawEngine()
+                    .metrics().journalEntryCount();
+
+            IllegalArgumentException ownerFailure = assertThrows(
+                    IllegalArgumentException.class,
+                    () -> managedCall(
+                            blue, counter, alice, foreignDraft).submit());
+            assertTrue(ownerFailure.getMessage().startsWith(
+                    "MANAGED_DRAFT_OWNER_MISMATCH:"));
+
+            UnsupportedOperationException importFailure = assertThrows(
+                    UnsupportedOperationException.class,
+                    () -> managedCall(
+                            blue, counter, alice, imported).submit());
+            assertTrue(importFailure.getMessage().startsWith(
+                    "UNSUPPORTED_MANAGED_DRAFT_IMPORT:"));
+            assertEquals(entriesBefore, blue.advanced().rawEngine()
+                    .metrics().journalEntryCount());
+        }
+    }
+
+    @Test
+    void defaultOccurrencePolicyUsesFinalCallActivationBeforeAppend() {
         try (BlueCoordination blue = BlueCoordination.inMemory()) {
             TimelineHandle alice = blue.timelines().local("alice");
             DocumentHandle counter = admitCounter(blue);
@@ -176,18 +252,12 @@ final class SdkOperationRuntimeTest {
 
             UnsupportedOperationException failure = assertThrows(
                     UnsupportedOperationException.class,
-                    () -> blue.operations()
-                            .on(counter)
-                            .from(alice)
-                            .call("increment")
-                            .through("aliceChannel")
-                            .request(request -> request.managed(
-                                    "child", draft))
-                            .expectOccurrence("/child", draft)
-                            .execute());
+                    () -> managedCall(blue, counter, alice, draft)
+                            .activation(ActivationPolicy.importFullHistory())
+                            .submit());
 
             assertTrue(failure.getMessage().startsWith(
-                    "UNSUPPORTED_MANAGED_DRAFT_ADMISSION:"));
+                    "UNSUPPORTED_MANAGED_DRAFT_ACTIVATION_POLICY:"));
             assertEquals(entriesBefore, blue.advanced().rawEngine()
                     .metrics().journalEntryCount());
         }
@@ -211,5 +281,19 @@ final class SdkOperationRuntimeTest {
                 .call("increment")
                 .through("aliceChannel")
                 .requestYaml("amount: " + amount);
+    }
+
+    private static OperationCall managedCall(
+            BlueCoordination blue,
+            DocumentHandle target,
+            TimelineHandle timeline,
+            ManagedDocumentDraft draft) {
+        return blue.operations()
+                .on(target)
+                .from(timeline)
+                .call("increment")
+                .through("aliceChannel")
+                .request(request -> request.managed("child", draft))
+                .expectOccurrence("/child", draft);
     }
 }
