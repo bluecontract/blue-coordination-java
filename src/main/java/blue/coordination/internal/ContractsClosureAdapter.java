@@ -247,6 +247,29 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 entryBlueId, "entryBlueId"));
     }
 
+    /**
+     * Rejects a managed-draft plan against the exact current target before its
+     * Timeline Entry can consume journal order.
+     */
+    synchronized void preflightManagedDraftPlan(
+            ContractsManagedDraftPlan plan) {
+        ensureOpen();
+        ContractsManagedDraftPlan selected = Objects.requireNonNull(
+                plan, "plan");
+        DocumentSession session = documents.require(
+                selected.targetDocumentId());
+        ExactValue target;
+        synchronized (session) {
+            target = session.currentRevision().after();
+            if (session.epoch() != selected.targetEpoch()
+                    || !target.blueId().equals(selected.targetBlueId())) {
+                throw stale("Managed expansion target head changed before "
+                        + "append " + selected.targetDocumentId());
+            }
+        }
+        validateManagedDraftExpectationPaths(selected, target);
+    }
+
     /** Executes and independently publishes every disconnected cohort. */
     synchronized List<CohortOutcome> processAndPublish(FrozenBatch batch) {
         ensureOpen();
@@ -930,8 +953,15 @@ final class ContractsClosureAdapter implements AutoCloseable {
                                 + documentId);
             }
         });
+        validateManagedDraftExpectationPaths(plan, target.current());
+    }
+
+    private void validateManagedDraftExpectationPaths(
+            ContractsManagedDraftPlan plan,
+            ExactValue target) {
         EffectiveFragmentationCatalog catalog = runtime
-                .effectiveFragmentationCatalog(target.current().blueId());
+                .effectiveFragmentationCatalog(Objects.requireNonNull(
+                        target, "target").blueId());
         for (ContractsManagedDraftPlan.ExpectedOccurrence expectation
                 : plan.expectedOccurrences()) {
             ArrayList<String> matches = new ArrayList<>();

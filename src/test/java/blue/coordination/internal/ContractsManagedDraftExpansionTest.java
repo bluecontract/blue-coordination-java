@@ -33,23 +33,21 @@ final class ContractsManagedDraftExpansionTest {
 
     @Test
     void atomicAppendPublishesOrRollsBackEntryAndPlanTogether() {
-        try (DefaultCoordinationEngine engine = contractsEngine()) {
-            Timeline timeline = engine.registerTimeline(
-                    "managed/atomic", ACTOR);
-            ExactValue target = engine.exactValue(
-                    "documentId: missing-managed-target");
-            ExactValue draft = engine.exactValue(
-                    "documentId: managed-expansion-draft\nstate: draft");
+        try (DefaultCoordinationEngine engine = admittedHost(
+                "managed/atomic")) {
+            Timeline timeline = engine.timeline("managed/atomic", ACTOR);
+            ExactValue target = engine.document(HOST).current();
+            ExactValue draft = draft(engine);
             ExactValue request = engine.referenceRequest("draft", draft);
             Operation operation = Operation.exact(
                     "create", "ownerChannel", request)
                     .targeting(target, true);
             ContractsManagedDraftPlan plan = plan(
-                    DocumentId.of("missing-managed-target"),
+                    HOST,
                     target,
                     draft,
                     "draft",
-                    "/children/draft");
+                    "/orders/draft");
             long clockBefore = engine.logicalClockMicros();
 
             engine.failOnceAt(DefaultCoordinationEngine.FailurePoint
@@ -68,21 +66,52 @@ final class ContractsManagedDraftExpansionTest {
     }
 
     @Test
+    void undeclaredManagedOccurrenceFailsBeforeConsumingJournalSequence() {
+        try (DefaultCoordinationEngine engine = admittedHost(
+                "managed/preflight")) {
+            Timeline timeline = engine.timeline("managed/preflight", ACTOR);
+            ExactValue target = engine.document(HOST).current();
+            ExactValue draft = draft(engine);
+            ExactValue request = engine.referenceRequest("order", draft);
+            Operation operation = Operation.exact(
+                    "createOrder", "ownerChannel", request)
+                    .targeting(target, true);
+
+            IllegalArgumentException failure = assertThrows(
+                    IllegalArgumentException.class,
+                    () -> engine.append(
+                            timeline,
+                            operation,
+                            plan(HOST, target, draft, "order",
+                                    "/not-declared/order-1")));
+
+            assertTrue(failure.getMessage().contains(
+                    "must match exactly one effective Process Embedded"));
+            TimelineEntry appended = engine.append(
+                    timeline,
+                    operation,
+                    plan(HOST, target, draft, "order",
+                            "/orders/order-1"));
+            assertEquals(1L, appended.globalSequence());
+            assertEquals(1L, appended.timelineSequence());
+        }
+    }
+
+    @Test
     void emptyDirectSelectionRemainsOrdinaryAndCreatesNoDraftSession() {
-        try (DefaultCoordinationEngine engine = contractsEngine()) {
-            Timeline timeline = engine.registerTimeline(
+        try (DefaultCoordinationEngine engine = admittedHost(
+                "managed/no-selection")) {
+            Timeline timeline = engine.timeline(
                     "managed/no-selection", ACTOR);
-            DocumentId missing = DocumentId.of("missing-managed-target");
-            ExactValue target = engine.exactValue(
-                    "documentId: missing-managed-target");
-            ExactValue draft = engine.exactValue(
-                    "documentId: managed-expansion-draft\nstate: draft");
+            ExactValue target = engine.document(HOST).current();
+            ExactValue draft = draft(engine);
             ExactValue request = engine.referenceRequest("draft", draft);
             TimelineEntry entry = engine.append(
                     timeline,
                     Operation.exact("missing", "missingChannel", request)
                             .targeting(target, true),
-                    plan(missing, target, draft, "draft", "/child"));
+                    plan(HOST, target, draft, "draft",
+                            "/orders/unselected"));
 
             ContractsClosureAdapter.FrozenBatch captured = engine
                     .contractsClosureAdapter().capture(entry);

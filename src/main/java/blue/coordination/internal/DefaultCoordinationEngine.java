@@ -503,6 +503,7 @@ public final class DefaultCoordinationEngine
         Timeline canonicalTimeline = requireRegisteredTimeline(timeline);
         ContractsManagedDraftPlan plan = Objects.requireNonNull(
                 managedDraftPlan, "managedDraftPlan");
+        contractsClosureAdapter.preflightManagedDraftPlan(plan);
         long previousLogicalClock = logicalClockMicros;
         long candidateTimestamp = Math.addExact(logicalClockMicros, 1L);
         InMemoryTimelineJournal.Mark mark = journal.mark();
