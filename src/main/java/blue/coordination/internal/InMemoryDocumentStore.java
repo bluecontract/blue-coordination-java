@@ -610,27 +610,26 @@ final class InMemoryDocumentStore {
             boolean retainedDocument = false;
             for (Map.Entry<DocumentId, ResultingDocument> entry
                     : resulting.entrySet()) {
+                ResultingDocument exact = entry.getValue();
+                if (!result.commits()
+                        && exact.epoch() == 0L
+                        && exact.beforeBlueId().equals(exact.afterBlueId())
+                        && !exact.initialized()
+                        && !exact.terminated()
+                        && !exact.publicRoot()) {
+                    // This row authenticates absence at the completed attempt,
+                    // not the current store image. A later operation may admit
+                    // the same lineage without invalidating the retained
+                    // virtual-draft rollback evidence.
+                    continue;
+                }
                 DocumentSession session = sessions.get(entry.getKey());
                 if (session == null) {
-                    ResultingDocument rollback = entry.getValue();
-                    if (!result.commits()
-                            && rollback.epoch() == 0L
-                            && rollback.beforeBlueId().equals(
-                                    rollback.afterBlueId())
-                            && !rollback.initialized()
-                            && !rollback.terminated()
-                            && !rollback.publicRoot()) {
-                        // A managed PROCESS expansion may retain truthful
-                        // terminal rollback evidence for virtual draft input
-                        // while its exact absent fence leaves no session.
-                        continue;
-                    }
                     throw new IllegalArgumentException(
                             label + " belongs to an absent document "
                                     + entry.getKey());
                 }
                 retainedDocument = true;
-                ResultingDocument exact = entry.getValue();
                 if (exact.epoch() > session.epoch()
                         || !session.revision(exact.epoch()).after().blueId()
                                 .equals(exact.afterBlueId())) {

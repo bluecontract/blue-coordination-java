@@ -191,6 +191,53 @@ final class ContractsManagedDraftExpansionTest {
     }
 
     @Test
+    void virtualRollbackReceiptSurvivesLaterAdmissionOfSameLineage() {
+        try (DefaultCoordinationEngine engine = admittedHost(
+                "managed/rollback-retry")) {
+            Timeline timeline = engine.timeline(
+                    "managed/rollback-retry", ACTOR);
+            ExactValue draft = draft(engine);
+            ExactValue request = engine.referenceRequest("order", draft);
+            ExactValue target = engine.document(HOST).current();
+            TimelineEntry rejectedEntry = engine.append(
+                    timeline,
+                    Operation.exact(
+                            "rejectCreate", "ownerChannel", request)
+                            .targeting(target, true),
+                    plan(HOST, target, draft, "order",
+                            "/orders/order-1"));
+
+            ProcessingDrainReceipt rejected = engine.drain();
+
+            assertEquals(List.of(rejectedEntry), rejected.processedEntries());
+            assertEquals(ProcessorStatus.INVALID_PROCESSING_DOCUMENT,
+                    rejected.contractsAttemptsFor(rejectedEntry.blueId())
+                            .get(0).attempt().processResult().status());
+            assertTrue(engine.documents().find(DRAFT).isEmpty());
+
+            target = engine.document(HOST).current();
+            TimelineEntry retryEntry = engine.append(
+                    timeline,
+                    Operation.exact(
+                            "createOrder", "ownerChannel", request)
+                            .targeting(target, true),
+                    plan(HOST, target, draft, "order",
+                            "/orders/order-1"));
+            ProcessingDrainReceipt retry = engine.drain();
+
+            assertEquals(List.of(retryEntry), retry.processedEntries());
+            assertEquals(ProcessorStatus.SUCCESS,
+                    retry.contractsAttemptsFor(retryEntry.blueId())
+                            .get(0).attempt().processResult().status());
+            assertEquals(SessionStatus.READY,
+                    engine.document(DRAFT).status());
+            assertEquals(engine.document(DRAFT).current().blueId(),
+                    engine.document(HOST).current()
+                            .canonicalBlueIdAt("/orders/order-1"));
+        }
+    }
+
+    @Test
     void managedDraftPlanSurvivesFailedPublicationAndClearsAfterRetry() {
         try (DefaultCoordinationEngine engine = admittedHost(
                 "managed/retry")) {
