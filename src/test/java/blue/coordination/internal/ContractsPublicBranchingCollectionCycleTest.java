@@ -148,10 +148,13 @@ final class ContractsPublicBranchingCollectionCycleTest {
         assertEquals(1L, structural.planConstructions());
         assertEquals(1L, structural.cohortsSelected());
         assertEquals(1L, structural.topologySnapshots());
-        assertEquals(15L, structural.headsCaptured());
+        // Planning and atomic publication each capture the five-head,
+        // one-component closure; typed receipt lookup adds no third snapshot.
+        assertEquals(2L * branchingDocuments().size(),
+                structural.headsCaptured());
         assertEquals(5L, structural.documentOpens());
         assertEquals(0L, structural.unrelatedDocumentOpens());
-        assertEquals(3L, structural.componentStatesCaptured());
+        assertEquals(2L, structural.componentStatesCaptured());
         assertEquals(1L, structural.componentStatesRead());
         assertEquals(1L, structural.requestSourcesParsed());
         assertEquals(7L, structural.acceptedWorkOccurrences());
