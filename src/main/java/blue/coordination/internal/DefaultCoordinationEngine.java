@@ -42,6 +42,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 
@@ -63,6 +64,21 @@ public final class DefaultCoordinationEngine
 
         private InjectedFailureException(FailurePoint point) {
             super("Injected coordination failure at " + point);
+        }
+    }
+
+    /** Narrow immutable projection used by advanced diagnostic adapters. */
+    public record ManagedOccurrenceAuditView(
+            DocumentId targetDocumentId,
+            long activationGeneration,
+            boolean active) {
+        public ManagedOccurrenceAuditView {
+            targetDocumentId = Objects.requireNonNull(
+                    targetDocumentId, "targetDocumentId");
+            if (activationGeneration < 1L) {
+                throw new IllegalArgumentException(
+                        "activationGeneration must be positive");
+            }
         }
     }
 
@@ -905,6 +921,20 @@ public final class DefaultCoordinationEngine
     public synchronized DocumentSnapshot auditDocument(
             DocumentId documentId) {
         return snapshot(requireDocument(documentId));
+    }
+
+    /** Reads one retained managed occurrence without opening document heads. */
+    public synchronized Optional<ManagedOccurrenceAuditView>
+            auditManagedOccurrence(
+                    DocumentId sourceDocumentId,
+                    String sourcePath) {
+        ensureOpen();
+        return documents.occurrenceInventory()
+                .find(sourceDocumentId, sourcePath)
+                .map(row -> new ManagedOccurrenceAuditView(
+                        DocumentId.of(row.targetDocumentId().value()),
+                        row.activationGeneration(),
+                        row.active()));
     }
 
     private DocumentSession requireDocument(DocumentId documentId) {

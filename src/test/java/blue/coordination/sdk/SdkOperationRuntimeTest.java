@@ -263,6 +263,32 @@ final class SdkOperationRuntimeTest {
         }
     }
 
+    @Test
+    void advancedAuditProjectsRetainedManagedOccurrenceLineage() {
+        DocumentId a = DocumentId.of("audit-occurrence-a");
+        DocumentId b = DocumentId.of("audit-occurrence-b");
+        ManagedClosure closure = ManagedClosure.builder()
+                .document("a", a, occurrenceAuditDocument(a))
+                .document("b", b, occurrenceAuditDocument(b))
+                .bindOccurrence("a", "/peer", "b")
+                .bindOccurrence("b", "/peer", "a")
+                .publicRoot("a")
+                .fromNow()
+                .build();
+
+        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            blue.documents().admit(closure);
+
+            assertEquals(new ManagedOccurrenceAudit(a, 1L, true),
+                    blue.advanced()
+                            .auditManagedOccurrence(b, "/peer")
+                            .orElseThrow());
+            assertTrue(blue.advanced()
+                    .auditManagedOccurrence(b, "/missing")
+                    .isEmpty());
+        }
+    }
+
     private static DocumentHandle admitCounter(BlueCoordination blue) {
         return blue.documents().admit(
                 ManagedDocument.yaml(COUNTER_ID, COUNTER)
@@ -295,5 +321,16 @@ final class SdkOperationRuntimeTest {
                 .through("aliceChannel")
                 .request(request -> request.managed("child", draft))
                 .expectOccurrence("/child", draft);
+    }
+
+    private static String occurrenceAuditDocument(DocumentId id) {
+        return """
+                documentId: %s
+                contracts:
+                  embedded:
+                    type: Process Embedded
+                    paths:
+                      - /peer
+                """.formatted(id.value());
     }
 }

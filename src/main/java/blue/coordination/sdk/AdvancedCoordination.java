@@ -25,6 +25,15 @@ public final class AdvancedCoordination {
                 Objects.requireNonNull(id, "id"));
     }
 
+    /** Reads retained lineage state for one managed source occurrence. */
+    public Optional<ManagedOccurrenceAudit> auditManagedOccurrence(
+            DocumentId sourceDocumentId,
+            String sourcePath) {
+        return runtime.auditManagedOccurrence(
+                Objects.requireNonNull(sourceDocumentId, "sourceDocumentId"),
+                SdkPreconditions.requireOccurrencePath(sourcePath));
+    }
+
     public String blueLanguageSpecificationIdentity() {
         return runtime.languageSpecificationIdentity();
     }

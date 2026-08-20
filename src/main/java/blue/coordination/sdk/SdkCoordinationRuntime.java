@@ -81,6 +81,20 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         return engine;
     }
 
+    synchronized Optional<ManagedOccurrenceAudit> auditManagedOccurrence(
+            DocumentId sourceDocumentId,
+            String sourcePath) {
+        ensureOpen();
+        return engine.auditManagedOccurrence(
+                        Objects.requireNonNull(
+                                sourceDocumentId, "sourceDocumentId"),
+                        SdkPreconditions.requireOccurrencePath(sourcePath))
+                .map(audit -> new ManagedOccurrenceAudit(
+                        audit.targetDocumentId(),
+                        audit.activationGeneration(),
+                        audit.active()));
+    }
+
     String languageSpecificationIdentity() {
         return languageSpecificationIdentity;
     }

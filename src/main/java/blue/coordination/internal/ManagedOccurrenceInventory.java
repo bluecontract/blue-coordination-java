@@ -14,6 +14,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -170,6 +171,14 @@ final class ManagedOccurrenceInventory {
                     "Unknown managed occurrence " + key);
         }
         return selected;
+    }
+
+    /** Finds the retained row for one source/path without exposing the map. */
+    Optional<ManagedOccurrenceBinding> find(
+            DocumentId sourceDocumentId,
+            String sourcePath) {
+        return Optional.ofNullable(rowsBySourcePath.get(
+                OccurrenceKey.of(sourceDocumentId, sourcePath)));
     }
 
     /**
