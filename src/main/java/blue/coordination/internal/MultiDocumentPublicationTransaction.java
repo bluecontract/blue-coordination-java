@@ -7,6 +7,7 @@ import blue.language.identity.BlueIds;
 import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.SubscriptionDelta;
 import blue.language.processor.closure.CheckpointWrite;
+import blue.language.processor.closure.ClosureInvocationInput;
 import blue.language.processor.closure.ClosureProcessResult;
 import blue.language.processor.closure.ComponentKind;
 import blue.language.processor.closure.ComponentSnapshot;
@@ -70,6 +71,7 @@ final class MultiDocumentPublicationTransaction {
     private ClosureProcessResult stagedGraphGeneration;
     private ClosureProcessResult stagedClosureSubscriptions;
     private boolean stagedAdmissionResult;
+    private ClosureInvocationInput stagedManagedExpansionInput;
     private ContractsClosureAdmissionReceipt stagedAdmissionReceipt;
     private ContractsClosurePublicationReceipt stagedClosurePublicationReceipt;
     private Consumer<FailurePoint> failureInjector = ignored -> { };
@@ -279,6 +281,59 @@ final class MultiDocumentPublicationTransaction {
         stagedClosureSubscriptions = selected;
         stagedAdmissionResult = true;
         return this;
+    }
+
+    /**
+     * Stages one verified PROCESS result which initializes absent members in
+     * the same atomic publication as its existing cohort transitions.
+     */
+    synchronized MultiDocumentPublicationTransaction
+            stageManagedExpansionResult(
+                    ClosureInvocationInput input,
+                    ClosureProcessResult result) {
+        ensureOpen();
+        ClosureInvocationInput invocation = stageManagedExpansionInput(input);
+        ClosureProcessResult selected = Objects.requireNonNull(
+                result, "result");
+        if (!selected.commits()
+                || selected.platformCommitCompanion() == null) {
+            throw new IllegalArgumentException(
+                    "Only a successful managed expansion can be staged");
+        }
+        if (!selected.invocationIdentity().equals(
+                invocation.invocationIdentity())
+                || !selected.inputClosureIdentity().equals(
+                        invocation.snapshot().closureIdentity())) {
+            throw new IllegalArgumentException(
+                    "Managed expansion result does not authenticate its input");
+        }
+        if (stagedGraphGeneration != null
+                || stagedClosureSubscriptions != null) {
+            throw new IllegalStateException(
+                    "Closure result state is already staged");
+        }
+        stagedGraphGeneration = selected;
+        stagedClosureSubscriptions = selected;
+        return this;
+    }
+
+    /** Stages the authenticated virtual-member input for a receipt-only rollback. */
+    synchronized ClosureInvocationInput stageManagedExpansionInput(
+            ClosureInvocationInput input) {
+        ensureOpen();
+        ClosureInvocationInput invocation = Objects.requireNonNull(
+                input, "input");
+        if (invocation.operation()
+                != ClosureInvocationInput.Operation.PROCESS_CLOSURE) {
+            throw new IllegalArgumentException(
+                    "A managed expansion requires PROCESS_CLOSURE input");
+        }
+        if (stagedManagedExpansionInput != null) {
+            throw new IllegalStateException(
+                    "Managed expansion input is already staged");
+        }
+        stagedManagedExpansionInput = invocation;
+        return invocation;
     }
 
     /** Stages the typed durable receipt for the successful admission. */
@@ -492,6 +547,11 @@ final class MultiDocumentPublicationTransaction {
                         : stagedAdmissionResult
                         ? before.graphGenerations().admit(
                                 stagedGraphGeneration, expectedAbsent)
+                        : stagedManagedExpansionInput != null
+                        ? before.graphGenerations().applyExpansion(
+                                stagedGraphGeneration,
+                                expectedHeads.keySet(),
+                                expectedAbsent)
                         : before.graphGenerations().apply(stagedGraphGeneration);
         ClosureSubscriptionInventory resultingClosureSubscriptions =
                 applyClosureSubscriptions(before, metrics);
@@ -766,6 +826,10 @@ final class MultiDocumentPublicationTransaction {
     }
 
     private void requireAdmissionShape() {
+        if (stagedManagedExpansionInput != null) {
+            requireManagedExpansionShape();
+            return;
+        }
         if (!stagedAdmissionResult) {
             if (stagedAdmissionReceipt != null
                     || !expectedAbsent.isEmpty()
@@ -829,21 +893,129 @@ final class MultiDocumentPublicationTransaction {
         }
     }
 
+    private void requireManagedExpansionShape() {
+        if (stagedAdmissionResult || stagedAdmissionReceipt != null) {
+            throw new IllegalStateException(
+                    "Managed expansion cannot also publish an admission");
+        }
+        if (expectedHeads.isEmpty() || expectedAbsent.isEmpty()) {
+            throw new IllegalStateException(
+                    "Managed expansion requires present and absent fences");
+        }
+        if (stagedClosurePublicationReceipt == null) {
+            throw new IllegalStateException(
+                    "Managed expansion requires one typed process receipt");
+        }
+        boolean commits = stagedClosurePublicationReceipt.commits();
+        if (commits && (!newSessions.keySet().equals(expectedAbsent)
+                || stagedOccurrenceInventory == null)) {
+            throw new IllegalStateException(
+                    "Committing managed expansion must stage every absent "
+                            + "lineage and complete topology");
+        }
+        if (!commits && (!newSessions.isEmpty()
+                || stagedOccurrenceInventory != null)) {
+            throw new IllegalStateException(
+                    "Non-committing managed expansion must be receipt-only");
+        }
+
+        LinkedHashSet<DocumentId> expectedMembers = new LinkedHashSet<>(
+                expectedHeads.keySet());
+        expectedMembers.addAll(expectedAbsent);
+        LinkedHashMap<DocumentId,
+                blue.language.processor.closure.ManagedDocumentSnapshot>
+                inputDocuments = new LinkedHashMap<>();
+        stagedManagedExpansionInput.snapshot().managedDocuments()
+                .forEach(document -> inputDocuments.put(
+                        DocumentId.of(document.documentId().value()),
+                        document));
+        LinkedHashMap<DocumentId,
+                blue.language.processor.closure.ResultingDocument>
+                resultDocuments = new LinkedHashMap<>();
+        ClosureProcessResult processResult = stagedClosurePublicationReceipt
+                .attempt().processResult();
+        if (!processResult.invocationIdentity().equals(
+                stagedManagedExpansionInput.invocationIdentity())
+                || !processResult.inputClosureIdentity().equals(
+                        stagedManagedExpansionInput.snapshot()
+                                .closureIdentity())) {
+            throw new IllegalStateException(
+                    "Managed expansion receipt does not authenticate its "
+                            + "virtual-member input");
+        }
+        processResult.resultingDocuments().forEach(document ->
+                resultDocuments.put(
+                        DocumentId.of(document.documentId().value()),
+                        document));
+        LinkedHashSet<DocumentId> companionDocuments = new LinkedHashSet<>();
+        if (commits) {
+            processResult.platformCommitCompanion()
+                    .expectedInputDocuments().forEach(document ->
+                            companionDocuments.add(DocumentId.of(
+                                    document.documentId().value())));
+        }
+        if (!inputDocuments.keySet().equals(expectedMembers)
+                || !resultDocuments.keySet().equals(expectedMembers)
+                || (commits
+                        && !companionDocuments.equals(expectedMembers))
+                || !new LinkedHashSet<>(stagedClosurePublicationReceipt
+                        .documentIds()).equals(expectedMembers)
+                || (commits
+                        && processResult != stagedGraphGeneration)) {
+            throw new IllegalStateException(
+                    "Managed expansion input, result, fences, and receipt "
+                            + "name different member sets or results");
+        }
+        for (DocumentId documentId : expectedHeads.keySet()) {
+            blue.language.processor.closure.ManagedDocumentSnapshot input =
+                    inputDocuments.get(documentId);
+            InMemoryDocumentStore.DocumentHead expected = expectedHeads.get(
+                    documentId);
+            if (!input.initialized()
+                    || input.epoch() != expected.epoch()
+                    || !input.blueId().equals(expected.blueId())) {
+                throw new IllegalStateException(
+                        "Managed expansion present input is not its exact "
+                                + "durable head " + documentId);
+            }
+        }
+        for (DocumentId documentId : expectedAbsent) {
+            blue.language.processor.closure.ManagedDocumentSnapshot input =
+                    inputDocuments.get(documentId);
+            blue.language.processor.closure.ResultingDocument result =
+                    resultDocuments.get(documentId);
+            DocumentSession session = newSessions.get(documentId);
+            if (input.initialized() || input.terminated()
+                    || input.epoch() != 0L
+                    || (commits && (!result.initialized()
+                            || result.epoch() != 0L
+                            || session == null
+                            || !session.currentRevision().after().blueId()
+                                    .equals(result.afterBlueId())))) {
+                throw new IllegalStateException(
+                        "Managed expansion new lineage is not one exact "
+                                + "epoch-zero initialization " + documentId);
+            }
+        }
+    }
+
     private void requireClosurePublicationShape() {
         ContractsClosurePublicationReceipt receipt =
                 stagedClosurePublicationReceipt;
         if (receipt == null) {
             return;
         }
-        if (stagedAdmissionResult || stagedAdmissionReceipt != null
-                || !expectedAbsent.isEmpty() || !newSessions.isEmpty()) {
+        if (stagedAdmissionResult || stagedAdmissionReceipt != null) {
             throw new IllegalStateException(
                     "A process receipt cannot publish an admission");
         }
         Set<DocumentId> members = new LinkedHashSet<>(receipt.documentIds());
-        if (!expectedHeads.keySet().equals(members)) {
+        Set<DocumentId> fencedMembers = new LinkedHashSet<>(
+                expectedHeads.keySet());
+        fencedMembers.addAll(expectedAbsent);
+        if (!fencedMembers.equals(members)) {
             throw new IllegalStateException(
-                    "A process receipt requires exact head fences for its "
+                    "A process receipt requires exact present/absent fences for its "
                             + "complete cohort");
         }
         ClosureProcessResult result = receipt.attempt().processResult();
@@ -859,6 +1031,25 @@ final class MultiDocumentPublicationTransaction {
                     entry.getKey());
             blue.language.processor.closure.ResultingDocument after =
                     entry.getValue();
+            if (before == null) {
+                boolean completeCommit = result.commits()
+                        && expectedAbsent.contains(entry.getKey())
+                        && after.epoch() == 0L
+                        && newSessions.containsKey(entry.getKey())
+                        && newSessions.get(entry.getKey())
+                                .currentRevision().after().blueId().equals(
+                                        after.afterBlueId());
+                boolean completeRollback = !result.commits()
+                        && expectedAbsent.contains(entry.getKey())
+                        && after.epoch() == 0L
+                        && after.afterBlueId().equals(after.beforeBlueId());
+                if (!completeCommit && !completeRollback) {
+                    throw new IllegalStateException(
+                            "Process receipt new lineage is not fully staged "
+                                    + entry.getKey());
+                }
+                continue;
+            }
             if (!before.blueId().equals(after.beforeBlueId())) {
                 throw new IllegalStateException(
                         "Process receipt result predecessor differs from its "

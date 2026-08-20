@@ -187,6 +187,86 @@ final class ClosureGraphGenerationInventory {
         return new ClosureGraphGenerationInventory(replacement);
     }
 
+    /**
+     * Applies one verified PROCESS result that atomically expands an existing
+     * cohort with lineages which were absent at capture time.
+     *
+     * <p>Existing members retain the ordinary exact graph-generation CAS.
+     * New members have no durable predecessor generation; they are installed
+     * only when the same result and transaction also prove their absence.</p>
+     */
+    ClosureGraphGenerationInventory applyExpansion(
+            ClosureProcessResult result,
+            Collection<DocumentId> expectedPresent,
+            Collection<DocumentId> expectedAbsent) {
+        ClosureProcessResult selected = Objects.requireNonNull(
+                result, "result");
+        if (!selected.commits()
+                || selected.platformCommitCompanion() == null) {
+            throw new IllegalArgumentException(
+                    "Only a committing closure result can expand graph state");
+        }
+        LinkedHashSet<DocumentId> present = new LinkedHashSet<>(
+                Objects.requireNonNull(expectedPresent, "expectedPresent"));
+        LinkedHashSet<DocumentId> absent = new LinkedHashSet<>(
+                Objects.requireNonNull(expectedAbsent, "expectedAbsent"));
+        if (present.isEmpty() || absent.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "A closure expansion requires present and absent members");
+        }
+        LinkedHashSet<DocumentId> overlap = new LinkedHashSet<>(present);
+        overlap.retainAll(absent);
+        if (!overlap.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Closure expansion fences overlap " + overlap);
+        }
+        long expectedGeneration = selected.platformCommitCompanion()
+                .expectedInputGraphGeneration();
+        for (DocumentId documentId : present) {
+            long actual = require(documentId);
+            if (actual != expectedGeneration) {
+                throw new MultiDocumentPublicationTransaction
+                        .AtomicPublicationCasException(
+                                "Stale graph generation for " + documentId
+                                        + ": expected "
+                                        + expectedGeneration
+                                        + " but found " + actual);
+            }
+        }
+        for (DocumentId documentId : absent) {
+            if (generations.containsKey(documentId)) {
+                throw new MultiDocumentPublicationTransaction
+                        .AtomicPublicationCasException(
+                                "Closure expansion graph lineage already exists "
+                                        + documentId);
+            }
+        }
+
+        LinkedHashSet<DocumentId> expectedMembers = new LinkedHashSet<>(
+                present);
+        expectedMembers.addAll(absent);
+        LinkedHashSet<DocumentId> companionMembers = new LinkedHashSet<>();
+        selected.platformCommitCompanion().expectedInputDocuments()
+                .forEach(document -> companionMembers.add(DocumentId.of(
+                        document.documentId().value())));
+        LinkedHashSet<DocumentId> resultingMembers = new LinkedHashSet<>();
+        selected.resultingDocuments().forEach(document ->
+                resultingMembers.add(DocumentId.of(
+                        document.documentId().value())));
+        if (!expectedMembers.equals(companionMembers)
+                || !expectedMembers.equals(resultingMembers)) {
+            throw new IllegalArgumentException(
+                    "Closure expansion graph members are incomplete");
+        }
+
+        TreeMap<DocumentId, Long> replacement = new TreeMap<>(
+                EmbeddingBinding.DOCUMENT_ORDER);
+        replacement.putAll(generations);
+        expectedMembers.forEach(documentId -> replacement.put(
+                documentId, selected.graphGeneration()));
+        return new ClosureGraphGenerationInventory(replacement);
+    }
+
     Map<DocumentId, Long> generations() {
         return generations;
     }

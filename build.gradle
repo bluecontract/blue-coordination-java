@@ -635,7 +635,8 @@ tasks.register('verifyPublicApiBoundary') {
         def allowedPublicInternalSources = [
                 'src/main/java/blue/coordination/internal/DefaultCoordinationEngine.java',
                 'src/main/java/blue/coordination/internal/BundledContracts10Release.java',
-                'src/main/java/blue/coordination/internal/Contracts10AuthoredClosureCompiler.java'
+                'src/main/java/blue/coordination/internal/Contracts10AuthoredClosureCompiler.java',
+                'src/main/java/blue/coordination/internal/ContractsManagedDraftPlan.java'
         ] as Set
         fileTree('src/main/java/blue/coordination/internal') {
             include '**/*.java'

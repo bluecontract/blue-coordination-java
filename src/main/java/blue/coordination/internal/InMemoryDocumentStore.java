@@ -198,6 +198,20 @@ final class InMemoryDocumentStore {
                 expectedComponentIndexGeneration);
     }
 
+    /** Looks up one typed process receipt without opening document heads. */
+    synchronized Optional<ContractsClosurePublicationReceipt>
+            closurePublicationReceipt(String publicationIdentity) {
+        return Optional.ofNullable(state.closurePublicationReceipts().get(
+                Objects.requireNonNull(
+                        publicationIdentity, "publicationIdentity")));
+    }
+
+    /** Checks the generic idempotency ledger without opening document heads. */
+    synchronized boolean hasPublicationReceipt(String publicationIdentity) {
+        return state.publicationReceipts().contains(Objects.requireNonNull(
+                publicationIdentity, "publicationIdentity"));
+    }
+
     synchronized void commit(MultiDocumentPublicationTransaction transaction) {
         MultiDocumentPublicationTransaction selected = Objects.requireNonNull(
                 transaction, "transaction");
@@ -593,14 +607,29 @@ final class InMemoryDocumentStore {
                 throw new IllegalArgumentException(
                         label + " document set differs from its exact result");
             }
+            boolean retainedDocument = false;
             for (Map.Entry<DocumentId, ResultingDocument> entry
                     : resulting.entrySet()) {
                 DocumentSession session = sessions.get(entry.getKey());
                 if (session == null) {
+                    ResultingDocument rollback = entry.getValue();
+                    if (!result.commits()
+                            && rollback.epoch() == 0L
+                            && rollback.beforeBlueId().equals(
+                                    rollback.afterBlueId())
+                            && !rollback.initialized()
+                            && !rollback.terminated()
+                            && !rollback.publicRoot()) {
+                        // A managed PROCESS expansion may retain truthful
+                        // terminal rollback evidence for virtual draft input
+                        // while its exact absent fence leaves no session.
+                        continue;
+                    }
                     throw new IllegalArgumentException(
                             label + " belongs to an absent document "
                                     + entry.getKey());
                 }
+                retainedDocument = true;
                 ResultingDocument exact = entry.getValue();
                 if (exact.epoch() > session.epoch()
                         || !session.revision(exact.epoch()).after().blueId()
@@ -609,6 +638,10 @@ final class InMemoryDocumentStore {
                             label + " result head is absent from durable "
                                     + "history for " + entry.getKey());
                 }
+            }
+            if (!retainedDocument) {
+                throw new IllegalArgumentException(
+                        label + " has no retained document");
             }
         }
 

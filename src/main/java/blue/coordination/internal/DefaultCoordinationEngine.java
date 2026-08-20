@@ -49,6 +49,7 @@ import java.util.function.Consumer;
 public final class DefaultCoordinationEngine
         implements CoordinationEngine {
     enum FailurePoint {
+        AFTER_MANAGED_DRAFT_PLAN_REGISTERED,
         BEFORE_FROZEN_PROCESS,
         AFTER_FROZEN_BEFORE_STAGE,
         AFTER_STAGING_CHILD_SESSION,
@@ -482,6 +483,70 @@ public final class DefaultCoordinationEngine
         } catch (RuntimeException failure) {
             journal.rollbackTo(mark);
             objects.rollbackTo(objectMark);
+            throw failure;
+        }
+    }
+
+    /**
+     * Atomically appends one Contracts operation and its exact managed-draft
+     * host evidence before either can be observed by the drain.
+     */
+    public synchronized TimelineEntry append(
+            Timeline timeline,
+            Operation operation,
+            ContractsManagedDraftPlan managedDraftPlan) {
+        ensureOpen();
+        if (contractsClosureAdapter == null) {
+            throw new IllegalStateException(
+                    "Contracts 1.0 was not enabled for this engine");
+        }
+        Timeline canonicalTimeline = requireRegisteredTimeline(timeline);
+        ContractsManagedDraftPlan plan = Objects.requireNonNull(
+                managedDraftPlan, "managedDraftPlan");
+        long previousLogicalClock = logicalClockMicros;
+        long candidateTimestamp = Math.addExact(logicalClockMicros, 1L);
+        InMemoryTimelineJournal.Mark mark = journal.mark();
+        WholeObjectStore.Mark objectMark = objects.mark();
+        String registeredEntryBlueId = null;
+        try {
+            TimelineEntry entry = metrics.timed(
+                    "append.total",
+                    () -> journal.append(
+                            canonicalTimeline,
+                            operation,
+                            candidateTimestamp));
+            requireAfterProcessedFrontier(entry);
+            if (!contractsClosureAdapter.registerManagedDraftPlan(
+                    entry.blueId(), plan)) {
+                throw new IllegalStateException(
+                        "Managed draft plan already exists for new entry "
+                                + entry.blueId());
+            }
+            registeredEntryBlueId = entry.blueId();
+            inject(FailurePoint.AFTER_MANAGED_DRAFT_PLAN_REGISTERED);
+            logicalClockMicros = candidateTimestamp;
+            objects.commit(objectMark);
+            return entry;
+        } catch (RuntimeException failure) {
+            if (registeredEntryBlueId != null) {
+                try {
+                    contractsClosureAdapter.unregisterManagedDraftPlan(
+                            registeredEntryBlueId, plan);
+                } catch (RuntimeException cleanupFailure) {
+                    failure.addSuppressed(cleanupFailure);
+                }
+            }
+            try {
+                journal.rollbackTo(mark);
+            } catch (RuntimeException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            try {
+                objects.rollbackTo(objectMark);
+            } catch (RuntimeException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            logicalClockMicros = previousLogicalClock;
             throw failure;
         }
     }
