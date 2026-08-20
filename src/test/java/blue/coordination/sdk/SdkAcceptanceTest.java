@@ -3,7 +3,9 @@ package blue.coordination.sdk;
 import blue.coordination.api.DocumentId;
 import org.junit.jupiter.api.Test;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -164,14 +166,16 @@ final class SdkAcceptanceTest {
     void finiteTwoMemberCycleReportsExactPublicEvidence() {
         assertFiniteRing("sdk-two-ring", 2,
                 List.of("sdk-two-ring-0", "sdk-two-ring-1",
-                        "sdk-two-ring-0"));
+                        "sdk-two-ring-0"),
+                1_364L);
     }
 
     @Test
     void finiteThreeMemberCycleReportsExactPublicEvidence() {
         assertFiniteRing("sdk-three-ring", 3,
                 List.of("sdk-three-ring-0", "sdk-three-ring-1",
-                        "sdk-three-ring-2", "sdk-three-ring-0"));
+                        "sdk-three-ring-2", "sdk-three-ring-0"),
+                1_787L);
     }
 
     @Test
@@ -207,6 +211,11 @@ final class SdkAcceptanceTest {
             TimelineHandle timeline = coordination.timelines().register(
                     timelineId, ACTOR);
             ClosureHandle admitted = coordination.documents().admit(closure);
+            Map<DocumentId, DocumentHandle> handles = handles(admitted);
+            Map<DocumentId, String> before = blueIds(handles);
+            String initialMaster = assertCyclicComponent(handles, members);
+            handles.values().forEach(handle ->
+                    assertCurrentHistory(handle, 0L));
 
             EntryResult result = coordination.operations()
                     .on(admitted.document("a"))
@@ -219,16 +228,24 @@ final class SdkAcceptanceTest {
             assertEquals(1, result.closures().size());
             assertEquals(List.of(a, c1, b1, a, c2, b2, a),
                     result.stats().documentStepOrder());
-            assertEquals(Set.copyOf(members), changedDocuments(result));
-            assertEquals(5, result.publicEvents().size());
-            List<String> publicEventBlueIds = result.publicEvents().stream()
-                    .map(PublicEvent::blueId)
-                    .toList();
-            assertEquals(publicEventBlueIds.get(1),
-                    publicEventBlueIds.get(3),
-                    "the two exact branch-ack values share one BlueId");
-            assertEquals(4, Set.copyOf(publicEventBlueIds).size());
-            assertAllExactEvidence(result, admitted, members, 1L);
+            assertExactPublicEvents(
+                    coordination,
+                    result.publicEvents(),
+                    List.of(
+                            new ExpectedPublicEvent(a, "branch-start-1"),
+                            new ExpectedPublicEvent(a, "branch-ack"),
+                            new ExpectedPublicEvent(a, "branch-start-2"),
+                            new ExpectedPublicEvent(a, "branch-ack"),
+                            new ExpectedPublicEvent(a, "branching-done")));
+            assertAllExactEvidence(
+                    result,
+                    handles,
+                    List.of(members),
+                    before,
+                    1L,
+                    3_768L);
+            assertNotEquals(initialMaster,
+                    assertCyclicComponent(handles, members));
             assertEquals("done",
                     admitted.document("a").snapshot().textAt("/phase"));
             assertEquals("done",
@@ -275,6 +292,15 @@ final class SdkAcceptanceTest {
             TimelineHandle timeline = coordination.timelines().register(
                     timelineId, ACTOR);
             ClosureHandle admitted = coordination.documents().admit(closure);
+            Map<DocumentId, DocumentHandle> handles = handles(admitted);
+            Map<DocumentId, String> before = blueIds(handles);
+            String initialFirstMaster = assertCyclicComponent(
+                    handles, List.of(a1, b1));
+            String initialSecondMaster = assertCyclicComponent(
+                    handles, List.of(a2, b2));
+            assertNotEquals(initialFirstMaster, initialSecondMaster);
+            handles.values().forEach(handle ->
+                    assertCurrentHistory(handle, 0L));
             ExactBlueValue event = coordination.values().yaml("""
                     type: Coordination/Timeline Entry
                     timeline:
@@ -310,10 +336,44 @@ final class SdkAcceptanceTest {
                             .toList());
             assertEquals(List.of(a1, b1, a1, a2, b2, a2),
                     result.stats().documentStepOrder());
-            assertEquals(Set.of(a1, b1, a2, b2),
-                    changedDocuments(result));
             assertAllExactEvidence(
-                    result, admitted, List.of(a1, b1, a2, b2), 1L);
+                    result,
+                    handles,
+                    List.of(List.of(a1, b1), List.of(a2, b2)),
+                    before,
+                    1L,
+                    2_746L);
+            assertEquals(List.of(a1, b1, a1), result.closures()
+                    .get(0).stats().documentStepOrder());
+            assertEquals(List.of(a2, b2, a2), result.closures()
+                    .get(1).stats().documentStepOrder());
+            assertExactGas(result.closures().get(0).stats(), 1_373L);
+            assertExactGas(result.closures().get(1).stats(), 1_373L);
+            assertExactPublicEvents(
+                    coordination,
+                    result.closures().get(0).publicEvents(),
+                    List.of(new ExpectedPublicEvent(
+                            a1, "disjoint-one-start")));
+            assertExactPublicEvents(
+                    coordination,
+                    result.closures().get(1).publicEvents(),
+                    List.of(new ExpectedPublicEvent(
+                            a2, "disjoint-two-start")));
+            assertExactPublicEvents(
+                    coordination,
+                    result.publicEvents(),
+                    List.of(
+                            new ExpectedPublicEvent(
+                                    a1, "disjoint-one-start"),
+                            new ExpectedPublicEvent(
+                                    a2, "disjoint-two-start")));
+            String firstMaster = assertCyclicComponent(
+                    handles, List.of(a1, b1));
+            String secondMaster = assertCyclicComponent(
+                    handles, List.of(a2, b2));
+            assertNotEquals(initialFirstMaster, firstMaster);
+            assertNotEquals(initialSecondMaster, secondMaster);
+            assertNotEquals(firstMaster, secondMaster);
         }
     }
 
@@ -323,13 +383,12 @@ final class SdkAcceptanceTest {
         GasLoopEvidence retry = runGasLoop();
 
         assertEquals(first, retry);
-        assertTrue(first.gas() > 0L);
-        assertTrue(first.documentStepOrder().size() > 2);
-        assertEquals(List.of(
+        assertEquals(expectedAlternatingLoopOrder(
                         DocumentId.of("sdk-gas-loop-a"),
                         DocumentId.of("sdk-gas-loop-b"),
-                        DocumentId.of("sdk-gas-loop-a")),
-                first.documentStepOrder().subList(0, 3));
+                        742),
+                first.documentStepOrder());
+        assertEquals(99_967L, first.gas());
     }
 
     @Test
@@ -337,8 +396,13 @@ final class SdkAcceptanceTest {
         try (BlueCoordination coordination = BlueCoordination.inMemory()) {
             DynamicLoop scenario = admitDynamicLoop(
                     coordination, "sdk-detach");
-            String beforeA = scenario.a().snapshot().blueId();
-            String beforeB = scenario.b().snapshot().blueId();
+            Map<DocumentId, DocumentHandle> handles = dynamicHandles(
+                    scenario);
+            Map<DocumentId, String> initial = blueIds(handles);
+            String initialMaster = assertCyclicComponent(
+                    handles, List.of(scenario.a().id(), scenario.b().id()));
+            handles.values().forEach(handle ->
+                    assertCurrentHistory(handle, 0L));
 
             EntryResult rejected = coordination.operations()
                     .on(scenario.a())
@@ -349,9 +413,24 @@ final class SdkAcceptanceTest {
 
             assertEquals(EntryDisposition.GAS_LIMIT_EXCEEDED,
                     rejected.disposition());
+            assertEquals(1, rejected.closures().size());
+            assertEquals(rejected.stats(),
+                    rejected.closures().get(0).stats());
+            assertTrue(rejected.diagnostic().present());
             assertTrue(rejected.closures().get(0).changes().isEmpty());
-            assertEquals(beforeA, scenario.a().snapshot().blueId());
-            assertEquals(beforeB, scenario.b().snapshot().blueId());
+            assertTrue(rejected.publicEvents().isEmpty());
+            assertTrue(rejected.closures().get(0).publicEvents().isEmpty());
+            assertEquals(0L, rejected.stats().committedTransitions());
+            assertEquals(2L, rejected.stats().documentsOpened());
+            assertEquals(expectedAlternatingLoopOrder(
+                            scenario.a().id(), scenario.b().id(), 712),
+                    rejected.stats().documentStepOrder());
+            assertExactGas(rejected.stats(), 99_997L);
+            assertEquals(initial, blueIds(handles));
+            handles.values().forEach(handle ->
+                    assertCurrentHistory(handle, 0L));
+            assertEquals(initialMaster, assertCyclicComponent(
+                    handles, List.of(scenario.a().id(), scenario.b().id())));
 
             EntryResult detached = coordination.operations()
                     .on(scenario.b())
@@ -362,10 +441,28 @@ final class SdkAcceptanceTest {
 
             assertEquals(EntryDisposition.APPLIED,
                     detached.disposition());
-            assertEquals(Set.of(scenario.a().id(), scenario.b().id()),
-                    changedDocuments(detached));
-            assertFalse(scenario.a().exact().cyclicMember());
-            assertFalse(scenario.b().exact().cyclicMember());
+            assertSingleAppliedClosure(detached);
+            assertEquals(1, detached.closures().size());
+            assertEquals(detached.stats(), detached.closures().get(0).stats());
+            assertEquals(List.of(scenario.b().id()),
+                    detached.stats().documentStepOrder());
+            assertEquals(2L, detached.stats().committedTransitions());
+            assertEquals(2L, detached.stats().documentsOpened());
+            assertExactGas(detached.stats(), 736L);
+            assertTrue(detached.publicEvents().isEmpty());
+            assertExactChangeEvidence(
+                    detached,
+                    handles,
+                    initial,
+                    Map.of(
+                            scenario.a().id(), 1L,
+                            scenario.b().id(), 1L));
+            assertAcyclicMembers(handles.values());
+            Map<DocumentId, String> afterDetach = blueIds(handles);
+            assertNotEquals(initial.get(scenario.a().id()),
+                    afterDetach.get(scenario.a().id()));
+            assertNotEquals(initial.get(scenario.b().id()),
+                    afterDetach.get(scenario.b().id()));
             assertFalse(coordination.advanced()
                     .auditDocument(scenario.b().id())
                     .embeddedChildren().containsKey("/peer"));
@@ -379,10 +476,26 @@ final class SdkAcceptanceTest {
 
             assertEquals(EntryDisposition.APPLIED,
                     accepted.disposition());
+            assertSingleAppliedClosure(accepted);
             assertEquals(List.of(scenario.a().id()),
                     accepted.stats().documentStepOrder());
-            assertEquals(Set.of(scenario.a().id()),
-                    changedDocuments(accepted));
+            assertEquals(1L, accepted.stats().committedTransitions());
+            assertEquals(2L, accepted.stats().documentsOpened());
+            assertExactGas(accepted.stats(), 707L);
+            assertExactPublicEvents(
+                    coordination,
+                    accepted.publicEvents(),
+                    List.of(new ExpectedPublicEvent(
+                            scenario.a().id(), "LOOP")));
+            assertExactChangeEvidence(
+                    accepted,
+                    Map.of(scenario.a().id(), scenario.a()),
+                    afterDetach,
+                    Map.of(scenario.a().id(), 2L));
+            assertEquals(afterDetach.get(scenario.b().id()),
+                    scenario.b().snapshot().blueId());
+            assertCurrentHistory(scenario.b(), 1L);
+            assertAcyclicMembers(handles.values());
             assertEquals(1L,
                     scenario.a().snapshot().longAt("/loopStarts"));
             assertTrue(accepted.stats().gas() < rejected.stats().gas());
@@ -394,12 +507,24 @@ final class SdkAcceptanceTest {
         try (BlueCoordination coordination = BlueCoordination.inMemory()) {
             DynamicLoop scenario = admitDynamicLoop(
                     coordination, "sdk-reactivation");
-            String initialA = scenario.a().snapshot().blueId();
-            String initialB = scenario.b().snapshot().blueId();
-            String initialMaster = cyclicMaster(initialA);
+            Map<DocumentId, DocumentHandle> handles = dynamicHandles(
+                    scenario);
+            Map<DocumentId, String> initial = blueIds(handles);
+            String initialMaster = assertCyclicComponent(
+                    handles, List.of(scenario.a().id(), scenario.b().id()));
+            handles.values().forEach(handle ->
+                    assertCurrentHistory(handle, 0L));
             assertEquals(scenario.a().id(), coordination.advanced()
                     .auditDocument(scenario.b().id())
                     .embeddedChildren().get("/peer"));
+            assertManagedOccurrence(
+                    coordination.advanced()
+                            .auditManagedOccurrence(
+                                    scenario.b().id(), "/peer")
+                            .orElseThrow(),
+                    scenario.a().id(),
+                    1L,
+                    true);
 
             EntryResult detached = coordination.operations()
                     .on(scenario.b())
@@ -409,10 +534,30 @@ final class SdkAcceptanceTest {
                     .execute();
             assertEquals(EntryDisposition.APPLIED,
                     detached.disposition());
-            String detachedA = scenario.a().snapshot().blueId();
-            String detachedB = scenario.b().snapshot().blueId();
-            assertFalse(scenario.a().exact().cyclicMember());
-            assertFalse(scenario.b().exact().cyclicMember());
+            assertSingleAppliedClosure(detached);
+            assertEquals(List.of(scenario.b().id()),
+                    detached.stats().documentStepOrder());
+            assertEquals(2L, detached.stats().committedTransitions());
+            assertEquals(2L, detached.stats().documentsOpened());
+            assertExactGas(detached.stats(), 736L);
+            assertTrue(detached.publicEvents().isEmpty());
+            assertExactChangeEvidence(
+                    detached,
+                    handles,
+                    initial,
+                    Map.of(
+                            scenario.a().id(), 1L,
+                            scenario.b().id(), 1L));
+            assertAcyclicMembers(handles.values());
+            Map<DocumentId, String> afterDetach = blueIds(handles);
+            assertManagedOccurrence(
+                    coordination.advanced()
+                            .auditManagedOccurrence(
+                                    scenario.b().id(), "/peer")
+                            .orElseThrow(),
+                    scenario.a().id(),
+                    2L,
+                    false);
 
             EntryResult finite = coordination.operations()
                     .on(scenario.a())
@@ -421,6 +566,27 @@ final class SdkAcceptanceTest {
                     .through("signalChannel")
                     .execute();
             assertEquals(EntryDisposition.APPLIED, finite.disposition());
+            assertSingleAppliedClosure(finite);
+            assertEquals(List.of(scenario.a().id()),
+                    finite.stats().documentStepOrder());
+            assertEquals(1L, finite.stats().committedTransitions());
+            assertEquals(2L, finite.stats().documentsOpened());
+            assertExactGas(finite.stats(), 707L);
+            assertExactPublicEvents(
+                    coordination,
+                    finite.publicEvents(),
+                    List.of(new ExpectedPublicEvent(
+                            scenario.a().id(), "LOOP")));
+            assertExactChangeEvidence(
+                    finite,
+                    Map.of(scenario.a().id(), scenario.a()),
+                    afterDetach,
+                    Map.of(scenario.a().id(), 2L));
+            assertEquals(afterDetach.get(scenario.b().id()),
+                    scenario.b().snapshot().blueId());
+            assertCurrentHistory(scenario.b(), 1L);
+            assertAcyclicMembers(handles.values());
+            Map<DocumentId, String> beforeReadd = blueIds(handles);
 
             EntryResult readded = coordination.operations()
                     .on(scenario.b())
@@ -433,27 +599,42 @@ final class SdkAcceptanceTest {
 
             assertEquals(EntryDisposition.APPLIED,
                     readded.disposition());
-            assertEquals(Set.of(scenario.a().id(), scenario.b().id()),
-                    changedDocuments(readded));
-            assertTrue(scenario.a().exact().cyclicMember());
-            assertTrue(scenario.b().exact().cyclicMember());
+            assertSingleAppliedClosure(readded);
+            assertEquals(List.of(scenario.b().id()),
+                    readded.stats().documentStepOrder());
+            assertEquals(2L, readded.stats().committedTransitions());
+            assertEquals(2L, readded.stats().documentsOpened());
+            assertExactGas(readded.stats(), 1_255L);
+            assertTrue(readded.publicEvents().isEmpty());
+            assertExactChangeEvidence(
+                    readded,
+                    handles,
+                    beforeReadd,
+                    Map.of(
+                            scenario.a().id(), 3L,
+                            scenario.b().id(), 2L));
             String readdedA = scenario.a().snapshot().blueId();
             String readdedB = scenario.b().snapshot().blueId();
-            String readdedMaster = cyclicMaster(readdedA);
-            assertEquals(readdedMaster, cyclicMaster(readdedB));
+            String readdedMaster = assertCyclicComponent(
+                    handles, List.of(scenario.a().id(), scenario.b().id()));
             assertNotEquals(initialMaster, readdedMaster);
-            assertNotEquals(initialA, readdedA);
-            assertNotEquals(initialB, readdedB);
-            assertNotEquals(detachedA, readdedA);
-            assertNotEquals(detachedB, readdedB);
+            assertNotEquals(initial.get(scenario.a().id()), readdedA);
+            assertNotEquals(initial.get(scenario.b().id()), readdedB);
+            assertNotEquals(afterDetach.get(scenario.a().id()), readdedA);
+            assertNotEquals(afterDetach.get(scenario.b().id()), readdedB);
+            assertNotEquals(beforeReadd.get(scenario.a().id()), readdedA);
+            assertNotEquals(beforeReadd.get(scenario.b().id()), readdedB);
             assertEquals(scenario.a().id(), coordination.advanced()
                     .auditDocument(scenario.b().id())
                     .embeddedChildren().get("/peer"));
-
-            // The normal SDK authenticates fresh member/master identities.
-            // Its advanced DocumentSnapshot exposes the restored path and
-            // lineage, but deliberately does not expose the internal
-            // activation-row generation or occurrence/binding identities.
+            assertManagedOccurrence(
+                    coordination.advanced()
+                            .auditManagedOccurrence(
+                                    scenario.b().id(), "/peer")
+                            .orElseThrow(),
+                    scenario.a().id(),
+                    2L,
+                    true);
         }
     }
 
@@ -521,51 +702,11 @@ final class SdkAcceptanceTest {
         }
     }
 
-    @Test
-    void managedOrderDraftAdmissionFailsClosedWithStableCode() {
-        String timelineId = "sdk/draft/alice";
-        DocumentId hostId = DocumentId.of("sdk-order-host");
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
-            TimelineHandle timeline = coordination.timelines().register(
-                    timelineId, ACTOR);
-            DocumentHandle host = coordination.documents().admit(
-                    ManagedDocument.yaml(
-                                    hostId,
-                                    orderHostDocument(hostId, timelineId))
-                            .publicRoot()
-                            .fromNow());
-            ManagedDocumentDraft order = coordination.documents().draft(
-                    DocumentId.of("sdk-created-order"),
-                    coordination.values().yaml("""
-                            documentId: sdk-created-order
-                            state: draft
-                            """));
-            String before = host.snapshot().blueId();
-            int historyBefore = host.history().size();
-
-            UnsupportedOperationException failure = assertThrows(
-                    UnsupportedOperationException.class,
-                    () -> coordination.operations().on(host)
-                            .from(timeline)
-                            .call("createOrder")
-                            .through("ownerChannel")
-                            .request(request -> request.managed(
-                                    "order", order))
-                            .expectOccurrence("/orders/order-1", order)
-                            .execute());
-
-            assertTrue(failure.getMessage().startsWith(
-                    "UNSUPPORTED_MANAGED_DRAFT_ADMISSION:"));
-            assertEquals(before, host.snapshot().blueId());
-            assertEquals(0L, host.snapshot().epoch());
-            assertEquals(historyBefore, host.history().size());
-        }
-    }
-
     private static void assertFiniteRing(
             String prefix,
             int size,
-            List<String> expectedStepOrder) {
+            List<String> expectedStepOrder,
+            long expectedGas) {
         String timelineId = prefix + "/alice";
         List<DocumentId> ids = IntStream.range(0, size)
                 .mapToObj(index -> DocumentId.of(prefix + "-" + index))
@@ -587,6 +728,11 @@ final class SdkAcceptanceTest {
                     timelineId, ACTOR);
             ClosureHandle closure = coordination.documents().admit(
                     definition);
+            Map<DocumentId, DocumentHandle> handles = handles(closure);
+            Map<DocumentId, String> before = blueIds(handles);
+            String initialMaster = assertCyclicComponent(handles, ids);
+            handles.values().forEach(handle ->
+                    assertCurrentHistory(handle, 0L));
 
             EntryResult result = coordination.operations()
                     .on(closure.document("m0"))
@@ -601,9 +747,19 @@ final class SdkAcceptanceTest {
                             .map(DocumentId::of)
                             .toList(),
                     result.stats().documentStepOrder());
-            assertEquals(Set.copyOf(ids), changedDocuments(result));
-            assertEquals(1, result.publicEvents().size());
-            assertAllExactEvidence(result, closure, ids, 1L);
+            assertExactPublicEvents(
+                    coordination,
+                    result.publicEvents(),
+                    List.of(new ExpectedPublicEvent(ids.get(0), "ring-0")));
+            assertAllExactEvidence(
+                    result,
+                    handles,
+                    List.of(ids),
+                    before,
+                    1L,
+                    expectedGas);
+            assertNotEquals(initialMaster,
+                    assertCyclicComponent(handles, ids));
             assertEquals("done", closure.document("m0")
                     .snapshot().textAt("/phase"));
             for (int index = 1; index < size; index++) {
@@ -634,8 +790,12 @@ final class SdkAcceptanceTest {
                     timelineId, ACTOR);
             ClosureHandle closure = coordination.documents().admit(
                     definition);
-            String beforeA = closure.document("a").snapshot().blueId();
-            String beforeB = closure.document("b").snapshot().blueId();
+            Map<DocumentId, DocumentHandle> handles = handles(closure);
+            Map<DocumentId, String> before = blueIds(handles);
+            String beforeMaster = assertCyclicComponent(
+                    handles, List.of(a, b));
+            handles.values().forEach(handle ->
+                    assertCurrentHistory(handle, 0L));
 
             EntryResult result = coordination.operations()
                     .on(closure.document("a"))
@@ -652,12 +812,18 @@ final class SdkAcceptanceTest {
             assertTrue(result.diagnostic().present());
             assertTrue(result.closures().get(0).changes().isEmpty());
             assertTrue(result.publicEvents().isEmpty());
-            assertEquals(0L, closure.document("a").snapshot().epoch());
-            assertEquals(0L, closure.document("b").snapshot().epoch());
-            assertEquals(beforeA,
-                    closure.document("a").snapshot().blueId());
-            assertEquals(beforeB,
-                    closure.document("b").snapshot().blueId());
+            assertTrue(result.closures().get(0).publicEvents().isEmpty());
+            assertEquals(result.stats(), result.closures().get(0).stats());
+            assertEquals(0L, result.stats().committedTransitions());
+            assertEquals(2L, result.stats().documentsOpened());
+            assertEquals(expectedAlternatingLoopOrder(a, b, 742),
+                    result.stats().documentStepOrder());
+            assertExactGas(result.stats(), 99_967L);
+            assertEquals(before, blueIds(handles));
+            handles.values().forEach(handle ->
+                    assertCurrentHistory(handle, 0L));
+            assertEquals(beforeMaster,
+                    assertCyclicComponent(handles, List.of(a, b)));
             assertTrue(coordination.processing().drain().entries().isEmpty(),
                     "a terminal gas failure is not silently retried");
 
@@ -666,9 +832,10 @@ final class SdkAcceptanceTest {
                     result.closures().get(0).closureId(),
                     result.stats().gas(),
                     result.stats().documentStepOrder(),
+                    result.stats().counters(),
                     result.diagnostic().code(),
-                    beforeA,
-                    beforeB,
+                    before.get(a),
+                    before.get(b),
                     closure.document("a").snapshot().blueId(),
                     closure.document("b").snapshot().blueId());
         }
@@ -713,30 +880,224 @@ final class SdkAcceptanceTest {
         return memberBlueId.substring(0, separator);
     }
 
+    private static List<DocumentId> expectedAlternatingLoopOrder(
+            DocumentId first,
+            DocumentId second,
+            int size) {
+        return IntStream.range(0, size)
+                .mapToObj(index -> index % 2 == 0 ? first : second)
+                .toList();
+    }
+
     private static void assertAllExactEvidence(
             EntryResult result,
-            ClosureHandle closure,
-            List<DocumentId> members,
-            long epoch) {
-        assertTrue(result.stats().gas() > 0L);
+            Map<DocumentId, DocumentHandle> handles,
+            List<List<DocumentId>> components,
+            Map<DocumentId, String> before,
+            long epoch,
+            long expectedGas) {
+        Set<DocumentId> members = components.stream()
+                .flatMap(List::stream)
+                .collect(Collectors.toUnmodifiableSet());
+        assertEquals(EntryDisposition.APPLIED, result.disposition());
+        assertTrue(result.applied());
+        assertFalse(result.diagnostic().present());
+        assertExactGas(result.stats(), expectedGas);
+        assertEquals((long) members.size(),
+                result.stats().committedTransitions());
+        assertEquals((long) members.size(),
+                result.stats().documentsOpened());
         assertFalse(result.entry().blueId().isBlank());
-        assertFalse(result.closures().get(0).closureId().isBlank());
+        assertTrue(result.closures().stream().allMatch(closure ->
+                !closure.closureId().isBlank()
+                        && closure.applied()
+                        && !closure.diagnostic().present()));
         assertTrue(result.publicEvents().stream().allMatch(event ->
                 !event.blueId().isBlank()
                         && event.blueId().equals(event.exact().blueId())));
-        assertEquals(Set.copyOf(members),
-                Set.copyOf(closure.documents().values().stream()
-                        .map(DocumentHandle::id)
-                        .toList()));
-        for (DocumentHandle handle : closure.documents().values()) {
-            assertEquals(epoch, handle.snapshot().epoch());
-            String blueId = handle.snapshot().blueId();
-            int memberSeparator = blueId.lastIndexOf('#');
-            assertTrue(memberSeparator > 0, () -> blueId);
-            assertTrue(blueId.substring(memberSeparator + 1)
-                    .matches("[0-9]+"), () -> blueId);
-            assertTrue(handle.exact().cyclicMember());
+        assertEquals(members, handles.keySet());
+        assertExactChangeEvidence(
+                result,
+                handles,
+                before,
+                members.stream().collect(Collectors.toUnmodifiableMap(
+                        id -> id,
+                        ignored -> epoch)));
+        components.forEach(component ->
+                assertCyclicComponent(handles, component));
+        assertEquals(result.publicEvents(), result.closures().stream()
+                .flatMap(closure -> closure.publicEvents().stream())
+                .toList());
+        if (result.closures().size() == 1) {
+            assertEquals(result.stats(), result.closures().get(0).stats());
         }
+    }
+
+    private static Map<DocumentId, DocumentHandle> handles(
+            ClosureHandle closure) {
+        LinkedHashMap<DocumentId, DocumentHandle> result =
+                new LinkedHashMap<>();
+        closure.documents().values().forEach(handle ->
+                result.put(handle.id(), handle));
+        return Map.copyOf(result);
+    }
+
+    private static Map<DocumentId, DocumentHandle> dynamicHandles(
+            DynamicLoop scenario) {
+        return Map.of(
+                scenario.a().id(), scenario.a(),
+                scenario.b().id(), scenario.b());
+    }
+
+    private static Map<DocumentId, String> blueIds(
+            Map<DocumentId, DocumentHandle> handles) {
+        return handles.values().stream().collect(
+                Collectors.toUnmodifiableMap(
+                        DocumentHandle::id,
+                        handle -> handle.snapshot().blueId()));
+    }
+
+    private static String assertCyclicComponent(
+            Map<DocumentId, DocumentHandle> handles,
+            List<DocumentId> orderedMembers) {
+        assertFalse(orderedMembers.isEmpty());
+        String master = cyclicMaster(handles.get(orderedMembers.get(0))
+                .snapshot().blueId());
+        Set<String> observed = orderedMembers.stream()
+                .map(handles::get)
+                .map(handle -> handle.snapshot().blueId())
+                .collect(Collectors.toUnmodifiableSet());
+        Set<String> expected = IntStream.range(0, orderedMembers.size())
+                .mapToObj(index -> master + "#" + index)
+                .collect(Collectors.toUnmodifiableSet());
+        assertEquals(expected, observed);
+        for (DocumentId member : orderedMembers) {
+            DocumentHandle handle = handles.get(member);
+            assertTrue(handle.exact().cyclicMember());
+            assertEquals(master, cyclicMaster(handle.snapshot().blueId()));
+            assertEquals(handle.snapshot().blueId(),
+                    handle.exact().blueId());
+        }
+        return master;
+    }
+
+    private static void assertAcyclicMembers(
+            Iterable<DocumentHandle> handles) {
+        for (DocumentHandle handle : handles) {
+            assertFalse(handle.exact().cyclicMember());
+            assertFalse(handle.snapshot().blueId().contains("#"));
+            assertEquals(handle.snapshot().blueId(),
+                    handle.exact().blueId());
+        }
+    }
+
+    private static void assertCurrentHistory(
+            DocumentHandle handle,
+            long expectedEpoch) {
+        List<DocumentRevision> history = handle.history();
+        assertEquals(expectedEpoch + 1L, (long) history.size());
+        assertEquals(IntStream.rangeClosed(0, Math.toIntExact(expectedEpoch))
+                        .asLongStream()
+                        .boxed()
+                        .toList(),
+                history.stream().map(DocumentRevision::epoch).toList());
+        assertEquals(DocumentRevision.Kind.INITIALIZATION,
+                history.get(0).kind());
+        for (int index = 0; index < history.size(); index++) {
+            DocumentRevision revision = history.get(index);
+            assertEquals(handle.id(), revision.documentId());
+            assertEquals((long) index, revision.epoch());
+            assertFalse(revision.after().blueId().isBlank());
+            if (index > 0) {
+                assertEquals(history.get(index - 1).after(),
+                        revision.before().orElseThrow());
+            }
+        }
+        assertEquals(expectedEpoch, handle.snapshot().epoch());
+        assertEquals(handle.exact(), history.get(history.size() - 1).after());
+        assertEquals(handle.snapshot().blueId(),
+                history.get(history.size() - 1).after().blueId());
+    }
+
+    private static void assertExactChangeEvidence(
+            EntryResult result,
+            Map<DocumentId, DocumentHandle> changedHandles,
+            Map<DocumentId, String> before,
+            Map<DocumentId, Long> expectedEpochs) {
+        Map<DocumentId, DocumentChange> changes = result.closures().stream()
+                .flatMap(closure -> closure.changes().stream())
+                .collect(Collectors.toUnmodifiableMap(
+                        DocumentChange::documentId,
+                        change -> change));
+        assertEquals(expectedEpochs.keySet(), changes.keySet());
+        assertEquals(expectedEpochs.keySet(), changedHandles.keySet());
+        expectedEpochs.forEach((id, epoch) -> {
+            DocumentHandle handle = changedHandles.get(id);
+            DocumentChange change = changes.get(id);
+            assertEquals(epoch.longValue(), change.epoch());
+            assertEquals(before.get(id),
+                    change.before().orElseThrow().blueId());
+            assertEquals(handle.exact(), change.after());
+            assertEquals(handle.snapshot().blueId(),
+                    change.after().blueId());
+            assertEquals(result.publicEvents().stream()
+                            .filter(event -> event.sourceDocument()
+                                    .filter(id::equals).isPresent())
+                            .toList(),
+                    change.publicEvents());
+            assertCurrentHistory(handle, epoch);
+        });
+    }
+
+    private static void assertExactGas(
+            ProcessingStats stats,
+            long expectedGas) {
+        long counterGas = stats.counters().values().stream()
+                .reduce(0L, Math::addExact);
+        assertEquals(expectedGas, stats.gas());
+        assertEquals(expectedGas, counterGas);
+    }
+
+    private static void assertExactPublicEvents(
+            BlueCoordination coordination,
+            List<PublicEvent> actual,
+            List<ExpectedPublicEvent> expected) {
+        assertEquals(expected.size(), actual.size());
+        for (int index = 0; index < expected.size(); index++) {
+            ExpectedPublicEvent event = expected.get(index);
+            ExactBlueValue exact = coordination.values().yaml("""
+                    type: Coordination/Event
+                    kind: %s
+                    """.formatted(event.kind()));
+            PublicEvent observed = actual.get(index);
+            assertEquals(exact, observed.exact());
+            assertEquals(exact.blueId(), observed.blueId());
+            assertEquals(event.source(),
+                    observed.sourceDocument().orElseThrow());
+            assertTrue(observed.occurrencePath().isEmpty());
+        }
+    }
+
+    private static void assertManagedOccurrence(
+            ManagedOccurrenceAudit audit,
+            DocumentId target,
+            long generation,
+            boolean active) {
+        assertEquals(target, audit.targetDocumentId());
+        assertEquals(generation, audit.activationGeneration());
+        assertEquals(active, audit.active());
+    }
+
+    private static void assertSingleAppliedClosure(EntryResult result) {
+        assertEquals(EntryDisposition.APPLIED, result.disposition());
+        assertTrue(result.applied());
+        assertFalse(result.diagnostic().present());
+        assertEquals(1, result.closures().size());
+        ClosureResult closure = result.closures().get(0);
+        assertTrue(closure.applied());
+        assertFalse(closure.diagnostic().present());
+        assertEquals(result.stats(), closure.stats());
+        assertEquals(result.publicEvents(), closure.publicEvents());
     }
 
     private static void assertApplied(
@@ -1100,36 +1461,6 @@ final class SdkAcceptanceTest {
                 """.formatted(id.value(), kind, kind, kind);
     }
 
-    private static String orderHostDocument(
-            DocumentId id,
-            String timelineId) {
-        return """
-                documentId: %s
-                orders: {}
-                contracts:
-                  embedded:
-                    type: Process Embedded
-                    collectionPaths:
-                      - /orders
-                  ownerChannel:
-                    type: Coordination/Timeline Channel
-                    timeline:
-                      type: MyOS/MyOS Timeline
-                      timelineId: %s
-                    actor:
-                      type: MyOS/Principal Actor
-                      accountId: %s
-                  createOrder:
-                    type: Coordination/Sequential Workflow Operation
-                    channel: ownerChannel
-                    request: {}
-                    steps:
-                      - type: Coordination/Compute
-                        do:
-                          - $return: true
-                """.formatted(id.value(), timelineId, ACTOR);
-    }
-
     private static String gasLoopDocument(
             DocumentId id,
             String timelineId,
@@ -1283,6 +1614,7 @@ final class SdkAcceptanceTest {
             String closureId,
             long gas,
             List<DocumentId> documentStepOrder,
+            Map<String, Long> counters,
             String diagnosticCode,
             String beforeA,
             String beforeB,
@@ -1290,7 +1622,11 @@ final class SdkAcceptanceTest {
             String afterB) {
         private GasLoopEvidence {
             documentStepOrder = List.copyOf(documentStepOrder);
+            counters = Map.copyOf(counters);
         }
+    }
+
+    private record ExpectedPublicEvent(DocumentId source, String kind) {
     }
 
     private record DynamicLoop(
