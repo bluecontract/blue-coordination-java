@@ -1,0 +1,563 @@
+{
+  "schema": "blue.coordination/cyclic-topology-sdk-freeze-final-receipt/v1",
+  "generatedAt": "2026-08-20T04:18:22Z",
+  "receiptState": "FINAL_EXTERNAL_PILOT_RC_EVIDENCE",
+  "overallStatus": "PASS_FOR_BOUNDED_EXTERNAL_PILOT",
+  "implementationConformanceClaimed": true,
+  "externalPilotReady": true,
+  "releaseReady": false,
+  "publicReleaseReady": false,
+  "productionReleaseReady": false,
+  "stableLatencySlaClaimed": false,
+  "scope": {
+    "dependencyMode": "staged-artifact",
+    "stagedRepository": "/Users/piotr/data/blue-staged-repository/cyclic-topology-rc3",
+    "stagingOrder": ["Language", "BEX", "Coordination"],
+    "localOnly": true,
+    "runtimeProfile": "single-jvm-in-memory-sequential-root-scope-bounded-cycles"
+  },
+  "sourceBindings": [
+    {
+      "component": "Language",
+      "repository": "/Users/piotr/data/blue-language-java",
+      "branch": "feature/cyclic-topology",
+      "commit": "e0dfc897ea7d158895325fae2bf84e103b8c1989",
+      "cleanAtEvidenceSnapshot": true
+    },
+    {
+      "component": "BEX",
+      "repository": "/Users/piotr/data/blue-bex-java",
+      "branch": "feature/cyclic-topology",
+      "commit": "23e9e62feb36bf14a579912bcfa80da84f5ee85f",
+      "cleanAtEvidenceSnapshot": true
+    },
+    {
+      "component": "Coordination",
+      "repository": "/Users/piotr/data/blue-contract-java",
+      "branch": "feature/cyclic-topology",
+      "commit": "fb3aca034953035a46038e76f028cf882267a98d",
+      "receiptParentHead": "fb3aca034953035a46038e76f028cf882267a98d",
+      "receiptCommit": null,
+      "receiptCommitBinding": "The resulting receipt commit is reported in the external handoff because a commit cannot bind its own identity.",
+      "cleanAtEvidenceSnapshot": true
+    },
+    {
+      "component": "Repository",
+      "repository": "/Users/piotr/data/blue-repository-java",
+      "branch": "feat/current-repository-api",
+      "commit": "2fcf29bf060ed114c971194adb6f8b747899aee2",
+      "coordinate": "blue.repo:blue-repo-java:3.0.0-rc.21",
+      "sourceLockBound": true,
+      "cleanAtEvidenceSnapshot": true
+    },
+    {
+      "component": "Repository staging build logic",
+      "repository": "/Users/piotr/data/blue-repository-java",
+      "branch": "codex/coordination-sdk-staging-repository",
+      "commit": "d305821bd813e77d46b7e559f03c0c6c902353f2",
+      "baseImplementationCommit": "2fcf29bf060ed114c971194adb6f8b747899aee2",
+      "scope": "build.gradle-only isolated staging override; the primary runtime source lock remains 2fcf29bf060ed114c971194adb6f8b747899aee2",
+      "cleanAtEvidenceSnapshot": true
+    },
+    {
+      "component": "Specification",
+      "repository": "/Users/piotr/data/blue-spec-release-5dc8096",
+      "branch": null,
+      "detached": true,
+      "commit": "5dc8096276652156e248c9c018a0850fcd8dbdbb",
+      "cleanAtEvidenceSnapshot": true
+    }
+  ],
+  "semanticIdentities": {
+    "blueLanguageSpecification": "sha256:01b038b64e3f0a9a11f3f70d544a63ff78a01d5169f1a03f8b8629cf73645a7d",
+    "contractsSpecification": "sha256:dfb444962a5a17b3a6519e8d148c2bf4a975a921b1fcb1277710052caaecd930",
+    "bexSpecification": "sha256:1725878bcb59f2d2a60bae2ada582a18dc964f4dbc61377aaae195a773765f92",
+    "contractsRelease": "sha256:7e6c3717bc28d21ebadec9f81725913e944bb3b9b70094531f19f10510a10e50",
+    "contractsFixturePackage": "sha256:071cecb68e1c4dcec2dbb0895de928629281d2b0a18f3e8a83a41a720e621bfa",
+    "contractsGasManifest": "sha256:03219c42eb3696ef8727fe8ae226c8a5eb4a6126859ba744f571d892c409626a",
+    "cyclicFinalizer": "sha256:0b4bd3bbe4380faa52d14bc6baf8bb0a6dbc01acc576985676155ea0115969b4",
+    "cyclicProofVerifier": "sha256:eb0501a25ec5ac6a18fc86584c0afb6ecc2e6c1201c723f28ec56c80a2ae3bc5",
+    "languageReleasePackage": "sha256:0268c0adc8badf0d1ab5cdef4a323117b82253a3695f9125af750437a23014b6",
+    "bexRelease": "sha256:fa690caa1f1ea3a5394f8e191d5ff8436b3f2f5399511970c262092742ba19d0",
+    "bexFixturePackage": "sha256:a1b7bb2b3687389409bc9d0aa450c734f7856d2bcb818c95f4d7ecb19095d20e",
+    "bexGasManifest": "sha256:41247c820d91a12fdfc17fd9e787a5d8d668d8acc5954fdcb131715bf9e6147d"
+  },
+  "fixtureCorpus": {
+    "language": {"required": 153, "passed": 153, "failed": 0, "skipped": 0},
+    "ordinaryContracts": {"required": 167, "passed": 167, "failed": 0, "skipped": 0},
+    "closureContracts": {"required": 67, "passed": 67, "failed": 0, "skipped": 0},
+    "contractsTotal": {"required": 234, "passed": 234, "failed": 0, "skipped": 0},
+    "releaseTotal": {"required": 387, "passed": 387, "failed": 0, "skipped": 0},
+    "normativeFixtureMutations": 0,
+    "exactFinalCorpusExecuted": true
+  },
+  "languageVerification": {
+    "tests": 3156,
+    "passed": 3156,
+    "failed": 0,
+    "skipped": 0,
+    "suiteCount": 303,
+    "junitEvidenceFileCount": 330,
+    "testEvidenceIdentity": "sha256:8f254e1a5d5e4591608d6cce082044d90b9f8193942a28db74b53dfdbdb7a150",
+    "aggregateArtifactIdentity": "sha256:56791d5e4795391f5e1a3065ba1841629363d501c09073da145c569f93101d32",
+    "aggregateFixtureEvidenceIdentity": "sha256:8c14ec8d2afab746fbb636eafe63b0f39fcb52544611ec2bd28e7029cb27aefd",
+    "aggregateVerificationIdentity": "sha256:7e575131d2c5b3c6ff43435a422341a9872d370d974c268233fcbfbec081a566",
+    "finalQualityEligible": true,
+    "finalQualityBlockers": []
+  },
+  "bexVerification": {
+    "tests": 910,
+    "passed": 910,
+    "failed": 0,
+    "skipped": 0,
+    "behaviorFixtures": {"required": 105, "passed": 105},
+    "gasMicrofixtures": {"required": 30, "passed": 30},
+    "normativeVectors": {"required": 60, "passed": 60},
+    "operators": {"required": 86, "passed": 86},
+    "sdkStageVerification": "PASS",
+    "stagedLanguageIdentityExact": true,
+    "genericPublicPromotionFlag": false,
+    "genericPublicPromotionNote": "The BEX report retains releaseReady=false because public hosted standalone/local-composite equivalence and independent public-release build pairs are not applicable to this staged candidate. Its staged SDK verification separately proves exact rc.21 artifact selection. This receipt does not treat inapplicable public-release evidence as a staged-candidate failure and makes no public-release claim."
+  },
+  "stagedRepository": {
+    "path": "/Users/piotr/data/blue-staged-repository/cyclic-topology-rc3",
+    "fileCount": 365,
+    "manifestSha256": "9418d0ea89049e44003b76f4280d7a39651768f882652eced0b093d6ca21ee4c",
+    "nonCoordinationEntriesMatchPreCoordinationManifest": true,
+    "coordinationEntriesStableAcrossJavaLanes": true
+  },
+  "stagedCoordinates": [
+    {
+      "coordinate": "blue.language:blue-conformance:3.1.0-rc.21",
+      "artifacts": {
+        "jar": "a4e4289cfd61b3caafcde7fe28e0cb635fc099b92ef7a591aba2a3235192df4f",
+        "pom": "d74abd57a8069f56487ed97b530393da433a09fb8054673ed825592ef43c3558",
+        "module": "d2e589e83370bb7820af20541230b952daa36194288468391f3b9e4f904ca2e9",
+        "sourcesJar": "6343d7c2ed1842faf55056a905c3d0a41b234322c87898a0cf1fbf7f0bf70b4f",
+        "javadocJar": "fc19b03d894280cd7d19d685a3cfaed49b2ac3eaf369b7d6526701944e5904ca"
+      }
+    },
+    {
+      "coordinate": "blue.language:blue-contracts-core:3.1.0-rc.21",
+      "artifacts": {
+        "jar": "54286457543af5c2766194f5741db823f5384aa78aeea0ba4c6f459a555a44f3",
+        "pom": "d2e51f49336dcb13fff4b6320e9a39a554e26fdcd3c6bf582efe078f3ea803c3",
+        "module": "47cc6905dc2cf406910a380fd6954b2a01788d213531b70723992c03102e7423",
+        "sourcesJar": "f0f99b770d5ca942a9e07319d3d6e1a5bbfdda304f120c1d497c27d720da57a6",
+        "javadocJar": "c8fcca6211ea337011bf5a54702ac2ea4825ec043c3b97325cb4d40669a4d033"
+      }
+    },
+    {
+      "coordinate": "blue.language:blue-language-core:3.1.0-rc.21",
+      "artifacts": {
+        "jar": "114ccee6789153aae06b94aa7c41fcbbb84272ba600427f4e687564dc1765431",
+        "pom": "70d5dc01a717994ebab394f7ddf0bc4bd27a2f14b4ce17bd682af68fa9a035df",
+        "module": "b1549e2efa5f3751a92f576d398d64af61e6fcc6e32c031acdcce76e50922d93",
+        "sourcesJar": "5ea7eddc1a8391247a4dea1c3203239dc11c413784511e621ab38f3b4c1ea482",
+        "javadocJar": "5387944a75b226a60603a8a5571c8ccb41101323d6eb227f6afccad0595b0e36"
+      }
+    },
+    {
+      "coordinate": "blue.language:blue-language-ipfs:3.1.0-rc.21",
+      "artifacts": {
+        "jar": "bec7355f39a109c4fe6dfc5f9970232dc0a75cd8e5b4ab055abc311314d24c8e",
+        "pom": "d39676b32ff05e41c9d1bf0ef657ad2904753a31b9f48512062632bdb8295118",
+        "module": "3cfc7e703202c4e453abed663d3c6615e37bd2d8fee02d34345646092d6df653",
+        "sourcesJar": "a7fd62c141303410d1dba27904e6114afd3a9b997b44493be951b8d1c1a3eab9",
+        "javadocJar": "0f228ba623b2b2e4866285c3dda1daf2daa11c5c03bf44b2557bf0c80bf1e57a"
+      }
+    },
+    {
+      "coordinate": "blue.language:blue-language-java:3.1.0-rc.21",
+      "artifacts": {
+        "jar": "b8e68a814e9b6888e5fd59baa9c26aa097e59421e96a7da507ab26d4e649ff15",
+        "pom": "5e7952150526e0102baebbe6558071bc1fd5009df83a847cc141f6df593b7b14",
+        "module": "36685abc258d18e78bd28ee1e021c02c7ac45f4e6f9cf1ab055946aa89ad7cc8",
+        "sourcesJar": "68d1069c56f754c2e76f208a4126a967533cc91059062c2e86b70e098f33a518",
+        "javadocJar": "55f7ef34c8055a71c48cfac128f82719adda74a9980d68ebbad7535bb7118cbf"
+      }
+    },
+    {
+      "coordinate": "blue.language:blue-language-mapping:3.1.0-rc.21",
+      "artifacts": {
+        "jar": "a6477ce17e43b0cbefd21a29ab57578301cd1de7d16c242ebaef9f0b7b5b2795",
+        "pom": "1ab4f9841a8a624fddb1431d8af42a0cfbc026bc03f79f7e252789b64e0052ca",
+        "module": "4f818a4e24e7b9bffba65f63a02321b78ab0427715e90cf844e2bb4a0335d7cd",
+        "sourcesJar": "05ddbc700dd0635927ac6e8b2edb93e778d92c1312c3504539d6799c9e2079db",
+        "javadocJar": "d300e55dc8c64da313df575289ddbe8788203626fbca90fb2bf9200a48eb5a35"
+      }
+    },
+    {
+      "coordinate": "blue.language:blue-language-model:3.1.0-rc.21",
+      "artifacts": {
+        "jar": "d88844e5ecfd37b0bf27ca52431943fadd6fcb4626f30b6a83fc146f20b3762c",
+        "pom": "9e5ddd73eeaadb344320c4de22306a36da8f5fb18dc42bf97cb87bc40aef4d9f",
+        "module": "71a6e276a0d72d5f2d66555735915568146878666715adac1ae1ce3e88a7ada8",
+        "sourcesJar": "00f557afbbb7bccfdb66324afb04254bb5afde4926a9b88cda2ac04cb9a1bf35",
+        "javadocJar": "29d8621394d1032e72ba5ec5bcebbeddf12f3242f7f2473111a1632a89de8948"
+      }
+    },
+    {
+      "coordinate": "blue.bex:blue-bex-contracts:1.1.0-rc.4",
+      "artifacts": {
+        "jar": "18fcce8af029debc5e8d446d28fbf6d3de52cb4bae3952d1232303ba3ee37537",
+        "pom": "b23c6d5a7d53251e0ec75572a9e6e3ce8a9cd003ab8604c207c4aaa1b1552fbc",
+        "module": "2d8aa4bb61db24afc873e49f49affdd00c855e3293dc7188d8a5a9a94d1e5642",
+        "sourcesJar": "24d1ddd90c1376775a964618d0a565cab0b4f671c2307318497e7c4e70abc6ec",
+        "javadocJar": "b08100fba3b4478044c6535c3a94b28a76dda44d4c278abf298fb070e87a2841"
+      }
+    },
+    {
+      "coordinate": "blue.bex:blue-bex-core:1.1.0-rc.4",
+      "artifacts": {
+        "jar": "d267a7744bd61cc787bf49b02a43ddeb14a7fb3878f4a0047f0a49212e778524",
+        "pom": "7b86a0bf8d6d12856b16a882733feef29d603bef28135f938a81d42ccaeea18c",
+        "module": "333a274136f8ea2df62db454278b026308d745416c9ce3c4de97bbc00cf6aa87",
+        "sourcesJar": "88a77248bb97f5f53f6849a409c945bc06309a9d1ac8bb2defb4eb514d71d04e",
+        "javadocJar": "33defbc4a5ab61f6f5abd858faabcf63eab83f4e96ef7c14e70a5e8d477bb72b"
+      }
+    },
+    {
+      "coordinate": "blue.bex:blue-bex-java:1.1.0-rc.4",
+      "artifacts": {
+        "jar": "c6deada2fac53b8ea6523dbda77597b128006674616f140f04df23264c6d1aa3",
+        "pom": "98f86c1c206ab1f23e7b56e9f573acbaa896a0371cb13112e79c48ba1eb6f9bf",
+        "module": "fa4facfacecfedff7e81f4a927594261d773b2b8c7c052c84577da80b03725d7",
+        "sourcesJar": "c39806d158cd696e501240eed2c9e3c7ae73db706c6b52e204a2ba248f1d7ac5",
+        "javadocJar": "c6deada2fac53b8ea6523dbda77597b128006674616f140f04df23264c6d1aa3"
+      }
+    },
+    {
+      "coordinate": "blue.repo:blue-repo-java:3.0.0-rc.21",
+      "artifacts": {
+        "jar": "c5bea287b3714db1478b058b18197b2626675a17bf420bee3672eaa14d7fae38",
+        "pom": "d8841891b363f4d129c5d0fa27918dce90cfca1dbe47d7a0af6de6972c9308eb",
+        "module": "291fb13ecb8d904ebd082344312e69c0304a6d8bfc9cbc589696dec7e3bea6a1",
+        "sourcesJar": "95596afb7e2a3a6c8a127fcd6b32fd8addae00aca2e4b2be0a5227afdf899488",
+        "javadocJar": "327f9ea0c6ab33de963584865625bd8db7c9714fd7dde45015dc5a2ddb59e8bf"
+      }
+    },
+    {
+      "coordinate": "blue.coordination:blue-coordination-java:3.0.0-rc.3",
+      "artifacts": {
+        "jar": "f86de40a65a4cf32181583196049da6d012aed53c4ed4168f8deff5da93aa7b3",
+        "pom": "eaa47f28d2c9edb79127d25fc70a3db49e55909a3c937f01394e7b24bba10c38",
+        "module": "4055e525d5acb9cd8d59480d799c4534b91702e4567269b8408ed9a6a45a7ad6",
+        "sourcesJar": "5785e16e1da114c6eefbb8be1f5be121fc60d9874129975954d37ade25878710",
+        "javadocJar": "92649d101ef56f320c0e70dbb4da665891555d0108eec9e08f624636b4d429eb",
+        "testFixturesJar": "f6e61fd4ac620b366995dc061569c738ec55f9e4d899b4ab81f61cb76d8b93a6"
+      }
+    }
+  ],
+  "sourceArchives": [
+    {
+      "component": "Language",
+      "name": "blue-language-java-3.1.0-rc.21-source-release.zip",
+      "sha256": "f09cef599388b8ec65229cf5423f343d9a59671f0269037ce1d95a19adc01272",
+      "verified": true,
+      "fileEntries": 1751
+    },
+    {
+      "component": "BEX",
+      "name": "blue-bex-java-1.1.0-rc.4-source-release.zip",
+      "sha256": "cb6dedf515219a23cf31ab9843bc76705ec53849c28892003bbf73bde2483a17",
+      "replicaSha256": "cb6dedf515219a23cf31ab9843bc76705ec53849c28892003bbf73bde2483a17",
+      "verified": true
+    },
+    {
+      "component": "Repository",
+      "name": null,
+      "sha256": null,
+      "status": "NO_SEPARATE_SOURCE_ZIP_IN_STAGING_LANE",
+      "boundSourcesJarSha256": "95596afb7e2a3a6c8a127fcd6b32fd8addae00aca2e4b2be0a5227afdf899488"
+    },
+    {
+      "component": "Coordination",
+      "name": "blue-coordination-java-3.0.0-rc.3-source.zip",
+      "sha256": "899624139437febee3f61c2e1af13956969efc2d8a7ac99417a5fa7b1cf0eddf",
+      "checksumSidecarSha256": "40fa5ae0fa9187e6d241459fc78d568167c558c3b44471ddbf908952c78b303d",
+      "verifiedOnJava": [17, 21]
+    }
+  ],
+  "verificationCommands": [
+    {
+      "id": "language-clean-build",
+      "workingDirectory": "/Users/piotr/data/blue-language-java",
+      "command": "env PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home BLUE_RELEASE_CHANNEL=rc SOURCE_DATE_EPOCH=1787193278 ./gradlew --no-daemon --max-workers=1 clean build -PreleaseVersion=3.1.0-rc.21 -PblueSpecRoot=/Users/piotr/data/blue-spec-release-5dc8096/latest --no-parallel --no-build-cache --console=plain",
+      "status": "PASS",
+      "durationSeconds": 489,
+      "tasks": {"total": 137, "executed": 132, "upToDate": 5}
+    },
+    {
+      "id": "language-final-release-aggregate",
+      "workingDirectory": "/Users/piotr/data/blue-language-java",
+      "command": "env PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home BLUE_RELEASE_CHANNEL=rc SOURCE_DATE_EPOCH=1787193278 ./gradlew --no-daemon --max-workers=1 finalQualityVerify rcVerify stagePublications verifyPublishedRepository sourceReleaseArchive -PreleaseVersion=3.1.0-rc.21 -PblueSpecRoot=/Users/piotr/data/blue-spec-release-5dc8096/latest --no-parallel --no-build-cache --console=plain",
+      "status": "PASS",
+      "durationSeconds": 248,
+      "tasks": {"total": 200, "executed": 85, "upToDate": 115}
+    },
+    {
+      "id": "bex-clean-sdk-stage-verify",
+      "workingDirectory": "/Users/piotr/data/blue-bex-java",
+      "command": "/usr/bin/env -i HOME=/Users/piotr USER=piotr LOGNAME=piotr TMPDIR=/var/folders/sr/1zpz2mjs2jg6vs80zcffx3h80000gn/T LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home PATH=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home/bin:/usr/bin:/bin:/usr/sbin:/sbin ./gradlew --no-daemon clean bexSdkStageVerify -PblueLanguageRepository=/Users/piotr/data/blue-staged-repository/cyclic-topology-rc3 -PbexSdkStagingRepository=/Users/piotr/data/blue-staged-repository/cyclic-topology-rc3 -PbexLocalStageVersion=1.1.0-rc.4",
+      "status": "PASS",
+      "durationSeconds": 23,
+      "tasks": {"total": 76, "executed": 70, "upToDate": 6}
+    },
+    {
+      "id": "bex-publish-isolated-stage",
+      "workingDirectory": "/Users/piotr/data/blue-bex-java",
+      "command": "/usr/bin/env -i HOME=/Users/piotr USER=piotr LOGNAME=piotr TMPDIR=/var/folders/sr/1zpz2mjs2jg6vs80zcffx3h80000gn/T LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home PATH=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home/bin:/usr/bin:/bin:/usr/sbin:/sbin ./gradlew --no-daemon publish -PblueLanguageRepository=/Users/piotr/data/blue-staged-repository/cyclic-topology-rc3 -PbexSdkStagingRepository=/Users/piotr/data/blue-staged-repository/cyclic-topology-rc3 -PbexLocalStageVersion=1.1.0-rc.4",
+      "status": "PASS",
+      "durationSeconds": 11,
+      "tasks": {"total": 79, "executed": 40, "upToDate": 39}
+    },
+    {
+      "id": "coordination-java17-preclean",
+      "workingDirectory": "/Users/piotr/data/blue-contract-java",
+      "command": "env PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home ./gradlew --no-daemon --max-workers=1 clean -PblueDependencyMode=staged-artifact -PblueStagingRepository=/Users/piotr/data/blue-staged-repository/cyclic-topology-rc3 -PblueSpecRoot=/Users/piotr/data/blue-spec-release-5dc8096/latest -PtestJavaVersion=17 --no-parallel --no-build-cache --console=plain",
+      "status": "PASS",
+      "durationSeconds": 3
+    },
+    {
+      "id": "coordination-java17-sdk-freeze-artifact-check",
+      "workingDirectory": "/Users/piotr/data/blue-contract-java",
+      "command": "env PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home ./gradlew --no-daemon --max-workers=1 sdkFreezeArtifactCheck -PblueDependencyMode=staged-artifact -PblueStagingRepository=/Users/piotr/data/blue-staged-repository/cyclic-topology-rc3 -PblueSpecRoot=/Users/piotr/data/blue-spec-release-5dc8096/latest -PtestJavaVersion=17 --no-parallel --no-build-cache --console=plain",
+      "status": "PASS",
+      "durationSeconds": 1286,
+      "tasks": {"total": 46, "executed": 46, "upToDate": 0},
+      "counts": {"unit": 378, "integration": 91, "consumer": 7, "scenario": 14, "total": 490, "failures": 0, "errors": 0, "skipped": 0}
+    },
+    {
+      "id": "coordination-java21-release-check",
+      "workingDirectory": "/Users/piotr/data/blue-contract-java",
+      "command": "env PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home ./gradlew --no-daemon --max-workers=1 releaseCheck --rerun-tasks -PblueDependencyMode=staged-artifact -PblueStagingRepository=/Users/piotr/data/blue-staged-repository/cyclic-topology-rc3 -PblueSpecRoot=/Users/piotr/data/blue-spec-release-5dc8096/latest -PtestJavaVersion=21 --no-parallel --no-build-cache --console=plain",
+      "gradleLauncherJava": 17,
+      "testJavaVersion": 21,
+      "status": "PASS",
+      "durationSeconds": 1206,
+      "tasks": {"total": 35, "executed": 35, "upToDate": 0},
+      "counts": {"unit": 378, "integration": 91, "consumer": 7, "scenario": 14, "total": 490, "failures": 0, "errors": 0, "skipped": 0}
+    }
+  ],
+  "recoveredTopologyTests": {
+    "status": "PASS",
+    "javaLanes": [17, 21],
+    "classCount": 15,
+    "testCount": 57,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "classes": [
+      {"name": "blue.coordination.internal.BlueRuntimeProviderMeterTest", "tests": 1},
+      {"name": "blue.coordination.internal.Contracts10AuthoredFacadeParityTest", "tests": 1},
+      {"name": "blue.coordination.internal.Contracts10ScenarioBuilderTest", "tests": 5},
+      {"name": "blue.coordination.internal.ContractsClosureAdmissionAdapterTest", "tests": 10},
+      {"name": "blue.coordination.internal.ContractsClosureExecutionMetricsObserverTest", "tests": 2},
+      {"name": "blue.coordination.internal.ContractsPublicBranchingCollectionCycleTest", "tests": 4},
+      {"name": "blue.coordination.internal.ContractsPublicComponentMergeSplitTest", "tests": 5},
+      {"name": "blue.coordination.internal.ContractsPublicCycleDetachmentTest", "tests": 2},
+      {"name": "blue.coordination.internal.ContractsPublicInitializationTopologyTest", "tests": 5},
+      {"name": "blue.coordination.internal.ContractsPublicLoopAndIsolationTest", "tests": 2},
+      {"name": "blue.coordination.internal.ContractsPublicNestedScopeBoundaryTest", "tests": 2},
+      {"name": "blue.coordination.internal.ContractsPublicOrderingAcceptanceTest", "tests": 3},
+      {"name": "blue.coordination.internal.ContractsPublicThreeMemberCycleTest", "tests": 5},
+      {"name": "blue.coordination.internal.CyclicTopologyIdentityEvidenceTest", "tests": 1},
+      {"name": "blue.coordination.internal.OperationRouteIndexTest", "tests": 9}
+    ]
+  },
+  "sdkTests": {
+    "status": "PASS",
+    "javaLanes": [17, 21],
+    "testCount": 34,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "classes": [
+      {"name": "blue.coordination.sdk.SdkAcceptanceTest", "tests": 12},
+      {"name": "blue.coordination.sdk.SdkManagedDraftAcceptanceTest", "tests": 5},
+      {"name": "blue.coordination.sdk.SdkEdgeResultTest", "tests": 2},
+      {"name": "blue.coordination.sdk.SdkOperationRuntimeTest", "tests": 9},
+      {"name": "blue.coordination.sdk.SdkValueModelTest", "tests": 6}
+    ],
+    "acceptanceCases": [
+      {"case": 1, "requirement": "counter +3/-1", "status": "PASS"},
+      {"case": 2, "requirement": "targeted Order operation excludes standalone PayNote", "status": "PASS"},
+      {"case": 3, "requirement": "valid broadcast with no accepting Channel returns NO_MATCH", "status": "PASS"},
+      {"case": 4, "requirement": "missing targeted document returns precise REJECTED", "status": "PASS"},
+      {"case": 5, "requirement": "finite A-B-A through SDK", "status": "PASS"},
+      {"case": 6, "requirement": "finite A-B-C-A through SDK", "status": "PASS"},
+      {"case": 7, "requirement": "five-member shared-A SCC through SDK", "status": "PASS"},
+      {"case": 8, "requirement": "two disconnected SCCs through SDK", "status": "PASS"},
+      {"case": 9, "requirement": "gas-loop rollback and exact retry", "status": "PASS"},
+      {"case": 10, "requirement": "detach breaks loop and later call terminates", "status": "PASS"},
+      {"case": 11, "requirement": "remove/re-add activation generation", "status": "PASS"},
+      {"case": 12, "requirement": "create Order draft into /orders collection", "status": "PASS"},
+      {"case": 13, "requirement": "five occurrences over three managed lineages with duplicate lineage use", "status": "PASS"},
+      {"case": 14, "requirement": "append-only submit and separate drain parity", "status": "PASS"},
+      {"case": 15, "requirement": "consumer compiled only against staged JARs", "status": "PASS"}
+    ],
+    "extractedConsumers": [
+      {"javaRuntime": 17, "javaRelease": 17, "status": "PASS", "reportSha256": "1babeb3be3dd601b3c17327f7e3c6e2911a0e47d80f328abd5629631193d1c4e"},
+      {"javaRuntime": 21, "javaRelease": 17, "status": "PASS", "reportSha256": "32400448beaadb44d99761a249f73a82ab68b189656f6a189aff4f904d4d4295"}
+    ]
+  },
+  "artifactEvidence": {
+    "coordinationJava17Audit": {"path": "/Users/piotr/data/blue-cyclic-topology-rc3-evidence/coordination-rc3/java17/audit.json", "sha256": "dd1d56583be4d56d445a739c27e01c96d5993d7e00a0def8b5c1d019a74d459e"},
+    "coordinationJava21Audit": {"path": "/Users/piotr/data/blue-cyclic-topology-rc3-evidence/coordination-rc3/java21/audit.json", "sha256": "bd4e24536db1bf705410a3a687011d7c6f4c1be4135ed6c1a7b535f67e0c3a44"},
+    "coordinationJava17RawEvidenceManifest": {"path": "/Users/piotr/data/blue-cyclic-topology-rc3-evidence/coordination-rc3/java17/manifests/evidence.sha256", "sha256": "3bd9556a49451c16b58359ec3cc14308bbdb0c5b404d1551851f27cb86a0454e"},
+    "coordinationJava21RawEvidenceManifest": {"path": "/Users/piotr/data/blue-cyclic-topology-rc3-evidence/coordination-rc3/java21/manifests/evidence.sha256", "sha256": "fde90ebf726b91b1a5f686dc18eaf28f48c2084839b5dc2a5fa272cc6b370530"},
+    "coordinationStagedCandidate": {"sha256": "cc568fce4abe929fafb8817b99964e47059913183767be6f69d86fc55ebc88d5"},
+    "coordinationArtifactCheck": {"sha256": "b3ccda3457523bb17e72632fccfec6e00db334488f5c2c7c4dc68dfa1a41992b"},
+    "priorTopologyReceiptMarkdown": {"path": "/Users/piotr/data/blue-contract-java/stabilization/cyclic-topology-round/FINAL_RECEIPT.md", "sha256": "4daac795b66b94232b220847992131ce793a3c152121b7efaa30051456f5f1f4"},
+    "priorTopologyReceiptJson": {"path": "/Users/piotr/data/blue-contract-java/stabilization/cyclic-topology-round/final-receipt.json", "sha256": "2fb6454786b2c012cefd6440df93d2135bd34b33d937226964a312cae0697242"},
+    "languageAggregateReleaseReceipt": {"path": "/Users/piotr/data/blue-cyclic-topology-rc3-evidence/language-rc21/aggregate-release-receipt.json", "sha256": "8db75271320494f173e6b97cf6f8909759497e911459f070e8a52f42e580b9b8"},
+    "languageFinalQuality": {"path": "/Users/piotr/data/blue-cyclic-topology-rc3-evidence/language-rc21/final-quality.json", "sha256": "a4a19b0b57a630ffe761c0cd82f72474095b3340f1f493174652fc60c44daa16"},
+    "bexConformanceReport": {"path": "/Users/piotr/data/blue-cyclic-topology-rc3-evidence/bex-rc4/bex-rc4-conformance-report.json", "sha256": "4844d5e65e12e3d4fdf0c88a828b9c774e6ee9071c1f22a40765f73e24ad7956"},
+    "bexSdkStageVerification": {"path": "/Users/piotr/data/blue-cyclic-topology-rc3-evidence/bex-rc4/bex-rc4-sdk-stage-verification.json", "sha256": "fb782dfba1dbd7bccb5e321fceeb8df31dc3773b39abb785f0cf44b94f39f60f"}
+  },
+  "retainedTopologyEvidence": [
+    {"file": "stabilization/cyclic-topology-round/CYCLIC_TOPOLOGY_COVERAGE.md", "sha256": "5d6350a2303fbaca9924bdd0d67c8deda434a27a658987afd407db697e18c646"},
+    {"file": "stabilization/cyclic-topology-round/cyclic-topology-coverage.json", "sha256": "60e2111a404df56561c94e9fd26f16e6e681898e2c390d8d835e12ac9de4dc52"},
+    {"file": "stabilization/cyclic-topology-round/cyclic-topology-identities.md", "sha256": "a23f9b1c19630e9ca47afb7f2c675c3d233eda998453a52f9159db6fefea860f"},
+    {"file": "stabilization/cyclic-topology-round/cyclic-topology-identities.json", "sha256": "10b4e7b4788773ebd23915eafebf6790182d5557901b24e8f9f3c0d487b63470"}
+  ],
+  "performanceEvidence": {
+    "longCampaignRerunForThisFreeze": false,
+    "historicalAuthoritativeCampaign": {
+      "status": "FAIL_WITH_COMPLETE_AUTHORITATIVE_ARTIFACTS",
+      "durationSeconds": 4404,
+      "warmupsPerShape": 20,
+      "samplesPerShape": 50,
+      "shapes": 6,
+      "iterations": 420,
+      "operations": 490,
+      "semanticAndGasEquality": "PASS",
+      "broadGlobalStateTraversal": "FAIL",
+      "rawBexColdWarmEquality": "UNOBSERVABLE",
+      "jsonSha256": "63d65fc48f219c4e2f9be58ccb4028b4af0798e4a8d7585bdc20b4090984cd7e",
+      "markdownSha256": "8fadbc5780ee0d7f23c7b047c2a3c1c408323450b1ecf68c14e270cfe3cc88e9"
+    },
+    "freshRc3Smoke": {
+      "command": "env PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home ./gradlew --no-daemon --max-workers=1 cyclicPerformanceAcceptance -PblueDependencyMode=staged-artifact -PblueStagingRepository=/Users/piotr/data/blue-staged-repository/cyclic-topology-rc3 -PblueSpecRoot=/Users/piotr/data/blue-spec-release-5dc8096/latest -PtestJavaVersion=17 -Dblue.coordination.cyclicPerformance.warmups=0 -Dblue.coordination.cyclicPerformance.samples=1 -Dblue.coordination.cyclicPerformance.output=build/reports/cyclic-performance-rc3-smoke --no-parallel --no-build-cache --console=plain",
+      "durationSeconds": 66,
+      "processOutcome": "EXPECTED_EXIT_1_AFTER_EVIDENCE_WRITE",
+      "authoritative": false,
+      "classification": "NON_AUTHORITATIVE_DIAGNOSTIC_NON_BLOCKING_TO_IMPLEMENTATION_CONFORMANCE",
+      "warmupsPerShape": 0,
+      "samplesPerShape": 1,
+      "plus1000SemanticEquality": "PASS",
+      "plus1000GasEquality": "PASS",
+      "plus1000ObservableProjectionEquality": "PASS",
+      "broadGlobalStateTraversal": "FAIL_KNOWN_DIAGNOSTIC",
+      "rawBexEquality": "UNOBSERVABLE",
+      "coldWarmEquality": "UNOBSERVABLE_ONE_ITERATION",
+      "latencyAndHostGates": "NOT_APPLICABLE",
+      "jsonFile": "stabilization/cyclic-topology-rc3-final/cyclic-performance.json",
+      "jsonSha256": "8793ec21b7af1bfd807895c260f89700a994e9373830e3e3885632b0e57cf5a6",
+      "markdownFile": "stabilization/cyclic-topology-rc3-final/cyclic-performance.md",
+      "markdownSha256": "154c0f617072a65a03a149b1bdfbc9977562e109a99dfed8de0340e7b9e63a81",
+      "rawCampaignLocalClaimErratum": "The raw campaign-local implementation-conformance-claim detail says the staged/published exact-package lane is disabled by policy. This smoke actually ran the staged-artifact rc3 lane named by its command. That stale campaign-local detail does not describe this final staged lane and does not itself promote implementation conformance."
+    },
+    "releasePerformanceClaimed": false,
+    "stableLatencySlaClaimed": false
+  },
+  "limitations": [
+    {"id": "LOCAL_STAGE_ONLY", "effect": "No public repository promotion or public-release status is claimed."},
+    {"id": "IN_MEMORY_SINGLE_JVM", "effect": "State and recovery are confined to one JVM process."},
+    {"id": "NO_FRESH_PROCESS_DURABILITY", "effect": "No fresh-process durable recovery or production persistence is implemented."},
+    {"id": "NO_PROVIDER_COMPLETENESS", "effect": "No external provider-completeness adapter is implemented."},
+    {"id": "NO_MANDATES", "effect": "No Mandate resolver is implemented."},
+    {"id": "NO_PARALLEL_EXECUTION", "effect": "Drain is sequential; no parallel scheduler or execution claim is made."},
+    {"id": "ROOT_SCOPE_BOUNDED_CYCLES", "effect": "The frozen profile is Root-scope with bounded cyclic components."},
+    {"id": "NO_PRODUCTION_OPERATIONS_PROFILE", "effect": "Tenant isolation, durable outbox recovery, operational backpressure, and production observability remain out of scope."},
+    {"id": "NO_PERFORMANCE_SLA", "effect": "Broad-state traversal remains and raw-BEX cold/warm equality is unobservable; no latency SLA is claimed."}
+  ],
+  "checksumManifest": {
+    "path": "stabilization/cyclic-topology-rc3-final/changed-files.sha256",
+    "algorithm": "SHA-256",
+    "format": "<sha256><two spaces><namespace>:<path>",
+    "ordering": "bytewise lexicographic by namespace:path (LC_ALL=C)",
+    "entryCount": 474,
+    "namespaceCounts": {
+      "language": 6,
+      "bex": 14,
+      "coordination": 100,
+      "repository-staging": 1,
+      "rc3-evidence": 292,
+      "staged-artifact": 61
+    },
+    "committedSourceRanges": [
+      {
+        "namespace": "language",
+        "root": "/Users/piotr/data/blue-language-java",
+        "base": "d4a0379053e1a716395349c40fa403ee993796ff",
+        "head": "e0dfc897ea7d158895325fae2bf84e103b8c1989",
+        "pattern": "git diff --name-only --diff-filter=ACMRT <base>..<head>",
+        "byteSource": "git show <head>:<path>",
+        "entryCount": 6
+      },
+      {
+        "namespace": "bex",
+        "root": "/Users/piotr/data/blue-bex-java",
+        "base": "821fe877fef5b04a729b7422cdda05a7ace55a1f",
+        "head": "23e9e62feb36bf14a579912bcfa80da84f5ee85f",
+        "pattern": "git diff --name-only --diff-filter=ACMRT <base>..<head>",
+        "byteSource": "git show <head>:<path>",
+        "entryCount": 14
+      },
+      {
+        "namespace": "coordination",
+        "root": "/Users/piotr/data/blue-contract-java",
+        "base": "f245270c87cbcec80ed81b416c82513a64367ffc",
+        "head": "fb3aca034953035a46038e76f028cf882267a98d",
+        "pattern": "git diff --name-only --diff-filter=ACMRT <base>..<head>",
+        "byteSource": "git show <head>:<path>",
+        "entryCount": 96
+      },
+      {
+        "namespace": "repository-staging",
+        "root": "/Users/piotr/data/blue-repository-java",
+        "base": "2fcf29bf060ed114c971194adb6f8b747899aee2",
+        "head": "d305821bd813e77d46b7e559f03c0c6c902353f2",
+        "pattern": "git diff --name-only --diff-filter=ACMRT <base>..<head>",
+        "byteSource": "git show <head>:<path>",
+        "entryCount": 1,
+        "scopeNote": "This binds the isolated SDK staging override in build.gradle; the primary Repository source lock remains 2fcf29bf060ed114c971194adb6f8b747899aee2."
+      }
+    ],
+    "fixedReceiptEvidence": {
+      "namespace": "coordination",
+      "root": "/Users/piotr/data/blue-contract-java",
+      "paths": [
+        "stabilization/cyclic-topology-rc3-final/FINAL_RECEIPT.md",
+        "stabilization/cyclic-topology-rc3-final/cyclic-performance.json",
+        "stabilization/cyclic-topology-rc3-final/cyclic-performance.md",
+        "stabilization/cyclic-topology-rc3-final/final-receipt.json"
+      ],
+      "byteSource": "final working-tree bytes",
+      "entryCount": 4
+    },
+    "rc3Evidence": {
+      "namespace": "rc3-evidence",
+      "root": "/Users/piotr/data/blue-cyclic-topology-rc3-evidence",
+      "patterns": ["**"],
+      "selection": "all regular files recursively, including dot-prefixed paths",
+      "byteSource": "disk",
+      "entryCount": 292
+    },
+    "stagedDeliverables": {
+      "namespace": "staged-artifact",
+      "root": "/Users/piotr/data/blue-staged-repository/cyclic-topology-rc3",
+      "patterns": ["**/*.jar", "**/*.pom", "**/*.module"],
+      "selection": "regular files only",
+      "byteSource": "disk",
+      "entryCount": 61
+    },
+    "selfExcluded": true,
+    "includesReceiptFilesAndCopiedSmokeEvidence": true,
+    "manifestSha256": null,
+    "manifestHashBinding": "Reported in the external handoff; embedding it here would create a receipt-manifest digest cycle."
+  },
+  "finalConclusion": "The exact clean staged Language rc.21, BEX rc.4, Repository rc.21, and Coordination rc.3 graph passes the final fixture corpus, recovered topology inventory, SDK cases 1-15, extracted staged-JAR consumers, and complete 490-test Coordination release lanes on Java 17 and Java 21. Implementation conformance is claimed and the local in-memory candidate is ready for bounded external pilots. Public and production release remain false because durability, provider completeness, Mandates, parallelism, production operations, and an SLA are outside this freeze."
+}
