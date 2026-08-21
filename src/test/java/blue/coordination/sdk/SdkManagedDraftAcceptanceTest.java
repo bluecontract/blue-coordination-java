@@ -255,6 +255,226 @@ final class SdkManagedDraftAcceptanceTest {
         }
     }
 
+    @Test
+    void cyclicManagedDraftTargetFailsBeforeAppend() {
+        // given
+        DocumentId cyclicA = DocumentId.of(
+                "sdk-managed-cyclic-preflight-a");
+        DocumentId cyclicB = DocumentId.of(
+                "sdk-managed-cyclic-preflight-b");
+        DocumentId childId = DocumentId.of(
+                "sdk-managed-cyclic-preflight-child");
+        String timelineId = "sdk/managed-cyclic-preflight/alice";
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            TimelineHandle timeline = coordination.timelines().register(
+                    timelineId, ACTOR);
+            ClosureHandle closure = coordination.documents().admit(
+                    ManagedClosure.builder()
+                            .document(
+                                    "a",
+                                    cyclicA,
+                                    cyclicDraftHost(
+                                            cyclicA, timelineId))
+                            .document(
+                                    "b",
+                                    cyclicB,
+                                    cyclicDraftPeer(cyclicB))
+                            .bindOccurrence("a", "/peer", "b")
+                            .bindOccurrence("b", "/peer", "a")
+                            .publicRoot("a")
+                            .fromNow()
+                            .build());
+            DocumentHandle host = closure.document("a");
+            ManagedDocumentDraft child = draft(
+                    coordination, childId, false);
+            String before = host.snapshot().blueId();
+
+            // when
+            RuntimeException failure = assertThrows(
+                    RuntimeException.class,
+                    () -> managedCall(
+                            coordination,
+                            host,
+                            timeline,
+                            "createOrder",
+                            child,
+                            "/orders/order-456")
+                            .submit());
+            EntryHandle next = coordination.operations()
+                    .on(host)
+                    .from(timeline)
+                    .call("touch")
+                    .through("ownerChannel")
+                    .submit();
+
+            // then
+            assertTrue(host.exact().cyclicMember());
+            assertTrue(failure.getMessage().contains("cyclic-set member"));
+            assertEquals(before, host.snapshot().blueId());
+            assertEquals(0L, host.snapshot().epoch());
+            assertEquals(1L, next.globalSequence().orElseThrow());
+            assertEquals(1L, next.timelineSequence().orElseThrow());
+            assertDocumentAbsent(coordination, childId);
+        }
+    }
+
+    @Test
+    void managedDraftCatalogCrossingACycleFailsBeforeAppend() {
+        // given
+        DocumentId hostId = DocumentId.of(
+                "sdk-managed-cycle-crossing-host");
+        DocumentId cyclicA = DocumentId.of(
+                "sdk-managed-cycle-crossing-a");
+        DocumentId cyclicB = DocumentId.of(
+                "sdk-managed-cycle-crossing-b");
+        DocumentId childId = DocumentId.of(
+                "sdk-managed-cycle-crossing-child");
+        String timelineId = "sdk/managed-cycle-crossing/alice";
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            TimelineHandle timeline = coordination.timelines().register(
+                    timelineId, ACTOR);
+            ClosureHandle closure = coordination.documents().admit(
+                    ManagedClosure.builder()
+                            .document(
+                                    "host",
+                                    hostId,
+                                    cyclicDraftHost(
+                                            hostId, timelineId))
+                            .document(
+                                    "a",
+                                    cyclicA,
+                                    cyclicDraftPeer(cyclicA))
+                            .document(
+                                    "b",
+                                    cyclicB,
+                                    cyclicDraftPeer(cyclicB))
+                            .bindOccurrence("host", "/peer", "a")
+                            .bindOccurrence("a", "/peer", "b")
+                            .bindOccurrence("b", "/peer", "a")
+                            .publicRoot("host")
+                            .fromNow()
+                            .build());
+            DocumentHandle host = closure.document("host");
+            ManagedDocumentDraft child = draft(
+                    coordination, childId, false);
+            String before = host.snapshot().blueId();
+
+            // when
+            RuntimeException failure = assertThrows(
+                    RuntimeException.class,
+                    () -> managedCall(
+                            coordination,
+                            host,
+                            timeline,
+                            "createOrder",
+                            child,
+                            "/orders/order-456")
+                            .submit());
+            EntryHandle next = coordination.operations()
+                    .on(host)
+                    .from(timeline)
+                    .call("touch")
+                    .through("ownerChannel")
+                    .submit();
+
+            // then
+            assertFalse(host.exact().cyclicMember());
+            assertTrue(closure.document("a").exact().cyclicMember());
+            assertTrue(closure.document("b").exact().cyclicMember());
+            assertTrue(failure.getMessage().contains("cyclic-set member"));
+            assertEquals(before, host.snapshot().blueId());
+            assertEquals(0L, host.snapshot().epoch());
+            assertEquals(1L, next.globalSequence().orElseThrow());
+            assertEquals(1L, next.timelineSequence().orElseThrow());
+            assertDocumentAbsent(coordination, childId);
+        }
+    }
+
+    @Test
+    void appliedManagedParentCanCreateAManagedGrandchild() {
+        // given
+        DocumentId hostId = DocumentId.of("sdk-managed-growth-host");
+        DocumentId parentId = DocumentId.of("sdk-managed-growth-parent");
+        DocumentId childId = DocumentId.of("sdk-managed-growth-child");
+        String hostTimelineId = "sdk/managed-growth/host";
+        String parentTimelineId = "sdk/managed-growth/parent";
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            TimelineHandle hostTimeline = coordination.timelines().register(
+                    hostTimelineId, ACTOR);
+            TimelineHandle parentTimeline = coordination.timelines().register(
+                    parentTimelineId, ACTOR);
+            DocumentHandle host = coordination.documents().admit(
+                    ManagedDocument.yaml(
+                                    hostId,
+                                    nestedGrowthHost(
+                                            hostId, hostTimelineId))
+                            .publicRoot()
+                            .fromNow());
+            ManagedDocumentDraft parentDraft = coordination.documents()
+                    .draft(
+                            parentId,
+                            coordination.values().yaml(nestedGrowthParent(
+                                    parentId, parentTimelineId)));
+            ManagedDocumentDraft childDraft = draft(
+                    coordination, childId, false);
+
+            // when
+            EntryResult parentCreated = coordination.operations()
+                    .on(host)
+                    .from(hostTimeline)
+                    .call("createParent")
+                    .through("ownerChannel")
+                    .request(request -> request.managed(
+                            "parent", parentDraft))
+                    .expectOccurrence("/parents/primary", parentDraft)
+                    .activation(ActivationPolicy.fromNow())
+                    .execute();
+            DocumentHandle parent = coordination.documents().require(
+                    parentId);
+            String parentBeforeChild = parent.snapshot().blueId();
+            EntryResult childCreated = coordination.operations()
+                    .on(parent)
+                    .from(parentTimeline)
+                    .call("createChild")
+                    .through("ownerChannel")
+                    .request(request -> request.managed(
+                            "child", childDraft))
+                    .expectOccurrence("/children/primary", childDraft)
+                    .activation(ActivationPolicy.fromNow())
+                    .execute();
+            DocumentHandle child = coordination.documents().require(childId);
+
+            // then
+            assertApplied(parentCreated);
+            assertApplied(childCreated);
+            assertEquals(parent.snapshot().blueId(),
+                    host.snapshot().valueAt("/parents/primary").blueId());
+            assertEquals(child.snapshot().blueId(),
+                    parent.snapshot().valueAt("/children/primary").blueId());
+            assertNotEquals(parentBeforeChild, parent.snapshot().blueId());
+            assertTrue(changedDocuments(parentCreated).containsAll(
+                    Set.of(hostId, parentId)));
+            assertTrue(changedDocuments(childCreated).containsAll(
+                    Set.of(parentId, childId)));
+            assertTrue(host.snapshot().ready());
+            assertTrue(parent.snapshot().ready());
+            assertTrue(child.snapshot().ready());
+            assertFalse(host.exact().cyclicMember());
+            assertFalse(parent.exact().cyclicMember());
+            assertFalse(child.exact().cyclicMember());
+            assertEquals(List.of(
+                            DocumentRevision.Kind.INITIALIZATION,
+                            DocumentRevision.Kind.TIMELINE_ENTRY),
+                    parent.history().stream()
+                            .map(DocumentRevision::kind)
+                            .toList());
+            assertEquals(List.of(DocumentRevision.Kind.INITIALIZATION),
+                    child.history().stream()
+                            .map(DocumentRevision::kind)
+                            .toList());
+        }
+    }
+
     private static RunEvidence runSingleDraft(Submission submission) {
         try (BlueCoordination coordination = BlueCoordination.inMemory()) {
             TimelineHandle timeline = coordination.timelines().register(
@@ -931,6 +1151,137 @@ final class SdkManagedDraftAcceptanceTest {
                           - $return: true
                 """.formatted(
                 id.value(), timelineId, ACTOR, validOperationName);
+    }
+
+    private static String cyclicDraftHost(
+            DocumentId id,
+            String timelineId) {
+        return """
+                documentId: %s
+                orders: {}
+                touched: false
+                contracts:
+                  embedded:
+                    type: Process Embedded
+                    paths:
+                      - /peer
+                    collectionPaths:
+                      - /orders
+                  ownerChannel:
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: %s
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: %s
+                  createOrder:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request:
+                      order: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: add
+                              path: /orders/order-456
+                              val: {$binding: event/message/request/order}
+                          - $return: true
+                  touch:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: replace
+                              path: /touched
+                              val: true
+                          - $return: true
+                """.formatted(id.value(), timelineId, ACTOR);
+    }
+
+    private static String cyclicDraftPeer(DocumentId id) {
+        return """
+                documentId: %s
+                contracts:
+                  embedded:
+                    type: Process Embedded
+                    paths:
+                      - /peer
+                """.formatted(id.value());
+    }
+
+    private static String nestedGrowthHost(
+            DocumentId id,
+            String timelineId) {
+        return """
+                documentId: %s
+                parents: {}
+                contracts:
+                  embedded:
+                    type: Process Embedded
+                    collectionPaths:
+                      - /parents
+                  ownerChannel:
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: %s
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: %s
+                  createParent:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request:
+                      parent: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: add
+                              path: /parents/primary
+                              val: {$binding: event/message/request/parent}
+                          - $return: true
+                """.formatted(id.value(), timelineId, ACTOR);
+    }
+
+    private static String nestedGrowthParent(
+            DocumentId id,
+            String timelineId) {
+        return """
+                documentId: %s
+                children: {}
+                contracts:
+                  embedded:
+                    type: Process Embedded
+                    collectionPaths:
+                      - /children
+                  ownerChannel:
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: %s
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: %s
+                  createChild:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request:
+                      child: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: add
+                              path: /children/primary
+                              val: {$binding: event/message/request/child}
+                          - $return: true
+                """.formatted(id.value(), timelineId, ACTOR);
     }
 
     private static String multiplicityHost(Variant variant) {

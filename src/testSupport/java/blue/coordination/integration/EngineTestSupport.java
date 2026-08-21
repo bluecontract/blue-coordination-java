@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Focused helpers for the clean basic-engine acceptance tests. */
+/** Focused assertions shared by integration and scenario tests. */
 final class EngineTestSupport {
     private EngineTestSupport() {
     }

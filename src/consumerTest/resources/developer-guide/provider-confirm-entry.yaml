@@ -1,0 +1,13 @@
+type: Coordination/Timeline Entry
+timeline:
+  type: MyOS/MyOS Timeline
+  timelineId: guide/orders/42/sales
+timestamp: 2100000000000001
+actor:
+  type: MyOS/Principal Actor
+  accountId: alice
+message:
+  type: Coordination/Operation Request
+  operation: confirm
+  channel: salesChannel
+  request: {}

@@ -4,3 +4,6 @@ build/
 out/
 *.class
 .DS_Store
+
+# Optional local Round 13 baseline; never a release input.
+Archive.zip

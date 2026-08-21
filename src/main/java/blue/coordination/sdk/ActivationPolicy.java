@@ -11,9 +11,9 @@ public final class ActivationPolicy {
     public enum Kind {
         /** A new managed lineage begins when it is attached. */
         FROM_NOW,
-        /** An imported lineage replays its complete source history. */
+        /** An imported lineage is eligible from complete retained history. */
         IMPORT_FULL_HISTORY,
-        /** An imported lineage starts after an exact persisted frontier. */
+        /** An imported lineage is eligible after an exact persisted frontier. */
         IMPORT_FROM_FRONTIER,
         /** An existing lineage is already current through attachment. */
         ATTACH_CURRENT_STATE,
@@ -50,12 +50,20 @@ public final class ActivationPolicy {
         return FROM_NOW;
     }
 
-    /** Imports all available source history before the document is READY. */
+    /**
+     * Makes retained full history eligible after admission.
+     * Admission returns the initialized READY document; a later drain applies
+     * eligible entries.
+     */
     public static ActivationPolicy importFullHistory() {
         return IMPORT_FULL_HISTORY;
     }
 
-    /** Imports state strictly after the supplied exact frontier evidence. */
+    /**
+     * Makes history strictly after the exact frontier eligible for a later
+     * drain. Admission expects retained external-order evidence encoded as
+     * {@code components: [timestamp, timelineId, entryBlueId]}.
+     */
     public static ActivationPolicy importFromFrontier(
             ExactBlueValue frontierEvidence) {
         return new ActivationPolicy(

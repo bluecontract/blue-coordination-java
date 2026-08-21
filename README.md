@@ -24,11 +24,18 @@ Central and is compiled with `--release 17`. It is not a stable or production
 release. Version 3 is a breaking API reset; the removed 2.x planning,
 fragmentation, session-store, and fast-path APIs are not shimmed.
 
+For application development, follow the
+[complete SDK developer guide](docs/guides/developer-guide.md). It covers both
+processing an existing document/closure with a complete Timeline Entry and
+evolving an initially known closure through several Timelines, including
+cycles and operation-created managed documents. The
+[documentation index](docs/README.md) separates application guides, API
+reference, semantics, internals, and historical release evidence.
+
 ## Counter quickstart
 
 ```java
 import blue.coordination.sdk.BlueCoordination;
-import blue.coordination.sdk.ManagedClosure;
 import blue.coordination.sdk.ManagedDocument;
 
 try (BlueCoordination blue = BlueCoordination.inMemory()) {
@@ -173,9 +180,11 @@ the [release procedure](docs/development/releasing.md) and
 `releaseCheck` does not read or execute `../blue-basic`. That sibling is
 retained only as a historical performance/metrics laboratory.
 
-Start with [START-HERE.md](START-HERE.md), then see the compact architecture,
-managed `Process Embedded` semantics, catch-up rules, performance
-interpretation, and limitations under `docs/`.
+Start with [START-HERE.md](START-HERE.md), continue with the
+[SDK developer guide](docs/guides/developer-guide.md), and use the
+[documentation index](docs/README.md) to find architecture, managed
+`Process Embedded` semantics, catch-up rules, operational behavior, and
+limitations.
 ## Historical release-candidate evidence
 
 The current release authority is the
@@ -202,6 +211,8 @@ See the [canonical RC report](docs/releases/3.0.0-rc.1-test-report.md),
 
 Developer references:
 
+- [Documentation index](docs/README.md)
+- [SDK developer guide](docs/guides/developer-guide.md)
 - [Build and test](docs/development/build-and-test.md)
 - [Test strategy](docs/development/test-strategy.md)
 - [Initialization causality](docs/semantics/initialization-causality.md)

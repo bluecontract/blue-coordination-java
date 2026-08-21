@@ -29,9 +29,18 @@ the new 3.x API before the first stable 3.0.0 release.
   the standalone staged-consumer fixture were retired from the live build.
 - Every test now follows the enforced lowercase `// given`, `// when`,
   `// then` structure.
+- Integration and slow scenario suites now share a private, non-published
+  `testSupport` layer instead of scenarios compiling against integration-test
+  output. Built-JAR consumer examples keep authored YAML in named resources so
+  the Java tests emphasize the application flow.
 - Managed-draft plans are preflighted before journal append and retained only
   while retry can make progress; terminal results retire the plan without
   erasing rollback evidence.
+- Developer documentation now has one canonical SDK journey for exact provider
+  entries and evolving managed closures, with current cycle, multi-Timeline,
+  operation-created lineage, ordering, diagnostics, migration, and deployment
+  guidance. Stale examples that selected the legacy engine as the public API
+  have been replaced or explicitly profile-labeled.
 
 ### Known limitations
 

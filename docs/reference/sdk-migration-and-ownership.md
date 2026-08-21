@@ -24,6 +24,9 @@ productionReleaseReady: false
 
 The two `inMemory()` names are not interchangeable. New application examples,
 consumer fixtures, and Javadocs start at `BlueCoordination`.
+The [SDK developer guide](../guides/developer-guide.md) is the canonical normal
+application journey; this ledger remains the package and semantic ownership
+reference.
 
 ## Package ownership
 
@@ -100,6 +103,10 @@ historical, frontier, attach-current, or passive operation-result activation
 fail closed. The Order-draft and five-occurrence/three-lineage cases are part of
 the rc.3 acceptance corpus. The final implementation-conformance value remains
 an artifact-bound receipt decision, not a claim made from source shape alone.
+
+Every already existing managed member and initially known cycle belongs in one
+initial `ManagedClosure`. The managed-draft lane does not claim arbitrary
+operation-created multi-member cyclic admission.
 
 ## Candidate and release ownership
 

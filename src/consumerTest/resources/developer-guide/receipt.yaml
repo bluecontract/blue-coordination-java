@@ -1,0 +1,23 @@
+documentId: guide-receipt-42-primary
+sent: false
+contracts:
+  workerChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: guide/receipts/42/worker
+    actor:
+      type: MyOS/Principal Actor
+      accountId: dave
+  markSent:
+    type: Coordination/Sequential Workflow Operation
+    channel: workerChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /sent
+              val: true
+          - $return: true

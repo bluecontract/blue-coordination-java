@@ -67,6 +67,136 @@ final class SdkAcceptanceTest {
     }
 
     @Test
+    void fullHistoryAdmissionIsReadyBeforeALaterDrainReplaysHistory() {
+        // given
+        String timelineId = "sdk/history/full/alice";
+        DocumentId counterId = DocumentId.of("sdk-history-full-counter");
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            TimelineHandle timeline = coordination.timelines().register(
+                    timelineId, ACTOR);
+            ExactBlueValue firstEvent = providerIncrement(
+                    coordination, timelineId, 2_100_000_000_001_001L,
+                    1L, null);
+            EntryHandle first = coordination.events().from(timeline)
+                    .exact(firstEvent)
+                    .submit();
+            ExactBlueValue secondEvent = providerIncrement(
+                    coordination, timelineId, 2_100_000_000_001_002L,
+                    2L, first.blueId());
+            EntryHandle second = coordination.events().from(timeline)
+                    .exact(secondEvent)
+                    .submit();
+
+            // when
+            DocumentHandle counter = coordination.documents().admit(
+                    ManagedDocument.yaml(
+                                    counterId,
+                                    counterDocument(counterId, timelineId))
+                            .publicRoot()
+                            .activation(ActivationPolicy
+                                    .importFullHistory()));
+            DocumentSnapshot initialized = counter.snapshot();
+            DrainResult drained = coordination.processing().drain();
+
+            // then
+            assertTrue(initialized.ready());
+            assertEquals(0L, initialized.epoch());
+            assertEquals(0L, initialized.longAt("/counter"));
+            assertEquals(EntryDisposition.APPLIED,
+                    drained.entry(first).disposition());
+            assertEquals(EntryDisposition.APPLIED,
+                    drained.entry(second).disposition());
+            assertTrue(drained.quiescent());
+            assertEquals(3L, counter.snapshot().longAt("/counter"));
+            assertEquals(2L, counter.snapshot().epoch());
+            assertEquals(List.of(
+                            DocumentRevision.Kind.INITIALIZATION,
+                            DocumentRevision.Kind.TIMELINE_ENTRY,
+                            DocumentRevision.Kind.TIMELINE_ENTRY),
+                    counter.history().stream()
+                            .map(DocumentRevision::kind)
+                            .toList());
+            assertEquals(List.of(first, second), counter.history().stream()
+                    .skip(1L)
+                    .map(revision -> revision.sourceEntry().orElseThrow())
+                    .toList());
+        }
+    }
+
+    @Test
+    void frontierAdmissionReplaysOnlyEntriesStrictlyAfterExactEvidence() {
+        // given
+        String timelineId = "sdk/history/frontier/alice";
+        DocumentId counterId = DocumentId.of(
+                "sdk-history-frontier-counter");
+        long firstTimestamp = 2_100_000_000_002_001L;
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            TimelineHandle timeline = coordination.timelines().register(
+                    timelineId, ACTOR);
+            EntryHandle first = coordination.events().from(timeline)
+                    .exact(providerIncrement(
+                            coordination,
+                            timelineId,
+                            firstTimestamp,
+                            1L,
+                            null))
+                    .submit();
+            EntryHandle second = coordination.events().from(timeline)
+                    .exact(providerIncrement(
+                            coordination,
+                            timelineId,
+                            firstTimestamp + 1L,
+                            2L,
+                            first.blueId()))
+                    .submit();
+            EntryHandle third = coordination.events().from(timeline)
+                    .exact(providerIncrement(
+                            coordination,
+                            timelineId,
+                            firstTimestamp + 2L,
+                            3L,
+                            second.blueId()))
+                    .submit();
+            ExactBlueValue frontierEvidence = coordination.values().yaml("""
+                    components:
+                      - %d
+                      - %s
+                      - %s
+                    """.formatted(
+                    firstTimestamp, timelineId, first.blueId()));
+
+            // when
+            DocumentHandle counter = coordination.documents().admit(
+                    ManagedDocument.yaml(
+                                    counterId,
+                                    counterDocument(counterId, timelineId))
+                            .publicRoot()
+                            .activation(ActivationPolicy
+                                    .importFromFrontier(frontierEvidence)));
+            DocumentSnapshot initialized = counter.snapshot();
+            DrainResult drained = coordination.processing().drain();
+
+            // then
+            assertTrue(initialized.ready());
+            assertEquals(0L, initialized.epoch());
+            assertEquals(0L, initialized.longAt("/counter"));
+            assertEquals(EntryDisposition.NO_MATCH,
+                    drained.entry(first).disposition());
+            assertEquals(EntryDisposition.APPLIED,
+                    drained.entry(second).disposition());
+            assertEquals(EntryDisposition.APPLIED,
+                    drained.entry(third).disposition());
+            assertTrue(drained.quiescent());
+            assertEquals(5L, counter.snapshot().longAt("/counter"));
+            assertEquals(2L, counter.snapshot().epoch());
+            assertEquals(List.of(second, third), counter.history().stream()
+                    .skip(1L)
+                    .map(revision -> revision.sourceEntry().orElseThrow())
+                    .toList());
+        }
+    }
+
+    @Test
     void exactOrderTargetDoesNotProcessStandalonePayNote() {
         // given
         String timelineId = "sdk/targeting/alice";
@@ -1237,6 +1367,34 @@ final class SdkAcceptanceTest {
                                   - $binding: event/message/request/amount
                           - $return: true
                 """.formatted(documentId.value(), timelineId, ACTOR);
+    }
+
+    private static ExactBlueValue providerIncrement(
+            BlueCoordination coordination,
+            String timelineId,
+            long timestamp,
+            long amount,
+            String previousEntryBlueId) {
+        String predecessor = previousEntryBlueId == null
+                ? ""
+                : "prevEntry:\n  blueId: " + previousEntryBlueId + "\n";
+        return coordination.values().yaml("""
+                type: Coordination/Timeline Entry
+                timeline:
+                  type: MyOS/MyOS Timeline
+                  timelineId: %s
+                timestamp: %d
+                %sactor:
+                  type: MyOS/Principal Actor
+                  accountId: %s
+                message:
+                  type: Coordination/Operation Request
+                  operation: increment
+                  channel: ownerChannel
+                  request:
+                    amount: %d
+                """.formatted(
+                timelineId, timestamp, predecessor, ACTOR, amount));
     }
 
     private static String targetedDocument(

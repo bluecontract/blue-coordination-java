@@ -1,5 +1,11 @@
 # Initialization causality and embedded lifecycle events
 
+This invariant applies to both the Contracts SDK and retained temporal
+compatibility evidence: initialization is a processor-owned revision, not a
+fabricated provider entry. Broader historical child/parent sequencing described
+below is not an additional rc.3 operation-created draft capability; those
+drafts are new `FROM_NOW` lineages only.
+
 Initialization is a deterministic processor-managed document transition. It is
 not an externally authored Timeline Entry and must not be assigned a fabricated
 provider timestamp.

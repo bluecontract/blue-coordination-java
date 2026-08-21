@@ -49,20 +49,29 @@ java {
 }
 
 sourceSets {
+    testSupport
     integrationTest
     scenarioTest {
-        resources.setSrcDirs(['src/integrationTest/resources'])
+        resources.setSrcDirs([
+                'src/scenarioTest/resources',
+                'src/integrationTest/resources'
+        ])
     }
     consumerTest {
-        resources.setSrcDirs(['src/integrationTest/resources'])
+        resources.setSrcDirs([
+                'src/consumerTest/resources',
+                'src/integrationTest/resources'
+        ])
     }
 }
 
 configurations {
-    integrationTestImplementation.extendsFrom testImplementation
-    integrationTestRuntimeOnly.extendsFrom testRuntimeOnly
-    scenarioTestImplementation.extendsFrom testImplementation
-    scenarioTestRuntimeOnly.extendsFrom testRuntimeOnly
+    testSupportImplementation.extendsFrom testImplementation
+    testSupportRuntimeOnly.extendsFrom testRuntimeOnly
+    integrationTestImplementation.extendsFrom testSupportImplementation
+    integrationTestRuntimeOnly.extendsFrom testSupportRuntimeOnly
+    scenarioTestImplementation.extendsFrom testSupportImplementation
+    scenarioTestRuntimeOnly.extendsFrom testSupportRuntimeOnly
 }
 
 dependencyLocking {
@@ -121,12 +130,16 @@ dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 
+    testSupportImplementation sourceSets.main.output
+    testSupportImplementation sourceSets.testFixtures.output
+
     integrationTestImplementation sourceSets.main.output
     integrationTestImplementation sourceSets.testFixtures.output
+    integrationTestImplementation sourceSets.testSupport.output
 
     scenarioTestImplementation sourceSets.main.output
     scenarioTestImplementation sourceSets.testFixtures.output
-    scenarioTestImplementation sourceSets.integrationTest.output
+    scenarioTestImplementation sourceSets.testSupport.output
 
     consumerTestImplementation files(tasks.named('jar'))
     consumerTestImplementation 'blue.language:blue-contracts-core:3.1.0-rc.21'
@@ -187,7 +200,9 @@ def playgroundSmokeTest = tasks.register('playgroundSmokeTest', Test) {
     testClassesDirs = files(
             sourceSets.integrationTest.output.classesDirs,
             sourceSets.scenarioTest.output.classesDirs)
-    classpath = sourceSets.scenarioTest.runtimeClasspath
+    classpath = files(
+            sourceSets.integrationTest.runtimeClasspath,
+            sourceSets.scenarioTest.runtimeClasspath)
     dependsOn tasks.named(sourceSets.integrationTest.classesTaskName),
             tasks.named(sourceSets.scenarioTest.classesTaskName)
     filter {
@@ -856,6 +871,8 @@ tasks.register('verifyReleaseMetadata') {
         [
                 'README.md',
                 'START-HERE.md',
+                'docs/README.md',
+                'docs/guides/developer-guide.md',
                 'CHANGELOG.md',
                 'CONTRIBUTING.md',
                 'SECURITY.md',
@@ -873,6 +890,7 @@ tasks.register('verifyReleaseMetadata') {
                 'scripts/run-round13-same-machine-ab.sh',
                 'docs/reference/public-api.md',
                 'docs/reference/metrics.md',
+                'docs/limitations.md',
                 'docs/operations/failure-model.md'
         ].each { required ->
             if (!file(required).isFile()) {
@@ -1024,9 +1042,90 @@ tasks.register('verifyDocumentation') {
             'scripts/round13-ab-evidence.mjs',
             'scripts/round13-published-dependencies.gradle',
             'scripts/run-round13-same-machine-ab.sh',
+            'src/consumerTest/java/blue/coordination/consumer/SdkDeveloperGuideTest.java',
             productionSources)
     doLast {
         def failures = []
+        File developerGuide = file('docs/guides/developer-guide.md')
+        def requiredGuideSections = [
+                '## Mental model',
+                '## Use case 1: process an existing document and exact entry',
+                '## Use case 2: evolve an initial closure through several Timelines',
+                '## Ordering, `execute()`, and batching',
+                '## Admission and history policies',
+                '## Results, diagnostics, and reads',
+                '## Atomicity, retries, and process failure',
+                '## Application testing checklist',
+                '## Production-readiness checklist'
+        ]
+        def requiredGuideEvidence = [
+                'ManagedClosure.builder()',
+                '.bindOccurrence(',
+                '.exact(exactEntry)',
+                'request.managed(',
+                '.expectOccurrence(',
+                'canonical external source order',
+                'cyclic-set member',
+                'IllegalArgumentException',
+                'SdkDeveloperGuideTest'
+        ]
+        if (!developerGuide.isFile()) {
+            failures << 'Canonical SDK developer guide is missing'
+        } else {
+            String guideText = developerGuide.getText('UTF-8')
+            requiredGuideSections.findAll {
+                !guideText.contains(it)
+            }.each { missing ->
+                failures << "Canonical SDK developer guide is missing ${missing}"
+            }
+            requiredGuideEvidence.findAll {
+                !guideText.contains(it)
+            }.each { missing ->
+                failures << "Canonical SDK developer guide is missing evidence ${missing}"
+            }
+        }
+        File guideConsumer = file(
+                'src/consumerTest/java/blue/coordination/consumer/SdkDeveloperGuideTest.java')
+        if (!guideConsumer.isFile()) {
+            failures << 'Built-JAR developer-guide consumer test is missing'
+        } else {
+            String guideConsumerText = guideConsumer.getText('UTF-8')
+            [
+                    'completeGuideEvolvesACyclicClosureAcrossSeveralTimelines',
+                    'completeProviderEntryProcessesTheInitiallyKnownCyclicClosure',
+                    'ManagedClosure.builder()',
+                    '.bindOccurrence(',
+                    '.expectOccurrence(',
+                    'var exactEntry = blue.values().yaml(',
+                    '.exact(exactEntry)'
+            ].findAll {
+                !guideConsumerText.contains(it)
+            }.each { missing ->
+                failures << "Built-JAR developer-guide consumer test is missing ${missing}"
+            }
+        }
+        [file('README.md'), file('START-HERE.md')].each { landing ->
+            if (!landing.getText('UTF-8').contains(
+                    'docs/guides/developer-guide.md')) {
+                failures << "${landing} does not link the canonical SDK developer guide"
+            }
+        }
+        File metricsReference = file('docs/reference/metrics.md')
+        if (!metricsReference.getText('UTF-8').contains(
+                '**Advanced low-level API.**')) {
+            failures << 'Metrics reference does not identify its raw-engine scope'
+        }
+        [file('README.md'), file('START-HERE.md'),
+                file('docs/guides/developer-guide.md'),
+                file('docs/examples/playground-five-occurrence.md')].each {
+            currentDoc ->
+            String currentText = currentDoc.getText('UTF-8')
+            if (currentText.contains(
+                    'try (CoordinationEngine engine = CoordinationEngine.inMemory())')
+                    || currentText.contains('engine.startDocument(host')) {
+                failures << "${currentDoc} presents the legacy engine as current SDK guidance"
+            }
+        }
         inputs.files.files.findAll { it.name.endsWith('.md') }.each { source ->
             String markdown = source.getText('UTF-8')
             def links = markdown =~ /\[[^\]]*\]\(([^)]+)\)/
@@ -2807,7 +2906,10 @@ tasks.register('verifyPublishedArtifactDependencies') {
 
 tasks.register('verifyTestArchitecture') {
     group = 'verification'
-    description = 'Protects test depth, Given/When/Then shape, and JAR-only consumer isolation.'
+    description = 'Protects test shape, suite isolation, and the JAR-only consumer boundary.'
+    def supportSources = fileTree('src/testSupport/java') {
+        include '**/*.java'
+    }
     def suites = [
             unit: fileTree('src/test/java') { include '**/*Test.java' },
             integration: fileTree('src/integrationTest/java') {
@@ -2820,7 +2922,7 @@ tasks.register('verifyTestArchitecture') {
                 include '**/*Test.java'
             }
     ]
-    inputs.files(suites.values())
+    inputs.files(suites.values(), supportSources)
     inputs.file('build.gradle')
     dependsOn tasks.named('jar')
     doLast {
@@ -2936,6 +3038,11 @@ tasks.register('verifyTestArchitecture') {
         if (integrationSources.contains('blue.coordination.basic')) {
             failures << 'release tests retain the historical basic package'
         }
+        if (supportSources.files.any { source ->
+            source.getText('UTF-8') =~ /(?m)^[ \t]*@Test\b/
+        }) {
+            failures << 'testSupport must contain helpers, not executable tests'
+        }
 
         fileTree('src/consumerTest/java') { include '**/*.java' }
                 .each { source ->
@@ -2972,18 +3079,42 @@ tasks.register('verifyTestArchitecture') {
                 failures << 'SDK built-JAR consumer does not use BlueCoordination'
             }
         }
-        Set<File> mainOutputs = sourceSets.main.output.files.collect {
-            it.canonicalFile
-        } as Set
         Set<File> consumerClasspath = sourceSets.consumerTest
                 .compileClasspath.files.collect { it.canonicalFile } as Set
-        if (!mainOutputs.intersect(consumerClasspath).empty) {
-            failures << 'consumer compile classpath contains main source outputs'
+        Set<File> forbiddenConsumerOutputs = [
+                sourceSets.main,
+                sourceSets.testFixtures,
+                sourceSets.testSupport,
+                sourceSets.test,
+                sourceSets.integrationTest,
+                sourceSets.scenarioTest
+        ].collectMany { sourceSet ->
+            sourceSet.output.files.collect { it.canonicalFile }
+        } as Set
+        if (!forbiddenConsumerOutputs.intersect(consumerClasspath).empty) {
+            failures << 'consumer compile classpath contains project class outputs'
         }
         File mainJar = tasks.named('jar').get().archiveFile.get().asFile
                 .canonicalFile
         if (!consumerClasspath.contains(mainJar)) {
             failures << 'consumer compile classpath does not contain the built JAR'
+        }
+        Set<File> scenarioCompileClasspath = sourceSets.scenarioTest
+                .compileClasspath.files.collect { it.canonicalFile } as Set
+        Set<File> scenarioRuntimeClasspath = sourceSets.scenarioTest
+                .runtimeClasspath.files.collect { it.canonicalFile } as Set
+        Set<File> integrationClassDirs = sourceSets.integrationTest.output
+                .classesDirs.files.collect { it.canonicalFile } as Set
+        if (!integrationClassDirs.intersect(scenarioCompileClasspath).empty
+                || !integrationClassDirs.intersect(
+                scenarioRuntimeClasspath).empty) {
+            failures << 'scenario classpath contains integration test output'
+        }
+        Set<File> supportClassDirs = sourceSets.testSupport.output
+                .classesDirs.files.collect { it.canonicalFile } as Set
+        if (!scenarioCompileClasspath.containsAll(supportClassDirs)
+                || !scenarioRuntimeClasspath.containsAll(supportClassDirs)) {
+            failures << 'scenario classpath lacks private testSupport output'
         }
         String historicalProject = '../blue-' + 'basic'
         if (file('build.gradle').getText('UTF-8').contains(
@@ -3028,10 +3159,12 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
             'docs/releases/3.0.0-rc.3.md')
     def rcTestSources = files(
             fileTree('src/test/java') { include '**/*Test.java' },
+            fileTree('src/testSupport/java') { include '**/*.java' },
             fileTree('src/integrationTest/java') {
                 include '**/*Test.java'
             },
             fileTree('src/consumerTest/java') { include '**/*Test.java' },
+            fileTree('src/consumerTest/resources'),
             fileTree('src/scenarioTest/java') { include '**/*Test.java' })
     inputs.files(rcTestSources)
     inputs.files(tasks.named('jar').flatMap { it.archiveFile },

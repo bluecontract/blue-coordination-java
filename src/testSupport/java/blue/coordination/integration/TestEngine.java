@@ -24,7 +24,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Compact acceptance DSL over the published production API. It contains no
+ * Shared compact acceptance DSL over the published production API. It contains no
  * Coordination processing implementation; only String-id conveniences and
  * immutable diagnostic projections used by the migrated tests.
  */

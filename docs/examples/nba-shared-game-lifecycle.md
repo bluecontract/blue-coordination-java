@@ -1,5 +1,11 @@
 # One NBA Game shared by several containing documents
 
+This is a retained temporal-profile semantic scenario, not the normal rc.3
+operation-created draft tutorial. Use it to understand stable lineage reuse and
+historical parent synchronization. For current SDK admission and dynamic
+`FROM_NOW` children, use the
+[SDK developer guide](../guides/developer-guide.md).
+
 The scenario uses only the graph derived from `Process Embedded`.
 
 ```text
@@ -53,12 +59,12 @@ The post-Final extension adds one reuse, five parent applications, one retained
 initialization-event application, and one retained ending-event application;
 the Game still has one session, one initialization, and five revisions.
 
-The same mechanism applies to dynamic activation. A child may be ordinary
-inline content at admission and become managed when a later transition adds a
-`Process Embedded` `paths` or `collectionPaths` contract. The activating entry
-is processed by the parent first; it never reaches the newly activated child.
-The new children then initialize and their epochs are applied before the parent
-becomes ready for another entry.
+The retained temporal compatibility profile also characterizes dynamic
+activation from previously inline content. Do not infer from that scenario that
+the rc.3 SDK imports arbitrary existing or historical children from operation
+results. Its supported application lane requires a genuinely new exact
+`ManagedDocumentDraft`, complete `expectOccurrence(...)` evidence, and
+`FROM_NOW` activation.
 
 For several collection members, initialization order is canonical absolute
 Runtime Pointer order using Unicode code points. It is not insertion order,

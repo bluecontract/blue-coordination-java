@@ -1,5 +1,11 @@
 # Metrics reference
 
+> **Advanced low-level API.** This page documents raw-engine instrumentation
+> exposed by `CoordinationEngine`; it is not the normal application API. SDK
+> applications should use `EntryResult.stats()` and `DrainResult.stats()`
+> (`ProcessingStats`) for processing results and aggregate drain timing. Start
+> with the [SDK developer guide](../guides/developer-guide.md).
+
 `CoordinationEngine.metrics()` returns one cumulative immutable snapshot.
 Capture a baseline and subtract later values when measuring one append, drain,
 entry frame, or catch-up barrier. Timers are nanoseconds; `millis(name)` is a

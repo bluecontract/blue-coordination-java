@@ -1,0 +1,7 @@
+documentId: guide-route-42
+mode: road
+contracts:
+  embedded:
+    type: Process Embedded
+    paths:
+      - /shipment
