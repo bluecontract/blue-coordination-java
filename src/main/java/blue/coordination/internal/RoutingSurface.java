@@ -3,9 +3,11 @@ package blue.coordination.internal;
 import blue.language.processor.EffectiveContractSnapshot;
 import blue.language.processor.EffectiveContractSnapshotConstants;
 import blue.language.processor.EffectiveFragmentationCatalog;
+import blue.language.mapping.TypeClassResolver;
 import blue.language.snapshot.FrozenNode;
 import blue.repo.coordination.AllTimelinesChannel;
 import blue.repo.coordination.CompositeTimelineChannel;
+import blue.repo.coordination.SequentialWorkflowOperation;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -25,6 +27,9 @@ import java.util.Set;
  * sessions compile their own routing surfaces.
  */
 final class RoutingSurface {
+    private static final Map<String, Class<?>> REPOSITORY_TYPES =
+            Collections.unmodifiableMap(new LinkedHashMap<>(
+                    new TypeClassResolver("blue.repo").getBlueIdMap()));
     private static final Comparator<SourceAddress> SOURCE_ORDER = Comparator
             .comparing(SourceAddress::timelineId, EmbeddingBinding.TEXT_ORDER)
             .thenComparing(SourceAddress::actorId, EmbeddingBinding.TEXT_ORDER);
@@ -66,11 +71,41 @@ final class RoutingSurface {
         }
     }
 
+    /** Read-only metadata for one externally invocable operation handler. */
+    record OperationDefinition(
+            String scopePath,
+            String operation,
+            String channelKey,
+            FrozenNode requestPattern,
+            List<SourceAddress> sources) {
+        OperationDefinition {
+            scopePath = requireText(scopePath, "scopePath");
+            operation = requireText(operation, "operation");
+            channelKey = requireText(channelKey, "channelKey");
+            Set<SourceAddress> unique = new LinkedHashSet<>(
+                    Objects.requireNonNull(sources, "sources"));
+            if (unique.contains(null)) {
+                throw new NullPointerException("source address");
+            }
+            sources = unique.stream()
+                    .sorted(SOURCE_ORDER)
+                    .toList();
+        }
+    }
+
     private final List<Definition> definitions;
+    private final List<OperationDefinition> operationDefinitions;
     private final boolean embeddedRevisionHandler;
 
     RoutingSurface(
             Collection<Definition> definitions,
+            boolean embeddedRevisionHandler) {
+        this(definitions, List.of(), embeddedRevisionHandler);
+    }
+
+    private RoutingSurface(
+            Collection<Definition> definitions,
+            Collection<OperationDefinition> operationDefinitions,
             boolean embeddedRevisionHandler) {
         List<Definition> ordered = new ArrayList<>(Objects.requireNonNull(
                 definitions, "definitions"));
@@ -81,6 +116,20 @@ final class RoutingSurface {
                 .thenComparing(Definition::sources,
                         RoutingSurface::compareSources));
         this.definitions = Collections.unmodifiableList(ordered);
+        List<OperationDefinition> orderedOperations = new ArrayList<>(
+                Objects.requireNonNull(
+                        operationDefinitions, "operationDefinitions"));
+        orderedOperations.sort(Comparator
+                .comparing(OperationDefinition::scopePath,
+                        EmbeddingBinding.TEXT_ORDER)
+                .thenComparing(OperationDefinition::operation,
+                        EmbeddingBinding.TEXT_ORDER)
+                .thenComparing(OperationDefinition::channelKey,
+                        EmbeddingBinding.TEXT_ORDER)
+                .thenComparing(OperationDefinition::sources,
+                        RoutingSurface::compareSources));
+        this.operationDefinitions = Collections.unmodifiableList(
+                orderedOperations);
         this.embeddedRevisionHandler = embeddedRevisionHandler;
     }
 
@@ -101,12 +150,15 @@ final class RoutingSurface {
             Collection<String> managedBoundaries) {
         Objects.requireNonNull(catalog, "catalog");
         Map<Definition, Definition> unique = new LinkedHashMap<>();
+        Map<Definition, OperationDefinition> operations =
+                new LinkedHashMap<>();
         catalog.effectiveContractsByScope().entrySet().stream()
                 .sorted(Map.Entry.comparingByKey(EmbeddingBinding.TEXT_ORDER))
                 .filter(entry -> owned(
                         entry.getKey(), managedBoundaries))
                 .forEach(entry -> collect(
-                        entry.getKey(), entry.getValue(), unique));
+                        entry.getKey(), entry.getValue(), unique,
+                        operations));
         boolean embeddedHandler = catalog.effectiveContractsByScope().entrySet()
                 .stream()
                 .filter(entry -> owned(entry.getKey(), managedBoundaries))
@@ -116,7 +168,8 @@ final class RoutingSurface {
                                 contract.role())
                                 && EmbeddedEpochInput.INTERNAL_OPERATION
                                 .equals(contract.key()));
-        return new RoutingSurface(unique.values(), embeddedHandler);
+        return new RoutingSurface(
+                unique.values(), operations.values(), embeddedHandler);
     }
 
     /** Compiles the non-recursive routing surface of one independently
@@ -139,17 +192,24 @@ final class RoutingSurface {
             }
         }
         Map<Definition, Definition> unique = new LinkedHashMap<>();
-        collect("/", contracts, unique);
+        Map<Definition, OperationDefinition> operations =
+                new LinkedHashMap<>();
+        collect("/", contracts, unique, operations);
         boolean embeddedHandler = contracts.stream().anyMatch(contract ->
                 EffectiveContractSnapshotConstants.Role.HANDLER.equals(
                         contract.role())
                         && EmbeddedEpochInput.INTERNAL_OPERATION.equals(
                         contract.key()));
-        return new RoutingSurface(unique.values(), embeddedHandler);
+        return new RoutingSurface(
+                unique.values(), operations.values(), embeddedHandler);
     }
 
     public List<Definition> definitions() {
         return definitions;
+    }
+
+    List<OperationDefinition> operationDefinitions() {
+        return operationDefinitions;
     }
 
     public List<String> externalTimelineIds() {
@@ -168,7 +228,8 @@ final class RoutingSurface {
     private static void collect(
             String scopePath,
             List<EffectiveContractSnapshot> contracts,
-            Map<Definition, Definition> unique) {
+            Map<Definition, Definition> unique,
+            Map<Definition, OperationDefinition> operations) {
         Map<String, EffectiveContractSnapshot> channels =
                 new LinkedHashMap<>();
         for (EffectiveContractSnapshot contract : contracts) {
@@ -206,7 +267,22 @@ final class RoutingSurface {
                     channelKey,
                     sources);
             unique.putIfAbsent(definition, definition);
+            if (isInvocableOperation(contract.effectiveTypeBlueId())) {
+                operations.putIfAbsent(definition, new OperationDefinition(
+                        scopePath,
+                        contract.key(),
+                        channelKey,
+                        contract.headerFields().get("request"),
+                        sources));
+            }
         }
+    }
+
+    private static boolean isInvocableOperation(String effectiveTypeBlueId) {
+        Class<?> effectiveType = REPOSITORY_TYPES.get(effectiveTypeBlueId);
+        return effectiveType != null
+                && SequentialWorkflowOperation.class.isAssignableFrom(
+                        effectiveType);
     }
 
     private static List<SourceAddress> sourcesFor(

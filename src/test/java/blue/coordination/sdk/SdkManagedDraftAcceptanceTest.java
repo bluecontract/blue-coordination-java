@@ -432,6 +432,18 @@ final class SdkManagedDraftAcceptanceTest {
             DocumentHandle parent = coordination.documents().require(
                     parentId);
             String parentBeforeChild = parent.snapshot().blueId();
+            long parentEpochBeforePromotion = parent.snapshot().epoch();
+            int parentHistoryBeforePromotion = parent.history().size();
+            int entriesBeforePromotion = coordination.advanced().rawEngine()
+                    .metrics().journalEntryCount();
+            DocumentHandle promoted = coordination.documents()
+                    .promotePublicRoot(parentId);
+            assertEquals(parentId, promoted.id());
+            assertEquals(parentBeforeChild, parent.snapshot().blueId());
+            assertEquals(parentEpochBeforePromotion, parent.snapshot().epoch());
+            assertEquals(parentHistoryBeforePromotion, parent.history().size());
+            assertEquals(entriesBeforePromotion, coordination.advanced()
+                    .rawEngine().metrics().journalEntryCount());
             EntryResult childCreated = coordination.operations()
                     .on(parent)
                     .from(parentTimeline)

@@ -82,6 +82,14 @@ final class BlueRuntime implements AutoCloseable {
     static BlueRuntime create(
             WholeObjectStore wholeObjects,
             EngineMetrics metrics) {
+        return create(wholeObjects, metrics, null);
+    }
+
+    /** Creates an isolated runtime with one optional read-only provider leaf. */
+    static BlueRuntime create(
+            WholeObjectStore wholeObjects,
+            EngineMetrics metrics,
+            NodeProvider exactNodeProvider) {
         BlueRepository repository = BlueRepository.current();
         List<NodeProvider> providers = new ArrayList<>();
         providers.add(metered(
@@ -92,6 +100,9 @@ final class BlueRuntime implements AutoCloseable {
         providers.add(metered(repository.nodeProvider(), metrics));
         providers.add(metered(
                 new RepositoryExactNodeProvider(repository), metrics));
+        if (exactNodeProvider != null) {
+            providers.add(metered(exactNodeProvider, metrics));
+        }
         NodeProvider nodeProvider = new SequentialNodeProvider(providers);
 
         Map<String, String> imports = new LinkedHashMap<>();

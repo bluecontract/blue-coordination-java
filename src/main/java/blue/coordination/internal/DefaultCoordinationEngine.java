@@ -82,6 +82,42 @@ public final class DefaultCoordinationEngine
         }
     }
 
+    /** Narrow immutable source address used by advanced diagnostic adapters. */
+    public record OperationRouteSourceAuditView(
+            String timelineId,
+            String actorId) {
+        public OperationRouteSourceAuditView {
+            timelineId = requireAuditText(timelineId, "timelineId");
+            actorId = requireAuditText(actorId, "actorId");
+        }
+    }
+
+    /** Narrow immutable compiled route used by advanced diagnostic adapters. */
+    public record OperationRouteAuditView(
+            String scopePath,
+            String operation,
+            String channel,
+            Optional<ExactValue> requestPattern,
+            List<OperationRouteSourceAuditView> acceptedSources) {
+        public OperationRouteAuditView {
+            scopePath = requireAuditText(scopePath, "scopePath");
+            operation = requireAuditText(operation, "operation");
+            channel = requireAuditText(channel, "channel");
+            requestPattern = Objects.requireNonNull(
+                    requestPattern, "requestPattern");
+            acceptedSources = List.copyOf(Objects.requireNonNull(
+                    acceptedSources, "acceptedSources"));
+        }
+    }
+
+    private static String requireAuditText(String value, String label) {
+        String checked = Objects.requireNonNull(value, label);
+        if (checked.isBlank()) {
+            throw new IllegalArgumentException(label + " must not be blank");
+        }
+        return checked;
+    }
+
     private static final long BASE_TIMESTAMP_MICROS =
             1_800_000_000_000_000L;
 
@@ -105,6 +141,8 @@ public final class DefaultCoordinationEngine
     private ContractsRootFeederCoordinator contractsFeederCoordinator;
     private ContractsJournalDrainCoordinator contractsJournalCoordinator;
     private final Map<String, Timeline> timelines = new LinkedHashMap<>();
+    private final Map<String, String> timelineActorKinds =
+            new LinkedHashMap<>();
     private Consumer<FailurePoint> failureInjector = ignored -> { };
     private long logicalClockMicros = BASE_TIMESTAMP_MICROS;
     private long applicationClockMicros = BASE_TIMESTAMP_MICROS;
@@ -115,7 +153,8 @@ public final class DefaultCoordinationEngine
         metrics = new EngineMetrics();
         objects = new WholeObjectStore(metrics);
         runtime = BlueRuntime.create(objects, metrics);
-        entryFactory = new WholeRequestEntryFactory(runtime, objects, metrics);
+        entryFactory = new WholeRequestEntryFactory(
+                runtime, objects, metrics, this::timelineActorKind);
         journal = new InMemoryTimelineJournal(entryFactory, metrics);
         documents = new InMemoryDocumentStore(metrics);
         routeIndex = new OperationRouteIndex(
@@ -237,6 +276,26 @@ public final class DefaultCoordinationEngine
         contractsActiveSourceTimelines.addPublicRoots(checked);
     }
 
+    /**
+     * Exposes one already-admitted lineage as a public Root.
+     *
+     * <p>This changes only the host's Root/source catalogs. It does not append
+     * an entry, execute a process, change document content, or advance an
+     * epoch.</p>
+     */
+    public synchronized void promoteContractsPublicRoot(DocumentId id) {
+        ensureOpen();
+        if (contractsClosureProfile == null) {
+            throw new IllegalStateException(
+                    "Contracts 1.0 was not enabled for this engine");
+        }
+        DocumentId selected = Objects.requireNonNull(id, "id");
+        requireDocument(selected);
+        contractsClosureProfile.addPublicRoots(Set.of(selected));
+        contractsActiveSourceTimelines.addPublicRoots(Set.of(selected));
+        contractsActiveSourceTimelines.refresh(Set.of(selected), documents);
+    }
+
     @Override
     public synchronized Timeline registerTimeline(
             String timelineId,
@@ -250,6 +309,50 @@ public final class DefaultCoordinationEngine
                             + existing.actorId());
         }
         return existing == null ? proposed : existing;
+    }
+
+    /** Selects the exact actor contract used for SDK-authored entries. */
+    public synchronized void registerTimelineActorType(
+            String timelineId,
+            String actorType) {
+        if (!timelines.containsKey(timelineId)) {
+            throw new IllegalArgumentException(
+                    "Timeline is not registered: " + timelineId);
+        }
+        String checked = Objects.requireNonNull(actorType, "actorType");
+        String existing = timelineActorKinds.putIfAbsent(
+                timelineId, checked);
+        if (existing != null && !existing.equals(checked)) {
+            throw new IllegalArgumentException(
+                    "Timeline " + timelineId + " already uses " + existing);
+        }
+    }
+
+    /** Returns the exact actor contract used for SDK-authored entries. */
+    public synchronized String timelineActorKind(String timelineId) {
+        return timelineActorKinds.getOrDefault(
+                timelineId, "MyOS/Principal Actor");
+    }
+
+    /** Returns one canonical retained Timeline Entry for read-only audit. */
+    public synchronized Optional<TimelineEntry> auditTimelineEntry(
+            String entryBlueId) {
+        ensureOpen();
+        return journal.byBlueId(requireAuditText(
+                entryBlueId, "entryBlueId"));
+    }
+
+    /** Returns every canonical retained Timeline Entry in append order. */
+    public synchronized List<TimelineEntry> auditTimelineEntries() {
+        ensureOpen();
+        return journal.entries();
+    }
+
+    /** Returns canonical retained entries for one Timeline in append order. */
+    public synchronized List<TimelineEntry> auditTimeline(
+            String timelineId) {
+        ensureOpen();
+        return journal.entries(requireAuditText(timelineId, "timelineId"));
     }
 
     synchronized Timeline timeline(String timelineId, String actorId) {
@@ -935,6 +1038,31 @@ public final class DefaultCoordinationEngine
                         DocumentId.of(row.targetDocumentId().value()),
                         row.activationGeneration(),
                         row.active()));
+    }
+
+    /** Reads the current processor-compiled operation routes without mutation. */
+    public synchronized List<OperationRouteAuditView> auditOperationRoutes(
+            DocumentId documentId) {
+        ensureOpen();
+        return requireDocument(Objects.requireNonNull(
+                        documentId, "documentId"))
+                .layout()
+                .routingSurface()
+                .operationDefinitions()
+                .stream()
+                .map(definition -> new OperationRouteAuditView(
+                        definition.scopePath(),
+                        definition.operation(),
+                        definition.channelKey(),
+                        Optional.ofNullable(definition.requestPattern())
+                                .map(ExactValue::fromFrozen),
+                        definition.sources().stream()
+                                .map(source ->
+                                        new OperationRouteSourceAuditView(
+                                                source.timelineId(),
+                                                source.actorId()))
+                                .toList()))
+                .toList();
     }
 
     private DocumentSession requireDocument(DocumentId documentId) {

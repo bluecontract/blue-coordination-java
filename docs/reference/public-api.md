@@ -35,15 +35,37 @@ silently crossing environments.
 an advanced custom-release option. Both values must be lowercase `sha256:`
 identities. Ordinary callers use `inMemory()` and never type release hashes.
 
+Hosts that key managed lineages by exact authored content can opt in with
+`builder().contentDerivedDocumentIds()`. Under that policy the managed
+`DocumentId` is the BlueId of the complete authored value before
+initialization. A property at `/documentId` remains ordinary authored content:
+it is neither read as the lineage selector nor inserted, removed, or rewritten.
+It contributes to the exact authored BlueId like every other property. An
+explicit caller-supplied `DocumentId` must agree with the derived identity.
+
+`builder().exactNodeProvider(provider)` installs a read-only
+`ExactNodeProvider` for static authored admission. Its single method is
+`Optional<String> findExactContent(String blueId)`. Coordination requests only a
+specific whole value named by a pure BlueId reference; it never enumerates the
+provider. Returned serialized content is parsed defensively and
+identity-verified before managed state is written. `ExactNodeProvider.empty()` and
+`ExactNodeProvider.of(blueId, exactContent)` and
+`ExactNodeProvider.of(exactValue)` cover the empty and one-value cases.
+
 ## Timelines and exact values
 
 `timelines().local(accountId)` registers a Timeline whose id and actor account
-are the same. `register(timelineId, accountId)` keeps them explicit.
+are the same. `register(timelineId, accountId)` keeps them explicit and uses a
+principal actor. The overload
+`register(timelineId, accountId, TimelineActorKind.AGENT)` authors exact Agent
+Actor evidence; `TimelineHandle.actorKind()` reports the stable choice.
 
 `values().yaml(source)` resolves with the runtime's pinned Language release and
 returns `ExactBlueValue`. An exact value exposes its authoritative BlueId and
 cyclic-member status while retaining immutable verified content. Snapshot
 scalar helpers provide exact long, text, and boolean reads by JSON Pointer.
+`json()` returns detached serialized Blue JSON for persistence and diagnostic
+adapters; callers receive no mutable reference to the retained exact value.
 
 ## Ordinary document admission
 
@@ -103,9 +125,64 @@ their Timeline sources. Those members remain independently targetable through
 their handles. Mark another member as a public Root only when it needs an
 independent externally authorized Root lane.
 
-`ClosureHandle` exposes the authenticated closure identity, members by alias,
-and public Roots. It does not expose component snapshots, occurrence internals,
-proof objects, or invocation environments.
+`documents().promotePublicRoot(memberId)` adds an already admitted member to
+that Root/source catalog. Promotion is from-now catalog exposure only: it does
+not append a Timeline Entry, run a process, change the exact document, create a
+revision, or advance an epoch.
+
+`ClosureHandle` exposes the authenticated closure identity,
+`documents()` / `document(alias)`, `publicRootAliases()`, and the corresponding
+`publicRoots()` handles. When the admission compiler retains authored
+evidence—as the static authored API below does—
+`authoredDocuments()` and `authoredDocument(alias)` expose the immutable exact
+pre-initialization values. `occurrences()` exposes read-only
+`ClosureOccurrenceSnapshot` values with source document/path, activation
+generation, target document, expected target BlueId, and active state. These
+values describe evidence already accepted during admission; they cannot author
+or override graph state. Component snapshots, proof objects, and invocation
+environments remain outside this handle.
+
+## Static Process Embedded admission
+
+For a bounded all-new graph already present in one authored Root value, the SDK
+can discover the complete static closure before admission:
+
+```java
+ClosureHandle closure = blue.documents()
+        .admitStaticProcessEmbedded(rootYaml);
+```
+
+The overload
+`admitStaticProcessEmbedded(rootYaml, activationPolicy)` applies an existing
+supported `ActivationPolicy` to the resulting closure; the one-argument form
+uses `ActivationPolicy.fromNow()`. The policy controls temporal admission of
+the all-new closure. It does not select an existing lineage or a historical
+version for attachment.
+
+Discovery follows only the effective `Process Embedded` `paths` and
+`collectionPaths` catalog compiled from each exact member. A complete inline
+value becomes another member. A pure `{blueId: ...}` value is resolved through
+the configured `ExactNodeProvider`. Discovery then recurses, coalesces repeated
+occurrences of the same exact authored value into one lineage, and delegates
+the explicit bindings, public Root, compilation, initialization, proof, and
+atomic publication to the ordinary closure-admission path. Every managed
+`DocumentId` is the member's exact pre-initialization authored BlueId; any
+authored `/documentId` value remains untouched content.
+
+The entire discovered member set must be new. Discovery and provider identity
+verification complete before the first managed write. If a pure reference is
+unavailable, the SDK throws a typed `CoordinationException` with code
+`NEEDS_RESOURCES` and exact `blueId`, `sourceDocumentId`, and `sourcePath`
+details; no member is admitted. A host may retain that demand, supply the exact
+resource, and retry the same admission. If the provider returns content with a
+different BlueId, admission fails with `INVALID_DOCUMENT_IDENTITY`, also before
+managed state is written.
+
+This API is deliberately static and all-new. It does not scan arbitrary object
+shape for children, attach an existing lineage, choose a historical child
+state, reserve a future occurrence, or discover an occurrence first created by
+an operation. It also does not infer a post-operation affected closure or add a
+dynamic cycle; those cases require a different semantic API.
 
 ## Targeted operations
 
@@ -157,15 +234,19 @@ EntryResult result = blue.operations().on(parent)
         .execute();
 ```
 
-The draft's exact initial value must contain a text `/documentId` equal to its
-stable `DocumentId`. The SDK verifies owner identity, exact request value,
-canonical effective `Process Embedded` paths, and complete result agreement. A
-single draft may be bound at several paths to express one stable lineage with
-multiple occurrences. Every expectation in one call is sourced from the
-current operation target; create a nested new child graph through sequential
-applied operations, not by assuming one call can declare edges between drafts.
-All new heads and topology changes publish atomically with the parent result; a
-terminal failure leaves no partial expansion.
+Under the default legacy identity policy, the draft's exact initial value must
+contain a text `/documentId` equal to its supplied stable `DocumentId`. Under
+`contentDerivedDocumentIds()`, the supplied `DocumentId` must instead equal the
+complete initial value's BlueId; `/documentId` is ordinary untouched content
+and may be absent or have any authored shape. In either mode the SDK verifies
+owner identity, exact request value, canonical effective `Process Embedded`
+paths, and complete result agreement. A single draft may be bound at several
+paths to express one stable lineage with multiple occurrences. Every
+expectation in one call is sourced from the current operation target; create a
+nested new child graph through sequential applied operations, not by assuming
+one call can declare edges between drafts. All new heads and topology changes
+publish atomically with the parent result; a terminal failure leaves no partial
+expansion.
 
 This candidate supports only new `FROM_NOW` lineages. Imported-state evidence
 created with `draft.atEpoch(...)` and historical, frontier, attach-current, or
@@ -266,6 +347,21 @@ cyclic finalizer, and proof-verifier identities used by evidence tooling.
 target `DocumentId`, positive activation generation, and active/inactive flag;
 it intentionally omits component snapshots, proof values, and mutable
 inventory internals.
+
+`auditTimelineEntry(blueId)`, `auditTimeline(timelineId)`, and
+`auditTimelineEntries()` return immutable `TimelineEntrySnapshot` values from
+the engine's canonical journal, including entries appended through
+`rawEngine()`. Each snapshot retains the exact whole entry, Timeline identity,
+predecessor identity, operation/channel, timestamp, and global/per-Timeline
+sequence numbers.
+
+`auditOperationRoutes(documentId)` returns the immutable compiled Root-scoped
+operation surface. Each `OperationRouteSnapshot` carries the operation,
+channel, optional exact effective request pattern, and deterministically
+ordered accepted Timeline/actor sources. This is a read-only compiler view: it
+does not append or process work. Executable repository subtypes of Sequential
+Workflow Operation are included; generic handlers and the bare Operation base
+are not reported as callable routes.
 
 Low-level types such as `ClosureInvocationInput`, occurrence bindings,
 component/closure snapshots, cyclic proofs, closure environments, and execution

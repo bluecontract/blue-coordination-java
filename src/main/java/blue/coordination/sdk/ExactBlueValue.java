@@ -1,6 +1,7 @@
 package blue.coordination.sdk;
 
 import blue.coordination.api.ExactValue;
+import blue.language.codec.jackson.UncheckedObjectMapper;
 import blue.language.model.Node;
 import blue.language.model.NodePathEditor;
 
@@ -30,6 +31,17 @@ public final class ExactBlueValue {
     /** Returns whether this is a verified member identity of a cyclic set. */
     public boolean cyclicMember() {
         return value.isCyclicMember();
+    }
+
+    /** Returns the verified exact value as detached Blue JSON. */
+    public String json() {
+        return UncheckedObjectMapper.JSON_MAPPER.writeValueAsString(
+                value.copyNode());
+    }
+
+    /** Package-private mutable copy used only by the SDK implementation. */
+    Node copyNode() {
+        return value.copyNode();
     }
 
     ExactBlueValue valueAt(String pointer) {

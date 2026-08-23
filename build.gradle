@@ -423,13 +423,14 @@ def publicBoundarySources = files(
             include '**/*.java'
         })
 // Current Contracts 1.0 maintainability guardrails. These are deliberately
-// bounded caps over the SDK baseline of 163 production source files, 39,656
-// lines, and 49 public api+sdk source types. They are not retained Round 13
-// counts and are not performance evidence.
+// bounded caps over the frozen SDK baseline plus the additive audit, exact
+// content-provider, content-identity and static-admission details: currently
+// 172 production sources, 42,713 lines and 56 public api+sdk source types.
+// They are not retained Round 13 counts and are not performance evidence.
 def currentProductionShapeLimits = [
-        classes: 170,
-        lines: 42_000L,
-        publicApiTypes: 50
+        classes: 175,
+        lines: 44_000L,
+        publicApiTypes: 56
 ]
 def forbiddenArchitectureTokens = [
         'AutonomousLink', 'TemporalWave', 'ConsistencyMode',
@@ -522,6 +523,7 @@ tasks.register('verifyPublicApiBoundary') {
                 'src/main/java/blue/coordination/internal/DefaultCoordinationEngine.java',
                 'src/main/java/blue/coordination/internal/BundledContracts10Release.java',
                 'src/main/java/blue/coordination/internal/Contracts10AuthoredClosureCompiler.java',
+                'src/main/java/blue/coordination/internal/Contracts10StaticEmbeddedAdmissionCompiler.java',
                 'src/main/java/blue/coordination/internal/ContractsManagedDraftPlan.java'
         ] as Set
         fileTree('src/main/java/blue/coordination/internal') {

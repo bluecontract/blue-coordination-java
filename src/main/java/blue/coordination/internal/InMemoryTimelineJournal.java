@@ -168,6 +168,18 @@ final class InMemoryTimelineJournal {
                 Objects.requireNonNull(blueId, "blueId")));
     }
 
+    /** Immutable canonical append-order view used by read-only audit adapters. */
+    synchronized List<TimelineEntry> entries() {
+        return List.copyOf(appendOrder);
+    }
+
+    /** Immutable canonical append-order view for one Timeline. */
+    synchronized List<TimelineEntry> entries(String timelineId) {
+        return List.copyOf(byTimeline.getOrDefault(
+                Objects.requireNonNull(timelineId, "timelineId"),
+                List.of()));
+    }
+
     /**
      * Returns the canonical journal object and rejects caller-forged metadata
      * even when the supplied value reuses a known BlueId.
