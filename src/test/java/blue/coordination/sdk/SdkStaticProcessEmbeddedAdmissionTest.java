@@ -3,6 +3,8 @@ package blue.coordination.sdk;
 import blue.coordination.api.CoordinationErrorCode;
 import blue.coordination.api.CoordinationException;
 import blue.coordination.api.DocumentId;
+import blue.language.processor.ProcessorErrorCategory;
+import blue.language.processor.ProcessorStatus;
 import blue.language.processor.registry.RuntimeBlueIds;
 import org.junit.jupiter.api.Test;
 
@@ -15,6 +17,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Focused SDK parity and atomicity coverage for bounded static admission. */
 final class SdkStaticProcessEmbeddedAdmissionTest {
@@ -221,6 +224,75 @@ final class SdkStaticProcessEmbeddedAdmissionTest {
             assertThrows(CoordinationException.class,
                     () -> blue.documents().require(DocumentId.of(
                             invalid.details().get("sourceDocumentId"))));
+        }
+    }
+
+    @Test
+    void admissionRejectionPreservesFrozenProcessorDiagnostic() {
+        // given
+        DocumentId rootId = DocumentId.of("sdk-init-event-rejection");
+        String rootYaml = """
+                documentId: sdk-init-event-rejection
+                initializationCount: 0
+                contracts:
+                  lifecycle:
+                    type:
+                      blueId: 2ukJitzzDKQWHJ5EVUtn3t4FXieGmNA1NdwFSqG8qcfo
+                    order: 0
+                    event:
+                      type:
+                        blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
+                  initialize:
+                    type: Coordination/Sequential Workflow
+                    channel: lifecycle
+                    order: 0
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: replace
+                              path: /initializationCount
+                              val: 1
+                          - $appendEvent:
+                              type: Coordination/Event
+                              kind: Lab/Initialization Event
+                          - $return: true
+                """;
+
+        // when
+        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            CoordinationException rejected = assertThrows(
+                    CoordinationException.class,
+                    () -> blue.documents().admit(ManagedDocument.yaml(
+                                    rootId, rootYaml)
+                            .publicRoot()
+                            .fromNow()));
+
+            // then
+            assertEquals(CoordinationErrorCode.FROZEN_PROCESSING_FAILED,
+                    rejected.code());
+            assertEquals(ProcessorStatus.RUNTIME_FATAL,
+                    rejected.processorStatus().orElseThrow());
+            assertEquals(ProcessorErrorCategory.RuntimeExecutionFailure,
+                    rejected.processorCategory().orElseThrow());
+            assertEquals(
+                    "Initialization-caused application events require "
+                            + "the full event queue lane",
+                    rejected.getMessage());
+            assertEquals(rejected.getMessage(),
+                    rejected.processorMessage().orElseThrow());
+            assertTrue(rejected.processorDetails().isEmpty());
+            assertEquals("runtime-fatal",
+                    rejected.details().get("processorStatus"));
+            assertEquals("RuntimeExecutionFailure",
+                    rejected.details().get("processorCategory"));
+            assertTrue(rejected.details().get("invocationIdentity")
+                    .startsWith("sha256:"));
+            CoordinationException missing = assertThrows(
+                    CoordinationException.class,
+                    () -> blue.documents().require(rootId));
+            assertEquals(CoordinationErrorCode.DOCUMENT_NOT_FOUND,
+                    missing.code());
         }
     }
 

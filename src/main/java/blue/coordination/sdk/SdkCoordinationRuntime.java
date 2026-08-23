@@ -2,6 +2,7 @@ package blue.coordination.sdk;
 
 import blue.coordination.api.ContractsClosureAdmissionReceipt;
 import blue.coordination.api.CoordinationEngine;
+import blue.coordination.api.CoordinationErrorCode;
 import blue.coordination.api.CoordinationException;
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.ExactValue;
@@ -19,6 +20,8 @@ import blue.coordination.internal.DefaultCoordinationEngine;
 import blue.language.model.Node;
 import blue.language.model.NodePathEditor;
 import blue.language.processor.ExternalOrderKey;
+import blue.language.processor.ProcessorDiagnostic;
+import blue.language.processor.closure.ClosureProcessResult;
 import blue.language.snapshot.FrozenNode;
 
 import java.math.BigInteger;
@@ -551,13 +554,34 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                         "ADMISSION_NEEDS_RESOURCES: "
                                 + receipt.attempt().requiredExactBlueIds());
             }
-            String status = receipt.attempt().processResult()
-                    .status().wireValue();
-            throw new IllegalStateException(
-                    "ADMISSION_REJECTED_"
-                            + status.toUpperCase().replace('-', '_'));
+            throw admissionRejected(receipt.attempt().processResult());
         }
         return receipt;
+    }
+
+    private static CoordinationException admissionRejected(
+            ClosureProcessResult result) {
+        ProcessorDiagnostic diagnostic = result.diagnostic();
+        String status = result.status().wireValue();
+        String message = diagnostic == null
+                || diagnostic.message() == null
+                || diagnostic.message().isBlank()
+                ? "Contracts admission rejected with " + status
+                : diagnostic.message();
+        LinkedHashMap<String, String> details = new LinkedHashMap<>();
+        details.put("processorStatus", status);
+        details.put("invocationIdentity", result.invocationIdentity());
+        if (diagnostic != null) {
+            details.put("processorCategory",
+                    diagnostic.category().name());
+        }
+        return new CoordinationException(
+                CoordinationErrorCode.FROZEN_PROCESSING_FAILED,
+                message,
+                null,
+                details,
+                result.status(),
+                diagnostic);
     }
 
     private EntryHandle appendOperation(OperationCall call) {

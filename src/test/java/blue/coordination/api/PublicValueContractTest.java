@@ -1,6 +1,9 @@
 package blue.coordination.api;
 
 import blue.language.model.Node;
+import blue.language.processor.ProcessorDiagnostic;
+import blue.language.processor.ProcessorErrorCategory;
+import blue.language.processor.ProcessorStatus;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
@@ -152,6 +155,46 @@ final class PublicValueContractTest {
         assertEquals("counter", failure.details().get("documentId"));
         assertThrows(UnsupportedOperationException.class,
                 () -> failure.details().clear());
+        assertTrue(failure.processorStatus().isEmpty());
+        assertTrue(failure.processorCategory().isEmpty());
+        assertTrue(failure.processorMessage().isEmpty());
+        assertTrue(failure.processorDetails().isEmpty());
+    }
+
+    @Test
+    void typedFailuresSnapshotFrozenProcessorDiagnosticsSeparately() {
+        // given
+        ProcessorDiagnostic diagnostic = ProcessorDiagnostic.builder(
+                        ProcessorErrorCategory.SubscriptionSurfaceInvalid)
+                .message("invalid subscription surface")
+                .detail("scopePath", "/")
+                .detail("contractKey", "embedded")
+                .build();
+
+        // when
+        CoordinationException failure = new CoordinationException(
+                CoordinationErrorCode.FROZEN_PROCESSING_FAILED,
+                "admission rejected",
+                null,
+                Map.of("processorStatus", "host-metadata"),
+                ProcessorStatus.SUBSCRIPTION_SURFACE_INVALID,
+                diagnostic);
+
+        // then
+        assertEquals(ProcessorStatus.SUBSCRIPTION_SURFACE_INVALID,
+                failure.processorStatus().orElseThrow());
+        assertEquals(ProcessorErrorCategory.SubscriptionSurfaceInvalid,
+                failure.processorCategory().orElseThrow());
+        assertEquals("invalid subscription surface",
+                failure.processorMessage().orElseThrow());
+        assertEquals(Map.of(
+                        "scopePath", "/",
+                        "contractKey", "embedded"),
+                failure.processorDetails());
+        assertEquals("host-metadata",
+                failure.details().get("processorStatus"));
+        assertThrows(UnsupportedOperationException.class,
+                () -> failure.processorDetails().clear());
     }
 
     @Test
