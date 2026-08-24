@@ -3,8 +3,6 @@ package blue.coordination.sdk;
 import blue.coordination.api.CoordinationErrorCode;
 import blue.coordination.api.CoordinationException;
 import blue.coordination.api.DocumentId;
-import blue.language.processor.ProcessorErrorCategory;
-import blue.language.processor.ProcessorStatus;
 import blue.language.processor.registry.RuntimeBlueIds;
 import org.junit.jupiter.api.Test;
 
@@ -19,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Focused SDK parity and atomicity coverage for bounded static admission. */
+/** Focused SDK parity and atomicity coverage for static admission. */
 final class SdkStaticProcessEmbeddedAdmissionTest {
     @Test
     void acceptsExistingFullHistoryAdmissionPolicy() {
@@ -228,12 +226,13 @@ final class SdkStaticProcessEmbeddedAdmissionTest {
     }
 
     @Test
-    void admissionRejectionPreservesFrozenProcessorDiagnostic() {
+    void publicRootInitializationEventPublishesAndReactsLocally() {
         // given
-        DocumentId rootId = DocumentId.of("sdk-init-event-rejection");
+        DocumentId rootId = DocumentId.of("sdk-init-event-full-lifecycle");
         String rootYaml = """
-                documentId: sdk-init-event-rejection
+                documentId: sdk-init-event-full-lifecycle
                 initializationCount: 0
+                reactionCount: 0
                 contracts:
                   lifecycle:
                     type:
@@ -242,6 +241,12 @@ final class SdkStaticProcessEmbeddedAdmissionTest {
                     event:
                       type:
                         blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
+                  initializedEvent:
+                    type:
+                      blueId: %s
+                    event:
+                      type: Coordination/Event
+                      kind: Lab/Initialization Event
                   initialize:
                     type: Coordination/Sequential Workflow
                     channel: lifecycle
@@ -257,42 +262,42 @@ final class SdkStaticProcessEmbeddedAdmissionTest {
                               type: Coordination/Event
                               kind: Lab/Initialization Event
                           - $return: true
-                """;
+                  react:
+                    type: Coordination/Sequential Workflow
+                    channel: initializedEvent
+                    event:
+                      type: Coordination/Event
+                      kind: Lab/Initialization Event
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: replace
+                              path: /reactionCount
+                              val: {$add: [{$document: /reactionCount}, 1]}
+                          - $return: true
+                """.formatted(RuntimeBlueIds.TRIGGERED_EVENT_CHANNEL);
 
         // when
         try (BlueCoordination blue = BlueCoordination.inMemory()) {
-            CoordinationException rejected = assertThrows(
-                    CoordinationException.class,
-                    () -> blue.documents().admit(ManagedDocument.yaml(
-                                    rootId, rootYaml)
+            DocumentHandle admitted = blue.documents().admit(
+                    ManagedDocument.yaml(rootId, rootYaml)
                             .publicRoot()
-                            .fromNow()));
+                            .fromNow());
 
             // then
-            assertEquals(CoordinationErrorCode.FROZEN_PROCESSING_FAILED,
-                    rejected.code());
-            assertEquals(ProcessorStatus.RUNTIME_FATAL,
-                    rejected.processorStatus().orElseThrow());
-            assertEquals(ProcessorErrorCategory.RuntimeExecutionFailure,
-                    rejected.processorCategory().orElseThrow());
-            assertEquals(
-                    "Initialization-caused application events require "
-                            + "the full event queue lane",
-                    rejected.getMessage());
-            assertEquals(rejected.getMessage(),
-                    rejected.processorMessage().orElseThrow());
-            assertTrue(rejected.processorDetails().isEmpty());
-            assertEquals("runtime-fatal",
-                    rejected.details().get("processorStatus"));
-            assertEquals("RuntimeExecutionFailure",
-                    rejected.details().get("processorCategory"));
-            assertTrue(rejected.details().get("invocationIdentity")
-                    .startsWith("sha256:"));
-            CoordinationException missing = assertThrows(
-                    CoordinationException.class,
-                    () -> blue.documents().require(rootId));
-            assertEquals(CoordinationErrorCode.DOCUMENT_NOT_FOUND,
-                    missing.code());
+            assertEquals(rootId, admitted.id());
+            assertEquals(1L, admitted.snapshot()
+                    .longAt("/initializationCount"));
+            assertEquals(1L, admitted.snapshot().longAt("/reactionCount"));
+            assertEquals(1, admitted.history().size());
+            DocumentRevision initialization = admitted.history().get(0);
+            assertEquals(DocumentRevision.Kind.INITIALIZATION,
+                    initialization.kind());
+            assertTrue(initialization.sourceEntry().isEmpty());
+            assertEquals(1, initialization.publicEvents().size());
+            assertTrue(blue.advanced().auditTimelineEntries().isEmpty(),
+                    "admission is not an external Timeline Entry");
         }
     }
 

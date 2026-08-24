@@ -1,10 +1,10 @@
 package blue.coordination.internal;
 
-import blue.coordination.api.Contracts10Configuration;
 import blue.coordination.api.ContractsClosureAdmissionReceipt;
 import blue.coordination.api.CoordinationEngine;
 import blue.coordination.api.DocumentId;
 import blue.language.model.Node;
+import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.ProcessorErrorCategory;
 import blue.language.processor.ProcessorStatus;
 import blue.language.processor.closure.AdmissionKind;
@@ -49,10 +49,6 @@ final class ContractsPublicInitializationTopologyTest {
     private static final List<DocumentId> MEMBERS = List.of(A, B, C);
     private static final Set<String> DYNAMIC_PATHS = Set.of(
             "/reciprocal", "/members/b", "/members/c");
-    private static final String LANGUAGE_SPEC = "sha256:01b038b64e3f0a9a"
-            + "11f3f70d544a63ff78a01d5169f1a03f8b8629cf73645a7d";
-    private static final String CONTRACTS_SPEC = "sha256:dfb444962a5a17b3"
-            + "a6519e8d148c2bf4a975a921b1fcb1277710052caaecd930";
     private static final String ADMISSION_POLICY =
             "contracts-top-level-admission-v1";
 
@@ -156,7 +152,7 @@ final class ContractsPublicInitializationTopologyTest {
     }
 
     @Test
-    void dynamicTopologyPatchInsideCycleFailsAtSubscriptionBoundary()
+    void dynamicTopologyPatchInsideCycleFailsAtManagedBindingBoundary()
             throws Exception {
         // given
         DynamicFailureEvidence declared = runDynamic(Variant.DECLARED);
@@ -260,6 +256,9 @@ final class ContractsPublicInitializationTopologyTest {
                             B.value(), B.value(),
                             C.value(), C.value()),
                     workTargets(evidence));
+            assertFalse(evidence.tentativeFinalizations().isEmpty(),
+                    "earlier initialization work must finalize tentatively "
+                            + "before the later runtime failure");
             assertTrue(evidence.complete());
 
             assertEquals(0, engine.documentCount());
@@ -267,8 +266,18 @@ final class ContractsPublicInitializationTopologyTest {
                     .documents().publicationSnapshot();
             assertTrue(publication.documentHeads().isEmpty());
             assertTrue(publication.occurrenceInventory().rows().isEmpty());
+            assertTrue(publication.componentIndex().documents().isEmpty());
             assertTrue(publication.componentStates().isEmpty());
+            assertTrue(publication.closureSubscriptions().states().isEmpty());
+            assertTrue(publication.outbox().isEmpty());
+            assertTrue(publication.checkpointEvidence().isEmpty());
+            assertTrue(publication.publicationReceipts().isEmpty());
             assertTrue(publication.admissionReceipts().isEmpty());
+            assertTrue(publication.closurePublicationReceipts().isEmpty());
+            assertTrue(publication.graphGenerations().documents().isEmpty());
+            assertEquals(0L,
+                    publication.occurrenceInventoryGeneration());
+            assertEquals(0L, publication.componentIndexGeneration());
             assertEquals(0, engine.routeRowCount());
             assertEquals(0L, publicEngine.metrics().journalEntryCount());
             if (CyclicTopologyIdentityEvidenceTest.isActive()) {
@@ -289,7 +298,7 @@ final class ContractsPublicInitializationTopologyTest {
     }
 
     @Test
-    void cClo08FirstFormationNeedsItsConformanceRuntimeAndAnEventBridgeFailsClosed()
+    void cClo08BoundedCompatibilityPreservesHistoricalFailClosedEvidence()
             throws Exception {
         // given
 
@@ -311,22 +320,29 @@ final class ContractsPublicInitializationTopologyTest {
                             == ComponentKind.ACYCLIC));
 
             /*
-             * C-CLO-08 forms the reciprocal edge through the conformance
-             * harness's admitted initialization patch.  The fixed public
-             * Coordination composition has no such scripted-runtime seam.
-             * An application event is not an equivalent activation bridge:
-             * admission must reject it instead of inventing a Timeline Entry.
+             * This package-private bounded-compatibility lane preserves the
+             * historical C-CLO-08 fail-closed evidence. It does not exercise
+             * normal public admission: the public lane runs the complete
+             * lifecycle queue and reaches the distinct managed-occurrence
+             * binding boundary covered by the dynamic-topology proofs.
              */
-            ContractsClosureAdmissionReceipt unavailable = publicEngine
-                    .admitContractsClosure(
+            ContractsClosureAdmissionReceipt unavailable = engine
+                    .contractsClosureAdmissionAdapter()
+                    .admitAndPublishBoundedCompatibility(
                             input,
                             CoordinationEngine.AdmissionPolicy.FROM_NOW,
-                            null);
+                            ExternalOrderKey.of(List.of(
+                                    BigInteger.ZERO,
+                                    "contracts-admission",
+                                    input.invocationIdentity())));
 
             assertEquals(
                     ContractsClosureAdmissionReceipt.PublicationOutcome
                             .NOT_PUBLISHED,
                     unavailable.publicationOutcome());
+            assertTrue(unavailable.publicationIdentity().startsWith(
+                    "coordination-contracts-closure-admission-bounded-"
+                            + "compatibility-v1:sha256:"));
             assertTrue(unavailable.attempt().isComplete());
             ClosureProcessResult result = unavailable.attempt()
                     .processResult();
@@ -352,7 +368,7 @@ final class ContractsPublicInitializationTopologyTest {
                     "ADMIT_CLOSURE must not fabricate a Timeline Entry");
             if (CyclicTopologyIdentityEvidenceTest.isActive()) {
                 CyclicTopologyIdentityEvidenceTest.capture(
-                        "P6.c-clo-08-public-host-boundary",
+                        "P6.c-clo-08-bounded-compatibility",
                         engine,
                         result,
                         null,
@@ -363,6 +379,9 @@ final class ContractsPublicInitializationTopologyTest {
                                 unavailable.publicationOutcome(),
                                 "activeInputOccurrences", 1,
                                 "inactiveInputOccurrences", 1,
+                                "admissionLane",
+                                "BOUNDED_COMPATIBILITY",
+                                "publicApiExercised", false,
                                 "timelineEntryCount",
                                 publicEngine.metrics().journalEntryCount()));
             }
@@ -397,13 +416,14 @@ final class ContractsPublicInitializationTopologyTest {
                     admitted.publicationOutcome());
             assertTrue(admitted.attempt().isComplete());
             ClosureProcessResult result = admitted.attempt().processResult();
-            assertEquals(ProcessorStatus.SUBSCRIPTION_SURFACE_INVALID,
+            assertEquals(ProcessorStatus.INVALID_PROCESSING_DOCUMENT,
                     result.status());
             assertFalse(result.commits());
             assertTrue(result.rollbackToInput());
             assertEquals(result.inputClosureIdentity(),
                     result.outputClosureIdentity());
-            assertEquals(ProcessorErrorCategory.SubscriptionSurfaceInvalid,
+            assertEquals(ProcessorErrorCategory
+                            .ManagedOccurrenceBindingMissing,
                     result.diagnostic().category());
             assertTrue(result.graphChanges().isEmpty());
             assertTrue(result.publicEvents().isEmpty());
@@ -422,7 +442,8 @@ final class ContractsPublicInitializationTopologyTest {
                     workTargets(evidence));
             assertFalse(evidence.tentativeFinalizations().isEmpty(),
                     "the first topology patch was staged before the "
-                            + "subscription-surface boundary rejected it");
+                            + "managed-occurrence binding boundary rejected "
+                            + "it");
             assertEquals(0, engine.documentCount());
             assertTrue(engine.documents().publicationSnapshot()
                     .admissionReceipts().isEmpty());
@@ -684,8 +705,8 @@ final class ContractsPublicInitializationTopologyTest {
 
     private static String initializationDocument(
             DocumentId documentId,
-            boolean emitUnsupportedEvent) {
-        if (emitUnsupportedEvent) {
+            boolean failAtRuntime) {
+        if (failAtRuntime) {
             return """
                     documentId: %s
                     initializationCount: 0
@@ -708,9 +729,9 @@ final class ContractsPublicInitializationTopologyTest {
                                   op: replace
                                   path: /initializationCount
                                   val: {$add: [$document: /initializationCount, 1]}
-                              - $appendEvent:
-                                  type: Coordination/Event
-                                  kind: init-topology-later-member-event
+                              - $appendChange:
+                                  op: remove
+                                  path: /missing-runtime-failure-target
                               - $return: true
                     """.formatted(documentId.value());
         }
@@ -835,8 +856,7 @@ final class ContractsPublicInitializationTopologyTest {
 
     private static CoordinationEngine engine(Set<DocumentId> roots) {
         return CoordinationEngine.inMemoryContracts10(
-                new Contracts10Configuration(
-                        LANGUAGE_SPEC, CONTRACTS_SPEC, roots));
+                BundledContracts10Release.configuration(roots));
     }
 
     private enum Variant {

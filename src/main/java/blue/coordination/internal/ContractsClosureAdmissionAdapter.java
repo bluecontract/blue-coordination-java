@@ -45,8 +45,18 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Consumer;
 
-/** Executes and atomically publishes the bounded all-new admission lane. */
+/** Executes and atomically publishes Contracts closure admission. */
 final class ContractsClosureAdmissionAdapter implements AutoCloseable {
+    private static final String FULL_LIFECYCLE_IDENTITY_DOMAIN =
+            "coordination-contracts-closure-admission-v1";
+    private static final String BOUNDED_COMPATIBILITY_IDENTITY_DOMAIN =
+            "coordination-contracts-closure-admission-bounded-compatibility-v1";
+
+    private enum AdmissionLane {
+        FULL_LIFECYCLE,
+        BOUNDED_COMPATIBILITY
+    }
+
     enum PublicationFailurePoint {
         AFTER_STORE_COMMIT_BEFORE_ROUTE_PUBLISH
     }
@@ -114,6 +124,26 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
             ClosureInvocationInput input,
             CoordinationEngine.AdmissionPolicy policy,
             ExternalOrderKey admissionFrontier) {
+        return admitAndPublish(
+                input, policy, admissionFrontier,
+                AdmissionLane.FULL_LIFECYCLE);
+    }
+
+    synchronized ContractsClosureAdmissionReceipt
+            admitAndPublishBoundedCompatibility(
+                    ClosureInvocationInput input,
+                    CoordinationEngine.AdmissionPolicy policy,
+                    ExternalOrderKey admissionFrontier) {
+        return admitAndPublish(
+                input, policy, admissionFrontier,
+                AdmissionLane.BOUNDED_COMPATIBILITY);
+    }
+
+    private ContractsClosureAdmissionReceipt admitAndPublish(
+            ClosureInvocationInput input,
+            CoordinationEngine.AdmissionPolicy policy,
+            ExternalOrderKey admissionFrontier,
+            AdmissionLane lane) {
         ensureOpen();
         ClosureInvocationInput admission = Objects.requireNonNull(
                 input, "input");
@@ -121,11 +151,17 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                 Objects.requireNonNull(policy, "policy");
         ExternalOrderKey frontier = Objects.requireNonNull(
                 admissionFrontier, "admissionFrontier");
+        AdmissionLane selectedLane = Objects.requireNonNull(lane, "lane");
         requireExactAdmissionInput(admission);
         List<DocumentId> members = coordinationIds(
                 admission.snapshot().managedDocuments());
-        String publicationIdentity = publicationIdentity(
-                admission, temporalPolicy, frontier);
+        String publicationIdentity = switch (selectedLane) {
+            case FULL_LIFECYCLE -> publicationIdentity(
+                    admission, temporalPolicy, frontier);
+            case BOUNDED_COMPATIBILITY ->
+                    boundedCompatibilityPublicationIdentity(
+                            admission, temporalPolicy, frontier);
+        };
 
         InMemoryDocumentStore.PublicationSnapshot before =
                 documents.publicationSnapshot();
@@ -151,7 +187,12 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
         executionObserver.beginAttempt(members.stream()
                 .map(DocumentId::value)
                 .toList());
-        ClosureAttemptResult attempt = contracts.admitClosure(admission);
+        ClosureAttemptResult attempt = switch (selectedLane) {
+            case FULL_LIFECYCLE ->
+                    contracts.admitClosureWithLifecycleQueue(admission);
+            case BOUNDED_COMPATIBILITY ->
+                    contracts.admitClosure(admission);
+        };
         if (!attempt.isComplete()
                 || !attempt.processResult().commits()) {
             return new ContractsClosureAdmissionReceipt(
@@ -763,9 +804,34 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
             ClosureInvocationInput input,
             CoordinationEngine.AdmissionPolicy policy,
             ExternalOrderKey frontier) {
+        return publicationIdentity(
+                input,
+                policy,
+                frontier,
+                FULL_LIFECYCLE_IDENTITY_DOMAIN);
+    }
+
+    private static String boundedCompatibilityPublicationIdentity(
+            ClosureInvocationInput input,
+            CoordinationEngine.AdmissionPolicy policy,
+            ExternalOrderKey frontier) {
+        return publicationIdentity(
+                input,
+                policy,
+                frontier,
+                BOUNDED_COMPATIBILITY_IDENTITY_DOMAIN);
+    }
+
+    private static String publicationIdentity(
+            ClosureInvocationInput input,
+            CoordinationEngine.AdmissionPolicy policy,
+            ExternalOrderKey frontier,
+            String identityDomain) {
         Objects.requireNonNull(input, "input");
         Objects.requireNonNull(policy, "policy");
         Objects.requireNonNull(frontier, "frontier");
+        String domain = Objects.requireNonNull(
+                identityDomain, "identityDomain");
         MessageDigest digest;
         try {
             digest = MessageDigest.getInstance("SHA-256");
@@ -773,8 +839,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
             throw new IllegalStateException(
                     "JVM does not provide SHA-256", unavailable);
         }
-        updatePublicationIdentityFrame(
-                digest, 0, "coordination-contracts-closure-admission-v1");
+        updatePublicationIdentityFrame(digest, 0, domain);
         updatePublicationIdentityFrame(
                 digest, 1, input.invocationIdentity());
         updatePublicationIdentityFrame(
@@ -795,7 +860,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                                 + component);
             }
         }
-        return "coordination-contracts-closure-admission-v1:sha256:"
+        return domain + ":sha256:"
                 + HexFormat.of().formatHex(digest.digest());
     }
 

@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "classification": "full-lifecycle-admission-phase2-semantic-delta",
+  "baseline": {
+    "path": "stabilization/cyclic-topology-round/cyclic-topology-identities.json",
+    "sha256": "10b4e7b4788773ebd23915eafebf6790182d5557901b24e8f9f3c0d487b63470",
+    "immutableHistoricalEvidence": true
+  },
+  "candidate": {
+    "path": "stabilization/full-lifecycle-admission-phase2/full-lifecycle-admission-identities.json",
+    "sha256": "8c3822456adc083b7b36266412baa2a176e2c1c366c8c328541dd1ad618bea70",
+    "admissionLane": "FULL_LIFECYCLE_EXCEPT_EXPLICIT_BOUNDED_COMPATIBILITY_PROOF"
+  },
+  "method": {
+    "population": 32,
+    "setsAreDisjointAndExhaustive": true,
+    "laneIsolation": "With the historical release inputs held byte-identical, 23 records were exactly stable and nine changed. Eight changes are normal full-lifecycle admission evidence and one is P5.1. The formerly stable C-CLO08 record is intentionally renamed and annotated as the sole bounded-compatibility proof, leaving the 22-record strict-stability set below.",
+    "acceptedReleaseRebind": "The candidate additionally binds accepted Phase-1 Contracts specification, release, and fixture-package identities. Identity fields derived from those inputs are provenance changes, not independent semantic deltas."
+  },
+  "summary": {
+    "strictlyStableBaselineRecords": 22,
+    "intendedAdmissionRecords": 9,
+    "causalAdmissionCarryForwardRecords": 1
+  },
+  "strictlyStableBaselineRecords": [
+    "P2.1.finite-three-member-ring",
+    "P2.3.three-direct-seeds",
+    "P2.4.shared-gas-rollback",
+    "P3.1.shared-anchor-BASELINE",
+    "P3.1.shared-anchor-REVERSED_MATERIALIZED",
+    "P3.3.disjoint-BOTH-cohort-0",
+    "P3.3.disjoint-BOTH-cohort-1",
+    "P3.3.disjoint-FIRST_ONLY-cohort-0",
+    "P4.pre-detach-gas-rollback",
+    "P4.1.partial-detach",
+    "P4.2.full-dissolution",
+    "P4.3.post-detach-gas-success",
+    "P4.5.re-add-retired-edge",
+    "P4.5.reformed-cycle-probe",
+    "P4.4.frozen-edge-delivery",
+    "P4.4.later-occurrence-uses-new-graph",
+    "P5.2.split-four-member-cycle",
+    "P5.3.split-to-ordinary-singletons",
+    "P5.4.dissolve-self-cycle",
+    "P5.5.late-failure-rollback",
+    "P7.ordinary-nested-scope",
+    "P7.cyclic-root-only-operation"
+  ],
+  "intendedAdmissionRecords": [
+    {
+      "id": "P4.initial-five-member-cycle",
+      "reason": "Normal admission executes the complete deterministic lifecycle queue; the result is unchanged and only the full-lifecycle finalization/gas trace identity changes."
+    },
+    {
+      "id": "P6.static-three-member-admission",
+      "reason": "Full-lifecycle work ownership redistributes admitted gas across the same six deterministic work occurrences while preserving total gas, result, order, and state."
+    },
+    {
+      "id": "P6.static-order-DECLARED",
+      "reason": "Declared-order proof records the same full-lifecycle work-ownership redistribution and preserves representation parity."
+    },
+    {
+      "id": "P6.static-order-REVERSED",
+      "reason": "Reversed-order proof records the same full-lifecycle work-ownership redistribution and preserves representation parity."
+    },
+    {
+      "id": "P6.dynamic-topology-DECLARED",
+      "reason": "Full lifecycle reaches prospective topology evolution and fails at the actual current blocker: the exact /reciprocal managed-occurrence binding is absent. Rollback remains atomic and non-publishing."
+    },
+    {
+      "id": "P6.dynamic-topology-REVERSED",
+      "reason": "The reversed representation reaches the same exact missing-binding rollback with identical result semantics."
+    },
+    {
+      "id": "P6.late-initialization-failure",
+      "reason": "The complete lane passes the former event-queue boundary and reaches the deliberately later real runtime failure at /missing-runtime-failure-target, retaining tentative evidence and rolling back every durable surface."
+    },
+    {
+      "id": "P6.c-clo-08-bounded-compatibility",
+      "baselineId": "P6.c-clo-08-public-host-boundary",
+      "reason": "This is explicitly historical fail-closed evidence: admissionLane=BOUNDED_COMPATIBILITY, publicApiExercised=false, with a distinct durable publication-identity domain."
+    },
+    {
+      "id": "P7.cyclic-root-only-admission",
+      "reason": "Normal root-only admission preserves the result and changes only the complete-lifecycle finalization/gas trace identity."
+    }
+  ],
+  "causalAdmissionCarryForward": {
+    "id": "P5.1.merge-two-cycles",
+    "classification": "necessary consequence of normal full-lifecycle admission of two preexisting cyclic components",
+    "construction": "The scenario admits four initialized=false documents as two exact SCCs, A-B and C-D, plus one inactive A-to-C occurrence, then activates that same occurrence in a later operation.",
+    "causalChain": [
+      "The normative entry is admitClosureWithLifecycleQueue; legacy admitClosure is explicitly bounded and nonconforming when lifecycle work can be queued.",
+      "Full admission plans initialization by deterministic SCC, freezes each current component, drains its lifecycle/event work, installs its marker batch, and finalizes the exact closure before selecting the next SCC.",
+      "Consequently the preexisting non-root C-D component is re-finalized before the later A-to-C merge: C/D changes from DoPfEZXNg49tyiBBoL8wWHGw1mVjwCdY67xG3ZYmTJa8 indices 0/1 to DS8sFKWh65uaXrHYfVwekPeuDGmQ6Wdn7XxwBD2ASNjn indices 1/0.",
+      "The later merge must consume those current exact C-D heads. Canonical finalization therefore produces a different four-member MASTER, indices, proofs, binding identities, closure identities, and representation-sensitive gas trace."
+    ],
+    "exactScalarDelta": {
+      "totalGas": {"baseline": 1149, "candidate": 1170, "delta": 21},
+      "gasEntryCount": {"baseline": 280, "candidate": 292, "delta": 12},
+      "admittedWorkGas": {"baseline": 597, "candidate": 605, "delta": 8},
+      "baselineFinalMemberIndices": {"merge-split-a": 1, "merge-split-b": 0, "merge-split-c": 3, "merge-split-d": 2},
+      "candidateFinalMemberIndices": {"merge-split-a": 0, "merge-split-b": 2, "merge-split-c": 3, "merge-split-d": 1}
+    },
+    "protectedInvariants": {
+      "status": "SUCCESS",
+      "atomic": true,
+      "commits": true,
+      "workOccurrenceCount": 1,
+      "workOrder": ["merge-split-a"],
+      "componentIdentity": "sha256:18583238f080c03aad3b234101d08cef1bb012c620d27c9a7f10bfc5b4fa0de3",
+      "componentGeneration": 2,
+      "members": ["merge-split-a", "merge-split-b", "merge-split-c", "merge-split-d"],
+      "graphChangeKinds": ["REBIND", "ADD", "REBIND", "REBIND", "REBIND", "REBIND"],
+      "occurrenceLineagePreserved": true,
+      "publicEvents": 0,
+      "quiescent": true
+    },
+    "nonRegressionConclusion": "The lane-isolated capture held all release inputs equal and reproduced this P5.1 delta while the other non-admission/non-P6/non-P7 records remained exact. The changed values are therefore downstream exact-state consequences of normative admission, not unrelated processing drift."
+  }
+}
