@@ -7,6 +7,7 @@ import blue.language.api.BlueCachePolicy;
 import blue.language.api.BlueCacheStats;
 import blue.language.codec.BlueFormat;
 import blue.language.codec.jackson.UncheckedObjectMapper;
+import blue.language.conformance.ConformanceEngine;
 import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.merge.ResolvedSnapshot;
 import blue.language.model.Node;
@@ -58,6 +59,7 @@ final class BlueRuntime implements AutoCloseable {
     private final BlueLanguage language;
     private final BlueContracts contracts;
     private final DocumentProcessor processor;
+    private final ConformanceEngine processorConformanceEngine;
     private final EngineMetrics metrics;
     private boolean closed;
 
@@ -66,12 +68,15 @@ final class BlueRuntime implements AutoCloseable {
             BlueLanguage language,
             BlueContracts contracts,
             DocumentProcessor processor,
+            ConformanceEngine processorConformanceEngine,
             EngineMetrics metrics) {
         this.nodeProvider = Objects.requireNonNull(
                 nodeProvider, "nodeProvider");
         this.language = Objects.requireNonNull(language, "language");
         this.contracts = Objects.requireNonNull(contracts, "contracts");
         this.processor = Objects.requireNonNull(processor, "processor");
+        this.processorConformanceEngine = Objects.requireNonNull(
+                processorConformanceEngine, "processorConformanceEngine");
         this.metrics = Objects.requireNonNull(metrics, "metrics");
     }
 
@@ -130,13 +135,21 @@ final class BlueRuntime implements AutoCloseable {
                         language.processing())
                 .runtimeRegistry(runtimeRegistry)
                 .build();
+        ConformanceEngine processorConformanceEngine =
+                language.processing().newConformanceEngine();
         DocumentProcessor processor = DocumentProcessor.builder()
                 .runtimeAccess(contracts.runtimeAccess())
                 .runtimeRegistry(runtimeRegistry)
                 .runtimeRegistryIdentity(runtimeRegistryIdentity)
+                .conformanceEngine(processorConformanceEngine)
                 .build();
         return new BlueRuntime(
-                nodeProvider, language, contracts, processor, metrics);
+                nodeProvider,
+                language,
+                contracts,
+                processor,
+                processorConformanceEngine,
+                metrics);
     }
 
     Node parseSourceYaml(String yaml) {
@@ -319,6 +332,7 @@ final class BlueRuntime implements AutoCloseable {
         closed = true;
         close(contracts);
         close(processor);
+        close(processorConformanceEngine);
         close(language);
     }
 
