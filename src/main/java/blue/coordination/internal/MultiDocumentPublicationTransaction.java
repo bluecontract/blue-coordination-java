@@ -1312,7 +1312,7 @@ final class MultiDocumentPublicationTransaction {
                             + (inventoryChanged ? "advance exactly once" : "remain unchanged"));
         }
 
-        boolean topologyChanged = !expectedAbsent.isEmpty()
+        boolean topologyChanged = !newSessions.isEmpty()
                 || affectedSources.stream().anyMatch(source ->
                         !activeEdges(before.occurrenceInventory()
                                         .activeRowsFrom(source))
