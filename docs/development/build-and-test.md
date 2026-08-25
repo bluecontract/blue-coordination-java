@@ -6,12 +6,13 @@ Use the checked-in Gradle wrapper and JDK 17 or newer. Production classes are
 compiled with `--release 17`; CI executes the complete suite on Java 17 and
 Java 21.
 
-## Published dependency graph
+## Dependency graph
 
-Maven Central is the only live dependency source. The default and only accepted
-`blueDependencyMode` is `published-artifact`; the property may be omitted.
-Sibling composite builds, Maven Local, and file-based staging repositories are
-rejected.
+The normal default is `blueDependencyMode=published-artifact`; the property may
+be omitted. Dynamic Contracts evidence uses the separate explicit
+`immutable-staged-contracts` lane. Sibling composite builds, Maven Local,
+unverified file repositories, and remote fallback for `blue.language` are
+rejected in both lanes.
 
 | Modules | Version |
 | --- | --- |
@@ -23,6 +24,30 @@ Repository rc.21 advertises `blue-language-java:3.1.0-rc.20`. The project
 excludes that one stale transitive edge and directly owns Language rc.21. The
 same exclusion is published in the Coordination POM. The exact graph is locked
 in `gradle/published-artifact.lockfile`.
+
+The staged lane accepts only the non-overwriting repository exported by the
+Contracts release gate. Its absolute path and exact manifest identity are both
+required:
+
+```bash
+./gradlew --no-daemon verifyActiveDependencyLane dependencyPreflight \
+  -PblueDependencyMode=immutable-staged-contracts \
+  -PblueContractsRepository=/absolute/path/to/contracts-maven-repository \
+  -PblueContractsManifestSha256=sha256:<64-lowercase-hex>
+```
+
+`artifact-manifest.json` must use
+`blue-staged-dependency-repository/1.0` and bind the exact source commit,
+Contracts specification, fixture package, release identity, seven
+`blue.language` modules, all artifact bytes, and every checksum companion. The
+manifest SHA-256 property is the invocation pin. The repository must be outside
+this source tree. It is read-only input: this build never invokes the Contracts
+build or copies its source.
+
+In staged mode, Gradle uses repository-exclusive content routing for the
+`blue.language` group. Maven Central remains available only for BEX, Repository,
+Gradle plugins, and third-party dependencies. There is no fallback if a staged
+Language artifact is absent or different.
 
 Verify fresh remote availability and the conflict-free graph with:
 

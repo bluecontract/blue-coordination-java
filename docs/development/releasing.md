@@ -19,6 +19,15 @@ Repository rc.21's stale Language rc.20 transitive edge is excluded; the direct
 Language rc.21 pin is authoritative and the generated POM publishes the same
 exclusion.
 
+The dynamic-contract-evolution evidence round is deliberately separate from
+this retained rc.3 publication authority. It consumes the exact unpublished
+Contracts checkpoint through `blueDependencyMode=immutable-staged-contracts`,
+`blueContractsRepository`, and `blueContractsManifestSha256`. That lane permits
+only manifest-bound `blue.language` bytes from the immutable handoff repository;
+it has no Maven Local, included-build, source-copy, or Maven Central fallback.
+The resulting Coordination candidate must receive its own receipt and release
+authority before publication.
+
 ## Before merging to `next`
 
 From a clean feature branch:

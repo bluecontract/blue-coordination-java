@@ -11,6 +11,7 @@ import blue.language.processor.closure.BlueClosureContracts;
 import blue.language.processor.closure.ClosureAttemptResult;
 import blue.language.processor.closure.ClosureEvidenceFactory;
 import blue.language.processor.closure.ComponentSnapshot;
+import blue.language.processor.closure.ExactNodeDemand;
 import blue.language.processor.closure.ManagedDocumentSnapshot;
 import org.junit.jupiter.api.Test;
 
@@ -72,7 +73,10 @@ final class ContractsRootFeederWindowTest {
             assertFalse(window.isTerminal(eventOne));
             assertEquals(
                     List.of(REQUIRED_BLUE_ID),
-                    window.requiredResourcesByLane().get(blocked.lane()));
+                    window.requiredResourcesByLane().get(blocked.lane())
+                            .stream()
+                            .map(demand -> demand.suppliedValueBlueId())
+                            .toList());
 
             ContractsClosureAdapter.FrozenBatch eventTwo =
                     fixture.adapter().capture(fixture.eventTwo());
@@ -134,7 +138,11 @@ final class ContractsRootFeederWindowTest {
             beforeRestart.recordNeedsResources(
                     selected.get(0),
                     selected.get(0).members(),
-                    List.of(REQUIRED_BLUE_ID));
+                    List.of(ExactNodeDemand.derived(
+                            REQUIRED_BLUE_ID,
+                            new blue.language.processor.closure.DocumentId(
+                                    A.value()),
+                            "/resource")));
             beforeRestart.recordTerminal(
                     selected.get(1),
                     selected.get(1).members(),
@@ -156,7 +164,9 @@ final class ContractsRootFeederWindowTest {
             assertEquals(
                     List.of(REQUIRED_BLUE_ID),
                     restarted.requiredResourcesByLane().get(
-                            retry.get(0).lane()));
+                            retry.get(0).lane()).stream()
+                            .map(demand -> demand.suppliedValueBlueId())
+                            .toList());
             assertEquals(1, restarted.terminalProgress().size());
             assertEquals(List.of(B), restarted.terminalProgress().get(0)
                     .ticket().members());

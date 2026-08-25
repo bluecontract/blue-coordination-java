@@ -10,6 +10,12 @@ group = 'blue.coordination'
 def dependencyMode = providers.gradleProperty('blueDependencyMode')
         .getOrElse('published-artifact')
         .trim()
+def immutableStagedContracts =
+        dependencyMode == 'immutable-staged-contracts'
+def stagedContractsRepositoryValue = providers.gradleProperty(
+        'blueContractsRepository').orNull
+def stagedContractsManifestIdentity = providers.gradleProperty(
+        'blueContractsManifestSha256').orNull
 def versionMatches = file('.cz.toml').getText('UTF-8') =~
         /(?m)^version = "([^"]+)"$/
 if (!versionMatches.find()) {
@@ -29,16 +35,49 @@ def publishedBlueCoordinates = [
         'blue.bex:blue-bex-core': '1.1.0-rc.4',
         'blue.bex:blue-bex-contracts': '1.1.0-rc.4'
 ]
-if (dependencyMode != 'published-artifact') {
+def acceptedDependencyModes = [
+        'published-artifact',
+        'immutable-staged-contracts'
+] as Set
+if (!acceptedDependencyModes.contains(dependencyMode)) {
     throw new GradleException(
-            'Only blueDependencyMode=published-artifact is supported')
+            'blueDependencyMode must be published-artifact or '
+                    + 'immutable-staged-contracts')
 }
+
+def stagedContractsArtifacts = [
+        'blue-language-model',
+        'blue-language-core',
+        'blue-language-mapping',
+        'blue-language-ipfs',
+        'blue-contracts-core',
+        'blue-conformance',
+        'blue-language-java'
+] as Set
 
 base {
     archivesName = 'blue-coordination-java'
 }
 
 repositories {
+    if (immutableStagedContracts) {
+        exclusiveContent {
+            forRepository {
+                maven {
+                    name = 'immutableStagedContracts'
+                    url = uri(file(stagedContractsRepositoryValue)
+                            .canonicalFile)
+                    metadataSources {
+                        mavenPom()
+                        artifact()
+                    }
+                }
+            }
+            filter {
+                includeGroup 'blue.language'
+            }
+        }
+    }
     mavenCentral()
 }
 
@@ -667,15 +706,244 @@ tasks.register('verifySdkPublicApiBoundary') {
     }
 }
 
+def sha256Identity = { File input ->
+    def digest = java.security.MessageDigest.getInstance('SHA-256')
+    input.withInputStream { stream ->
+        byte[] buffer = new byte[8192]
+        int count
+        while ((count = stream.read(buffer)) != -1) {
+            digest.update(buffer, 0, count)
+        }
+    }
+    'sha256:' + digest.digest().encodeHex().toString()
+}
+
+def inspectImmutableStagedContractsRepository = {
+    if (!immutableStagedContracts) {
+        throw new GradleException(
+                'Immutable staged Contracts verification requires '
+                        + '-PblueDependencyMode=immutable-staged-contracts')
+    }
+    File repository = file(stagedContractsRepositoryValue).canonicalFile
+    File manifestFile = new File(repository, 'artifact-manifest.json')
+    File manifestChecksum = new File(
+            repository, 'artifact-manifest.json.sha256')
+    def failures = []
+    def regularFile = { File candidate ->
+        java.nio.file.Files.isRegularFile(candidate.toPath(),
+                java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                && !java.nio.file.Files.isSymbolicLink(candidate.toPath())
+    }
+    if (!repository.isDirectory()) {
+        failures << "staged repository is not a directory ${repository}"
+    }
+    if (repository.toPath().startsWith(rootDir.canonicalFile.toPath())) {
+        failures << 'staged repository must be outside the Coordination source tree'
+    }
+    if (!regularFile(manifestFile) || !regularFile(manifestChecksum)) {
+        failures << 'regular artifact manifest and checksum companion are required'
+    }
+    if (!failures.empty) {
+        throw new GradleException(
+                'Immutable staged Contracts repository failed:\n - '
+                        + failures.join('\n - '))
+    }
+
+    String actualManifestIdentity = sha256Identity(manifestFile)
+    if (actualManifestIdentity != stagedContractsManifestIdentity) {
+        failures << ('manifest identity is ' + actualManifestIdentity
+                + '; expected ' + stagedContractsManifestIdentity)
+    }
+    String expectedManifestChecksum = actualManifestIdentity.substring(
+            'sha256:'.length()) + '  artifact-manifest.json\n'
+    if (manifestChecksum.getText('UTF-8') != expectedManifestChecksum) {
+        failures << 'artifact manifest checksum companion differs'
+    }
+
+    def manifest
+    try {
+        manifest = new groovy.json.JsonSlurper().parse(manifestFile)
+    } catch (RuntimeException exception) {
+        throw new GradleException(
+                'Cannot parse immutable staged Contracts manifest', exception)
+    }
+    if (manifest.schema != 'blue-staged-dependency-repository/1.0') {
+        failures << "unexpected manifest schema ${manifest.schema}"
+    }
+    if (manifest.groupId != 'blue.language') {
+        failures << "unexpected staged group ${manifest.groupId}"
+    }
+    if (manifest.version != '3.1.0-rc.21') {
+        failures << "unexpected staged Contracts version ${manifest.version}"
+    }
+    if (!(manifest.sourceCommit instanceof String)
+            || !(manifest.sourceCommit ==~ /[0-9a-f]{40}|[0-9a-f]{64}/)) {
+        failures << 'manifest sourceCommit is not an exact Git identity'
+    }
+    [
+            'contractsSpecificationIdentity',
+            'contractsFixturePackageIdentity',
+            'contractsReleaseIdentity'
+    ].each { field ->
+        if (!(manifest[field] instanceof String)
+                || !(manifest[field] ==~ /sha256:[0-9a-f]{64}/)) {
+            failures << "manifest ${field} is not a SHA-256 identity"
+        }
+    }
+    if (!(manifest.artifacts instanceof List)) {
+        failures << 'manifest artifacts must be a list'
+    }
+
+    def kinds = [
+            javadoc: '-javadoc.jar',
+            pom: '.pom',
+            runtime: '.jar',
+            sources: '-sources.jar'
+    ]
+    def expectedRecords = []
+    stagedContractsArtifacts.toList().sort().each { artifact ->
+        kinds.keySet().toList().sort().each { kind ->
+            String base = 'blue/language/' + artifact + '/3.1.0-rc.21/' +
+                    artifact + '-3.1.0-rc.21'
+            expectedRecords << [
+                    key: artifact + ':' + kind,
+                    coordinate: 'blue.language:' + artifact +
+                            ':3.1.0-rc.21',
+                    kind: kind,
+                    path: base + kinds[kind]
+            ]
+        }
+    }
+    def records = manifest.artifacts instanceof List
+            ? manifest.artifacts : []
+    def recordKeys = records.collect { record ->
+        String.valueOf(record.coordinate) + ':' +
+                String.valueOf(record.kind)
+    }
+    if (recordKeys != recordKeys.toList().sort()) {
+        failures << 'manifest artifact records are not canonically ordered'
+    }
+    if (recordKeys.toSet().size() != recordKeys.size()) {
+        failures << 'manifest contains duplicate artifact records'
+    }
+    def recordsByKey = records.collectEntries { record ->
+        [(String.valueOf(record.coordinate) + ':'
+                + String.valueOf(record.kind)): record]
+    }
+    def expectedFiles = [
+            'artifact-manifest.json',
+            'artifact-manifest.json.sha256'
+    ] as Set
+    expectedRecords.each { expected ->
+        String lookup = expected.coordinate + ':' + expected.kind
+        def record = recordsByKey[lookup]
+        if (record == null) {
+            failures << "missing manifest artifact record ${lookup}"
+            return
+        }
+        if (record.path != expected.path
+                || record.checksumPath != expected.path + '.sha256') {
+            failures << "noncanonical manifest paths for ${lookup}"
+            return
+        }
+        expectedFiles.add(expected.path)
+        expectedFiles.add(expected.path + '.sha256')
+        File payload = new File(repository, expected.path).canonicalFile
+        File checksum = new File(
+                repository, expected.path + '.sha256').canonicalFile
+        if (!payload.toPath().startsWith(repository.toPath())
+                || !checksum.toPath().startsWith(repository.toPath())) {
+            failures << "artifact path escapes repository for ${lookup}"
+            return
+        }
+        if (!regularFile(payload) || !regularFile(checksum)) {
+            failures << "missing regular payload/checksum for ${lookup}"
+            return
+        }
+        String payloadIdentity = sha256Identity(payload)
+        if (record.sha256 != payloadIdentity) {
+            failures << "payload identity differs for ${lookup}"
+        }
+        if (!(record.bytes instanceof Number)
+                || record.bytes.longValue() != payload.length()) {
+            failures << "payload byte count differs for ${lookup}"
+        }
+        String expectedChecksum = payloadIdentity.substring(
+                'sha256:'.length()) + '  ' + payload.name + '\n'
+        if (checksum.getText('UTF-8') != expectedChecksum) {
+            failures << "payload checksum companion differs for ${lookup}"
+        }
+    }
+    if (records.size() != expectedRecords.size()) {
+        failures << ('manifest has ' + records.size()
+                + ' artifact records; expected ' + expectedRecords.size())
+    }
+
+    def actualFiles = [] as Set
+    def stream = java.nio.file.Files.walk(repository.toPath())
+    try {
+        stream.forEach { path ->
+            if (path == repository.toPath()) {
+                return
+            }
+            if (java.nio.file.Files.isSymbolicLink(path)) {
+                failures << ('symbolic link in staged repository '
+                        + repository.toPath().relativize(path))
+                return
+            }
+            if (java.nio.file.Files.isRegularFile(path,
+                    java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                actualFiles.add(repository.toPath().relativize(path)
+                        .toString().replace(File.separator, '/'))
+            }
+        }
+    } finally {
+        stream.close()
+    }
+    if (actualFiles != expectedFiles) {
+        failures << ('staged repository closure differs; missing '
+                + (expectedFiles - actualFiles).toList().sort()
+                + ', unexpected '
+                + (actualFiles - expectedFiles).toList().sort())
+    }
+    if (!failures.empty) {
+        throw new GradleException(
+                'Immutable staged Contracts repository failed:\n - '
+                        + failures.join('\n - '))
+    }
+    manifest
+}
+
+def immutableStagedContractsRepository = tasks.register(
+        'verifyImmutableStagedContractsRepository') {
+    group = 'verification'
+    description = 'Verifies the manifest-pinned, closed Contracts repository before dependency resolution.'
+    if (immutableStagedContracts) {
+        inputs.dir(file(stagedContractsRepositoryValue))
+        inputs.property('blueContractsManifestSha256',
+                stagedContractsManifestIdentity)
+    }
+    doLast {
+        def manifest = inspectImmutableStagedContractsRepository()
+        logger.lifecycle(
+                'Immutable staged Contracts repository verified: {} from {}',
+                stagedContractsManifestIdentity, manifest.sourceCommit)
+    }
+}
+
+if (immutableStagedContracts) {
+    tasks.named('compileJava') {
+        dependsOn immutableStagedContractsRepository
+    }
+}
+
 tasks.register('dependencyPreflight') {
     group = 'verification'
-    description = 'Resolves every release dependency from published repositories.'
+    description = 'Resolves every release dependency from the selected isolated lane.'
+    if (immutableStagedContracts) {
+        dependsOn immutableStagedContractsRepository
+    }
     doLast {
-        if (dependencyMode != 'published-artifact') {
-            throw new GradleException(
-                    'dependencyPreflight requires '
-                            + '-PblueDependencyMode=published-artifact')
-        }
         def repositoryDependency = dependencies.create(
                 'blue.repo:blue-repo-java:3.0.0-rc.21')
         repositoryDependency.exclude(
@@ -709,7 +977,8 @@ tasks.register('dependencyPreflight') {
                             + "pin: ${selectedBlue}")
         }
         logger.lifecycle(
-                'All published release dependencies resolved at exact pins.')
+                'All {} release dependencies resolved at exact pins.',
+                dependencyMode)
     }
 }
 
@@ -2692,12 +2961,17 @@ def sourceArchiveChecksum = tasks.register(
 
 def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
     group = 'verification'
-    description = 'Verifies the extracted archive against published dependencies.'
+    description = 'Verifies the extracted archive against the selected isolated dependency lane.'
     dependsOn sourceArchiveChecksum
     inputs.file(coordinationSourceArchive.flatMap { it.archiveFile })
     inputs.property('dependencyMode', dependencyMode)
     inputs.property('testJavaVersion', providers.gradleProperty(
             'testJavaVersion').getOrElse('17'))
+    if (immutableStagedContracts) {
+        inputs.dir(file(stagedContractsRepositoryValue))
+        inputs.property('blueContractsManifestSha256',
+                stagedContractsManifestIdentity)
+    }
     outputs.dir(layout.buildDirectory.dir('source-archive-smoke'))
     def verificationReceipt = layout.buildDirectory.file(
             'reports/contracts10/source-archive-verification.json')
@@ -2764,10 +3038,23 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
                 '--no-daemon', '--max-workers=1', 'help',
                 '-PtestJavaVersion=' + providers.gradleProperty(
                         'testJavaVersion').getOrElse('17'),
-                'verifyDependencyModeIsolation',
-                'verifyPublishedDependencyIsolation',
-                '-PblueDependencyMode=published-artifact'
+                'verifyDependencyModeIsolation'
         ])
+        if (immutableStagedContracts) {
+            command.addAll([
+                    'verifyImmutableStagedContractsRepository',
+                    '-PblueDependencyMode=immutable-staged-contracts',
+                    '-PblueContractsRepository=' +
+                            file(stagedContractsRepositoryValue).canonicalPath,
+                    '-PblueContractsManifestSha256=' +
+                            stagedContractsManifestIdentity
+            ])
+        } else {
+            command.addAll([
+                    'verifyPublishedDependencyIsolation',
+                    '-PblueDependencyMode=published-artifact'
+            ])
+        }
         Process process = new ProcessBuilder(command)
                 .directory(extracted).redirectErrorStream(true).start()
         process.inputStream.eachLine { logger.lifecycle(it) }
@@ -2795,6 +3082,8 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
                 checksumPath: rootDir.toPath().relativize(
                         sidecar.toPath()).toString().replace('\\', '/'),
                 dependencyMode: dependencyMode,
+                contractsManifestSha256: immutableStagedContracts
+                        ? stagedContractsManifestIdentity : null,
                 java: providers.gradleProperty(
                         'testJavaVersion').getOrElse('17'),
                 extractedConfiguration: 'PASS',
@@ -2812,7 +3101,7 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
 
 tasks.register('verifyDependencyModeIsolation') {
     group = 'verification'
-    description = 'Proves Maven Central artifacts are the only live dependency lane.'
+    description = 'Proves published and manifest-pinned Contracts lanes are explicit and isolated.'
     inputs.files('settings.gradle', 'build.gradle')
     doLast {
         String settings = file('settings.gradle').getText('UTF-8')
@@ -2827,26 +3116,51 @@ tasks.register('verifyDependencyModeIsolation') {
             throw new GradleException(
                     'Published artifacts must remain the default dependency mode')
         }
-        def forbiddenLiveModes = [
-                'include' + 'Build(', 'local-' + 'composite',
-                'staged-' + 'artifact',
-                'blueLanguage' + 'CompositePath',
-                'blueBex' + 'CompositePath',
-                'blueRepository' + 'CompositePath',
-                'blueStaging' + 'Repository', 'maven' + 'Local()'
+        def forbiddenLivePlumbing = [
+                'include' + 'Build(',
+                'dependency' + 'Substitution {',
+                'maven' + 'Local()',
+                'flat' + 'Dir {'
         ]
-        def leaked = forbiddenLiveModes.findAll { token ->
+        def leaked = forbiddenLivePlumbing.findAll { token ->
             settings.contains(token) || buildScript.contains(token)
         }
         if (!leaked.empty) {
             throw new GradleException(
-                    'Retired local dependency plumbing remains: ' + leaked)
+                    'Implicit dependency plumbing remains: ' + leaked)
         }
-        if (!settings.contains("dependencyMode != 'published-artifact'")
-                || !buildScript.contains(
-                "dependencyMode != 'published-artifact'")) {
+        def requiredStagedEvidence = [
+                "'immutable-staged-contracts'",
+                "'blueContractsRepository'",
+                "'blueContractsManifestSha256'",
+                "'artifact-manifest.json'",
+                "'artifact-manifest.json.sha256'"
+        ]
+        if (requiredStagedEvidence.any { token ->
+            !settings.contains(token) || !buildScript.contains(token)
+        }) {
             throw new GradleException(
-                    'Published-only dependency mode is not fail-closed')
+                    'Manifest-pinned Contracts dependency configuration is incomplete')
+        }
+        if (!buildScript.contains('exclusiveContent {')
+                || !buildScript.contains("includeGroup 'blue.language'")
+                || !buildScript.contains(
+                "name = 'immutableStagedContracts'")) {
+            throw new GradleException(
+                    'The staged blue.language group is not repository-exclusive')
+        }
+        def legacyProperties = [
+                'blueLanguageCompositePath',
+                'blueBexCompositePath',
+                'blueRepositoryCompositePath',
+                'blueStagingRepository',
+                'bluePublishedRepository'
+        ]
+        if (legacyProperties.any { property ->
+            !settings.contains("'${property}'")
+        } || !settings.contains('forbiddenDependencyProperties')) {
+            throw new GradleException(
+                    'Retired dependency properties are not rejected fail-closed')
         }
     }
 }
@@ -2903,6 +3217,100 @@ tasks.register('verifyPublishedArtifactDependencies') {
         }
         logger.lifecycle(
                 'Published dependencies resolve in isolation and provide the required source API.')
+    }
+}
+
+def immutableStagedContractsDependencies = tasks.register(
+        'verifyImmutableStagedContractsDependencies') {
+    group = 'verification'
+    description = 'Compiles against the manifest-pinned Contracts graph and verifies resolved JAR bytes.'
+    if (immutableStagedContracts) {
+        dependsOn immutableStagedContractsRepository,
+                tasks.named('compileJava')
+    }
+    doLast {
+        if (!immutableStagedContracts) {
+            throw new GradleException(
+                    'verifyImmutableStagedContractsDependencies requires '
+                            + '-PblueDependencyMode=immutable-staged-contracts')
+        }
+        def manifest = inspectImmutableStagedContractsRepository()
+        def failures = []
+        def components = configurations.runtimeClasspath
+                .incoming.resolutionResult.allComponents
+        def leakedProjects = components.findAll { component ->
+            component.id instanceof
+                    org.gradle.api.artifacts.component.ProjectComponentIdentifier
+                    && component.id.displayName
+                    != "root project '${rootProject.name}'"
+        }.collect { component -> component.id.displayName }.sort()
+        if (!leakedProjects.empty || !gradle.includedBuilds.empty) {
+            failures << ('project/composite substitution leaked into staged '
+                    + 'Contracts mode: ' + leakedProjects
+                    + gradle.includedBuilds.collect { it.name }.sort())
+        }
+        def selectedBlue = components.findAll { component ->
+            component.id instanceof
+                    org.gradle.api.artifacts.component.ModuleComponentIdentifier
+                    && ['blue.language', 'blue.bex', 'blue.repo'].contains(
+                    component.id.group)
+        }.collectEntries { component ->
+            [(component.id.group + ':' + component.id.module):
+                     component.id.version]
+        }
+        if (selectedBlue != publishedBlueCoordinates) {
+            failures << ('selected Blue graph differs from exact pins: '
+                    + selectedBlue)
+        }
+        def manifestRuntimeIdentities = manifest.artifacts.findAll { record ->
+            record.kind == 'runtime'
+        }.collectEntries { record ->
+            [(record.coordinate): record.sha256]
+        }
+        def resolvedLanguageArtifacts = configurations.runtimeClasspath
+                .resolvedConfiguration.resolvedArtifacts.findAll { artifact ->
+            artifact.moduleVersion.id.group == 'blue.language'
+        }
+        def expectedLanguageCoordinates = publishedBlueCoordinates.findAll {
+            coordinate, ignored -> coordinate.startsWith('blue.language:')
+        }.collectEntries { coordinate, expectedVersion ->
+            [(coordinate + ':' + expectedVersion):
+                     manifestRuntimeIdentities[
+                             coordinate + ':' + expectedVersion]]
+        }
+        def resolvedLanguageIdentities = resolvedLanguageArtifacts
+                .collectEntries { artifact ->
+            String coordinate = artifact.moduleVersion.id.group + ':' +
+                    artifact.name + ':' + artifact.moduleVersion.id.version
+            [(coordinate): sha256Identity(artifact.file)]
+        }
+        if (expectedLanguageCoordinates.any { coordinate, identity ->
+            identity == null
+        }) {
+            failures << 'staged manifest does not bind every selected Language runtime'
+        }
+        if (resolvedLanguageIdentities != expectedLanguageCoordinates) {
+            failures << ('resolved Language artifact bytes differ from '
+                    + 'the staged manifest: ' + resolvedLanguageIdentities)
+        }
+        if (!failures.empty) {
+            throw new GradleException(
+                    'Immutable staged Contracts dependency graph failed:\n - '
+                            + failures.join('\n - '))
+        }
+        logger.lifecycle(
+                'Manifest-pinned Contracts dependencies resolved without fallback: {}',
+                stagedContractsManifestIdentity)
+    }
+}
+
+def activeDependencyLane = tasks.register('verifyActiveDependencyLane') {
+    group = 'verification'
+    description = 'Verifies the dependency lane selected for this invocation.'
+    if (immutableStagedContracts) {
+        dependsOn immutableStagedContractsDependencies
+    } else {
+        dependsOn tasks.named('verifyPublishedArtifactDependencies')
     }
 }
 
@@ -3310,10 +3718,10 @@ tasks.named('publishMavenJavaPublicationToStagingRepository') {
 }
 
 tasks.named('releaseCheck') {
-    dependsOn 'verifyPublishedArtifactDependencies'
+    dependsOn activeDependencyLane
 }
 tasks.named('productionizationCheck') {
-    dependsOn 'verifyPublishedArtifactDependencies'
+    dependsOn activeDependencyLane
 }
 
 tasks.matching {
