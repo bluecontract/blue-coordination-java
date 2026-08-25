@@ -108,6 +108,88 @@ final class SdkManagedDraftAcceptanceTest {
     }
 
     @Test
+    void extraOccurrencesUseAutomaticExpansionWithoutReselectingTheFeeder() {
+        // Dynamic occurrence resolution supersedes the legacy closed-surface
+        // rejection for SINGLE_PATCH_EXTRA and SEQUENTIAL_EXTRA.  Supplying
+        // one advanced explicit expectation must remain semantically equal to
+        // the ordinary automatic path: the additional occurrence is resolved
+        // in one bounded retry and the Timeline Entry is published once.
+        for (String operation : List.of(
+                "singlePatchExtra", "sequentialExtra")) {
+            String suffix = operation.toLowerCase(Locale.ROOT);
+            DocumentId hostId = DocumentId.of(
+                    "sdk-managed-extra-host-" + suffix);
+            DocumentId childId = DocumentId.of(
+                    "sdk-managed-extra-child-" + suffix);
+            String timelineId = "sdk/managed-extra/" + suffix;
+            try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+                TimelineHandle timeline = coordination.timelines().register(
+                        timelineId, ACTOR);
+                DocumentHandle host = coordination.documents().admit(
+                        ManagedDocument.yaml(
+                                        hostId,
+                                        failureHost(hostId, timelineId))
+                                .publicRoot()
+                                .fromNow());
+                ManagedDocumentDraft child = draft(
+                        coordination, childId, false);
+                DocumentId automaticChildId = DocumentId.of(
+                        child.initial().blueId());
+
+                EntryResult result = coordination.operations()
+                        .on(host)
+                        .from(timeline)
+                        .call(operation)
+                        .through("ownerChannel")
+                        .request(request -> request.managed("order", child))
+                        .expectOccurrence("/orders/expected", child)
+                        .execute();
+
+                assertEquals(EntryDisposition.APPLIED, result.disposition(),
+                        operation);
+                assertEquals(1, result.closures().size(), operation);
+                ClosureResult closure = result.closures().get(0);
+                assertEquals(2L, closure.processorAttemptCount(), operation);
+                assertEquals(1L, closure.automaticRetryCount(), operation);
+                assertEquals(Set.of(hostId, childId, automaticChildId),
+                        closure.changes().stream()
+                                .map(DocumentChange::documentId)
+                                .collect(java.util.stream.Collectors.toSet()),
+                        operation);
+                assertEquals(3L, closure.stats().documentsOpened(), operation);
+                assertEquals(1L, closure.stats().documentStepOrder().stream()
+                        .filter(hostId::equals)
+                        .count(), operation);
+
+                DocumentHandle explicitChild = coordination.documents()
+                        .require(childId);
+                DocumentHandle automaticChild = coordination.documents()
+                        .require(automaticChildId);
+                assertEquals(1L, explicitChild.snapshot()
+                        .longAt("/initializationCount"), operation);
+                assertEquals(1L, automaticChild.snapshot()
+                        .longAt("/initializationCount"), operation);
+                assertEquals(1, explicitChild.history().size(), operation);
+                assertEquals(1, automaticChild.history().size(), operation);
+                assertEquals(explicitChild.snapshot().blueId(),
+                        host.snapshot().valueAt("/orders/expected").blueId(),
+                        operation);
+                assertEquals(automaticChild.snapshot().blueId(),
+                        host.snapshot().valueAt("/orders/extra").blueId(),
+                        operation);
+
+                int hostHistory = host.history().size();
+                DrainResult replayFence = coordination.processing().drain();
+                assertTrue(replayFence.entries().isEmpty(), operation);
+                assertTrue(replayFence.quiescent(), operation);
+                assertEquals(hostHistory, host.history().size(), operation);
+                assertEquals(1, explicitChild.history().size(), operation);
+                assertEquals(1, automaticChild.history().size(), operation);
+            }
+        }
+    }
+
+    @Test
     void malformedManagedEvidenceFailsBeforeTheFirstAppend() {
         // given
         DocumentId hostId = DocumentId.of("sdk-managed-preflight-host");
@@ -1617,13 +1699,7 @@ final class SdkManagedDraftAcceptanceTest {
                 "MANAGED_OCCURRENCE_BINDING_MISSING"),
         WRONG_EXACT_STATE(
                 "wrongExactState",
-                "MANAGED_OCCURRENCE_BINDING_MISSING"),
-        SINGLE_PATCH_EXTRA(
-                "singlePatchExtra",
-                "SUBSCRIPTION_SURFACE_INVALID"),
-        SEQUENTIAL_EXTRA(
-                "sequentialExtra",
-                "SUBSCRIPTION_SURFACE_INVALID");
+                "MANAGED_OCCURRENCE_BINDING_MISSING");
 
         private final String operation;
         private final String diagnosticCode;
