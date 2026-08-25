@@ -72,6 +72,7 @@ final class InMemoryDocumentStore {
                 nextSessions.values(), state.occurrenceInventory());
         state = state.withSessions(
                 nextSessions,
+                state.lineageIndex().withNewLineage(session),
                 nextIndex,
                 increment(state.componentIndexGeneration(),
                         "component index generation"));
@@ -90,6 +91,7 @@ final class InMemoryDocumentStore {
                 nextSessions.values(), state.occurrenceInventory());
         state = state.withSessions(
                 nextSessions,
+                state.lineageIndex().withoutLineage(selected),
                 nextIndex,
                 increment(state.componentIndexGeneration(),
                         "component index generation"));
@@ -107,6 +109,11 @@ final class InMemoryDocumentStore {
     /** Current immutable occurrence topology without opening document heads. */
     synchronized ManagedOccurrenceInventory occurrenceInventory() {
         return state.occurrenceInventory();
+    }
+
+    /** Exact immutable managed-lineage indexes without a session scan. */
+    synchronized ManagedLineageIndex lineageIndex() {
+        return state.lineageIndex();
     }
 
     EngineMetrics metrics() {
@@ -239,6 +246,7 @@ final class InMemoryDocumentStore {
     /** Immutable durable publication image; exactly one instance is swapped. */
     static final class StoreState {
         private final Map<DocumentId, DocumentSession> sessions;
+        private final ManagedLineageIndex lineageIndex;
         private final ManagedOccurrenceInventory occurrenceInventory;
         private final long occurrenceInventoryGeneration;
         private final ProcessEmbeddedComponentIndex componentIndex;
@@ -259,6 +267,7 @@ final class InMemoryDocumentStore {
 
         StoreState(
                 Map<DocumentId, DocumentSession> sessions,
+                ManagedLineageIndex lineageIndex,
                 ManagedOccurrenceInventory occurrenceInventory,
                 long occurrenceInventoryGeneration,
                 ProcessEmbeddedComponentIndex componentIndex,
@@ -276,6 +285,14 @@ final class InMemoryDocumentStore {
             this.sessions = Collections.unmodifiableMap(
                     new LinkedHashMap<>(Objects.requireNonNull(
                             sessions, "sessions")));
+            this.lineageIndex = Objects.requireNonNull(
+                    lineageIndex, "lineageIndex");
+            if (!this.lineageIndex.documentIds().equals(
+                    this.sessions.keySet())) {
+                throw new IllegalArgumentException(
+                        "Managed-lineage index must cover every durable "
+                                + "document exactly once");
+            }
             this.occurrenceInventory = Objects.requireNonNull(
                     occurrenceInventory, "occurrenceInventory");
             this.occurrenceInventoryGeneration =
@@ -468,6 +485,7 @@ final class InMemoryDocumentStore {
                     ManagedOccurrenceInventory.empty();
             return new StoreState(
                     Map.of(),
+                    ManagedLineageIndex.empty(),
                     inventory,
                     0L,
                     InMemoryDocumentStore.componentIndex(
@@ -485,6 +503,7 @@ final class InMemoryDocumentStore {
 
         StoreState withSessions(
                 Map<DocumentId, DocumentSession> replacementSessions,
+                ManagedLineageIndex replacementLineages,
                 ProcessEmbeddedComponentIndex replacementIndex,
                 long replacementIndexGeneration) {
             List<ComponentSnapshot> retainedComponents = componentStates.stream()
@@ -495,6 +514,7 @@ final class InMemoryDocumentStore {
                     .toList();
             return new StoreState(
                     replacementSessions,
+                    replacementLineages,
                     occurrenceInventory,
                     occurrenceInventoryGeneration,
                     replacementIndex,
@@ -513,6 +533,10 @@ final class InMemoryDocumentStore {
 
         Map<DocumentId, DocumentSession> sessions() {
             return sessions;
+        }
+
+        ManagedLineageIndex lineageIndex() {
+            return lineageIndex;
         }
 
         ManagedOccurrenceInventory occurrenceInventory() {

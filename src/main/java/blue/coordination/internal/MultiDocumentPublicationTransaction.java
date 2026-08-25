@@ -463,6 +463,7 @@ final class MultiDocumentPublicationTransaction {
                 before.sessions().size());
         LinkedHashMap<DocumentId, DocumentSession> resultingSessions =
                 new LinkedHashMap<>(before.sessions());
+        ManagedLineageIndex resultingLineages = before.lineageIndex();
         for (Map.Entry<DocumentId, DocumentSession> entry
                 : newSessions.entrySet()) {
             if (!expectedAbsent.contains(entry.getKey())) {
@@ -470,9 +471,11 @@ final class MultiDocumentPublicationTransaction {
                         "Staged new session has no expected-absent fence "
                                 + entry.getKey());
             }
-            resultingSessions.put(
-                    entry.getKey(),
-                    entry.getValue().copyForAtomicPublication());
+            DocumentSession replacement =
+                    entry.getValue().copyForAtomicPublication();
+            resultingSessions.put(entry.getKey(), replacement);
+            resultingLineages = resultingLineages.withNewLineage(
+                    replacement);
         }
         for (DocumentUpdate update : documentUpdates.values()) {
             DocumentId documentId = update.revision().documentId();
@@ -496,6 +499,8 @@ final class MultiDocumentPublicationTransaction {
                 replacement.markReady(update.committedFrontier());
             }
             resultingSessions.put(documentId, replacement);
+            resultingLineages = resultingLineages.withAdvancedRevision(
+                    replacement);
         }
         failureInjector.accept(FailurePoint.AFTER_DOCUMENTS_STAGED);
 
@@ -635,6 +640,7 @@ final class MultiDocumentPublicationTransaction {
         InMemoryDocumentStore.StoreState replacement =
                 new InMemoryDocumentStore.StoreState(
                         resultingSessions,
+                        resultingLineages,
                         resultingInventory,
                         resultingInventoryGeneration,
                         resultingIndex,
