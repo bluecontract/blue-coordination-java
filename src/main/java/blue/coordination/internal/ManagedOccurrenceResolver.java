@@ -9,6 +9,7 @@ import blue.language.processor.closure.ClosureResourceDemand;
 import blue.language.processor.closure.ExactNodeDemand;
 import blue.language.processor.closure.ManagedOccurrenceBinding;
 import blue.language.processor.closure.ManagedOccurrenceEvidenceDemand;
+import blue.language.provider.NodeProvider;
 import blue.language.provider.NodeProviderResult;
 
 import java.util.ArrayList;
@@ -33,13 +34,14 @@ final class ManagedOccurrenceResolver {
     static final String RESOLVED_NEW =
             "contracts.occurrenceResolver.newAuthoredResolved";
 
-    private final WholeObjectStore objects;
+    private final NodeProvider exactNodes;
     private final EngineMetrics metrics;
 
     ManagedOccurrenceResolver(
-            WholeObjectStore objects,
+            NodeProvider exactNodes,
             EngineMetrics metrics) {
-        this.objects = Objects.requireNonNull(objects, "objects");
+        this.exactNodes = Objects.requireNonNull(
+                exactNodes, "exactNodes");
         this.metrics = Objects.requireNonNull(metrics, "metrics");
     }
 
@@ -47,20 +49,24 @@ final class ManagedOccurrenceResolver {
         ResolutionRequest selected = Objects.requireNonNull(
                 request, "request");
         ArrayList<ResolvedOccurrence> occurrences = new ArrayList<>();
-        ArrayList<ExactNodeDemand> exactNodes = new ArrayList<>();
+        ArrayList<ResolvedExactNode> exactNodes = new ArrayList<>();
         ArrayList<UnresolvedDemand> unresolved = new ArrayList<>();
         LinkedHashMap<String, ContractsManagedDraftPlan.ManagedDraft>
                 pendingDrafts = new LinkedHashMap<>();
         for (ClosureResourceDemand demand : selected.demands()) {
             if (demand instanceof ExactNodeDemand exact) {
                 metrics.increment(EXACT_NODE_LOOKUPS);
-                if (exactBody(exact.blueId()) == null) {
+                Node exactNode = exactBody(exact.blueId());
+                if (exactNode == null) {
                     unresolved.add(new UnresolvedDemand(
                             exact,
                             ResolutionStatus.MISSING_EXACT_CONTENT,
                             "Exact node content is unavailable"));
                 } else {
-                    exactNodes.add(exact);
+                    exactNodes.add(new ResolvedExactNode(
+                            exact,
+                            ExactValue.verified(
+                                    exact.blueId(), exactNode)));
                 }
                 continue;
             }
@@ -95,7 +101,7 @@ final class ManagedOccurrenceResolver {
     }
 
     private Node exactBody(String blueId) {
-        NodeProviderResult result = objects.fetchResultByBlueId(blueId);
+        NodeProviderResult result = exactNodes.fetchResultByBlueId(blueId);
         if (result.outcome() != NodeProviderOutcome.FOUND
                 || result.nodes().size() != 1) {
             return null;
@@ -404,10 +410,23 @@ final class ManagedOccurrenceResolver {
         }
     }
 
+    record ResolvedExactNode(
+            ExactNodeDemand demand,
+            ExactValue exactValue) {
+        ResolvedExactNode {
+            demand = Objects.requireNonNull(demand, "demand");
+            exactValue = Objects.requireNonNull(exactValue, "exactValue");
+            if (!demand.blueId().equals(exactValue.blueId())) {
+                throw new IllegalArgumentException(
+                        "Resolved exact-node evidence has the wrong BlueId");
+            }
+        }
+    }
+
     record Resolution(
             List<ClosureResourceDemand> demands,
             List<ResolvedOccurrence> resolvedOccurrences,
-            List<ExactNodeDemand> resolvedExactNodes,
+            List<ResolvedExactNode> resolvedExactNodes,
             List<UnresolvedDemand> unresolvedDemands) {
         Resolution {
             demands = List.copyOf(Objects.requireNonNull(

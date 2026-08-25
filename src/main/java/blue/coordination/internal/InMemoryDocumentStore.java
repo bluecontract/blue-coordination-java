@@ -124,6 +124,7 @@ final class InMemoryDocumentStore {
         return new OccurrenceResolutionSnapshot(
                 state.lineageIndex(),
                 state.occurrenceInventory(),
+                state.componentIndex(),
                 state.occurrenceInventoryGeneration(),
                 state.componentIndexGeneration());
     }
@@ -259,6 +260,7 @@ final class InMemoryDocumentStore {
     record OccurrenceResolutionSnapshot(
             ManagedLineageIndex lineageIndex,
             ManagedOccurrenceInventory occurrenceInventory,
+            ProcessEmbeddedComponentIndex componentIndex,
             long occurrenceInventoryGeneration,
             long componentIndexGeneration) {
         OccurrenceResolutionSnapshot {
@@ -266,6 +268,8 @@ final class InMemoryDocumentStore {
                     lineageIndex, "lineageIndex");
             occurrenceInventory = Objects.requireNonNull(
                     occurrenceInventory, "occurrenceInventory");
+            componentIndex = Objects.requireNonNull(
+                    componentIndex, "componentIndex");
             MultiDocumentPublicationTransaction.requireSafeInteger(
                     occurrenceInventoryGeneration,
                     "occurrenceInventoryGeneration");

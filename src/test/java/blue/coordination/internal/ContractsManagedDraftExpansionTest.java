@@ -30,6 +30,8 @@ final class ContractsManagedDraftExpansionTest {
             "managed-expansion-host");
     private static final DocumentId DRAFT = DocumentId.of(
             "managed-expansion-draft");
+    private static final DocumentId EXISTING = DocumentId.of(
+            "managed-expansion-existing");
 
     @Test
     void atomicAppendPublishesOrRollsBackEntryAndPlanTogether() {
@@ -379,6 +381,156 @@ final class ContractsManagedDraftExpansionTest {
                             && row.targetDocumentId().value().equals(
                                     DRAFT.value()))
                     .count());
+        }
+    }
+
+    @Test
+    void typedDemandAutomaticallyCreatesOneExactAuthoredChild() {
+        // given
+
+        try (DefaultCoordinationEngine engine = admittedHost(
+                "managed/automatic-new")) {
+            Timeline timeline = engine.timeline(
+                    "managed/automatic-new", ACTOR);
+            ExactValue target = engine.document(HOST).current();
+            ExactValue draft = engine.exactValue("""
+                    documentId: arbitrary-authored-content
+                    state: automatic-draft
+                    """);
+            DocumentId runtimeDocumentId = DocumentId.of(draft.blueId());
+            ExactValue request = engine.referenceRequest("order", draft);
+            TimelineEntry entry = engine.append(
+                    timeline,
+                    Operation.exact(
+                            "createOrder", "ownerChannel", request)
+                            .targeting(target, true));
+            ContractsClosureAdapter adapter = engine
+                    .contractsClosureAdapter();
+            ContractsClosureAdapter.FrozenBatch batch = adapter.capture(entry);
+
+            // when
+            ContractsClosureAdapter.CohortOutcome outcome = adapter
+                    .executeAndPublish(batch, batch.invocations().get(0));
+
+            // then
+            assertTrue(outcome.published());
+            assertEquals(ProcessorStatus.SUCCESS,
+                    outcome.attempt().processResult().status());
+            assertEquals(Set.of(HOST, runtimeDocumentId),
+                    Set.copyOf(outcome.members()));
+            DocumentSnapshot child = engine.document(runtimeDocumentId);
+            assertEquals(0L, child.epoch());
+            assertEquals(SessionStatus.READY, child.status());
+            assertEquals("arbitrary-authored-content",
+                    child.current().copyNode().get("/documentId"));
+            assertEquals(child.current().blueId(), engine.document(HOST)
+                    .current().canonicalBlueIdAt("/orders/order-1"));
+            assertTrue(engine.documents().metrics().counter(
+                    AutomaticOccurrenceResolutionCoordinator.RETRIES) > 0L);
+        }
+    }
+
+    @Test
+    void typedDemandReusesOneExistingCurrentLineageWithoutInitialization() {
+        // given
+
+        try (DefaultCoordinationEngine engine = contractsEngine()) {
+            String timelineId = "managed/automatic-current";
+            engine.registerTimeline(timelineId, ACTOR);
+            engine.authorizeContractsPublicRoots(Set.of(HOST, EXISTING));
+            new Contracts10ScenarioBuilder(engine)
+                    .document(HOST, hostDocument(timelineId))
+                    .document(EXISTING, """
+                            documentId: managed-expansion-existing
+                            state: reusable-current
+                            """)
+                    .publicRoot(HOST)
+                    .publicRoot(EXISTING)
+                    .expectedComponent(EXISTING)
+                    .expectedComponent(HOST)
+                    .admitTo(engine);
+            DocumentSnapshot existingBefore = engine.document(EXISTING);
+            ExactValue request = engine.referenceRequest(
+                    "order", existingBefore.current());
+            TimelineEntry entry = engine.append(
+                    engine.timeline(timelineId, ACTOR),
+                    Operation.exact(
+                            "createOrder", "ownerChannel", request)
+                            .targeting(engine.document(HOST).current(), true));
+            ContractsClosureAdapter adapter = engine
+                    .contractsClosureAdapter();
+            ContractsClosureAdapter.FrozenBatch batch = adapter.capture(entry);
+
+            // when
+            ContractsClosureAdapter.CohortOutcome outcome = adapter
+                    .executeAndPublish(batch, batch.invocations().get(0));
+
+            // then
+            assertTrue(outcome.published());
+            assertEquals(Set.of(HOST, EXISTING), Set.copyOf(
+                    outcome.members()));
+            DocumentSnapshot existingAfter = engine.document(EXISTING);
+            assertEquals(existingBefore.epoch(), existingAfter.epoch());
+            assertEquals(existingBefore.current().blueId(),
+                    existingAfter.current().blueId());
+            assertEquals(existingAfter.current().blueId(),
+                    engine.document(HOST).current()
+                            .canonicalBlueIdAt("/orders/order-1"));
+            assertEquals(2, engine.documents().publicationSnapshot()
+                    .documentHeads().size());
+            assertTrue(engine.documents().metrics().counter(
+                    AutomaticOccurrenceResolutionCoordinator.RETRIES) > 0L);
+        }
+    }
+
+    @Test
+    void expandedReceiptReplaysAfterStoreCommitAndBaseLaneRecapture() {
+        // given
+
+        try (DefaultCoordinationEngine engine = admittedHost(
+                "managed/automatic-replay")) {
+            Timeline timeline = engine.timeline(
+                    "managed/automatic-replay", ACTOR);
+            ExactValue authored = engine.exactValue("""
+                    state: one-initialization-only
+                    """);
+            DocumentId childId = DocumentId.of(authored.blueId());
+            TimelineEntry entry = engine.append(
+                    timeline,
+                    Operation.exact(
+                                    "createOrder",
+                                    "ownerChannel",
+                                    engine.referenceRequest("order", authored))
+                            .targeting(engine.document(HOST).current(), true));
+            ContractsClosureAdapter adapter = engine
+                    .contractsClosureAdapter();
+            adapter.onPublicationFailurePoint(point -> {
+                throw new IllegalStateException("lost expanded response");
+            });
+
+            // when
+            assertThrows(RuntimeException.class, engine::drain);
+
+            // then
+            assertTrue(engine.documents().find(childId).isPresent());
+            assertEquals(2, engine.history(HOST).size());
+            assertEquals(1, engine.history(childId).size());
+            assertEquals(1, engine.documents().publicationSnapshot()
+                    .closurePublicationReceipts().size());
+            long retries = engine.documents().metrics().counter(
+                    AutomaticOccurrenceResolutionCoordinator.RETRIES);
+
+            adapter.onPublicationFailurePoint(ignored -> { });
+            ProcessingDrainReceipt recovered = engine.drain();
+
+            assertEquals(List.of(entry), recovered.processedEntries());
+            assertTrue(recovered.quiescent());
+            assertEquals(2, engine.history(HOST).size());
+            assertEquals(1, engine.history(childId).size());
+            assertEquals(1, engine.documents().publicationSnapshot()
+                    .closurePublicationReceipts().size());
+            assertEquals(retries, engine.documents().metrics().counter(
+                    AutomaticOccurrenceResolutionCoordinator.RETRIES));
         }
     }
 

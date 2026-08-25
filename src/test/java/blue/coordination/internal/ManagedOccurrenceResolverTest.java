@@ -126,6 +126,7 @@ final class ManagedOccurrenceResolverTest {
                     new InMemoryDocumentStore.OccurrenceResolutionSnapshot(
                             base.lineageIndex(),
                             ManagedOccurrenceInventory.of(List.of(reserved)),
+                            base.componentIndex(),
                             base.occurrenceInventoryGeneration(),
                             base.componentIndexGeneration());
 
@@ -162,7 +163,12 @@ final class ManagedOccurrenceResolverTest {
                     .resolve(request(engine, Set.of(A), List.of(missing)));
 
             assertTrue(foundResult.complete());
-            assertEquals(List.of(found), foundResult.resolvedExactNodes());
+            assertEquals(List.of(found), foundResult.resolvedExactNodes()
+                    .stream()
+                    .map(ManagedOccurrenceResolver.ResolvedExactNode::demand)
+                    .toList());
+            assertTrue(available.sameExactValue(foundResult
+                    .resolvedExactNodes().get(0).exactValue()));
             assertFalse(missingResult.complete());
             assertEquals(
                     ManagedOccurrenceResolver.ResolutionStatus

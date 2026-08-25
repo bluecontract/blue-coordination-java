@@ -114,6 +114,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
     private final ClosureEnvironment environment;
     private final ContractsClosureExecutionMetricsObserver executionObserver;
     private final BlueClosureContracts contracts;
+    private final AutomaticOccurrenceResolutionCoordinator<CohortInvocation>
+            automaticResolutionCoordinator;
     private final Map<String, ContractsManagedDraftPlan> managedDraftPlans =
             new LinkedHashMap<>();
     private Consumer<PublicationFailurePoint> publicationFailureInjector =
@@ -161,6 +163,47 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         runtime.metrics());
         this.contracts = new BlueClosureContracts(
                 runtime.documentProcessor(), executionObserver);
+        ManagedOccurrenceResolver occurrenceResolver =
+                new ManagedOccurrenceResolver(
+                        runtime.nodeProvider(), runtime.metrics());
+        this.automaticResolutionCoordinator =
+                new AutomaticOccurrenceResolutionCoordinator<
+                        CohortInvocation>(
+                        occurrenceResolver,
+                        runtime.metrics(),
+                        CohortInvocation::input,
+                        invocation -> {
+                            executionObserver.beginAttempt(
+                                    invocation.members().stream()
+                                            .map(DocumentId::value)
+                                            .toList());
+                            return runtime.metrics().timed(
+                                    PROCESSOR_PHASE,
+                                    () -> contracts.processClosure(
+                                            invocation.input()));
+                        },
+                        new AutomaticOccurrenceResolutionCoordinator
+                                .ExpansionBuilder<CohortInvocation>() {
+                            @Override
+                            public InMemoryDocumentStore
+                                    .OccurrenceResolutionSnapshot
+                                    captureStoreState() {
+                                return documents
+                                        .occurrenceResolutionSnapshot();
+                            }
+
+                            @Override
+                            public CohortInvocation expand(
+                                    CohortInvocation current,
+                                    ManagedOccurrenceResolver.Resolution
+                                            resolution,
+                                    InMemoryDocumentStore
+                                            .OccurrenceResolutionSnapshot
+                                            storeState) {
+                                return augmentWithAutomaticResolution(
+                                        current, resolution, storeState);
+                            }
+                        });
     }
 
     /** Captures all exact inputs selected by one immutable Root feeder event. */
@@ -309,12 +352,28 @@ final class ContractsClosureAdapter implements AutoCloseable {
             return outcome(receipt, true);
         }
         requireRouteSelectionCurrent(frozen, selected);
-        executionObserver.beginAttempt(selected.members().stream()
-                .map(DocumentId::value)
-                .toList());
-        ClosureAttemptResult attempt = runtime.metrics().timed(
-                PROCESSOR_PHASE,
-                () -> contracts.processClosure(selected.input()));
+        AutomaticOccurrenceResolutionCoordinator.RunResult<
+                CohortInvocation,
+                ContractsClosurePublicationReceipt> automatic =
+                automaticResolutionCoordinator.run(
+                        selected,
+                        requireAutomaticExpansionLimit(),
+                        invocation -> publicationReceiptByIdentity(
+                                frozen, invocation),
+                        (before, expanded, storeState) -> {
+                            requireAutomaticRetryStillCurrent(
+                                    before, expanded, storeState);
+                            requireRouteSelectionCurrent(frozen, selected);
+                        });
+        CohortInvocation executed = automatic.invocation();
+        if (automatic.replayed()) {
+            ContractsClosurePublicationReceipt replay = automatic.replay();
+            if (replay.commits()) {
+                reconcilePublication(frozen, selected);
+            }
+            return outcome(replay, true);
+        }
+        ClosureAttemptResult attempt = automatic.attempt();
         long validationStarted = System.nanoTime();
         String identity;
         ContractsClosurePublicationReceipt receipt;
@@ -325,10 +384,10 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         attempt.processResult()
                                 .resultingComponents().size());
             }
-            identity = publicationIdentity(frozen, selected);
+            identity = publicationIdentity(frozen, executed);
             if (!attempt.isComplete()) {
                 return new CohortOutcome(
-                        selected.members(), attempt, false, identity, false);
+                        executed.members(), attempt, false, identity, false);
             }
             if (!isDurablyTerminalStatus(
                     attempt.processResult().status())) {
@@ -339,7 +398,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
             }
             receipt = new ContractsClosurePublicationReceipt(
                     identity,
-                    selected.members(),
+                    executed.members(),
                     attempt);
         } finally {
             runtime.metrics().addNanos(
@@ -348,9 +407,9 @@ final class ContractsClosureAdapter implements AutoCloseable {
         }
         runtime.metrics().timed(PUBLICATION_PHASE, () -> {
             if (receipt.commits()) {
-                publish(frozen, selected, receipt);
+                publish(frozen, executed, receipt);
             } else {
-                publishNonCommit(frozen, selected, receipt);
+                publishNonCommit(frozen, executed, receipt);
             }
         });
         return outcome(receipt, false);
@@ -385,7 +444,16 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     CohortInvocation cohort) {
         ensureOpen();
         FrozenBatch frozen = requireCohortHandle(batch, cohort);
-        String identity = publicationIdentity(frozen, cohort);
+        return publicationReceiptByIdentity(frozen, cohort);
+    }
+
+    private Optional<ContractsClosurePublicationReceipt>
+            publicationReceiptByIdentity(
+                    FrozenBatch batch,
+                    CohortInvocation cohort) {
+        FrozenBatch frozen = Objects.requireNonNull(batch, "batch");
+        CohortInvocation selected = Objects.requireNonNull(cohort, "cohort");
+        String identity = publicationIdentity(frozen, selected);
         ContractsClosurePublicationReceipt receipt = documents
                 .closurePublicationReceipt(identity)
                 .orElse(null);
@@ -397,7 +465,11 @@ final class ContractsClosureAdapter implements AutoCloseable {
             }
             return Optional.empty();
         }
-        if (!receipt.documentIds().equals(cohort.members())) {
+        if (!new LinkedHashSet<>(receipt.documentIds()).containsAll(
+                selected.publicationIdentityMembers())
+                || (selected.automaticExpansion() != null
+                        && !receipt.documentIds().equals(
+                                selected.members()))) {
             throw new IllegalStateException(
                     "Typed closure receipt does not belong to the frozen "
                             + "cohort " + identity);
@@ -516,7 +588,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
         }
         List<OperationRouteIndex.Replacement> replacements =
                 new ArrayList<>();
-        for (DocumentId documentId : cohort.members()) {
+        for (DocumentId documentId : receipt.get().documentIds()) {
             DocumentSession session = documents.require(documentId);
             synchronized (session) {
                 replacements.add(new OperationRouteIndex.Replacement(
@@ -526,7 +598,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
             }
         }
         routes.prepareReplacement(replacements).publish();
-        activeSourceTimelines.refresh(cohort.members(), documents);
+        activeSourceTimelines.refresh(receipt.get().documentIds(), documents);
         return true;
     }
 
@@ -779,7 +851,10 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     base.directDeliveries(),
                     base.input(),
                     base.documents(),
-                    plan);
+                    plan,
+                    null,
+                    base.publicationIdentityMembers(),
+                    base.publicationIdentityPublicRoots());
             String identity = publicationIdentity(
                     new FrozenBatch(entry, 0L, List.of(replay)), replay);
             ContractsClosurePublicationReceipt receipt = documents
@@ -932,7 +1007,468 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 base.directDeliveries(),
                 expanded,
                 base.documents(),
-                plan);
+                plan,
+                null,
+                base.publicationIdentityMembers(),
+                base.publicationIdentityPublicRoots());
+    }
+
+    private long requireAutomaticExpansionLimit() {
+        Long limit = environment.portableLimitPolicy().limits().get(
+                "closureExpansionsPerInvocation");
+        if (limit == null || limit.longValue() <= 0L) {
+            throw new IllegalStateException(
+                    "Portable limit policy has no positive "
+                            + "closureExpansionsPerInvocation limit");
+        }
+        return MultiDocumentPublicationTransaction.requireSafeInteger(
+                limit.longValue(), "closureExpansionsPerInvocation");
+    }
+
+    private CohortInvocation augmentWithAutomaticResolution(
+            CohortInvocation base,
+            ManagedOccurrenceResolver.Resolution resolution,
+            InMemoryDocumentStore.OccurrenceResolutionSnapshot storeState) {
+        CohortInvocation current = Objects.requireNonNull(base, "base");
+        ManagedOccurrenceResolver.Resolution selected =
+                Objects.requireNonNull(resolution, "resolution");
+        InMemoryDocumentStore.OccurrenceResolutionSnapshot indexed =
+                Objects.requireNonNull(storeState, "storeState");
+        if (!selected.complete()) {
+            throw new IllegalArgumentException(
+                    "Only complete occurrence evidence may expand a retry");
+        }
+        for (ManagedOccurrenceResolver.ResolvedExactNode exact
+                : selected.resolvedExactNodes()) {
+            ExactValue retained = objects.put(
+                    exact.exactValue().copyNode(),
+                    "automatic-occurrence-retry-resource");
+            if (!retained.sameExactValue(exact.exactValue())) {
+                throw new IllegalStateException(
+                        "Retry resource cache changed verified exact content");
+            }
+        }
+
+        Set<DocumentId> existingMembers = forwardExistingMembers(
+                current.existingMemberSet(),
+                selected.existingTargets(),
+                indexed.occurrenceInventory());
+        InMemoryDocumentStore.ClosureSnapshot durable =
+                documents.closureSnapshot(existingMembers);
+        if (durable.occurrenceInventoryGeneration()
+                        != indexed.occurrenceInventoryGeneration()
+                || durable.componentIndexGeneration()
+                        != indexed.componentIndexGeneration()) {
+            throw stale("Managed occurrence indexes changed during retry "
+                    + "expansion");
+        }
+        long graphGeneration = durable.graphGenerations()
+                .requireCohortGeneration(existingMembers);
+        if (graphGeneration
+                != current.input().snapshot().graphGeneration()) {
+            throw stale("Resolved managed lineages do not share the frozen "
+                    + "graph generation");
+        }
+
+        TreeMap<DocumentId, CapturedDocument> captured = new TreeMap<>(
+                EmbeddingBinding.DOCUMENT_ORDER);
+        captured.putAll(current.documents());
+        for (DocumentId documentId : existingMembers) {
+            CapturedDocument prior = captured.get(documentId);
+            InMemoryDocumentStore.DocumentHead head =
+                    durable.requireHead(documentId);
+            if (prior != null) {
+                if (!prior.head().equals(head)) {
+                    throw stale("Document head changed during automatic "
+                            + "occurrence expansion " + documentId);
+                }
+                continue;
+            }
+            captured.put(documentId, captureDocument(
+                    documentId, head, existingMembers));
+        }
+
+        TreeMap<DocumentId, ContractsManagedDraftPlan.ManagedDraft> drafts =
+                automaticDrafts(current, selected);
+        for (DocumentId documentId : drafts.keySet()) {
+            if (existingMembers.contains(documentId)) {
+                throw stale("Resolved authored draft became durable during "
+                        + "retry expansion " + documentId);
+            }
+            if (profile.isPublicRoot(documentId)) {
+                throw new IllegalArgumentException(
+                        "Automatic managed draft cannot create a public Root "
+                                + documentId);
+            }
+        }
+        long maximumDocuments = requireManagedDocumentLimit();
+        long totalDocuments = Math.addExact(
+                existingMembers.size(), drafts.size());
+        if (totalDocuments > maximumDocuments) {
+            throw new ProjectionUnavailableException(
+                    "Automatic occurrence expansion exceeds "
+                            + "managedDocumentsPerClosure");
+        }
+
+        LinkedHashMap<String, ManagedOccurrenceBinding> rows =
+                new LinkedHashMap<>();
+        for (DocumentId source : existingMembers) {
+            for (ManagedOccurrenceBinding row
+                    : indexed.occurrenceInventory().rowsFrom(source)) {
+                DocumentId target = coordinationId(row.targetDocumentId());
+                if (!existingMembers.contains(target)) {
+                    throw stale("Forward managed closure omitted occurrence "
+                            + "target " + target);
+                }
+                mergeAutomaticRow(rows, row);
+            }
+        }
+        for (ManagedOccurrenceBinding row
+                : current.input().snapshot().occurrences()) {
+            mergeAutomaticRow(rows, row);
+        }
+
+        LinkedHashSet<String> prospectiveIdentities = new LinkedHashSet<>();
+        for (ManagedOccurrenceResolver.ResolvedOccurrence occurrence
+                : selected.resolvedOccurrences()) {
+            String key = occurrenceKey(
+                    occurrence.demand().sourceDocumentId().value(),
+                    occurrence.demand().sourcePath());
+            if (rows.containsKey(key)) {
+                continue;
+            }
+            ManagedOccurrenceBinding prospective =
+                    ManagedOccurrenceBinding.derived(
+                            current.input().environment()
+                                    .managedBindingPolicyIdentity(),
+                            occurrence.demand().sourceDocumentId(),
+                            ScopeAddress.embedded(
+                                    occurrence.demand().sourcePath(), 1L),
+                            closureId(occurrence.targetDocumentId()),
+                            occurrence.expectedTargetBlueId(),
+                            false,
+                            null);
+            mergeAutomaticRow(rows, prospective);
+            prospectiveIdentities.add(
+                    prospective.occurrenceIdentity());
+        }
+
+        AutomaticManagedOccurrenceExpansion prior =
+                current.automaticExpansion() == null
+                        ? AutomaticManagedOccurrenceExpansion.empty()
+                        : current.automaticExpansion();
+        AutomaticManagedOccurrenceExpansion accumulated = prior.merge(
+                selected, prospectiveIdentities);
+
+        LinkedHashMap<blue.language.processor.closure.DocumentId, Node>
+                bodies = new LinkedHashMap<>();
+        LinkedHashMap<blue.language.processor.closure.DocumentId, Long>
+                generations = componentGenerations(
+                        durable, captured, existingMembers);
+        LinkedHashMap<blue.language.processor.closure.DocumentId,
+                ManagedDocumentSnapshot> existing = new LinkedHashMap<>();
+        ArrayList<blue.language.processor.closure.DocumentId> members =
+                new ArrayList<>();
+        ArrayList<blue.language.processor.closure.DocumentId> publicRoots =
+                new ArrayList<>();
+        for (CapturedDocument document : captured.values()) {
+            blue.language.processor.closure.DocumentId documentId =
+                    closureId(document.documentId());
+            boolean publicRoot = profile.isPublicRoot(document.documentId());
+            ManagedDocumentSnapshot snapshot = new ManagedDocumentSnapshot(
+                    documentId,
+                    document.head().blueId(),
+                    document.current().copyNode(),
+                    document.initialized(),
+                    document.terminated(),
+                    publicRoot,
+                    document.head().epoch(),
+                    requireComponentGeneration(
+                            coordinationGenerations(generations),
+                            document.documentId()));
+            members.add(documentId);
+            bodies.put(documentId, document.current().copyNode());
+            existing.put(documentId, snapshot);
+            if (publicRoot) {
+                publicRoots.add(documentId);
+            }
+        }
+        drafts.forEach((documentId, draft) -> {
+            blue.language.processor.closure.DocumentId closureDocumentId =
+                    closureId(documentId);
+            members.add(closureDocumentId);
+            bodies.put(closureDocumentId, draft.initial().copyNode());
+            generations.put(closureDocumentId, 1L);
+        });
+
+        ManagedDocumentGraph graph = ManagedDocumentGraph.fromBindings(
+                members, rows.values());
+        ComponentFinalizationResult finalization =
+                new ComponentFinalizationKernel().finalizeComponents(
+                        new ComponentFinalizationInput(
+                                graph,
+                                generations,
+                                bodies,
+                                rows.values()));
+        ArrayList<ManagedDocumentSnapshot> compiledDocuments =
+                new ArrayList<>();
+        finalization.documents().forEach((documentId, exact) -> {
+            ManagedDocumentSnapshot durableDocument = existing.get(
+                    documentId);
+            if (durableDocument != null) {
+                if (!durableDocument.blueId().equals(exact.blueId())) {
+                    throw stale("Automatic occurrence expansion changed a "
+                            + "durable input head " + documentId);
+                }
+                compiledDocuments.add(new ManagedDocumentSnapshot(
+                        documentId,
+                        exact.blueId(),
+                        exact.document(),
+                        durableDocument.initialized(),
+                        durableDocument.terminated(),
+                        durableDocument.publicRoot(),
+                        durableDocument.epoch(),
+                        exact.componentGeneration()));
+                return;
+            }
+            ContractsManagedDraftPlan.ManagedDraft draft = drafts.get(
+                    coordinationId(documentId));
+            if (draft == null
+                    || !draft.initial().blueId().equals(exact.blueId())) {
+                throw new IllegalStateException(
+                        "Automatic draft is not an exact isolated input "
+                                + documentId);
+            }
+            compiledDocuments.add(new ManagedDocumentSnapshot(
+                    documentId,
+                    exact.blueId(),
+                    exact.document(),
+                    false,
+                    false,
+                    false,
+                    0L,
+                    exact.componentGeneration()));
+        });
+        List<ComponentSnapshot> components = finalization.components()
+                .stream()
+                .map(component -> component.component())
+                .toList();
+        ClosureInvocationInput original = current.input();
+        AffectedClosureSnapshot snapshot = ClosureEvidenceFactory
+                .affectedClosure(
+                        original.snapshot().graphGeneration(),
+                        compiledDocuments,
+                        finalization.finalizedGraph().bindings(),
+                        components,
+                        publicRoots);
+        ClosureInvocationInput expanded = ClosureEvidenceFactory
+                .processClosure(
+                        snapshot,
+                        original.cause(),
+                        original.directDeliveries(),
+                        original.executionPolicy(),
+                        original.environment());
+        return new CohortInvocation(
+                coordinationIds(graph.documentIds()),
+                current.directDeliveries(),
+                expanded,
+                captured,
+                current.managedDraftPlan(),
+                accumulated,
+                current.publicationIdentityMembers(),
+                current.publicationIdentityPublicRoots());
+    }
+
+    private long requireManagedDocumentLimit() {
+        Long limit = environment.portableLimitPolicy().limits().get(
+                "managedDocumentsPerClosure");
+        if (limit == null || limit.longValue() <= 0L) {
+            throw new IllegalStateException(
+                    "Portable limit policy has no positive "
+                            + "managedDocumentsPerClosure limit");
+        }
+        return MultiDocumentPublicationTransaction.requireSafeInteger(
+                limit.longValue(), "managedDocumentsPerClosure");
+    }
+
+    private static Set<DocumentId> forwardExistingMembers(
+            Collection<DocumentId> original,
+            Collection<DocumentId> targets,
+            ManagedOccurrenceInventory inventory) {
+        TreeMap<DocumentId, Boolean> discovered = new TreeMap<>(
+                EmbeddingBinding.DOCUMENT_ORDER);
+        Deque<DocumentId> pending = new ArrayDeque<>();
+        for (DocumentId documentId : original) {
+            if (discovered.putIfAbsent(documentId, Boolean.TRUE) == null) {
+                pending.addLast(documentId);
+            }
+        }
+        for (DocumentId documentId : targets) {
+            if (discovered.putIfAbsent(documentId, Boolean.TRUE) == null) {
+                pending.addLast(documentId);
+            }
+        }
+        while (!pending.isEmpty()) {
+            DocumentId source = pending.removeFirst();
+            for (ManagedOccurrenceBinding row : inventory.rowsFrom(source)) {
+                DocumentId target = coordinationId(row.targetDocumentId());
+                if (discovered.putIfAbsent(target, Boolean.TRUE) == null) {
+                    pending.addLast(target);
+                }
+            }
+        }
+        Set<DocumentId> selected = discovered.keySet();
+        for (DocumentId target : selected) {
+            for (ManagedOccurrenceBinding row
+                    : inventory.rowsTouching(target)) {
+                DocumentId source = coordinationId(row.sourceDocumentId());
+                if (row.active()
+                        && coordinationId(row.targetDocumentId()).equals(
+                                target)
+                        && !selected.contains(source)) {
+                    throw new ProjectionUnavailableException(
+                            "Automatic forward expansion cannot merge an "
+                                    + "existing target with an external "
+                                    + "active incoming occurrence under the "
+                                    + "scalar graph-generation contract");
+                }
+            }
+        }
+        return Collections.unmodifiableSet(
+                new LinkedHashSet<>(discovered.keySet()));
+    }
+
+    private static TreeMap<DocumentId,
+            ContractsManagedDraftPlan.ManagedDraft> automaticDrafts(
+                    CohortInvocation current,
+                    ManagedOccurrenceResolver.Resolution resolution) {
+        TreeMap<DocumentId, ContractsManagedDraftPlan.ManagedDraft> drafts =
+                new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
+        if (current.managedDraftPlan() != null) {
+            current.managedDraftPlan().drafts().forEach((documentId, draft) ->
+                    mergeAutomaticDraft(drafts, documentId, draft));
+        }
+        if (current.automaticExpansion() != null) {
+            current.automaticExpansion().drafts().forEach(
+                    (documentId, draft) -> mergeAutomaticDraft(
+                            drafts, documentId, draft));
+        }
+        resolution.newDrafts().forEach((documentId, draft) ->
+                mergeAutomaticDraft(drafts, documentId, draft));
+        return drafts;
+    }
+
+    private static void mergeAutomaticDraft(
+            Map<DocumentId, ContractsManagedDraftPlan.ManagedDraft> drafts,
+            DocumentId documentId,
+            ContractsManagedDraftPlan.ManagedDraft draft) {
+        ContractsManagedDraftPlan.ManagedDraft prior = drafts.putIfAbsent(
+                documentId, draft);
+        if (prior != null && !prior.initial().sameExactValue(
+                draft.initial())) {
+            throw new IllegalStateException(
+                    "Managed draft evidence disagrees for " + documentId);
+        }
+    }
+
+    private static void mergeAutomaticRow(
+            Map<String, ManagedOccurrenceBinding> rows,
+            ManagedOccurrenceBinding row) {
+        String key = occurrenceKey(
+                row.sourceDocumentId().value(), row.sourcePath());
+        ManagedOccurrenceBinding prior = rows.putIfAbsent(key, row);
+        if (prior != null && !OccurrenceProjection.from(prior).equals(
+                OccurrenceProjection.from(row))) {
+            throw stale("Managed occurrence evidence disagrees at " + key);
+        }
+    }
+
+    private static String occurrenceKey(
+            String sourceDocumentId,
+            String sourcePath) {
+        return Objects.requireNonNull(sourceDocumentId, "sourceDocumentId")
+                + "\u0000"
+                + Objects.requireNonNull(sourcePath, "sourcePath");
+    }
+
+    private LinkedHashMap<blue.language.processor.closure.DocumentId, Long>
+            componentGenerations(
+                    InMemoryDocumentStore.ClosureSnapshot durable,
+                    Map<DocumentId, CapturedDocument> captured,
+                    Set<DocumentId> expectedMembers) {
+        LinkedHashMap<blue.language.processor.closure.DocumentId, Long>
+                generations = new LinkedHashMap<>();
+        for (ComponentSnapshot component : durable.componentStates()) {
+            runtime.metrics().increment(COMPONENT_STATES_READ);
+            List<DocumentId> componentMembers = coordinationIds(
+                    component.orderedMemberDocumentIds());
+            if (!expectedMembers.containsAll(componentMembers)) {
+                throw stale("Forward closure contains only part of a durable "
+                        + "component " + componentMembers);
+            }
+            for (int index = 0; index < componentMembers.size(); index++) {
+                DocumentId member = componentMembers.get(index);
+                CapturedDocument document = captured.get(member);
+                if (document == null
+                        || !document.head().blueId().equals(
+                                component.orderedMemberBlueIds().get(index))) {
+                    throw stale("Durable component state is stale for "
+                            + member);
+                }
+                generations.put(
+                        closureId(member),
+                        component.componentGeneration());
+            }
+        }
+        if (generations.size() != expectedMembers.size()) {
+            throw stale("Durable component state does not cover automatic "
+                    + "occurrence expansion");
+        }
+        return generations;
+    }
+
+    private static Map<DocumentId, Long> coordinationGenerations(
+            Map<blue.language.processor.closure.DocumentId, Long>
+                    generations) {
+        TreeMap<DocumentId, Long> result = new TreeMap<>(
+                EmbeddingBinding.DOCUMENT_ORDER);
+        generations.forEach((documentId, generation) -> result.put(
+                coordinationId(documentId), generation));
+        return result;
+    }
+
+    private void requireAutomaticRetryStillCurrent(
+            CohortInvocation before,
+            CohortInvocation expanded,
+            InMemoryDocumentStore.OccurrenceResolutionSnapshot storeState) {
+        if (!before.input().cause().causeIdentity().equals(
+                expanded.input().cause().causeIdentity())
+                || !before.input().directDeliverySnapshotIdentity().equals(
+                        expanded.input().directDeliverySnapshotIdentity())
+                || before.input().executionPolicy()
+                        != expanded.input().executionPolicy()
+                || before.input().environment()
+                        != expanded.input().environment()
+                || before.input().snapshot().graphGeneration()
+                        != expanded.input().snapshot().graphGeneration()
+                || !before.publicationIdentityMembers().equals(
+                        expanded.publicationIdentityMembers())
+                || !before.publicationIdentityPublicRoots().equals(
+                        expanded.publicationIdentityPublicRoots())) {
+            throw new IllegalStateException(
+                    "Automatic retry changed its frozen logical lane");
+        }
+        InMemoryDocumentStore.OccurrenceResolutionSnapshot currentIndexes =
+                documents.occurrenceResolutionSnapshot();
+        if (currentIndexes.occurrenceInventoryGeneration()
+                        != storeState.occurrenceInventoryGeneration()
+                || currentIndexes.componentIndexGeneration()
+                        != storeState.componentIndexGeneration()) {
+            throw stale("Managed occurrence indexes changed before retry");
+        }
+        InMemoryDocumentStore.ClosureSnapshot current =
+                documents.closureSnapshot(expanded.existingMemberSet());
+        requireCohortStillCurrent(expanded, current);
     }
 
     private void validateManagedDraftDeclarations(
@@ -1202,7 +1738,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 ResultingDocument after = entry.getValue();
                 if (before == null) {
                     ContractsManagedDraftPlan.ManagedDraft draft = invocation
-                            .managedDraftPlan().drafts().get(entry.getKey());
+                            .managedDraft(entry.getKey());
                     if (draft == null || after.epoch() != 0L
                             || !after.initialized()) {
                         throw new ProjectionUnavailableException(
@@ -1426,6 +1962,9 @@ final class ContractsClosureAdapter implements AutoCloseable {
         if (invocation.managedExpansion()) {
             requireManagedExpansionResult(invocation, result);
         }
+        if (invocation.automaticExpansion() != null) {
+            requireAutomaticOccurrenceResults(invocation, result);
+        }
     }
 
     private static void requireManagedExpansionResult(
@@ -1435,7 +1974,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 result, invocation.memberSet());
         for (DocumentId documentId : invocation.newMemberSet()) {
             ContractsManagedDraftPlan.ManagedDraft draft = invocation
-                    .managedDraftPlan().drafts().get(documentId);
+                    .managedDraft(documentId);
             ResultingDocument initialized = documents.get(documentId);
             if (draft == null
                     || !draft.initial().blueId().equals(
@@ -1446,6 +1985,9 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         "Managed draft was not initialized exactly once "
                                 + documentId);
             }
+        }
+        if (invocation.managedDraftPlan() == null) {
+            return;
         }
         ResultingDocument source = documents.get(
                 invocation.managedDraftPlan().targetDocumentId());
@@ -1489,6 +2031,48 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 throw new IllegalStateException(
                         "Managed occurrence was not established exactly at "
                                 + expectation.path());
+            }
+        }
+    }
+
+    private static void requireAutomaticOccurrenceResults(
+            CohortInvocation invocation,
+            ClosureProcessResult result) {
+        Map<DocumentId, ResultingDocument> documents = resultingDocuments(
+                result, invocation.memberSet());
+        for (ManagedOccurrenceResolver.ResolvedOccurrence occurrence
+                : invocation.automaticExpansion().occurrences()) {
+            DocumentId sourceId = DocumentId.of(
+                    occurrence.demand().sourceDocumentId().value());
+            ResultingDocument source = documents.get(sourceId);
+            ResultingDocument target = documents.get(
+                    occurrence.targetDocumentId());
+            if (source == null || target == null) {
+                throw new IllegalStateException(
+                        "Automatic occurrence result omitted a resolved "
+                                + "endpoint");
+            }
+            List<ManagedOccurrenceBinding> matches = result
+                    .occurrenceBindings().stream()
+                    .filter(row -> row.sourceDocumentId().value().equals(
+                            sourceId.value())
+                            && row.sourcePath().equals(
+                                    occurrence.demand().sourcePath()))
+                    .toList();
+            Node exact = NodePathEditor.getOrNull(
+                    source.document(), occurrence.demand().sourcePath());
+            if (matches.size() != 1
+                    || !matches.get(0).active()
+                    || !matches.get(0).targetDocumentId().value().equals(
+                            occurrence.targetDocumentId().value())
+                    || !matches.get(0).expectedTargetBlueId().equals(
+                            target.afterBlueId())
+                    || exact == null
+                    || !target.afterBlueId().equals(exact.getBlueId())) {
+                throw new IllegalStateException(
+                        "Automatic managed occurrence was not established "
+                                + "exactly at " + sourceId
+                                + occurrence.demand().sourcePath());
             }
         }
     }
@@ -1753,28 +2337,37 @@ final class ContractsClosureAdapter implements AutoCloseable {
             throw stale("Cohort graph generation changed before publication");
         }
 
-        List<OccurrenceProjection> expectedOccurrences = invocation.input()
-                .snapshot().occurrences().stream()
+        Map<String, OccurrenceProjection> expectedOccurrences =
+                new TreeMap<>(EmbeddingBinding.TEXT_ORDER);
+        invocation.input().snapshot().occurrences().stream()
+                .filter(row -> !invocation
+                        .prospectiveOccurrenceIdentities()
+                        .contains(row.occurrenceIdentity()))
                 .filter(row -> members.contains(coordinationId(
                         row.sourceDocumentId()))
                         && members.contains(coordinationId(
                                 row.targetDocumentId())))
-                .map(OccurrenceProjection::from)
-                .toList();
-        List<OccurrenceProjection> currentOccurrences = new ArrayList<>();
-        for (ManagedOccurrenceBinding row
-                : targetedOccurrences(
-                        current.occurrenceInventory(), members)) {
-            boolean source = members.contains(
-                    coordinationId(row.sourceDocumentId()));
-            boolean target = members.contains(
-                    coordinationId(row.targetDocumentId()));
-            if (source != target) {
-                throw stale("Occurrence inventory joined a captured cohort "
-                        + "before publication");
-            }
-            if (source) {
-                currentOccurrences.add(OccurrenceProjection.from(row));
+                .forEach(row -> expectedOccurrences.put(
+                        occurrenceKey(
+                                row.sourceDocumentId().value(),
+                                row.sourcePath()),
+                        OccurrenceProjection.from(row)));
+        Map<String, OccurrenceProjection> currentOccurrences =
+                new TreeMap<>(EmbeddingBinding.TEXT_ORDER);
+        for (DocumentId member : members) {
+            for (ManagedOccurrenceBinding row
+                    : current.occurrenceInventory().rowsFrom(member)) {
+                boolean target = members.contains(
+                        coordinationId(row.targetDocumentId()));
+                if (!target) {
+                    throw stale("Forward occurrence closure changed before "
+                            + "publication");
+                }
+                currentOccurrences.put(
+                        occurrenceKey(
+                                row.sourceDocumentId().value(),
+                                row.sourcePath()),
+                        OccurrenceProjection.from(row));
             }
         }
         if (!expectedOccurrences.equals(currentOccurrences)) {
@@ -1782,22 +2375,42 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     + "publication");
         }
 
-        List<String> expectedComponents = invocation.input().snapshot()
-                .components().stream()
-                .filter(component -> component.orderedMemberDocumentIds()
-                        .stream().allMatch(member -> members.contains(
-                                coordinationId(member))))
-                .map(ComponentSnapshot::componentStateIdentity)
-                .toList();
-        List<String> currentComponents = current.componentStates().stream()
-                .filter(component -> component.orderedMemberDocumentIds()
-                        .stream().anyMatch(member -> members.contains(
-                                coordinationId(member))))
-                .map(ComponentSnapshot::componentStateIdentity)
-                .toList();
+        Map<List<DocumentId>, String> expectedComponents =
+                componentStateIndex(
+                        invocation.input().snapshot().components(), members);
+        Map<List<DocumentId>, String> currentComponents =
+                componentStateIndex(current.componentStates(), members);
         if (!expectedComponents.equals(currentComponents)) {
             throw stale("Cohort component state changed before publication");
         }
+    }
+
+    private static Map<List<DocumentId>, String> componentStateIndex(
+            Collection<ComponentSnapshot> components,
+            Set<DocumentId> members) {
+        LinkedHashMap<List<DocumentId>, String> result =
+                new LinkedHashMap<>();
+        for (ComponentSnapshot component : components) {
+            List<DocumentId> componentMembers = coordinationIds(
+                    component.orderedMemberDocumentIds());
+            boolean any = componentMembers.stream().anyMatch(
+                    members::contains);
+            if (!any) {
+                continue;
+            }
+            if (!members.containsAll(componentMembers)) {
+                throw stale("Captured forward closure contains only part of "
+                        + "a component " + componentMembers);
+            }
+            String duplicate = result.putIfAbsent(
+                    componentMembers,
+                    component.componentStateIdentity());
+            if (duplicate != null) {
+                throw new IllegalStateException(
+                        "Duplicate component state " + componentMembers);
+            }
+        }
+        return Collections.unmodifiableMap(result);
     }
 
     private static List<ManagedOccurrenceBinding> targetedOccurrences(
@@ -1874,9 +2487,10 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     coordinationId(row.sourceDocumentId()));
             boolean target = cohortMembers.contains(
                     coordinationId(row.targetDocumentId()));
-            if (source != target) {
+            if (source && !target) {
                 throw new ProjectionUnavailableException(
-                        "Occurrence inventory crosses a disconnected cohort");
+                        "Forward occurrence closure omitted an outgoing "
+                                + "target");
             }
             if (!source) {
                 merged.add(row);
@@ -2016,13 +2630,12 @@ final class ContractsClosureAdapter implements AutoCloseable {
         updatePublicationIdentityFrame(digest, 0, domain);
         updatePublicationIdentityFrame(
                 digest, 1, frozen.entry().blueId());
-        List<DocumentId> publicRoots = selected.input().snapshot()
-                .publicRootDocumentIds().stream()
-                .map(documentId -> DocumentId.of(documentId.value()))
+        List<DocumentId> publicRoots = selected
+                .publicationIdentityPublicRoots().stream()
                 .sorted(EmbeddingBinding.DOCUMENT_ORDER)
                 .toList();
         List<DocumentId> lane = publicRoots.isEmpty()
-                ? selected.members() : publicRoots;
+                ? selected.publicationIdentityMembers() : publicRoots;
         updatePublicationIdentityFrame(
                 digest, 2, publicRoots.isEmpty() ? "internal" : "public");
         updatePublicationIdentityFrame(
@@ -2031,8 +2644,11 @@ final class ContractsClosureAdapter implements AutoCloseable {
             updatePublicationIdentityFrame(digest, 4, root.value());
         }
         updatePublicationIdentityFrame(
-                digest, 5, Integer.toString(selected.members().size()));
-        for (DocumentId member : selected.members()) {
+                digest,
+                5,
+                Integer.toString(
+                        selected.publicationIdentityMembers().size()));
+        for (DocumentId member : selected.publicationIdentityMembers()) {
             updatePublicationIdentityFrame(digest, 6, member.value());
         }
         List<Object> order = frozen.entry().sourceOrderKey().components();
@@ -2197,7 +2813,47 @@ final class ContractsClosureAdapter implements AutoCloseable {
             List<DirectLogicalDelivery> directDeliveries,
             ClosureInvocationInput input,
             Map<DocumentId, CapturedDocument> documents,
-            ContractsManagedDraftPlan managedDraftPlan) {
+            ContractsManagedDraftPlan managedDraftPlan,
+            AutomaticManagedOccurrenceExpansion automaticExpansion,
+            List<DocumentId> publicationIdentityMembers,
+            List<DocumentId> publicationIdentityPublicRoots) {
+        CohortInvocation(
+                List<DocumentId> members,
+                List<DirectLogicalDelivery> directDeliveries,
+                ClosureInvocationInput input,
+                Map<DocumentId, CapturedDocument> documents,
+                ContractsManagedDraftPlan managedDraftPlan) {
+            this(
+                    members,
+                    directDeliveries,
+                    input,
+                    documents,
+                    managedDraftPlan,
+                    null,
+                    directTargetDocumentIds(directDeliveries),
+                    directPublicRootDocumentIds(
+                            directDeliveries, input));
+        }
+
+        CohortInvocation(
+                List<DocumentId> members,
+                List<DirectLogicalDelivery> directDeliveries,
+                ClosureInvocationInput input,
+                Map<DocumentId, CapturedDocument> documents,
+                ContractsManagedDraftPlan managedDraftPlan,
+                AutomaticManagedOccurrenceExpansion automaticExpansion) {
+            this(
+                    members,
+                    directDeliveries,
+                    input,
+                    documents,
+                    managedDraftPlan,
+                    automaticExpansion,
+                    directTargetDocumentIds(directDeliveries),
+                    directPublicRootDocumentIds(
+                            directDeliveries, input));
+        }
+
         CohortInvocation {
             members = List.copyOf(Objects.requireNonNull(
                     members, "members"));
@@ -2207,6 +2863,19 @@ final class ContractsClosureAdapter implements AutoCloseable {
             documents = Collections.unmodifiableMap(
                     new LinkedHashMap<>(Objects.requireNonNull(
                             documents, "documents")));
+            publicationIdentityMembers = List.copyOf(Objects.requireNonNull(
+                    publicationIdentityMembers,
+                    "publicationIdentityMembers"));
+            publicationIdentityPublicRoots = List.copyOf(
+                    Objects.requireNonNull(
+                            publicationIdentityPublicRoots,
+                            "publicationIdentityPublicRoots"));
+            if (publicationIdentityMembers.isEmpty()
+                    || !new LinkedHashSet<>(publicationIdentityMembers)
+                            .containsAll(publicationIdentityPublicRoots)) {
+                throw new IllegalArgumentException(
+                        "Publication identity lane must contain every Root");
+            }
         }
 
         Set<DocumentId> memberSet() {
@@ -2226,7 +2895,61 @@ final class ContractsClosureAdapter implements AutoCloseable {
         }
 
         boolean managedExpansion() {
-            return managedDraftPlan != null;
+            return !newMemberSet().isEmpty();
+        }
+
+        ContractsManagedDraftPlan.ManagedDraft managedDraft(
+                DocumentId documentId) {
+            DocumentId selected = Objects.requireNonNull(
+                    documentId, "documentId");
+            ContractsManagedDraftPlan.ManagedDraft explicit =
+                    managedDraftPlan == null
+                            ? null : managedDraftPlan.drafts().get(selected);
+            ContractsManagedDraftPlan.ManagedDraft automatic =
+                    automaticExpansion == null
+                            ? null : automaticExpansion.drafts().get(selected);
+            if (explicit != null && automatic != null
+                    && !explicit.initial().sameExactValue(
+                            automatic.initial())) {
+                throw new IllegalStateException(
+                        "Explicit and automatic expansion disagree for "
+                                + selected);
+            }
+            return explicit != null ? explicit : automatic;
+        }
+
+        Set<String> prospectiveOccurrenceIdentities() {
+            return automaticExpansion == null
+                    ? Set.of()
+                    : automaticExpansion.prospectiveOccurrenceIdentities();
+        }
+
+        private static List<DocumentId> directTargetDocumentIds(
+                Collection<DirectLogicalDelivery> deliveries) {
+            TreeMap<DocumentId, Boolean> targets = new TreeMap<>(
+                    EmbeddingBinding.DOCUMENT_ORDER);
+            for (DirectLogicalDelivery delivery : deliveries) {
+                targets.put(
+                        coordinationId(delivery.targetDocumentId()),
+                        Boolean.TRUE);
+            }
+            if (targets.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "A closure invocation needs a direct target lane");
+            }
+            return List.copyOf(targets.keySet());
+        }
+
+        private static List<DocumentId> directPublicRootDocumentIds(
+                Collection<DirectLogicalDelivery> deliveries,
+                ClosureInvocationInput input) {
+            Set<DocumentId> direct = new LinkedHashSet<>(
+                    directTargetDocumentIds(deliveries));
+            return input.snapshot().publicRootDocumentIds().stream()
+                    .map(ContractsClosureAdapter::coordinationId)
+                    .filter(direct::contains)
+                    .sorted(EmbeddingBinding.DOCUMENT_ORDER)
+                    .toList();
         }
     }
 
