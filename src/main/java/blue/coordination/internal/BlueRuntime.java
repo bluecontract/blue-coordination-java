@@ -280,6 +280,21 @@ final class BlueRuntime implements AutoCloseable {
                 cache(resolveToSnapshot(preprocessed)), purpose);
     }
 
+    /**
+     * Parses direct provider content under this runtime's preprocessing
+     * aliases without resolving the declared type as an instance.
+     */
+    ExactValue exactProviderSource(String yaml) {
+        Node source = parseSourceYaml(Objects.requireNonNull(yaml, "yaml"));
+        Node preprocessed = preprocess(source);
+        if (preprocessed.isReferenceOnly()) {
+            throw new IllegalArgumentException(
+                    "Provider content must be a whole exact Blue value");
+        }
+        String blueId = DirectBlueIdCalculator.calculateBlueId(preprocessed);
+        return ExactValue.verified(blueId, preprocessed);
+    }
+
     NodeProvider nodeProvider() {
         ensureOpen();
         return nodeProvider;

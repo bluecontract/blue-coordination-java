@@ -118,7 +118,9 @@ public final class Contracts10AuthoredClosureCompiler {
         WholeObjectStore verificationObjects =
                 new WholeObjectStore(verificationMetrics);
         try (BlueRuntime verificationRuntime = BlueRuntime.create(
-                verificationObjects, verificationMetrics)) {
+                verificationObjects,
+                verificationMetrics,
+                engine.applicationExactNodeProvider())) {
             LinkedHashMap<DocumentId, Node> resolved = resolveDocuments(
                     input.documents(), verificationRuntime,
                     verificationObjects,

@@ -123,6 +123,8 @@ public final class DefaultCoordinationEngine
 
     private final EngineMetrics metrics;
     private final WholeObjectStore objects;
+    private final blue.language.provider.NodeProvider
+            applicationExactNodeProvider;
     private final BlueRuntime runtime;
     private final WholeRequestEntryFactory entryFactory;
     private final InMemoryTimelineJournal journal;
@@ -150,9 +152,20 @@ public final class DefaultCoordinationEngine
 
     private DefaultCoordinationEngine(
             ContractsBootstrap contractsConfiguration) {
+        this(contractsConfiguration, null);
+    }
+
+    private DefaultCoordinationEngine(
+            ContractsBootstrap contractsConfiguration,
+            blue.coordination.sdk.ExactNodeProvider exactNodeProvider) {
         metrics = new EngineMetrics();
         objects = new WholeObjectStore(metrics);
-        runtime = BlueRuntime.create(objects, metrics);
+        applicationExactNodeProvider = exactNodeProvider == null
+                ? null
+                : Contracts10StaticEmbeddedAdmissionCompiler
+                        .verifiedProvider(exactNodeProvider);
+        runtime = BlueRuntime.create(
+                objects, metrics, applicationExactNodeProvider);
         entryFactory = new WholeRequestEntryFactory(
                 runtime, objects, metrics, this::timelineActorKind);
         journal = new InMemoryTimelineJournal(entryFactory, metrics);
@@ -253,6 +266,23 @@ public final class DefaultCoordinationEngine
                 blueLanguageSpecificationIdentity,
                 contractsSpecificationIdentity,
                 Set.of()));
+    }
+
+    /**
+     * Creates the SDK Contracts runtime with one verified application exact
+     * node provider available to ordinary Language resolution.
+     */
+    public static DefaultCoordinationEngine createContracts10Sdk(
+            String blueLanguageSpecificationIdentity,
+            String contractsSpecificationIdentity,
+            blue.coordination.sdk.ExactNodeProvider exactNodeProvider) {
+        return new DefaultCoordinationEngine(
+                new ContractsBootstrap(
+                        blueLanguageSpecificationIdentity,
+                        contractsSpecificationIdentity,
+                        Set.of()),
+                Objects.requireNonNull(
+                        exactNodeProvider, "exactNodeProvider"));
     }
 
     /**
@@ -582,6 +612,25 @@ public final class DefaultCoordinationEngine
         ensureOpen();
         return runtime.exactSource(
                 sourceYaml, objects, "external-exact-value");
+    }
+
+    /**
+     * Parses provider content, preprocesses runtime aliases, and retains its
+     * direct identity without resolving the value's type as an instance.
+     *
+     * <p>This public method is an internal cross-package bridge for the
+     * developer SDK. Applications use
+     * {@link blue.coordination.sdk.ExactValues#providerContentYaml(String)}.
+     * The returned value is not installed in the engine object store.</p>
+     */
+    public synchronized ExactValue exactProviderValue(String sourceYaml) {
+        ensureOpen();
+        return runtime.exactProviderSource(sourceYaml);
+    }
+
+    /** Provider leaf shared with isolated authored-closure verification. */
+    blue.language.provider.NodeProvider applicationExactNodeProvider() {
+        return applicationExactNodeProvider;
     }
 
     synchronized ExactValue embeddedDocumentRequest(

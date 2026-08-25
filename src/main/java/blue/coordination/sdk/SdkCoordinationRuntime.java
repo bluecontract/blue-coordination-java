@@ -45,7 +45,7 @@ final class SdkCoordinationRuntime implements AutoCloseable {
     private final Contracts10AuthoredClosureCompiler compiler;
     private final Contracts10StaticEmbeddedAdmissionCompiler staticCompiler;
     private final SdkDrainResultMapper mapper;
-    private final ExactNodeProvider exactNodeProvider;
+    private final ScopedExactNodeProvider exactNodeProvider;
     private final boolean contentDerivedDocumentIds;
     private final String languageSpecificationIdentity;
     private final String contractsSpecificationIdentity;
@@ -64,8 +64,9 @@ final class SdkCoordinationRuntime implements AutoCloseable {
             ExactNodeProvider exactNodeProvider,
             boolean contentDerivedDocumentIds) {
         this.owner = Objects.requireNonNull(owner, "owner");
-        this.exactNodeProvider = Objects.requireNonNull(
-                exactNodeProvider, "exactNodeProvider");
+        this.exactNodeProvider = new ScopedExactNodeProvider(
+                Objects.requireNonNull(
+                        exactNodeProvider, "exactNodeProvider"));
         this.contentDerivedDocumentIds = contentDerivedDocumentIds;
         BundledContracts10Release.Manifest bundled =
                 BundledContracts10Release.manifest();
@@ -79,7 +80,7 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         contractsSpecificationIdentity = contracts;
         bundledRelease = languageIdentity == null;
         engine = DefaultCoordinationEngine.createContracts10Sdk(
-                language, contracts);
+                language, contracts, this.exactNodeProvider);
         compiler = new Contracts10AuthoredClosureCompiler(engine);
         staticCompiler = new Contracts10StaticEmbeddedAdmissionCompiler(engine);
         mapper = new SdkDrainResultMapper(this, engine);
@@ -199,6 +200,12 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                 Objects.requireNonNull(sourceYaml, "sourceYaml")));
     }
 
+    synchronized ExactBlueValue exactProviderValue(String sourceYaml) {
+        ensureOpen();
+        return ExactBlueValue.wrap(engine.exactProviderValue(
+                Objects.requireNonNull(sourceYaml, "sourceYaml")));
+    }
+
     synchronized ManagedDocumentDraft draft(
             DocumentId id,
             ExactBlueValue initial) {
@@ -244,6 +251,18 @@ final class SdkCoordinationRuntime implements AutoCloseable {
             String authoredYaml,
             ActivationPolicy activationPolicy) {
         ensureOpen();
+        exactNodeProvider.beginLookupScope();
+        try {
+            return admitStaticProcessEmbeddedScoped(
+                    authoredYaml, activationPolicy);
+        } finally {
+            exactNodeProvider.endLookupScope();
+        }
+    }
+
+    private ClosureHandle admitStaticProcessEmbeddedScoped(
+            String authoredYaml,
+            ActivationPolicy activationPolicy) {
         Contracts10StaticEmbeddedAdmissionCompiler.CompiledStaticAdmission
                 selected = staticCompiler.compile(
                         Objects.requireNonNull(authoredYaml, "authoredYaml"),
@@ -1093,6 +1112,43 @@ final class SdkCoordinationRuntime implements AutoCloseable {
     private record CoreEntryRef(TimelineEntry entry) {
         private CoreEntryRef {
             entry = Objects.requireNonNull(entry, "entry");
+        }
+    }
+
+    /** Deduplicates provider transport reads within one static admission. */
+    private static final class ScopedExactNodeProvider
+            implements ExactNodeProvider {
+        private final ExactNodeProvider delegate;
+        private Map<String, Optional<String>> lookupScope;
+
+        private ScopedExactNodeProvider(ExactNodeProvider delegate) {
+            this.delegate = Objects.requireNonNull(delegate, "delegate");
+        }
+
+        private synchronized void beginLookupScope() {
+            if (lookupScope != null) {
+                throw new IllegalStateException(
+                        "Exact-node provider lookup scope is already active");
+            }
+            lookupScope = new LinkedHashMap<>();
+        }
+
+        private synchronized void endLookupScope() {
+            lookupScope = null;
+        }
+
+        @Override
+        public synchronized Optional<String> findExactContent(String blueId) {
+            String selected = Objects.requireNonNull(blueId, "blueId");
+            if (lookupScope != null && lookupScope.containsKey(selected)) {
+                return lookupScope.get(selected);
+            }
+            Optional<String> result = Objects.requireNonNull(
+                    delegate.findExactContent(selected), "provider result");
+            if (lookupScope != null) {
+                lookupScope.put(selected, result);
+            }
+            return result;
         }
     }
 

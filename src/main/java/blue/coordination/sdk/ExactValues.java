@@ -15,4 +15,23 @@ public final class ExactValues {
         return runtime.exactValue(Objects.requireNonNull(
                 sourceYaml, "sourceYaml"));
     }
+
+    /**
+     * Parses one whole YAML value for direct exact-provider storage.
+     *
+     * <p>The runtime preprocesses its pinned aliases and calculates the direct
+     * BlueId of that result. It deliberately does not resolve the root's
+     * declared type as though the supplied value were an instance. This makes
+     * schema-bearing application type definitions safe to identify before
+     * supplying {@link ExactBlueValue#json()} through an
+     * {@link ExactNodeProvider}. The value is returned detached and is not
+     * installed in the runtime's object store.</p>
+     *
+     * @param providerYaml complete provider content in YAML form
+     * @return immutable preprocessed content with its direct exact BlueId
+     */
+    public ExactBlueValue providerContentYaml(String providerYaml) {
+        return runtime.exactProviderValue(Objects.requireNonNull(
+                providerYaml, "providerYaml"));
+    }
 }

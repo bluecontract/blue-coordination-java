@@ -83,8 +83,16 @@ public final class BlueCoordination implements AutoCloseable {
         }
 
         /**
-         * Supplies read-only serialized exact values for pure references
-         * encountered by static Process Embedded admission.
+         * Supplies read-only serialized application exact values and type
+         * definitions to ordinary runtime resolution and Process Embedded
+         * admission.
+         *
+         * <p>Every returned whole value is parsed defensively and must
+         * establish the exact requested BlueId before it can participate in
+         * resolution. Use
+         * {@link ExactValues#providerContentYaml(String)} to prepare authored
+         * provider YAML that contains aliases or schema-bearing type
+         * definitions.</p>
          */
         public Builder exactNodeProvider(ExactNodeProvider provider) {
             exactNodeProvider = Objects.requireNonNull(provider, "provider");
