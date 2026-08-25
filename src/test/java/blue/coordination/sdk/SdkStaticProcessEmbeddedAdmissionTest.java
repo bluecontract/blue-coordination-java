@@ -175,7 +175,9 @@ final class SdkStaticProcessEmbeddedAdmissionTest {
             assertEquals("/child", missing.details().get("sourcePath"));
             DocumentId rootId = DocumentId.of(
                     missing.details().get("sourceDocumentId"));
-            assertEquals(List.of(child.blueId()), reads);
+            assertEquals(List.of(child.blueId()), reads,
+                    "one automatic resolution request must perform one "
+                            + "provider lookup");
             assertThrows(CoordinationException.class,
                     () -> blue.documents().require(rootId));
             assertThrows(CoordinationException.class,
@@ -192,6 +194,73 @@ final class SdkStaticProcessEmbeddedAdmissionTest {
                             .orElseThrow().targetDocumentId());
             assertEquals(5L, blue.documents().require(childId)
                     .snapshot().longAt("/count"));
+        }
+    }
+
+    @Test
+    void reusesExistingCurrentMemberAndReplaysTheSameRootAdmission() {
+        // given
+        String childYaml = "name: existing current child\ncount: 3\n";
+
+        // when
+        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            ClosureHandle childClosure = blue.documents()
+                    .admitStaticProcessEmbedded(childYaml);
+            DocumentHandle child = childClosure.document("root");
+            ExactBlueValue currentChild = child.snapshot().exact();
+            String rootYaml = "name: parent of existing child\n"
+                    + "child: " + currentChild.json() + "\n"
+                    + embeddedPath("/child");
+
+            ClosureHandle admitted = blue.documents()
+                    .admitStaticProcessEmbedded(rootYaml);
+            ClosureHandle replayed = blue.documents()
+                    .admitStaticProcessEmbedded(rootYaml);
+
+            // then
+            assertEquals(2, admitted.documents().size());
+            assertEquals(child.id(), admitted.document("embedded-0").id());
+            assertEquals(child.id(), admitted.occurrences().get(0)
+                    .targetDocumentId());
+            assertEquals(1, child.history().size(),
+                    "admission must not reinitialize an existing member");
+            assertEquals(admitted.id(), replayed.id());
+            assertEquals(admitted.document("root").id(),
+                    replayed.document("root").id());
+            assertEquals(admitted.document("embedded-0").id(),
+                    replayed.document("embedded-0").id());
+            assertEquals(1, replayed.document("root").history().size());
+        }
+    }
+
+    @Test
+    void preservesAllTypedDemandsWhenSeveralReferencesAreUnavailable() {
+        // given
+        ExactBlueValue first = exact("name: unavailable first\n");
+        ExactBlueValue second = exact("name: unavailable second\n");
+        String rootYaml = "first:\n  blueId: " + first.blueId() + "\n"
+                + "second:\n  blueId: " + second.blueId() + "\n"
+                + "contracts:\n"
+                + "  embedded:\n"
+                + "    type:\n"
+                + "      blueId: " + RuntimeBlueIds.PROCESS_EMBEDDED + "\n"
+                + "    paths: [/first, /second]\n";
+
+        // when
+        try (BlueCoordination blue = BlueCoordination.builder()
+                .exactNodeProvider(ignored -> Optional.empty())
+                .build()) {
+            CoordinationException missing = assertThrows(
+                    CoordinationException.class,
+                    () -> blue.documents()
+                            .admitStaticProcessEmbedded(rootYaml));
+
+            // then
+            assertEquals(CoordinationErrorCode.NEEDS_RESOURCES,
+                    missing.code());
+            assertTrue(missing.getMessage().contains(first.blueId()));
+            assertTrue(missing.getMessage().contains(second.blueId()));
+            assertEquals("/first", missing.details().get("sourcePath"));
         }
     }
 

@@ -43,6 +43,7 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -438,6 +439,66 @@ final class ContractsClosureAdmissionAdapterTest {
                             .PUBLISHED,
                     retried.publicationOutcome());
             assertEquals(2, engine.documentCount());
+        }
+    }
+
+    @Test
+    void automaticStaticExpansionRollsBackAndRetriesAsOnePublication() {
+        // given
+        String rootYaml = """
+                name: static rollback root
+                child:
+                  name: static rollback child
+                contracts:
+                  embedded:
+                    type:
+                      blueId: %s
+                    paths:
+                      - /child
+                """.formatted(RuntimeBlueIds.PROCESS_EMBEDDED);
+        try (DefaultCoordinationEngine engine =
+                     DefaultCoordinationEngine.createContracts10Sdk(
+                             SHA_A, SHA_B)) {
+            Contracts10StaticEmbeddedAdmissionCompiler.CompiledStaticAdmission
+                    compiled = new Contracts10StaticEmbeddedAdmissionCompiler(
+                            engine).compile(rootYaml, ignored -> Optional.empty());
+            engine.authorizeContractsPublicRoots(
+                    Set.of(compiled.rootDocumentId()));
+            engine.contractsClosureAdmissionAdapter().onFailurePoint(point -> {
+                if (point == MultiDocumentPublicationTransaction.FailurePoint
+                        .BEFORE_SWAP) {
+                    throw new IllegalStateException("static-before-swap");
+                }
+            });
+
+            // when
+            assertThrows(IllegalStateException.class, () -> engine
+                    .admitContractsClosure(
+                            compiled.invocation(),
+                            compiled.activationInputs().policy(),
+                            compiled.activationInputs().verifiedFrontier()));
+
+            // then
+            InMemoryDocumentStore.PublicationSnapshot afterFailure = engine
+                    .documents().publicationSnapshot();
+            assertTrue(afterFailure.documentHeads().isEmpty());
+            assertTrue(afterFailure.occurrenceInventory().rows().isEmpty());
+            assertTrue(afterFailure.admissionReceipts().isEmpty());
+
+            engine.contractsClosureAdmissionAdapter().onFailurePoint(
+                    ignored -> { });
+            ContractsClosureAdmissionReceipt retried = engine
+                    .admitContractsClosure(
+                            compiled.invocation(),
+                            compiled.activationInputs().policy(),
+                            compiled.activationInputs().verifiedFrontier());
+            assertEquals(
+                    ContractsClosureAdmissionReceipt.PublicationOutcome
+                            .PUBLISHED,
+                    retried.publicationOutcome());
+            assertEquals(2, engine.documentCount());
+            assertEquals(1, engine.documents().publicationSnapshot()
+                    .occurrenceInventory().rows().size());
         }
     }
 

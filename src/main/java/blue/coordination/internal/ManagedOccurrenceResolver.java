@@ -1,6 +1,7 @@
 package blue.coordination.internal;
 
 import blue.coordination.api.DocumentId;
+import blue.coordination.api.CoordinationException;
 import blue.coordination.api.ExactValue;
 import blue.language.api.NodeProviderOutcome;
 import blue.language.model.Node;
@@ -56,7 +57,7 @@ final class ManagedOccurrenceResolver {
         for (ClosureResourceDemand demand : selected.demands()) {
             if (demand instanceof ExactNodeDemand exact) {
                 metrics.increment(EXACT_NODE_LOOKUPS);
-                Node exactNode = exactBody(exact.blueId());
+                Node exactNode = exactBody(exact.blueId(), exact);
                 if (exactNode == null) {
                     unresolved.add(new UnresolvedDemand(
                             exact,
@@ -97,11 +98,28 @@ final class ManagedOccurrenceResolver {
         if (demand.suppliedExactValue().isPresent()) {
             return demand.suppliedExactValue().orElseThrow();
         }
-        return exactBody(demand.suppliedValueBlueId());
+        return exactBody(demand.suppliedValueBlueId(), demand);
     }
 
-    private Node exactBody(String blueId) {
-        NodeProviderResult result = exactNodes.fetchResultByBlueId(blueId);
+    private Node exactBody(
+            String blueId,
+            ClosureResourceDemand demand) {
+        NodeProviderResult result;
+        try {
+            result = exactNodes.fetchResultByBlueId(blueId);
+        } catch (CoordinationException failure) {
+            LinkedHashMap<String, String> details = new LinkedHashMap<>(
+                    failure.details());
+            details.putIfAbsent("sourceDocumentId",
+                    demand.sourceDocumentId().value());
+            details.putIfAbsent("sourcePath", demand.sourcePath());
+            details.putIfAbsent("blueId", demand.suppliedValueBlueId());
+            throw new CoordinationException(
+                    failure.code(),
+                    failure.getMessage(),
+                    failure,
+                    details);
+        }
         if (result.outcome() != NodeProviderOutcome.FOUND
                 || result.nodes().size() != 1) {
             return null;

@@ -22,10 +22,13 @@ import blue.language.model.NodePathEditor;
 import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.ProcessorDiagnostic;
 import blue.language.processor.closure.ClosureProcessResult;
+import blue.language.processor.closure.ClosureResourceDemand;
 import blue.language.snapshot.FrozenNode;
 
 import java.math.BigInteger;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -247,21 +250,19 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                         exactNodeProvider,
                         activationInputs(Objects.requireNonNull(
                                 activationPolicy, "activationPolicy")));
-        Contracts10AuthoredClosureCompiler.CompiledClosure compiled =
-                selected.compiledClosure();
         DocumentId rootId = selected.rootDocumentId();
-        ContractsClosureAdmissionReceipt receipt = admitCompiled(
-                compiled, Set.of(rootId));
-        LinkedHashMap<String, DocumentHandle> handles = new LinkedHashMap<>();
-        selected.documentsByAlias().forEach((alias, documentId) ->
-                handles.put(alias, requireDocument(documentId)));
-        LinkedHashMap<String, ExactBlueValue> authored = new LinkedHashMap<>();
-        selected.documentsByAlias().forEach((alias, documentId) ->
-                authored.put(alias, ExactBlueValue.wrap(ExactValue.verified(
-                        documentId.value(),
-                        selected.authoredDocument(documentId)))));
-        List<ClosureOccurrenceSnapshot> occurrences = compiled.bindings()
-                .stream()
+        engine.authorizeContractsPublicRoots(Set.of(rootId));
+        Contracts10AuthoredClosureCompiler.ActivationInputs activation =
+                selected.activationInputs();
+        ContractsClosureAdmissionReceipt receipt = engine.admitContractsClosure(
+                selected.invocation(),
+                activation.policy(),
+                activation.verifiedFrontier(),
+                exactNodeProvider);
+        requirePublishedAdmission(receipt);
+        ClosureProcessResult result = receipt.attempt().processResult();
+        List<ClosureOccurrenceSnapshot> occurrences = result
+                .occurrenceBindings().stream()
                 .map(binding -> new ClosureOccurrenceSnapshot(
                         DocumentId.of(binding.sourceDocumentId().value()),
                         binding.sourcePath(),
@@ -270,13 +271,72 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                         binding.expectedTargetBlueId(),
                         binding.active()))
                 .toList();
+        LinkedHashMap<String, DocumentId> aliases = staticAdmissionAliases(
+                rootId, result, occurrences);
+        LinkedHashMap<String, DocumentHandle> handles = new LinkedHashMap<>();
+        LinkedHashMap<String, ExactBlueValue> authored = new LinkedHashMap<>();
+        aliases.forEach((alias, documentId) -> {
+            handles.put(alias, requireDocument(documentId));
+            ExactValue initial = engine.history(documentId).get(0).before()
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Static admission lost authored history for "
+                                    + documentId));
+            authored.put(alias, ExactBlueValue.wrap(initial));
+        });
         return new ClosureHandle(
                 owner,
-                receipt.attempt().processResult().outputClosureIdentity(),
+                result.outputClosureIdentity(),
                 handles,
                 Set.of("root"),
                 authored,
                 occurrences);
+    }
+
+    private static LinkedHashMap<String, DocumentId> staticAdmissionAliases(
+            DocumentId rootId,
+            ClosureProcessResult result,
+            List<ClosureOccurrenceSnapshot> occurrences) {
+        Comparator<ClosureOccurrenceSnapshot> occurrenceOrder = Comparator
+                .comparing(ClosureOccurrenceSnapshot::sourcePath)
+                .thenComparing(row -> row.targetDocumentId().value())
+                .thenComparing(ClosureOccurrenceSnapshot::expectedTargetBlueId);
+        LinkedHashMap<DocumentId, List<ClosureOccurrenceSnapshot>> outgoing =
+                new LinkedHashMap<>();
+        occurrences.forEach(row -> outgoing
+                .computeIfAbsent(row.sourceDocumentId(), ignored ->
+                        new ArrayList<>())
+                .add(row));
+        outgoing.values().forEach(rows -> rows.sort(occurrenceOrder));
+
+        LinkedHashMap<String, DocumentId> aliases = new LinkedHashMap<>();
+        LinkedHashSet<DocumentId> visited = new LinkedHashSet<>();
+        ArrayDeque<DocumentId> queue = new ArrayDeque<>();
+        aliases.put("root", rootId);
+        visited.add(rootId);
+        queue.add(rootId);
+        int embedded = 0;
+        while (!queue.isEmpty()) {
+            DocumentId source = queue.removeFirst();
+            for (ClosureOccurrenceSnapshot row
+                    : outgoing.getOrDefault(source, List.of())) {
+                if (visited.add(row.targetDocumentId())) {
+                    aliases.put("embedded-" + embedded++,
+                            row.targetDocumentId());
+                    queue.addLast(row.targetDocumentId());
+                }
+            }
+        }
+        ArrayList<DocumentId> remaining = result.resultingDocuments().stream()
+                .map(document -> DocumentId.of(
+                        document.documentId().value()))
+                .filter(visited::add)
+                .sorted(Comparator.comparing(DocumentId::value))
+                .collect(java.util.stream.Collectors.toCollection(
+                        ArrayList::new));
+        for (DocumentId documentId : remaining) {
+            aliases.put("embedded-" + embedded++, documentId);
+        }
+        return aliases;
     }
 
     synchronized ClosureHandle admit(ManagedClosure definition) {
@@ -548,15 +608,38 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                         compiled.invocation(),
                         activation.policy(),
                         activation.verifiedFrontier());
-        if (!receipt.published()) {
-            if (!receipt.attempt().isComplete()) {
-                throw new IllegalStateException(
-                        "ADMISSION_NEEDS_RESOURCES: "
-                                + receipt.attempt().requiredExactBlueIds());
-            }
-            throw admissionRejected(receipt.attempt().processResult());
-        }
+        requirePublishedAdmission(receipt);
         return receipt;
+    }
+
+    private static void requirePublishedAdmission(
+            ContractsClosureAdmissionReceipt receipt) {
+        if (receipt.published()) {
+            return;
+        }
+        if (!receipt.attempt().isComplete()) {
+            LinkedHashMap<String, String> details = new LinkedHashMap<>();
+            List<String> required = receipt.attempt().requiredExactBlueIds();
+            if (!required.isEmpty()) {
+                details.put("blueId", required.get(0));
+            }
+            List<ClosureResourceDemand> demands =
+                    receipt.attempt().resourceDemands();
+            if (!demands.isEmpty()) {
+                ClosureResourceDemand first = demands.get(0);
+                details.put("sourceDocumentId",
+                        first.sourceDocumentId().value());
+                details.put("sourcePath", first.sourcePath());
+                details.putIfAbsent("blueId", first.suppliedValueBlueId());
+            }
+            throw new CoordinationException(
+                    CoordinationErrorCode.NEEDS_RESOURCES,
+                    "ADMISSION_NEEDS_RESOURCES: "
+                            + required,
+                    null,
+                    details);
+        }
+        throw admissionRejected(receipt.attempt().processResult());
     }
 
     private static CoordinationException admissionRejected(

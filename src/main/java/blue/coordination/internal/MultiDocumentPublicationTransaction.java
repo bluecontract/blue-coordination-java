@@ -71,6 +71,7 @@ final class MultiDocumentPublicationTransaction {
     private ClosureProcessResult stagedGraphGeneration;
     private ClosureProcessResult stagedClosureSubscriptions;
     private boolean stagedAdmissionResult;
+    private ClosureInvocationInput stagedAdmissionInput;
     private ClosureInvocationInput stagedManagedExpansionInput;
     private ContractsClosureAdmissionReceipt stagedAdmissionReceipt;
     private ContractsClosurePublicationReceipt stagedClosurePublicationReceipt;
@@ -280,6 +281,42 @@ final class MultiDocumentPublicationTransaction {
         stagedGraphGeneration = selected;
         stagedClosureSubscriptions = selected;
         stagedAdmissionResult = true;
+        return this;
+    }
+
+    /**
+     * Stages an authenticated admission which may retain exact existing
+     * members while atomically creating the absent partition.
+     */
+    synchronized MultiDocumentPublicationTransaction
+            stageClosureAdmissionResult(
+                    ClosureInvocationInput input,
+                    ClosureProcessResult result) {
+        ensureOpen();
+        ClosureInvocationInput invocation = Objects.requireNonNull(
+                input, "input");
+        if (invocation.operation()
+                != ClosureInvocationInput.Operation.ADMIT_CLOSURE) {
+            throw new IllegalArgumentException(
+                    "A closure admission requires ADMIT_CLOSURE input");
+        }
+        ClosureProcessResult selected = Objects.requireNonNull(
+                result, "result");
+        if (!selected.commits()
+                || selected.platformCommitCompanion() == null
+                || !selected.invocationIdentity().equals(
+                        invocation.invocationIdentity())
+                || !selected.inputClosureIdentity().equals(
+                        invocation.snapshot().closureIdentity())) {
+            throw new IllegalArgumentException(
+                    "Admission result does not authenticate its input");
+        }
+        if (stagedAdmissionInput != null) {
+            throw new IllegalStateException(
+                    "Closure admission input is already staged");
+        }
+        stageClosureAdmissionResult(selected);
+        stagedAdmissionInput = invocation;
         return this;
     }
 
@@ -550,8 +587,14 @@ final class MultiDocumentPublicationTransaction {
                 stagedGraphGeneration == null
                         ? before.graphGenerations()
                         : stagedAdmissionResult
-                        ? before.graphGenerations().admit(
-                                stagedGraphGeneration, expectedAbsent)
+                        ? stagedAdmissionInput != null
+                                && !expectedHeads.isEmpty()
+                                ? before.graphGenerations().applyExpansion(
+                                        stagedGraphGeneration,
+                                        expectedHeads.keySet(),
+                                        expectedAbsent)
+                                : before.graphGenerations().admit(
+                                        stagedGraphGeneration, expectedAbsent)
                         : stagedManagedExpansionInput != null
                         ? before.graphGenerations().applyExpansion(
                                 stagedGraphGeneration,
@@ -850,10 +893,9 @@ final class MultiDocumentPublicationTransaction {
             throw new IllegalStateException(
                     "Admission and process receipts cannot share a transaction");
         }
-        if (!expectedHeads.isEmpty() || !documentUpdates.isEmpty()) {
+        if (!documentUpdates.isEmpty()) {
             throw new IllegalStateException(
-                    "Mixed existing/new closure admission is not supported; "
-                            + "all admitted lineages must be absent");
+                    "Static admission cannot advance existing document heads");
         }
         if (expectedAbsent.isEmpty()
                 || !newSessions.keySet().equals(expectedAbsent)) {
@@ -875,17 +917,86 @@ final class MultiDocumentPublicationTransaction {
                 .expectedInputDocuments().forEach(document ->
                         companionDocuments.add(DocumentId.of(
                                 document.documentId().value())));
-        if (!resultDocuments.equals(expectedAbsent)
-                || !companionDocuments.equals(expectedAbsent)
-                || !new LinkedHashSet<>(
-                        stagedAdmissionReceipt.documentIds())
-                        .equals(expectedAbsent)
+        LinkedHashSet<DocumentId> expectedMembers = new LinkedHashSet<>(
+                expectedHeads.keySet());
+        expectedMembers.addAll(expectedAbsent);
+        if (!resultDocuments.equals(expectedMembers)
+                || !companionDocuments.equals(expectedMembers)
+                || !new LinkedHashSet<>(stagedAdmissionReceipt.documentIds())
+                        .equals(expectedMembers)
                 || !stagedAdmissionReceipt.attempt().isComplete()
                 || stagedAdmissionReceipt.attempt().processResult()
                         != stagedGraphGeneration) {
             throw new IllegalStateException(
                     "Admission result, companion, sessions, and receipt name "
                             + "different document sets or results");
+        }
+        if (stagedAdmissionInput == null) {
+            if (!expectedHeads.isEmpty()
+                    || !expectedMembers.equals(expectedAbsent)) {
+                throw new IllegalStateException(
+                        "Legacy admission staging requires all members absent");
+            }
+        } else {
+            LinkedHashMap<DocumentId,
+                    blue.language.processor.closure.ManagedDocumentSnapshot>
+                    inputDocuments = new LinkedHashMap<>();
+            stagedAdmissionInput.snapshot().managedDocuments()
+                    .forEach(document -> inputDocuments.put(
+                            DocumentId.of(document.documentId().value()),
+                            document));
+            if (!stagedGraphGeneration.invocationIdentity().equals(
+                    stagedAdmissionInput.invocationIdentity())
+                    || !stagedGraphGeneration.inputClosureIdentity().equals(
+                            stagedAdmissionInput.snapshot().closureIdentity())
+                    || !inputDocuments.keySet().equals(expectedMembers)) {
+                throw new IllegalStateException(
+                        "Admission input, result, and fences name different "
+                                + "members or identities");
+            }
+            Map<DocumentId,
+                    blue.language.processor.closure.ResultingDocument>
+                    indexedResults = new LinkedHashMap<>();
+            stagedGraphGeneration.resultingDocuments().forEach(document ->
+                    indexedResults.put(
+                            DocumentId.of(document.documentId().value()),
+                            document));
+            for (DocumentId documentId : expectedHeads.keySet()) {
+                blue.language.processor.closure.ManagedDocumentSnapshot input =
+                        inputDocuments.get(documentId);
+                blue.language.processor.closure.ResultingDocument result =
+                        indexedResults.get(documentId);
+                InMemoryDocumentStore.DocumentHead expected =
+                        expectedHeads.get(documentId);
+                if (!input.initialized()
+                        || input.epoch() != expected.epoch()
+                        || !input.blueId().equals(expected.blueId())
+                        || !result.beforeBlueId().equals(expected.blueId())
+                        || result.epoch() != expected.epoch()
+                        || !result.afterBlueId().equals(expected.blueId())) {
+                    throw new IllegalStateException(
+                            "Existing admission member is not retained at its "
+                                    + "exact durable head " + documentId);
+                }
+            }
+            for (DocumentId documentId : expectedAbsent) {
+                blue.language.processor.closure.ManagedDocumentSnapshot input =
+                        inputDocuments.get(documentId);
+                blue.language.processor.closure.ResultingDocument result =
+                        indexedResults.get(documentId);
+                DocumentSession session = newSessions.get(documentId);
+                if (input.initialized() || input.terminated()
+                        || input.epoch() != 0L
+                        || !result.initialized()
+                        || result.epoch() != 0L
+                        || session == null
+                        || !session.currentRevision().after().blueId().equals(
+                                result.afterBlueId())) {
+                    throw new IllegalStateException(
+                            "New admission member is not one exact epoch-zero "
+                                    + "initialization " + documentId);
+                }
+            }
         }
         if (!stagedComponentStates.equals(
                 stagedGraphGeneration.resultingComponents())

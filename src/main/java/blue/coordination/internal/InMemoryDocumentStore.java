@@ -159,6 +159,20 @@ final class InMemoryDocumentStore {
     synchronized ClosureSnapshot closureSnapshot(
             Collection<DocumentId> documentIds,
             ClosureTopologySnapshot expectedTopology) {
+        return targetedClosureSnapshot(
+                documentIds, expectedTopology, true);
+    }
+
+    /** Captures a static-admission partition, including the empty partition. */
+    synchronized ClosureSnapshot admissionSnapshot(
+            Collection<DocumentId> documentIds) {
+        return targetedClosureSnapshot(documentIds, null, false);
+    }
+
+    private ClosureSnapshot targetedClosureSnapshot(
+            Collection<DocumentId> documentIds,
+            ClosureTopologySnapshot expectedTopology,
+            boolean requireMember) {
         if (expectedTopology != null
                 && (state.occurrenceInventoryGeneration()
                         != expectedTopology.occurrenceInventoryGeneration()
@@ -182,7 +196,7 @@ final class InMemoryDocumentStore {
                     session.epoch(),
                     session.currentRevision().after().blueId()));
         }
-        if (heads.isEmpty()) {
+        if (requireMember && heads.isEmpty()) {
             throw new IllegalArgumentException(
                     "A closure snapshot requires at least one document");
         }
@@ -222,6 +236,14 @@ final class InMemoryDocumentStore {
     synchronized Optional<ContractsClosurePublicationReceipt>
             closurePublicationReceipt(String publicationIdentity) {
         return Optional.ofNullable(state.closurePublicationReceipts().get(
+                Objects.requireNonNull(
+                        publicationIdentity, "publicationIdentity")));
+    }
+
+    /** Looks up one typed admission receipt without opening document heads. */
+    synchronized Optional<ContractsClosureAdmissionReceipt> admissionReceipt(
+            String publicationIdentity) {
+        return Optional.ofNullable(state.admissionReceipts().get(
                 Objects.requireNonNull(
                         publicationIdentity, "publicationIdentity")));
     }

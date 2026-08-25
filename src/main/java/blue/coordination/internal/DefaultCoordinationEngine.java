@@ -474,6 +474,49 @@ public final class DefaultCoordinationEngine
                 input, selectedPolicy, frontier);
     }
 
+    /**
+     * SDK static-admission seam for resolving exact referenced occurrence
+     * content without changing the provider used by ordinary operations.
+     */
+    public synchronized ContractsClosureAdmissionReceipt
+            admitContractsClosure(
+                    ClosureInvocationInput input,
+                    CoordinationEngine.AdmissionPolicy policy,
+                    ExternalOrderKey verifiedFrontier,
+                    blue.coordination.sdk.ExactNodeProvider exactNodeProvider) {
+        ensureOpen();
+        if (contractsClosureAdapter == null) {
+            throw new CoordinationException(
+                    CoordinationErrorCode.ATOMIC_COMMIT_FAILED,
+                    "admitContractsClosure requires Contracts 1.0 mode");
+        }
+        CoordinationEngine.AdmissionPolicy selectedPolicy =
+                Objects.requireNonNull(policy, "policy");
+        ExternalOrderKey frontier = switch (selectedPolicy) {
+            case FULL_HISTORY -> {
+                requireNoExplicitFrontier(selectedPolicy, verifiedFrontier);
+                yield ExternalOrderKey.of(List.of(
+                        BigInteger.valueOf(Long.MIN_VALUE),
+                        "contracts-full-history-admission",
+                        Objects.requireNonNull(input, "input")
+                                .invocationIdentity()));
+            }
+            case FROM_FRONTIER -> requireRetainedFrontier(verifiedFrontier);
+            case FROM_NOW -> {
+                requireNoExplicitFrontier(selectedPolicy, verifiedFrontier);
+                yield currentContractsAdmissionFrontier(
+                        Objects.requireNonNull(input, "input"));
+            }
+        };
+        return contractsClosureAdmissionAdapter.admitAndPublish(
+                input,
+                selectedPolicy,
+                frontier,
+                Contracts10StaticEmbeddedAdmissionCompiler.verifiedProvider(
+                        Objects.requireNonNull(
+                                exactNodeProvider, "exactNodeProvider")));
+    }
+
     @Override
     public synchronized void configureEmbeddedAdmission(
             DocumentId documentId,
