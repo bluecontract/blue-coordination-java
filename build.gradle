@@ -461,15 +461,16 @@ def publicBoundarySources = files(
         fileTree('src/main/java/blue/coordination/sdk') {
             include '**/*.java'
         })
-// Current Contracts 1.0 maintainability guardrails. These are deliberately
-// bounded caps over the frozen SDK baseline plus the additive audit, exact
-// content-provider, content-identity and static-admission details: currently
-// 172 production sources, 42,713 lines and 56 public api+sdk source types.
-// They are not retained Round 13 counts and are not performance evidence.
+// Dynamic-evolution maintainability guardrails. These are deliberately bounded
+// caps over the frozen SDK baseline plus reviewed automatic occurrence
+// resolution, managed transition evidence, exact-provider and runtime
+// conformance additions: currently 182 production sources, 49,637 lines and
+// 57 public api+sdk source types. They are not historical Round 13 counts and
+// are not performance evidence.
 def currentProductionShapeLimits = [
-        classes: 175,
-        lines: 44_000L,
-        publicApiTypes: 56
+        classes: 184,
+        lines: 50_000L,
+        publicApiTypes: 58
 ]
 def forbiddenArchitectureTokens = [
         'AutonomousLink', 'TemporalWave', 'ConsistencyMode',
@@ -491,16 +492,16 @@ tasks.register('validateProductionShape') {
         }
         def failures = []
         if (classes > currentProductionShapeLimits.classes) {
-            failures << "production classes ${classes} > "
-                    + currentProductionShapeLimits.classes
+            failures << ("production classes ${classes} > "
+                    + currentProductionShapeLimits.classes)
         }
         if (lines > currentProductionShapeLimits.lines) {
-            failures << "production lines ${lines} > "
-                    + currentProductionShapeLimits.lines
+            failures << ("production lines ${lines} > "
+                    + currentProductionShapeLimits.lines)
         }
         if (apiSources.size() > currentProductionShapeLimits.publicApiTypes) {
-            failures << "public API types ${apiSources.size()} > "
-                    + currentProductionShapeLimits.publicApiTypes
+            failures << ("public API types ${apiSources.size()} > "
+                    + currentProductionShapeLimits.publicApiTypes)
         }
         ['engine', 'fastpath'].each { legacy ->
             if (file("src/main/java/blue/coordination/${legacy}").exists()) {
