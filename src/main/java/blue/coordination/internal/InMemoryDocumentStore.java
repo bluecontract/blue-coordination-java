@@ -116,6 +116,18 @@ final class InMemoryDocumentStore {
         return state.lineageIndex();
     }
 
+    /**
+     * Captures the exact immutable indexes used by one occurrence-resolution
+     * attempt without opening or scanning document sessions.
+     */
+    synchronized OccurrenceResolutionSnapshot occurrenceResolutionSnapshot() {
+        return new OccurrenceResolutionSnapshot(
+                state.lineageIndex(),
+                state.occurrenceInventory(),
+                state.occurrenceInventoryGeneration(),
+                state.componentIndexGeneration());
+    }
+
     EngineMetrics metrics() {
         return metrics;
     }
@@ -241,6 +253,26 @@ final class InMemoryDocumentStore {
             throw new IllegalStateException(label + " exhausted");
         }
         return Math.addExact(value, 1L);
+    }
+
+    /** Immutable indexed store image for one managed-occurrence resolution. */
+    record OccurrenceResolutionSnapshot(
+            ManagedLineageIndex lineageIndex,
+            ManagedOccurrenceInventory occurrenceInventory,
+            long occurrenceInventoryGeneration,
+            long componentIndexGeneration) {
+        OccurrenceResolutionSnapshot {
+            lineageIndex = Objects.requireNonNull(
+                    lineageIndex, "lineageIndex");
+            occurrenceInventory = Objects.requireNonNull(
+                    occurrenceInventory, "occurrenceInventory");
+            MultiDocumentPublicationTransaction.requireSafeInteger(
+                    occurrenceInventoryGeneration,
+                    "occurrenceInventoryGeneration");
+            MultiDocumentPublicationTransaction.requireSafeInteger(
+                    componentIndexGeneration,
+                    "componentIndexGeneration");
+        }
     }
 
     /** Immutable durable publication image; exactly one instance is swapped. */
