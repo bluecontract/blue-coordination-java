@@ -136,6 +136,8 @@ final class InMemoryDocumentStore {
     synchronized StoreStructureSnapshot storeStructureSnapshotForTesting() {
         return new StoreStructureSnapshot(
                 state.sessionIndex(),
+                state.componentIndex(),
+                state.componentStateInventory(),
                 state.outboxLog(),
                 state.checkpointEvidenceLog(),
                 state.publicationReceiptIndex(),
@@ -156,7 +158,8 @@ final class InMemoryDocumentStore {
                 state.occurrenceInventoryGeneration(),
                 state.componentIndexGeneration(),
                 state.occurrenceInventory(),
-                state.componentIndex());
+                state.componentIndex(),
+                state.closureSubscriptions());
     }
 
     /** Captures only the durable heads and component states in one cohort. */
@@ -313,6 +316,8 @@ final class InMemoryDocumentStore {
 
     record StoreStructureSnapshot(
             PersistentOrderedMap<DocumentId, DocumentSession> sessions,
+            ProcessEmbeddedComponentIndex componentIndex,
+            ComponentStateInventory componentStates,
             PersistentAppendLog<PublicEventOccurrence> outbox,
             PersistentAppendLog<CheckpointWrite> checkpoints,
             PersistentOrderedMap<String, Boolean> publicationReceipts,
@@ -322,6 +327,10 @@ final class InMemoryDocumentStore {
                     closurePublicationReceipts) {
         StoreStructureSnapshot {
             sessions = Objects.requireNonNull(sessions, "sessions");
+            componentIndex = Objects.requireNonNull(
+                    componentIndex, "componentIndex");
+            componentStates = Objects.requireNonNull(
+                    componentStates, "componentStates");
             outbox = Objects.requireNonNull(outbox, "outbox");
             checkpoints = Objects.requireNonNull(checkpoints, "checkpoints");
             publicationReceipts = Objects.requireNonNull(
@@ -336,6 +345,32 @@ final class InMemoryDocumentStore {
         int sharedSessionNodes(StoreStructureSnapshot other) {
             return sessions.sharedNodeCountForTesting(
                     Objects.requireNonNull(other, "other").sessions);
+        }
+
+        int sharedComponentIndexNodes(StoreStructureSnapshot other) {
+            return componentIndex.sharedComponentNodesForTesting(
+                    Objects.requireNonNull(other, "other").componentIndex);
+        }
+
+        int sharedComponentStateNodes(StoreStructureSnapshot other) {
+            return componentStates.sharedLineageNodesForTesting(
+                    Objects.requireNonNull(other, "other").componentStates);
+        }
+
+        boolean sameComponentIndexEntryIdentity(
+                StoreStructureSnapshot other,
+                DocumentId document) {
+            return componentIndex.sameComponentEntryIdentityForTesting(
+                    Objects.requireNonNull(other, "other").componentIndex,
+                    document);
+        }
+
+        boolean sameComponentStateEntryIdentity(
+                StoreStructureSnapshot other,
+                DocumentId document) {
+            return componentStates.sameStateEntryIdentityForTesting(
+                    Objects.requireNonNull(other, "other").componentStates,
+                    document);
         }
 
         boolean evidenceExtends(StoreStructureSnapshot prefix) {
@@ -365,10 +400,7 @@ final class InMemoryDocumentStore {
         private final ProcessEmbeddedComponentIndex componentIndex;
         private final long componentIndexGeneration;
         private final ClosureGraphGenerationInventory graphGenerations;
-        private final List<ComponentSnapshot> componentStates;
-        private final Map<DocumentId, ComponentSnapshot>
-                componentStateByDocument;
-        private final Map<String, Integer> componentStateOrder;
+        private final ComponentStateInventory componentStates;
         private final ClosureSubscriptionInventory closureSubscriptions;
         private final PersistentAppendLog<PublicEventOccurrence> outbox;
         private final PersistentAppendLog<CheckpointWrite>
@@ -472,11 +504,8 @@ final class InMemoryDocumentStore {
                         component.componentStateIdentity(), statePosition);
             }
             requireCondensationOrder(canonicalComponents, componentIndex);
-            this.componentStates = List.copyOf(canonicalComponents);
-            this.componentStateByDocument = Collections.unmodifiableMap(
-                    byDocument);
-            this.componentStateOrder = Collections.unmodifiableMap(
-                    orderByIdentity);
+            this.componentStates = ComponentStateInventory.of(
+                    canonicalComponents);
             this.closureSubscriptions = Objects.requireNonNull(
                     closureSubscriptions, "closureSubscriptions");
             this.closureSubscriptions.states().forEach(state -> {
@@ -494,7 +523,7 @@ final class InMemoryDocumentStore {
                             "Closure subscription does not identify the durable "
                                     + "document head " + owner);
                 }
-                ComponentSnapshot component = componentStateByDocument.get(
+                ComponentSnapshot component = this.componentStates.forDocument(
                         owner);
                 if (component == null) {
                     throw new IllegalArgumentException(
@@ -613,7 +642,7 @@ final class InMemoryDocumentStore {
                 ProcessEmbeddedComponentIndex componentIndex,
                 long componentIndexGeneration,
                 ClosureGraphGenerationInventory graphGenerations,
-                Collection<ComponentSnapshot> componentStates,
+                ComponentStateInventory componentStates,
                 ClosureSubscriptionInventory closureSubscriptions,
                 PersistentAppendLog<PublicEventOccurrence> outbox,
                 PersistentAppendLog<CheckpointWrite> checkpointEvidence,
@@ -643,46 +672,8 @@ final class InMemoryDocumentStore {
             this.graphGenerations = Objects.requireNonNull(
                     graphGenerations, "graphGenerations");
 
-            ArrayList<ComponentSnapshot> canonicalComponents =
-                    new ArrayList<>(Objects.requireNonNull(
-                            componentStates, "componentStates"));
-            Set<String> componentLineages = new LinkedHashSet<>();
-            Set<String> componentStateIdentities = new LinkedHashSet<>();
-            Set<String> componentMembers = new LinkedHashSet<>();
-            LinkedHashMap<DocumentId, ComponentSnapshot> byDocument =
-                    new LinkedHashMap<>();
-            LinkedHashMap<String, Integer> orderByIdentity =
-                    new LinkedHashMap<>();
-            for (int statePosition = 0;
-                    statePosition < canonicalComponents.size();
-                    statePosition++) {
-                ComponentSnapshot component = canonicalComponents.get(
-                        statePosition);
-                if (!componentLineages.add(component.componentIdentity())
-                        || !componentStateIdentities.add(
-                                component.componentStateIdentity())) {
-                    throw new IllegalArgumentException(
-                            "Trusted transition contains duplicate component "
-                                    + "identity");
-                }
-                component.orderedMemberDocumentIds().forEach(documentId -> {
-                    if (!componentMembers.add(documentId.value())) {
-                        throw new IllegalArgumentException(
-                                "Trusted transition contains overlapping "
-                                        + "component member "
-                                        + documentId.value());
-                    }
-                    byDocument.put(
-                            DocumentId.of(documentId.value()), component);
-                });
-                orderByIdentity.put(
-                        component.componentStateIdentity(), statePosition);
-            }
-            this.componentStates = List.copyOf(canonicalComponents);
-            this.componentStateByDocument = Collections.unmodifiableMap(
-                    byDocument);
-            this.componentStateOrder = Collections.unmodifiableMap(
-                    orderByIdentity);
+            this.componentStates = Objects.requireNonNull(
+                    componentStates, "componentStates");
             this.closureSubscriptions = Objects.requireNonNull(
                     closureSubscriptions, "closureSubscriptions");
             this.outbox = Objects.requireNonNull(outbox, "outbox");
@@ -711,7 +702,7 @@ final class InMemoryDocumentStore {
                 ProcessEmbeddedComponentIndex componentIndex,
                 long componentIndexGeneration,
                 ClosureGraphGenerationInventory graphGenerations,
-                Collection<ComponentSnapshot> componentStates,
+                ComponentStateInventory componentStates,
                 ClosureSubscriptionInventory closureSubscriptions,
                 PersistentAppendLog<PublicEventOccurrence> outbox,
                 PersistentAppendLog<CheckpointWrite> checkpointEvidence,
@@ -764,7 +755,8 @@ final class InMemoryDocumentStore {
                 ManagedLineageIndex replacementLineages,
                 ProcessEmbeddedComponentIndex replacementIndex,
                 long replacementIndexGeneration) {
-            List<ComponentSnapshot> retainedComponents = componentStates.stream()
+            List<ComponentSnapshot> retainedComponents = componentStates()
+                    .stream()
                     .filter(component -> component.orderedMemberDocumentIds()
                             .stream().allMatch(documentId ->
                                     replacementSessions.containsKey(DocumentId.of(
@@ -822,27 +814,20 @@ final class InMemoryDocumentStore {
         }
 
         List<ComponentSnapshot> componentStates() {
-            return componentStates;
+            return componentStates.states(componentIndex);
         }
 
         List<ComponentSnapshot> componentStatesFor(
                 Collection<DocumentId> documentIds) {
-            LinkedHashMap<String, ComponentSnapshot> selected =
-                    new LinkedHashMap<>();
-            for (DocumentId documentId : documentIds) {
-                ComponentSnapshot component = componentStateByDocument.get(
-                        Objects.requireNonNull(documentId, "documentId"));
-                if (component != null) {
-                    selected.putIfAbsent(
-                            component.componentStateIdentity(), component);
-                }
-            }
-            ArrayList<ComponentSnapshot> canonical = new ArrayList<>(
-                    selected.values());
-            canonical.sort((left, right) -> Integer.compare(
-                    componentStateOrder.get(left.componentStateIdentity()),
-                    componentStateOrder.get(right.componentStateIdentity())));
-            return List.copyOf(canonical);
+            return componentStates.statesFor(documentIds, componentIndex);
+        }
+
+        ComponentStateInventory componentStateInventory() {
+            return componentStates;
+        }
+
+        ComponentSnapshot componentState(String componentIdentity) {
+            return componentStates.byLineage(componentIdentity);
         }
 
         ClosureSubscriptionInventory closureSubscriptions() {
@@ -1072,7 +1057,8 @@ final class InMemoryDocumentStore {
             long occurrenceInventoryGeneration,
             long componentIndexGeneration,
             ManagedOccurrenceInventory occurrenceInventory,
-            ProcessEmbeddedComponentIndex componentIndex) {
+            ProcessEmbeddedComponentIndex componentIndex,
+            ClosureSubscriptionInventory closureSubscriptions) {
         ClosureTopologySnapshot {
             MultiDocumentPublicationTransaction.requireSafeInteger(
                     occurrenceInventoryGeneration,
@@ -1084,6 +1070,8 @@ final class InMemoryDocumentStore {
                     occurrenceInventory, "occurrenceInventory");
             componentIndex = Objects.requireNonNull(
                     componentIndex, "componentIndex");
+            closureSubscriptions = Objects.requireNonNull(
+                    closureSubscriptions, "closureSubscriptions");
         }
     }
 

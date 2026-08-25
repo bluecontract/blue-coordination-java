@@ -376,6 +376,34 @@ final class ClosureSubscriptionInventoryTest {
     }
 
     @Test
+    void retainsProcessorOnlyEmbeddedDemandByExactSourcePath() {
+        // given
+        ClosureSubscriptionInventory before =
+                ClosureSubscriptionInventory.empty()
+                        .replaceEmbeddedDemands(
+                                A,
+                                List.of(new ClosureSubscriptionInventory
+                                        .EmbeddedDemand(
+                                                "fromChild",
+                                                "/child",
+                                                "embedded-contribution")));
+
+        // when
+        ClosureSubscriptionInventory retained = before.retainingDocuments(
+                List.of(A));
+        ClosureSubscriptionInventory dropped = before.retainingDocuments(
+                List.of(B));
+
+        // then
+        assertTrue(retained.hasEmbeddedDemand(A, "/child"));
+        assertFalse(retained.hasEmbeddedDemand(A, "/other"));
+        assertFalse(dropped.hasEmbeddedDemand(A, "/child"));
+        assertTrue(retained.statesFor(A).isEmpty(),
+                "processor-only demand must not require an external "
+                        + "subscription row");
+    }
+
+    @Test
     void randomizedSubscriptionRetentionMatchesCanonicalSlotProjection() {
         // given
         SubscriptionState template = delta(

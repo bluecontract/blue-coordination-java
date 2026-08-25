@@ -6,7 +6,13 @@ import blue.language.processor.closure.ClosureProcessResult;
 import blue.language.processor.closure.ResultingDocument;
 import blue.language.processor.closure.SubscriptionDelta;
 import blue.language.processor.closure.SubscriptionState;
+import blue.language.processor.EffectiveContractSnapshot;
+import blue.language.processor.ManagedRootChannelOccurrence;
+import blue.language.processor.ManagedRootSubscriptionSurface;
+import blue.language.processor.registry.RuntimeBlueIds;
+import blue.language.snapshot.FrozenNode;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -25,17 +31,26 @@ final class ClosureSubscriptionInventory {
     private final PersistentOrderedMap<String, Slot> slotByIdentity;
     private final PersistentOrderedMap<String,
             PersistentOrderedMap<String, SubscriptionState>> byDocument;
+    private final PersistentOrderedMap<DocumentId,
+            PersistentOrderedMap<String, EmbeddedDemand>>
+            embeddedDemandsByDocument;
     private final int lastOperationComparisons;
     private final int lastOperationCopiedNodes;
     private final int lastOperationVisitedRows;
 
     private ClosureSubscriptionInventory(
             Indexes indexes,
+            PersistentOrderedMap<DocumentId,
+                    PersistentOrderedMap<String, EmbeddedDemand>>
+                    embeddedDemandsByDocument,
             Work work) {
         Indexes exact = Objects.requireNonNull(indexes, "indexes");
         this.bySlot = exact.bySlot();
         this.slotByIdentity = exact.slotByIdentity();
         this.byDocument = exact.byDocument();
+        this.embeddedDemandsByDocument = Objects.requireNonNull(
+                embeddedDemandsByDocument,
+                "embeddedDemandsByDocument");
         Work exactWork = Objects.requireNonNull(work, "work");
         this.lastOperationComparisons = exactWork.comparisons;
         this.lastOperationCopiedNodes = exactWork.copiedNodes;
@@ -44,7 +59,7 @@ final class ClosureSubscriptionInventory {
 
     static ClosureSubscriptionInventory empty() {
         return new ClosureSubscriptionInventory(
-                Indexes.empty(), new Work());
+                Indexes.empty(), emptyEmbeddedDemands(), new Work());
     }
 
     static ClosureSubscriptionInventory of(
@@ -65,7 +80,8 @@ final class ClosureSubscriptionInventory {
             }
             indexes = insertAbsent(indexes, exact, work);
         }
-        return new ClosureSubscriptionInventory(indexes, work);
+        return new ClosureSubscriptionInventory(
+                indexes, emptyEmbeddedDemands(), work);
     }
 
     /** Applies one already verified successful result to the durable inventory. */
@@ -140,7 +156,8 @@ final class ClosureSubscriptionInventory {
                 resultingDocuments,
                 verified.graphGeneration(),
                 work);
-        return new ClosureSubscriptionInventory(next, work);
+        return new ClosureSubscriptionInventory(
+                next, embeddedDemandsByDocument, work);
     }
 
     ClosureSubscriptionInventory retainingDocuments(
@@ -153,8 +170,18 @@ final class ClosureSubscriptionInventory {
                     document, "document").value());
         }
         Indexes selected = Indexes.empty();
+        PersistentOrderedMap<DocumentId,
+                PersistentOrderedMap<String, EmbeddedDemand>>
+                selectedDemands = emptyEmbeddedDemands();
         Work work = new Work();
         for (String documentId : retained) {
+            DocumentId coordinationId = DocumentId.of(documentId);
+            PersistentOrderedMap<String, EmbeddedDemand> demandBucket =
+                    embeddedDemandsByDocument.get(coordinationId);
+            if (demandBucket != null) {
+                selectedDemands = selectedDemands.put(
+                        coordinationId, demandBucket).map();
+            }
             PersistentOrderedMap.ReadResult<PersistentOrderedMap<String,
                     SubscriptionState>> bucketRead =
                     byDocument.read(documentId);
@@ -189,7 +216,8 @@ final class ClosureSubscriptionInventory {
                     selected.slotByIdentity(),
                     documentMutation.map());
         }
-        return new ClosureSubscriptionInventory(selected, work);
+        return new ClosureSubscriptionInventory(
+                selected, selectedDemands, work);
     }
 
     List<SubscriptionState> states() {
@@ -202,6 +230,110 @@ final class ClosureSubscriptionInventory {
         PersistentOrderedMap<String, SubscriptionState> bucket =
                 byDocument.get(selected);
         return bucket == null ? List.of() : bucket.values();
+    }
+
+    ClosureSubscriptionInventory replaceEmbeddedDemands(
+            DocumentId documentId,
+            Collection<EmbeddedDemand> demands) {
+        DocumentId selectedDocument = Objects.requireNonNull(
+                documentId, "documentId");
+        PersistentOrderedMap<String, EmbeddedDemand> replacement =
+                PersistentOrderedMap.empty(EmbeddingBinding.TEXT_ORDER);
+        for (EmbeddedDemand demand : Objects.requireNonNull(
+                demands, "demands")) {
+            EmbeddedDemand selected = Objects.requireNonNull(
+                    demand, "embedded demand");
+            if (replacement.containsKey(selected.sourcePath())) {
+                continue;
+            }
+            replacement = replacement.put(
+                    selected.sourcePath(), selected).map();
+        }
+        PersistentOrderedMap<DocumentId,
+                PersistentOrderedMap<String, EmbeddedDemand>> updated =
+                replacement.isEmpty()
+                        ? embeddedDemandsByDocument.remove(
+                                selectedDocument).map()
+                        : embeddedDemandsByDocument.put(
+                                selectedDocument, replacement).map();
+        Work retainedWork = new Work();
+        retainedWork.comparisons = lastOperationComparisons;
+        retainedWork.copiedNodes = lastOperationCopiedNodes;
+        retainedWork.visitedRows = lastOperationVisitedRows;
+        return new ClosureSubscriptionInventory(
+                new Indexes(bySlot, slotByIdentity, byDocument),
+                updated,
+                retainedWork);
+    }
+
+    boolean hasEmbeddedDemand(DocumentId documentId, String sourcePath) {
+        PersistentOrderedMap<String, EmbeddedDemand> bucket =
+                embeddedDemandsByDocument.get(Objects.requireNonNull(
+                        documentId, "documentId"));
+        return bucket != null && bucket.containsKey(Objects.requireNonNull(
+                sourcePath, "sourcePath"));
+    }
+
+    record EmbeddedDemand(
+            String rawChannelKey,
+            String sourcePath,
+            String effectiveRuntimeContributionBlueId) {
+        EmbeddedDemand {
+            rawChannelKey = requireText(rawChannelKey, "rawChannelKey");
+            sourcePath = requireText(sourcePath, "sourcePath");
+            effectiveRuntimeContributionBlueId = requireText(
+                    effectiveRuntimeContributionBlueId,
+                    "effectiveRuntimeContributionBlueId");
+        }
+    }
+
+    static List<EmbeddedDemand> embeddedDemands(
+            ManagedRootSubscriptionSurface surface) {
+        ManagedRootSubscriptionSurface projected = Objects.requireNonNull(
+                surface, "surface");
+        Map<String, ManagedRootChannelOccurrence> channels =
+                new LinkedHashMap<>();
+        for (ManagedRootChannelOccurrence channel
+                : projected.channelOccurrences()) {
+            channels.put(channel.rawChannelKey(), channel);
+        }
+        ArrayList<EmbeddedDemand> result = new ArrayList<>();
+        for (EffectiveContractSnapshot contract
+                : projected.effectiveRootContracts()) {
+            if (!RuntimeBlueIds.EMBEDDED_NODE_CHANNEL.equals(
+                    contract.effectiveTypeBlueId())) {
+                continue;
+            }
+            ManagedRootChannelOccurrence channel = channels.get(
+                    contract.key());
+            if (channel == null
+                    || !channel.effectiveTypeBlueId().equals(
+                            contract.effectiveTypeBlueId())) {
+                throw new IllegalArgumentException(
+                        "Embedded Node Channel projection is incomplete at "
+                                + contract.key());
+            }
+            FrozenNode sourcePath = contract.headerFields().get(
+                    "sourcePath");
+            if (sourcePath == null
+                    || !(sourcePath.getValue() instanceof String path)
+                    || path.isBlank()) {
+                throw new IllegalArgumentException(
+                        "Embedded Node Channel has no exact sourcePath at "
+                                + contract.key());
+            }
+            result.add(new EmbeddedDemand(
+                    channel.rawChannelKey(),
+                    path,
+                    channel.effectiveRuntimeContributionBlueId()));
+        }
+        return List.copyOf(result);
+    }
+
+    private static PersistentOrderedMap<DocumentId,
+            PersistentOrderedMap<String, EmbeddedDemand>>
+            emptyEmbeddedDemands() {
+        return PersistentOrderedMap.empty(EmbeddingBinding.DOCUMENT_ORDER);
     }
 
     private static void requireResultingStates(

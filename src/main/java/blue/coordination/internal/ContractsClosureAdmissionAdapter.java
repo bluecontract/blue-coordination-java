@@ -901,20 +901,21 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
             InMemoryDocumentStore.ClosureSnapshot before) {
         ClosureInvocationInput input = invocation.input();
         Set<DocumentId> memberSet = new LinkedHashSet<>(members);
-        ManagedOccurrenceInventory resultingInventory = mergeAdmissionInventory(
+        ManagedOccurrenceInventory.DeltaResult inventoryDelta =
+                mergeAdmissionInventory(
                 before.occurrenceInventory(),
                 result.occurrenceBindings(),
-                memberSet,
-                runtime.metrics());
-        boolean inventoryChanged = !sameInventory(
-                before.occurrenceInventory(), resultingInventory);
+                memberSet);
+        ManagedOccurrenceInventory resultingInventory =
+                inventoryDelta.inventory();
+        boolean inventoryChanged = inventoryDelta.changed();
         long inventoryGeneration = transitionGeneration(
                 before.occurrenceInventoryGeneration(),
                 inventoryChanged,
                 "occurrence inventory generation");
         boolean componentIndexChanged = !invocation.newDocuments().isEmpty()
-                || !sameActiveTopology(
-                        before.occurrenceInventory(), resultingInventory);
+                || !sameActiveTopologyForSources(
+                before.occurrenceInventory(), resultingInventory, memberSet);
         long componentIndexGeneration = transitionGeneration(
                 before.componentIndexGeneration(),
                 componentIndexChanged,
@@ -1014,6 +1015,10 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                 ManagedRootSubscriptionSurface rootSurface = contracts
                         .projectRootSubscriptionSurface(
                                 resulting.document());
+                transaction.stageEmbeddedDemands(
+                        documentId,
+                        ClosureSubscriptionInventory.embeddedDemands(
+                                rootSurface));
                 RoutingSurface routingSurface = RoutingSurface
                         .fromManagedRootContracts(
                                 rootSurface.effectiveRootContracts());
@@ -1157,30 +1162,22 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
         }
     }
 
-    private static ManagedOccurrenceInventory mergeAdmissionInventory(
+    private static ManagedOccurrenceInventory.DeltaResult
+            mergeAdmissionInventory(
             ManagedOccurrenceInventory before,
             Collection<ManagedOccurrenceBinding> admittedRows,
-            Set<DocumentId> admittedMembers,
-            EngineMetrics metrics) {
-        ContractsStructuralWorkMetrics.recordGlobalPass(
-                metrics,
-                ContractsStructuralWorkMetrics
-                        .GLOBAL_OCCURRENCE_ENTRIES_TRAVERSED,
-                before.rows().size());
-        ArrayList<ManagedOccurrenceBinding> merged = new ArrayList<>();
-        for (ManagedOccurrenceBinding row : before.rows()) {
-            boolean source = admittedMembers.contains(
-                    coordinationId(row.sourceDocumentId()));
-            boolean target = admittedMembers.contains(
-                    coordinationId(row.targetDocumentId()));
-            if (source && !target) {
-                throw new UnsupportedOperationException(
-                        "Forward admission closure omitted an outgoing target");
-            }
-            if (!source) {
-                merged.add(row);
+            Set<DocumentId> admittedMembers) {
+        for (DocumentId source : admittedMembers) {
+            for (ManagedOccurrenceBinding row : before.rowsFrom(source)) {
+                if (!admittedMembers.contains(
+                        coordinationId(row.targetDocumentId()))) {
+                    throw new UnsupportedOperationException(
+                            "Forward admission closure omitted an outgoing "
+                                    + "target");
+                }
             }
         }
+        ArrayList<ManagedOccurrenceBinding> merged = new ArrayList<>();
         for (ManagedOccurrenceBinding row : Objects.requireNonNull(
                 admittedRows, "admittedRows")) {
             if (!admittedMembers.contains(DocumentId.of(
@@ -1192,28 +1189,22 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
             }
             merged.add(row);
         }
-        ContractsStructuralWorkMetrics.recordGlobalPass(
-                metrics,
-                ContractsStructuralWorkMetrics
-                        .GLOBAL_OCCURRENCE_ENTRIES_TRAVERSED,
-                merged.size());
-        return ManagedOccurrenceInventory.of(merged);
+        return before.replaceSources(admittedMembers, merged);
     }
 
-    private static boolean sameInventory(
+    private static boolean sameActiveTopologyForSources(
             ManagedOccurrenceInventory first,
-            ManagedOccurrenceInventory second) {
-        return first.rows().stream().map(OccurrenceProjection::from).toList()
-                .equals(second.rows().stream()
-                        .map(OccurrenceProjection::from).toList());
-    }
-
-    private static boolean sameActiveTopology(
-            ManagedOccurrenceInventory first,
-            ManagedOccurrenceInventory second) {
-        return first.activeRows().stream().map(ActiveEdge::from).toList()
-                .equals(second.activeRows().stream()
-                        .map(ActiveEdge::from).toList());
+            ManagedOccurrenceInventory second,
+            Collection<DocumentId> sources) {
+        for (DocumentId source : sources) {
+            if (!first.activeRowsFrom(source).stream()
+                    .map(ActiveEdge::from).toList()
+                    .equals(second.activeRowsFrom(source).stream()
+                            .map(ActiveEdge::from).toList())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static long transitionGeneration(

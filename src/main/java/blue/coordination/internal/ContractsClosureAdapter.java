@@ -225,6 +225,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     topology.componentIndex(),
                     topology.occurrenceInventory(),
                     selection,
+                    row -> hasTypedIncomingDemand(
+                            topology.closureSubscriptions(), row),
                     runtime.metrics());
             LinkedHashSet<DocumentId> selectedMembers = new LinkedHashSet<>();
             selectedCohorts.forEach(cohort -> selectedMembers.addAll(
@@ -631,13 +633,32 @@ final class ContractsClosureAdapter implements AutoCloseable {
             ManagedOccurrenceInventory occurrenceInventory,
             OperationRouteIndex.FrozenDirectDeliverySelection selection) {
         return partitionSelection(
-                componentIndex, occurrenceInventory, selection, null);
+                componentIndex,
+                occurrenceInventory,
+                selection,
+                ignored -> false,
+                null);
     }
 
     static List<CohortSelection> partitionSelection(
             ProcessEmbeddedComponentIndex componentIndex,
             ManagedOccurrenceInventory occurrenceInventory,
             OperationRouteIndex.FrozenDirectDeliverySelection selection,
+            EngineMetrics metrics) {
+        return partitionSelection(
+                componentIndex,
+                occurrenceInventory,
+                selection,
+                ignored -> false,
+                metrics);
+    }
+
+    private static List<CohortSelection> partitionSelection(
+            ProcessEmbeddedComponentIndex componentIndex,
+            ManagedOccurrenceInventory occurrenceInventory,
+            OperationRouteIndex.FrozenDirectDeliverySelection selection,
+            java.util.function.Predicate<ManagedOccurrenceBinding>
+                    incomingDemand,
             EngineMetrics metrics) {
         ProcessEmbeddedComponentIndex index = Objects.requireNonNull(
                 componentIndex, "componentIndex");
@@ -656,7 +677,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 continue;
             }
             ConnectedSelection connected = connectedSelection(
-                    inventory, directTarget);
+                    inventory, incomingDemand, directTarget);
             connected = mergeIntersecting(groups, connected);
             groups.add(connected);
             occurrenceRowsExamined = Math.addExact(
@@ -690,6 +711,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
 
     private static ConnectedSelection connectedSelection(
             ManagedOccurrenceInventory inventory,
+            java.util.function.Predicate<ManagedOccurrenceBinding>
+                    incomingDemand,
             DocumentId start) {
         TreeMap<DocumentId, Boolean> discovered = new TreeMap<>(
                 EmbeddingBinding.DOCUMENT_ORDER);
@@ -701,16 +724,34 @@ final class ContractsClosureAdapter implements AutoCloseable {
         long rowsExamined = 0L;
         while (!pending.isEmpty()) {
             DocumentId current = pending.removeFirst();
-            for (ManagedOccurrenceBinding row
-                    : inventory.rowsFrom(current)) {
-                rowsExamined = Math.addExact(rowsExamined, 1L);
+            for (ManagedOccurrenceBinding row : inventory.rowsFrom(current)) {
                 if (occurrences.putIfAbsent(
                         row.occurrenceIdentity(), row) != null) {
                     continue;
                 }
+                rowsExamined = Math.addExact(rowsExamined, 1L);
                 DocumentId target = coordinationId(row.targetDocumentId());
                 if (discovered.putIfAbsent(target, Boolean.TRUE) == null) {
                     pending.addLast(target);
+                }
+            }
+            for (ManagedOccurrenceBinding row
+                    : inventory.rowsTouching(current)) {
+                DocumentId target = coordinationId(row.targetDocumentId());
+                if (!target.equals(current)) {
+                    continue;
+                }
+                DocumentId source = coordinationId(row.sourceDocumentId());
+                if (source.equals(current)
+                        || !row.active()
+                        || !incomingDemand.test(row)
+                        || occurrences.putIfAbsent(
+                                row.occurrenceIdentity(), row) != null) {
+                    continue;
+                }
+                rowsExamined = Math.addExact(rowsExamined, 1L);
+                if (discovered.putIfAbsent(source, Boolean.TRUE) == null) {
+                    pending.addLast(source);
                 }
             }
         }
@@ -721,6 +762,13 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 new ArrayList<>(discovered.keySet()),
                 canonicalOccurrences,
                 rowsExamined);
+    }
+
+    private boolean hasTypedIncomingDemand(
+            ClosureSubscriptionInventory subscriptions,
+            ManagedOccurrenceBinding row) {
+        DocumentId source = coordinationId(row.sourceDocumentId());
+        return subscriptions.hasEmbeddedDemand(source, row.sourcePath());
     }
 
     private static ConnectedSelection mergeIntersecting(
@@ -1743,19 +1791,21 @@ final class ContractsClosureAdapter implements AutoCloseable {
         InMemoryDocumentStore.ClosureSnapshot current =
                 documents.closureSnapshot(invocation.existingMemberSet());
         requireCohortStillCurrent(invocation, current);
-        ManagedOccurrenceInventory resultingInventory = mergeInventory(
+        ManagedOccurrenceInventory.DeltaResult inventoryDelta =
+                mergeInventory(
                 current.occurrenceInventory(),
                 invocation.memberSet(),
                 result.occurrenceBindings());
+        ManagedOccurrenceInventory resultingInventory =
+                inventoryDelta.inventory();
         long resultingInventoryGeneration = transitionGeneration(
                 current.occurrenceInventoryGeneration(),
-                !sameInventory(
-                        current.occurrenceInventory(),
-                        resultingInventory),
+                inventoryDelta.changed(),
                 "occurrence inventory generation");
-        boolean topologyChanged = !sameActiveTopology(
+        boolean topologyChanged = !sameActiveTopologyForSources(
                 current.occurrenceInventory(),
-                resultingInventory);
+                resultingInventory,
+                invocation.memberSet());
         long resultingComponentIndexGeneration = transitionGeneration(
                 current.componentIndexGeneration(),
                 topologyChanged,
@@ -1787,9 +1837,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         transaction.expectComponentState(component);
                     }
                 });
-        if (invocation.managedExpansion() || !sameInventory(
-                current.occurrenceInventory(),
-                resultingInventory)) {
+        if (invocation.managedExpansion() || inventoryDelta.changed()) {
             transaction.stageOccurrenceInventory(
                     resultingInventory,
                     resultingInventoryGeneration,
@@ -1811,14 +1859,6 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 resultingDocuments(result, invocation.memberSet());
         Map<DocumentId, Long> gasByDocument = gasByDocument(
                 result, resultingDocuments.keySet());
-        ContractsStructuralWorkMetrics.recordGlobalPasses(
-                runtime.metrics(),
-                ContractsStructuralWorkMetrics
-                        .GLOBAL_SUBSCRIPTION_ENTRIES_TRAVERSED,
-                3L,
-                Math.multiplyExact(
-                        current.closureSubscriptions().states().size(),
-                        3L));
         ClosureSubscriptionInventory resultingClosureSubscriptions =
                 current.closureSubscriptions().apply(result);
         WholeObjectStore.Mark objectMark = objects.mark();
@@ -1842,6 +1882,10 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     }
                     ManagedRootSubscriptionSurface projected = contracts
                             .projectRootSubscriptionSurface(after.document());
+                    transaction.stageEmbeddedDemands(
+                            entry.getKey(),
+                            ClosureSubscriptionInventory.embeddedDemands(
+                                    projected));
                     RoutingSurface routingSurface = RoutingSurface
                             .fromManagedRootContracts(
                                     projected.effectiveRootContracts());
@@ -1909,6 +1953,10 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 boolean changed = requiresDocumentPublication(before, after);
                 ManagedRootSubscriptionSurface projected = contracts
                         .projectRootSubscriptionSurface(after.document());
+                transaction.stageEmbeddedDemands(
+                        entry.getKey(),
+                        ClosureSubscriptionInventory.embeddedDemands(
+                                projected));
                 RoutingSurface routingSurface = RoutingSurface
                         .fromManagedRootContracts(
                                 projected.effectiveRootContracts());
@@ -2554,30 +2602,11 @@ final class ContractsClosureAdapter implements AutoCloseable {
         return true;
     }
 
-    private ManagedOccurrenceInventory mergeInventory(
+    private ManagedOccurrenceInventory.DeltaResult mergeInventory(
             ManagedOccurrenceInventory before,
             Set<DocumentId> cohortMembers,
             Collection<ManagedOccurrenceBinding> replacements) {
-        List<ManagedOccurrenceBinding> merged = new ArrayList<>();
-        ContractsStructuralWorkMetrics.recordGlobalPass(
-                runtime.metrics(),
-                ContractsStructuralWorkMetrics
-                        .GLOBAL_OCCURRENCE_ENTRIES_TRAVERSED,
-                before.rows().size());
-        for (ManagedOccurrenceBinding row : before.rows()) {
-            boolean source = cohortMembers.contains(
-                    coordinationId(row.sourceDocumentId()));
-            boolean target = cohortMembers.contains(
-                    coordinationId(row.targetDocumentId()));
-            if (source && !target) {
-                throw new ProjectionUnavailableException(
-                        "Forward occurrence closure omitted an outgoing "
-                                + "target");
-            }
-            if (!source) {
-                merged.add(row);
-            }
-        }
+        List<ManagedOccurrenceBinding> replacementRows = new ArrayList<>();
         for (ManagedOccurrenceBinding replacement : replacements) {
             if (!cohortMembers.contains(coordinationId(
                     replacement.sourceDocumentId()))
@@ -2586,63 +2615,48 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 throw new IllegalStateException(
                         "Contracts result occurrence escaped its cohort");
             }
-            merged.add(replacement);
+            replacementRows.add(replacement);
         }
-        ContractsStructuralWorkMetrics.recordGlobalPass(
-                runtime.metrics(),
-                ContractsStructuralWorkMetrics
-                        .GLOBAL_OCCURRENCE_ENTRIES_TRAVERSED,
-                merged.size());
-        return ManagedOccurrenceInventory.of(merged);
+        for (DocumentId source : cohortMembers) {
+            for (ManagedOccurrenceBinding row : before.rowsFrom(source)) {
+                if (!cohortMembers.contains(
+                        coordinationId(row.targetDocumentId()))) {
+                    throw new ProjectionUnavailableException(
+                            "Forward occurrence closure omitted an outgoing "
+                                    + "target");
+                }
+            }
+        }
+        return before.replaceSources(cohortMembers, replacementRows);
     }
 
-    private boolean sameInventory(
+    private static boolean sameActiveTopologyForSources(
             ManagedOccurrenceInventory first,
-            ManagedOccurrenceInventory second) {
-        return inventoryProjection(first).equals(inventoryProjection(second));
-    }
-
-    private List<OccurrenceProjection> inventoryProjection(
-            ManagedOccurrenceInventory inventory) {
-        ContractsStructuralWorkMetrics.recordGlobalPass(
-                runtime.metrics(),
-                ContractsStructuralWorkMetrics
-                        .GLOBAL_OCCURRENCE_ENTRIES_TRAVERSED,
-                inventory.rows().size());
-        return inventory.rows().stream()
-                .map(OccurrenceProjection::from)
-                .toList();
-    }
-
-    private boolean sameActiveTopology(
-            ManagedOccurrenceInventory first,
-            ManagedOccurrenceInventory second) {
-        return activeTopology(first).equals(activeTopology(second));
-    }
-
-    private List<ActiveEdge> activeTopology(
-            ManagedOccurrenceInventory inventory) {
-        ContractsStructuralWorkMetrics.recordGlobalPass(
-                runtime.metrics(),
-                ContractsStructuralWorkMetrics
-                        .GLOBAL_OCCURRENCE_ENTRIES_TRAVERSED,
-                inventory.activeRows().size());
-        return inventory.activeRows().stream()
-                .map(row -> new ActiveEdge(
-                        row.occurrenceIdentity(),
-                        row.sourceDocumentId().value(),
-                        row.targetDocumentId().value()))
-                .toList();
+            ManagedOccurrenceInventory second,
+            Collection<DocumentId> sources) {
+        for (DocumentId source : sources) {
+            List<ActiveEdge> before = first.activeRowsFrom(source).stream()
+                    .map(row -> new ActiveEdge(
+                            row.occurrenceIdentity(),
+                            row.sourceDocumentId().value(),
+                            row.targetDocumentId().value()))
+                    .toList();
+            List<ActiveEdge> after = second.activeRowsFrom(source).stream()
+                    .map(row -> new ActiveEdge(
+                            row.occurrenceIdentity(),
+                            row.sourceDocumentId().value(),
+                            row.targetDocumentId().value()))
+                    .toList();
+            if (!before.equals(after)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private List<SubscriptionState> subscriptionStatesFor(
             ClosureSubscriptionInventory subscriptions,
             DocumentId documentId) {
-        ContractsStructuralWorkMetrics.recordGlobalPass(
-                runtime.metrics(),
-                ContractsStructuralWorkMetrics
-                        .GLOBAL_SUBSCRIPTION_ENTRIES_TRAVERSED,
-                subscriptions.states().size());
         return subscriptions.statesFor(documentId);
     }
 

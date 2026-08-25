@@ -116,9 +116,9 @@ final class ContractsPublicOrderingAcceptanceTest {
             ContractsClosureAdapter.FrozenBatch initial = engine
                     .contractsClosureAdapter().capture(entry);
             assertEquals(1, initial.invocations().size());
-            assertEquals(List.of(A), initial.invocations().get(0).members());
-            assertTrue(initial.invocations().get(0).input().snapshot()
-                    .occurrences().isEmpty());
+            assertEquals(List.of(A, B), initial.invocations().get(0).members());
+            assertEquals(1, initial.invocations().get(0).input().snapshot()
+                    .occurrences().size());
             ProcessingDrainReceipt drained = publicEngine.drain();
 
             assertTrue(drained.quiescent());
