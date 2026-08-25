@@ -180,7 +180,8 @@ final class ContractsJournalDrainCoordinator {
         return progress.cohorts().stream()
                 .filter(cohort -> cohort.outcome().published()
                         && !cohort.outcome().replayed())
-                .mapToLong(cohort -> cohort.outcome().members().size())
+                .mapToLong(cohort -> cohort.outcome()
+                        .publicationMembers().size())
                 .sum();
     }
 

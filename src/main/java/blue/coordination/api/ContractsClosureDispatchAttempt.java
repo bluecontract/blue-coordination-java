@@ -17,6 +17,8 @@ import java.util.Objects;
  * @param published whether durable state was published
  * @param publicationIdentity durable publication identity, when available
  * @param replayed whether an existing publication receipt was reconciled
+ * @param automaticRetryCount number of resource-resolution retries before
+ *                             this retained attempt
  */
 public record ContractsClosureDispatchAttempt(
         String entryBlueId,
@@ -24,7 +26,23 @@ public record ContractsClosureDispatchAttempt(
         ClosureAttemptResult attempt,
         boolean published,
         String publicationIdentity,
-        boolean replayed) {
+        boolean replayed,
+        long automaticRetryCount) {
+
+    /**
+     * Preserves the original additive SDK seam for callers that do not need
+     * automatic resource-resolution evidence.
+     */
+    public ContractsClosureDispatchAttempt(
+            String entryBlueId,
+            List<DocumentId> documentIds,
+            ClosureAttemptResult attempt,
+            boolean published,
+            String publicationIdentity,
+            boolean replayed) {
+        this(entryBlueId, documentIds, attempt, published,
+                publicationIdentity, replayed, 0L);
+    }
 
     /** Validates immutable cohort evidence. */
     public ContractsClosureDispatchAttempt {
@@ -32,6 +50,10 @@ public record ContractsClosureDispatchAttempt(
         documentIds = List.copyOf(Objects.requireNonNull(
                 documentIds, "documentIds"));
         attempt = Objects.requireNonNull(attempt, "attempt");
+        if (automaticRetryCount < 0L) {
+            throw new IllegalArgumentException(
+                    "automaticRetryCount must be non-negative");
+        }
         if (publicationIdentity != null && publicationIdentity.isBlank()) {
             throw new IllegalArgumentException(
                     "publicationIdentity must not be blank");

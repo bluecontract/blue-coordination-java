@@ -418,10 +418,12 @@ final class ContractsManagedDraftExpansionTest {
 
             // then
             assertTrue(outcome.published());
+            assertEquals(1L, outcome.automaticRetryCount());
             assertEquals(ProcessorStatus.SUCCESS,
                     outcome.attempt().processResult().status());
             assertEquals(Set.of(HOST, runtimeDocumentId),
-                    Set.copyOf(outcome.members()));
+                    Set.copyOf(outcome.publicationMembers()));
+            assertEquals(List.of(HOST), outcome.members());
             DocumentSnapshot child = engine.document(runtimeDocumentId);
             assertEquals(0L, child.epoch());
             assertEquals(SessionStatus.READY, child.status());
@@ -475,7 +477,8 @@ final class ContractsManagedDraftExpansionTest {
             // then
             assertTrue(outcome.published());
             assertEquals(Set.of(HOST, EXISTING), Set.copyOf(
-                    outcome.members()));
+                    outcome.publicationMembers()));
+            assertEquals(List.of(HOST), outcome.members());
             DocumentSnapshot existingAfter = engine.document(EXISTING);
             assertEquals(existingBefore.epoch(), existingAfter.epoch());
             assertEquals(existingBefore.current().blueId(),
@@ -524,6 +527,9 @@ final class ContractsManagedDraftExpansionTest {
             assertEquals(1, engine.history(childId).size());
             assertEquals(1, engine.documents().publicationSnapshot()
                     .closurePublicationReceipts().size());
+            assertEquals(1L, engine.documents().publicationSnapshot()
+                    .closurePublicationReceipts().values().iterator().next()
+                    .automaticRetryCount());
             long retries = engine.documents().metrics().counter(
                     AutomaticOccurrenceResolutionCoordinator.RETRIES);
 
@@ -583,7 +589,8 @@ final class ContractsManagedDraftExpansionTest {
             // then
             assertTrue(outcome.published());
             assertEquals(Set.of(HOST, EXISTING, DESCENDANT),
-                    Set.copyOf(outcome.members()));
+                    Set.copyOf(outcome.publicationMembers()));
+            assertEquals(List.of(HOST), outcome.members());
             assertEquals(existingBefore.current().blueId(),
                     engine.document(EXISTING).current().blueId());
             assertEquals(existingBefore.epoch(),

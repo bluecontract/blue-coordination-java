@@ -164,6 +164,9 @@ final class SdkValueModelTest {
         assertTrue(result.applied());
         assertEquals(1, result.closures().size());
         assertEquals(1, applied.changes().size());
+        assertTrue(applied.resourceDemands().isEmpty());
+        assertEquals(1L, applied.processorAttemptCount());
+        assertEquals(0L, applied.automaticRetryCount());
         assertEquals(1L, stats.counter("COMPONENTS"));
         assertEquals(result, drain.entry(entry));
         assertThrows(IllegalArgumentException.class,

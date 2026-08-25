@@ -11,6 +11,7 @@ import blue.language.processor.ProcessorDiagnostic;
 import blue.language.processor.ProcessorStatus;
 import blue.language.processor.closure.ClosureAttemptResult;
 import blue.language.processor.closure.ClosureProcessResult;
+import blue.language.processor.closure.ClosureResourceDemand;
 import blue.language.processor.closure.GasTraceEntry;
 import blue.language.processor.closure.PublicEventOccurrence;
 
@@ -132,7 +133,9 @@ final class SdkDrainResultMapper {
                     List.of(),
                     List.of(),
                     ProcessingStats.zero(),
-                    diagnostic);
+                    diagnostic,
+                    resourceDemands(attempt.resourceDemands()),
+                    processorAttemptCount(retained));
         }
 
         ClosureProcessResult result = attempt.processResult();
@@ -149,7 +152,26 @@ final class SdkDrainResultMapper {
                 changes,
                 events,
                 stats,
-                diagnostic);
+                diagnostic,
+                List.of(),
+                processorAttemptCount(retained));
+    }
+
+    private static List<ClosureResult.ResourceDemand> resourceDemands(
+            List<ClosureResourceDemand> demands) {
+        return Objects.requireNonNull(demands, "demands").stream()
+                .map(demand -> new ClosureResult.ResourceDemand(
+                        demand.kind().name(),
+                        demand.demandIdentity(),
+                        demand.suppliedValueBlueId(),
+                        DocumentId.of(demand.sourceDocumentId().value()),
+                        demand.sourcePath()))
+                .toList();
+    }
+
+    private static long processorAttemptCount(
+            ContractsClosureDispatchAttempt retained) {
+        return Math.addExact(retained.automaticRetryCount(), 1L);
     }
 
     private List<DocumentChange> changes(

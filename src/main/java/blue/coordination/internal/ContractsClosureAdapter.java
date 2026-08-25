@@ -349,7 +349,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
             if (receipt.commits()) {
                 reconcilePublication(frozen, selected);
             }
-            return outcome(receipt, true);
+            return outcome(receipt, true, selected.members());
         }
         requireRouteSelectionCurrent(frozen, selected);
         AutomaticOccurrenceResolutionCoordinator.RunResult<
@@ -371,7 +371,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
             if (replay.commits()) {
                 reconcilePublication(frozen, selected);
             }
-            return outcome(replay, true);
+            return outcome(replay, true, selected.members());
         }
         ClosureAttemptResult attempt = automatic.attempt();
         long validationStarted = System.nanoTime();
@@ -387,7 +387,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
             identity = publicationIdentity(frozen, executed);
             if (!attempt.isComplete()) {
                 return new CohortOutcome(
-                        executed.members(), attempt, false, identity, false);
+                        selected.members(), executed.members(), attempt,
+                        false, identity, false, automatic.expansionCount());
             }
             if (!isDurablyTerminalStatus(
                     attempt.processResult().status())) {
@@ -399,7 +400,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
             receipt = new ContractsClosurePublicationReceipt(
                     identity,
                     executed.members(),
-                    attempt);
+                    attempt,
+                    automatic.expansionCount());
         } finally {
             runtime.metrics().addNanos(
                     RESULT_VALIDATION_PHASE,
@@ -412,7 +414,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 publishNonCommit(frozen, executed, receipt);
             }
         });
-        return outcome(receipt, false);
+        return outcome(receipt, false, selected.members());
     }
 
     /** Exact implementation evidence from the latest completed execution. */
@@ -429,13 +431,16 @@ final class ContractsClosureAdapter implements AutoCloseable {
 
     private static CohortOutcome outcome(
             ContractsClosurePublicationReceipt receipt,
-            boolean replayed) {
+            boolean replayed,
+            List<DocumentId> laneMembers) {
         return new CohortOutcome(
+                laneMembers,
                 receipt.documentIds(),
                 receipt.attempt(),
                 receipt.commits(),
                 receipt.publicationIdentity(),
-                replayed);
+                replayed,
+                receipt.automaticRetryCount());
     }
 
     synchronized Optional<ContractsClosurePublicationReceipt>
@@ -2955,21 +2960,41 @@ final class ContractsClosureAdapter implements AutoCloseable {
 
     record CohortOutcome(
             List<DocumentId> members,
+            List<DocumentId> publicationMembers,
             ClosureAttemptResult attempt,
             boolean published,
             String publicationIdentity,
-            boolean replayed) {
+            boolean replayed,
+            long automaticRetryCount) {
         CohortOutcome(
                 List<DocumentId> members,
                 ClosureAttemptResult attempt,
                 boolean published) {
-            this(members, attempt, published, null, false);
+            this(members, members, attempt, published, null, false, 0L);
+        }
+
+        CohortOutcome(
+                List<DocumentId> members,
+                ClosureAttemptResult attempt,
+                boolean published,
+                String publicationIdentity,
+                boolean replayed) {
+            this(members, members, attempt, published, publicationIdentity,
+                    replayed, 0L);
         }
 
         CohortOutcome {
             members = List.copyOf(Objects.requireNonNull(
                     members, "members"));
+            publicationMembers = List.copyOf(Objects.requireNonNull(
+                    publicationMembers, "publicationMembers"));
+            if (!publicationMembers.containsAll(members)) {
+                throw new IllegalArgumentException(
+                        "Publication members must contain the frozen lane");
+            }
             attempt = Objects.requireNonNull(attempt, "attempt");
+            MultiDocumentPublicationTransaction.requireSafeInteger(
+                    automaticRetryCount, "automaticRetryCount");
             if (publicationIdentity != null
                     && publicationIdentity.isEmpty()) {
                 throw new IllegalArgumentException(

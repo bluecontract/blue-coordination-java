@@ -24,7 +24,15 @@ import java.util.TreeSet;
 record ContractsClosurePublicationReceipt(
         String publicationIdentity,
         List<DocumentId> documentIds,
-        ClosureAttemptResult attempt) {
+        ClosureAttemptResult attempt,
+        long automaticRetryCount) {
+
+    ContractsClosurePublicationReceipt(
+            String publicationIdentity,
+            List<DocumentId> documentIds,
+            ClosureAttemptResult attempt) {
+        this(publicationIdentity, documentIds, attempt, 0L);
+    }
 
     ContractsClosurePublicationReceipt {
         publicationIdentity = requireText(
@@ -34,6 +42,8 @@ record ContractsClosurePublicationReceipt(
             throw new IllegalArgumentException(
                     "A durable process receipt requires a completed attempt");
         }
+        MultiDocumentPublicationTransaction.requireSafeInteger(
+                automaticRetryCount, "automaticRetryCount");
         if (attempt.processResult().status()
                 == ProcessorStatus.CAPABILITY_FAILURE) {
             throw new IllegalArgumentException(

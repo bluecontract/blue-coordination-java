@@ -1306,16 +1306,18 @@ public final class DefaultCoordinationEngine
                         cohort.outcome();
                 entryAttempts.add(new ContractsClosureDispatchAttempt(
                         entry.blueId(),
-                        exact.members(),
+                        exact.publicationMembers(),
                         exact.attempt(),
                         exact.published(),
                         exact.publicationIdentity(),
-                        exact.replayed()));
+                        exact.replayed(),
+                        exact.automaticRetryCount()));
                 if (!cohort.outcome().published()
                         || cohort.outcome().replayed()) {
                     continue;
                 }
-                for (DocumentId member : cohort.outcome().members()) {
+                for (DocumentId member
+                        : cohort.outcome().publicationMembers()) {
                     documents.require(member).revisionForEntry(entry.blueId())
                             .ifPresent(revision -> entryOutcomes.add(
                                     new DocumentDispatchOutcome(
