@@ -324,6 +324,16 @@ document-step order, an elapsed field, and named counters. Current host elapsed
 time is populated on aggregate `DrainResult.stats()`; entry and closure elapsed
 fields remain zero and are not per-entry latency measurements.
 
+For an applied managed closure, `ClosureResult.managedSurfaceEvidence()`
+retains the exact committed processor and host publication delta. Alongside
+contract, graph, component, and Channel/subscription transitions,
+`operationRouteChanges()` reports deterministic `ADD`, `REMOVE`, or `REPLACE`
+changes from the prepared `OperationRouteIndex` reconciliation. Each route
+side identifies the managed `DocumentId`, scope, operation, Channel, and
+accepted Timeline/actor sources. Rejected, suspended, and rolled-back closures
+expose no route changes; replay uses the route delta retained in the durable
+publication receipt.
+
 `DocumentHandle.snapshot()` is READY-only and exposes application state,
 DocumentId, epoch, BlueId, exact content, and public events. `history()` returns
 immutable application-safe revisions. Physical objects, topology generations,

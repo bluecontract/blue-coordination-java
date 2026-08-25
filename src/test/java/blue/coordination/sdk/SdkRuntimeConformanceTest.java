@@ -7,6 +7,7 @@ import blue.language.processor.registry.RuntimeBlueIds;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -27,6 +28,11 @@ final class SdkRuntimeConformanceTest {
         Scenario scenario = scenario("nearest-valid-ancestor", "nearest");
         try (BlueCoordination coordination = scenario.coordination()) {
             DocumentHandle document = scenario.document();
+            assertTrue(coordination.advanced()
+                    .auditOperationRoutes(document.id())
+                    .stream()
+                    .anyMatch(route -> "premiumOperation".equals(
+                            route.operation())));
 
             EntryResult result = removePremium(
                     coordination, document, scenario.timeline());
@@ -46,6 +52,20 @@ final class SdkRuntimeConformanceTest {
                     .anyMatch(write -> "/type".equals(write.path())
                             && scenario.parentBlueId().equals(
                                     write.valueBlueId())));
+            assertEquals(List.of(
+                            ManagedSurfaceEvidence.OperationRouteChangeKind
+                                    .REMOVE),
+                    evidence.operationRouteChanges().stream()
+                            .filter(change -> "premiumOperation".equals(
+                                    change.before().orElseThrow().operation()))
+                            .map(ManagedSurfaceEvidence.OperationRouteChange
+                                    ::kind)
+                            .toList());
+            assertFalse(coordination.advanced()
+                    .auditOperationRoutes(document.id())
+                    .stream()
+                    .anyMatch(route -> "premiumOperation".equals(
+                            route.operation())));
         }
     }
 
@@ -67,6 +87,13 @@ final class SdkRuntimeConformanceTest {
             assertFalse(document.snapshot().valueAt("/premiumWorkflow")
                     .json().isBlank());
             assertTrue(result.closures().get(0).changes().isEmpty());
+            assertTrue(result.closures().get(0).managedSurfaceEvidence()
+                    .operationRouteChanges().isEmpty());
+            assertTrue(coordination.advanced()
+                    .auditOperationRoutes(document.id())
+                    .stream()
+                    .anyMatch(route -> "premiumOperation".equals(
+                            route.operation())));
         }
     }
 
@@ -102,6 +129,23 @@ final class SdkRuntimeConformanceTest {
                     premiumWorkflow:
                       schema:
                         required: true
+                    contracts:
+                      premiumChannel:
+                        type: Coordination/Timeline Channel
+                        timeline:
+                          type: MyOS/MyOS Timeline
+                          timelineId: sdk/runtime-conformance/premium
+                        actor:
+                          type: MyOS/Principal Actor
+                          accountId: premium
+                      premiumOperation:
+                        type: Coordination/Sequential Workflow Operation
+                        channel: premiumChannel
+                        request: {}
+                        steps:
+                          - type: Coordination/Compute
+                            do:
+                              - $return: true
                     """.formatted(parent.blueId()));
             content.put(parent.blueId(), parent.json());
             content.put(subtype.blueId(), subtype.json());

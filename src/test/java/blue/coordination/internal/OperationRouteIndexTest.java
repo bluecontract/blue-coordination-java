@@ -58,6 +58,72 @@ final class OperationRouteIndexTest {
     }
 
     @Test
+    void preparedReplacementRetainsExactLogicalRouteDelta() {
+        // given
+        OperationRouteIndex index = new OperationRouteIndex(
+                new EngineMetrics());
+        RoutingSurface aliceSurface = surface("timeline-a", "alice");
+        RoutingSurface bobSurface = surface("timeline-b", "bob");
+
+        // when / then: add
+        OperationRouteIndex.PreparedReplacement added =
+                index.prepareReplacement(List.of(
+                        new OperationRouteIndex.Replacement(
+                                DOCUMENT,
+                                aliceSurface,
+                                List.of(active("timeline-a", "alice")))));
+        assertEquals(List.of(new OperationRouteIndex.OperationRouteChange(
+                        OperationRouteIndex.OperationRouteChangeKind.ADD,
+                        DOCUMENT,
+                        java.util.Optional.empty(),
+                        java.util.Optional.of(routeState(
+                                "timeline-a", "alice")))),
+                added.operationRouteChanges());
+        added.publish();
+
+        // when / then: replace
+        OperationRouteIndex.PreparedReplacement replaced =
+                index.prepareReplacement(List.of(
+                        new OperationRouteIndex.Replacement(
+                                DOCUMENT,
+                                bobSurface,
+                                List.of(active("timeline-b", "bob")))));
+        assertEquals(List.of(new OperationRouteIndex.OperationRouteChange(
+                        OperationRouteIndex.OperationRouteChangeKind.REPLACE,
+                        DOCUMENT,
+                        java.util.Optional.of(routeState(
+                                "timeline-a", "alice")),
+                        java.util.Optional.of(routeState(
+                                "timeline-b", "bob")))),
+                replaced.operationRouteChanges());
+        replaced.publish();
+
+        OperationRouteIndex.PreparedReplacement unchanged =
+                index.prepareReplacement(List.of(
+                        new OperationRouteIndex.Replacement(
+                                DOCUMENT,
+                                bobSurface,
+                                List.of(active("timeline-b", "bob")))));
+        assertEquals(List.of(), unchanged.operationRouteChanges());
+        unchanged.publish();
+
+        // when / then: remove
+        OperationRouteIndex.PreparedReplacement removed =
+                index.prepareReplacement(List.of(
+                        new OperationRouteIndex.Replacement(
+                                DOCUMENT,
+                                new RoutingSurface(List.of(), false),
+                                List.of())));
+        assertEquals(List.of(new OperationRouteIndex.OperationRouteChange(
+                        OperationRouteIndex.OperationRouteChangeKind.REMOVE,
+                        DOCUMENT,
+                        java.util.Optional.of(routeState(
+                                "timeline-b", "bob")),
+                        java.util.Optional.empty())),
+                removed.operationRouteChanges());
+    }
+
+    @Test
     void invalidReplacementLeavesPriorRouteGenerationPublished() {
         // given
         OperationRouteIndex index = new OperationRouteIndex(
@@ -427,6 +493,16 @@ final class OperationRouteIndexTest {
                 "ownerChannel",
                 timeline,
                 actor)), false);
+    }
+
+    private static OperationRouteIndex.OperationRouteState routeState(
+            String timeline,
+            String actor) {
+        return new OperationRouteIndex.OperationRouteState(
+                "/",
+                "increment",
+                "ownerChannel",
+                List.of(new RoutingSurface.SourceAddress(timeline, actor)));
     }
 
     private static SubscriptionDelta.Entry active(

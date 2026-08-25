@@ -130,6 +130,113 @@ final class SdkManagedSurfaceEvidenceTest {
         }
     }
 
+    @Test
+    void dynamicFeatureInstallAndRemovalExposeExactRouteChanges() {
+        // given
+        DocumentId id = DocumentId.of("sdk-managed-surface-feature");
+        String ownerTimelineId = "sdk/managed-surface/feature/owner";
+        String featureTimelineId = "sdk/managed-surface/feature/caller";
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            TimelineHandle owner = coordination.timelines().register(
+                    ownerTimelineId, ACTOR);
+            TimelineHandle featureCaller = coordination.timelines().register(
+                    featureTimelineId, "feature-caller");
+            DocumentHandle document = coordination.documents().admit(
+                    ManagedDocument.yaml(
+                                    id,
+                                    dynamicFeatureDocument(
+                                            id, ownerTimelineId))
+                            .publicRoot()
+                            .fromNow());
+            ExactBlueValue featureChannel = coordination.values().yaml("""
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: sdk/managed-surface/feature/caller
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: feature-caller
+                    """);
+            ExactBlueValue featureOperation = coordination.values().yaml("""
+                    type: Coordination/Sequential Workflow Operation
+                    channel: featureChannel
+                    request: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: add
+                              path: /featureInvoked
+                              val: true
+                          - $return: true
+                    """);
+
+            // when: install and invoke
+            EntryResult installed = coordination.operations()
+                    .on(document)
+                    .from(owner)
+                    .call("installFeature")
+                    .through("ownerChannel")
+                    .request(request -> {
+                        request.exact("featureChannel", featureChannel);
+                        request.exact("featureOperation", featureOperation);
+                    })
+                    .execute();
+            EntryResult invoked = coordination.operations()
+                    .on(document)
+                    .from(featureCaller)
+                    .call("dynamicFeature")
+                    .through("featureChannel")
+                    .requestYaml("{}")
+                    .execute();
+
+            // then: the prepared index reports exactly one logical add
+            assertEquals(EntryDisposition.APPLIED, installed.disposition(),
+                    installed.diagnostic().toString());
+            assertEquals(EntryDisposition.APPLIED, invoked.disposition(),
+                    invoked.diagnostic().toString());
+            assertEquals(List.of(
+                            ManagedSurfaceEvidence.OperationRouteChangeKind.ADD),
+                    installed.closures().get(0).managedSurfaceEvidence()
+                            .operationRouteChanges().stream()
+                            .map(ManagedSurfaceEvidence.OperationRouteChange
+                                    ::kind)
+                            .toList());
+            ManagedSurfaceEvidence.OperationRouteState added = installed
+                    .closures().get(0).managedSurfaceEvidence()
+                    .operationRouteChanges().get(0).after().orElseThrow();
+            assertEquals("dynamicFeature", added.operation());
+            assertEquals("featureChannel", added.channel());
+            assertEquals(List.of(new TimelineSourceSnapshot(
+                            featureTimelineId, "feature-caller")),
+                    added.acceptedSources());
+
+            // when: remove
+            EntryResult removed = coordination.operations()
+                    .on(document)
+                    .from(owner)
+                    .call("removeFeature")
+                    .through("ownerChannel")
+                    .requestYaml("{}")
+                    .execute();
+
+            // then: the same route retires and committed ordinals restart at 0
+            assertEquals(EntryDisposition.APPLIED, removed.disposition(),
+                    removed.diagnostic().toString());
+            List<ManagedSurfaceEvidence.OperationRouteChange> routeChanges =
+                    removed.closures().get(0).managedSurfaceEvidence()
+                            .operationRouteChanges();
+            assertEquals(1, routeChanges.size());
+            assertEquals(0L, routeChanges.get(0).ordinal());
+            assertEquals(
+                    ManagedSurfaceEvidence.OperationRouteChangeKind.REMOVE,
+                    routeChanges.get(0).kind());
+            assertEquals("dynamicFeature",
+                    routeChanges.get(0).before().orElseThrow().operation());
+            assertTrue(routeChanges.get(0).after().isEmpty());
+        }
+    }
+
     private static void assertAdd(
             ManagedSurfaceEvidence.ContractPatch patch,
             String expectedAuthoredBlueId) {
@@ -212,6 +319,56 @@ final class SdkManagedSurfaceEvidenceTest {
                               val: updated
                           - $return: true
                 """.formatted(id.value(), timelineId, ACTOR);
+    }
+
+    private static String dynamicFeatureDocument(
+            DocumentId id,
+            String ownerTimelineId) {
+        return """
+                documentId: %s
+                name: Dynamic feature route evidence
+                contracts:
+                  ownerChannel:
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: %s
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: %s
+                  installFeature:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request:
+                      featureChannel: {}
+                      featureOperation: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: add
+                              path: /contracts/featureChannel
+                              val: {$binding: event/message/request/featureChannel}
+                          - $appendChange:
+                              op: add
+                              path: /contracts/dynamicFeature
+                              val: {$binding: event/message/request/featureOperation}
+                          - $return: true
+                  removeFeature:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: remove
+                              path: /contracts/dynamicFeature
+                          - $appendChange:
+                              op: remove
+                              path: /contracts/featureChannel
+                          - $return: true
+                """.formatted(id.value(), ownerTimelineId, ACTOR);
     }
 
 }

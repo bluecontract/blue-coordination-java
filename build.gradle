@@ -464,12 +464,12 @@ def publicBoundarySources = files(
 // Dynamic-evolution maintainability guardrails. These are deliberately bounded
 // caps over the frozen SDK baseline plus reviewed automatic occurrence
 // resolution, managed transition evidence, exact-provider and runtime
-// conformance additions: currently 182 production sources, 49,637 lines and
-// 57 public api+sdk source types. They are not historical Round 13 counts and
-// are not performance evidence.
+// conformance and prepared route-delta evidence additions: currently 182
+// production sources, 50,119 lines and 57 public api+sdk source types. They
+// are not historical Round 13 counts and are not performance evidence.
 def currentProductionShapeLimits = [
         classes: 184,
-        lines: 50_000L,
+        lines: 50_119L,
         publicApiTypes: 58
 ]
 def forbiddenArchitectureTokens = [

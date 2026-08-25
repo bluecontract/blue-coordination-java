@@ -1420,7 +1420,13 @@ public final class DefaultCoordinationEngine
                                                         resolution
                                                                 .authoredInitial())))
                                 .toList(),
-                        exact.managedSurfaceEvidence().inputComponents()));
+                        exact.managedSurfaceEvidence().inputComponents(),
+                        exact.managedSurfaceEvidence()
+                                .operationRouteChanges()
+                                .stream()
+                                .map(DefaultCoordinationEngine
+                                        ::operationRouteChange)
+                                .toList()));
                 if (!cohort.outcome().published()
                         || cohort.outcome().replayed()) {
                     continue;
@@ -1454,6 +1460,32 @@ public final class DefaultCoordinationEngine
                 progress.paused(),
                 committed,
                 System.nanoTime() - started);
+    }
+
+    private static ContractsClosureDispatchAttempt.OperationRouteChange
+            operationRouteChange(
+                    OperationRouteIndex.OperationRouteChange change) {
+        return new ContractsClosureDispatchAttempt.OperationRouteChange(
+                ContractsClosureDispatchAttempt.OperationRouteChangeKind
+                        .valueOf(change.kind().name()),
+                change.documentId(),
+                change.before().map(
+                        DefaultCoordinationEngine::operationRouteState),
+                change.after().map(
+                        DefaultCoordinationEngine::operationRouteState));
+    }
+
+    private static ContractsClosureDispatchAttempt.OperationRouteState
+            operationRouteState(
+                    OperationRouteIndex.OperationRouteState state) {
+        return new ContractsClosureDispatchAttempt.OperationRouteState(
+                state.scopePath(),
+                state.operation(),
+                state.channel(),
+                state.acceptedSources().stream()
+                        .map(source -> new Timeline(
+                                source.timelineId(), source.actorId()))
+                        .toList());
     }
 
     private ContractsJournalDrainCoordinator createContractsJournalCoordinator() {

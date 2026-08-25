@@ -210,13 +210,52 @@ final class SdkDrainResultMapper {
                 .stream()
                 .map(SdkDrainResultMapper::documentTransition)
                 .toList();
+        List<ManagedSurfaceEvidence.OperationRouteChange> routeChanges =
+                new ArrayList<>();
+        for (int index = 0;
+                index < retained.operationRouteChanges().size();
+                index++) {
+            routeChanges.add(operationRouteChange(
+                    index, retained.operationRouteChanges().get(index)));
+        }
         return new ManagedSurfaceEvidence(
                 result.graphGeneration(),
                 resolutions,
                 graphChanges,
                 components,
                 subscriptions,
-                transitions);
+                transitions,
+                routeChanges);
+    }
+
+    private static ManagedSurfaceEvidence.OperationRouteChange
+            operationRouteChange(
+                    long ordinal,
+                    ContractsClosureDispatchAttempt.OperationRouteChange
+                            change) {
+        return new ManagedSurfaceEvidence.OperationRouteChange(
+                ordinal,
+                ManagedSurfaceEvidence.OperationRouteChangeKind.valueOf(
+                        change.kind().name()),
+                change.documentId(),
+                change.before().map(
+                        SdkDrainResultMapper::operationRouteState),
+                change.after().map(
+                        SdkDrainResultMapper::operationRouteState));
+    }
+
+    private static ManagedSurfaceEvidence.OperationRouteState
+            operationRouteState(
+                    ContractsClosureDispatchAttempt.OperationRouteState
+                            state) {
+        return new ManagedSurfaceEvidence.OperationRouteState(
+                state.scopePath(),
+                state.operation(),
+                state.channel(),
+                state.acceptedSources().stream()
+                        .map(source -> new TimelineSourceSnapshot(
+                                source.timelineId(), source.actorId()))
+                        .toList());
     }
 
     private static ManagedSurfaceEvidence.OccurrenceResolution

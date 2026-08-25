@@ -416,14 +416,16 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     RESULT_VALIDATION_PHASE,
                     System.nanoTime() - validationStarted);
         }
-        runtime.metrics().timed(PUBLICATION_PHASE, () -> {
-            if (receipt.commits()) {
-                publish(frozen, executed, receipt);
-            } else {
-                publishNonCommit(frozen, executed, receipt);
-            }
-        });
-        return outcome(receipt, false, selected.members());
+        ContractsClosurePublicationReceipt selectedReceipt = receipt;
+        ContractsClosurePublicationReceipt retainedReceipt =
+                runtime.metrics().timed(PUBLICATION_PHASE, () -> {
+                    if (selectedReceipt.commits()) {
+                        return publish(frozen, executed, selectedReceipt);
+                    }
+                    publishNonCommit(frozen, executed, selectedReceipt);
+                    return selectedReceipt;
+                });
+        return outcome(retainedReceipt, false, selected.members());
     }
 
     /** Exact implementation evidence from the latest completed execution. */
@@ -1783,7 +1785,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
         return List.copyOf(result);
     }
 
-    private void publish(
+    private ContractsClosurePublicationReceipt publish(
             FrozenBatch batch,
             CohortInvocation invocation,
             ContractsClosurePublicationReceipt receipt) {
@@ -1859,7 +1861,6 @@ final class ContractsClosureAdapter implements AutoCloseable {
         }
         transaction.stageOutbox(result.publicEvents());
         transaction.stageCheckpointEvidence(result.checkpointWrites());
-        transaction.stageClosurePublicationReceipt(receipt);
 
         Map<DocumentId, ResultingDocument> resultingDocuments =
                 resultingDocuments(result, invocation.memberSet());
@@ -2040,6 +2041,10 @@ final class ContractsClosureAdapter implements AutoCloseable {
             requireRouteSelectionCurrent(batch, invocation);
             OperationRouteIndex.PreparedReplacement preparedRoutes =
                     routes.prepareReplacement(routeReplacements);
+            ContractsClosurePublicationReceipt retainedReceipt =
+                    receipt.withOperationRouteChanges(
+                            preparedRoutes.operationRouteChanges());
+            transaction.stageClosurePublicationReceipt(retainedReceipt);
             transaction.commit();
             storeCommitted = true;
             publicationFailureInjector.accept(
@@ -2048,6 +2053,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
             preparedRoutes.publish();
             activeSourceTimelines.refresh(invocation.members(), documents);
             objects.commit(objectMark);
+            return retainedReceipt;
         } catch (RuntimeException failure) {
             if (storeCommitted) {
                 // Durable sessions may already reference these exact values.
@@ -3110,10 +3116,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 throw new IllegalArgumentException(
                         "A replayed outcome requires its publication identity");
             }
-            if (!published
-                    && (!managedSurfaceEvidence.resolvedOccurrences().isEmpty()
-                            || !managedSurfaceEvidence.inputComponents()
-                                    .isEmpty())) {
+            if (!published && managedSurfaceEvidence.present()) {
                 throw new IllegalArgumentException(
                         "Only a published outcome can expose managed "
                                 + "publication evidence");

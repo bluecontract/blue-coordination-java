@@ -21,7 +21,28 @@ public record ManagedSurfaceEvidence(
         List<GraphChange> graphChanges,
         List<ComponentTransition> componentTransitions,
         List<SubscriptionChange> subscriptionChanges,
-        List<DocumentTransition> documentTransitions) {
+        List<DocumentTransition> documentTransitions,
+        List<OperationRouteChange> operationRouteChanges) {
+
+    /**
+     * Preserves the original constructor for callers compiled before typed
+     * operation-route evidence was added.
+     */
+    public ManagedSurfaceEvidence(
+            long graphGeneration,
+            List<OccurrenceResolution> resolvedOccurrences,
+            List<GraphChange> graphChanges,
+            List<ComponentTransition> componentTransitions,
+            List<SubscriptionChange> subscriptionChanges,
+            List<DocumentTransition> documentTransitions) {
+        this(graphGeneration,
+                resolvedOccurrences,
+                graphChanges,
+                componentTransitions,
+                subscriptionChanges,
+                documentTransitions,
+                List.of());
+    }
 
     /** Defensively retains all ordered evidence collections. */
     public ManagedSurfaceEvidence {
@@ -36,12 +57,15 @@ public record ManagedSurfaceEvidence(
                 subscriptionChanges, "subscriptionChanges");
         documentTransitions = immutable(
                 documentTransitions, "documentTransitions");
+        operationRouteChanges = immutable(
+                operationRouteChanges, "operationRouteChanges");
     }
 
     /** Canonical absence of committed managed-surface evidence. */
     public static ManagedSurfaceEvidence empty() {
         return new ManagedSurfaceEvidence(
-                0L, List.of(), List.of(), List.of(), List.of(), List.of());
+                0L, List.of(), List.of(), List.of(), List.of(), List.of(),
+                List.of());
     }
 
     /** Whether this view contains any committed managed-surface evidence. */
@@ -50,7 +74,8 @@ public record ManagedSurfaceEvidence(
                 || !graphChanges.isEmpty()
                 || !componentTransitions.isEmpty()
                 || !subscriptionChanges.isEmpty()
-                || !documentTransitions.isEmpty();
+                || !documentTransitions.isEmpty()
+                || !operationRouteChanges.isEmpty();
     }
 
     /** Automatic resolver target classification. */
@@ -232,6 +257,56 @@ public record ManagedSurfaceEvidence(
         ADD,
         REMOVE,
         REPLACE
+    }
+
+    /** Closed logical operation-route transition kind. */
+    public enum OperationRouteChangeKind {
+        ADD,
+        REMOVE,
+        REPLACE
+    }
+
+    /** Exact externally routable operation state. */
+    public record OperationRouteState(
+            String scopePath,
+            String operation,
+            String channel,
+            List<TimelineSourceSnapshot> acceptedSources) {
+        /** Validates one immutable route state. */
+        public OperationRouteState {
+            scopePath = path(scopePath, "scopePath");
+            operation = text(operation, "operation");
+            channel = text(channel, "channel");
+            acceptedSources = immutable(
+                    acceptedSources, "acceptedSources");
+        }
+    }
+
+    /** One exact committed operation-route reconciliation change. */
+    public record OperationRouteChange(
+            long ordinal,
+            OperationRouteChangeKind kind,
+            DocumentId documentId,
+            Optional<OperationRouteState> before,
+            Optional<OperationRouteState> after) {
+        /** Validates the closed before/after route transition shape. */
+        public OperationRouteChange {
+            ordinal = SdkPreconditions.requireNonNegative(
+                    ordinal, "ordinal");
+            kind = Objects.requireNonNull(kind, "kind");
+            documentId = Objects.requireNonNull(documentId, "documentId");
+            before = Objects.requireNonNull(before, "before");
+            after = Objects.requireNonNull(after, "after");
+            if ((kind == OperationRouteChangeKind.ADD
+                    && (before.isPresent() || after.isEmpty()))
+                    || (kind == OperationRouteChangeKind.REMOVE
+                    && (before.isEmpty() || after.isPresent()))
+                    || (kind == OperationRouteChangeKind.REPLACE
+                    && (before.isEmpty() || after.isEmpty()))) {
+                throw new IllegalArgumentException(
+                        "Operation route change kind disagrees with its sides");
+            }
+        }
     }
 
     /** Complete exact state of one Root-scoped Channel subscription. */

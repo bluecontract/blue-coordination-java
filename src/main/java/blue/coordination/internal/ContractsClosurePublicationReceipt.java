@@ -94,13 +94,26 @@ record ContractsClosurePublicationReceipt(
                     "Process receipt cohort differs from its exact result");
         }
         if (!result.commits()
-                && (!managedSurfaceEvidence.resolvedOccurrences().isEmpty()
-                        || !managedSurfaceEvidence.inputComponents()
-                                .isEmpty())) {
+                && managedSurfaceEvidence.present()) {
             throw new IllegalArgumentException(
                     "A non-committing receipt cannot retain managed "
                             + "publication evidence");
         }
+    }
+
+    /** Returns the same receipt with its prepared route-index delta retained. */
+    ContractsClosurePublicationReceipt withOperationRouteChanges(
+            List<OperationRouteIndex.OperationRouteChange> changes) {
+        if (!commits()) {
+            throw new IllegalStateException(
+                    "A non-committing receipt has no route publication");
+        }
+        return new ContractsClosurePublicationReceipt(
+                publicationIdentity,
+                documentIds,
+                attempt,
+                automaticRetryCount,
+                managedSurfaceEvidence.withOperationRouteChanges(changes));
     }
 
     /** Whether the retained terminal result committed durable effects. */

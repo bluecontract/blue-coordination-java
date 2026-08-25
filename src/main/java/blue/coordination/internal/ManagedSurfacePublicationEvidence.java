@@ -20,17 +20,29 @@ import java.util.Objects;
  */
 record ManagedSurfacePublicationEvidence(
         List<ResolvedOccurrence> resolvedOccurrences,
-        List<ComponentSnapshot> inputComponents) {
+        List<ComponentSnapshot> inputComponents,
+        List<OperationRouteIndex.OperationRouteChange>
+                operationRouteChanges) {
+
+    /** Compatibility constructor for evidence captured before route prepare. */
+    ManagedSurfacePublicationEvidence(
+            List<ResolvedOccurrence> resolvedOccurrences,
+            List<ComponentSnapshot> inputComponents) {
+        this(resolvedOccurrences, inputComponents, List.of());
+    }
 
     ManagedSurfacePublicationEvidence {
         resolvedOccurrences = List.copyOf(Objects.requireNonNull(
                 resolvedOccurrences, "resolvedOccurrences"));
         inputComponents = List.copyOf(Objects.requireNonNull(
                 inputComponents, "inputComponents"));
+        operationRouteChanges = List.copyOf(Objects.requireNonNull(
+                operationRouteChanges, "operationRouteChanges"));
     }
 
     static ManagedSurfacePublicationEvidence empty() {
-        return new ManagedSurfacePublicationEvidence(List.of(), List.of());
+        return new ManagedSurfacePublicationEvidence(
+                List.of(), List.of(), List.of());
     }
 
     static ManagedSurfacePublicationEvidence committed(
@@ -73,7 +85,27 @@ record ManagedSurfacePublicationEvidence(
         }
         return new ManagedSurfacePublicationEvidence(
                 resolutions,
-                selected.input().snapshot().components());
+                selected.input().snapshot().components(),
+                List.of());
+    }
+
+    /** Retains exact route-index changes after replacement preparation. */
+    ManagedSurfacePublicationEvidence withOperationRouteChanges(
+            List<OperationRouteIndex.OperationRouteChange> changes) {
+        if (!operationRouteChanges.isEmpty()) {
+            throw new IllegalStateException(
+                    "Operation route changes were already retained");
+        }
+        return new ManagedSurfacePublicationEvidence(
+                resolvedOccurrences,
+                inputComponents,
+                changes);
+    }
+
+    boolean present() {
+        return !resolvedOccurrences.isEmpty()
+                || !inputComponents.isEmpty()
+                || !operationRouteChanges.isEmpty();
     }
 
     record ResolvedOccurrence(
