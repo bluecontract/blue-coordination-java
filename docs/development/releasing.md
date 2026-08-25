@@ -1,5 +1,9 @@
 # Releasing
 
+The dynamic-evolution downstream handoff is documented in
+[`immutable-staged-coordination.md`](immutable-staged-coordination.md). It is
+separate from Maven Central staging and is intentionally non-overwriting.
+
 ## Current decision
 
 `3.0.0-rc.3` is authorized as a bounded external-pilot release candidate.

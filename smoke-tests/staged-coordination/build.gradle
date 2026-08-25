@@ -1,0 +1,142 @@
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+import java.security.MessageDigest
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+
+plugins {
+    id 'java'
+}
+
+def coordinationVersion = providers.gradleProperty(
+        'coordinationVersion').get()
+def coordinationRepository = file(providers.gradleProperty(
+        'coordinationRepository').get()).canonicalFile
+def contractsRepository = file(providers.gradleProperty(
+        'contractsRepository').get()).canonicalFile
+def smokeReport = file(providers.gradleProperty('smokeReport').get())
+
+java {
+    toolchain { languageVersion = JavaLanguageVersion.of(17) }
+}
+
+configurations.configureEach {
+    resolutionStrategy.failOnVersionConflict()
+}
+
+dependencies {
+    testImplementation "blue.coordination:blue-coordination-java:${coordinationVersion}"
+    testImplementation platform('org.junit:junit-bom:5.14.1')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+}
+
+def sha256Identity = { File input ->
+    MessageDigest digest = MessageDigest.getInstance('SHA-256')
+    input.withInputStream { stream ->
+        byte[] buffer = new byte[8192]
+        int count
+        while ((count = stream.read(buffer)) != -1) {
+            digest.update(buffer, 0, count)
+        }
+    }
+    'sha256:' + digest.digest().encodeHex().toString()
+}
+def manifest = { File repository ->
+    new JsonSlurper().parse(
+            new File(repository, 'artifact-manifest.json'))
+}
+
+def verifyStagedCoordinates = tasks.register('verifyStagedCoordinates') {
+    group = 'verification'
+    doLast {
+        def coordinationManifest = manifest(coordinationRepository)
+        def contractsManifest = manifest(contractsRepository)
+        def resolution = configurations.testRuntimeClasspath
+                .incoming.resolutionResult
+        def projectComponents = resolution.allComponents.findAll { component ->
+            component.id instanceof ProjectComponentIdentifier
+                    && component.id != resolution.rootComponent.get().id
+        }
+        if (!projectComponents.isEmpty()
+                || !gradle.includedBuilds.isEmpty()) {
+            throw new GradleException(
+                    'project or composite substitution leaked into consumer')
+        }
+        def blueComponents = resolution.allComponents.findAll { component ->
+            component.id instanceof ModuleComponentIdentifier
+                    && ['blue.coordination', 'blue.language'].contains(
+                    component.id.group)
+        }.collect { component ->
+            component.id.group + ':' + component.id.module + ':' +
+                    component.id.version
+        }.sort()
+        if (!blueComponents.contains(
+                'blue.coordination:blue-coordination-java:'
+                        + coordinationVersion)) {
+            throw new GradleException(
+                    'staged Coordination coordinate was not selected')
+        }
+        Map<String, String> expectedCoordination =
+                coordinationManifest.artifacts.findAll { record ->
+                    record.kind == 'runtime'
+                }.collectEntries { record ->
+                    [(String.valueOf(record.coordinate)):
+                             String.valueOf(record.sha256)]
+                }
+        Map<String, String> expectedContracts =
+                contractsManifest.artifacts.findAll { record ->
+                    record.kind == 'runtime'
+                }.collectEntries { record ->
+                    [(String.valueOf(record.coordinate)):
+                             String.valueOf(record.sha256)]
+                }
+        Map<String, String> actual = configurations.testRuntimeClasspath
+                .resolvedConfiguration.resolvedArtifacts.findAll { artifact ->
+            ['blue.coordination', 'blue.language'].contains(
+                    artifact.moduleVersion.id.group)
+        }.collectEntries { artifact ->
+            String coordinate = artifact.moduleVersion.id.group + ':' +
+                    artifact.name + ':' +
+                    artifact.moduleVersion.id.version
+            [(coordinate): sha256Identity(artifact.file)]
+        }
+        Map<String, String> expected = [:]
+        actual.keySet().sort().each { coordinate ->
+            expected[coordinate] = coordinate.startsWith(
+                    'blue.coordination:')
+                    ? expectedCoordination[coordinate]
+                    : expectedContracts[coordinate]
+        }
+        if (actual != expected || expected.values().any { it == null }) {
+            throw new GradleException(
+                    'resolved Blue bytes differ from immutable manifests')
+        }
+        smokeReport.parentFile.mkdirs()
+        smokeReport.setText(JsonOutput.prettyPrint(JsonOutput.toJson([
+                schema: 'blue-coordination-staged-consumer/1.0',
+                status: 'PASS',
+                coordinationManifestIdentity:
+                        providers.gradleProperty(
+                                'coordinationManifestSha256').get(),
+                contractsManifestIdentity:
+                        providers.gradleProperty(
+                                'contractsManifestSha256').get(),
+                selectedBlueCoordinates: blueComponents,
+                verifiedBlueArtifacts: actual.collect { coordinate, identity ->
+                    [coordinate: coordinate, sha256: identity]
+                }.sort { left, right ->
+                    left.coordinate <=> right.coordinate
+                }
+        ])) + '\n', 'UTF-8')
+    }
+}
+
+tasks.register('stagedConsumerCheck') {
+    group = 'verification'
+    dependsOn verifyStagedCoordinates, tasks.named('test')
+}

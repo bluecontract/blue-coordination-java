@@ -2912,7 +2912,7 @@ def sourceArchiveIncludes = [
         'CHANGELOG.md', 'CONTRIBUTING.md', 'LICENSE', 'README.md',
         'SECURITY.md', 'START-HERE.md', 'build.gradle', 'docs/**',
         'gradle/**', 'gradle.properties', 'gradlew',
-        'gradlew.bat', 'scripts/**', 'settings.gradle', 'src/**',
+        'gradlew.bat', 'scripts/**', 'settings.gradle', 'smoke-tests/**', 'src/**',
         'stabilization/cyclic-topology-rc3-final/**'
 ]
 def sourceArchiveExcludes = [
@@ -3737,3 +3737,5 @@ tasks.named('check') {
             'verifyArtifactContents', 'integrationTest', 'consumerTest',
             'verifyTestArchitecture'
 }
+
+apply from: 'gradle/coordination-staging.gradle'
