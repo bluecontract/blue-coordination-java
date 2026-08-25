@@ -39,6 +39,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -52,6 +53,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Public-facade acceptance for topology changes and frozen work ordering. */
 final class ContractsPublicOrderingAcceptanceTest {
+    private static final int UNRELATED_ADMISSION_BATCH_SIZE = 25;
     private static final DocumentId A = DocumentId.of("ordering-a");
     private static final DocumentId B = DocumentId.of("ordering-b");
     private static final String SHA_A = sha('a');
@@ -111,6 +113,12 @@ final class ContractsPublicOrderingAcceptanceTest {
                     ENTRY_TIME);
 
             assertEquals(1, publicEngine.routeTargetCount(entry));
+            ContractsClosureAdapter.FrozenBatch initial = engine
+                    .contractsClosureAdapter().capture(entry);
+            assertEquals(1, initial.invocations().size());
+            assertEquals(List.of(A), initial.invocations().get(0).members());
+            assertTrue(initial.invocations().get(0).input().snapshot()
+                    .occurrences().isEmpty());
             ProcessingDrainReceipt drained = publicEngine.drain();
 
             assertTrue(drained.quiescent());
@@ -132,6 +140,7 @@ final class ContractsPublicOrderingAcceptanceTest {
 
             ContractsClosurePublicationReceipt receipt = onlyProcessReceipt(
                     engine);
+            assertEquals(1L, receipt.automaticRetryCount());
             ClosureProcessResult result = receipt.attempt().processResult();
             assertTrue(result.commits());
             assertEquals(List.of(A.value(), B.value(), A.value()),
@@ -264,6 +273,7 @@ final class ContractsPublicOrderingAcceptanceTest {
 
             ContractsClosurePublicationReceipt receipt = onlyProcessReceipt(
                     engine);
+            assertEquals(1L, receipt.automaticRetryCount());
             ClosureProcessResult result = receipt.attempt().processResult();
             assertEquals(ProcessorStatus.GAS_LIMIT_EXCEEDED, result.status());
             assertTrue(result.rollbackToInput());
@@ -275,8 +285,8 @@ final class ContractsPublicOrderingAcceptanceTest {
                     engine.contractsClosureAdmissionAdapter().executionPolicy()
                             .sharedLimit() - result.totalGas(),
                     result.rejectedCharge().remainingBeforeCharge());
-            assertTrue(engine.documents().metrics().counter(
-                    AutomaticOccurrenceResolutionCoordinator.RETRIES) > 0L);
+            assertEquals(1L, engine.documents().metrics().counter(
+                    AutomaticOccurrenceResolutionCoordinator.RETRIES));
         }
     }
 
@@ -318,9 +328,25 @@ final class ContractsPublicOrderingAcceptanceTest {
                     timeline,
                     Operation.exact("connectA", "ownerChannel", request),
                     ENTRY_TIME);
+            ContractsClosureAdapter.FrozenBatch initial = engine
+                    .contractsClosureAdapter().capture(entry);
+            assertEquals(1, initial.invocations().size());
+            assertEquals(List.of(B), initial.invocations().get(0).members());
+            assertTrue(initial.invocations().get(0).input().snapshot()
+                    .occurrences().isEmpty());
+            assertEquals(List.of(B.value()), initial.invocations().get(0)
+                    .input().snapshot().components().stream()
+                    .flatMap(component -> component
+                            .orderedMemberDocumentIds().stream())
+                    .map(blue.language.processor.closure.DocumentId::value)
+                    .toList());
+            EngineMetrics.MetricsSnapshot metricsBefore = engine
+                    .engineMetrics().snapshot();
 
             // when
             ProcessingDrainReceipt drained = publicEngine.drain();
+            EngineMetrics.MetricsSnapshot metricsAfter = engine
+                    .engineMetrics().snapshot();
 
             // then
             assertEquals(List.of(entry), drained.processedEntries());
@@ -349,8 +375,46 @@ final class ContractsPublicOrderingAcceptanceTest {
             assertEquals(master(publicEngine.document(A).blueId()),
                     master(publicEngine.document(B).blueId()));
 
-            ClosureProcessResult result = onlyProcessReceipt(engine)
-                    .attempt().processResult();
+            ContractsClosurePublicationReceipt receipt = onlyProcessReceipt(
+                    engine);
+            assertEquals(1L, receipt.automaticRetryCount());
+            assertEquals(2L, metricDelta(
+                    metricsBefore,
+                    metricsAfter,
+                    AutomaticOccurrenceResolutionCoordinator.ATTEMPTS));
+            assertEquals(1L, metricDelta(
+                    metricsBefore,
+                    metricsAfter,
+                    AutomaticOccurrenceResolutionCoordinator.TYPED_DEMANDS));
+            assertEquals(1L, metricDelta(
+                    metricsBefore,
+                    metricsAfter,
+                    AutomaticOccurrenceResolutionCoordinator.RETRIES));
+            assertEquals(1L, metricDelta(
+                    metricsBefore,
+                    metricsAfter,
+                    ManagedOccurrenceResolver.INDEX_LOOKUPS));
+            assertEquals(1L, metricDelta(
+                    metricsBefore,
+                    metricsAfter,
+                    ManagedOccurrenceResolver.RESOLVED_CURRENT));
+            assertEquals(2L, metricDelta(
+                    metricsBefore,
+                    metricsAfter,
+                    ContractsClosureAdapter.DOCUMENT_OPENS));
+            assertEquals(0L, metricDelta(
+                    metricsBefore,
+                    metricsAfter,
+                    ContractsClosureAdapter.UNRELATED_DOCUMENT_OPENS));
+            assertEquals(3L, metricDelta(
+                    metricsBefore,
+                    metricsAfter,
+                    ContractsClosureAdapter.COMPONENT_STATES_READ));
+            assertEquals(4L, metricDelta(
+                    metricsBefore,
+                    metricsAfter,
+                    ContractsClosureAdapter.OCCURRENCE_ROWS_EXAMINED));
+            ClosureProcessResult result = receipt.attempt().processResult();
             assertTrue(result.commits());
             assertEquals(1L, result.graphChanges().stream()
                     .filter(change -> change.changeKind()
@@ -361,6 +425,90 @@ final class ContractsPublicOrderingAcceptanceTest {
                     .count());
             assertEquals(2, publicEngine.history(A).size());
             assertEquals(2, publicEngine.history(B).size());
+        }
+    }
+
+    @Test
+    void dynamicRetryDoesNotOpenOrLoadProofForOneThousandUnrelatedSessions() {
+        // given
+        LinkedHashSet<DocumentId> publicRoots = new LinkedHashSet<>();
+        publicRoots.add(A);
+        publicRoots.addAll(unrelatedAdmissionRoots(1_000));
+        Contracts10Configuration configuration = new Contracts10Configuration(
+                SHA_A, SHA_B, publicRoots);
+        try (CoordinationEngine publicEngine =
+                     CoordinationEngine.inMemoryContracts10(configuration)) {
+            DefaultCoordinationEngine engine =
+                    (DefaultCoordinationEngine) publicEngine;
+            publicEngine.admitContractsClosure(
+                    aEmbedsBAdmission(engine),
+                    CoordinationEngine.AdmissionPolicy.FROM_NOW,
+                    null);
+            admitUnrelatedDocuments(engine, publicEngine, 1_000);
+
+            ExactValue request = publicEngine.referenceRequest(
+                    "a", publicEngine.document(A).current());
+            Timeline timeline = publicEngine.registerTimeline(
+                    "ordering/connect-a", "alice");
+            TimelineEntry entry = publicEngine.appendAt(
+                    timeline,
+                    Operation.exact("connectA", "ownerChannel", request),
+                    ENTRY_TIME);
+            ContractsClosureAdapter.FrozenBatch initial = engine
+                    .contractsClosureAdapter().capture(entry);
+            assertEquals(List.of(B), initial.invocations().get(0).members());
+            EngineMetrics.MetricsSnapshot metricsBefore = engine
+                    .engineMetrics().snapshot();
+
+            // when
+            ProcessingDrainReceipt drained = publicEngine.drain();
+            EngineMetrics.MetricsSnapshot metricsAfter = engine
+                    .engineMetrics().snapshot();
+
+            // then
+            assertEquals(List.of(entry), drained.processedEntries());
+            assertEquals(2L, drained.committedProcessTransitions());
+            ContractsClosurePublicationReceipt receipt = onlyProcessReceipt(
+                    engine);
+            assertEquals(1L, receipt.automaticRetryCount());
+            assertEquals(2L, metricDelta(
+                    metricsBefore,
+                    metricsAfter,
+                    AutomaticOccurrenceResolutionCoordinator.ATTEMPTS));
+            assertEquals(1L, metricDelta(
+                    metricsBefore,
+                    metricsAfter,
+                    AutomaticOccurrenceResolutionCoordinator.TYPED_DEMANDS));
+            assertEquals(1L, metricDelta(
+                    metricsBefore,
+                    metricsAfter,
+                    AutomaticOccurrenceResolutionCoordinator.RETRIES));
+            assertEquals(2L, metricDelta(
+                    metricsBefore,
+                    metricsAfter,
+                    ContractsClosureAdapter.DOCUMENT_OPENS));
+            assertEquals(0L, metricDelta(
+                    metricsBefore,
+                    metricsAfter,
+                    ContractsClosureAdapter.UNRELATED_DOCUMENT_OPENS));
+            assertEquals(3L, metricDelta(
+                    metricsBefore,
+                    metricsAfter,
+                    ContractsClosureAdapter.COMPONENT_STATES_READ));
+            assertEquals(4L, metricDelta(
+                    metricsBefore,
+                    metricsAfter,
+                    ContractsClosureAdapter.OCCURRENCE_ROWS_EXAMINED));
+            assertEquals("connected", property(publicEngine, B, "phase"));
+            assertEquals(ComponentKind.CYCLIC, engine.documents()
+                    .publicationSnapshot().componentStates().stream()
+                    .filter(component -> component
+                            .orderedMemberDocumentIds().stream()
+                            .anyMatch(documentId -> documentId.value()
+                                    .equals(A.value())))
+                    .findFirst()
+                    .orElseThrow()
+                    .kind());
         }
     }
 
@@ -1183,6 +1331,64 @@ final class ContractsPublicOrderingAcceptanceTest {
             String name) {
         return engine.document(documentId).current().copyNode()
                 .getProperties().get(name).getValue();
+    }
+
+    private static long metricDelta(
+            EngineMetrics.MetricsSnapshot before,
+            EngineMetrics.MetricsSnapshot after,
+            String name) {
+        return Math.subtractExact(
+                after.counters().getOrDefault(name, 0L),
+                before.counters().getOrDefault(name, 0L));
+    }
+
+    private static void admitUnrelatedDocuments(
+            DefaultCoordinationEngine engine,
+            CoordinationEngine publicEngine,
+            int count) {
+        List<DocumentId> unrelated = unrelatedIds(count);
+        for (int start = 0; start < unrelated.size();
+                start += UNRELATED_ADMISSION_BATCH_SIZE) {
+            int end = Math.min(
+                    start + UNRELATED_ADMISSION_BATCH_SIZE,
+                    unrelated.size());
+            Contracts10ScenarioBuilder batch =
+                    new Contracts10ScenarioBuilder(engine);
+            for (DocumentId documentId : unrelated.subList(start, end)) {
+                batch.document(documentId, """
+                        documentId: %s
+                        phase: unrelated
+                        """.formatted(documentId.value()))
+                        .expectedComponent(documentId);
+            }
+            Contracts10ScenarioBuilder.ScenarioRuntime admitted = batch
+                    .publicRoot(unrelated.get(start))
+                    .admissionLabel("ordering-unrelated-" + start)
+                    .admitTo(publicEngine);
+            assertEquals(
+                    ContractsClosureAdmissionReceipt.PublicationOutcome
+                            .PUBLISHED,
+                    admitted.admissionReceipt().publicationOutcome());
+        }
+    }
+
+    private static List<DocumentId> unrelatedIds(int count) {
+        ArrayList<DocumentId> result = new ArrayList<>(count);
+        for (int index = 0; index < count; index++) {
+            result.add(DocumentId.of(
+                    "ordering-unrelated-%04d".formatted(index)));
+        }
+        return List.copyOf(result);
+    }
+
+    private static List<DocumentId> unrelatedAdmissionRoots(int count) {
+        List<DocumentId> unrelated = unrelatedIds(count);
+        ArrayList<DocumentId> result = new ArrayList<>();
+        for (int index = 0; index < unrelated.size();
+                index += UNRELATED_ADMISSION_BATCH_SIZE) {
+            result.add(unrelated.get(index));
+        }
+        return List.copyOf(result);
     }
 
     private static String master(String memberBlueId) {

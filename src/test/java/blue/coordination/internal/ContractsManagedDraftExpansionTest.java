@@ -616,7 +616,7 @@ final class ContractsManagedDraftExpansionTest {
     }
 
     @Test
-    void externalActiveIncomingBoundaryRejectsWithoutMutation() {
+    void externalActiveIncomingBoundaryRemainsOutsideForwardRetry() {
         // given
 
         try (DefaultCoordinationEngine engine = contractsEngine()) {
@@ -649,32 +649,49 @@ final class ContractsManagedDraftExpansionTest {
             ContractsClosureAdapter.FrozenBatch batch = adapter.capture(entry);
             InMemoryDocumentStore.PublicationSnapshot before = engine
                     .documents().publicationSnapshot();
-            int objectsBefore = engine.objects().size();
+            InMemoryDocumentStore.DocumentHead externalBefore = before
+                    .documentHeads().get(EXTERNAL);
+            ManagedOccurrenceBinding externalIncoming = before
+                    .occurrenceInventory().row(EXTERNAL, "/child");
+            EngineMetrics.MetricsSnapshot metricsBefore = engine
+                    .engineMetrics().snapshot();
 
             // when
-            ContractsClosureAdapter.ProjectionUnavailableException rejected =
-                    assertThrows(
-                            ContractsClosureAdapter
-                                    .ProjectionUnavailableException.class,
-                            () -> adapter.executeAndPublish(
-                                    batch, batch.invocations().get(0)));
+            ContractsClosureAdapter.CohortOutcome outcome = adapter
+                    .executeAndPublish(batch, batch.invocations().get(0));
+            EngineMetrics.MetricsSnapshot metricsAfter = engine
+                    .engineMetrics().snapshot();
 
             // then
-            assertTrue(rejected.getMessage().contains(
-                    "external active incoming"));
+            assertTrue(outcome.published());
+            assertEquals(1L, outcome.automaticRetryCount());
+            assertEquals(List.of(HOST), outcome.members());
+            assertEquals(Set.of(HOST, EXISTING),
+                    Set.copyOf(outcome.publicationMembers()));
             InMemoryDocumentStore.PublicationSnapshot after = engine
                     .documents().publicationSnapshot();
-            assertEquals(before.documentHeads(), after.documentHeads());
-            assertEquals(before.occurrenceInventory().rows(),
-                    after.occurrenceInventory().rows());
-            assertEquals(before.occurrenceInventoryGeneration(),
-                    after.occurrenceInventoryGeneration());
-            assertEquals(before.componentIndexGeneration(),
-                    after.componentIndexGeneration());
-            assertEquals(before.componentStates(), after.componentStates());
-            assertEquals(before.closurePublicationReceipts(),
-                    after.closurePublicationReceipts());
-            assertEquals(objectsBefore, engine.objects().size());
+            assertEquals(externalBefore, after.documentHeads().get(EXTERNAL));
+            assertSameOccurrence(
+                    externalIncoming,
+                    after.occurrenceInventory().row(EXTERNAL, "/child"));
+            ManagedOccurrenceBinding hostToExisting = after
+                    .occurrenceInventory().row(HOST, "/orders/order-1");
+            assertTrue(hostToExisting.active());
+            assertEquals(EXISTING.value(),
+                    hostToExisting.targetDocumentId().value());
+            assertEquals(2, after.occurrenceInventory().activeRows().size());
+            assertEquals(1L, metricDelta(
+                    metricsBefore,
+                    metricsAfter,
+                    ContractsClosureAdapter.DOCUMENT_OPENS));
+            assertEquals(0L, metricDelta(
+                    metricsBefore,
+                    metricsAfter,
+                    ContractsClosureAdapter.UNRELATED_DOCUMENT_OPENS));
+            assertEquals(2L, metricDelta(
+                    metricsBefore,
+                    metricsAfter,
+                    ContractsClosureAdapter.COMPONENT_STATES_READ));
         }
     }
 
@@ -976,6 +993,35 @@ final class ContractsManagedDraftExpansionTest {
         return DefaultCoordinationEngine.createContracts10Sdk(
                 release.blueLanguageSpecification(),
                 release.contractsSpecification());
+    }
+
+    private static long metricDelta(
+            EngineMetrics.MetricsSnapshot before,
+            EngineMetrics.MetricsSnapshot after,
+            String name) {
+        return Math.subtractExact(
+                after.counters().getOrDefault(name, 0L),
+                before.counters().getOrDefault(name, 0L));
+    }
+
+    private static void assertSameOccurrence(
+            ManagedOccurrenceBinding expected,
+            ManagedOccurrenceBinding actual) {
+        assertEquals(expected.occurrenceIdentity(),
+                actual.occurrenceIdentity());
+        assertEquals(expected.bindingIdentity(), actual.bindingIdentity());
+        assertEquals(expected.bindingPolicyIdentity(),
+                actual.bindingPolicyIdentity());
+        assertEquals(expected.sourceDocumentId().value(),
+                actual.sourceDocumentId().value());
+        assertEquals(expected.sourceAddress(), actual.sourceAddress());
+        assertEquals(expected.targetDocumentId().value(),
+                actual.targetDocumentId().value());
+        assertEquals(expected.expectedTargetBlueId(),
+                actual.expectedTargetBlueId());
+        assertEquals(expected.active(), actual.active());
+        assertEquals(expected.pendingHistoricalEpoch(),
+                actual.pendingHistoricalEpoch());
     }
 
     private static ExactValue draft(DefaultCoordinationEngine engine) {

@@ -1270,10 +1270,13 @@ final class MultiDocumentPublicationTransaction {
                         .GLOBAL_OCCURRENCE_ENTRIES_TRAVERSED,
                 resultingInventory.rows().size());
         List<OccurrenceRow> actualRows = resultingInventory.rows().stream()
+                // Affected-closure occurrence evidence is source-owned.
+                // An ambient source that points into this forward closure is
+                // neither an input member nor an output row of the Contracts
+                // result, and must remain durable without widening capture to
+                // a weakly connected component.
                 .filter(row -> members.contains(DocumentId.of(
-                        row.sourceDocumentId().value()))
-                        || members.contains(DocumentId.of(
-                                row.targetDocumentId().value())))
+                        row.sourceDocumentId().value())))
                 .map(OccurrenceRow::from)
                 .toList();
         if (!expectedRows.equals(actualRows)) {

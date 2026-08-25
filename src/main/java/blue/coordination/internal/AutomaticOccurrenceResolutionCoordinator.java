@@ -14,6 +14,10 @@ import java.util.Set;
 final class AutomaticOccurrenceResolutionCoordinator<I> {
     static final String RETRIES =
             "contracts.occurrenceResolver.retries";
+    static final String ATTEMPTS =
+            "contracts.occurrenceResolver.attempts";
+    static final String TYPED_DEMANDS =
+            "contracts.occurrenceResolver.typedDemands";
     static final String REPEATED_DEMAND_STOPS =
             "contracts.occurrenceResolver.repeatedDemandStops";
     static final String LIMIT_STOPS =
@@ -63,11 +67,13 @@ final class AutomaticOccurrenceResolutionCoordinator<I> {
                 return RunResult.replayed(
                         current, replay.orElseThrow(), expansionCount);
             }
+            metrics.increment(ATTEMPTS);
             ClosureAttemptResult attempt = attempts.run(current);
             if (attempt.isComplete()) {
                 return RunResult.executed(
                         current, attempt, expansionCount);
             }
+            metrics.add(TYPED_DEMANDS, attempt.resourceDemands().size());
             List<String> demandVector = demandVector(
                     attempt.resourceDemands());
             if (expansionCount >= maximumExpansions) {

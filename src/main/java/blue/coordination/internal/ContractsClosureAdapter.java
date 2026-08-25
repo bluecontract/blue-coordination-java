@@ -634,7 +634,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 componentIndex, occurrenceInventory, selection, null);
     }
 
-    private static List<CohortSelection> partitionSelection(
+    static List<CohortSelection> partitionSelection(
             ProcessEmbeddedComponentIndex componentIndex,
             ManagedOccurrenceInventory occurrenceInventory,
             OperationRouteIndex.FrozenDirectDeliverySelection selection,
@@ -645,44 +645,35 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 occurrenceInventory, "occurrenceInventory");
         OperationRouteIndex.FrozenDirectDeliverySelection frozen =
                 Objects.requireNonNull(selection, "selection");
-        TreeMap<DocumentId, ConnectedSelection> groups = new TreeMap<>(
-                EmbeddingBinding.DOCUMENT_ORDER);
-        Set<DocumentId> alreadySelected = new LinkedHashSet<>();
+        List<ConnectedSelection> groups = new ArrayList<>();
         long occurrenceRowsExamined = 0L;
         List<DocumentId> directTargets = frozen.documentIds().stream()
                 .sorted(EmbeddingBinding.DOCUMENT_ORDER)
                 .toList();
         for (DocumentId directTarget : directTargets) {
-            if (alreadySelected.contains(directTarget)) {
+            if (groups.stream().anyMatch(group -> group.members().contains(
+                    directTarget))) {
                 continue;
             }
             ConnectedSelection connected = connectedSelection(
-                    index, inventory, directTarget);
-            groups.put(connected.members().get(0), connected);
-            alreadySelected.addAll(connected.members());
+                    inventory, directTarget);
+            connected = mergeIntersecting(groups, connected);
+            groups.add(connected);
             occurrenceRowsExamined = Math.addExact(
                     occurrenceRowsExamined, connected.rowsExamined());
         }
+        groups.sort(Comparator.comparing(
+                group -> group.members().get(0),
+                EmbeddingBinding.DOCUMENT_ORDER));
         if (metrics != null) {
             metrics.add(OCCURRENCE_ROWS_EXAMINED, occurrenceRowsExamined);
         }
         List<CohortSelection> result = new ArrayList<>();
-        for (ConnectedSelection connected : groups.values()) {
+        for (ConnectedSelection connected : groups) {
             List<DocumentId> members = connected.members();
             Set<DocumentId> memberSet = new LinkedHashSet<>(members);
-            TreeMap<DocumentId, ProcessEmbeddedComponentIndex.Cohort>
-                    activeCohorts = new TreeMap<>(
-                            EmbeddingBinding.DOCUMENT_ORDER);
-            for (DocumentId member : members) {
-                ProcessEmbeddedComponentIndex.Cohort active =
-                        index.cohort(member);
-                activeCohorts.putIfAbsent(
-                        active.members().get(0), active);
-            }
             List<ProcessEmbeddedComponentIndex.Component> components =
-                    activeCohorts.values().stream()
-                            .flatMap(active -> active.components().stream())
-                            .toList();
+                    forwardComponents(index, memberSet);
             List<OperationRouteIndex.FrozenDirectDelivery> deliveries =
                     frozen.deliveries().stream()
                             .filter(delivery -> memberSet.contains(
@@ -698,7 +689,6 @@ final class ContractsClosureAdapter implements AutoCloseable {
     }
 
     private static ConnectedSelection connectedSelection(
-            ProcessEmbeddedComponentIndex index,
             ManagedOccurrenceInventory inventory,
             DocumentId start) {
         TreeMap<DocumentId, Boolean> discovered = new TreeMap<>(
@@ -711,24 +701,14 @@ final class ContractsClosureAdapter implements AutoCloseable {
         long rowsExamined = 0L;
         while (!pending.isEmpty()) {
             DocumentId current = pending.removeFirst();
-            for (DocumentId activeMember : index.cohort(current).members()) {
-                if (discovered.putIfAbsent(
-                        activeMember, Boolean.TRUE) == null) {
-                    pending.addLast(activeMember);
-                }
-            }
             for (ManagedOccurrenceBinding row
-                    : inventory.rowsTouching(current)) {
+                    : inventory.rowsFrom(current)) {
+                rowsExamined = Math.addExact(rowsExamined, 1L);
                 if (occurrences.putIfAbsent(
                         row.occurrenceIdentity(), row) != null) {
                     continue;
                 }
-                rowsExamined = Math.addExact(rowsExamined, 1L);
-                DocumentId source = coordinationId(row.sourceDocumentId());
                 DocumentId target = coordinationId(row.targetDocumentId());
-                if (discovered.putIfAbsent(source, Boolean.TRUE) == null) {
-                    pending.addLast(source);
-                }
                 if (discovered.putIfAbsent(target, Boolean.TRUE) == null) {
                     pending.addLast(target);
                 }
@@ -741,6 +721,114 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 new ArrayList<>(discovered.keySet()),
                 canonicalOccurrences,
                 rowsExamined);
+    }
+
+    private static ConnectedSelection mergeIntersecting(
+            List<ConnectedSelection> groups,
+            ConnectedSelection candidate) {
+        TreeMap<DocumentId, Boolean> members = new TreeMap<>(
+                EmbeddingBinding.DOCUMENT_ORDER);
+        candidate.members().forEach(member -> members.put(
+                member, Boolean.TRUE));
+        LinkedHashMap<String, ManagedOccurrenceBinding> occurrences =
+                new LinkedHashMap<>();
+        candidate.occurrences().forEach(row -> occurrences.put(
+                row.occurrenceIdentity(), row));
+        long rowsExamined = candidate.rowsExamined();
+        for (int index = groups.size() - 1; index >= 0; index--) {
+            ConnectedSelection existing = groups.get(index);
+            if (existing.members().stream().noneMatch(
+                    members::containsKey)) {
+                continue;
+            }
+            groups.remove(index);
+            existing.members().forEach(member -> members.put(
+                    member, Boolean.TRUE));
+            existing.occurrences().forEach(row -> occurrences.putIfAbsent(
+                    row.occurrenceIdentity(), row));
+        }
+        ArrayList<ManagedOccurrenceBinding> canonicalOccurrences =
+                new ArrayList<>(occurrences.values());
+        canonicalOccurrences.sort(Comparator.naturalOrder());
+        return new ConnectedSelection(
+                new ArrayList<>(members.keySet()),
+                canonicalOccurrences,
+                rowsExamined);
+    }
+
+    private static List<ProcessEmbeddedComponentIndex.Component>
+            forwardComponents(
+                    ProcessEmbeddedComponentIndex index,
+                    Set<DocumentId> members) {
+        Comparator<ProcessEmbeddedComponentIndex.Component> order =
+                Comparator.comparing(
+                        component -> component.members().get(0),
+                        EmbeddingBinding.DOCUMENT_ORDER);
+        TreeMap<DocumentId, ProcessEmbeddedComponentIndex.Component>
+                selected = new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
+        for (DocumentId member : members) {
+            ProcessEmbeddedComponentIndex.Component component =
+                    index.component(member);
+            if (!members.containsAll(component.members())) {
+                throw new IllegalStateException(
+                        "Forward occurrence selection contains only part of "
+                                + "an active component "
+                                + component.members());
+            }
+            selected.putIfAbsent(component.members().get(0), component);
+        }
+
+        Map<ProcessEmbeddedComponentIndex.Component, Integer>
+                remainingTargets = new LinkedHashMap<>();
+        Map<ProcessEmbeddedComponentIndex.Component,
+                List<ProcessEmbeddedComponentIndex.Component>>
+                sourcesByTarget = new LinkedHashMap<>();
+        selected.values().forEach(component -> sourcesByTarget.put(
+                component, new ArrayList<>()));
+        for (ProcessEmbeddedComponentIndex.Component source
+                : selected.values()) {
+            int targets = 0;
+            for (ProcessEmbeddedComponentIndex.Component target
+                    : index.targets(source)) {
+                if (!sourcesByTarget.containsKey(target)) {
+                    throw new IllegalStateException(
+                            "Forward occurrence selection omitted active "
+                                    + "component " + target.members());
+                }
+                sourcesByTarget.get(target).add(source);
+                targets = Math.addExact(targets, 1);
+            }
+            remainingTargets.put(source, targets);
+        }
+        java.util.PriorityQueue<ProcessEmbeddedComponentIndex.Component>
+                ready = new java.util.PriorityQueue<>(order);
+        remainingTargets.forEach((component, targets) -> {
+            if (targets == 0) {
+                ready.add(component);
+            }
+        });
+        ArrayList<ProcessEmbeddedComponentIndex.Component> result =
+                new ArrayList<>(selected.size());
+        while (!ready.isEmpty()) {
+            ProcessEmbeddedComponentIndex.Component target = ready.remove();
+            result.add(target);
+            List<ProcessEmbeddedComponentIndex.Component> sources =
+                    sourcesByTarget.get(target);
+            sources.sort(order);
+            for (ProcessEmbeddedComponentIndex.Component source : sources) {
+                int remaining = Math.subtractExact(
+                        remainingTargets.get(source), 1);
+                remainingTargets.put(source, remaining);
+                if (remaining == 0) {
+                    ready.add(source);
+                }
+            }
+        }
+        if (result.size() != selected.size()) {
+            throw new IllegalStateException(
+                    "Selected component condensation must be acyclic");
+        }
+        return List.copyOf(result);
     }
 
     private CohortInvocation captureInvocation(
@@ -1067,7 +1155,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
         Set<DocumentId> existingMembers = forwardExistingMembers(
                 current.existingMemberSet(),
                 selected.existingTargets(),
-                indexed.occurrenceInventory());
+                indexed.occurrenceInventory(),
+                runtime.metrics());
         InMemoryDocumentStore.ClosureSnapshot durable =
                 documents.closureSnapshot(existingMembers);
         if (durable.occurrenceInventoryGeneration()
@@ -1128,8 +1217,11 @@ final class ContractsClosureAdapter implements AutoCloseable {
         LinkedHashMap<String, ManagedOccurrenceBinding> rows =
                 new LinkedHashMap<>();
         for (DocumentId source : existingMembers) {
-            for (ManagedOccurrenceBinding row
-                    : indexed.occurrenceInventory().rowsFrom(source)) {
+            List<ManagedOccurrenceBinding> sourceRows =
+                    indexed.occurrenceInventory().rowsFrom(source);
+            runtime.metrics().add(
+                    OCCURRENCE_ROWS_EXAMINED, sourceRows.size());
+            for (ManagedOccurrenceBinding row : sourceRows) {
                 DocumentId target = coordinationId(row.targetDocumentId());
                 if (!existingMembers.contains(target)) {
                     throw stale("Forward managed closure omitted occurrence "
@@ -1309,7 +1401,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
     private static Set<DocumentId> forwardExistingMembers(
             Collection<DocumentId> original,
             Collection<DocumentId> targets,
-            ManagedOccurrenceInventory inventory) {
+            ManagedOccurrenceInventory inventory,
+            EngineMetrics metrics) {
         TreeMap<DocumentId, Boolean> discovered = new TreeMap<>(
                 EmbeddingBinding.DOCUMENT_ORDER);
         Deque<DocumentId> pending = new ArrayDeque<>();
@@ -1325,27 +1418,13 @@ final class ContractsClosureAdapter implements AutoCloseable {
         }
         while (!pending.isEmpty()) {
             DocumentId source = pending.removeFirst();
-            for (ManagedOccurrenceBinding row : inventory.rowsFrom(source)) {
+            List<ManagedOccurrenceBinding> sourceRows =
+                    inventory.rowsFrom(source);
+            metrics.add(OCCURRENCE_ROWS_EXAMINED, sourceRows.size());
+            for (ManagedOccurrenceBinding row : sourceRows) {
                 DocumentId target = coordinationId(row.targetDocumentId());
                 if (discovered.putIfAbsent(target, Boolean.TRUE) == null) {
                     pending.addLast(target);
-                }
-            }
-        }
-        Set<DocumentId> selected = discovered.keySet();
-        for (DocumentId target : selected) {
-            for (ManagedOccurrenceBinding row
-                    : inventory.rowsTouching(target)) {
-                DocumentId source = coordinationId(row.sourceDocumentId());
-                if (row.active()
-                        && coordinationId(row.targetDocumentId()).equals(
-                                target)
-                        && !selected.contains(source)) {
-                    throw new ProjectionUnavailableException(
-                            "Automatic forward expansion cannot merge an "
-                                    + "existing target with an external "
-                                    + "active incoming occurrence under the "
-                                    + "scalar graph-generation contract");
                 }
             }
         }
@@ -2333,7 +2412,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 endEpoch);
     }
 
-    private static void requireCohortStillCurrent(
+    private void requireCohortStillCurrent(
             CohortInvocation invocation,
             InMemoryDocumentStore.ClosureSnapshot current) {
         Set<DocumentId> members = invocation.managedExpansion()
@@ -2371,8 +2450,11 @@ final class ContractsClosureAdapter implements AutoCloseable {
         Map<String, OccurrenceProjection> currentOccurrences =
                 new TreeMap<>(EmbeddingBinding.TEXT_ORDER);
         for (DocumentId member : members) {
-            for (ManagedOccurrenceBinding row
-                    : current.occurrenceInventory().rowsFrom(member)) {
+            List<ManagedOccurrenceBinding> sourceRows =
+                    current.occurrenceInventory().rowsFrom(member);
+            runtime.metrics().add(
+                    OCCURRENCE_ROWS_EXAMINED, sourceRows.size());
+            for (ManagedOccurrenceBinding row : sourceRows) {
                 boolean target = members.contains(
                         coordinationId(row.targetDocumentId()));
                 if (!target) {
@@ -2427,22 +2509,6 @@ final class ContractsClosureAdapter implements AutoCloseable {
             }
         }
         return Collections.unmodifiableMap(result);
-    }
-
-    private static List<ManagedOccurrenceBinding> targetedOccurrences(
-            ManagedOccurrenceInventory inventory,
-            Set<DocumentId> members) {
-        Map<String, ManagedOccurrenceBinding> selected =
-                new LinkedHashMap<>();
-        for (DocumentId member : members) {
-            for (ManagedOccurrenceBinding row : inventory.rowsTouching(member)) {
-                selected.putIfAbsent(row.occurrenceIdentity(), row);
-            }
-        }
-        ArrayList<ManagedOccurrenceBinding> canonical = new ArrayList<>(
-                selected.values());
-        canonical.sort(Comparator.naturalOrder());
-        return List.copyOf(canonical);
     }
 
     private static Map<DocumentId, ResultingDocument> resultingDocuments(

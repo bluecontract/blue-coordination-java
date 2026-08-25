@@ -1,6 +1,5 @@
 package blue.coordination.internal;
 
-import blue.coordination.api.ActivationMode;
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.ExactValue;
 import blue.coordination.api.Operation;
@@ -14,9 +13,12 @@ import blue.language.processor.closure.ClosureCommitCompanion;
 import blue.language.processor.closure.ClosureEvidenceFactory;
 import blue.language.processor.closure.ComponentSnapshot;
 import blue.language.processor.closure.ManagedDocumentSnapshot;
+import blue.language.processor.closure.ManagedOccurrenceBinding;
+import blue.language.processor.closure.ScopeAddress;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigInteger;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -96,13 +98,13 @@ final class ContractsClosureAdapterTest {
     }
 
     @Test
-    void partitionsOneFrozenRouteSelectionByConnectedCohort() {
+    void partitionsOneFrozenRouteSelectionByForwardAffectedClosure() {
         // given
-
-        ProcessEmbeddedComponentIndex components =
-                ProcessEmbeddedComponentIndex.fromDocumentsAndBindings(
-                        List.of(A, B, C),
-                        List.of(binding("a-to-b", A, B)));
+        ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(
+                List.of(occurrence("a-to-b", A, B, true)));
+        ProcessEmbeddedComponentIndex components = ProcessEmbeddedComponentIndex
+                .fromDocumentsAndOccurrenceInventory(
+                        List.of(A, B, C), inventory);
         OperationRouteIndex routes = new OperationRouteIndex(
                 new EngineMetrics());
         RoutingSurface surface = surface("timeline-a", "alice");
@@ -120,7 +122,7 @@ final class ContractsClosureAdapterTest {
         List<ContractsClosureAdapter.CohortSelection> selected =
                 ContractsClosureAdapter.partitionSelection(
                         components,
-                        ManagedOccurrenceInventory.empty(),
+                        inventory,
                         selection);
 
         // then
@@ -135,6 +137,83 @@ final class ContractsClosureAdapterTest {
                 .map(OperationRouteIndex.FrozenDirectDelivery
                         ::rawOccurrenceOrder)
                 .toList());
+    }
+
+    @Test
+    void incomingOccurrenceDoesNotOpenItsSourceWithoutTypedDemand() {
+        // given
+        ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(
+                List.of(occurrence("a-to-b", A, B, true)));
+        ProcessEmbeddedComponentIndex components = ProcessEmbeddedComponentIndex
+                .fromDocumentsAndOccurrenceInventory(
+                        List.of(A, B), inventory);
+        OperationRouteIndex routes = new OperationRouteIndex(
+                new EngineMetrics());
+        ExternalOrderKey frontier = ExternalOrderKey.of(List.of(0L));
+        routes.replace(B, surface("timeline-a", "alice"), List.of(active(
+                "ownerChannel", "timeline-a", "alice", frontier, 0)));
+        OperationRouteIndex.FrozenDirectDeliverySelection selection =
+                routes.selectDirectDeliveries(entry(
+                        "timeline-a", "alice", "ownerChannel"));
+        EngineMetrics metrics = new EngineMetrics();
+
+        // when
+        List<ContractsClosureAdapter.CohortSelection> selected =
+                ContractsClosureAdapter.partitionSelection(
+                        components, inventory, selection, metrics);
+
+        // then
+        assertEquals(1, selected.size());
+        assertEquals(List.of(B), selected.get(0).members());
+        assertTrue(selected.get(0).occurrences().isEmpty());
+        assertEquals(0L, metrics.counter(
+                ContractsClosureAdapter.OCCURRENCE_ROWS_EXAMINED));
+    }
+
+    @Test
+    void oneThousandUnrelatedRowsDoNotChangeForwardSelectionWork() {
+        // given
+        ArrayList<ManagedOccurrenceBinding> rows = new ArrayList<>();
+        rows.add(occurrence("a-to-b", A, B, true));
+        ArrayList<DocumentId> documents = new ArrayList<>(List.of(A, B));
+        for (int index = 0; index < 1_000; index++) {
+            DocumentId source = DocumentId.of(
+                    "zz-unrelated-source-%04d".formatted(index));
+            DocumentId target = DocumentId.of(
+                    "zz-unrelated-target-%04d".formatted(index));
+            documents.add(source);
+            documents.add(target);
+            rows.add(occurrence(
+                    "unrelated-%04d".formatted(index),
+                    source,
+                    target,
+                    true));
+        }
+        ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(
+                rows);
+        ProcessEmbeddedComponentIndex components = ProcessEmbeddedComponentIndex
+                .fromDocumentsAndOccurrenceInventory(documents, inventory);
+        OperationRouteIndex routes = new OperationRouteIndex(
+                new EngineMetrics());
+        ExternalOrderKey frontier = ExternalOrderKey.of(List.of(0L));
+        routes.replace(A, surface("timeline-a", "alice"), List.of(active(
+                "ownerChannel", "timeline-a", "alice", frontier, 0)));
+        OperationRouteIndex.FrozenDirectDeliverySelection selection =
+                routes.selectDirectDeliveries(entry(
+                        "timeline-a", "alice", "ownerChannel"));
+        EngineMetrics metrics = new EngineMetrics();
+
+        // when
+        List<ContractsClosureAdapter.CohortSelection> selected =
+                ContractsClosureAdapter.partitionSelection(
+                        components, inventory, selection, metrics);
+
+        // then
+        assertEquals(1, selected.size());
+        assertEquals(List.of(A, B), selected.get(0).members());
+        assertEquals(1, selected.get(0).occurrences().size());
+        assertEquals(1L, metrics.counter(
+                ContractsClosureAdapter.OCCURRENCE_ROWS_EXAMINED));
     }
 
     @Test
@@ -443,22 +522,22 @@ final class ContractsClosureAdapterTest {
                 1L);
     }
 
-    private static EmbeddingBinding binding(
+    private static ManagedOccurrenceBinding occurrence(
             String identity,
             DocumentId source,
-            DocumentId target) {
-        return new EmbeddingBinding(
-                identity,
-                source,
-                "/" + identity,
-                target,
-                1L,
-                ActivationMode.IMPORT_FULL_HISTORY,
-                null,
-                "state-" + identity,
-                null,
-                "proof-" + identity,
-                "attachment-" + identity,
-                ExternalOrderKey.of(List.of(100L, identity)));
+            DocumentId target,
+            boolean active) {
+        ExactValue targetValue = ExactValue.verified(
+                new Node().value("state-" + identity));
+        return ManagedOccurrenceBinding.derived(
+                SHA_A,
+                new blue.language.processor.closure.DocumentId(
+                        source.value()),
+                ScopeAddress.embedded("/" + identity, 1L),
+                new blue.language.processor.closure.DocumentId(
+                        target.value()),
+                targetValue.blueId(),
+                active,
+                null);
     }
 }
