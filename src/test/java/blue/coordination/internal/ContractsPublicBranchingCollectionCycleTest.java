@@ -185,7 +185,10 @@ final class ContractsPublicBranchingCollectionCycleTest {
         assertTrue(structural.globalGraphEntriesTraversed() > 0L);
         assertTrue(structural.globalSubscriptionEntriesTraversed() > 0L);
         assertTrue(structural.globalReceiptEntriesTraversed() > 0L);
-        assertTrue(structural.globalRouteEntriesTraversed() > 0L);
+        assertEquals(0L, structural.globalRouteEntriesTraversed(),
+                "Route publication uses exact persistent-key updates; the "
+                        + "remaining global counters identify other store "
+                        + "locality blockers");
         assertTrue(structural.globalEvidenceEntriesTraversed() > 0L);
         StructuralMetrics baseStructural = base.structuralMetrics();
         assertTrue(structural.globalStateEntriesTraversed()
