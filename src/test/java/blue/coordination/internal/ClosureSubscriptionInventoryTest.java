@@ -18,20 +18,30 @@ import blue.language.processor.closure.SubscriptionState;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Random;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Exact Contracts subscription-state and copy-on-write publication proofs. */
 final class ClosureSubscriptionInventoryTest {
+    private static final long RANDOM_SEED = 0xC105_5EEDL;
     private static final String LANGUAGE_SPECIFICATION_IDENTITY =
             "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     private static final String CONTRACTS_SPECIFICATION_IDENTITY =
@@ -222,6 +232,199 @@ final class ClosureSubscriptionInventoryTest {
         }
     }
 
+    @Test
+    void graphGenerationUpdateCopiesOnlyTheAffectedPersistentPath() {
+        // given
+        ArrayList<DocumentId> documents = new ArrayList<>();
+        for (int index = 0; index < 1_000; index++) {
+            documents.add(DocumentId.of(
+                    "ambient-graph-%04d".formatted(index)));
+        }
+        documents.add(A);
+        ClosureGraphGenerationInventory before =
+                ClosureGraphGenerationInventory.empty()
+                        .retainingDocuments(documents);
+        ClosureProcessResult result = fixture.result(A);
+
+        // when
+        ClosureGraphGenerationInventory after = before.apply(result);
+
+        // then
+        assertEquals(0L, before.require(A));
+        assertEquals(result.graphGeneration(), after.require(A));
+        assertEquals(0L, after.require(documents.get(500)));
+        assertEquals(before.documents(), after.documents());
+        assertNotSame(
+                before.rootIdentityForTesting(),
+                after.rootIdentityForTesting());
+        assertTrue(after.lastOperationComparisonsForTesting() < 32,
+                () -> "unexpected exact-key comparisons: "
+                        + after.lastOperationComparisonsForTesting());
+        assertTrue(after.lastOperationCopiedNodesForTesting() < 16,
+                () -> "unexpected copied graph nodes: "
+                        + after.lastOperationCopiedNodesForTesting());
+        assertTrue(before.sharedNodeCountForTesting(after) > 980,
+                "the 1,000 unrelated graph rows must remain shared");
+        assertTrue(after.lookupStepsForTesting(documents.get(500)) < 16);
+        before.assertStructurallyValidForTesting();
+        after.assertStructurallyValidForTesting();
+    }
+
+    @Test
+    void randomizedGraphRetentionMatchesCanonicalMapWithoutAmbientReads() {
+        // given
+        ArrayList<DocumentId> documents = new ArrayList<>();
+        for (int index = 0; index < 1_024; index++) {
+            documents.add(DocumentId.of(
+                    "random-graph-%04d".formatted(index)));
+        }
+        documents.add(A);
+        ClosureGraphGenerationInventory source =
+                ClosureGraphGenerationInventory.empty()
+                        .retainingDocuments(documents)
+                        .apply(fixture.result(A));
+        Random random = new Random(RANDOM_SEED);
+
+        // when / then
+        for (int step = 0; step < 256; step++) {
+            TreeSet<DocumentId> selected = new TreeSet<>(
+                    EmbeddingBinding.DOCUMENT_ORDER);
+            while (selected.size() < 16) {
+                selected.add(documents.get(
+                        random.nextInt(documents.size())));
+            }
+            ClosureGraphGenerationInventory retained =
+                    source.retainingDocuments(selected);
+            TreeMap<DocumentId, Long> expected = new TreeMap<>(
+                    EmbeddingBinding.DOCUMENT_ORDER);
+            for (DocumentId documentId : selected) {
+                expected.put(
+                        documentId,
+                        documentId.equals(A)
+                                ? fixture.result(A).graphGeneration()
+                                : 0L);
+            }
+            assertEquals(expected, retained.generations());
+            assertEquals(List.copyOf(expected.keySet()), retained.documents());
+            assertTrue(retained.lastOperationComparisonsForTesting() < 512);
+            assertTrue(retained.lastOperationCopiedNodesForTesting() < 512);
+            retained.assertStructurallyValidForTesting();
+        }
+        assertEquals(fixture.result(A).graphGeneration(), source.require(A));
+        assertEquals(0L, source.require(documents.get(700)));
+        source.assertStructurallyValidForTesting();
+    }
+
+    @Test
+    void subscriptionDeltaSharesUnrelatedRowsAndReportsAllIndexWork() {
+        // given
+        ClosureProcessResult result = fixture.result(A);
+        SubscriptionState template = delta(
+                result, SubscriptionDelta.Operation.REPLACE)
+                .beforeSubscription();
+        ArrayList<SubscriptionState> initial = new ArrayList<>();
+        result.subscriptionDeltas().stream()
+                .map(SubscriptionDelta::beforeSubscription)
+                .filter(Objects::nonNull)
+                .forEach(initial::add);
+        ArrayList<SubscriptionState> ambient = new ArrayList<>();
+        for (int index = 0; index < 1_000; index++) {
+            SubscriptionState state = ambientState(
+                    index, 0, template);
+            ambient.add(state);
+            initial.add(state);
+        }
+        ClosureSubscriptionInventory before =
+                ClosureSubscriptionInventory.of(initial);
+
+        // when
+        ClosureSubscriptionInventory after = before.apply(result);
+
+        // then
+        assertFinalRows(result, after);
+        DocumentId ambientDocument = ambientDocument(500);
+        assertSame(
+                ambient.get(500),
+                after.statesFor(ambientDocument).get(0));
+        assertNotSame(
+                before.slotRootIdentityForTesting(),
+                after.slotRootIdentityForTesting());
+        assertTrue(after.lastOperationComparisonsForTesting() < 256,
+                () -> "unexpected subscription-index comparisons: "
+                        + after.lastOperationComparisonsForTesting());
+        assertTrue(after.lastOperationCopiedNodesForTesting() < 192,
+                () -> "unexpected copied subscription-index nodes: "
+                        + after.lastOperationCopiedNodesForTesting());
+        assertEquals(2, after.lastOperationVisitedRowsForTesting(),
+                "final validation must visit only A's resulting rows");
+        assertTrue(before.sharedSlotNodeCountForTesting(after) > 950,
+                "the 1,000 unrelated subscription rows must remain shared");
+        assertTrue(after.slotLookupStepsForTesting(
+                ambientDocument, "ambient-channel-0") < 16);
+        assertEquals(2, before.statesFor(A).size(),
+                "the old persistent snapshot must remain unchanged");
+        before.assertStructurallyValidForTesting();
+        after.assertStructurallyValidForTesting();
+
+        ClosureSubscriptionInventory one =
+                before.retainingDocuments(List.of(ambientDocument));
+        assertEquals(List.of(ambient.get(500)), one.states());
+        assertTrue(one.lastOperationComparisonsForTesting() < 32,
+                "one exact document lookup must ignore 1,000 ambient rows");
+        assertTrue(one.lastOperationCopiedNodesForTesting() < 16);
+        assertEquals(1, one.lastOperationVisitedRowsForTesting());
+    }
+
+    @Test
+    void randomizedSubscriptionRetentionMatchesCanonicalSlotProjection() {
+        // given
+        SubscriptionState template = delta(
+                fixture.result(A), SubscriptionDelta.Operation.REPLACE)
+                .beforeSubscription();
+        ArrayList<SubscriptionState> rows = new ArrayList<>();
+        ArrayList<DocumentId> documents = new ArrayList<>();
+        for (int document = 0; document < 256; document++) {
+            documents.add(ambientDocument(document));
+            rows.add(ambientState(document, 0, template));
+            rows.add(ambientState(document, 1, template));
+        }
+        ArrayList<SubscriptionState> insertionOrder =
+                new ArrayList<>(rows);
+        Collections.shuffle(
+                insertionOrder, new Random(RANDOM_SEED ^ 0x1A_5E47L));
+        ClosureSubscriptionInventory source =
+                ClosureSubscriptionInventory.of(insertionOrder);
+        Random random = new Random(RANDOM_SEED ^ 0x51_07L);
+
+        // when / then
+        for (int step = 0; step < 256; step++) {
+            LinkedHashSet<DocumentId> selected = new LinkedHashSet<>();
+            while (selected.size() < 16) {
+                selected.add(documents.get(random.nextInt(documents.size())));
+            }
+            Set<String> selectedIds = selected.stream()
+                    .map(DocumentId::value)
+                    .collect(java.util.stream.Collectors.toSet());
+            List<SubscriptionState> expected = source.states().stream()
+                    .filter(state -> selectedIds.contains(
+                            state.channelOccurrence()
+                                    .managedDocumentId().value()))
+                    .toList();
+            ClosureSubscriptionInventory retained =
+                    source.retainingDocuments(selected);
+            assertEquals(expected, retained.states());
+            for (DocumentId documentId : selected) {
+                assertEquals(2, retained.statesFor(documentId).size());
+            }
+            assertTrue(retained.lastOperationComparisonsForTesting() < 2_048);
+            assertTrue(retained.lastOperationCopiedNodesForTesting() < 2_048);
+            assertEquals(32, retained.lastOperationVisitedRowsForTesting());
+            retained.assertStructurallyValidForTesting();
+        }
+        assertEquals(rows, source.states());
+        source.assertStructurallyValidForTesting();
+    }
+
     private static void assertFinalRows(
             ClosureProcessResult result,
             ClosureSubscriptionInventory inventory) {
@@ -244,6 +447,28 @@ final class ClosureSubscriptionInventoryTest {
                         actual.get(channelKey).subscriptionIdentity());
             }
         }
+    }
+
+    private static DocumentId ambientDocument(int index) {
+        return DocumentId.of("ambient-subscription-%04d".formatted(index));
+    }
+
+    private static SubscriptionState ambientState(
+            int document,
+            int channel,
+            SubscriptionState template) {
+        ChannelOccurrence occurrence = ChannelOccurrence.root(
+                new blue.language.processor.closure.DocumentId(
+                        ambientDocument(document).value()),
+                "ambient-channel-" + channel,
+                template.channelOccurrence()
+                        .effectiveRuntimeContributionBlueId(),
+                template.channelOccurrence().subscriptionHeaderBlueId());
+        return SubscriptionState.identified(
+                occurrence,
+                template.documentBlueId(),
+                template.graphGeneration(),
+                template.componentGeneration());
     }
 
     private static void assertFinalStateRejected(
