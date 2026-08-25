@@ -127,9 +127,9 @@ final class ManagedOccurrenceInventoryTest {
 
         // then
         assertSame(inventory, inventory.apply(List.of()));
-        assertThrows(UnsupportedOperationException.class,
+        assertThrows(IllegalStateException.class,
                 () -> inventory.apply(List.of(
-                        ManagedOccurrenceInventory.Change.rebind(
+                        ManagedOccurrenceInventory.Change.retire(
                                 A, "/b", C, INPUT_B))));
         assertEquals(active.occurrenceIdentity(),
                 inventory.row(A, "/b").occurrenceIdentity());
@@ -148,16 +148,85 @@ final class ManagedOccurrenceInventoryTest {
                 ManagedOccurrenceInventory.of(List.of(
                         active,
                         row(B, "/a", 1L, A, INPUT_A, true, null)));
-        assertThrows(UnsupportedOperationException.class,
+        assertThrows(IllegalStateException.class,
                 () -> twoRows.apply(List.of(
                         ManagedOccurrenceInventory.Change.rebind(
                                 A, "/b", B, AFTER_REMOVE_B),
-                        ManagedOccurrenceInventory.Change.rebind(
+                        ManagedOccurrenceInventory.Change.retire(
                                 B, "/a", C, AFTER_REMOVE_A))));
         assertEquals(INPUT_B,
                 twoRows.row(A, "/b").expectedTargetBlueId());
         assertEquals(INPUT_A,
                 twoRows.row(B, "/a").expectedTargetBlueId());
+    }
+
+    @Test
+    void activeDifferentLineageRebindAllocatesExactFreshNextGenerationRow() {
+        // given
+
+        ManagedOccurrenceBinding before = row(
+                A, "/b", 4L, B, INPUT_B, true, null);
+        ManagedOccurrenceInventory inventory =
+                ManagedOccurrenceInventory.of(List.of(before));
+
+        // when
+        ManagedOccurrenceInventory rebound = inventory.apply(List.of(
+                ManagedOccurrenceInventory.Change.rebind(
+                        A, "/b", C, AFTER_READD_B)));
+
+        // then
+        ManagedOccurrenceBinding after = rebound.row(A, "/b");
+        ManagedOccurrenceBinding exact = row(
+                A, "/b", 5L, C, AFTER_READD_B, true, null);
+        assertTrue(after.active());
+        assertEquals(5L, after.activationGeneration());
+        assertEquals(C.value(), after.targetDocumentId().value());
+        assertEquals(AFTER_READD_B, after.expectedTargetBlueId());
+        assertEquals(exact.occurrenceIdentity(),
+                after.occurrenceIdentity());
+        assertEquals(exact.bindingIdentity(), after.bindingIdentity());
+        assertNotEquals(before.occurrenceIdentity(),
+                after.occurrenceIdentity());
+        assertNotEquals(before.bindingIdentity(), after.bindingIdentity());
+        assertEquals(INPUT_B,
+                inventory.row(A, "/b").expectedTargetBlueId());
+        assertEquals(B.value(),
+                inventory.row(A, "/b").targetDocumentId().value());
+    }
+
+    @Test
+    void differentLineageRebindRejectsInactiveHistoricalAndOverflowRows() {
+        // given
+
+        ManagedOccurrenceInventory inactive =
+                ManagedOccurrenceInventory.of(List.of(row(
+                        A, "/b", 2L, B, INPUT_B, false, null)));
+        ManagedOccurrenceInventory historical =
+                ManagedOccurrenceInventory.of(List.of(row(
+                        A, "/b", 2L, B, INPUT_B, false, 7L)));
+        ManagedOccurrenceInventory atLimit =
+                ManagedOccurrenceInventory.of(List.of(row(
+                        A, "/b", MAX_SAFE_INTEGER,
+                        B, INPUT_B, true, null)));
+
+        // when / then
+        assertThrows(IllegalStateException.class,
+                () -> inactive.apply(List.of(
+                        ManagedOccurrenceInventory.Change.rebind(
+                                A, "/b", C, AFTER_READD_B))));
+        assertThrows(IllegalStateException.class,
+                () -> historical.apply(List.of(
+                        ManagedOccurrenceInventory.Change.rebind(
+                                A, "/b", C, AFTER_READD_B))));
+        assertThrows(IllegalStateException.class,
+                () -> atLimit.apply(List.of(
+                        ManagedOccurrenceInventory.Change.rebind(
+                                A, "/b", C, AFTER_READD_B))));
+        assertFalse(inactive.row(A, "/b").active());
+        assertEquals(7L,
+                historical.row(A, "/b").pendingHistoricalEpoch());
+        assertEquals(MAX_SAFE_INTEGER,
+                atLimit.row(A, "/b").activationGeneration());
     }
 
     @Test
@@ -187,6 +256,11 @@ final class ManagedOccurrenceInventoryTest {
         assertEquals(List.of(D), index.component(D).members());
         assertEquals(List.of(), index.targets(index.component(C)));
         assertEquals(List.of(), index.sources(index.component(D)));
+        assertEquals(inventory.rows().stream()
+                        .filter(row -> row.sourceDocumentId().value()
+                                .equals(A.value()))
+                        .toList(),
+                inventory.rowsFrom(A));
     }
 
     @Test

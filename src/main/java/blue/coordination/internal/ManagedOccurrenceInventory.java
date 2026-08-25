@@ -47,6 +47,8 @@ final class ManagedOccurrenceInventory {
     private final Map<DocumentId, List<ManagedOccurrenceBinding>>
             rowsByDocument;
     private final Map<DocumentId, List<ManagedOccurrenceBinding>>
+            rowsBySourceDocument;
+    private final Map<DocumentId, List<ManagedOccurrenceBinding>>
             activeRowsBySourceDocument;
 
     private ManagedOccurrenceInventory(
@@ -63,6 +65,8 @@ final class ManagedOccurrenceInventory {
         TreeSet<DocumentId> documents = new TreeSet<>(
                 EmbeddingBinding.DOCUMENT_ORDER);
         TreeMap<DocumentId, List<ManagedOccurrenceBinding>> byDocument =
+                new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
+        TreeMap<DocumentId, List<ManagedOccurrenceBinding>> bySource =
                 new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
         TreeMap<DocumentId, List<ManagedOccurrenceBinding>> activeBySource =
                 new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
@@ -92,6 +96,8 @@ final class ManagedOccurrenceInventory {
             documents.add(target);
             byDocument.computeIfAbsent(
                     source, ignored -> new ArrayList<>()).add(row);
+            bySource.computeIfAbsent(
+                    source, ignored -> new ArrayList<>()).add(row);
             if (!source.equals(target)) {
                 byDocument.computeIfAbsent(
                         target, ignored -> new ArrayList<>()).add(row);
@@ -112,6 +118,12 @@ final class ManagedOccurrenceInventory {
                 immutableByDocument.put(documentId, List.copyOf(touching)));
         this.rowsByDocument = Collections.unmodifiableMap(
                 immutableByDocument);
+        LinkedHashMap<DocumentId, List<ManagedOccurrenceBinding>>
+                immutableBySource = new LinkedHashMap<>();
+        bySource.forEach((documentId, outgoing) ->
+                immutableBySource.put(documentId, List.copyOf(outgoing)));
+        this.rowsBySourceDocument = Collections.unmodifiableMap(
+                immutableBySource);
         LinkedHashMap<DocumentId, List<ManagedOccurrenceBinding>>
                 immutableActiveBySource = new LinkedHashMap<>();
         activeBySource.forEach((documentId, outgoing) ->
@@ -160,6 +172,12 @@ final class ManagedOccurrenceInventory {
                 Objects.requireNonNull(documentId, "documentId"), List.of());
     }
 
+    /** All active and inactive retained rows sourced by one lineage. */
+    List<ManagedOccurrenceBinding> rowsFrom(DocumentId documentId) {
+        return rowsBySourceDocument.getOrDefault(
+                Objects.requireNonNull(documentId, "documentId"), List.of());
+    }
+
     /** Returns the unique retained row for one source/path. */
     ManagedOccurrenceBinding row(
             DocumentId sourceDocumentId,
@@ -186,10 +204,12 @@ final class ManagedOccurrenceInventory {
      *
      * <p>Retirement allocates the same-lineage inactive successor at exactly
      * generation plus one. Activation consumes an already committed inactive
-     * row and preserves its generation and occurrence identity. Supplying two
-     * changes for one source/path is rejected, which excludes same-invocation
-     * remove-then-re-add. Every resulting identity is derived by Contracts,
-     * never by Coordination.</p>
+     * row and preserves its generation and occurrence identity. An active
+     * REBIND may atomically select a different target lineage by allocating
+     * the next activation generation and fresh Contracts-owned occurrence and
+     * binding identities. Supplying two changes for one source/path is
+     * rejected, which excludes same-invocation remove-then-re-add. Every
+     * resulting identity is derived by Contracts, never by Coordination.</p>
      */
     ManagedOccurrenceInventory apply(Collection<Change> changes) {
         Objects.requireNonNull(changes, "changes");
@@ -220,18 +240,17 @@ final class ManagedOccurrenceInventory {
                         "Transition has no committed occurrence row: "
                                 + change.key());
             }
-            if (!current.targetDocumentId().value().equals(
-                    change.targetDocumentId().value())) {
-                throw new UnsupportedOperationException(
-                        "Different-lineage Process Embedded retarget is "
-                                + "unsupported for " + change.key());
-            }
             ManagedOccurrenceBinding replacement = switch (change.kind()) {
-                case RETIRE -> retire(current, change.expectedTargetBlueId());
+                case RETIRE -> retire(
+                        requireReservedTarget(current, change),
+                        change.expectedTargetBlueId());
                 case ACTIVATE -> activate(
-                        current, change.expectedTargetBlueId());
+                        requireReservedTarget(current, change),
+                        change.expectedTargetBlueId());
                 case REBIND -> rebind(
-                        current, change.expectedTargetBlueId());
+                        current,
+                        change.targetDocumentId(),
+                        change.expectedTargetBlueId());
             };
             resultingRows.put(change.key(), replacement);
             changed |= !sameRow(replacement, current);
@@ -250,16 +269,7 @@ final class ManagedOccurrenceInventory {
                     "Only an active occurrence can be retired: "
                             + key(current));
         }
-        ScopeAddress successorAddress;
-        try {
-            successorAddress = ScopeAddress.embedded(
-                    current.sourcePath(),
-                    Math.addExact(current.activationGeneration(), 1L));
-        } catch (ArithmeticException | IllegalArgumentException rejected) {
-            throw new IllegalStateException(
-                    "Occurrence generation exceeds the portable safe-integer "
-                            + "range at " + key(current), rejected);
-        }
+        ScopeAddress successorAddress = nextGenerationAddress(current);
         ManagedOccurrenceBinding successor = ManagedOccurrenceBinding.derived(
                 current.bindingPolicyIdentity(),
                 current.sourceDocumentId(),
@@ -308,7 +318,13 @@ final class ManagedOccurrenceInventory {
 
     private static ManagedOccurrenceBinding rebind(
             ManagedOccurrenceBinding current,
+            DocumentId targetDocumentId,
             String expectedTargetBlueId) {
+        if (!current.targetDocumentId().value().equals(
+                targetDocumentId.value())) {
+            return rebindDifferentLineage(
+                    current, targetDocumentId, expectedTargetBlueId);
+        }
         if (current.expectedTargetBlueId().equals(expectedTargetBlueId)) {
             return current;
         }
@@ -330,6 +346,73 @@ final class ManagedOccurrenceInventory {
                     "Changed exact target state retained binding identity");
         }
         return rebound;
+    }
+
+    private static ManagedOccurrenceBinding rebindDifferentLineage(
+            ManagedOccurrenceBinding current,
+            DocumentId targetDocumentId,
+            String expectedTargetBlueId) {
+        if (current.pendingHistoricalEpoch() != null) {
+            throw new IllegalStateException(
+                    "Historical occurrence cannot retarget before catch-up: "
+                            + key(current));
+        }
+        if (!current.active()) {
+            throw new IllegalStateException(
+                    "Only an active occurrence can retarget to a different "
+                            + "lineage: " + key(current));
+        }
+        ScopeAddress nextAddress = nextGenerationAddress(current);
+        ManagedOccurrenceBinding rebound = ManagedOccurrenceBinding.derived(
+                current.bindingPolicyIdentity(),
+                current.sourceDocumentId(),
+                nextAddress,
+                contractsDocumentId(targetDocumentId),
+                expectedTargetBlueId,
+                true,
+                null);
+        if (rebound.activationGeneration()
+                        != current.activationGeneration() + 1L
+                || rebound.targetDocumentId().equals(
+                        current.targetDocumentId())
+                || !rebound.targetDocumentId().value().equals(
+                        targetDocumentId.value())
+                || !rebound.expectedTargetBlueId().equals(
+                        expectedTargetBlueId)
+                || rebound.occurrenceIdentity().equals(
+                        current.occurrenceIdentity())
+                || rebound.bindingIdentity().equals(
+                        current.bindingIdentity())) {
+            throw new IllegalStateException(
+                    "Different-lineage rebind did not allocate the exact "
+                            + "fresh next-generation occurrence");
+        }
+        return rebound;
+    }
+
+    private static ManagedOccurrenceBinding requireReservedTarget(
+            ManagedOccurrenceBinding current,
+            Change change) {
+        if (!current.targetDocumentId().value().equals(
+                change.targetDocumentId().value())) {
+            throw new IllegalStateException(
+                    change.kind() + " cannot change the reserved target "
+                            + "lineage for " + change.key());
+        }
+        return current;
+    }
+
+    private static ScopeAddress nextGenerationAddress(
+            ManagedOccurrenceBinding current) {
+        try {
+            return ScopeAddress.embedded(
+                    current.sourcePath(),
+                    Math.addExact(current.activationGeneration(), 1L));
+        } catch (ArithmeticException | IllegalArgumentException rejected) {
+            throw new IllegalStateException(
+                    "Occurrence generation exceeds the portable safe-integer "
+                            + "range at " + key(current), rejected);
+        }
     }
 
     /** One explicit occurrence mutation within an invocation. */
@@ -456,5 +539,11 @@ final class ManagedOccurrenceInventory {
             blue.language.processor.closure.DocumentId documentId) {
         return DocumentId.of(Objects.requireNonNull(
                 documentId, "documentId").value());
+    }
+
+    private static blue.language.processor.closure.DocumentId
+            contractsDocumentId(DocumentId documentId) {
+        return new blue.language.processor.closure.DocumentId(
+                Objects.requireNonNull(documentId, "documentId").value());
     }
 }
