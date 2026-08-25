@@ -392,7 +392,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
             if (!attempt.isComplete()) {
                 return new CohortOutcome(
                         selected.members(), executed.members(), attempt,
-                        false, identity, false, automatic.expansionCount());
+                        false, identity, false, automatic.expansionCount(),
+                        ManagedSurfacePublicationEvidence.empty());
             }
             if (!isDurablyTerminalStatus(
                     attempt.processResult().status())) {
@@ -405,7 +406,11 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     identity,
                     executed.members(),
                     attempt,
-                    automatic.expansionCount());
+                    automatic.expansionCount(),
+                    attempt.processResult().commits()
+                            ? ManagedSurfacePublicationEvidence.committed(
+                                    executed, attempt.processResult())
+                            : ManagedSurfacePublicationEvidence.empty());
         } finally {
             runtime.metrics().addNanos(
                     RESULT_VALIDATION_PHASE,
@@ -444,7 +449,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 receipt.commits(),
                 receipt.publicationIdentity(),
                 replayed,
-                receipt.automaticRetryCount());
+                receipt.automaticRetryCount(),
+                receipt.managedSurfaceEvidence());
     }
 
     synchronized Optional<ContractsClosurePublicationReceipt>
@@ -3056,12 +3062,14 @@ final class ContractsClosureAdapter implements AutoCloseable {
             boolean published,
             String publicationIdentity,
             boolean replayed,
-            long automaticRetryCount) {
+            long automaticRetryCount,
+            ManagedSurfacePublicationEvidence managedSurfaceEvidence) {
         CohortOutcome(
                 List<DocumentId> members,
                 ClosureAttemptResult attempt,
                 boolean published) {
-            this(members, members, attempt, published, null, false, 0L);
+            this(members, members, attempt, published, null, false, 0L,
+                    ManagedSurfacePublicationEvidence.empty());
         }
 
         CohortOutcome(
@@ -3071,7 +3079,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 String publicationIdentity,
                 boolean replayed) {
             this(members, members, attempt, published, publicationIdentity,
-                    replayed, 0L);
+                    replayed, 0L, ManagedSurfacePublicationEvidence.empty());
         }
 
         CohortOutcome {
@@ -3084,6 +3092,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         "Publication members must contain the frozen lane");
             }
             attempt = Objects.requireNonNull(attempt, "attempt");
+            managedSurfaceEvidence = Objects.requireNonNull(
+                    managedSurfaceEvidence, "managedSurfaceEvidence");
             MultiDocumentPublicationTransaction.requireSafeInteger(
                     automaticRetryCount, "automaticRetryCount");
             if (publicationIdentity != null
@@ -3099,6 +3109,14 @@ final class ContractsClosureAdapter implements AutoCloseable {
             if (replayed && publicationIdentity == null) {
                 throw new IllegalArgumentException(
                         "A replayed outcome requires its publication identity");
+            }
+            if (!published
+                    && (!managedSurfaceEvidence.resolvedOccurrences().isEmpty()
+                            || !managedSurfaceEvidence.inputComponents()
+                                    .isEmpty())) {
+                throw new IllegalArgumentException(
+                        "Only a published outcome can expose managed "
+                                + "publication evidence");
             }
         }
     }

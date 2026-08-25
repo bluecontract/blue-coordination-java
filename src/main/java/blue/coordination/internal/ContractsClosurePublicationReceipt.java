@@ -25,13 +25,24 @@ record ContractsClosurePublicationReceipt(
         String publicationIdentity,
         List<DocumentId> documentIds,
         ClosureAttemptResult attempt,
-        long automaticRetryCount) {
+        long automaticRetryCount,
+        ManagedSurfacePublicationEvidence managedSurfaceEvidence) {
 
     ContractsClosurePublicationReceipt(
             String publicationIdentity,
             List<DocumentId> documentIds,
             ClosureAttemptResult attempt) {
-        this(publicationIdentity, documentIds, attempt, 0L);
+        this(publicationIdentity, documentIds, attempt, 0L,
+                ManagedSurfacePublicationEvidence.empty());
+    }
+
+    ContractsClosurePublicationReceipt(
+            String publicationIdentity,
+            List<DocumentId> documentIds,
+            ClosureAttemptResult attempt,
+            long automaticRetryCount) {
+        this(publicationIdentity, documentIds, attempt, automaticRetryCount,
+                ManagedSurfacePublicationEvidence.empty());
     }
 
     ContractsClosurePublicationReceipt {
@@ -44,6 +55,8 @@ record ContractsClosurePublicationReceipt(
         }
         MultiDocumentPublicationTransaction.requireSafeInteger(
                 automaticRetryCount, "automaticRetryCount");
+        managedSurfaceEvidence = Objects.requireNonNull(
+                managedSurfaceEvidence, "managedSurfaceEvidence");
         if (attempt.processResult().status()
                 == ProcessorStatus.CAPABILITY_FAILURE) {
             throw new IllegalArgumentException(
@@ -79,6 +92,14 @@ record ContractsClosurePublicationReceipt(
         if (!resultDocuments.equals(new LinkedHashSet<>(documentIds))) {
             throw new IllegalArgumentException(
                     "Process receipt cohort differs from its exact result");
+        }
+        if (!result.commits()
+                && (!managedSurfaceEvidence.resolvedOccurrences().isEmpty()
+                        || !managedSurfaceEvidence.inputComponents()
+                                .isEmpty())) {
+            throw new IllegalArgumentException(
+                    "A non-committing receipt cannot retain managed "
+                            + "publication evidence");
         }
     }
 

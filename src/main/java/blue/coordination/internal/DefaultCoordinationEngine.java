@@ -1354,7 +1354,24 @@ public final class DefaultCoordinationEngine
                         exact.published(),
                         exact.publicationIdentity(),
                         exact.replayed(),
-                        exact.automaticRetryCount()));
+                        exact.automaticRetryCount(),
+                        exact.managedSurfaceEvidence()
+                                .resolvedOccurrences()
+                                .stream()
+                                .map(resolution -> new
+                                        ContractsClosureDispatchAttempt
+                                                .ManagedOccurrenceResolution(
+                                                resolution.demandIdentity(),
+                                                resolution.occurrence(),
+                                                ContractsClosureDispatchAttempt
+                                                        .TargetKind.valueOf(
+                                                        resolution.targetKind()
+                                                                .name()),
+                                                Optional.ofNullable(
+                                                        resolution
+                                                                .authoredInitial())))
+                                .toList(),
+                        exact.managedSurfaceEvidence().inputComponents()));
                 if (!cohort.outcome().published()
                         || cohort.outcome().replayed()) {
                     continue;

@@ -14,7 +14,8 @@ public record ClosureResult(
         ProcessingStats stats,
         Diagnostic diagnostic,
         List<ResourceDemand> resourceDemands,
-        long processorAttemptCount) {
+        long processorAttemptCount,
+        ManagedSurfaceEvidence managedSurfaceEvidence) {
 
     /**
      * Preserves the original result constructor for callers that do not need
@@ -28,7 +29,25 @@ public record ClosureResult(
             ProcessingStats stats,
             Diagnostic diagnostic) {
         this(closureId, disposition, changes, publicEvents, stats, diagnostic,
-                List.of(), 1L);
+                List.of(), 1L, ManagedSurfaceEvidence.empty());
+    }
+
+    /**
+     * Preserves the resource-evidence constructor for callers that do not
+     * need committed managed-surface presentation evidence.
+     */
+    public ClosureResult(
+            String closureId,
+            EntryDisposition disposition,
+            List<DocumentChange> changes,
+            List<PublicEvent> publicEvents,
+            ProcessingStats stats,
+            Diagnostic diagnostic,
+            List<ResourceDemand> resourceDemands,
+            long processorAttemptCount) {
+        this(closureId, disposition, changes, publicEvents, stats, diagnostic,
+                resourceDemands, processorAttemptCount,
+                ManagedSurfaceEvidence.empty());
     }
 
     /** Defensively copies result collections. */
@@ -42,9 +61,17 @@ public record ClosureResult(
         diagnostic = Objects.requireNonNull(diagnostic, "diagnostic");
         resourceDemands = List.copyOf(Objects.requireNonNull(
                 resourceDemands, "resourceDemands"));
+        managedSurfaceEvidence = Objects.requireNonNull(
+                managedSurfaceEvidence, "managedSurfaceEvidence");
         if (processorAttemptCount < 1L) {
             throw new IllegalArgumentException(
                     "processorAttemptCount must be positive");
+        }
+        if (disposition != EntryDisposition.APPLIED
+                && managedSurfaceEvidence.present()) {
+            throw new IllegalArgumentException(
+                    "Only an applied closure may expose managed-surface "
+                            + "publication evidence");
         }
     }
 

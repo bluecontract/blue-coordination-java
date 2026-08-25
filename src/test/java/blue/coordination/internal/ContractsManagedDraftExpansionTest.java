@@ -482,6 +482,20 @@ final class ContractsManagedDraftExpansionTest {
             assertEquals(Set.of(HOST, EXISTING), Set.copyOf(
                     outcome.publicationMembers()));
             assertEquals(List.of(HOST), outcome.members());
+            assertEquals(1, outcome.managedSurfaceEvidence()
+                    .resolvedOccurrences().size());
+            ManagedSurfacePublicationEvidence.ResolvedOccurrence
+                    resolution = outcome.managedSurfaceEvidence()
+                            .resolvedOccurrences().get(0);
+            assertEquals(
+                    ManagedOccurrenceResolver.TargetKind.CURRENT_EXISTING,
+                    resolution.targetKind());
+            assertEquals(EXISTING.value(),
+                    resolution.occurrence().targetDocumentId().value());
+            assertEquals("/orders/order-1",
+                    resolution.occurrence().sourcePath());
+            assertTrue(resolution.occurrence().active());
+            assertTrue(resolution.authoredInitial() == null);
             DocumentSnapshot existingAfter = engine.document(EXISTING);
             assertEquals(existingBefore.epoch(), existingAfter.epoch());
             assertEquals(existingBefore.current().blueId(),
@@ -517,12 +531,17 @@ final class ContractsManagedDraftExpansionTest {
                             .targeting(engine.document(HOST).current(), true));
             ContractsClosureAdapter adapter = engine
                     .contractsClosureAdapter();
+            ContractsClosureAdapter.FrozenBatch originalBatch = adapter
+                    .capture(entry);
+            ContractsClosureAdapter.CohortInvocation originalInvocation =
+                    originalBatch.invocations().get(0);
             adapter.onPublicationFailurePoint(point -> {
                 throw new IllegalStateException("lost expanded response");
             });
 
             // when
-            assertThrows(RuntimeException.class, engine::drain);
+            assertThrows(RuntimeException.class, () -> adapter
+                    .executeAndPublish(originalBatch, originalInvocation));
 
             // then
             assertTrue(engine.documents().find(childId).isPresent());
@@ -530,13 +549,35 @@ final class ContractsManagedDraftExpansionTest {
             assertEquals(1, engine.history(childId).size());
             assertEquals(1, engine.documents().publicationSnapshot()
                     .closurePublicationReceipts().size());
-            assertEquals(1L, engine.documents().publicationSnapshot()
-                    .closurePublicationReceipts().values().iterator().next()
-                    .automaticRetryCount());
+            ContractsClosurePublicationReceipt committedReceipt = engine
+                    .documents().publicationSnapshot()
+                    .closurePublicationReceipts().values().iterator().next();
+            assertEquals(1L, committedReceipt.automaticRetryCount());
+            assertEquals(1, committedReceipt.managedSurfaceEvidence()
+                    .resolvedOccurrences().size());
+            ManagedSurfacePublicationEvidence.ResolvedOccurrence retained =
+                    committedReceipt.managedSurfaceEvidence()
+                            .resolvedOccurrences().get(0);
+            assertEquals(
+                    ManagedOccurrenceResolver.TargetKind.NEW_AUTHORED,
+                    retained.targetKind());
+            assertEquals(childId.value(),
+                    retained.occurrence().targetDocumentId().value());
+            assertEquals(authored.blueId(),
+                    retained.authoredInitial().blueId());
             long retries = engine.documents().metrics().counter(
                     AutomaticOccurrenceResolutionCoordinator.RETRIES);
 
             adapter.onPublicationFailurePoint(ignored -> { });
+            ContractsClosureAdapter.CohortOutcome replay = adapter
+                    .executeAndPublish(
+                            originalBatch,
+                            originalInvocation);
+            assertTrue(replay.replayed());
+            assertTrue(replay.published());
+            assertEquals(committedReceipt.managedSurfaceEvidence(),
+                    replay.managedSurfaceEvidence());
+
             ProcessingDrainReceipt recovered = engine.drain();
 
             assertEquals(List.of(entry), recovered.processedEntries());

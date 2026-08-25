@@ -151,6 +151,43 @@ final class SdkManagedDraftAcceptanceTest {
                 ClosureResult closure = result.closures().get(0);
                 assertEquals(2L, closure.processorAttemptCount(), operation);
                 assertEquals(1L, closure.automaticRetryCount(), operation);
+                ManagedSurfaceEvidence surface =
+                        closure.managedSurfaceEvidence();
+                assertTrue(surface.present(), operation);
+                assertEquals(1, surface.resolvedOccurrences().size(),
+                        operation);
+                ManagedSurfaceEvidence.OccurrenceResolution resolution =
+                        surface.resolvedOccurrences().get(0);
+                assertEquals(
+                        ManagedSurfaceEvidence.ResolutionKind.NEW_AUTHORED,
+                        resolution.kind(), operation);
+                assertEquals(hostId,
+                        resolution.occurrence().sourceDocumentId(),
+                        operation);
+                assertEquals("/orders/extra",
+                        resolution.occurrence().sourcePath(), operation);
+                assertEquals(automaticChildId,
+                        resolution.occurrence().targetDocumentId(),
+                        operation);
+                assertTrue(resolution.occurrence().active(), operation);
+                assertEquals(child.initial().blueId(),
+                        resolution.authoredInitial().orElseThrow().blueId(),
+                        operation);
+                assertTrue(surface.graphChanges().stream().anyMatch(
+                        change -> change.kind()
+                                        == ManagedSurfaceEvidence
+                                                .GraphChangeKind.ADD
+                                && change.sourceDocumentId().equals(hostId)
+                                && change.sourcePath().equals(
+                                        "/orders/extra")
+                                && change.after().orElseThrow()
+                                        .targetDocumentId()
+                                        .equals(automaticChildId)),
+                        operation);
+                assertFalse(surface.componentTransitions().isEmpty(),
+                        operation);
+                assertFalse(surface.subscriptionChanges().isEmpty(),
+                        operation);
                 assertEquals(Set.of(hostId, childId, automaticChildId),
                         closure.changes().stream()
                                 .map(DocumentChange::documentId)
@@ -186,6 +223,77 @@ final class SdkManagedDraftAcceptanceTest {
                 assertEquals(1, explicitChild.history().size(), operation);
                 assertEquals(1, automaticChild.history().size(), operation);
             }
+        }
+    }
+
+    @Test
+    void automaticOccurrenceResolutionReusesTheExactCurrentLineage() {
+        // given
+
+        DocumentId hostId = DocumentId.of(
+                "sdk-managed-current-reuse-host");
+        DocumentId existingId = DocumentId.of(
+                "sdk-managed-current-reuse-child");
+        String timelineId = "sdk/managed-current-reuse/alice";
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            TimelineHandle timeline = coordination.timelines().register(
+                    timelineId, ACTOR);
+            DocumentHandle host = coordination.documents().admit(
+                    ManagedDocument.yaml(
+                                    hostId,
+                                    singleDraftHost(
+                                            hostId,
+                                            timelineId,
+                                            "attachCurrent"))
+                            .publicRoot()
+                            .fromNow());
+            DocumentHandle existing = coordination.documents().admit(
+                    ManagedDocument.yaml(
+                                    existingId,
+                                    lifecycleDocument(existingId, false))
+                            .publicRoot()
+                            .fromNow());
+            String currentBlueId = existing.snapshot().blueId();
+            int historyBefore = existing.history().size();
+
+            // when
+
+            EntryResult result = coordination.operations()
+                    .on(host)
+                    .from(timeline)
+                    .call("attachCurrent")
+                    .through("ownerChannel")
+                    .request(request -> request.exact(
+                            "order", existing.exact()))
+                    .execute();
+
+            // then
+
+            assertEquals(EntryDisposition.APPLIED, result.disposition());
+            ClosureResult closure = result.closures().get(0);
+            assertEquals(2L, closure.processorAttemptCount());
+            ManagedSurfaceEvidence surface =
+                    closure.managedSurfaceEvidence();
+            assertEquals(1, surface.resolvedOccurrences().size());
+            ManagedSurfaceEvidence.OccurrenceResolution resolution =
+                    surface.resolvedOccurrences().get(0);
+            assertEquals(
+                    ManagedSurfaceEvidence.ResolutionKind.CURRENT_EXISTING,
+                    resolution.kind());
+            assertTrue(resolution.authoredInitial().isEmpty());
+            assertEquals(hostId,
+                    resolution.occurrence().sourceDocumentId());
+            assertEquals("/orders/order-456",
+                    resolution.occurrence().sourcePath());
+            assertEquals(existingId,
+                    resolution.occurrence().targetDocumentId());
+            assertEquals(currentBlueId,
+                    resolution.occurrence().expectedTargetBlueId());
+            assertTrue(resolution.occurrence().active());
+            assertEquals(currentBlueId, existing.snapshot().blueId());
+            assertEquals(historyBefore, existing.history().size());
+            assertEquals(currentBlueId,
+                    host.snapshot().valueAt("/orders/order-456").blueId());
         }
     }
 
@@ -955,6 +1063,8 @@ final class SdkManagedDraftAcceptanceTest {
                     failure.name());
             assertTrue(result.closures().get(0).publicEvents().isEmpty(),
                     failure.name());
+            assertFalse(result.closures().get(0)
+                    .managedSurfaceEvidence().present(), failure.name());
             assertTrue(result.publicEvents().isEmpty(), failure.name());
             assertEquals(0L, result.stats().committedTransitions(),
                     failure.name());
