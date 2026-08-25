@@ -392,6 +392,13 @@ requireApplied(blue.operations()
         .execute());
 
 requireApplied(blue.operations()
+        .on(order)
+        .from(sales)
+        .call("complete")
+        .through("salesChannel")
+        .execute());
+
+requireApplied(blue.operations()
         .on(payment)
         .from(billing)
         .call("capture")
@@ -487,6 +494,7 @@ or a cycle in the initial `ManagedClosure` instead.
 
 ```java
 DocumentHandle newParent = blue.documents().require(parentId);
+newParent = blue.documents().promotePublicRoot(parentId);
 ManagedDocumentDraft grandchild = blue.documents().draft(
         grandchildId, blue.values().yaml(grandchildYaml));
 
@@ -514,10 +522,15 @@ child's READY BlueId will remain identical. Epoch-zero initialization can
 legitimately transform that value or emit lifecycle events; the stable
 `DocumentId` remains the lineage identity.
 
-After the result is `APPLIED`, retrieve and operate on the new lineage:
+Retrieve the new lineage after the managed expansion. An operation-created
+member is managed but is not automatically a public Root. Promote it before
+addressing one of its operations directly. Promotion changes only the Root
+admission set: it does not append a Timeline Entry, advance the member epoch,
+or change its exact document head.
 
 ```java
 var receipt = blue.documents().require(receiptId);
+receipt = blue.documents().promotePublicRoot(receiptId);
 
 requireApplied(blue.operations()
         .on(receipt)
@@ -525,14 +538,17 @@ requireApplied(blue.operations()
         .call("markSent")
         .through("workerChannel")
         .execute());
-
-requireApplied(blue.operations()
-        .on(order)
-        .from(sales)
-        .call("complete")
-        .through("salesChannel")
-        .execute());
 ```
+
+This ordering is part of the current forward-only profile. A directly selected
+embedded member without typed incoming demand can advance without opening its
+ancestors. The current scalar graph-generation contract does not subsequently
+merge that advanced forward closure back into a wider ancestor invocation. Run
+any remaining ancestor operation before independently advancing a descendant,
+or model the required upstream participation with explicit typed demand.
+Advancing the descendant also does not mutate the ancestor's exact embedded
+value behind its back: that occurrence remains the version the ancestor last
+published until an authorized ancestor transition replaces it.
 
 Use a helper that reports diagnostics instead of assuming success:
 

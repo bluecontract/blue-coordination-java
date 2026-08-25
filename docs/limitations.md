@@ -56,6 +56,14 @@ list-position identity and arbitrary collection reshaping are not implied.
 Same-invocation remove-then-re-add and retargeting one retained occurrence to a
 different lineage remain unsupported.
 
+A directly selected embedded member with no typed incoming demand processes
+only its forward affected closure. After that smaller closure advances, the
+current scalar graph-generation contract cannot merge it back into a wider
+ancestor invocation. Run any later ancestor operation before independently
+advancing the descendant, or model the required upstream participation with
+explicit typed demand. Coordination does not weaken graph-generation CAS or
+silently rebase retained subscription evidence across that boundary.
+
 Managed embedded-document epochs and broad historical synchronization remain a
 next-version Coordination temporal profile rather than frozen Contracts 1.0
 semantics. Top-level history import is bounded by the current in-memory provider

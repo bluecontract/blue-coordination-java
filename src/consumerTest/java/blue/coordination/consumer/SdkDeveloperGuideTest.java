@@ -69,6 +69,13 @@ final class SdkDeveloperGuideTest {
                     .execute();
             requireApplied(confirmed);
 
+            EntryResult completed = blue.operations().on(order)
+                    .from(sales)
+                    .call("complete")
+                    .through("salesChannel")
+                    .execute();
+            requireApplied(completed);
+
             EntryResult captured = blue.operations().on(payment)
                     .from(billing)
                     .call("capture")
@@ -100,27 +107,39 @@ final class SdkDeveloperGuideTest {
             requireApplied(created);
 
             DocumentHandle receipt = blue.documents().require(RECEIPT);
-            EntryResult sent = blue.operations().on(receipt)
+            String receiptBeforePromotion = receipt.snapshot().blueId();
+            assertEquals(receiptBeforePromotion,
+                    payment.snapshot().valueAt(
+                            "/receipts/primary").blueId());
+            long receiptEpochBeforePromotion = receipt.snapshot().epoch();
+            int receiptHistoryBeforePromotion = receipt.history().size();
+            int entriesBeforePromotion = blue.advanced()
+                    .auditTimelineEntries().size();
+            DocumentHandle promotedReceipt = blue.documents()
+                    .promotePublicRoot(RECEIPT);
+            assertEquals(receiptBeforePromotion,
+                    promotedReceipt.snapshot().blueId());
+            assertEquals(receiptEpochBeforePromotion,
+                    promotedReceipt.snapshot().epoch());
+            assertEquals(receiptHistoryBeforePromotion,
+                    promotedReceipt.history().size());
+            assertEquals(entriesBeforePromotion,
+                    blue.advanced().auditTimelineEntries().size());
+            EntryResult sent = blue.operations().on(promotedReceipt)
                     .from(receiptWorker)
                     .call("markSent")
                     .through("workerChannel")
                     .execute();
             requireApplied(sent);
 
-            EntryResult completed = blue.operations().on(order)
-                    .from(sales)
-                    .call("complete")
-                    .through("salesChannel")
-                    .execute();
-
             // then
             List<EntryResult> results = List.of(
                     confirmed,
+                    completed,
                     captured,
                     dispatched,
                     created,
-                    sent,
-                    completed);
+                    sent);
             results.forEach(result -> {
                 assertEquals(EntryDisposition.APPLIED,
                         result.disposition());
@@ -140,9 +159,12 @@ final class SdkDeveloperGuideTest {
             assertTrue(shipment.snapshot().ready());
             assertTrue(route.snapshot().ready());
             assertTrue(receipt.snapshot().ready());
-            assertEquals(
-                    receipt.snapshot().blueId(),
-                    payment.snapshot().valueAt("/receipts/primary").blueId());
+            assertEquals(receiptBeforePromotion,
+                    payment.snapshot().valueAt(
+                            "/receipts/primary").blueId());
+            assertFalse(receipt.snapshot().blueId().equals(
+                    payment.snapshot().valueAt(
+                            "/receipts/primary").blueId()));
             assertFalse(order.exact().cyclicMember());
             assertFalse(payment.exact().cyclicMember());
             assertTrue(shipment.exact().cyclicMember());
