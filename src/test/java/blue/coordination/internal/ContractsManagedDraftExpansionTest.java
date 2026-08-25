@@ -32,6 +32,10 @@ final class ContractsManagedDraftExpansionTest {
             "managed-expansion-draft");
     private static final DocumentId EXISTING = DocumentId.of(
             "managed-expansion-existing");
+    private static final DocumentId DESCENDANT = DocumentId.of(
+            "managed-expansion-descendant");
+    private static final DocumentId EXTERNAL = DocumentId.of(
+            "managed-expansion-external-source");
 
     @Test
     void atomicAppendPublishesOrRollsBackEntryAndPlanTogether() {
@@ -427,6 +431,9 @@ final class ContractsManagedDraftExpansionTest {
                     .current().canonicalBlueIdAt("/orders/order-1"));
             assertTrue(engine.documents().metrics().counter(
                     AutomaticOccurrenceResolutionCoordinator.RETRIES) > 0L);
+            assertEquals(0L, engine.documents().metrics().counter(
+                    ContractsClosureExecutionMetricsObserver
+                            .UNRELATED_COMPONENT_FINALIZATIONS));
         }
     }
 
@@ -534,17 +541,150 @@ final class ContractsManagedDraftExpansionTest {
         }
     }
 
+    @Test
+    void existingTargetExpansionOpensOnlyItsForwardManagedClosure() {
+        // given
+
+        try (DefaultCoordinationEngine engine = contractsEngine()) {
+            String timelineId = "managed/automatic-forward";
+            engine.registerTimeline(timelineId, ACTOR);
+            engine.authorizeContractsPublicRoots(Set.of(
+                    HOST, EXISTING, DESCENDANT));
+            new Contracts10ScenarioBuilder(engine)
+                    .document(EXISTING, edgeSource(EXISTING))
+                    .document(DESCENDANT, leaf(DESCENDANT))
+                    .processEmbeddedPath(
+                            EXISTING, "/child", DESCENDANT)
+                    .publicRoot(EXISTING)
+                    .publicRoot(DESCENDANT)
+                    .expectedComponent(DESCENDANT)
+                    .expectedComponent(EXISTING)
+                    .admitTo(engine);
+            admitHost(engine, timelineId);
+            DocumentSnapshot existingBefore = engine.document(EXISTING);
+            DocumentSnapshot descendantBefore = engine.document(DESCENDANT);
+            TimelineEntry entry = engine.append(
+                    engine.timeline(timelineId, ACTOR),
+                    Operation.exact(
+                                    "createOrder",
+                                    "ownerChannel",
+                                    engine.referenceRequest(
+                                            "order",
+                                            existingBefore.current()))
+                            .targeting(engine.document(HOST).current(), true));
+            ContractsClosureAdapter adapter = engine
+                    .contractsClosureAdapter();
+            ContractsClosureAdapter.FrozenBatch batch = adapter.capture(entry);
+
+            // when
+            ContractsClosureAdapter.CohortOutcome outcome = adapter
+                    .executeAndPublish(batch, batch.invocations().get(0));
+
+            // then
+            assertTrue(outcome.published());
+            assertEquals(Set.of(HOST, EXISTING, DESCENDANT),
+                    Set.copyOf(outcome.members()));
+            assertEquals(existingBefore.current().blueId(),
+                    engine.document(EXISTING).current().blueId());
+            assertEquals(existingBefore.epoch(),
+                    engine.document(EXISTING).epoch());
+            assertEquals(descendantBefore.current().blueId(),
+                    engine.document(DESCENDANT).current().blueId());
+            assertEquals(descendantBefore.epoch(),
+                    engine.document(DESCENDANT).epoch());
+            assertEquals(existingBefore.current().blueId(),
+                    engine.document(HOST).current()
+                            .canonicalBlueIdAt("/orders/order-1"));
+            assertEquals(1L, engine.documents().occurrenceInventory()
+                    .activeRows().stream()
+                    .filter(row -> row.sourceDocumentId().value().equals(
+                            EXISTING.value())
+                            && row.targetDocumentId().value().equals(
+                                    DESCENDANT.value()))
+                    .count());
+        }
+    }
+
+    @Test
+    void externalActiveIncomingBoundaryRejectsWithoutMutation() {
+        // given
+
+        try (DefaultCoordinationEngine engine = contractsEngine()) {
+            String timelineId = "managed/automatic-incoming-boundary";
+            engine.registerTimeline(timelineId, ACTOR);
+            engine.authorizeContractsPublicRoots(Set.of(
+                    HOST, EXISTING, EXTERNAL));
+            new Contracts10ScenarioBuilder(engine)
+                    .document(EXTERNAL, edgeSource(EXTERNAL))
+                    .document(EXISTING, leaf(EXISTING))
+                    .processEmbeddedPath(EXTERNAL, "/child", EXISTING)
+                    .publicRoot(EXTERNAL)
+                    .publicRoot(EXISTING)
+                    .expectedComponent(EXISTING)
+                    .expectedComponent(EXTERNAL)
+                    .admitTo(engine);
+            admitHost(engine, timelineId);
+            TimelineEntry entry = engine.append(
+                    engine.timeline(timelineId, ACTOR),
+                    Operation.exact(
+                                    "createOrder",
+                                    "ownerChannel",
+                                    engine.referenceRequest(
+                                            "order",
+                                            engine.document(EXISTING)
+                                                    .current()))
+                            .targeting(engine.document(HOST).current(), true));
+            ContractsClosureAdapter adapter = engine
+                    .contractsClosureAdapter();
+            ContractsClosureAdapter.FrozenBatch batch = adapter.capture(entry);
+            InMemoryDocumentStore.PublicationSnapshot before = engine
+                    .documents().publicationSnapshot();
+            int objectsBefore = engine.objects().size();
+
+            // when
+            ContractsClosureAdapter.ProjectionUnavailableException rejected =
+                    assertThrows(
+                            ContractsClosureAdapter
+                                    .ProjectionUnavailableException.class,
+                            () -> adapter.executeAndPublish(
+                                    batch, batch.invocations().get(0)));
+
+            // then
+            assertTrue(rejected.getMessage().contains(
+                    "external active incoming"));
+            InMemoryDocumentStore.PublicationSnapshot after = engine
+                    .documents().publicationSnapshot();
+            assertEquals(before.documentHeads(), after.documentHeads());
+            assertEquals(before.occurrenceInventory().rows(),
+                    after.occurrenceInventory().rows());
+            assertEquals(before.occurrenceInventoryGeneration(),
+                    after.occurrenceInventoryGeneration());
+            assertEquals(before.componentIndexGeneration(),
+                    after.componentIndexGeneration());
+            assertEquals(before.componentStates(), after.componentStates());
+            assertEquals(before.closurePublicationReceipts(),
+                    after.closurePublicationReceipts());
+            assertEquals(objectsBefore, engine.objects().size());
+        }
+    }
+
     private static DefaultCoordinationEngine admittedHost(
             String timelineId) {
         DefaultCoordinationEngine engine = contractsEngine();
         engine.registerTimeline(timelineId, ACTOR);
         engine.authorizeContractsPublicRoots(Set.of(HOST));
+        admitHost(engine, timelineId);
+        return engine;
+    }
+
+    private static void admitHost(
+            DefaultCoordinationEngine engine,
+            String timelineId) {
         new Contracts10ScenarioBuilder(engine)
                 .document(HOST, hostDocument(timelineId))
                 .publicRoot(HOST)
                 .expectedComponent(HOST)
                 .admitTo(engine);
-        return engine;
     }
 
     private static DefaultCoordinationEngine contractsEngine() {
@@ -621,5 +761,19 @@ final class ContractsManagedDraftExpansionTest {
                         do:
                           - $return: true
                 """.formatted(timelineId);
+    }
+
+    private static String edgeSource(DocumentId documentId) {
+        return """
+                documentId: %s
+                child: {}
+                """.formatted(documentId.value());
+    }
+
+    private static String leaf(DocumentId documentId) {
+        return """
+                documentId: %s
+                state: current
+                """.formatted(documentId.value());
     }
 }

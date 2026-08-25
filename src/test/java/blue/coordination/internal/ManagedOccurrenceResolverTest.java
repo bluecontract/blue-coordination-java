@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -174,6 +175,31 @@ final class ManagedOccurrenceResolverTest {
                     ManagedOccurrenceResolver.ResolutionStatus
                             .MISSING_EXACT_CONTENT,
                     missingResult.unresolvedDemands().get(0).status());
+        }
+    }
+
+    @Test
+    void exactNodeResolutionCarriesOneShotProviderContentForTheRetry() {
+        try (DefaultCoordinationEngine engine =
+                DefaultCoordinationEngine.create()) {
+            ExactValue available = engine.exactValue("value: one-shot");
+            AtomicInteger reads = new AtomicInteger();
+            ManagedOccurrenceResolver resolver =
+                    new ManagedOccurrenceResolver(
+                            blueId -> reads.getAndIncrement() == 0
+                                    ? List.of(available.copyNode())
+                                    : List.of(),
+                            engine.engineMetrics());
+            ExactNodeDemand demand = ExactNodeDemand.derived(
+                    available.blueId(), closureId(A), "/one-shot");
+
+            ManagedOccurrenceResolver.Resolution result = resolver.resolve(
+                    request(engine, Set.of(A), List.of(demand)));
+
+            assertTrue(result.complete());
+            assertEquals(1, reads.get());
+            assertTrue(available.sameExactValue(
+                    result.resolvedExactNodes().get(0).exactValue()));
         }
     }
 

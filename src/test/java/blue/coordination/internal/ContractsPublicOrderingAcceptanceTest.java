@@ -14,6 +14,7 @@ import blue.language.identity.CyclicMemberFinalization;
 import blue.language.identity.CyclicSetFinalization;
 import blue.language.model.Node;
 import blue.language.model.NodeWireForm;
+import blue.language.processor.ProcessorStatus;
 import blue.language.processor.closure.AdmissionKind;
 import blue.language.processor.closure.AffectedClosureSnapshot;
 import blue.language.processor.closure.ClosureEnvironment;
@@ -90,7 +91,7 @@ final class ContractsPublicOrderingAcceptanceTest {
                             == ComponentKind.ACYCLIC));
             assertEquals(1, engine.documents().publicationSnapshot()
                     .occurrenceInventory().activeRows().size());
-            assertEquals(2, engine.documents().publicationSnapshot()
+            assertEquals(1, engine.documents().publicationSnapshot()
                     .occurrenceInventory().rows().size());
             assertEquals(B.value(), engine.documents().publicationSnapshot()
                     .occurrenceInventory().activeRows().get(0)
@@ -98,14 +99,8 @@ final class ContractsPublicOrderingAcceptanceTest {
             assertEquals(A.value(), engine.documents().publicationSnapshot()
                     .occurrenceInventory().activeRows().get(0)
                     .targetDocumentId().value());
-            assertFalse(engine.documents().publicationSnapshot()
-                    .occurrenceInventory().row(A, "/b").active());
-
             String beforeA = publicEngine.document(A).blueId();
             String beforeB = publicEngine.document(B).blueId();
-            assertEquals(beforeB, engine.documents().publicationSnapshot()
-                    .occurrenceInventory().row(A, "/b")
-                    .expectedTargetBlueId());
             ExactValue request = publicEngine.referenceRequest(
                     "b", publicEngine.document(B).current());
             Timeline timeline = publicEngine.registerTimeline(
@@ -189,10 +184,183 @@ final class ContractsPublicOrderingAcceptanceTest {
             assertEquals(2, publicEngine.history(A).size());
             assertEquals(2, publicEngine.history(B).size());
 
+            Timeline control = publicEngine.registerTimeline(
+                    "ordering/dynamic-control", "alice");
+            TimelineEntry detach = publicEngine.appendAt(
+                    control,
+                    Operation.yaml("detachA", "controlChannel", "{}"),
+                    ENTRY_TIME + 1L);
+            ProcessingDrainReceipt detached = publicEngine.drain();
+            assertEquals(List.of(detach), detached.processedEntries());
+            assertTrue(engine.documents().publicationSnapshot()
+                    .componentStates().stream()
+                    .allMatch(state -> state.kind() == ComponentKind.ACYCLIC));
+            assertFalse(engine.documents().occurrenceInventory()
+                    .row(B, "/a").active());
+            assertTrue(engine.documents().occurrenceInventory()
+                    .row(A, "/b").active());
+            assertFalse(publicEngine.document(A).current().isCyclicMember());
+            assertFalse(publicEngine.document(B).current().isCyclicMember());
+
+            TimelineEntry touch = publicEngine.appendAt(
+                    control,
+                    Operation.yaml("touch", "controlChannel", "{}"),
+                    ENTRY_TIME + 2L);
+            ProcessingDrainReceipt usable = publicEngine.drain();
+            assertEquals(List.of(touch), usable.processedEntries());
+            assertEquals("post-detach", property(publicEngine, B, "phase"));
+            assertEquals(4, publicEngine.history(A).size());
+            assertEquals(4, publicEngine.history(B).size());
+
             ProcessingDrainReceipt replay = publicEngine.drain();
             assertTrue(replay.quiescent());
             assertTrue(replay.processedEntries().isEmpty());
             assertEquals(0L, replay.committedProcessTransitions());
+        }
+    }
+
+    @Test
+    void automaticCycleFormationGasFailureRollsBackEveryExpandedMember() {
+        // given
+
+        Contracts10Configuration configuration = new Contracts10Configuration(
+                SHA_A, SHA_B, Set.of(B));
+        try (CoordinationEngine publicEngine =
+                     CoordinationEngine.inMemoryContracts10(configuration)) {
+            DefaultCoordinationEngine engine =
+                    (DefaultCoordinationEngine) publicEngine;
+            publicEngine.admitContractsClosure(
+                    dynamicLoopAdmission(engine),
+                    CoordinationEngine.AdmissionPolicy.FROM_NOW,
+                    null);
+            String beforeA = publicEngine.document(A).blueId();
+            String beforeB = publicEngine.document(B).blueId();
+            InMemoryDocumentStore.PublicationSnapshot before = engine
+                    .documents().publicationSnapshot();
+            Timeline timeline = publicEngine.registerTimeline(
+                    "ordering/dynamic-loop", "alice");
+            ExactValue request = publicEngine.referenceRequest(
+                    "b", publicEngine.document(B).current());
+            TimelineEntry entry = publicEngine.appendAt(
+                    timeline,
+                    Operation.exact("startLoop", "loopChannel", request),
+                    ENTRY_TIME);
+
+            // when
+            ProcessingDrainReceipt drained = publicEngine.drain();
+
+            // then
+            assertEquals(List.of(entry), drained.processedEntries());
+            assertTrue(drained.outcomes().isEmpty());
+            assertEquals(0L, drained.committedProcessTransitions());
+            assertEquals(beforeA, publicEngine.document(A).blueId());
+            assertEquals(beforeB, publicEngine.document(B).blueId());
+            assertEquals(before.occurrenceInventory().rows(), engine
+                    .documents().occurrenceInventory().rows());
+            assertEquals(before.componentStates(), engine.documents()
+                    .publicationSnapshot().componentStates());
+            assertTrue(engine.documents().occurrenceInventory()
+                    .find(A, "/b").isEmpty());
+
+            ContractsClosurePublicationReceipt receipt = onlyProcessReceipt(
+                    engine);
+            ClosureProcessResult result = receipt.attempt().processResult();
+            assertEquals(ProcessorStatus.GAS_LIMIT_EXCEEDED, result.status());
+            assertTrue(result.rollbackToInput());
+            assertEquals(result.inputClosureIdentity(),
+                    result.outputClosureIdentity());
+            assertNotNull(result.rejectedWorkOccurrence());
+            assertNotNull(result.rejectedCharge());
+            assertEquals(
+                    engine.contractsClosureAdmissionAdapter().executionPolicy()
+                            .sharedLimit() - result.totalGas(),
+                    result.rejectedCharge().remainingBeforeCharge());
+            assertTrue(engine.documents().metrics().counter(
+                    AutomaticOccurrenceResolutionCoordinator.RETRIES) > 0L);
+        }
+    }
+
+    @Test
+    void operationOnEmbeddedBConnectsCurrentAAndClosesTheCycle() {
+        // given
+
+        Contracts10Configuration configuration = new Contracts10Configuration(
+                SHA_A, SHA_B, Set.of(A));
+        try (CoordinationEngine publicEngine =
+                     CoordinationEngine.inMemoryContracts10(configuration)) {
+            DefaultCoordinationEngine engine =
+                    (DefaultCoordinationEngine) publicEngine;
+            ContractsClosureAdmissionReceipt admitted = publicEngine
+                    .admitContractsClosure(
+                            aEmbedsBAdmission(engine),
+                            CoordinationEngine.AdmissionPolicy.FROM_NOW,
+                            null);
+            assertEquals(
+                    ContractsClosureAdmissionReceipt.PublicationOutcome
+                            .PUBLISHED,
+                    admitted.publicationOutcome());
+            assertEquals(1, engine.documents().occurrenceInventory()
+                    .activeRows().size());
+            ManagedOccurrenceBinding aToB = engine.documents()
+                    .occurrenceInventory().row(A, "/b");
+            assertTrue(aToB.active());
+            assertEquals(B.value(), aToB.targetDocumentId().value());
+            assertTrue(engine.documents().publicationSnapshot()
+                    .componentStates().stream()
+                    .allMatch(component -> component.kind()
+                            == ComponentKind.ACYCLIC));
+
+            ExactValue request = publicEngine.referenceRequest(
+                    "a", publicEngine.document(A).current());
+            Timeline timeline = publicEngine.registerTimeline(
+                    "ordering/connect-a", "alice");
+            TimelineEntry entry = publicEngine.appendAt(
+                    timeline,
+                    Operation.exact("connectA", "ownerChannel", request),
+                    ENTRY_TIME);
+
+            // when
+            ProcessingDrainReceipt drained = publicEngine.drain();
+
+            // then
+            assertEquals(List.of(entry), drained.processedEntries());
+            assertEquals(2L, drained.committedProcessTransitions());
+            assertEquals(List.of(A, B), drained.outcomesFor(entry.blueId())
+                    .stream()
+                    .map(outcome -> outcome.documentId())
+                    .toList());
+            assertEquals("connected", property(publicEngine, B, "phase"));
+            ManagedOccurrenceBinding bToA = engine.documents()
+                    .occurrenceInventory().row(B, "/a");
+            assertTrue(bToA.active());
+            assertEquals(A.value(), bToA.targetDocumentId().value());
+            assertEquals(1L, bToA.activationGeneration());
+            assertEquals(2, engine.documents().occurrenceInventory()
+                    .activeRows().size());
+            assertEquals(1, engine.documents().publicationSnapshot()
+                    .componentStates().size());
+            ComponentSnapshot component = engine.documents()
+                    .publicationSnapshot().componentStates().get(0);
+            assertCompleteCyclicComponent(component);
+            assertEquals(List.of(A.value(), B.value()), component
+                    .orderedMemberDocumentIds().stream()
+                    .map(blue.language.processor.closure.DocumentId::value)
+                    .toList());
+            assertEquals(master(publicEngine.document(A).blueId()),
+                    master(publicEngine.document(B).blueId()));
+
+            ClosureProcessResult result = onlyProcessReceipt(engine)
+                    .attempt().processResult();
+            assertTrue(result.commits());
+            assertEquals(1L, result.graphChanges().stream()
+                    .filter(change -> change.changeKind()
+                            == GraphChange.Kind.ADD)
+                    .filter(change -> change.sourceDocumentId().value()
+                            .equals(B.value()))
+                    .filter(change -> change.sourcePath().equals("/a"))
+                    .count());
+            assertEquals(2, publicEngine.history(A).size());
+            assertEquals(2, publicEngine.history(B).size());
         }
     }
 
@@ -343,15 +511,6 @@ final class ContractsPublicOrderingAcceptanceTest {
                 exactA.blueId(),
                 true,
                 null);
-        ManagedOccurrenceBinding prospectiveAToB =
-                ManagedOccurrenceBinding.derived(
-                        environment.managedBindingPolicyIdentity(),
-                        closureA,
-                        ScopeAddress.embedded("/b", 1L),
-                        closureB,
-                        exactB.blueId(),
-                        false,
-                        null);
         LinkedHashMap<DocumentId, Node> bodies = new LinkedHashMap<>();
         bodies.put(A, exactA.copyNode());
         bodies.put(B, exactB.copyNode());
@@ -359,9 +518,61 @@ final class ContractsPublicOrderingAcceptanceTest {
                 engine,
                 List.of(A, B),
                 bodies,
-                List.of(prospectiveAToB, bToA),
+                List.of(bToA),
                 List.of(B),
                 "coordination-public-dynamic-cycle");
+    }
+
+    private static ClosureInvocationInput dynamicLoopAdmission(
+            DefaultCoordinationEngine engine) {
+        ClosureEnvironment environment = engine
+                .contractsClosureAdmissionAdapter().environment();
+        ExactValue exactA = engine.exactValue(dynamicLoopA());
+        ExactValue exactB = engine.exactValue(dynamicLoopB(exactA.blueId()));
+        ManagedOccurrenceBinding bToA = ManagedOccurrenceBinding.derived(
+                environment.managedBindingPolicyIdentity(),
+                closureId(B),
+                ScopeAddress.embedded("/a", 1L),
+                closureId(A),
+                exactA.blueId(),
+                true,
+                null);
+        LinkedHashMap<DocumentId, Node> bodies = new LinkedHashMap<>();
+        bodies.put(A, exactA.copyNode());
+        bodies.put(B, exactB.copyNode());
+        return finalizedAdmission(
+                engine,
+                List.of(A, B),
+                bodies,
+                List.of(bToA),
+                List.of(B),
+                "coordination-public-dynamic-loop");
+    }
+
+    private static ClosureInvocationInput aEmbedsBAdmission(
+            DefaultCoordinationEngine engine) {
+        ClosureEnvironment environment = engine
+                .contractsClosureAdmissionAdapter().environment();
+        ExactValue exactB = engine.exactValue(connectableB());
+        ExactValue exactA = engine.exactValue(aEmbeddingB(exactB.blueId()));
+        ManagedOccurrenceBinding aToB = ManagedOccurrenceBinding.derived(
+                environment.managedBindingPolicyIdentity(),
+                closureId(A),
+                ScopeAddress.embedded("/b", 1L),
+                closureId(B),
+                exactB.blueId(),
+                true,
+                null);
+        LinkedHashMap<DocumentId, Node> bodies = new LinkedHashMap<>();
+        bodies.put(A, exactA.copyNode());
+        bodies.put(B, exactB.copyNode());
+        return finalizedAdmission(
+                engine,
+                List.of(A, B),
+                bodies,
+                List.of(aToB),
+                List.of(A),
+                "coordination-public-a-embeds-b");
     }
 
     private static ClosureInvocationInput sameEntryAdmission(
@@ -591,6 +802,41 @@ final class ContractsPublicOrderingAcceptanceTest {
                       blueId: %s
                     paths:
                       - /a
+                  controlChannel:
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: ordering/dynamic-control
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: alice
+                  detachA:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: controlChannel
+                    request: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: remove
+                              path: /a
+                          - $appendChange:
+                              op: replace
+                              path: /phase
+                              val: detached
+                          - $return: true
+                  touch:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: controlChannel
+                    request: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: replace
+                              path: /phase
+                              val: post-detach
+                          - $return: true
                   fromA:
                     type:
                       blueId: %s
@@ -615,6 +861,147 @@ final class ContractsPublicOrderingAcceptanceTest {
                 aBlueId,
                 RuntimeBlueIds.PROCESS_EMBEDDED,
                 RuntimeBlueIds.EMBEDDED_NODE_CHANNEL);
+    }
+
+    private static String dynamicLoopA() {
+        return """
+                documentId: ordering-a
+                contracts:
+                  embedded:
+                    type:
+                      blueId: %s
+                    paths:
+                      - /b
+                  loopChannel:
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: ordering/dynamic-loop
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: alice
+                  startLoop:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: loopChannel
+                    request:
+                      b: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: add
+                              path: /b
+                              val: {$binding: event/message/request/b}
+                          - $appendEvent:
+                              type: Coordination/Event
+                              kind: dynamic-loop
+                          - $return: true
+                  fromB:
+                    type:
+                      blueId: %s
+                    sourcePath: /b
+                    event: {type: Coordination/Event, kind: dynamic-loop}
+                  repeatFromB:
+                    type: Coordination/Sequential Workflow
+                    channel: fromB
+                    event: {type: Coordination/Event, kind: dynamic-loop}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendEvent:
+                              type: Coordination/Event
+                              kind: dynamic-loop
+                          - $return: true
+                """.formatted(
+                RuntimeBlueIds.PROCESS_EMBEDDED,
+                RuntimeBlueIds.EMBEDDED_NODE_CHANNEL);
+    }
+
+    private static String dynamicLoopB(String aBlueId) {
+        return """
+                documentId: ordering-b
+                a:
+                  blueId: %s
+                contracts:
+                  embedded:
+                    type:
+                      blueId: %s
+                    paths:
+                      - /a
+                  fromA:
+                    type:
+                      blueId: %s
+                    sourcePath: /a
+                    event: {type: Coordination/Event, kind: dynamic-loop}
+                  repeatFromA:
+                    type: Coordination/Sequential Workflow
+                    channel: fromA
+                    event: {type: Coordination/Event, kind: dynamic-loop}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendEvent:
+                              type: Coordination/Event
+                              kind: dynamic-loop
+                          - $return: true
+                """.formatted(
+                aBlueId,
+                RuntimeBlueIds.PROCESS_EMBEDDED,
+                RuntimeBlueIds.EMBEDDED_NODE_CHANNEL);
+    }
+
+    private static String aEmbeddingB(String bBlueId) {
+        return """
+                documentId: ordering-a
+                b:
+                  blueId: %s
+                contracts:
+                  embedded:
+                    type:
+                      blueId: %s
+                    paths:
+                      - /b
+                """.formatted(
+                bBlueId,
+                RuntimeBlueIds.PROCESS_EMBEDDED);
+    }
+
+    private static String connectableB() {
+        return """
+                documentId: ordering-b
+                phase: initial
+                contracts:
+                  embedded:
+                    type:
+                      blueId: %s
+                    paths:
+                      - /a
+                  ownerChannel:
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: ordering/connect-a
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: alice
+                  connectA:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request:
+                      a: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: add
+                              path: /a
+                              val: {$binding: event/message/request/a}
+                          - $appendChange:
+                              op: replace
+                              path: /phase
+                              val: connected
+                          - $return: true
+                """.formatted(RuntimeBlueIds.PROCESS_EMBEDDED);
     }
 
     private static String sameEntryA() {
