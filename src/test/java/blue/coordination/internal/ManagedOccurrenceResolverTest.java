@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class ManagedOccurrenceResolverTest {
@@ -222,6 +223,52 @@ final class ManagedOccurrenceResolverTest {
             assertEquals(1, result.newDrafts().size());
             assertEquals(result.resolvedOccurrences().get(0).targetDocumentId(),
                     result.resolvedOccurrences().get(1).targetDocumentId());
+        }
+    }
+
+    @Test
+    void exactResolutionAndLineageAdvanceRemainLocalWithOneThousandAmbient() {
+        try (DefaultCoordinationEngine engine =
+                DefaultCoordinationEngine.create()) {
+            for (int index = 0; index < 1_000; index++) {
+                start(
+                        engine,
+                        DocumentId.of("ambient-" + index),
+                        "ambient-" + index);
+            }
+            DocumentSession target = start(engine, A, "selected");
+            ManagedLineageIndex before = engine.documents().lineageIndex();
+            ManagedLineageIndex.Lineage ambientBefore = before.byDocumentId(
+                    DocumentId.of("ambient-500"));
+
+            appendNoOpRevision(engine, target);
+
+            ManagedLineageIndex after = engine.documents().lineageIndex();
+            ExactValue current = engine.documents().require(A)
+                    .currentRevision().after();
+            ManagedOccurrenceEvidenceDemand demand = demand(
+                    A, "/child", current);
+            ManagedOccurrenceResolver.Resolution result = resolver(engine)
+                    .resolve(request(engine, Set.of(A), List.of(demand)));
+
+            assertTrue(result.complete());
+            assertEquals(A, result.resolvedOccurrences().get(0)
+                    .targetDocumentId());
+            assertSame(ambientBefore, after.byDocumentId(
+                    DocumentId.of("ambient-500")),
+                    "unrelated lineage rows remain structurally shared");
+            assertTrue(after.lastMutationNodeCopies() < 256,
+                    () -> "lineage advance copied "
+                            + after.lastMutationNodeCopies()
+                            + " persistent nodes for 1,000 unrelated rows");
+            assertTrue(after.exactLookupSteps(current.blueId()) < 64,
+                    () -> "exact indexes required "
+                            + after.exactLookupSteps(current.blueId())
+                            + " balanced-tree comparisons");
+            assertTrue(after.documentLookupSteps(A) < 16,
+                    () -> "document index required "
+                            + after.documentLookupSteps(A)
+                            + " balanced-tree comparisons");
         }
     }
 

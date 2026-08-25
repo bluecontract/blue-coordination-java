@@ -7,7 +7,12 @@ import blue.language.processor.closure.ComponentSnapshot;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.TreeSet;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -130,6 +135,65 @@ final class ManagedLineageIndexTest {
                     a.currentRevision().after().blueId()).stream()
                     .filter(lineage -> lineage.documentId().equals(A))
                     .toList());
+        }
+    }
+
+    @Test
+    void randomizedPersistentUpdatesMatchReferenceAndPreserveAvlInvariants() {
+        try (DefaultCoordinationEngine engine =
+                DefaultCoordinationEngine.create()) {
+            LinkedHashMap<DocumentId, DocumentSession> reference =
+                    new LinkedHashMap<>();
+            ManagedLineageIndex index = ManagedLineageIndex.empty();
+            for (int ordinal = 0; ordinal < 128; ordinal++) {
+                DocumentId documentId = DocumentId.of(
+                        "randomized-" + ordinal);
+                DocumentSession session = engine.start(documentId, """
+                        state: randomized-%d
+                        """.formatted(ordinal));
+                reference.put(documentId, session);
+                index = index.withNewLineage(session);
+                index.assertStructurallyValid();
+            }
+            List<DocumentId> randomized = new java.util.ArrayList<>(
+                    reference.keySet());
+            Collections.shuffle(randomized, new Random(0x5eedL));
+
+            for (DocumentId documentId : randomized.subList(0, 64)) {
+                DocumentSession prior = reference.get(documentId);
+                DocumentSession advanced = prior.copyForAtomicPublication();
+                advanced.commit(
+                        update(prior),
+                        prior.layout(),
+                        null,
+                        prior.activeSubscriptions(),
+                        "randomized-advance|" + documentId.value());
+                reference.put(documentId, advanced);
+                index = index.withAdvancedRevision(advanced);
+                index.assertStructurallyValid();
+            }
+            for (DocumentId documentId : randomized.subList(32, 112)) {
+                reference.remove(documentId);
+                index = index.withoutLineage(documentId);
+                index.assertStructurallyValid();
+            }
+
+            assertEquals(reference.size(), index.lineageCount());
+            assertEquals(
+                    new TreeSet<>(reference.keySet()),
+                    new TreeSet<>(index.documentIds()));
+            for (Map.Entry<DocumentId, DocumentSession> entry
+                    : reference.entrySet()) {
+                ManagedLineageIndex.Lineage lineage = index.byDocumentId(
+                        entry.getKey());
+                assertEquals(entry.getValue().epoch(), lineage.currentEpoch());
+                assertEquals(entry.getValue().currentRevision().after()
+                        .blueId(), lineage.currentBlueId());
+                assertEquals(List.of(entry.getKey()), index.currentMatches(
+                        lineage.currentBlueId()).stream()
+                        .map(ManagedLineageIndex.Lineage::documentId)
+                        .toList());
+            }
         }
     }
 

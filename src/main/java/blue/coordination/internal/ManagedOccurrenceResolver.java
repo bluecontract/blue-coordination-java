@@ -138,7 +138,7 @@ final class ManagedOccurrenceResolver {
                                 + retained.targetDocumentId().value()));
             }
             return resolveSelectedLineage(
-                    demand, suppliedBody, stable, true);
+                    index, demand, suppliedBody, stable, true);
         }
 
         LinkedHashMap<DocumentId, ManagedLineageIndex.Lineage> candidates =
@@ -152,6 +152,7 @@ final class ManagedOccurrenceResolver {
         }
         if (candidates.size() == 1) {
             return resolveSelectedLineage(
+                    index,
                     demand,
                     suppliedBody,
                     candidates.values().iterator().next(),
@@ -202,6 +203,7 @@ final class ManagedOccurrenceResolver {
     }
 
     private FoldedResolution resolveSelectedLineage(
+            ManagedLineageIndex index,
             ManagedOccurrenceEvidenceDemand demand,
             Node suppliedBody,
             ManagedLineageIndex.Lineage lineage,
@@ -217,7 +219,12 @@ final class ManagedOccurrenceResolver {
                     TargetKind.CURRENT_EXISTING,
                     null));
         }
-        List<Long> retainedEpochs = lineage.epochsFor(suppliedBlueId);
+        List<Long> retainedEpochs = index.retainedMatches(suppliedBlueId)
+                .stream()
+                .filter(state -> state.documentId().equals(
+                        lineage.documentId()))
+                .map(ManagedLineageIndex.RetainedState::epoch)
+                .toList();
         if (retainedEpochs.size() > 1) {
             return FoldedResolution.unresolved(new UnresolvedDemand(
                     demand,
