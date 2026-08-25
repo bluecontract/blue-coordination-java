@@ -622,6 +622,8 @@ final class SdkManagedDraftAcceptanceTest {
             DocumentHandle parent = coordination.documents().require(
                     parentId);
             String parentBeforeChild = parent.snapshot().blueId();
+            String hostBeforeChild = host.snapshot().blueId();
+            int hostHistoryBeforeChild = host.history().size();
             long parentEpochBeforePromotion = parent.snapshot().epoch();
             int parentHistoryBeforePromotion = parent.history().size();
             int entriesBeforePromotion = coordination.advanced().rawEngine()
@@ -649,8 +651,13 @@ final class SdkManagedDraftAcceptanceTest {
             // then
             assertApplied(parentCreated);
             assertApplied(childCreated);
-            assertEquals(parent.snapshot().blueId(),
+            // The promoted parent is an independent Root. Its child command
+            // opens only the forward parent -> child closure; the host keeps
+            // the exact retained parent occurrence created by the first call.
+            assertEquals(parentBeforeChild,
                     host.snapshot().valueAt("/parents/primary").blueId());
+            assertEquals(hostBeforeChild, host.snapshot().blueId());
+            assertEquals(hostHistoryBeforeChild, host.history().size());
             assertEquals(child.snapshot().blueId(),
                     parent.snapshot().valueAt("/children/primary").blueId());
             assertNotEquals(parentBeforeChild, parent.snapshot().blueId());
