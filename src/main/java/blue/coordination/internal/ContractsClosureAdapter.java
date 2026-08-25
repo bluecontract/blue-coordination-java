@@ -120,6 +120,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
             new LinkedHashMap<>();
     private Consumer<PublicationFailurePoint> publicationFailureInjector =
             ignored -> { };
+    private Consumer<MultiDocumentPublicationTransaction.FailurePoint>
+            storeFailureInjector = ignored -> { };
     private boolean closed;
 
     ContractsClosureAdapter(
@@ -500,6 +502,13 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 injector, "injector");
     }
 
+    synchronized void onStoreFailurePoint(
+            Consumer<MultiDocumentPublicationTransaction.FailurePoint>
+                    injector) {
+        ensureOpen();
+        storeFailureInjector = Objects.requireNonNull(injector, "injector");
+    }
+
     private void publishNonCommit(
             FrozenBatch batch,
             CohortInvocation invocation,
@@ -523,6 +532,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         receipt.publicationIdentity(),
                         current.occurrenceInventoryGeneration(),
                         current.componentIndexGeneration());
+        transaction.onFailurePoint(storeFailureInjector);
         for (CapturedDocument document : invocation.documents().values()) {
             transaction.expectHead(
                     document.documentId(),
@@ -1677,6 +1687,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         publicationIdentity,
                         current.occurrenceInventoryGeneration(),
                         current.componentIndexGeneration());
+        transaction.onFailurePoint(storeFailureInjector);
         for (CapturedDocument document
                 : invocation.documents().values()) {
             transaction.expectHead(

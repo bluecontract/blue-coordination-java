@@ -11,6 +11,8 @@ import blue.coordination.api.Timeline;
 import blue.coordination.api.TimelineEntry;
 import blue.language.processor.ProcessorErrorCategory;
 import blue.language.processor.ProcessorStatus;
+import blue.language.processor.closure.GraphChange;
+import blue.language.processor.closure.ManagedOccurrenceBinding;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -20,6 +22,7 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -675,6 +678,279 @@ final class ContractsManagedDraftExpansionTest {
         }
     }
 
+    @Test
+    void activeOccurrenceRetargetsAcrossLineagesAtomicallyAndReplaysAfterRestart() {
+        // given
+
+        try (DefaultCoordinationEngine engine = contractsEngine()) {
+            String timelineId = "managed/automatic-active-rebind";
+            engine.registerTimeline(timelineId, ACTOR);
+            engine.authorizeContractsPublicRoots(Set.of(HOST));
+            new Contracts10ScenarioBuilder(engine)
+                    .document(HOST, retargetHostDocument(timelineId))
+                    .document(EXISTING, leaf(EXISTING))
+                    .document(DESCENDANT, leaf(DESCENDANT))
+                    .processEmbeddedPath(HOST, "/peer", EXISTING)
+                    .publicRoot(HOST)
+                    .expectedComponent(DESCENDANT)
+                    .expectedComponent(EXISTING)
+                    .expectedComponent(HOST)
+                    .admitTo(engine);
+            Timeline timeline = engine.timeline(timelineId, ACTOR);
+            ContractsClosureAdapter adapter = engine
+                    .contractsClosureAdapter();
+            ManagedOccurrenceBinding initial = engine.documents()
+                    .occurrenceInventory().row(HOST, "/peer");
+            InMemoryDocumentStore.PublicationSnapshot before = engine
+                    .documents().publicationSnapshot();
+            int hostHistoryBefore = engine.history(HOST).size();
+            int existingHistoryBefore = engine.history(EXISTING).size();
+            int descendantHistoryBefore = engine.history(DESCENDANT).size();
+            int routeRowsBefore = engine.routeRowCount();
+            TimelineEntry toDescendant = engine.append(
+                    timeline,
+                    Operation.exact(
+                                    "retarget",
+                                    "ownerChannel",
+                                    engine.referenceRequest(
+                                            "peer",
+                                            engine.document(DESCENDANT)
+                                                    .current()))
+                            .targeting(engine.document(HOST).current(), true));
+            ContractsClosureAdapter.FrozenBatch batch = adapter.capture(
+                    toDescendant);
+            ContractsClosureAdapter.CohortInvocation invocation = batch
+                    .invocations().get(0);
+            String publicationIdentity = adapter.publicationIdentityFor(
+                    batch, invocation);
+
+            // when: the first store attempt fails before its atomic swap.
+            adapter.onStoreFailurePoint(point -> {
+                if (point == MultiDocumentPublicationTransaction.FailurePoint
+                        .BEFORE_SWAP) {
+                    throw new IllegalStateException("before-swap");
+                }
+            });
+
+            // then: no document, occurrence, topology, receipt, or route state
+            // escapes the rejected transaction.
+            IllegalStateException injected = assertThrows(
+                    IllegalStateException.class,
+                    () -> adapter.executeAndPublish(batch, invocation));
+            assertEquals("before-swap", injected.getMessage());
+            InMemoryDocumentStore.PublicationSnapshot rolledBack = engine
+                    .documents().publicationSnapshot();
+            assertEquals(before.documentHeads(), rolledBack.documentHeads());
+            assertEquals(before.occurrenceInventory().rows(), rolledBack
+                    .occurrenceInventory().rows());
+            assertEquals(before.occurrenceInventoryGeneration(), rolledBack
+                    .occurrenceInventoryGeneration());
+            assertEquals(before.componentIndexGeneration(), rolledBack
+                    .componentIndexGeneration());
+            assertEquals(before.componentStates(), rolledBack
+                    .componentStates());
+            assertEquals(before.closurePublicationReceipts(), rolledBack
+                    .closurePublicationReceipts());
+            assertEquals(before.graphGenerations().require(HOST), rolledBack
+                    .graphGenerations().require(HOST));
+            assertEquals(before.graphGenerations().require(EXISTING),
+                    rolledBack.graphGenerations().require(EXISTING));
+            assertEquals(before.graphGenerations().require(DESCENDANT),
+                    rolledBack.graphGenerations().require(DESCENDANT));
+            assertEquals(routeRowsBefore, engine.routeRowCount());
+            assertEquals(hostHistoryBefore, engine.history(HOST).size());
+            assertEquals(existingHistoryBefore,
+                    engine.history(EXISTING).size());
+            assertEquals(descendantHistoryBefore,
+                    engine.history(DESCENDANT).size());
+
+            // when: the exact same frozen operation is retried.
+            adapter.onStoreFailurePoint(ignored -> { });
+            ContractsClosureAdapter.CohortOutcome rebound = adapter
+                    .executeAndPublish(batch, invocation);
+
+            // then: the typed current-C demand expands only the publication
+            // lane, and Contracts emits one identity-bearing REBIND.
+            assertTrue(rebound.published());
+            assertFalse(rebound.replayed());
+            assertEquals(1L, rebound.automaticRetryCount());
+            assertEquals(List.of(EXISTING, HOST), rebound.members());
+            assertEquals(Set.of(HOST, EXISTING, DESCENDANT),
+                    Set.copyOf(rebound.publicationMembers()));
+            assertEquals(publicationIdentity, rebound.publicationIdentity());
+            assertEquals(ProcessorStatus.SUCCESS,
+                    rebound.attempt().processResult().status());
+            List<GraphChange> graphChanges = rebound.attempt().processResult()
+                    .graphChanges().stream()
+                    .filter(change -> change.changeKind()
+                            == GraphChange.Kind.REBIND
+                            && change.sourceDocumentId().value().equals(
+                                    HOST.value())
+                            && change.sourcePath().equals("/peer"))
+                    .toList();
+            assertEquals(1, graphChanges.size());
+            GraphChange graphChange = graphChanges.get(0);
+            assertEquals(0L, graphChange.graphChangeOrdinal());
+            assertEquals(EXISTING.value(),
+                    graphChange.beforeTargetDocumentId().value());
+            assertEquals(initial.expectedTargetBlueId(),
+                    graphChange.beforeTargetBlueId());
+            assertEquals(initial.activationGeneration(),
+                    graphChange.beforeActivationGeneration());
+            assertEquals(initial.occurrenceIdentity(),
+                    graphChange.beforeOccurrenceIdentity());
+            assertEquals(initial.bindingIdentity(),
+                    graphChange.beforeBindingIdentity());
+            assertEquals(DESCENDANT.value(),
+                    graphChange.afterTargetDocumentId().value());
+            assertEquals(engine.document(DESCENDANT).current().blueId(),
+                    graphChange.afterTargetBlueId());
+            assertEquals(initial.activationGeneration() + 1L,
+                    graphChange.afterActivationGeneration());
+            assertNotEquals(initial.occurrenceIdentity(),
+                    graphChange.afterOccurrenceIdentity());
+            assertNotEquals(initial.bindingIdentity(),
+                    graphChange.afterBindingIdentity());
+
+            InMemoryDocumentStore.PublicationSnapshot after = engine
+                    .documents().publicationSnapshot();
+            ManagedOccurrenceBinding current = after.occurrenceInventory()
+                    .row(HOST, "/peer");
+            assertTrue(current.active());
+            assertNull(current.pendingHistoricalEpoch());
+            assertEquals(DESCENDANT.value(),
+                    current.targetDocumentId().value());
+            assertEquals(engine.document(DESCENDANT).current().blueId(),
+                    current.expectedTargetBlueId());
+            assertEquals(initial.activationGeneration() + 1L,
+                    current.activationGeneration());
+            assertEquals(graphChange.afterOccurrenceIdentity(),
+                    current.occurrenceIdentity());
+            assertEquals(graphChange.afterBindingIdentity(),
+                    current.bindingIdentity());
+            assertEquals(before.occurrenceInventoryGeneration() + 1L,
+                    after.occurrenceInventoryGeneration());
+            assertEquals(before.componentIndexGeneration() + 1L,
+                    after.componentIndexGeneration());
+            assertEquals(before.requireHead(HOST).epoch() + 1L,
+                    after.requireHead(HOST).epoch());
+            assertEquals(before.requireHead(EXISTING),
+                    after.requireHead(EXISTING));
+            assertEquals(before.requireHead(DESCENDANT),
+                    after.requireHead(DESCENDANT));
+            long resultGraphGeneration = rebound.attempt().processResult()
+                    .graphGeneration();
+            assertEquals(before.graphGenerations().require(HOST) + 1L,
+                    resultGraphGeneration);
+            assertEquals(resultGraphGeneration,
+                    after.graphGenerations().require(HOST));
+            assertEquals(resultGraphGeneration,
+                    after.graphGenerations().require(EXISTING));
+            assertEquals(resultGraphGeneration,
+                    after.graphGenerations().require(DESCENDANT));
+            assertEquals(1L, after.occurrenceInventory().rows().stream()
+                    .filter(row -> row.sourceDocumentId().value().equals(
+                            HOST.value())
+                            && row.sourceAddress().path().equals("/peer"))
+                    .count());
+            ProcessEmbeddedComponentIndex index = after.componentIndex();
+            assertEquals(List.of(DESCENDANT, HOST),
+                    index.cohort(HOST).members());
+            assertEquals(List.of(EXISTING),
+                    index.cohort(EXISTING).members());
+            assertEquals(List.of(index.component(DESCENDANT)),
+                    index.targets(index.component(HOST)));
+            assertTrue(index.sources(index.component(EXISTING)).isEmpty());
+            assertEquals(0L, engine.documents().metrics().counter(
+                    "temporal.catchUpBarriersCreated"));
+            assertEquals(0L, engine.documents().metrics().counter(
+                    "catchUp.childEntriesProcessed"));
+            assertTrue(engine.history(EXISTING).stream().noneMatch(
+                    revision -> revision.kind()
+                            == blue.coordination.api.DocumentRevision.Kind
+                                    .CATCH_UP_COMPLETED));
+            assertTrue(engine.history(DESCENDANT).stream().noneMatch(
+                    revision -> revision.kind()
+                            == blue.coordination.api.DocumentRevision.Kind
+                                    .CATCH_UP_COMPLETED));
+
+            // when: a route-publish response is lost after a second atomic
+            // retarget commits, and the runtime is rebuilt from durable stores.
+            TimelineEntry backToExisting = engine.append(
+                    timeline,
+                    Operation.exact(
+                                    "retarget",
+                                    "ownerChannel",
+                                    engine.referenceRequest(
+                                            "peer",
+                                            engine.document(EXISTING)
+                                                    .current())));
+            ContractsClosureAdapter.FrozenBatch secondBatch = adapter.capture(
+                    backToExisting);
+            assertFalse(secondBatch.invocations().isEmpty());
+            ContractsClosureAdapter.CohortInvocation secondInvocation =
+                    secondBatch.invocations().get(0);
+            String secondPublicationIdentity = adapter.publicationIdentityFor(
+                    secondBatch, secondInvocation);
+            adapter.onPublicationFailurePoint(point -> {
+                if (point == ContractsClosureAdapter.PublicationFailurePoint
+                        .AFTER_STORE_COMMIT_BEFORE_ROUTE_PUBLISH) {
+                    throw new IllegalStateException("route-publish");
+                }
+            });
+            assertThrows(IllegalStateException.class, () -> adapter
+                    .executeAndPublish(secondBatch, secondInvocation));
+            InMemoryDocumentStore.PublicationSnapshot committed = engine
+                    .documents().publicationSnapshot();
+            ManagedOccurrenceBinding committedBack = committed
+                    .occurrenceInventory().row(HOST, "/peer");
+            assertEquals(EXISTING.value(),
+                    committedBack.targetDocumentId().value());
+            assertEquals(current.activationGeneration() + 1L,
+                    committedBack.activationGeneration());
+            assertTrue(committed.closurePublicationReceipts().containsKey(
+                    secondPublicationIdentity));
+            int historyAfterCommit = engine.history(HOST).size();
+            long inventoryGenerationAfterCommit = committed
+                    .occurrenceInventoryGeneration();
+            int receiptCountAfterCommit = committed
+                    .closurePublicationReceipts().size();
+
+            adapter.onPublicationFailurePoint(ignored -> { });
+            engine.restartFromStores();
+            ContractsClosureAdapter.FrozenBatch recoveredBatch = adapter
+                    .capture(backToExisting);
+            ContractsClosureAdapter.CohortInvocation recoveredInvocation =
+                    recoveredBatch.invocations().get(0);
+            assertEquals(secondPublicationIdentity,
+                    adapter.publicationIdentityFor(
+                            recoveredBatch, recoveredInvocation));
+            ContractsClosureAdapter.CohortOutcome replay = adapter
+                    .executeAndPublish(recoveredBatch, recoveredInvocation);
+
+            // then: the durable base-lane identity replays exactly once.
+            assertTrue(replay.replayed());
+            assertTrue(replay.published());
+            assertEquals(secondPublicationIdentity,
+                    replay.publicationIdentity());
+            assertEquals(historyAfterCommit, engine.history(HOST).size());
+            assertEquals(existingHistoryBefore,
+                    engine.history(EXISTING).size());
+            assertEquals(descendantHistoryBefore,
+                    engine.history(DESCENDANT).size());
+            assertEquals(inventoryGenerationAfterCommit,
+                    engine.documents().publicationSnapshot()
+                            .occurrenceInventoryGeneration());
+            assertEquals(receiptCountAfterCommit,
+                    engine.documents().publicationSnapshot()
+                            .closurePublicationReceipts().size());
+            assertEquals(committedBack, engine.documents()
+                    .occurrenceInventory().row(HOST, "/peer"));
+            assertTrue(engine.contractsClosureAdapter()
+                    .lastExecutionEvidence().isPresent());
+        }
+    }
+
     private static DefaultCoordinationEngine admittedHost(
             String timelineId) {
         DefaultCoordinationEngine engine = contractsEngine();
@@ -766,6 +1042,35 @@ final class ContractsManagedDraftExpansionTest {
                     steps:
                       - type: Coordination/Compute
                         do:
+                          - $return: true
+                """.formatted(timelineId);
+    }
+
+    private static String retargetHostDocument(String timelineId) {
+        return """
+                documentId: managed-expansion-host
+                peer: {}
+                contracts:
+                  ownerChannel:
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: %s
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: alice
+                  retarget:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request:
+                      peer: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: replace
+                              path: /peer
+                              val: {$binding: event/message/request/peer}
                           - $return: true
                 """.formatted(timelineId);
     }

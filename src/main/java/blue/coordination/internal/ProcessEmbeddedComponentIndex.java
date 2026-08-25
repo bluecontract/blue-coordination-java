@@ -202,9 +202,8 @@ final class ProcessEmbeddedComponentIndex {
 
         List<Cohort> cohorts = buildCohorts(
                 scalarComponents, componentTargets, componentSources);
-        List<Component> targetBeforeSource = cohorts.stream()
-                .flatMap(cohort -> cohort.components().stream())
-                .toList();
+        List<Component> targetBeforeSource = targetBeforeSource(
+                scalarComponents, componentTargets, componentSources);
         Map<DocumentId, Cohort> cohortByDocument = new HashMap<>();
         for (Cohort cohort : cohorts) {
             for (DocumentId member : cohort.members()) {
