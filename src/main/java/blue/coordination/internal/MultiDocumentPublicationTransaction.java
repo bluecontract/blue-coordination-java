@@ -487,19 +487,16 @@ final class MultiDocumentPublicationTransaction {
                 before.componentStates().size());
         requireComponentStateFences(before);
         requireClosurePublicationShape();
-        if (before.publicationReceipts().contains(publicationIdentity)) {
+        if (before.hasPublicationReceipt(publicationIdentity)) {
             throw new IllegalStateException(
                     "Duplicate publication receipt " + publicationIdentity);
         }
         failureInjector.accept(FailurePoint.AFTER_CAS_CHECKS);
 
-        ContractsStructuralWorkMetrics.recordGlobalPass(
-                metrics,
-                ContractsStructuralWorkMetrics
-                        .GLOBAL_SESSION_ENTRIES_TRAVERSED,
-                before.sessions().size());
-        LinkedHashMap<DocumentId, DocumentSession> resultingSessions =
-                new LinkedHashMap<>(before.sessions());
+        PersistentOrderedMap<DocumentId, DocumentSession> resultingSessionIndex =
+                before.sessionIndex();
+        long sessionIndexComparisons = 0L;
+        long sessionIndexNodesCopied = 0L;
         ManagedLineageIndex resultingLineages = before.lineageIndex();
         for (Map.Entry<DocumentId, DocumentSession> entry
                 : newSessions.entrySet()) {
@@ -510,7 +507,14 @@ final class MultiDocumentPublicationTransaction {
             }
             DocumentSession replacement =
                     entry.getValue().copyForAtomicPublication();
-            resultingSessions.put(entry.getKey(), replacement);
+            PersistentOrderedMap.Mutation<DocumentId, DocumentSession>
+                    mutation = resultingSessionIndex.put(
+                            entry.getKey(), replacement);
+            resultingSessionIndex = mutation.map();
+            sessionIndexComparisons = Math.addExact(
+                    sessionIndexComparisons, mutation.comparisons());
+            sessionIndexNodesCopied = Math.addExact(
+                    sessionIndexNodesCopied, mutation.copiedNodes());
             resultingLineages = resultingLineages.withNewLineage(
                     replacement);
         }
@@ -535,10 +539,21 @@ final class MultiDocumentPublicationTransaction {
                 replacement.markGraphPublished();
                 replacement.markReady(update.committedFrontier());
             }
-            resultingSessions.put(documentId, replacement);
+            PersistentOrderedMap.Mutation<DocumentId, DocumentSession>
+                    mutation = resultingSessionIndex.put(
+                            documentId, replacement);
+            resultingSessionIndex = mutation.map();
+            sessionIndexComparisons = Math.addExact(
+                    sessionIndexComparisons, mutation.comparisons());
+            sessionIndexNodesCopied = Math.addExact(
+                    sessionIndexNodesCopied, mutation.copiedNodes());
             resultingLineages = resultingLineages.withAdvancedRevision(
                     replacement);
         }
+        metrics.add("store.sessionIndexComparisons", sessionIndexComparisons);
+        metrics.add("store.sessionIndexNodesCopied", sessionIndexNodesCopied);
+        Map<DocumentId, DocumentSession> resultingSessions =
+                new PersistentMapView<>(resultingSessionIndex);
         failureInjector.accept(FailurePoint.AFTER_DOCUMENTS_STAGED);
 
         ManagedOccurrenceInventory resultingInventory =
@@ -603,56 +618,50 @@ final class MultiDocumentPublicationTransaction {
                         : before.graphGenerations().apply(stagedGraphGeneration);
         ClosureSubscriptionInventory resultingClosureSubscriptions =
                 applyClosureSubscriptions(before, metrics);
-        ContractsStructuralWorkMetrics.recordGlobalPass(
-                metrics,
-                ContractsStructuralWorkMetrics
-                        .GLOBAL_EVIDENCE_ENTRIES_TRAVERSED,
-                before.outbox().size());
-        List<PublicEventOccurrence> resultingOutbox = new ArrayList<>(
-                before.outbox());
         requireContiguousPublicEventOrdinals(stagedOutbox);
-        resultingOutbox.addAll(stagedOutbox);
-        ContractsStructuralWorkMetrics.recordGlobalPass(
-                metrics,
-                ContractsStructuralWorkMetrics
-                        .GLOBAL_EVIDENCE_ENTRIES_TRAVERSED,
-                before.checkpointEvidence().size());
-        List<CheckpointWrite> resultingCheckpoints = new ArrayList<>(
-                before.checkpointEvidence());
+        PersistentAppendLog<PublicEventOccurrence> resultingOutbox =
+                before.outboxLog().appendAll(stagedOutbox);
         requireContiguousCheckpointOrdinals(stagedCheckpointEvidence);
-        resultingCheckpoints.addAll(stagedCheckpointEvidence);
-        ContractsStructuralWorkMetrics.recordGlobalPass(
-                metrics,
-                ContractsStructuralWorkMetrics
-                        .GLOBAL_RECEIPT_ENTRIES_TRAVERSED,
-                before.publicationReceipts().size());
-        LinkedHashSet<String> resultingReceipts = new LinkedHashSet<>(
-                before.publicationReceipts());
-        resultingReceipts.add(publicationIdentity);
-        ContractsStructuralWorkMetrics.recordGlobalPass(
-                metrics,
-                ContractsStructuralWorkMetrics
-                        .GLOBAL_RECEIPT_ENTRIES_TRAVERSED,
-                before.admissionReceipts().size());
-        LinkedHashMap<String, ContractsClosureAdmissionReceipt>
-                resultingAdmissionReceipts = new LinkedHashMap<>(
-                        before.admissionReceipts());
+        PersistentAppendLog<CheckpointWrite> resultingCheckpoints =
+                before.checkpointEvidenceLog().appendAll(
+                        stagedCheckpointEvidence);
+        PersistentOrderedMap.Mutation<String, Boolean> receiptMutation =
+                before.publicationReceiptIndex().put(
+                        publicationIdentity, Boolean.TRUE);
+        PersistentOrderedMap<String, Boolean> resultingReceipts =
+                receiptMutation.map();
+        PersistentOrderedMap<String, ContractsClosureAdmissionReceipt>
+                resultingAdmissionReceipts = before.admissionReceiptIndex();
+        long receiptComparisons = receiptMutation.comparisons();
+        long receiptNodesCopied = receiptMutation.copiedNodes();
         if (stagedAdmissionReceipt != null) {
-            resultingAdmissionReceipts.put(
-                    publicationIdentity, stagedAdmissionReceipt);
+            PersistentOrderedMap.Mutation<String,
+                    ContractsClosureAdmissionReceipt> mutation =
+                    resultingAdmissionReceipts.put(
+                            publicationIdentity, stagedAdmissionReceipt);
+            resultingAdmissionReceipts = mutation.map();
+            receiptComparisons = Math.addExact(
+                    receiptComparisons, mutation.comparisons());
+            receiptNodesCopied = Math.addExact(
+                    receiptNodesCopied, mutation.copiedNodes());
         }
-        ContractsStructuralWorkMetrics.recordGlobalPass(
-                metrics,
-                ContractsStructuralWorkMetrics
-                        .GLOBAL_RECEIPT_ENTRIES_TRAVERSED,
-                before.closurePublicationReceipts().size());
-        LinkedHashMap<String, ContractsClosurePublicationReceipt>
-                resultingClosurePublicationReceipts = new LinkedHashMap<>(
-                        before.closurePublicationReceipts());
+        PersistentOrderedMap<String, ContractsClosurePublicationReceipt>
+                resultingClosurePublicationReceipts =
+                before.closurePublicationReceiptIndex();
         if (stagedClosurePublicationReceipt != null) {
-            resultingClosurePublicationReceipts.put(
-                    publicationIdentity, stagedClosurePublicationReceipt);
+            PersistentOrderedMap.Mutation<String,
+                    ContractsClosurePublicationReceipt> mutation =
+                    resultingClosurePublicationReceipts.put(
+                            publicationIdentity,
+                            stagedClosurePublicationReceipt);
+            resultingClosurePublicationReceipts = mutation.map();
+            receiptComparisons = Math.addExact(
+                    receiptComparisons, mutation.comparisons());
+            receiptNodesCopied = Math.addExact(
+                    receiptNodesCopied, mutation.copiedNodes());
         }
+        metrics.add("store.receiptIndexComparisons", receiptComparisons);
+        metrics.add("store.receiptIndexNodesCopied", receiptNodesCopied);
         requireClosurePublicationResult(
                 resultingSessions,
                 resultingInventory,
@@ -667,22 +676,16 @@ final class MultiDocumentPublicationTransaction {
                 resultingClosureSubscriptions);
         failureInjector.accept(FailurePoint.AFTER_TOPOLOGY_STAGED);
 
-        recordStoreStateConstruction(
-                resultingSessions,
+        recordRemainingGlobalStateConstruction(
                 resultingIndex,
                 resultingGraphGenerations,
                 resultingComponents,
                 resultingClosureSubscriptions,
-                resultingOutbox,
-                resultingCheckpoints,
-                resultingReceipts,
-                resultingAdmissionReceipts,
-                resultingClosurePublicationReceipts,
                 metrics);
 
         InMemoryDocumentStore.StoreState replacement =
-                new InMemoryDocumentStore.StoreState(
-                        resultingSessions,
+                InMemoryDocumentStore.StoreState.trustedTransition(
+                        resultingSessionIndex,
                         resultingLineages,
                         resultingInventory,
                         resultingInventoryGeneration,
@@ -772,24 +775,12 @@ final class MultiDocumentPublicationTransaction {
         return resulting;
     }
 
-    private static void recordStoreStateConstruction(
-            Map<DocumentId, DocumentSession> sessions,
+    private static void recordRemainingGlobalStateConstruction(
             ProcessEmbeddedComponentIndex componentIndex,
             ClosureGraphGenerationInventory graphGenerations,
             List<ComponentSnapshot> components,
             ClosureSubscriptionInventory subscriptions,
-            List<PublicEventOccurrence> outbox,
-            List<CheckpointWrite> checkpoints,
-            Set<String> receipts,
-            Map<String, ContractsClosureAdmissionReceipt> admissionReceipts,
-            Map<String, ContractsClosurePublicationReceipt> processReceipts,
             EngineMetrics metrics) {
-        ContractsStructuralWorkMetrics.recordGlobalPasses(
-                metrics,
-                ContractsStructuralWorkMetrics
-                        .GLOBAL_SESSION_ENTRIES_TRAVERSED,
-                2L,
-                Math.multiplyExact(sessions.size(), 2L));
         ContractsStructuralWorkMetrics.recordGlobalPass(
                 metrics,
                 ContractsStructuralWorkMetrics
@@ -807,22 +798,6 @@ final class MultiDocumentPublicationTransaction {
                 ContractsStructuralWorkMetrics
                         .GLOBAL_SUBSCRIPTION_ENTRIES_TRAVERSED,
                 subscriptions.states().size());
-        ContractsStructuralWorkMetrics.recordGlobalPasses(
-                metrics,
-                ContractsStructuralWorkMetrics
-                        .GLOBAL_EVIDENCE_ENTRIES_TRAVERSED,
-                2L,
-                Math.addExact((long) outbox.size(), checkpoints.size()));
-        ContractsStructuralWorkMetrics.recordGlobalPasses(
-                metrics,
-                ContractsStructuralWorkMetrics
-                        .GLOBAL_RECEIPT_ENTRIES_TRAVERSED,
-                3L,
-                Math.addExact(
-                        (long) receipts.size(),
-                        Math.addExact(
-                                (long) admissionReceipts.size(),
-                                processReceipts.size())));
     }
 
     private void requireGenerationFences(

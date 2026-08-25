@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -101,6 +102,12 @@ final class PersistentOrderedMap<K, V> {
     List<V> values() {
         ArrayList<V> values = new ArrayList<>(size());
         collectValues(root, values);
+        return List.copyOf(values);
+    }
+
+    List<Map.Entry<K, V>> entries() {
+        ArrayList<Map.Entry<K, V>> values = new ArrayList<>(size());
+        collectEntries(root, values);
         return List.copyOf(values);
     }
 
@@ -338,6 +345,17 @@ final class PersistentOrderedMap<K, V> {
         collectValues(node.left, destination);
         destination.add(node.value);
         collectValues(node.right, destination);
+    }
+
+    private static <K, V> void collectEntries(
+            TreeNode<K, V> node,
+            List<Map.Entry<K, V>> destination) {
+        if (node == null) {
+            return;
+        }
+        collectEntries(node.left, destination);
+        destination.add(Map.entry(node.key, node.value));
+        collectEntries(node.right, destination);
     }
 
     private static void collectNodeIdentities(
