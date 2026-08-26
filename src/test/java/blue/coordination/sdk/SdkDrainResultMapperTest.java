@@ -21,6 +21,7 @@ final class SdkDrainResultMapperTest {
 
     @Test
     void publicOperationReturnsTypedManagedOccurrenceBlocker() {
+        // given
         DocumentId source = DocumentId.of("sdk-demand-host");
         String timelineId = "sdk/typed-occurrence-demand";
         try (BlueCoordination coordination = BlueCoordination.inMemory();
@@ -76,6 +77,7 @@ final class SdkDrainResultMapperTest {
                     coordination.values().yaml(childYaml).blueId());
             String before = host.snapshot().blueId();
 
+            // when
             EntryResult result = coordination.operations()
                     .on(host)
                     .from(timeline)
@@ -84,6 +86,7 @@ final class SdkDrainResultMapperTest {
                     .requestYaml("child:\n" + childYaml.indent(2))
                     .execute();
 
+            // then
             assertEquals(EntryDisposition.NEEDS_RESOURCES,
                     result.disposition(), result.toString());
             assertEquals(1, result.closures().size());
@@ -104,6 +107,7 @@ final class SdkDrainResultMapperTest {
 
     @Test
     void suspendedClosureExposesTypedDemandAndAutomaticAttemptCount() {
+        // given
         Object owner = new Object();
         try (SdkCoordinationRuntime runtime = SdkCoordinationRuntime.create(
                 owner, null, null, ExactNodeProvider.empty(), false)) {
@@ -142,9 +146,11 @@ final class SdkDrainResultMapperTest {
                     0L,
                     0L);
 
+            // when
             DrainResult result = new SdkDrainResultMapper(runtime, engine)
                     .map(receipt);
 
+            // then
             ClosureResult closure = result.entries().get(0)
                     .closures().get(0);
             assertEquals(EntryDisposition.NEEDS_RESOURCES,

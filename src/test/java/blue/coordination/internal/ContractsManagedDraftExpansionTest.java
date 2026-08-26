@@ -782,7 +782,7 @@ final class ContractsManagedDraftExpansionTest {
             String publicationIdentity = adapter.publicationIdentityFor(
                     batch, invocation);
 
-            // when: the first store attempt fails before its atomic swap.
+            // The first store attempt fails before its atomic swap.
             adapter.onStoreFailurePoint(point -> {
                 if (point == MultiDocumentPublicationTransaction.FailurePoint
                         .BEFORE_SWAP) {
@@ -790,11 +790,14 @@ final class ContractsManagedDraftExpansionTest {
                 }
             });
 
-            // then: no document, occurrence, topology, receipt, or route state
-            // escapes the rejected transaction.
+            // when
             IllegalStateException injected = assertThrows(
                     IllegalStateException.class,
                     () -> adapter.executeAndPublish(batch, invocation));
+
+            // then
+            // No document, occurrence, topology, receipt, or route state
+            // escapes the rejected transaction.
             assertEquals("before-swap", injected.getMessage());
             InMemoryDocumentStore.PublicationSnapshot rolledBack = engine
                     .documents().publicationSnapshot();

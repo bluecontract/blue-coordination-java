@@ -285,7 +285,7 @@ final class ClosureSubscriptionInventoryTest {
                         .apply(fixture.result(A));
         Random random = new Random(RANDOM_SEED);
 
-        // when / then
+        // when
         for (int step = 0; step < 256; step++) {
             TreeSet<DocumentId> selected = new TreeSet<>(
                     EmbeddingBinding.DOCUMENT_ORDER);
@@ -310,6 +310,8 @@ final class ClosureSubscriptionInventoryTest {
             assertTrue(retained.lastOperationCopiedNodesForTesting() < 512);
             retained.assertStructurallyValidForTesting();
         }
+
+        // then
         assertEquals(fixture.result(A).graphGeneration(), source.require(A));
         assertEquals(0L, source.require(documents.get(700)));
         source.assertStructurallyValidForTesting();
@@ -424,7 +426,7 @@ final class ClosureSubscriptionInventoryTest {
                 ClosureSubscriptionInventory.of(insertionOrder);
         Random random = new Random(RANDOM_SEED ^ 0x51_07L);
 
-        // when / then
+        // when
         for (int step = 0; step < 256; step++) {
             LinkedHashSet<DocumentId> selected = new LinkedHashSet<>();
             while (selected.size() < 16) {
@@ -449,6 +451,8 @@ final class ClosureSubscriptionInventoryTest {
             assertEquals(32, retained.lastOperationVisitedRowsForTesting());
             retained.assertStructurallyValidForTesting();
         }
+
+        // then
         assertEquals(rows, source.states());
         source.assertStructurallyValidForTesting();
     }

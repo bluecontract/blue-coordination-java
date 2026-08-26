@@ -15,12 +15,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class PersistentMapViewTest {
     @Test
     void exposesDeterministicReadOnlyMapSemantics() {
+        // given
         PersistentOrderedMap<Integer, String> index =
                 PersistentOrderedMap.empty(Comparator.naturalOrder());
         index = index.put(2, "two").map();
         index = index.put(1, "one").map();
+
+        // when
         Map<Integer, String> view = new PersistentMapView<>(index);
 
+        // then
         assertEquals("one", view.get(1));
         assertNull(view.get("wrong-type"));
         assertTrue(view.containsKey(2));

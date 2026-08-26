@@ -34,6 +34,7 @@ final class ManagedOccurrenceResolverTest {
     void newAuthoredValueUsesExactIdentityAndNeverReadsAuthoredDocumentId() {
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.create()) {
+            // given
             ExactValue authored = engine.exactValue("""
                     documentId: arbitrary-user-content
                     name: duplicate names are also ordinary content
@@ -42,9 +43,11 @@ final class ManagedOccurrenceResolverTest {
             ManagedOccurrenceEvidenceDemand demand = demand(
                     A, "/child", authored);
 
+            // when
             ManagedOccurrenceResolver.Resolution result = resolver(engine)
                     .resolve(request(engine, Set.of(A), List.of(demand)));
 
+            // then
             assertTrue(result.complete());
             assertEquals(1, result.newDrafts().size());
             ManagedOccurrenceResolver.ResolvedOccurrence occurrence = result
@@ -63,6 +66,7 @@ final class ManagedOccurrenceResolverTest {
     void currentExactWinsWhenTheSameStateAlsoOccursAtOlderEpochs() {
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.create()) {
+            // given
             DocumentSession a = start(engine, A, "one");
             appendNoOpRevision(engine, a);
             ExactValue current = engine.documents().require(A)
@@ -70,9 +74,11 @@ final class ManagedOccurrenceResolverTest {
             ManagedOccurrenceEvidenceDemand demand = demand(
                     A, "/child", current);
 
+            // when
             ManagedOccurrenceResolver.Resolution result = resolver(engine)
                     .resolve(request(engine, Set.of(A), List.of(demand)));
 
+            // then
             assertTrue(result.complete());
             assertEquals(A, result.resolvedOccurrences().get(0)
                     .targetDocumentId());
@@ -87,15 +93,18 @@ final class ManagedOccurrenceResolverTest {
     void identicalExactStateAcrossLineagesIsAmbiguous() {
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.create()) {
+            // given
             start(engine, A, "same");
             start(engine, B, "same");
             ExactValue current = engine.document(A).current();
             ManagedOccurrenceEvidenceDemand demand = demand(
                     A, "/child", current);
 
+            // when
             ManagedOccurrenceResolver.Resolution result = resolver(engine)
                     .resolve(request(engine, Set.of(A), List.of(demand)));
 
+            // then
             assertFalse(result.complete());
             assertEquals(
                     ManagedOccurrenceResolver.ResolutionStatus
@@ -108,6 +117,7 @@ final class ManagedOccurrenceResolverTest {
     void inactiveReservationIsStableIdentityEvidenceAheadOfAmbiguity() {
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.create()) {
+            // given
             start(engine, A, "same");
             start(engine, B, "same");
             ExactValue current = engine.document(A).current();
@@ -132,6 +142,7 @@ final class ManagedOccurrenceResolverTest {
                             base.occurrenceInventoryGeneration(),
                             base.componentIndexGeneration());
 
+            // when
             ManagedOccurrenceResolver.Resolution result = resolver(engine)
                     .resolve(new ManagedOccurrenceResolver.ResolutionRequest(
                             CAUSE,
@@ -141,6 +152,7 @@ final class ManagedOccurrenceResolverTest {
                             List.of(demand),
                             reservedState));
 
+            // then
             assertTrue(result.complete());
             assertEquals(A, result.resolvedOccurrences().get(0)
                     .targetDocumentId());
@@ -151,6 +163,7 @@ final class ManagedOccurrenceResolverTest {
     void exactNodeDemandCompletesOnlyWhenProviderHasVerifiedContent() {
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.create()) {
+            // given
             ExactValue available = engine.exactValue("value: available");
             ExactValue absent = ExactValue.verified(
                     new Node().properties("value", new Node().value("absent")));
@@ -159,11 +172,13 @@ final class ManagedOccurrenceResolverTest {
             ExactNodeDemand missing = ExactNodeDemand.derived(
                     absent.blueId(), closureId(A), "/missing");
 
+            // when
             ManagedOccurrenceResolver.Resolution foundResult = resolver(engine)
                     .resolve(request(engine, Set.of(A), List.of(found)));
             ManagedOccurrenceResolver.Resolution missingResult = resolver(engine)
                     .resolve(request(engine, Set.of(A), List.of(missing)));
 
+            // then
             assertTrue(foundResult.complete());
             assertEquals(List.of(found), foundResult.resolvedExactNodes()
                     .stream()
@@ -183,6 +198,7 @@ final class ManagedOccurrenceResolverTest {
     void exactNodeResolutionCarriesOneShotProviderContentForTheRetry() {
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.create()) {
+            // given
             ExactValue available = engine.exactValue("value: one-shot");
             AtomicInteger reads = new AtomicInteger();
             ManagedOccurrenceResolver resolver =
@@ -194,9 +210,11 @@ final class ManagedOccurrenceResolverTest {
             ExactNodeDemand demand = ExactNodeDemand.derived(
                     available.blueId(), closureId(A), "/one-shot");
 
+            // when
             ManagedOccurrenceResolver.Resolution result = resolver.resolve(
                     request(engine, Set.of(A), List.of(demand)));
 
+            // then
             assertTrue(result.complete());
             assertEquals(1, reads.get());
             assertTrue(available.sameExactValue(
@@ -208,16 +226,19 @@ final class ManagedOccurrenceResolverTest {
     void duplicateNewOccurrencesShareOnePendingLineage() {
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.create()) {
+            // given
             ExactValue authored = engine.exactValue("state: initial");
             ManagedOccurrenceEvidenceDemand first = demand(
                     A, "/children/0", authored, 0L);
             ManagedOccurrenceEvidenceDemand second = demand(
                     A, "/children/1", authored, 1L);
 
+            // when
             ManagedOccurrenceResolver.Resolution result = resolver(engine)
                     .resolve(request(
                             engine, Set.of(A), List.of(first, second)));
 
+            // then
             assertTrue(result.complete());
             assertEquals(2, result.resolvedOccurrences().size());
             assertEquals(1, result.newDrafts().size());
@@ -230,6 +251,7 @@ final class ManagedOccurrenceResolverTest {
     void exactResolutionAndLineageAdvanceRemainLocalWithOneThousandAmbient() {
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.create()) {
+            // given
             for (int index = 0; index < 1_000; index++) {
                 start(
                         engine,
@@ -248,9 +270,12 @@ final class ManagedOccurrenceResolverTest {
                     .currentRevision().after();
             ManagedOccurrenceEvidenceDemand demand = demand(
                     A, "/child", current);
+
+            // when
             ManagedOccurrenceResolver.Resolution result = resolver(engine)
                     .resolve(request(engine, Set.of(A), List.of(demand)));
 
+            // then
             assertTrue(result.complete());
             assertEquals(A, result.resolvedOccurrences().get(0)
                     .targetDocumentId());

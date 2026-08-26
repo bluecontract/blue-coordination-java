@@ -209,7 +209,7 @@ final class ManagedOccurrenceInventoryTest {
                         A, "/b", MAX_SAFE_INTEGER,
                         B, INPUT_B, true, null)));
 
-        // when / then
+        // when
         assertThrows(IllegalStateException.class,
                 () -> inactive.apply(List.of(
                         ManagedOccurrenceInventory.Change.rebind(
@@ -222,6 +222,8 @@ final class ManagedOccurrenceInventoryTest {
                 () -> atLimit.apply(List.of(
                         ManagedOccurrenceInventory.Change.rebind(
                                 A, "/b", C, AFTER_READD_B))));
+
+        // then
         assertFalse(inactive.row(A, "/b").active());
         assertEquals(7L,
                 historical.row(A, "/b").pendingHistoricalEpoch());

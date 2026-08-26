@@ -30,10 +30,15 @@ final class PersistentAppendLogTest {
 
     @Test
     void emptyAppendRetainsTheExactRoot() {
+        // given
         PersistentAppendLog<String> log = PersistentAppendLog.of(
                 List.of("retained"));
 
-        assertSame(log, log.appendAll(List.of()));
+        // when
+        PersistentAppendLog<String> retained = log.appendAll(List.of());
+
+        // then
+        assertSame(log, retained);
     }
 
     @Test

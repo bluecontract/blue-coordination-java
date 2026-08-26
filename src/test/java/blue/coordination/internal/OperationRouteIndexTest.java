@@ -65,13 +65,15 @@ final class OperationRouteIndexTest {
         RoutingSurface aliceSurface = surface("timeline-a", "alice");
         RoutingSurface bobSurface = surface("timeline-b", "bob");
 
-        // when / then: add
+        // when
         OperationRouteIndex.PreparedReplacement added =
                 index.prepareReplacement(List.of(
                         new OperationRouteIndex.Replacement(
                                 DOCUMENT,
                                 aliceSurface,
                                 List.of(active("timeline-a", "alice")))));
+
+        // then
         assertEquals(List.of(new OperationRouteIndex.OperationRouteChange(
                         OperationRouteIndex.OperationRouteChangeKind.ADD,
                         DOCUMENT,

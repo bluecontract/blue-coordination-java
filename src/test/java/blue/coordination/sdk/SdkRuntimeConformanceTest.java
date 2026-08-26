@@ -20,11 +20,22 @@ final class SdkRuntimeConformanceTest {
 
     @Test
     void exactSubtypeGeneralizesAndRejectPolicyRollsBack() throws Exception {
-        assertNearestAncestorGeneralizes();
-        assertRejectRollsBack();
+        // given
+        List<EntryDisposition> expected = List.of(
+                EntryDisposition.APPLIED,
+                EntryDisposition.REJECTED);
+
+        // when
+        List<EntryDisposition> actual = List.of(
+                assertNearestAncestorGeneralizes(),
+                assertRejectRollsBack());
+
+        // then
+        assertEquals(expected, actual);
     }
 
-    private static void assertNearestAncestorGeneralizes() throws Exception {
+    private static EntryDisposition assertNearestAncestorGeneralizes()
+            throws Exception {
         Scenario scenario = scenario("nearest-valid-ancestor", "nearest");
         try (BlueCoordination coordination = scenario.coordination()) {
             DocumentHandle document = scenario.document();
@@ -66,10 +77,11 @@ final class SdkRuntimeConformanceTest {
                     .stream()
                     .anyMatch(route -> "premiumOperation".equals(
                             route.operation())));
+            return result.disposition();
         }
     }
 
-    private static void assertRejectRollsBack() throws Exception {
+    private static EntryDisposition assertRejectRollsBack() throws Exception {
         Scenario scenario = scenario("reject", "reject");
         try (BlueCoordination coordination = scenario.coordination()) {
             DocumentHandle document = scenario.document();
@@ -94,6 +106,7 @@ final class SdkRuntimeConformanceTest {
                     .stream()
                     .anyMatch(route -> "premiumOperation".equals(
                             route.operation())));
+            return result.disposition();
         }
     }
 

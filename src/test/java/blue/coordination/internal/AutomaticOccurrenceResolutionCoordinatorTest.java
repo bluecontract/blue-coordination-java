@@ -22,6 +22,7 @@ final class AutomaticOccurrenceResolutionCoordinatorTest {
     @Test
     void stopsOnlyAfterTheSameFullProgressIdentityRepeats() {
         try (DefaultCoordinationEngine engine = contractsEngine()) {
+            // given
             FakeInvocation invocation = invocation(engine, "repeat");
             ClosureAttemptResult needs = needs(engine);
             AtomicInteger attempts = new AtomicInteger();
@@ -35,6 +36,7 @@ final class AutomaticOccurrenceResolutionCoordinatorTest {
                             },
                             (current, resolution, storeState) -> current);
 
+            // when
             AutomaticOccurrenceResolutionCoordinator.RunResult<
                     FakeInvocation, String> result = coordinator.run(
                             invocation,
@@ -43,6 +45,7 @@ final class AutomaticOccurrenceResolutionCoordinatorTest {
                             (before, after, storeState) ->
                                     fences.incrementAndGet());
 
+            // then
             assertFalse(result.replayed());
             assertFalse(result.attempt().isComplete());
             assertEquals(2, attempts.get());
@@ -57,6 +60,7 @@ final class AutomaticOccurrenceResolutionCoordinatorTest {
     @Test
     void sameDemandShapeMayAdvanceAcrossDistinctInvocationIdentities() {
         try (DefaultCoordinationEngine engine = contractsEngine()) {
+            // given
             FakeInvocation first = invocation(engine, "first");
             FakeInvocation second = invocation(engine, "second");
             FakeInvocation third = invocation(engine, "third");
@@ -78,6 +82,7 @@ final class AutomaticOccurrenceResolutionCoordinatorTest {
                                         "unexpected expansion");
                             });
 
+            // when
             AutomaticOccurrenceResolutionCoordinator.RunResult<
                     FakeInvocation, String> result = coordinator.run(
                             first,
@@ -87,6 +92,7 @@ final class AutomaticOccurrenceResolutionCoordinatorTest {
                                     : Optional.empty(),
                             (before, after, storeState) -> { });
 
+            // then
             assertTrue(result.replayed());
             assertEquals("durable-receipt", result.replay());
             assertEquals(2, attempts.get());
@@ -101,6 +107,7 @@ final class AutomaticOccurrenceResolutionCoordinatorTest {
     @Test
     void portableExpansionLimitStopsBeforeAnotherResolution() {
         try (DefaultCoordinationEngine engine = contractsEngine()) {
+            // given
             FakeInvocation first = invocation(engine, "limit-first");
             FakeInvocation second = invocation(engine, "limit-second");
             ClosureAttemptResult needs = needs(engine);
@@ -118,6 +125,7 @@ final class AutomaticOccurrenceResolutionCoordinatorTest {
                                 return second;
                             });
 
+            // when
             AutomaticOccurrenceResolutionCoordinator.RunResult<
                     FakeInvocation, String> result = coordinator.run(
                             first,
@@ -125,6 +133,7 @@ final class AutomaticOccurrenceResolutionCoordinatorTest {
                             ignored -> Optional.empty(),
                             (before, after, storeState) -> { });
 
+            // then
             assertFalse(result.replayed());
             assertEquals(2, attempts.get());
             assertEquals(1, expansions.get());

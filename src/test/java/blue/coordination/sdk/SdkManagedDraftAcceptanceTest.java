@@ -109,13 +109,17 @@ final class SdkManagedDraftAcceptanceTest {
 
     @Test
     void extraOccurrencesUseAutomaticExpansionWithoutReselectingTheFeeder() {
+        // given
         // Dynamic occurrence resolution supersedes the legacy closed-surface
         // rejection for SINGLE_PATCH_EXTRA and SEQUENTIAL_EXTRA.  Supplying
         // one advanced explicit expectation must remain semantically equal to
         // the ordinary automatic path: the additional occurrence is resolved
         // in one bounded retry and the Timeline Entry is published once.
-        for (String operation : List.of(
-                "singlePatchExtra", "sequentialExtra")) {
+        List<String> operations = List.of(
+                "singlePatchExtra", "sequentialExtra");
+
+        // when
+        for (String operation : operations) {
             String suffix = operation.toLowerCase(Locale.ROOT);
             DocumentId hostId = DocumentId.of(
                     "sdk-managed-extra-host-" + suffix);
@@ -145,6 +149,7 @@ final class SdkManagedDraftAcceptanceTest {
                         .expectOccurrence("/orders/expected", child)
                         .execute();
 
+                // then
                 assertEquals(EntryDisposition.APPLIED, result.disposition(),
                         operation);
                 assertEquals(1, result.closures().size(), operation);

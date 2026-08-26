@@ -142,6 +142,7 @@ final class ManagedLineageIndexTest {
     void randomizedPersistentUpdatesMatchReferenceAndPreserveAvlInvariants() {
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.create()) {
+            // given
             LinkedHashMap<DocumentId, DocumentSession> reference =
                     new LinkedHashMap<>();
             ManagedLineageIndex index = ManagedLineageIndex.empty();
@@ -159,6 +160,7 @@ final class ManagedLineageIndexTest {
                     reference.keySet());
             Collections.shuffle(randomized, new Random(0x5eedL));
 
+            // when
             for (DocumentId documentId : randomized.subList(0, 64)) {
                 DocumentSession prior = reference.get(documentId);
                 DocumentSession advanced = prior.copyForAtomicPublication();
@@ -178,6 +180,7 @@ final class ManagedLineageIndexTest {
                 index.assertStructurallyValid();
             }
 
+            // then
             assertEquals(reference.size(), index.lineageCount());
             assertEquals(
                     new TreeSet<>(reference.keySet()),

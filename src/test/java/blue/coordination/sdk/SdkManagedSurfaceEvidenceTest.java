@@ -171,7 +171,8 @@ final class SdkManagedSurfaceEvidenceTest {
                           - $return: true
                     """);
 
-            // when: install and invoke
+            // when
+            // Install the dynamic route and invoke it through its new source.
             EntryResult installed = coordination.operations()
                     .on(document)
                     .from(owner)
@@ -190,7 +191,8 @@ final class SdkManagedSurfaceEvidenceTest {
                     .requestYaml("{}")
                     .execute();
 
-            // then: the prepared index reports exactly one logical add
+            // then
+            // The prepared index reports exactly one logical add.
             assertEquals(EntryDisposition.APPLIED, installed.disposition(),
                     installed.diagnostic().toString());
             assertEquals(EntryDisposition.APPLIED, invoked.disposition(),
