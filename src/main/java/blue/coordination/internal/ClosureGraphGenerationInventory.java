@@ -14,42 +14,56 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.TreeMap;
+import java.util.TreeSet;
 
 /** Durable cohort-local Contracts graph generations, keyed by document. */
 final class ClosureGraphGenerationInventory {
-    private final Map<DocumentId, Long> generations;
+    private final PersistentOrderedMap<DocumentId, Long> generations;
+    private final int lastOperationComparisons;
+    private final int lastOperationCopiedNodes;
 
-    private ClosureGraphGenerationInventory(Map<DocumentId, Long> values) {
-        TreeMap<DocumentId, Long> canonical = new TreeMap<>(
-                EmbeddingBinding.DOCUMENT_ORDER);
-        Objects.requireNonNull(values, "values").forEach((documentId,
-                generation) -> canonical.put(
-                        Objects.requireNonNull(documentId, "documentId"),
-                        MultiDocumentPublicationTransaction.requireSafeInteger(
-                                Objects.requireNonNull(
-                                        generation, "graphGeneration"),
-                                "graphGeneration")));
-        this.generations = Collections.unmodifiableMap(
-                new LinkedHashMap<>(canonical));
+    private ClosureGraphGenerationInventory(
+            PersistentOrderedMap<DocumentId, Long> generations,
+            Work work) {
+        this.generations = Objects.requireNonNull(generations, "generations");
+        Work exact = Objects.requireNonNull(work, "work");
+        this.lastOperationComparisons = exact.comparisons;
+        this.lastOperationCopiedNodes = exact.copiedNodes;
     }
 
     static ClosureGraphGenerationInventory empty() {
-        return new ClosureGraphGenerationInventory(Map.of());
+        return new ClosureGraphGenerationInventory(
+                PersistentOrderedMap.empty(
+                        EmbeddingBinding.DOCUMENT_ORDER),
+                new Work());
     }
 
     /** Retains known lineages and initializes newly admitted documents at zero. */
     ClosureGraphGenerationInventory retainingDocuments(
             Collection<DocumentId> documentIds) {
-        TreeMap<DocumentId, Long> retained = new TreeMap<>(
+        TreeSet<DocumentId> canonical = new TreeSet<>(
                 EmbeddingBinding.DOCUMENT_ORDER);
         for (DocumentId documentId : Objects.requireNonNull(
                 documentIds, "documentIds")) {
-            DocumentId exact = Objects.requireNonNull(
-                    documentId, "documentId");
-            retained.put(exact, generations.getOrDefault(exact, 0L));
+            canonical.add(Objects.requireNonNull(
+                    documentId, "documentId"));
         }
-        return new ClosureGraphGenerationInventory(retained);
+        PersistentOrderedMap<DocumentId, Long> retained =
+                PersistentOrderedMap.empty(
+                        EmbeddingBinding.DOCUMENT_ORDER);
+        Work work = new Work();
+        for (DocumentId documentId : canonical) {
+            PersistentOrderedMap.ReadResult<Long> existing =
+                    generations.read(documentId);
+            work.read(existing);
+            PersistentOrderedMap.Mutation<DocumentId, Long> mutation =
+                    retained.put(
+                            documentId,
+                            existing.found() ? existing.value() : 0L);
+            work.mutation(mutation);
+            retained = mutation.map();
+        }
+        return new ClosureGraphGenerationInventory(retained, work);
     }
 
     long require(DocumentId documentId) {
@@ -99,6 +113,7 @@ final class ClosureGraphGenerationInventory {
         }
         ClosureCommitCompanion companion =
                 selected.platformCommitCompanion();
+        Work work = new Work();
         Set<DocumentId> expectedMembers = new LinkedHashSet<>();
         companion.expectedInputDocuments().forEach(document -> {
             DocumentId member = DocumentId.of(document.documentId().value());
@@ -107,7 +122,7 @@ final class ClosureGraphGenerationInventory {
                         "Duplicate expected graph-generation member "
                                 + member);
             }
-            long actual = require(member);
+            long actual = require(member, work);
             if (actual != companion.expectedInputGraphGeneration()) {
                 throw new MultiDocumentPublicationTransaction
                         .AtomicPublicationCasException(
@@ -129,13 +144,16 @@ final class ClosureGraphGenerationInventory {
                             + "generation cohort");
         }
 
-        TreeMap<DocumentId, Long> replacement = new TreeMap<>(
-                EmbeddingBinding.DOCUMENT_ORDER);
-        replacement.putAll(generations);
+        long resultingGeneration = safeGeneration(
+                selected.graphGeneration());
+        PersistentOrderedMap<DocumentId, Long> replacement = generations;
         for (DocumentId member : resultingMembers) {
-            replacement.put(member, selected.graphGeneration());
+            PersistentOrderedMap.Mutation<DocumentId, Long> mutation =
+                    replacement.put(member, resultingGeneration);
+            work.mutation(mutation);
+            replacement = mutation.map();
         }
-        return new ClosureGraphGenerationInventory(replacement);
+        return new ClosureGraphGenerationInventory(replacement, work);
     }
 
     /**
@@ -158,8 +176,12 @@ final class ClosureGraphGenerationInventory {
             throw new IllegalArgumentException(
                     "Closure admission must contain a new document");
         }
+        Work work = new Work();
         for (DocumentId documentId : admitted) {
-            if (generations.containsKey(documentId)) {
+            PersistentOrderedMap.ReadResult<Long> existing =
+                    generations.read(documentId);
+            work.read(existing);
+            if (existing.found()) {
                 throw new MultiDocumentPublicationTransaction
                         .AtomicPublicationCasException(
                                 "Closure admission graph lineage already exists "
@@ -179,12 +201,17 @@ final class ClosureGraphGenerationInventory {
             throw new IllegalArgumentException(
                     "Closure admission graph members are incomplete");
         }
-        TreeMap<DocumentId, Long> replacement = new TreeMap<>(
-                EmbeddingBinding.DOCUMENT_ORDER);
-        replacement.putAll(generations);
-        admitted.forEach(documentId -> replacement.put(
-                documentId, selected.graphGeneration()));
-        return new ClosureGraphGenerationInventory(replacement);
+        long resultingGeneration = safeGeneration(
+                selected.graphGeneration());
+        PersistentOrderedMap<DocumentId, Long> replacement = generations;
+        for (DocumentId documentId : admitted) {
+            PersistentOrderedMap.Mutation<DocumentId, Long> mutation =
+                    replacement.put(
+                            documentId, resultingGeneration);
+            work.mutation(mutation);
+            replacement = mutation.map();
+        }
+        return new ClosureGraphGenerationInventory(replacement, work);
     }
 
     /**
@@ -222,8 +249,9 @@ final class ClosureGraphGenerationInventory {
         }
         long expectedGeneration = selected.platformCommitCompanion()
                 .expectedInputGraphGeneration();
+        Work work = new Work();
         for (DocumentId documentId : present) {
-            long actual = require(documentId);
+            long actual = require(documentId, work);
             if (actual != expectedGeneration) {
                 throw new MultiDocumentPublicationTransaction
                         .AtomicPublicationCasException(
@@ -234,7 +262,10 @@ final class ClosureGraphGenerationInventory {
             }
         }
         for (DocumentId documentId : absent) {
-            if (generations.containsKey(documentId)) {
+            PersistentOrderedMap.ReadResult<Long> existing =
+                    generations.read(documentId);
+            work.read(existing);
+            if (existing.found()) {
                 throw new MultiDocumentPublicationTransaction
                         .AtomicPublicationCasException(
                                 "Closure expansion graph lineage already exists "
@@ -259,19 +290,95 @@ final class ClosureGraphGenerationInventory {
                     "Closure expansion graph members are incomplete");
         }
 
-        TreeMap<DocumentId, Long> replacement = new TreeMap<>(
-                EmbeddingBinding.DOCUMENT_ORDER);
-        replacement.putAll(generations);
-        expectedMembers.forEach(documentId -> replacement.put(
-                documentId, selected.graphGeneration()));
-        return new ClosureGraphGenerationInventory(replacement);
+        long resultingGeneration = safeGeneration(
+                selected.graphGeneration());
+        PersistentOrderedMap<DocumentId, Long> replacement = generations;
+        for (DocumentId documentId : expectedMembers) {
+            PersistentOrderedMap.Mutation<DocumentId, Long> mutation =
+                    replacement.put(
+                            documentId, resultingGeneration);
+            work.mutation(mutation);
+            replacement = mutation.map();
+        }
+        return new ClosureGraphGenerationInventory(replacement, work);
     }
 
     Map<DocumentId, Long> generations() {
-        return generations;
+        List<DocumentId> documents = generations.keys();
+        List<Long> values = generations.values();
+        LinkedHashMap<DocumentId, Long> result = new LinkedHashMap<>();
+        for (int index = 0; index < documents.size(); index++) {
+            result.put(documents.get(index), values.get(index));
+        }
+        return Collections.unmodifiableMap(result);
     }
 
     List<DocumentId> documents() {
-        return List.copyOf(generations.keySet());
+        return generations.keys();
+    }
+
+    /** Comparator calls made by persistent-index reads and mutations only. */
+    int lastOperationComparisonsForTesting() {
+        return lastOperationComparisons;
+    }
+
+    /** Persistent tree nodes allocated by the operation that built this view. */
+    int lastOperationCopiedNodesForTesting() {
+        return lastOperationCopiedNodes;
+    }
+
+    int lookupStepsForTesting(DocumentId documentId) {
+        return generations.lookupSteps(Objects.requireNonNull(
+                documentId, "documentId"));
+    }
+
+    Object rootIdentityForTesting() {
+        return generations.rootIdentityForTesting();
+    }
+
+    int sharedNodeCountForTesting(
+            ClosureGraphGenerationInventory other) {
+        return generations.sharedNodeCountForTesting(
+                Objects.requireNonNull(other, "other").generations);
+    }
+
+    void assertStructurallyValidForTesting() {
+        generations.assertStructurallyValid();
+    }
+
+    private long require(DocumentId documentId, Work work) {
+        PersistentOrderedMap.ReadResult<Long> result = generations.read(
+                Objects.requireNonNull(documentId, "documentId"));
+        work.read(result);
+        if (!result.found()) {
+            throw new IllegalArgumentException(
+                    "No durable graph generation for " + documentId);
+        }
+        return result.value();
+    }
+
+    private static long safeGeneration(long generation) {
+        return MultiDocumentPublicationTransaction.requireSafeInteger(
+                generation, "graphGeneration");
+    }
+
+    private static final class Work {
+        private int comparisons;
+        private int copiedNodes;
+
+        private void read(PersistentOrderedMap.ReadResult<?> read) {
+            comparisons = Math.addExact(
+                    comparisons,
+                    Objects.requireNonNull(read, "read").comparisons());
+        }
+
+        private void mutation(PersistentOrderedMap.Mutation<?, ?> mutation) {
+            PersistentOrderedMap.Mutation<?, ?> exact =
+                    Objects.requireNonNull(mutation, "mutation");
+            comparisons = Math.addExact(
+                    comparisons, exact.comparisons());
+            copiedNodes = Math.addExact(
+                    copiedNodes, exact.copiedNodes());
+        }
     }
 }

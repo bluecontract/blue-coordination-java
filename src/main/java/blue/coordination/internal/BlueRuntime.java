@@ -7,6 +7,7 @@ import blue.language.api.BlueCachePolicy;
 import blue.language.api.BlueCacheStats;
 import blue.language.codec.BlueFormat;
 import blue.language.codec.jackson.UncheckedObjectMapper;
+import blue.language.conformance.ConformanceEngine;
 import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.merge.ResolvedSnapshot;
 import blue.language.model.Node;
@@ -58,6 +59,7 @@ final class BlueRuntime implements AutoCloseable {
     private final BlueLanguage language;
     private final BlueContracts contracts;
     private final DocumentProcessor processor;
+    private final ConformanceEngine processorConformanceEngine;
     private final EngineMetrics metrics;
     private boolean closed;
 
@@ -66,12 +68,15 @@ final class BlueRuntime implements AutoCloseable {
             BlueLanguage language,
             BlueContracts contracts,
             DocumentProcessor processor,
+            ConformanceEngine processorConformanceEngine,
             EngineMetrics metrics) {
         this.nodeProvider = Objects.requireNonNull(
                 nodeProvider, "nodeProvider");
         this.language = Objects.requireNonNull(language, "language");
         this.contracts = Objects.requireNonNull(contracts, "contracts");
         this.processor = Objects.requireNonNull(processor, "processor");
+        this.processorConformanceEngine = Objects.requireNonNull(
+                processorConformanceEngine, "processorConformanceEngine");
         this.metrics = Objects.requireNonNull(metrics, "metrics");
     }
 
@@ -82,6 +87,14 @@ final class BlueRuntime implements AutoCloseable {
     static BlueRuntime create(
             WholeObjectStore wholeObjects,
             EngineMetrics metrics) {
+        return create(wholeObjects, metrics, null);
+    }
+
+    /** Creates an isolated runtime with one optional read-only provider leaf. */
+    static BlueRuntime create(
+            WholeObjectStore wholeObjects,
+            EngineMetrics metrics,
+            NodeProvider exactNodeProvider) {
         BlueRepository repository = BlueRepository.current();
         List<NodeProvider> providers = new ArrayList<>();
         providers.add(metered(
@@ -92,6 +105,9 @@ final class BlueRuntime implements AutoCloseable {
         providers.add(metered(repository.nodeProvider(), metrics));
         providers.add(metered(
                 new RepositoryExactNodeProvider(repository), metrics));
+        if (exactNodeProvider != null) {
+            providers.add(metered(exactNodeProvider, metrics));
+        }
         NodeProvider nodeProvider = new SequentialNodeProvider(providers);
 
         Map<String, String> imports = new LinkedHashMap<>();
@@ -119,13 +135,21 @@ final class BlueRuntime implements AutoCloseable {
                         language.processing())
                 .runtimeRegistry(runtimeRegistry)
                 .build();
+        ConformanceEngine processorConformanceEngine =
+                language.processing().newConformanceEngine();
         DocumentProcessor processor = DocumentProcessor.builder()
                 .runtimeAccess(contracts.runtimeAccess())
                 .runtimeRegistry(runtimeRegistry)
                 .runtimeRegistryIdentity(runtimeRegistryIdentity)
+                .conformanceEngine(processorConformanceEngine)
                 .build();
         return new BlueRuntime(
-                nodeProvider, language, contracts, processor, metrics);
+                nodeProvider,
+                language,
+                contracts,
+                processor,
+                processorConformanceEngine,
+                metrics);
     }
 
     Node parseSourceYaml(String yaml) {
@@ -269,6 +293,21 @@ final class BlueRuntime implements AutoCloseable {
                 cache(resolveToSnapshot(preprocessed)), purpose);
     }
 
+    /**
+     * Parses direct provider content under this runtime's preprocessing
+     * aliases without resolving the declared type as an instance.
+     */
+    ExactValue exactProviderSource(String yaml) {
+        Node source = parseSourceYaml(Objects.requireNonNull(yaml, "yaml"));
+        Node preprocessed = preprocess(source);
+        if (preprocessed.isReferenceOnly()) {
+            throw new IllegalArgumentException(
+                    "Provider content must be a whole exact Blue value");
+        }
+        String blueId = DirectBlueIdCalculator.calculateBlueId(preprocessed);
+        return ExactValue.verified(blueId, preprocessed);
+    }
+
     NodeProvider nodeProvider() {
         ensureOpen();
         return nodeProvider;
@@ -293,6 +332,7 @@ final class BlueRuntime implements AutoCloseable {
         closed = true;
         close(contracts);
         close(processor);
+        close(processorConformanceEngine);
         close(language);
     }
 

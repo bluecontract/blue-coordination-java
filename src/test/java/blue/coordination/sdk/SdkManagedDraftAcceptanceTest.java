@@ -108,6 +108,201 @@ final class SdkManagedDraftAcceptanceTest {
     }
 
     @Test
+    void extraOccurrencesUseAutomaticExpansionWithoutReselectingTheFeeder() {
+        // given
+        // Dynamic occurrence resolution supersedes the legacy closed-surface
+        // rejection for SINGLE_PATCH_EXTRA and SEQUENTIAL_EXTRA.  Supplying
+        // one advanced explicit expectation must remain semantically equal to
+        // the ordinary automatic path: the additional occurrence is resolved
+        // in one bounded retry and the Timeline Entry is published once.
+        List<String> operations = List.of(
+                "singlePatchExtra", "sequentialExtra");
+
+        // when
+        for (String operation : operations) {
+            String suffix = operation.toLowerCase(Locale.ROOT);
+            DocumentId hostId = DocumentId.of(
+                    "sdk-managed-extra-host-" + suffix);
+            DocumentId childId = DocumentId.of(
+                    "sdk-managed-extra-child-" + suffix);
+            String timelineId = "sdk/managed-extra/" + suffix;
+            try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+                TimelineHandle timeline = coordination.timelines().register(
+                        timelineId, ACTOR);
+                DocumentHandle host = coordination.documents().admit(
+                        ManagedDocument.yaml(
+                                        hostId,
+                                        failureHost(hostId, timelineId))
+                                .publicRoot()
+                                .fromNow());
+                ManagedDocumentDraft child = draft(
+                        coordination, childId, false);
+                DocumentId automaticChildId = DocumentId.of(
+                        child.initial().blueId());
+
+                EntryResult result = coordination.operations()
+                        .on(host)
+                        .from(timeline)
+                        .call(operation)
+                        .through("ownerChannel")
+                        .request(request -> request.managed("order", child))
+                        .expectOccurrence("/orders/expected", child)
+                        .execute();
+
+                // then
+                assertEquals(EntryDisposition.APPLIED, result.disposition(),
+                        operation);
+                assertEquals(1, result.closures().size(), operation);
+                ClosureResult closure = result.closures().get(0);
+                assertEquals(2L, closure.processorAttemptCount(), operation);
+                assertEquals(1L, closure.automaticRetryCount(), operation);
+                ManagedSurfaceEvidence surface =
+                        closure.managedSurfaceEvidence();
+                assertTrue(surface.present(), operation);
+                assertEquals(1, surface.resolvedOccurrences().size(),
+                        operation);
+                ManagedSurfaceEvidence.OccurrenceResolution resolution =
+                        surface.resolvedOccurrences().get(0);
+                assertEquals(
+                        ManagedSurfaceEvidence.ResolutionKind.NEW_AUTHORED,
+                        resolution.kind(), operation);
+                assertEquals(hostId,
+                        resolution.occurrence().sourceDocumentId(),
+                        operation);
+                assertEquals("/orders/extra",
+                        resolution.occurrence().sourcePath(), operation);
+                assertEquals(automaticChildId,
+                        resolution.occurrence().targetDocumentId(),
+                        operation);
+                assertTrue(resolution.occurrence().active(), operation);
+                assertEquals(child.initial().blueId(),
+                        resolution.authoredInitial().orElseThrow().blueId(),
+                        operation);
+                assertTrue(surface.graphChanges().stream().anyMatch(
+                        change -> change.kind()
+                                        == ManagedSurfaceEvidence
+                                                .GraphChangeKind.ADD
+                                && change.sourceDocumentId().equals(hostId)
+                                && change.sourcePath().equals(
+                                        "/orders/extra")
+                                && change.after().orElseThrow()
+                                        .targetDocumentId()
+                                        .equals(automaticChildId)),
+                        operation);
+                assertFalse(surface.componentTransitions().isEmpty(),
+                        operation);
+                assertFalse(surface.subscriptionChanges().isEmpty(),
+                        operation);
+                assertEquals(Set.of(hostId, childId, automaticChildId),
+                        closure.changes().stream()
+                                .map(DocumentChange::documentId)
+                                .collect(java.util.stream.Collectors.toSet()),
+                        operation);
+                assertEquals(3L, closure.stats().documentsOpened(), operation);
+                assertEquals(1L, closure.stats().documentStepOrder().stream()
+                        .filter(hostId::equals)
+                        .count(), operation);
+
+                DocumentHandle explicitChild = coordination.documents()
+                        .require(childId);
+                DocumentHandle automaticChild = coordination.documents()
+                        .require(automaticChildId);
+                assertEquals(1L, explicitChild.snapshot()
+                        .longAt("/initializationCount"), operation);
+                assertEquals(1L, automaticChild.snapshot()
+                        .longAt("/initializationCount"), operation);
+                assertEquals(1, explicitChild.history().size(), operation);
+                assertEquals(1, automaticChild.history().size(), operation);
+                assertEquals(explicitChild.snapshot().blueId(),
+                        host.snapshot().valueAt("/orders/expected").blueId(),
+                        operation);
+                assertEquals(automaticChild.snapshot().blueId(),
+                        host.snapshot().valueAt("/orders/extra").blueId(),
+                        operation);
+
+                int hostHistory = host.history().size();
+                DrainResult replayFence = coordination.processing().drain();
+                assertTrue(replayFence.entries().isEmpty(), operation);
+                assertTrue(replayFence.quiescent(), operation);
+                assertEquals(hostHistory, host.history().size(), operation);
+                assertEquals(1, explicitChild.history().size(), operation);
+                assertEquals(1, automaticChild.history().size(), operation);
+            }
+        }
+    }
+
+    @Test
+    void automaticOccurrenceResolutionReusesTheExactCurrentLineage() {
+        // given
+
+        DocumentId hostId = DocumentId.of(
+                "sdk-managed-current-reuse-host");
+        DocumentId existingId = DocumentId.of(
+                "sdk-managed-current-reuse-child");
+        String timelineId = "sdk/managed-current-reuse/alice";
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            TimelineHandle timeline = coordination.timelines().register(
+                    timelineId, ACTOR);
+            DocumentHandle host = coordination.documents().admit(
+                    ManagedDocument.yaml(
+                                    hostId,
+                                    singleDraftHost(
+                                            hostId,
+                                            timelineId,
+                                            "attachCurrent"))
+                            .publicRoot()
+                            .fromNow());
+            DocumentHandle existing = coordination.documents().admit(
+                    ManagedDocument.yaml(
+                                    existingId,
+                                    lifecycleDocument(existingId, false))
+                            .publicRoot()
+                            .fromNow());
+            String currentBlueId = existing.snapshot().blueId();
+            int historyBefore = existing.history().size();
+
+            // when
+
+            EntryResult result = coordination.operations()
+                    .on(host)
+                    .from(timeline)
+                    .call("attachCurrent")
+                    .through("ownerChannel")
+                    .request(request -> request.exact(
+                            "order", existing.exact()))
+                    .execute();
+
+            // then
+
+            assertEquals(EntryDisposition.APPLIED, result.disposition());
+            ClosureResult closure = result.closures().get(0);
+            assertEquals(2L, closure.processorAttemptCount());
+            ManagedSurfaceEvidence surface =
+                    closure.managedSurfaceEvidence();
+            assertEquals(1, surface.resolvedOccurrences().size());
+            ManagedSurfaceEvidence.OccurrenceResolution resolution =
+                    surface.resolvedOccurrences().get(0);
+            assertEquals(
+                    ManagedSurfaceEvidence.ResolutionKind.CURRENT_EXISTING,
+                    resolution.kind());
+            assertTrue(resolution.authoredInitial().isEmpty());
+            assertEquals(hostId,
+                    resolution.occurrence().sourceDocumentId());
+            assertEquals("/orders/order-456",
+                    resolution.occurrence().sourcePath());
+            assertEquals(existingId,
+                    resolution.occurrence().targetDocumentId());
+            assertEquals(currentBlueId,
+                    resolution.occurrence().expectedTargetBlueId());
+            assertTrue(resolution.occurrence().active());
+            assertEquals(currentBlueId, existing.snapshot().blueId());
+            assertEquals(historyBefore, existing.history().size());
+            assertEquals(currentBlueId,
+                    host.snapshot().valueAt("/orders/order-456").blueId());
+        }
+    }
+
+    @Test
     void malformedManagedEvidenceFailsBeforeTheFirstAppend() {
         // given
         DocumentId hostId = DocumentId.of("sdk-managed-preflight-host");
@@ -252,6 +447,245 @@ final class SdkManagedDraftAcceptanceTest {
                     drained.entry(valid).disposition());
             assertEquals(1L, coordination.documents().require(childId)
                     .snapshot().longAt("/initializationCount"));
+        }
+    }
+
+    @Test
+    void cyclicManagedDraftTargetFailsBeforeAppend() {
+        // given
+        DocumentId cyclicA = DocumentId.of(
+                "sdk-managed-cyclic-preflight-a");
+        DocumentId cyclicB = DocumentId.of(
+                "sdk-managed-cyclic-preflight-b");
+        DocumentId childId = DocumentId.of(
+                "sdk-managed-cyclic-preflight-child");
+        String timelineId = "sdk/managed-cyclic-preflight/alice";
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            TimelineHandle timeline = coordination.timelines().register(
+                    timelineId, ACTOR);
+            ClosureHandle closure = coordination.documents().admit(
+                    ManagedClosure.builder()
+                            .document(
+                                    "a",
+                                    cyclicA,
+                                    cyclicDraftHost(
+                                            cyclicA, timelineId))
+                            .document(
+                                    "b",
+                                    cyclicB,
+                                    cyclicDraftPeer(cyclicB))
+                            .bindOccurrence("a", "/peer", "b")
+                            .bindOccurrence("b", "/peer", "a")
+                            .publicRoot("a")
+                            .fromNow()
+                            .build());
+            DocumentHandle host = closure.document("a");
+            ManagedDocumentDraft child = draft(
+                    coordination, childId, false);
+            String before = host.snapshot().blueId();
+
+            // when
+            RuntimeException failure = assertThrows(
+                    RuntimeException.class,
+                    () -> managedCall(
+                            coordination,
+                            host,
+                            timeline,
+                            "createOrder",
+                            child,
+                            "/orders/order-456")
+                            .submit());
+            EntryHandle next = coordination.operations()
+                    .on(host)
+                    .from(timeline)
+                    .call("touch")
+                    .through("ownerChannel")
+                    .submit();
+
+            // then
+            assertTrue(host.exact().cyclicMember());
+            assertTrue(failure.getMessage().contains("cyclic-set member"));
+            assertEquals(before, host.snapshot().blueId());
+            assertEquals(0L, host.snapshot().epoch());
+            assertEquals(1L, next.globalSequence().orElseThrow());
+            assertEquals(1L, next.timelineSequence().orElseThrow());
+            assertDocumentAbsent(coordination, childId);
+        }
+    }
+
+    @Test
+    void managedDraftCatalogCrossingACycleFailsBeforeAppend() {
+        // given
+        DocumentId hostId = DocumentId.of(
+                "sdk-managed-cycle-crossing-host");
+        DocumentId cyclicA = DocumentId.of(
+                "sdk-managed-cycle-crossing-a");
+        DocumentId cyclicB = DocumentId.of(
+                "sdk-managed-cycle-crossing-b");
+        DocumentId childId = DocumentId.of(
+                "sdk-managed-cycle-crossing-child");
+        String timelineId = "sdk/managed-cycle-crossing/alice";
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            TimelineHandle timeline = coordination.timelines().register(
+                    timelineId, ACTOR);
+            ClosureHandle closure = coordination.documents().admit(
+                    ManagedClosure.builder()
+                            .document(
+                                    "host",
+                                    hostId,
+                                    cyclicDraftHost(
+                                            hostId, timelineId))
+                            .document(
+                                    "a",
+                                    cyclicA,
+                                    cyclicDraftPeer(cyclicA))
+                            .document(
+                                    "b",
+                                    cyclicB,
+                                    cyclicDraftPeer(cyclicB))
+                            .bindOccurrence("host", "/peer", "a")
+                            .bindOccurrence("a", "/peer", "b")
+                            .bindOccurrence("b", "/peer", "a")
+                            .publicRoot("host")
+                            .fromNow()
+                            .build());
+            DocumentHandle host = closure.document("host");
+            ManagedDocumentDraft child = draft(
+                    coordination, childId, false);
+            String before = host.snapshot().blueId();
+
+            // when
+            RuntimeException failure = assertThrows(
+                    RuntimeException.class,
+                    () -> managedCall(
+                            coordination,
+                            host,
+                            timeline,
+                            "createOrder",
+                            child,
+                            "/orders/order-456")
+                            .submit());
+            EntryHandle next = coordination.operations()
+                    .on(host)
+                    .from(timeline)
+                    .call("touch")
+                    .through("ownerChannel")
+                    .submit();
+
+            // then
+            assertFalse(host.exact().cyclicMember());
+            assertTrue(closure.document("a").exact().cyclicMember());
+            assertTrue(closure.document("b").exact().cyclicMember());
+            assertTrue(failure.getMessage().contains("cyclic-set member"));
+            assertEquals(before, host.snapshot().blueId());
+            assertEquals(0L, host.snapshot().epoch());
+            assertEquals(1L, next.globalSequence().orElseThrow());
+            assertEquals(1L, next.timelineSequence().orElseThrow());
+            assertDocumentAbsent(coordination, childId);
+        }
+    }
+
+    @Test
+    void appliedManagedParentCanCreateAManagedGrandchild() {
+        // given
+        DocumentId hostId = DocumentId.of("sdk-managed-growth-host");
+        DocumentId parentId = DocumentId.of("sdk-managed-growth-parent");
+        DocumentId childId = DocumentId.of("sdk-managed-growth-child");
+        String hostTimelineId = "sdk/managed-growth/host";
+        String parentTimelineId = "sdk/managed-growth/parent";
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            TimelineHandle hostTimeline = coordination.timelines().register(
+                    hostTimelineId, ACTOR);
+            TimelineHandle parentTimeline = coordination.timelines().register(
+                    parentTimelineId, ACTOR);
+            DocumentHandle host = coordination.documents().admit(
+                    ManagedDocument.yaml(
+                                    hostId,
+                                    nestedGrowthHost(
+                                            hostId, hostTimelineId))
+                            .publicRoot()
+                            .fromNow());
+            ManagedDocumentDraft parentDraft = coordination.documents()
+                    .draft(
+                            parentId,
+                            coordination.values().yaml(nestedGrowthParent(
+                                    parentId, parentTimelineId)));
+            ManagedDocumentDraft childDraft = draft(
+                    coordination, childId, false);
+
+            // when
+            EntryResult parentCreated = coordination.operations()
+                    .on(host)
+                    .from(hostTimeline)
+                    .call("createParent")
+                    .through("ownerChannel")
+                    .request(request -> request.managed(
+                            "parent", parentDraft))
+                    .expectOccurrence("/parents/primary", parentDraft)
+                    .activation(ActivationPolicy.fromNow())
+                    .execute();
+            DocumentHandle parent = coordination.documents().require(
+                    parentId);
+            String parentBeforeChild = parent.snapshot().blueId();
+            String hostBeforeChild = host.snapshot().blueId();
+            int hostHistoryBeforeChild = host.history().size();
+            long parentEpochBeforePromotion = parent.snapshot().epoch();
+            int parentHistoryBeforePromotion = parent.history().size();
+            int entriesBeforePromotion = coordination.advanced().rawEngine()
+                    .metrics().journalEntryCount();
+            DocumentHandle promoted = coordination.documents()
+                    .promotePublicRoot(parentId);
+            assertEquals(parentId, promoted.id());
+            assertEquals(parentBeforeChild, parent.snapshot().blueId());
+            assertEquals(parentEpochBeforePromotion, parent.snapshot().epoch());
+            assertEquals(parentHistoryBeforePromotion, parent.history().size());
+            assertEquals(entriesBeforePromotion, coordination.advanced()
+                    .rawEngine().metrics().journalEntryCount());
+            EntryResult childCreated = coordination.operations()
+                    .on(parent)
+                    .from(parentTimeline)
+                    .call("createChild")
+                    .through("ownerChannel")
+                    .request(request -> request.managed(
+                            "child", childDraft))
+                    .expectOccurrence("/children/primary", childDraft)
+                    .activation(ActivationPolicy.fromNow())
+                    .execute();
+            DocumentHandle child = coordination.documents().require(childId);
+
+            // then
+            assertApplied(parentCreated);
+            assertApplied(childCreated);
+            // The promoted parent is an independent Root. Its child command
+            // opens only the forward parent -> child closure; the host keeps
+            // the exact retained parent occurrence created by the first call.
+            assertEquals(parentBeforeChild,
+                    host.snapshot().valueAt("/parents/primary").blueId());
+            assertEquals(hostBeforeChild, host.snapshot().blueId());
+            assertEquals(hostHistoryBeforeChild, host.history().size());
+            assertEquals(child.snapshot().blueId(),
+                    parent.snapshot().valueAt("/children/primary").blueId());
+            assertNotEquals(parentBeforeChild, parent.snapshot().blueId());
+            assertTrue(changedDocuments(parentCreated).containsAll(
+                    Set.of(hostId, parentId)));
+            assertTrue(changedDocuments(childCreated).containsAll(
+                    Set.of(parentId, childId)));
+            assertTrue(host.snapshot().ready());
+            assertTrue(parent.snapshot().ready());
+            assertTrue(child.snapshot().ready());
+            assertFalse(host.exact().cyclicMember());
+            assertFalse(parent.exact().cyclicMember());
+            assertFalse(child.exact().cyclicMember());
+            assertEquals(List.of(
+                            DocumentRevision.Kind.INITIALIZATION,
+                            DocumentRevision.Kind.TIMELINE_ENTRY),
+                    parent.history().stream()
+                            .map(DocumentRevision::kind)
+                            .toList());
+            assertEquals(List.of(DocumentRevision.Kind.INITIALIZATION),
+                    child.history().stream()
+                            .map(DocumentRevision::kind)
+                            .toList());
         }
     }
 
@@ -641,6 +1075,8 @@ final class SdkManagedDraftAcceptanceTest {
                     failure.name());
             assertTrue(result.closures().get(0).publicEvents().isEmpty(),
                     failure.name());
+            assertFalse(result.closures().get(0)
+                    .managedSurfaceEvidence().present(), failure.name());
             assertTrue(result.publicEvents().isEmpty(), failure.name());
             assertEquals(0L, result.stats().committedTransitions(),
                     failure.name());
@@ -931,6 +1367,137 @@ final class SdkManagedDraftAcceptanceTest {
                           - $return: true
                 """.formatted(
                 id.value(), timelineId, ACTOR, validOperationName);
+    }
+
+    private static String cyclicDraftHost(
+            DocumentId id,
+            String timelineId) {
+        return """
+                documentId: %s
+                orders: {}
+                touched: false
+                contracts:
+                  embedded:
+                    type: Process Embedded
+                    paths:
+                      - /peer
+                    collectionPaths:
+                      - /orders
+                  ownerChannel:
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: %s
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: %s
+                  createOrder:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request:
+                      order: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: add
+                              path: /orders/order-456
+                              val: {$binding: event/message/request/order}
+                          - $return: true
+                  touch:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: replace
+                              path: /touched
+                              val: true
+                          - $return: true
+                """.formatted(id.value(), timelineId, ACTOR);
+    }
+
+    private static String cyclicDraftPeer(DocumentId id) {
+        return """
+                documentId: %s
+                contracts:
+                  embedded:
+                    type: Process Embedded
+                    paths:
+                      - /peer
+                """.formatted(id.value());
+    }
+
+    private static String nestedGrowthHost(
+            DocumentId id,
+            String timelineId) {
+        return """
+                documentId: %s
+                parents: {}
+                contracts:
+                  embedded:
+                    type: Process Embedded
+                    collectionPaths:
+                      - /parents
+                  ownerChannel:
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: %s
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: %s
+                  createParent:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request:
+                      parent: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: add
+                              path: /parents/primary
+                              val: {$binding: event/message/request/parent}
+                          - $return: true
+                """.formatted(id.value(), timelineId, ACTOR);
+    }
+
+    private static String nestedGrowthParent(
+            DocumentId id,
+            String timelineId) {
+        return """
+                documentId: %s
+                children: {}
+                contracts:
+                  embedded:
+                    type: Process Embedded
+                    collectionPaths:
+                      - /children
+                  ownerChannel:
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: %s
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: %s
+                  createChild:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request:
+                      child: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: add
+                              path: /children/primary
+                              val: {$binding: event/message/request/child}
+                          - $return: true
+                """.formatted(id.value(), timelineId, ACTOR);
     }
 
     private static String multiplicityHost(Variant variant) {
@@ -1254,13 +1821,7 @@ final class SdkManagedDraftAcceptanceTest {
                 "MANAGED_OCCURRENCE_BINDING_MISSING"),
         WRONG_EXACT_STATE(
                 "wrongExactState",
-                "MANAGED_OCCURRENCE_BINDING_MISSING"),
-        SINGLE_PATCH_EXTRA(
-                "singlePatchExtra",
-                "SUBSCRIPTION_SURFACE_INVALID"),
-        SEQUENTIAL_EXTRA(
-                "sequentialExtra",
-                "SUBSCRIPTION_SURFACE_INVALID");
+                "MANAGED_OCCURRENCE_BINDING_MISSING");
 
         private final String operation;
         private final String diagnosticCode;

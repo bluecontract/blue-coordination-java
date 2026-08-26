@@ -82,6 +82,8 @@ final class SdkValueModelTest {
         ExactBlueValue exact = new ExactBlueValue(
                 ExactValue.verified(source));
         source.getProperties().get("counter").value(BigInteger.TEN);
+        Node detached = exact.copyNode();
+        detached.getProperties().get("counter").value(BigInteger.ZERO);
         List<PublicEvent> events = new ArrayList<>();
         DocumentSnapshot snapshot = new DocumentSnapshot(
                 DocumentId.of("counter"), 3L, true, exact, events);
@@ -89,6 +91,8 @@ final class SdkValueModelTest {
 
         // then
         assertEquals(2L, snapshot.longAt("/counter"));
+        assertEquals(BigInteger.valueOf(2L), exact.copyNode()
+                .getProperties().get("counter").getValue());
         assertTrue(snapshot.booleanAt("/enabled"));
         assertEquals("blue", snapshot.textAt("/name"));
         assertTrue(snapshot.publicEvents().isEmpty());
@@ -160,6 +164,9 @@ final class SdkValueModelTest {
         assertTrue(result.applied());
         assertEquals(1, result.closures().size());
         assertEquals(1, applied.changes().size());
+        assertTrue(applied.resourceDemands().isEmpty());
+        assertEquals(1L, applied.processorAttemptCount());
+        assertEquals(0L, applied.automaticRetryCount());
         assertEquals(1L, stats.counter("COMPONENTS"));
         assertEquals(result, drain.entry(entry));
         assertThrows(IllegalArgumentException.class,

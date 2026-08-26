@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
 
 /**
  * Builds one whole request object and one whole Timeline Entry object.
@@ -41,14 +42,25 @@ final class WholeRequestEntryFactory {
     private final EngineMetrics metrics;
     private final Map<EventShapeKey, FrozenNode> eventTemplates =
             new LinkedHashMap<>();
+    private final Function<String, String> actorType;
 
     public WholeRequestEntryFactory(
             BlueRuntime runtime,
             WholeObjectStore objects,
             EngineMetrics metrics) {
+        this(runtime, objects, metrics,
+                ignored -> "MyOS/Principal Actor");
+    }
+
+    public WholeRequestEntryFactory(
+            BlueRuntime runtime,
+            WholeObjectStore objects,
+            EngineMetrics metrics,
+            Function<String, String> actorType) {
         this.runtime = Objects.requireNonNull(runtime, "runtime");
         this.objects = Objects.requireNonNull(objects, "objects");
         this.metrics = Objects.requireNonNull(metrics, "metrics");
+        this.actorType = Objects.requireNonNull(actorType, "actorType");
     }
 
     public TimelineEntry create(
@@ -188,6 +200,7 @@ final class WholeRequestEntryFactory {
         EventShapeKey key = new EventShapeKey(
                 timeline.timelineId(),
                 timeline.actorId(),
+                actorType.apply(timeline.timelineId()),
                 operation.operation(),
                 operation.channel(),
                 previousEntryBlueId != null,
@@ -246,7 +259,7 @@ final class WholeRequestEntryFactory {
                 .type("MyOS/MyOS Timeline")
                 .properties("timelineId", scalarNode(timeline.timelineId()));
         Node actorNode = new Node()
-                .type("MyOS/Principal Actor")
+                .type(actorType.apply(timeline.timelineId()))
                 .properties("accountId", scalarNode(timeline.actorId()));
         Node messageNode = new Node()
                 .type("Coordination/Operation Request")
@@ -305,6 +318,7 @@ final class WholeRequestEntryFactory {
     private record EventShapeKey(
             String timelineId,
             String actorId,
+            String actorType,
             String operation,
             String channel,
             boolean hasPreviousEntry,
@@ -313,6 +327,7 @@ final class WholeRequestEntryFactory {
         private EventShapeKey {
             timelineId = requireText(timelineId, "timelineId");
             actorId = requireText(actorId, "actorId");
+            actorType = requireText(actorType, "actorType");
             operation = requireText(operation, "operation");
             channel = requireText(channel, "channel");
         }

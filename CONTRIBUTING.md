@@ -31,15 +31,20 @@ the changelog, and run `git diff --check`.
 
 ## Design rules
 
-- Keep `blue.coordination.api` immutable and small.
-- Never expose `blue.coordination.internal` in a public signature.
-- Append never routes or processes; the sequential drain coordinator owns
-  canonical entry selection.
-- One document transition is the atomic commit boundary. Do not add a
-  whole-engine rollback snapshot.
-- Keep Process Embedded binding topology immutable and cursor progress separate.
+- Keep `blue.coordination.sdk` immutable and application-focused.
+- Keep `blue.coordination.api` as the explicit low-level host and compatibility
+  boundary; never present its plain `inMemory()` profile as the SDK default.
+- Never expose `blue.coordination.internal` in a normal application signature.
+- Append never chooses recipients or invokes PROCESS; the environment owns
+  canonical entry and closure selection.
+- Preserve the copy-on-write atomic boundary for one connected affected
+  Contracts closure. Do not add a whole-engine rollback snapshot or collapse
+  disconnected closure outcomes.
+- Keep managed occurrence lineage, active/inactive topology generations, and
+  historical progress as distinct exact evidence.
 - Unsupported semantics fail with a `CoordinationException` and stable error
-  code; never silently approximate them.
+  code at the low-level boundary or a documented SDK validation exception or
+  `Diagnostic` at the facade boundary; never silently approximate them.
 - Every semantic guarantee or fixed regression needs an executable test.
 - Performance work must report frozen semantic and Coordination host time
   separately.

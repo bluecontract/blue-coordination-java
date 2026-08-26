@@ -79,6 +79,38 @@ public final class Contracts10AuthoredClosureCompiler {
 
     /** Compiles one complete immutable authored request. */
     public CompiledClosure compile(CompilationRequest request) {
+        return compile(request, DocumentIdentityMode.EXPLICIT_LINEAGE);
+    }
+
+    /**
+     * Compiles an explicit request whose lineages are exact authored BlueIds.
+     *
+     * <p>This additive mode never authors or rewrites {@code /documentId}.
+     * Every supplied lineage must instead equal the exact resolved source
+     * identity before initialization.</p>
+     */
+    public CompiledClosure compileContentIdentified(
+            CompilationRequest request) {
+        return compile(request, DocumentIdentityMode.CONTENT_DERIVED);
+    }
+
+    /**
+     * Compiles resolver-prepared content-derived members without mutating an
+     * authored identity field.
+     *
+     * <p>The static Process Embedded resolver is the sole caller. It verifies
+     * each lineage against the untouched exact authored member before adding
+     * the preliminary occurrence representations required by the existing
+     * explicit compiler and finalizer.</p>
+     */
+    CompiledClosure compilePreverifiedContentIdentified(
+            CompilationRequest request) {
+        return compile(request, DocumentIdentityMode.PREVERIFIED_CONTENT);
+    }
+
+    private CompiledClosure compile(
+            CompilationRequest request,
+            DocumentIdentityMode identityMode) {
         CompilationRequest input = Objects.requireNonNull(request, "request");
         RequestIndex index = RequestIndex.from(input);
 
@@ -86,15 +118,19 @@ public final class Contracts10AuthoredClosureCompiler {
         WholeObjectStore verificationObjects =
                 new WholeObjectStore(verificationMetrics);
         try (BlueRuntime verificationRuntime = BlueRuntime.create(
-                verificationObjects, verificationMetrics)) {
+                verificationObjects,
+                verificationMetrics,
+                engine.applicationExactNodeProvider())) {
             LinkedHashMap<DocumentId, Node> resolved = resolveDocuments(
                     input.documents(), verificationRuntime,
-                    verificationObjects);
+                    verificationObjects,
+                    Objects.requireNonNull(identityMode, "identityMode"));
             validateDeclarationsAndCoverage(
                     index, resolved, verificationRuntime,
                     verificationObjects);
             LinkedHashMap<DocumentId, Node> authored =
-                    installAndVerifyPreliminaryReferences(index, resolved);
+                    installAndVerifyPreliminaryReferences(
+                            index, resolved, identityMode);
             return finalizeClosure(input, index, authored);
         }
     }
@@ -102,7 +138,8 @@ public final class Contracts10AuthoredClosureCompiler {
     private static LinkedHashMap<DocumentId, Node> resolveDocuments(
             List<AuthoredDocument> documents,
             BlueRuntime runtime,
-            WholeObjectStore objects) {
+            WholeObjectStore objects,
+            DocumentIdentityMode identityMode) {
         LinkedHashMap<DocumentId, Node> result = new LinkedHashMap<>();
         for (AuthoredDocument document : documents) {
             ExactValue exact = runtime.exactSource(
@@ -110,7 +147,24 @@ public final class Contracts10AuthoredClosureCompiler {
                     objects,
                     "contracts10-authored-compiler-source");
             Node body = exact.copyNode();
-            requireOrWriteDocumentId(document.documentId(), body);
+            switch (identityMode) {
+                case EXPLICIT_LINEAGE -> requireOrWriteDocumentId(
+                        document.documentId(), body);
+                case CONTENT_DERIVED -> {
+                    if (!document.documentId().value().equals(
+                            exact.blueId())) {
+                        throw new IllegalArgumentException(
+                                "Managed DocumentId must equal the exact "
+                                        + "authored pre-initialization BlueId: "
+                                        + document.documentId() + " != "
+                                        + exact.blueId());
+                    }
+                }
+                case PREVERIFIED_CONTENT -> {
+                    // The static resolver already authenticated the untouched
+                    // authored member before adding preliminary references.
+                }
+            }
             result.put(document.documentId(), body);
         }
         return result;
@@ -201,7 +255,8 @@ public final class Contracts10AuthoredClosureCompiler {
     private static LinkedHashMap<DocumentId, Node>
             installAndVerifyPreliminaryReferences(
                     RequestIndex index,
-                    Map<DocumentId, Node> resolved) {
+                    Map<DocumentId, Node> resolved,
+                    DocumentIdentityMode identityMode) {
         LinkedHashMap<DocumentId, Node> referenceBodies = cloneBodies(
                 resolved);
         for (ResolvedOccurrence occurrence : index.occurrences()) {
@@ -228,7 +283,11 @@ public final class Contracts10AuthoredClosureCompiler {
                 replacement = expectedMaterializedTarget(
                         referenceBodies, occurrence.targetDocumentId());
                 requireExpectedMaterializedTarget(
-                        current, replacement, occurrence);
+                        current,
+                        replacement,
+                        occurrence,
+                        identityMode != DocumentIdentityMode
+                                .PREVERIFIED_CONTENT);
             }
             NodePathEditor.put(
                     authored.get(occurrence.sourceDocumentId()),
@@ -514,24 +573,58 @@ public final class Contracts10AuthoredClosureCompiler {
     private static void requireExpectedMaterializedTarget(
             Node current,
             Node expected,
-            ResolvedOccurrence occurrence) {
-        if (!preliminaryBlueId(occurrence.targetDocumentId()).equals(
-                current.getBlueId())
-                || !unclaimedBlueId(current).equals(
-                        unclaimedBlueId(expected))) {
+            ResolvedOccurrence occurrence,
+            boolean requirePreliminaryClaim) {
+        String currentUnclaimed = unclaimedBlueId(current);
+        String expectedUnclaimed = unclaimedBlueId(expected);
+        if ((requirePreliminaryClaim
+                && !preliminaryBlueId(occurrence.targetDocumentId()).equals(
+                        current.getBlueId()))
+                || !currentUnclaimed.equals(expectedUnclaimed)) {
             throw new IllegalArgumentException(
                     "Managed occurrence " + occurrence.sourceDocumentId()
                             + occurrence.path()
                             + " contains materialized state for the wrong "
                             + "target; expected exact authored member "
-                            + occurrence.targetDocumentId());
+                            + occurrence.targetDocumentId()
+                            + " (actual " + currentUnclaimed
+                            + ", expected " + expectedUnclaimed + ")");
         }
     }
 
     private static String unclaimedBlueId(Node value) {
         Node unclaimed = Objects.requireNonNull(value, "value").clone();
-        unclaimed.blueId(null);
+        removeMaterializedClaims(unclaimed);
         return DirectBlueIdCalculator.calculateBlueId(unclaimed);
+    }
+
+    /** Removes representation-only materialized claims but keeps pure refs. */
+    private static void removeMaterializedClaims(Node node) {
+        if (node.getBlueId() != null && !node.isReferenceOnly()) {
+            node.blueId(null);
+        }
+        removeMaterializedClaim(node.getType());
+        removeMaterializedClaim(node.getItemType());
+        removeMaterializedClaim(node.getKeyType());
+        removeMaterializedClaim(node.getValueType());
+        removeMaterializedClaim(node.getContracts());
+        removeMaterializedClaim(node.getBlue());
+        if (node.getItems() != null) {
+            node.getItems().forEach(
+                    Contracts10AuthoredClosureCompiler
+                            ::removeMaterializedClaims);
+        }
+        if (node.getProperties() != null) {
+            node.getProperties().values().forEach(
+                    Contracts10AuthoredClosureCompiler
+                            ::removeMaterializedClaims);
+        }
+    }
+
+    private static void removeMaterializedClaim(Node node) {
+        if (node != null) {
+            removeMaterializedClaims(node);
+        }
     }
 
     private static Node expectedMaterializedTarget(
@@ -926,6 +1019,12 @@ public final class Contracts10AuthoredClosureCompiler {
             DocumentId sourceDocumentId,
             String path,
             DocumentId targetDocumentId) {
+    }
+
+    private enum DocumentIdentityMode {
+        EXPLICIT_LINEAGE,
+        CONTENT_DERIVED,
+        PREVERIFIED_CONTENT
     }
 
     private record RequestIndex(List<ResolvedOccurrence> occurrences) {

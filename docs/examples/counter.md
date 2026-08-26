@@ -1,14 +1,47 @@
 # Counter example
 
-The Counter acceptance document defines Alice's increment channel and Bob's
-decrement channel. Register both Timelines, start the document, append
-`increment amount: 3` and `decrement amount: 1`, then call `drain()`. The
-environment selects both entries in canonical order; neither append identifies a
-recipient or calls PROCESS. Read `/counter` from the immutable snapshot. The
-result is `2`, the document epoch is `2`, and structural counters show exactly
-two external PROCESS invocations and zero generic fragments.
+This is the smallest normal SDK flow: register a Timeline, admit one ordinary
+public Root, execute targeted operations, inspect terminal results, and read a
+READY snapshot.
 
-The executable release-owned coverage is
-`CoreBehaviorIntegrationTest.counterRoutesAliceAndBobExactlyOnceWithoutGenericSplitting`;
-see the quickstart in the repository README for application code. Historical per-step
-timings remain in `../blue-basic`.
+```java
+try (BlueCoordination blue = BlueCoordination.inMemory()) {
+    TimelineHandle alice = blue.timelines().register(
+            "examples/counter/alice", "alice");
+
+    DocumentHandle counter = blue.documents().admit(
+            ManagedDocument.yaml("counter", counterYaml)
+                    .publicRoot()
+                    .fromNow());
+
+    EntryResult plusThree = blue.operations().on(counter)
+            .from(alice)
+            .call("increment")
+            .through("ownerChannel")
+            .requestYaml("amount: 3")
+            .execute();
+
+    EntryResult minusOne = blue.operations().on(counter)
+            .from(alice)
+            .call("decrement")
+            .through("ownerChannel")
+            .requestYaml("amount: 1")
+            .execute();
+
+    assert plusThree.applied();
+    assert minusOne.applied();
+    assert counter.snapshot().longAt("/counter") == 2L;
+    assert counter.snapshot().epoch() == 2L;
+}
+```
+
+Each call is constructed after the previous call commits, so its exact target
+is current. `execute()` appends and drains through its entry. To demonstrate
+append/process separation, replace one `execute()` with `submit()`, verify the
+snapshot is unchanged, call `blue.processing().drain()`, and retrieve the result
+with `drain.entry(submitted)`.
+
+The executable version of this exact increment-then-decrement story is
+[`SdkAcceptanceTest.counterAppliesPlusThreeThenMinusOne`](../../src/test/java/blue/coordination/sdk/SdkAcceptanceTest.java).
+Continue with the [SDK developer guide](../guides/developer-guide.md) for
+embedded members, cycles, exact provider entries, and managed drafts.

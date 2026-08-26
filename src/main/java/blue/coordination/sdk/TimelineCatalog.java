@@ -19,4 +19,12 @@ public final class TimelineCatalog {
     public TimelineHandle register(String timelineId, String accountId) {
         return runtime.registerTimeline(timelineId, accountId);
     }
+
+    /** Registers a Timeline whose SDK-authored entries use the chosen actor. */
+    public TimelineHandle register(
+            String timelineId,
+            String accountId,
+            TimelineActorKind actorKind) {
+        return runtime.registerTimeline(timelineId, accountId, actorKind);
+    }
 }

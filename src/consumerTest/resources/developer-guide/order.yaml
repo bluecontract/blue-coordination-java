@@ -1,0 +1,40 @@
+documentId: guide-order-42
+status: draft
+contracts:
+  embedded:
+    type: Process Embedded
+    paths:
+      - /payment
+      - /shipment
+  salesChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: guide/orders/42/sales
+    actor:
+      type: MyOS/Principal Actor
+      accountId: alice
+  confirm:
+    type: Coordination/Sequential Workflow Operation
+    channel: salesChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /status
+              val: confirmed
+          - $return: true
+  complete:
+    type: Coordination/Sequential Workflow Operation
+    channel: salesChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /status
+              val: complete
+          - $return: true

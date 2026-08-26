@@ -10,6 +10,8 @@ public enum CoordinationErrorCode {
     DOCUMENT_NOT_READY,
     /** Authored or referenced content violates exact identity rules. */
     INVALID_DOCUMENT_IDENTITY,
+    /** Exact content required by a declared static occurrence is unavailable. */
+    NEEDS_RESOURCES,
     /** Host-supplied temporal policy evidence is missing or inconsistent. */
     INVALID_ACTIVATION_EVIDENCE,
     /** Frozen subscription evidence is inconsistent with the committed state. */

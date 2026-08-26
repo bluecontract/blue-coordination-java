@@ -3,6 +3,7 @@ package blue.coordination.internal;
 import blue.coordination.api.ContractsClosureAdmissionReceipt;
 import blue.coordination.api.CoordinationEngine;
 import blue.coordination.api.DocumentId;
+import blue.coordination.api.ExactValue;
 import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.model.Node;
 import blue.language.model.NodePathEditor;
@@ -276,6 +277,51 @@ final class Contracts10AuthoredClosureCompilerTest {
                                     binding("a", "/peers", "b"),
                                     binding("a", "/peers/b", "b")),
                             Set.of(a))));
+        }
+    }
+
+    @Test
+    void contentIdentifiedCompilationLeavesEveryDocumentIdShapeUntouched() {
+        // given
+        List<String> authoredValues = List.of(
+                "name: absent-document-id\n",
+                "name: string-document-id\ndocumentId: arbitrary label\n",
+                """
+                        name: nested-document-id
+                        documentId:
+                          nested: ordinary content
+                        """,
+                """
+                        name: misleading-document-id
+                        documentId: definitely-not-the-managed-lineage
+                        metadata:
+                          documentId: also ordinary nested content
+                        """);
+
+        // when
+        for (String authored : authoredValues) {
+            try (CoordinationEngine publicEngine = engine(Set.of(
+                    DocumentId.of("content-identity-test-root")))) {
+                ExactValue exact = publicEngine.exactValue(authored);
+                DocumentId documentId = DocumentId.of(exact.blueId());
+                Contracts10AuthoredClosureCompiler compiler =
+                        new Contracts10AuthoredClosureCompiler(
+                                (DefaultCoordinationEngine) publicEngine);
+                Contracts10AuthoredClosureCompiler.CompilationRequest request =
+                        request(
+                                List.of(document(documentId, authored)),
+                                Map.of("root", documentId),
+                                List.of(),
+                                Set.of(documentId));
+
+                Contracts10AuthoredClosureCompiler.CompiledClosure compiled =
+                        compiler.compileContentIdentified(request);
+
+                // then
+                assertTrue(exact.sameExactValue(ExactValue.verified(
+                        compiled.authoredDocument(documentId))));
+                assertEquals(exact.blueId(), documentId.value());
+            }
         }
     }
 

@@ -1,21 +1,35 @@
 # Failure and retry model
 
-Append and each document transition have separate atomic boundaries. Admission
-prepares one document before publication. A document transition atomically
-commits its exact new state and epoch, emitted events/outbox, subscription and
-`Process Embedded` deltas, external delivery progress or parent cursor,
-idempotency receipt, and commit companion. The engine does not copy and roll
-back the entire environment as one transaction.
+This page distinguishes the normal Contracts 1.0 SDK from the retained legacy
+temporal compatibility profile. Application code uses the first boundary unless
+it explicitly chooses the low-level legacy engine.
+
+## Contracts 1.0 SDK boundary
+
+Append and connected affected-closure publication have separate atomic
+boundaries. The engine does not copy and roll back the entire environment as
+one transaction. One appended entry can also affect disconnected closures,
+which retain independent results and may commit independently.
 
 Timeline append advances sequence numbers and the logical clock only after the
 exact Timeline Entry is valid and journaled. Retrying a rejected append
 therefore produces the same coordinates and BlueId as an equivalent fresh
 engine.
 
-Every committed delivery has a receipt written with the state transition. If
-state CAS succeeds but the caller loses the response, retry reconciles the
-commit companion and does not invoke frozen PROCESS or publish another
-revision. Duplicate exact journal admission is similarly idempotent.
+Every committed delivery has a receipt written with the state transition. When
+the engine resumes or reconciles the same retained journal entry after state CAS
+succeeds, the commit companion prevents another frozen PROCESS invocation or
+revision. Duplicate admission of the identical complete provider entry is
+similarly journal-idempotent by its exact BlueId.
+
+That guarantee does not make a newly constructed targeted operation call an
+application-level retry of the old entry. `operations().on(...)` builds a new
+Timeline Entry with a new engine timestamp; recreating it after an ambiguous
+`execute()` exception can apply the business intent again. Use `submit()` when
+the caller needs the `EntryHandle` before processing, and do not rebuild a call
+after a timeout or lost response until application state or an application-owned
+idempotency key proves that doing so is safe. The current SDK has no durable
+idempotency-key or cross-process result-lookup service.
 
 The Contracts closure-publication store seam has a stronger, deliberately
 narrow boundary for one affected closure. PROCESS checks every selected
@@ -34,6 +48,29 @@ sessions and reports `ALREADY_PUBLISHED` without repeating Contracts. A
 `NeedsResources` or non-committing result creates no receipt or state mutation.
 Mixed existing/new admission and an all-present closure without the exact
 receipt fail closed.
+
+Operation-created managed expansion uses the same closure-publication seam.
+The parent result, every new head, complete occurrence inventory, component
+state, routes, checkpoints, events, and receipt become visible together. A
+terminal validation or processing failure leaves no partial child or topology
+expansion.
+
+Normal SDK calls distinguish validation from processing outcomes. Invalid
+owner combinations, incomplete managed-draft evidence, malformed arguments,
+and unsupported activation can throw `IllegalArgumentException` or
+`UnsupportedOperationException` before append and consume no journal sequence.
+After append, processing state is represented by `EntryResult`,
+`EntryDisposition`, and an optional stable `Diagnostic`. `APPLIED`, `NO_MATCH`,
+`STALE`, `REJECTED`, and deterministic limit failures are terminal decisions;
+`NEEDS_RESOURCES` and `BLOCKED` report that the lane has not reached a terminal
+result. Branch on diagnostic code, not message text.
+
+## Legacy temporal compatibility boundary
+
+The paragraphs below describe the earlier document-local temporal coordinator,
+including child-then-parent catch-up and `DrainBudget`. They are relevant only
+to an explicit low-level compatibility or migration integration, not the
+normal `BlueCoordination.inMemory()` Contracts publication model.
 
 Child and parent synchronization are intentionally separate commits. If a
 child epoch commits and parent application fails, the child remains committed,
@@ -63,9 +100,9 @@ failure. The receipt owns only outcomes committed during that call, and a later
 drain resumes the open frame. INITIALIZE and an individual frozen PROCESS call
 remain atomic and cannot be interrupted to meet a wall-clock deadline.
 
-Failures use `CoordinationException` and a machine-readable error code. Treat
-the message as diagnostic text; branch on the code. Preserve attached details
-in logs while applying normal data-redaction policy.
+Low-level failures use `CoordinationException` and a machine-readable error
+code. Treat the message as diagnostic text; branch on the code. Preserve
+attached details in logs while applying normal data-redaction policy.
 
 The bundled host supports control-plane reconstruction inside the same live
 engine while its document, journal, and scheduler state remain in memory.
@@ -76,8 +113,10 @@ child-committed/parent-pending and parent-committed/cursor-pending recovery
 without repeating initialization or source PROCESS. This test-only seam does
 not construct a fresh engine instance or reload serialized state.
 
-A process crash still loses those in-memory stores. This is therefore not a
-cross-process durability or exactly-once claim. A durable adapter must persist
-the same typed document, journal, graph, barrier, cursor, entry-frame, receipt,
-and commit-companion records and pass the restart/store gate before a host can
-treat the engine as a system of record.
+## Shared process boundary
+
+A process crash still loses the bundled in-memory stores in either profile.
+This is therefore not a cross-process durability or exactly-once claim. A
+durable adapter must persist the same typed document, journal, graph, barrier,
+cursor, entry-frame, receipt, and commit-companion records and pass the
+restart/store gate before a host can treat the engine as a system of record.

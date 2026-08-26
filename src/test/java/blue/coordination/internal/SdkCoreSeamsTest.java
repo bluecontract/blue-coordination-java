@@ -40,8 +40,14 @@ final class SdkCoreSeamsTest {
                 configuration.contractsSpecificationIdentity());
         assertEquals(Set.of(A), configuration.publicRootDocumentIds());
         assertEquals(
-                "sha256:7e6c3717bc28d21ebadec9f81725913e944bb3b9b70094531f19f10510a10e50",
+                "sha256:8fa141d5babb21a0b5df064a1b715e3d57f868a9a087fc1fd20b686761375242",
+                manifest.contractsSpecification());
+        assertEquals(
+                "sha256:32a5c3f8dfe99a421ca0d6862bc1f59bddcfb10e4762dcf3d8200b4726defad3",
                 manifest.contractsRelease());
+        assertEquals(
+                "sha256:0d70b0399a61364774fe0509b18b89db27c4ce8bce27db2e5c238a8c6cd59b79",
+                manifest.fixturePackage());
     }
 
     @Test

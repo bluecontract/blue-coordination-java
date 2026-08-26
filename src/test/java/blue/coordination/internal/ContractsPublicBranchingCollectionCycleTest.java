@@ -1,6 +1,5 @@
 package blue.coordination.internal;
 
-import blue.coordination.api.Contracts10Configuration;
 import blue.coordination.api.ContractsClosureAdmissionReceipt;
 import blue.coordination.api.CoordinationEngine;
 import blue.coordination.api.CoordinationMetrics;
@@ -35,10 +34,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Public Contracts proof for branching collection-backed cyclic topology. */
 final class ContractsPublicBranchingCollectionCycleTest {
-    private static final String LANGUAGE_SPEC = "sha256:01b038b64e3f0a9a"
-            + "11f3f70d544a63ff78a01d5169f1a03f8b8629cf73645a7d";
-    private static final String CONTRACTS_SPEC = "sha256:dfb444962a5a17b3"
-            + "a6519e8d148c2bf4a975a921b1fcb1277710052caaecd930";
     private static final long ENTRY_TIME = 2_100_000_000_000_001L;
     private static final int UNRELATED_ADMISSION_BATCH_SIZE = 25;
     private static final BranchingIds BRANCHING = new BranchingIds(
@@ -114,7 +109,7 @@ final class ContractsPublicBranchingCollectionCycleTest {
     }
 
     @Test
-    void oneThousandUnrelatedDocumentsKeepCaptureLocalAndExposeGlobalBlocker() {
+    void oneThousandUnrelatedDocumentsRemainStructurallySharedWithoutGlobalTraversal() {
         // given
 
         BranchingRun base = runBranching(BranchingVariant.BASELINE, 0);
@@ -180,27 +175,29 @@ final class ContractsPublicBranchingCollectionCycleTest {
                 base.structuralMetrics().occurrenceRowsExamined(),
                 structural.occurrenceRowsExamined());
         assertEquals(1L, structural.resultingComponents());
-        assertTrue(structural.globalStatePasses() > 0L);
-        assertTrue(structural.globalStateEntriesTraversed() > 0L,
-                "Known global publication traversals remain an explicit "
-                        + "optimization blocker");
-        assertTrue(structural.globalSessionEntriesTraversed() > 0L);
-        assertTrue(structural.globalOccurrenceEntriesTraversed() > 0L);
-        assertTrue(structural.globalComponentEntriesTraversed() > 0L);
-        assertTrue(structural.globalGraphEntriesTraversed() > 0L);
-        assertTrue(structural.globalSubscriptionEntriesTraversed() > 0L);
-        assertTrue(structural.globalReceiptEntriesTraversed() > 0L);
-        assertTrue(structural.globalRouteEntriesTraversed() > 0L);
-        assertTrue(structural.globalEvidenceEntriesTraversed() > 0L);
-        StructuralMetrics baseStructural = base.structuralMetrics();
-        assertTrue(structural.globalStateEntriesTraversed()
-                > baseStructural.globalStateEntriesTraversed());
-        assertTrue(structural.globalSessionEntriesTraversed()
-                > baseStructural.globalSessionEntriesTraversed());
-        assertTrue(structural.globalComponentEntriesTraversed()
-                > baseStructural.globalComponentEntriesTraversed());
-        assertTrue(structural.globalGraphEntriesTraversed()
-                > baseStructural.globalGraphEntriesTraversed());
+        assertEquals(0L, structural.globalStatePasses());
+        assertEquals(0L, structural.globalStateEntriesTraversed());
+        assertEquals(0L, structural.globalSessionEntriesTraversed());
+        assertEquals(0L, structural.globalOccurrenceEntriesTraversed());
+        assertEquals(0L, structural.globalComponentEntriesTraversed());
+        assertEquals(0L, structural.globalGraphEntriesTraversed());
+        assertEquals(0L, structural.globalSubscriptionEntriesTraversed());
+        assertEquals(0L, structural.globalReceiptEntriesTraversed());
+        assertEquals(0L, structural.globalRouteEntriesTraversed());
+        assertEquals(0L, structural.globalEvidenceEntriesTraversed());
+
+        assertTrue(withUnrelated.sharedComponentIndexNodes() > 900,
+                "Unrelated topology-index nodes must remain structurally "
+                        + "shared");
+        assertTrue(withUnrelated.sharedComponentStateNodes() > 900,
+                "Unrelated component-state nodes must remain structurally "
+                        + "shared");
+        assertTrue(withUnrelated.unrelatedComponentIndexEntrySameIdentity(),
+                "An unrelated component index entry must retain its exact "
+                        + "object identity");
+        assertTrue(withUnrelated.unrelatedComponentStateEntrySameIdentity(),
+                "An unrelated component proof must retain its exact object "
+                        + "identity");
     }
 
     @Test
@@ -352,6 +349,8 @@ final class ContractsPublicBranchingCollectionCycleTest {
                     engine.documents().publicationSnapshot()
                             .componentStates().size());
 
+            InMemoryDocumentStore.StoreStructureSnapshot structureBefore =
+                    engine.documents().storeStructureSnapshotForTesting();
             EngineMetrics.MetricsSnapshot rawBefore =
                     engine.engineMetrics().snapshot();
             CoordinationMetrics before = publicEngine.metrics();
@@ -367,6 +366,8 @@ final class ContractsPublicBranchingCollectionCycleTest {
             CoordinationMetrics after = publicEngine.metrics();
             EngineMetrics.MetricsSnapshot rawAfter =
                     engine.engineMetrics().snapshot();
+            InMemoryDocumentStore.StoreStructureSnapshot structureAfter =
+                    engine.documents().storeStructureSnapshotForTesting();
 
             assertTrue(drained.quiescent());
             assertFalse(drained.paused());
@@ -465,6 +466,9 @@ final class ContractsPublicBranchingCollectionCycleTest {
                                 "publicEventOccurrenceIdentities",
                                 semantic.publicEventOccurrenceIds()));
             }
+            DocumentId unrelatedIdentityProbe = unrelatedCount == 0
+                    ? null : unrelatedIds(unrelatedCount).get(
+                            unrelatedCount - 1);
             return new BranchingRun(
                     semantic,
                     result,
@@ -494,6 +498,18 @@ final class ContractsPublicBranchingCollectionCycleTest {
                             CoordinationMetrics.Counter
                                     .UNRELATED_DOCUMENT_READS),
                     structuralDelta(rawBefore, rawAfter),
+                    structureAfter.sharedComponentIndexNodes(
+                            structureBefore),
+                    structureAfter.sharedComponentStateNodes(
+                            structureBefore),
+                    unrelatedIdentityProbe == null
+                            || structureAfter.sameComponentIndexEntryIdentity(
+                                    structureBefore,
+                                    unrelatedIdentityProbe),
+                    unrelatedIdentityProbe == null
+                            || structureAfter.sameComponentStateEntryIdentity(
+                                    structureBefore,
+                                    unrelatedIdentityProbe),
                     after.documentCount());
         }
     }
@@ -1124,10 +1140,7 @@ final class ContractsPublicBranchingCollectionCycleTest {
 
     private static CoordinationEngine engine(Set<DocumentId> publicRoots) {
         return CoordinationEngine.inMemoryContracts10(
-                new Contracts10Configuration(
-                        LANGUAGE_SPEC,
-                        CONTRACTS_SPEC,
-                        publicRoots));
+                BundledContracts10Release.configuration(publicRoots));
     }
 
     private enum BranchingVariant {
@@ -1188,6 +1201,10 @@ final class ContractsPublicBranchingCollectionCycleTest {
             long fullPublicationHeadSnapshots,
             long unrelatedDocumentReads,
             StructuralMetrics structuralMetrics,
+            int sharedComponentIndexNodes,
+            int sharedComponentStateNodes,
+            boolean unrelatedComponentIndexEntrySameIdentity,
+            boolean unrelatedComponentStateEntrySameIdentity,
             int documentCount) {
         private BranchingRun {
             changedDocuments = Set.copyOf(changedDocuments);

@@ -2,7 +2,7 @@ package blue.coordination.integration;
 
 import java.util.Map;
 
-/** Immutable test projection of the engine's public metric snapshot. */
+/** Immutable metric projection shared by integration and scenario tests. */
 final class EngineMetrics {
     private EngineMetrics() {
     }

@@ -1,0 +1,49 @@
+documentId: guide-payment-42
+status: pending
+amount: 0
+receipts: {}
+contracts:
+  embedded:
+    type: Process Embedded
+    collectionPaths:
+      - /receipts
+  billingChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: guide/orders/42/billing
+    actor:
+      type: MyOS/Principal Actor
+      accountId: bob
+  capture:
+    type: Coordination/Sequential Workflow Operation
+    channel: billingChannel
+    request:
+      amount: {type: Integer}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /status
+              val: captured
+          - $appendChange:
+              op: replace
+              path: /amount
+              val:
+                $binding: event/message/request/amount
+          - $return: true
+  createReceipt:
+    type: Coordination/Sequential Workflow Operation
+    channel: billingChannel
+    request:
+      receipt: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: add
+              path: /receipts/primary
+              val:
+                $binding: event/message/request/receipt
+          - $return: true

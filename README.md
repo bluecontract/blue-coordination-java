@@ -14,21 +14,28 @@ repositories {
 }
 
 dependencies {
-    implementation 'blue.coordination:blue-coordination-java:3.0.0-rc.3'
+    implementation 'blue.coordination:blue-coordination-java:3.0.0-rc.4'
 }
 ```
 
-`3.0.0-rc.3` is the bounded external-pilot candidate. It consumes Language
-`3.1.0-rc.21`, BEX `1.1.0-rc.4`, and Repository `3.0.0-rc.21` from Maven
+`3.0.0-rc.4` is the bounded external-pilot candidate. It consumes Language
+`3.1.0-rc.22`, BEX `1.1.0-rc.4`, and Repository `3.0.0-rc.21` from Maven
 Central and is compiled with `--release 17`. It is not a stable or production
 release. Version 3 is a breaking API reset; the removed 2.x planning,
 fragmentation, session-store, and fast-path APIs are not shimmed.
+
+For application development, follow the
+[complete SDK developer guide](docs/guides/developer-guide.md). It covers both
+processing an existing document/closure with a complete Timeline Entry and
+evolving an initially known closure through several Timelines, including
+cycles and operation-created managed documents. The
+[documentation index](docs/README.md) separates application guides, API
+reference, semantics, internals, and historical release evidence.
 
 ## Counter quickstart
 
 ```java
 import blue.coordination.sdk.BlueCoordination;
-import blue.coordination.sdk.ManagedClosure;
 import blue.coordination.sdk.ManagedDocument;
 
 try (BlueCoordination blue = BlueCoordination.inMemory()) {
@@ -162,24 +169,26 @@ lowercase `// given`, `// when`, `// then` sequence, enforced by
 `dependencyPreflight` resolves the exact conflict-free Blue graph from Maven
 Central. Repository rc.21 still advertises Language rc.20 transitively, so the
 build and published POM exclude that one edge and directly own Language
-rc.21. Local composites, Maven Local, and file-based staging repositories are
+rc.22. Local composites, Maven Local, and file-based staging repositories are
 retired from the live build.
 
 The release workflow runs the same gates, stages signed artifacts, publishes
-through JReleaser, and pushes the rc.3 tag only after publication succeeds. See
+through JReleaser, and pushes the rc.4 tag only after publication succeeds. See
 the [release procedure](docs/development/releasing.md) and
-[rc.3 release decision](docs/releases/3.0.0-rc.3.md).
+[rc.4 release decision](docs/releases/3.0.0-rc.4.md).
 
 `releaseCheck` does not read or execute `../blue-basic`. That sibling is
 retained only as a historical performance/metrics laboratory.
 
-Start with [START-HERE.md](START-HERE.md), then see the compact architecture,
-managed `Process Embedded` semantics, catch-up rules, performance
-interpretation, and limitations under `docs/`.
+Start with [START-HERE.md](START-HERE.md), continue with the
+[SDK developer guide](docs/guides/developer-guide.md), and use the
+[documentation index](docs/README.md) to find architecture, managed
+`Process Embedded` semantics, catch-up rules, operational behavior, and
+limitations.
 ## Historical release-candidate evidence
 
 The current release authority is the
-[3.0.0-rc.3 decision](docs/releases/3.0.0-rc.3.md). The documents below are
+[3.0.0-rc.4 decision](docs/releases/3.0.0-rc.4.md). The documents below are
 retained evidence for rc.1 and are not reused as current artifact hashes.
 
 The retained 3.0.0-rc.1 report covers the earlier Round 10.1 Process Embedded
@@ -202,12 +211,14 @@ See the [canonical RC report](docs/releases/3.0.0-rc.1-test-report.md),
 
 Developer references:
 
+- [Documentation index](docs/README.md)
+- [SDK developer guide](docs/guides/developer-guide.md)
 - [Build and test](docs/development/build-and-test.md)
 - [Test strategy](docs/development/test-strategy.md)
 - [Initialization causality](docs/semantics/initialization-causality.md)
 - [Shared NBA Game lifecycle](docs/examples/nba-shared-game-lifecycle.md)
 - [Five-occurrence Playground API example](docs/examples/playground-five-occurrence.md)
-- [3.0.0-rc.3 release decision](docs/releases/3.0.0-rc.3.md)
+- [3.0.0-rc.4 release decision](docs/releases/3.0.0-rc.4.md)
 - [Canonical RC evidence report](docs/releases/3.0.0-rc.1-test-report.md)
 - [Public API](docs/reference/public-api.md)
 - [SDK migration and ownership ledger](docs/reference/sdk-migration-and-ownership.md)

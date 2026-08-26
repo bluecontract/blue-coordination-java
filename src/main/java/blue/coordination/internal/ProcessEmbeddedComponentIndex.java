@@ -40,29 +40,27 @@ final class ProcessEmbeddedComponentIndex {
     private static final Comparator<Cohort> COHORT_ORDER =
             Comparator.comparing(Cohort::members, MEMBER_ORDER);
 
-    private final List<DocumentId> documents;
-    private final List<Component> components;
-    private final List<Cohort> cohorts;
-    private final Map<DocumentId, Component> componentByDocument;
-    private final Map<DocumentId, Cohort> cohortByDocument;
-    private final Map<Component, List<Component>> targetsBySource;
-    private final Map<Component, List<Component>> sourcesByTarget;
+    private final PersistentOrderedMap<DocumentId, Component>
+            componentByDocument;
+    private final PersistentOrderedMap<DocumentId,
+            PersistentOrderedMap<DocumentId, Boolean>> targetsByDocument;
+    private final PersistentOrderedMap<DocumentId,
+            PersistentOrderedMap<DocumentId, Boolean>> sourcesByDocument;
 
     private ProcessEmbeddedComponentIndex(
-            List<DocumentId> documents,
-            List<Component> components,
-            List<Cohort> cohorts,
-            Map<DocumentId, Component> componentByDocument,
-            Map<DocumentId, Cohort> cohortByDocument,
-            Map<Component, List<Component>> targetsBySource,
-            Map<Component, List<Component>> sourcesByTarget) {
-        this.documents = List.copyOf(documents);
-        this.components = List.copyOf(components);
-        this.cohorts = List.copyOf(cohorts);
-        this.componentByDocument = Map.copyOf(componentByDocument);
-        this.cohortByDocument = Map.copyOf(cohortByDocument);
-        this.targetsBySource = immutableComponentIndex(targetsBySource);
-        this.sourcesByTarget = immutableComponentIndex(sourcesByTarget);
+            PersistentOrderedMap<DocumentId, Component> componentByDocument,
+            PersistentOrderedMap<DocumentId,
+                    PersistentOrderedMap<DocumentId, Boolean>>
+                    targetsByDocument,
+            PersistentOrderedMap<DocumentId,
+                    PersistentOrderedMap<DocumentId, Boolean>>
+                    sourcesByDocument) {
+        this.componentByDocument = Objects.requireNonNull(
+                componentByDocument, "componentByDocument");
+        this.targetsByDocument = Objects.requireNonNull(
+                targetsByDocument, "targetsByDocument");
+        this.sourcesByDocument = Objects.requireNonNull(
+                sourcesByDocument, "sourcesByDocument");
     }
 
     /** Builds a cycle-capable index over every binding endpoint. */
@@ -200,36 +198,14 @@ final class ProcessEmbeddedComponentIndex {
             }
         }
 
-        List<Cohort> cohorts = buildCohorts(
-                scalarComponents, componentTargets, componentSources);
-        List<Component> targetBeforeSource = cohorts.stream()
-                .flatMap(cohort -> cohort.components().stream())
-                .toList();
-        Map<DocumentId, Cohort> cohortByDocument = new HashMap<>();
-        for (Cohort cohort : cohorts) {
-            for (DocumentId member : cohort.members()) {
-                Cohort duplicate = cohortByDocument.put(member, cohort);
-                if (duplicate != null) {
-                    throw new IllegalStateException(
-                            "Document appears in more than one cohort: "
-                                    + member);
-                }
-            }
-        }
-        if (!componentByDocument.keySet().equals(allDocuments)
-                || !cohortByDocument.keySet().equals(allDocuments)) {
+        if (!componentByDocument.keySet().equals(allDocuments)) {
             throw new IllegalStateException(
                     "Component index does not exactly cover its documents");
         }
-
         return new ProcessEmbeddedComponentIndex(
-                List.copyOf(allDocuments),
-                targetBeforeSource,
-                cohorts,
-                componentByDocument,
-                cohortByDocument,
-                asListIndex(componentTargets),
-                asListIndex(componentSources));
+                persistentComponents(componentByDocument),
+                persistentAdjacency(targets),
+                persistentAdjacency(sources));
     }
 
     private record DirectedBinding(
@@ -261,7 +237,7 @@ final class ProcessEmbeddedComponentIndex {
 
     /** Every indexed document in exact scalar order. */
     List<DocumentId> documents() {
-        return documents;
+        return componentByDocument.keys();
     }
 
     /**
@@ -269,12 +245,20 @@ final class ProcessEmbeddedComponentIndex {
      * source within each cohort.
      */
     List<Component> components() {
-        return components;
+        List<Component> scalar = scalarComponents();
+        return targetBeforeSource(
+                scalar,
+                componentAdjacency(scalar, true),
+                componentAdjacency(scalar, false));
     }
 
     /** Weakly connected cohorts in exact minimum-member scalar order. */
     List<Cohort> cohorts() {
-        return cohorts;
+        List<Component> scalar = scalarComponents();
+        return buildCohorts(
+                scalar,
+                componentAdjacency(scalar, true),
+                componentAdjacency(scalar, false));
     }
 
     Component component(DocumentId document) {
@@ -288,37 +272,273 @@ final class ProcessEmbeddedComponentIndex {
     }
 
     Cohort cohort(DocumentId document) {
-        Cohort cohort = cohortByDocument.get(
-                Objects.requireNonNull(document, "document"));
-        if (cohort == null) {
-            throw new IllegalArgumentException(
-                    "Unknown Process Embedded document " + document);
+        Component start = component(document);
+        NavigableSet<Component> selected = new TreeSet<>(COMPONENT_ORDER);
+        Deque<Component> pending = new ArrayDeque<>();
+        selected.add(start);
+        pending.add(start);
+        while (!pending.isEmpty()) {
+            Component current = pending.removeFirst();
+            for (Component adjacent : union(
+                    targets(current), sources(current))) {
+                if (selected.add(adjacent)) {
+                    pending.addLast(adjacent);
+                }
+            }
         }
-        return cohort;
+        Map<Component, NavigableSet<Component>> targets =
+                componentAdjacency(selected, true);
+        Map<Component, NavigableSet<Component>> sources =
+                componentAdjacency(selected, false);
+        List<DocumentId> members = selected.stream()
+                .flatMap(component -> component.members().stream())
+                .sorted(DOCUMENT_ORDER)
+                .toList();
+        return new Cohort(
+                members,
+                targetBeforeSource(selected, targets, sources));
     }
 
     /** Direct condensation targets in exact component scalar order. */
     List<Component> targets(Component source) {
-        return requireIndexed(source, targetsBySource, "component");
+        return adjacentComponents(source, targetsByDocument);
     }
 
     /** Direct condensation sources in exact component scalar order. */
     List<Component> sources(Component target) {
-        return requireIndexed(target, sourcesByTarget, "component");
+        return adjacentComponents(target, sourcesByDocument);
     }
 
-    private static List<Component> requireIndexed(
-            Component component,
-            Map<Component, List<Component>> index,
-            String label) {
-        Component checked = Objects.requireNonNull(component, label);
-        List<Component> adjacent = index.get(checked);
-        if (adjacent == null) {
+    /**
+     * Rebuilds only an exact forward-closed region and persistently rewrites
+     * the raw outgoing/incoming edge buckets owned by its source documents.
+     * Components and edge buckets outside the region remain shared by identity.
+     */
+    ProcessEmbeddedComponentIndex replaceForwardClosure(
+            Collection<DocumentId> affectedDocuments,
+            ManagedOccurrenceInventory inventory) {
+        NavigableSet<DocumentId> affected = new TreeSet<>(DOCUMENT_ORDER);
+        Objects.requireNonNull(affectedDocuments, "affectedDocuments")
+                .forEach(document -> affected.add(Objects.requireNonNull(
+                        document, "affectedDocument")));
+        if (affected.isEmpty()) {
+            return this;
+        }
+        ManagedOccurrenceInventory selectedInventory = Objects.requireNonNull(
+                inventory, "inventory");
+        ArrayList<DirectedBinding> active = new ArrayList<>();
+        for (DocumentId source : affected) {
+            for (blue.language.processor.closure.ManagedOccurrenceBinding row
+                    : selectedInventory.activeRowsFrom(source)) {
+                DocumentId target = DocumentId.of(
+                        row.targetDocumentId().value());
+                if (!affected.contains(target)) {
+                    throw new IllegalArgumentException(
+                            "Affected component region is not forward closed: "
+                                    + source + " -> " + target);
+                }
+                active.add(new DirectedBinding(
+                        row.occurrenceIdentity(), source, target));
+            }
+        }
+        ProcessEmbeddedComponentIndex local = fromDirectedBindings(
+                affected, active);
+
+        PersistentOrderedMap<DocumentId, Component> components =
+                componentByDocument;
+        for (DocumentId document : affected) {
+            components = components.put(
+                    document, local.component(document)).map();
+        }
+        PersistentOrderedMap<DocumentId,
+                PersistentOrderedMap<DocumentId, Boolean>> targets =
+                targetsByDocument;
+        PersistentOrderedMap<DocumentId,
+                PersistentOrderedMap<DocumentId, Boolean>> sources =
+                sourcesByDocument;
+        for (DocumentId source : affected) {
+            PersistentOrderedMap<DocumentId, Boolean> beforeTargets =
+                    bucket(targets, source);
+            PersistentOrderedMap<DocumentId, Boolean> afterTargets =
+                    bucket(local.targetsByDocument, source);
+            for (DocumentId removed : beforeTargets.keys()) {
+                if (!afterTargets.containsKey(removed)) {
+                    sources = removeBucketValue(sources, removed, source);
+                }
+            }
+            for (DocumentId added : afterTargets.keys()) {
+                if (!beforeTargets.containsKey(added)) {
+                    sources = putBucketValue(sources, added, source);
+                }
+            }
+            targets = replaceBucket(targets, source, afterTargets);
+        }
+        return new ProcessEmbeddedComponentIndex(
+                components, targets, sources);
+    }
+
+    /** Orders only the components intersecting the selected forward region. */
+    List<Component> orderedComponentsFor(
+            Collection<DocumentId> documents) {
+        NavigableSet<Component> selected = new TreeSet<>(COMPONENT_ORDER);
+        Objects.requireNonNull(documents, "documents").forEach(document ->
+                selected.add(component(document)));
+        Map<Component, NavigableSet<Component>> targets =
+                componentAdjacency(selected, true);
+        Map<Component, NavigableSet<Component>> sources =
+                componentAdjacency(selected, false);
+        return targetBeforeSource(selected, targets, sources);
+    }
+
+    int sharedComponentNodesForTesting(
+            ProcessEmbeddedComponentIndex other) {
+        return componentByDocument.sharedNodeCountForTesting(
+                Objects.requireNonNull(other, "other").componentByDocument);
+    }
+
+    int sharedTargetBucketNodesForTesting(
+            ProcessEmbeddedComponentIndex other) {
+        return targetsByDocument.sharedNodeCountForTesting(
+                Objects.requireNonNull(other, "other").targetsByDocument);
+    }
+
+    boolean sameComponentEntryIdentityForTesting(
+            ProcessEmbeddedComponentIndex other,
+            DocumentId document) {
+        ProcessEmbeddedComponentIndex selected = Objects.requireNonNull(
+                other, "other");
+        DocumentId key = Objects.requireNonNull(document, "document");
+        return componentByDocument.get(key)
+                == selected.componentByDocument.get(key);
+    }
+
+    private List<Component> adjacentComponents(
+            Component supplied,
+            PersistentOrderedMap<DocumentId,
+                    PersistentOrderedMap<DocumentId, Boolean>> adjacency) {
+        Component selected = requireCurrent(supplied);
+        NavigableSet<Component> adjacent = new TreeSet<>(COMPONENT_ORDER);
+        for (DocumentId member : selected.members()) {
+            for (DocumentId document : bucket(adjacency, member).keys()) {
+                Component component = component(document);
+                if (!component.equals(selected)) {
+                    adjacent.add(component);
+                }
+            }
+        }
+        return List.copyOf(adjacent);
+    }
+
+    private Component requireCurrent(Component supplied) {
+        Component selected = Objects.requireNonNull(supplied, "component");
+        Component current = component(selected.members().get(0));
+        if (!current.equals(selected)) {
             throw new IllegalArgumentException(
                     "Unknown Process Embedded component "
-                            + checked.members());
+                            + selected.members());
         }
-        return adjacent;
+        return selected;
+    }
+
+    private List<Component> scalarComponents() {
+        TreeMap<List<DocumentId>, Component> unique = new TreeMap<>(
+                MEMBER_ORDER);
+        componentByDocument.values().forEach(component -> unique.putIfAbsent(
+                component.members(), component));
+        return List.copyOf(unique.values());
+    }
+
+    private Map<Component, NavigableSet<Component>> componentAdjacency(
+            Collection<Component> selected,
+            boolean outgoing) {
+        NavigableSet<Component> allowed = new TreeSet<>(COMPONENT_ORDER);
+        allowed.addAll(selected);
+        Map<Component, NavigableSet<Component>> result =
+                componentAdjacency(selected);
+        for (Component component : selected) {
+            List<Component> adjacent = outgoing
+                    ? targets(component) : sources(component);
+            for (Component candidate : adjacent) {
+                if (allowed.contains(candidate)) {
+                    result.get(component).add(candidate);
+                }
+            }
+        }
+        return result;
+    }
+
+    private static PersistentOrderedMap<DocumentId, Component>
+            persistentComponents(Map<DocumentId, Component> source) {
+        PersistentOrderedMap<DocumentId, Component> result =
+                PersistentOrderedMap.empty(DOCUMENT_ORDER);
+        for (Map.Entry<DocumentId, Component> entry : source.entrySet()) {
+            result = result.put(entry.getKey(), entry.getValue()).map();
+        }
+        return result;
+    }
+
+    private static PersistentOrderedMap<DocumentId,
+            PersistentOrderedMap<DocumentId, Boolean>> persistentAdjacency(
+                    Map<DocumentId, ? extends Collection<DocumentId>> source) {
+        PersistentOrderedMap<DocumentId,
+                PersistentOrderedMap<DocumentId, Boolean>> result =
+                PersistentOrderedMap.empty(DOCUMENT_ORDER);
+        for (Map.Entry<DocumentId, ? extends Collection<DocumentId>> entry
+                : source.entrySet()) {
+            PersistentOrderedMap<DocumentId, Boolean> values =
+                    PersistentOrderedMap.empty(DOCUMENT_ORDER);
+            for (DocumentId document : entry.getValue()) {
+                values = values.put(document, Boolean.TRUE).map();
+            }
+            if (!values.isEmpty()) {
+                result = result.put(entry.getKey(), values).map();
+            }
+        }
+        return result;
+    }
+
+    private static PersistentOrderedMap<DocumentId, Boolean> bucket(
+            PersistentOrderedMap<DocumentId,
+                    PersistentOrderedMap<DocumentId, Boolean>> index,
+            DocumentId document) {
+        PersistentOrderedMap<DocumentId, Boolean> selected =
+                index.get(document);
+        return selected == null
+                ? PersistentOrderedMap.empty(DOCUMENT_ORDER) : selected;
+    }
+
+    private static PersistentOrderedMap<DocumentId,
+            PersistentOrderedMap<DocumentId, Boolean>> replaceBucket(
+                    PersistentOrderedMap<DocumentId,
+                            PersistentOrderedMap<DocumentId, Boolean>> index,
+                    DocumentId document,
+                    PersistentOrderedMap<DocumentId, Boolean> replacement) {
+        if (replacement.isEmpty()) {
+            return index.remove(document).map();
+        }
+        return index.put(document, replacement).map();
+    }
+
+    private static PersistentOrderedMap<DocumentId,
+            PersistentOrderedMap<DocumentId, Boolean>> putBucketValue(
+                    PersistentOrderedMap<DocumentId,
+                            PersistentOrderedMap<DocumentId, Boolean>> index,
+                    DocumentId bucket,
+                    DocumentId value) {
+        PersistentOrderedMap<DocumentId, Boolean> changed =
+                bucket(index, bucket).put(value, Boolean.TRUE).map();
+        return index.put(bucket, changed).map();
+    }
+
+    private static PersistentOrderedMap<DocumentId,
+            PersistentOrderedMap<DocumentId, Boolean>> removeBucketValue(
+                    PersistentOrderedMap<DocumentId,
+                            PersistentOrderedMap<DocumentId, Boolean>> index,
+                    DocumentId bucket,
+                    DocumentId value) {
+        PersistentOrderedMap<DocumentId, Boolean> changed =
+                bucket(index, bucket).remove(value).map();
+        return replaceBucket(index, bucket, changed);
     }
 
     private static Map<DocumentId, NavigableSet<DocumentId>> adjacency(

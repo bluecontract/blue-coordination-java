@@ -1,11 +1,11 @@
 # SDK migration and ownership ledger
 
-This ledger fixes the application boundary for the `3.0.0-rc.3` SDK release
+This ledger fixes the application boundary for the `3.0.0-rc.4` SDK release
 candidate. It is normative for package ownership and migration guidance, but it
 does not replace the Contracts 1.0 specification.
 
 ```text
-candidate: 3.0.0-rc.3
+candidate: 3.0.0-rc.4
 distribution: Maven Central, bounded external-pilot tier
 normal default: BlueCoordination.inMemory() -> Contracts 1.0
 implementationConformanceClaimed: true
@@ -24,6 +24,9 @@ productionReleaseReady: false
 
 The two `inMemory()` names are not interchangeable. New application examples,
 consumer fixtures, and Javadocs start at `BlueCoordination`.
+The [SDK developer guide](../guides/developer-guide.md) is the canonical normal
+application journey; this ledger remains the package and semantic ownership
+reference.
 
 ## Package ownership
 
@@ -86,7 +89,7 @@ the legacy and SDK runtimes.
 ## Managed-draft boundary
 
 `ManagedDocumentDraft`, `RequestBuilder.managed(...)`, and
-`expectOccurrence(...)` are the supported rc.3 boundary for a new managed
+`expectOccurrence(...)` are the supported rc.4 boundary for a new managed
 lineage produced by an operation. Request content remains separate from the
 stable draft identity and activation evidence. Before append, the SDK verifies
 ownership, draft consistency, canonical unique paths, and effective
@@ -98,18 +101,22 @@ does not call the legacy child/parent path or create a second dependency graph.
 This lane supports only new `FROM_NOW` lineages. `draft.atEpoch(...)` and
 historical, frontier, attach-current, or passive operation-result activation
 fail closed. The Order-draft and five-occurrence/three-lineage cases are part of
-the rc.3 acceptance corpus. The final implementation-conformance value remains
+the rc.4 acceptance corpus. The final implementation-conformance value remains
 an artifact-bound receipt decision, not a claim made from source shape alone.
+
+Every already existing managed member and initially known cycle belongs in one
+initial `ManagedClosure`. The managed-draft lane does not claim arbitrary
+operation-created multi-member cyclic admission.
 
 ## Candidate and release ownership
 
-The rc.3 build resolves only Maven Central artifacts. Dependency isolation,
+The rc.4 build resolves only Maven Central artifacts. Dependency isolation,
 exact component versions, Java 17/21 verification, publication metadata, and
 built-artifact checks are owned by `releaseCheck` and
 `verifyRcReadiness`. Local composites, Maven Local, and file-staged
 repositories are not supported fallbacks.
 
 Passing the gate authorizes only the bounded external-pilot tier documented in
-the [rc.3 release decision](../releases/3.0.0-rc.3.md). Remote publication and
+the [rc.4 release decision](../releases/3.0.0-rc.4.md). Remote publication and
 tagging remain owned by the release workflow, which pushes the tag only after
 Maven Central deployment succeeds.

@@ -6,16 +6,20 @@ import blue.language.processor.closure.ClosureProcessResult;
 import blue.language.processor.closure.ResultingDocument;
 import blue.language.processor.closure.SubscriptionDelta;
 import blue.language.processor.closure.SubscriptionState;
+import blue.language.processor.EffectiveContractSnapshot;
+import blue.language.processor.ManagedRootChannelOccurrence;
+import blue.language.processor.ManagedRootSubscriptionSurface;
+import blue.language.processor.registry.RuntimeBlueIds;
+import blue.language.snapshot.FrozenNode;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
+import java.util.TreeSet;
 
 /** Complete durable Contracts subscription state, independent of legacy rows. */
 final class ClosureSubscriptionInventory {
@@ -23,53 +27,61 @@ final class ClosureSubscriptionInventory {
             .comparing(Slot::documentId, EmbeddingBinding.TEXT_ORDER)
             .thenComparing(Slot::rawChannelKey, EmbeddingBinding.TEXT_ORDER);
 
-    private final Map<Slot, SubscriptionState> bySlot;
-    private final List<SubscriptionState> states;
+    private final PersistentOrderedMap<Slot, SubscriptionState> bySlot;
+    private final PersistentOrderedMap<String, Slot> slotByIdentity;
+    private final PersistentOrderedMap<String,
+            PersistentOrderedMap<String, SubscriptionState>> byDocument;
+    private final PersistentOrderedMap<DocumentId,
+            PersistentOrderedMap<String, EmbeddedDemand>>
+            embeddedDemandsByDocument;
+    private final int lastOperationComparisons;
+    private final int lastOperationCopiedNodes;
+    private final int lastOperationVisitedRows;
 
     private ClosureSubscriptionInventory(
-            Map<Slot, SubscriptionState> rows) {
-        List<Map.Entry<Slot, SubscriptionState>> canonical =
-                new ArrayList<>(rows.entrySet());
-        canonical.sort(Map.Entry.comparingByKey(SLOT_ORDER));
-        LinkedHashMap<Slot, SubscriptionState> ordered = new LinkedHashMap<>();
-        LinkedHashSet<String> identities = new LinkedHashSet<>();
-        for (Map.Entry<Slot, SubscriptionState> entry : canonical) {
-            SubscriptionState state = Objects.requireNonNull(
-                    entry.getValue(), "subscription state");
-            Slot actual = Slot.from(state);
-            if (!entry.getKey().equals(actual)) {
-                throw new IllegalArgumentException(
-                        "Subscription state is stored under the wrong slot");
-            }
-            if (!identities.add(state.subscriptionIdentity())) {
-                throw new IllegalArgumentException(
-                        "Duplicate closure subscription identity "
-                                + state.subscriptionIdentity());
-            }
-            ordered.put(entry.getKey(), state);
-        }
-        this.bySlot = Map.copyOf(ordered);
-        this.states = List.copyOf(ordered.values());
+            Indexes indexes,
+            PersistentOrderedMap<DocumentId,
+                    PersistentOrderedMap<String, EmbeddedDemand>>
+                    embeddedDemandsByDocument,
+            Work work) {
+        Indexes exact = Objects.requireNonNull(indexes, "indexes");
+        this.bySlot = exact.bySlot();
+        this.slotByIdentity = exact.slotByIdentity();
+        this.byDocument = exact.byDocument();
+        this.embeddedDemandsByDocument = Objects.requireNonNull(
+                embeddedDemandsByDocument,
+                "embeddedDemandsByDocument");
+        Work exactWork = Objects.requireNonNull(work, "work");
+        this.lastOperationComparisons = exactWork.comparisons;
+        this.lastOperationCopiedNodes = exactWork.copiedNodes;
+        this.lastOperationVisitedRows = exactWork.visitedRows;
     }
 
     static ClosureSubscriptionInventory empty() {
-        return new ClosureSubscriptionInventory(Map.of());
+        return new ClosureSubscriptionInventory(
+                Indexes.empty(), emptyEmbeddedDemands(), new Work());
     }
 
     static ClosureSubscriptionInventory of(
             Collection<SubscriptionState> states) {
-        LinkedHashMap<Slot, SubscriptionState> rows = new LinkedHashMap<>();
+        Indexes indexes = Indexes.empty();
+        Work work = new Work();
         for (SubscriptionState state : Objects.requireNonNull(
                 states, "states")) {
             SubscriptionState exact = Objects.requireNonNull(
                     state, "subscription state");
             Slot slot = Slot.from(exact);
-            if (rows.putIfAbsent(slot, exact) != null) {
+            PersistentOrderedMap.ReadResult<SubscriptionState> existing =
+                    indexes.bySlot().read(slot);
+            work.read(existing);
+            if (existing.found()) {
                 throw new IllegalArgumentException(
                         "Duplicate closure subscription slot " + slot);
             }
+            indexes = insertAbsent(indexes, exact, work);
         }
-        return new ClosureSubscriptionInventory(rows);
+        return new ClosureSubscriptionInventory(
+                indexes, emptyEmbeddedDemands(), work);
     }
 
     /** Applies one already verified successful result to the durable inventory. */
@@ -83,8 +95,9 @@ final class ClosureSubscriptionInventory {
                 verified.platformCommitCompanion());
         Map<String, ResultingDocument> resultingDocuments =
                 resultingDocuments(verified.resultingDocuments());
-        LinkedHashMap<Slot, SubscriptionState> next =
-                new LinkedHashMap<>(bySlot);
+        Indexes next = new Indexes(
+                bySlot, slotByIdentity, byDocument);
+        Work work = new Work();
         for (SubscriptionDelta delta : verified.subscriptionDeltas()) {
             SubscriptionState before = delta.beforeSubscription();
             SubscriptionState after = delta.afterSubscription();
@@ -94,89 +107,508 @@ final class ClosureSubscriptionInventory {
             if (before != null) {
                 requireExpectedInputState(before, expectedHeads);
             }
-            SubscriptionState current = next.get(slot);
+            PersistentOrderedMap.ReadResult<SubscriptionState> currentRead =
+                    next.bySlot().read(slot);
+            work.read(currentRead);
+            SubscriptionState current = currentRead.value();
             if (delta.operation() == SubscriptionDelta.Operation.ADD) {
                 if (current != null) {
                     throw new IllegalStateException(
                             "Closure subscription ADD targets a present slot "
                                     + slot);
                 }
-                next.put(slot, after);
+                next = insertAbsent(
+                        next,
+                        Objects.requireNonNull(
+                                after, "subscription ADD after state"),
+                        work);
             } else {
+                SubscriptionState exactBefore = Objects.requireNonNull(
+                        before, "subscription before state");
+                boolean present = current != null;
                 if (current == null) {
                     // Migration bootstrap is safe because the verified before
                     // state is bound to the exact CAS-fenced input head.
-                    current = before;
+                    current = exactBefore;
                 }
                 if (!current.subscriptionIdentity().equals(
-                        before.subscriptionIdentity())) {
+                        exactBefore.subscriptionIdentity())) {
                     throw new IllegalStateException(
                             "Closure subscription before-state CAS mismatch at "
                                     + slot);
                 }
                 if (delta.operation() == SubscriptionDelta.Operation.REMOVE) {
-                    next.remove(slot);
+                    if (present) {
+                        next = removePresent(next, slot, current, work);
+                    }
                 } else {
-                    next.put(slot, after);
+                    SubscriptionState exactAfter = Objects.requireNonNull(
+                            after, "subscription replacement after state");
+                    next = present
+                            ? replacePresent(
+                                    next, slot, current, exactAfter, work)
+                            : insertAbsent(next, exactAfter, work);
                 }
             }
         }
-        ClosureSubscriptionInventory applied =
-                new ClosureSubscriptionInventory(next);
-        applied.requireResultingStates(
-                resultingDocuments, verified.graphGeneration());
-        return applied;
+        requireResultingStates(
+                next,
+                resultingDocuments,
+                verified.graphGeneration(),
+                work);
+        return new ClosureSubscriptionInventory(
+                next, embeddedDemandsByDocument, work);
     }
 
     ClosureSubscriptionInventory retainingDocuments(
             Collection<DocumentId> documents) {
-        Set<String> retained = new LinkedHashSet<>();
+        TreeSet<String> retained = new TreeSet<>(
+                EmbeddingBinding.TEXT_ORDER);
         for (DocumentId document : Objects.requireNonNull(
                 documents, "documents")) {
             retained.add(Objects.requireNonNull(
                     document, "document").value());
         }
-        LinkedHashMap<Slot, SubscriptionState> selected = new LinkedHashMap<>();
-        bySlot.forEach((slot, state) -> {
-            if (retained.contains(slot.documentId())) {
-                selected.put(slot, state);
+        Indexes selected = Indexes.empty();
+        PersistentOrderedMap<DocumentId,
+                PersistentOrderedMap<String, EmbeddedDemand>>
+                selectedDemands = emptyEmbeddedDemands();
+        Work work = new Work();
+        for (String documentId : retained) {
+            DocumentId coordinationId = DocumentId.of(documentId);
+            PersistentOrderedMap<String, EmbeddedDemand> demandBucket =
+                    embeddedDemandsByDocument.get(coordinationId);
+            if (demandBucket != null) {
+                selectedDemands = selectedDemands.put(
+                        coordinationId, demandBucket).map();
             }
-        });
-        return new ClosureSubscriptionInventory(selected);
+            PersistentOrderedMap.ReadResult<PersistentOrderedMap<String,
+                    SubscriptionState>> bucketRead =
+                    byDocument.read(documentId);
+            work.read(bucketRead);
+            if (!bucketRead.found()) {
+                continue;
+            }
+            PersistentOrderedMap<String, SubscriptionState> bucket =
+                    bucketRead.value();
+            work.visitedRows(bucket.size());
+            for (SubscriptionState state : bucket.values()) {
+                Slot slot = Slot.from(state);
+                PersistentOrderedMap.Mutation<Slot, SubscriptionState>
+                        slotMutation = selected.bySlot().put(slot, state);
+                work.mutation(slotMutation);
+                PersistentOrderedMap.Mutation<String, Slot>
+                        identityMutation = selected.slotByIdentity().put(
+                                state.subscriptionIdentity(), slot);
+                work.mutation(identityMutation);
+                selected = new Indexes(
+                        slotMutation.map(),
+                        identityMutation.map(),
+                        selected.byDocument());
+            }
+            PersistentOrderedMap.Mutation<String,
+                    PersistentOrderedMap<String, SubscriptionState>>
+                    documentMutation = selected.byDocument().put(
+                            documentId, bucket);
+            work.mutation(documentMutation);
+            selected = new Indexes(
+                    selected.bySlot(),
+                    selected.slotByIdentity(),
+                    documentMutation.map());
+        }
+        return new ClosureSubscriptionInventory(
+                selected, selectedDemands, work);
     }
 
     List<SubscriptionState> states() {
-        return states;
+        return bySlot.values();
     }
 
     List<SubscriptionState> statesFor(DocumentId documentId) {
         String selected = Objects.requireNonNull(
                 documentId, "documentId").value();
-        return states.stream()
-                .filter(state -> state.channelOccurrence().managedDocumentId()
-                        .value().equals(selected))
-                .toList();
+        PersistentOrderedMap<String, SubscriptionState> bucket =
+                byDocument.get(selected);
+        return bucket == null ? List.of() : bucket.values();
     }
 
-    private void requireResultingStates(
-            Map<String, ResultingDocument> resultingDocuments,
-            long graphGeneration) {
-        for (SubscriptionState state : states) {
-            String documentId = state.channelOccurrence()
-                    .managedDocumentId().value();
-            ResultingDocument resulting = resultingDocuments.get(documentId);
-            if (resulting == null) {
+    ClosureSubscriptionInventory replaceEmbeddedDemands(
+            DocumentId documentId,
+            Collection<EmbeddedDemand> demands) {
+        DocumentId selectedDocument = Objects.requireNonNull(
+                documentId, "documentId");
+        PersistentOrderedMap<String, EmbeddedDemand> replacement =
+                PersistentOrderedMap.empty(EmbeddingBinding.TEXT_ORDER);
+        for (EmbeddedDemand demand : Objects.requireNonNull(
+                demands, "demands")) {
+            EmbeddedDemand selected = Objects.requireNonNull(
+                    demand, "embedded demand");
+            if (replacement.containsKey(selected.sourcePath())) {
                 continue;
             }
-            if (!state.documentBlueId().equals(resulting.afterBlueId())
-                    || state.graphGeneration() != graphGeneration
-                    || state.componentGeneration()
-                    != resulting.componentGeneration()) {
-                throw new IllegalStateException(
-                        "Closure subscription state is stale after publication "
-                                + documentId + "/"
-                                + state.channelOccurrence().rawChannelKey());
+            replacement = replacement.put(
+                    selected.sourcePath(), selected).map();
+        }
+        PersistentOrderedMap<DocumentId,
+                PersistentOrderedMap<String, EmbeddedDemand>> updated =
+                replacement.isEmpty()
+                        ? embeddedDemandsByDocument.remove(
+                                selectedDocument).map()
+                        : embeddedDemandsByDocument.put(
+                                selectedDocument, replacement).map();
+        Work retainedWork = new Work();
+        retainedWork.comparisons = lastOperationComparisons;
+        retainedWork.copiedNodes = lastOperationCopiedNodes;
+        retainedWork.visitedRows = lastOperationVisitedRows;
+        return new ClosureSubscriptionInventory(
+                new Indexes(bySlot, slotByIdentity, byDocument),
+                updated,
+                retainedWork);
+    }
+
+    boolean hasEmbeddedDemand(DocumentId documentId, String sourcePath) {
+        PersistentOrderedMap<String, EmbeddedDemand> bucket =
+                embeddedDemandsByDocument.get(Objects.requireNonNull(
+                        documentId, "documentId"));
+        return bucket != null && bucket.containsKey(Objects.requireNonNull(
+                sourcePath, "sourcePath"));
+    }
+
+    record EmbeddedDemand(
+            String rawChannelKey,
+            String sourcePath,
+            String effectiveRuntimeContributionBlueId) {
+        EmbeddedDemand {
+            rawChannelKey = requireText(rawChannelKey, "rawChannelKey");
+            sourcePath = requireText(sourcePath, "sourcePath");
+            effectiveRuntimeContributionBlueId = requireText(
+                    effectiveRuntimeContributionBlueId,
+                    "effectiveRuntimeContributionBlueId");
+        }
+    }
+
+    static List<EmbeddedDemand> embeddedDemands(
+            ManagedRootSubscriptionSurface surface) {
+        ManagedRootSubscriptionSurface projected = Objects.requireNonNull(
+                surface, "surface");
+        Map<String, ManagedRootChannelOccurrence> channels =
+                new LinkedHashMap<>();
+        for (ManagedRootChannelOccurrence channel
+                : projected.channelOccurrences()) {
+            channels.put(channel.rawChannelKey(), channel);
+        }
+        ArrayList<EmbeddedDemand> result = new ArrayList<>();
+        for (EffectiveContractSnapshot contract
+                : projected.effectiveRootContracts()) {
+            if (!RuntimeBlueIds.EMBEDDED_NODE_CHANNEL.equals(
+                    contract.effectiveTypeBlueId())) {
+                continue;
             }
+            ManagedRootChannelOccurrence channel = channels.get(
+                    contract.key());
+            if (channel == null
+                    || !channel.effectiveTypeBlueId().equals(
+                            contract.effectiveTypeBlueId())) {
+                throw new IllegalArgumentException(
+                        "Embedded Node Channel projection is incomplete at "
+                                + contract.key());
+            }
+            FrozenNode sourcePath = contract.headerFields().get(
+                    "sourcePath");
+            if (sourcePath == null
+                    || !(sourcePath.getValue() instanceof String path)
+                    || path.isBlank()) {
+                throw new IllegalArgumentException(
+                        "Embedded Node Channel has no exact sourcePath at "
+                                + contract.key());
+            }
+            result.add(new EmbeddedDemand(
+                    channel.rawChannelKey(),
+                    path,
+                    channel.effectiveRuntimeContributionBlueId()));
+        }
+        return List.copyOf(result);
+    }
+
+    private static PersistentOrderedMap<DocumentId,
+            PersistentOrderedMap<String, EmbeddedDemand>>
+            emptyEmbeddedDemands() {
+        return PersistentOrderedMap.empty(EmbeddingBinding.DOCUMENT_ORDER);
+    }
+
+    private static void requireResultingStates(
+            Indexes indexes,
+            Map<String, ResultingDocument> resultingDocuments,
+            long graphGeneration,
+            Work work) {
+        for (Map.Entry<String, ResultingDocument> entry
+                : resultingDocuments.entrySet()) {
+            PersistentOrderedMap.ReadResult<PersistentOrderedMap<String,
+                    SubscriptionState>> bucketRead =
+                    indexes.byDocument().read(entry.getKey());
+            work.read(bucketRead);
+            if (!bucketRead.found()) {
+                continue;
+            }
+            ResultingDocument resulting = entry.getValue();
+            work.visitedRows(bucketRead.value().size());
+            for (SubscriptionState state : bucketRead.value().values()) {
+                if (!state.documentBlueId().equals(resulting.afterBlueId())
+                        || state.graphGeneration() != graphGeneration
+                        || state.componentGeneration()
+                        != resulting.componentGeneration()) {
+                    throw new IllegalStateException(
+                            "Closure subscription state is stale after "
+                                    + "publication " + entry.getKey() + "/"
+                                    + state.channelOccurrence()
+                                            .rawChannelKey());
+                }
+            }
+        }
+    }
+
+    private static Indexes insertAbsent(
+            Indexes indexes,
+            SubscriptionState state,
+            Work work) {
+        SubscriptionState exact = Objects.requireNonNull(
+                state, "subscription state");
+        Slot slot = Slot.from(exact);
+        PersistentOrderedMap.ReadResult<Slot> identityRead =
+                indexes.slotByIdentity().read(
+                        exact.subscriptionIdentity());
+        work.read(identityRead);
+        if (identityRead.found()) {
+            throw new IllegalArgumentException(
+                    "Duplicate closure subscription identity "
+                            + exact.subscriptionIdentity());
+        }
+
+        PersistentOrderedMap.Mutation<Slot, SubscriptionState>
+                slotMutation = indexes.bySlot().put(slot, exact);
+        work.mutation(slotMutation);
+        PersistentOrderedMap.Mutation<String, Slot> identityMutation =
+                indexes.slotByIdentity().put(
+                        exact.subscriptionIdentity(), slot);
+        work.mutation(identityMutation);
+
+        PersistentOrderedMap.ReadResult<PersistentOrderedMap<String,
+                SubscriptionState>> bucketRead =
+                indexes.byDocument().read(slot.documentId());
+        work.read(bucketRead);
+        PersistentOrderedMap<String, SubscriptionState> bucket =
+                bucketRead.found()
+                        ? bucketRead.value()
+                        : PersistentOrderedMap.empty(
+                                EmbeddingBinding.TEXT_ORDER);
+        PersistentOrderedMap.Mutation<String, SubscriptionState>
+                bucketMutation = bucket.put(slot.rawChannelKey(), exact);
+        work.mutation(bucketMutation);
+        PersistentOrderedMap.Mutation<String,
+                PersistentOrderedMap<String, SubscriptionState>>
+                documentMutation = indexes.byDocument().put(
+                        slot.documentId(), bucketMutation.map());
+        work.mutation(documentMutation);
+        return new Indexes(
+                slotMutation.map(),
+                identityMutation.map(),
+                documentMutation.map());
+    }
+
+    private static Indexes replacePresent(
+            Indexes indexes,
+            Slot slot,
+            SubscriptionState current,
+            SubscriptionState after,
+            Work work) {
+        SubscriptionState exactAfter = Objects.requireNonNull(
+                after, "subscription replacement after state");
+        if (!slot.equals(Slot.from(exactAfter))) {
+            throw new IllegalArgumentException(
+                    "Subscription replacement changes its slot");
+        }
+        PersistentOrderedMap.ReadResult<Slot> afterIdentity =
+                indexes.slotByIdentity().read(
+                        exactAfter.subscriptionIdentity());
+        work.read(afterIdentity);
+        if (afterIdentity.found() && !slot.equals(afterIdentity.value())) {
+            throw new IllegalArgumentException(
+                    "Duplicate closure subscription identity "
+                            + exactAfter.subscriptionIdentity());
+        }
+
+        PersistentOrderedMap.Mutation<Slot, SubscriptionState>
+                slotMutation = indexes.bySlot().put(slot, exactAfter);
+        work.mutation(slotMutation);
+        PersistentOrderedMap<String, Slot> identities =
+                indexes.slotByIdentity();
+        if (!current.subscriptionIdentity().equals(
+                exactAfter.subscriptionIdentity())) {
+            PersistentOrderedMap.ReadResult<Slot> currentIdentity =
+                    identities.read(current.subscriptionIdentity());
+            work.read(currentIdentity);
+            if (!currentIdentity.found()
+                    || !slot.equals(currentIdentity.value())) {
+                throw new IllegalStateException(
+                        "Closure subscription identity index is inconsistent "
+                                + current.subscriptionIdentity());
+            }
+            PersistentOrderedMap.Mutation<String, Slot> removed =
+                    identities.remove(current.subscriptionIdentity());
+            work.mutation(removed);
+            PersistentOrderedMap.Mutation<String, Slot> added =
+                    removed.map().put(
+                            exactAfter.subscriptionIdentity(), slot);
+            work.mutation(added);
+            identities = added.map();
+        }
+
+        PersistentOrderedMap.ReadResult<PersistentOrderedMap<String,
+                SubscriptionState>> bucketRead =
+                indexes.byDocument().read(slot.documentId());
+        work.read(bucketRead);
+        if (!bucketRead.found()) {
+            throw new IllegalStateException(
+                    "Closure subscription document index is missing "
+                            + slot.documentId());
+        }
+        PersistentOrderedMap.ReadResult<SubscriptionState> indexedCurrent =
+                bucketRead.value().read(slot.rawChannelKey());
+        work.read(indexedCurrent);
+        if (!indexedCurrent.found()
+                || !indexedCurrent.value().subscriptionIdentity().equals(
+                        current.subscriptionIdentity())) {
+            throw new IllegalStateException(
+                    "Closure subscription document index is inconsistent "
+                            + slot);
+        }
+        PersistentOrderedMap.Mutation<String, SubscriptionState>
+                bucketMutation = bucketRead.value().put(
+                        slot.rawChannelKey(), exactAfter);
+        work.mutation(bucketMutation);
+        PersistentOrderedMap.Mutation<String,
+                PersistentOrderedMap<String, SubscriptionState>>
+                documentMutation = indexes.byDocument().put(
+                        slot.documentId(), bucketMutation.map());
+        work.mutation(documentMutation);
+        return new Indexes(
+                slotMutation.map(), identities, documentMutation.map());
+    }
+
+    private static Indexes removePresent(
+            Indexes indexes,
+            Slot slot,
+            SubscriptionState current,
+            Work work) {
+        PersistentOrderedMap.Mutation<Slot, SubscriptionState>
+                slotMutation = indexes.bySlot().remove(slot);
+        work.mutation(slotMutation);
+        if (!slotMutation.changed()) {
+            throw new IllegalStateException(
+                    "Closure subscription slot index is missing " + slot);
+        }
+
+        PersistentOrderedMap.ReadResult<Slot> identityRead =
+                indexes.slotByIdentity().read(
+                        current.subscriptionIdentity());
+        work.read(identityRead);
+        if (!identityRead.found() || !slot.equals(identityRead.value())) {
+            throw new IllegalStateException(
+                    "Closure subscription identity index is inconsistent "
+                            + current.subscriptionIdentity());
+        }
+        PersistentOrderedMap.Mutation<String, Slot> identityMutation =
+                indexes.slotByIdentity().remove(
+                        current.subscriptionIdentity());
+        work.mutation(identityMutation);
+
+        PersistentOrderedMap.ReadResult<PersistentOrderedMap<String,
+                SubscriptionState>> bucketRead =
+                indexes.byDocument().read(slot.documentId());
+        work.read(bucketRead);
+        if (!bucketRead.found()) {
+            throw new IllegalStateException(
+                    "Closure subscription document index is missing "
+                            + slot.documentId());
+        }
+        PersistentOrderedMap.Mutation<String, SubscriptionState>
+                bucketMutation = bucketRead.value().remove(
+                        slot.rawChannelKey());
+        work.mutation(bucketMutation);
+        if (!bucketMutation.changed()) {
+            throw new IllegalStateException(
+                    "Closure subscription document slot is missing " + slot);
+        }
+        PersistentOrderedMap.Mutation<String,
+                PersistentOrderedMap<String, SubscriptionState>>
+                documentMutation = bucketMutation.map().isEmpty()
+                        ? indexes.byDocument().remove(slot.documentId())
+                        : indexes.byDocument().put(
+                                slot.documentId(), bucketMutation.map());
+        work.mutation(documentMutation);
+        return new Indexes(
+                slotMutation.map(),
+                identityMutation.map(),
+                documentMutation.map());
+    }
+
+    /** Comparator calls across persistent slot/identity/document indexes. */
+    int lastOperationComparisonsForTesting() {
+        return lastOperationComparisons;
+    }
+
+    /** Persistent tree nodes allocated across every maintained index. */
+    int lastOperationCopiedNodesForTesting() {
+        return lastOperationCopiedNodes;
+    }
+
+    /** Rows explicitly enumerated inside selected document buckets. */
+    int lastOperationVisitedRowsForTesting() {
+        return lastOperationVisitedRows;
+    }
+
+    int slotLookupStepsForTesting(
+            DocumentId documentId,
+            String rawChannelKey) {
+        return bySlot.lookupSteps(new Slot(
+                Objects.requireNonNull(documentId, "documentId").value(),
+                rawChannelKey));
+    }
+
+    Object slotRootIdentityForTesting() {
+        return bySlot.rootIdentityForTesting();
+    }
+
+    int sharedSlotNodeCountForTesting(
+            ClosureSubscriptionInventory other) {
+        return bySlot.sharedNodeCountForTesting(
+                Objects.requireNonNull(other, "other").bySlot);
+    }
+
+    void assertStructurallyValidForTesting() {
+        bySlot.assertStructurallyValid();
+        slotByIdentity.assertStructurallyValid();
+        byDocument.assertStructurallyValid();
+        for (SubscriptionState state : bySlot.values()) {
+            Slot slot = Slot.from(state);
+            if (!slot.equals(slotByIdentity.get(
+                    state.subscriptionIdentity()))) {
+                throw new IllegalStateException(
+                        "Closure subscription identity index is inconsistent "
+                                + state.subscriptionIdentity());
+            }
+            PersistentOrderedMap<String, SubscriptionState> bucket =
+                    byDocument.get(slot.documentId());
+            if (bucket == null
+                    || bucket.get(slot.rawChannelKey()) != state) {
+                throw new IllegalStateException(
+                        "Closure subscription document index is inconsistent "
+                                + slot);
+            }
+        }
+        for (PersistentOrderedMap<String, SubscriptionState> bucket
+                : byDocument.values()) {
+            bucket.assertStructurallyValid();
         }
     }
 
@@ -228,6 +660,59 @@ final class ClosureSubscriptionInventory {
             return new Slot(
                     state.channelOccurrence().managedDocumentId().value(),
                     state.channelOccurrence().rawChannelKey());
+        }
+    }
+
+    private record Indexes(
+            PersistentOrderedMap<Slot, SubscriptionState> bySlot,
+            PersistentOrderedMap<String, Slot> slotByIdentity,
+            PersistentOrderedMap<String,
+                    PersistentOrderedMap<String, SubscriptionState>>
+                    byDocument) {
+        private Indexes {
+            bySlot = Objects.requireNonNull(bySlot, "bySlot");
+            slotByIdentity = Objects.requireNonNull(
+                    slotByIdentity, "slotByIdentity");
+            byDocument = Objects.requireNonNull(
+                    byDocument, "byDocument");
+        }
+
+        private static Indexes empty() {
+            return new Indexes(
+                    PersistentOrderedMap.empty(SLOT_ORDER),
+                    PersistentOrderedMap.empty(
+                            EmbeddingBinding.TEXT_ORDER),
+                    PersistentOrderedMap.empty(
+                            EmbeddingBinding.TEXT_ORDER));
+        }
+    }
+
+    private static final class Work {
+        private int comparisons;
+        private int copiedNodes;
+        private int visitedRows;
+
+        private void read(PersistentOrderedMap.ReadResult<?> read) {
+            comparisons = Math.addExact(
+                    comparisons,
+                    Objects.requireNonNull(read, "read").comparisons());
+        }
+
+        private void mutation(PersistentOrderedMap.Mutation<?, ?> mutation) {
+            PersistentOrderedMap.Mutation<?, ?> exact =
+                    Objects.requireNonNull(mutation, "mutation");
+            comparisons = Math.addExact(
+                    comparisons, exact.comparisons());
+            copiedNodes = Math.addExact(
+                    copiedNodes, exact.copiedNodes());
+        }
+
+        private void visitedRows(int count) {
+            if (count < 0) {
+                throw new IllegalArgumentException(
+                        "visited row count must be non-negative");
+            }
+            visitedRows = Math.addExact(visitedRows, count);
         }
     }
 

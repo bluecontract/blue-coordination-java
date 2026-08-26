@@ -1,5 +1,10 @@
 # Large host and PayNote
 
+This is a retained whole-object semantic and performance scenario. Its
+low-level host details are not the normal SDK onboarding path; start with the
+[SDK developer guide](../guides/developer-guide.md) for current application
+admission, targeting, and managed drafts.
+
 The Wadowice scenario starts a roughly 60 KB host with 43 workflows, retains a
 real PayNote as one exact request value, and attaches it through one `Process
 Embedded` field. The host becomes one physical root shell plus one whole managed

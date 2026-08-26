@@ -2,7 +2,7 @@ package blue.coordination.integration;
 
 import blue.coordination.api.DocumentId;
 
-/** Read-only catch-up plan compatibility projection. */
+/** Read-only catch-up plan compatibility projection shared by test suites. */
 record CatchUpPlan(Link link, Status status) {
     enum Status {
         PENDING_INITIALIZATION,

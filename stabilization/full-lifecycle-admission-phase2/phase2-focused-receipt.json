@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "status": "FOCUSED_GATES_COMPLETE_FULL_GATES_PENDING",
+  "source": {
+    "repository": "blue-contract-java",
+    "branch": "feat/dynamic-contract-evolution",
+    "baseCommit": "d9e00f40a0ac28454321a977c0657ee778cc069c",
+    "sourceCommit": null,
+    "sourceCommitReason": "Phase-2 review is uncommitted until full gates are authorized and green"
+  },
+  "languageProvenance": {
+    "acceptedHead": "03db5ee45f96698a45a3f5556dcc1ef6222d8e6f",
+    "testedParent": "5357b87bc4b37d6f8306797b57341e2c5905b258",
+    "semanticSource": "3ea346d13dba31e65e32827972bcc501776fa49f",
+    "invocationLocalRepository": "/private/tmp/blue-language-phase1-release-repo.rLY91V",
+    "initScript": "/private/tmp/blue-language-phase1-repository.init.gradle",
+    "mavenLocalUsedAsReleaseEvidence": false
+  },
+  "acceptedContractsInputs": {
+    "contractsSpecification": "sha256:389746c3faddebde4a4958cce0037ce2ec3a64a67c854053f0f6fa209a105e18",
+    "contractsRelease": "sha256:5917b16adfde2ed6bb21bac74c40a1b44526d7c9ddb3faaaf5fbe8a13aae3b1c",
+    "fixturePackage": "sha256:3bb21b5df6eb87b578e9647f11d094aff2cf45c56b3b7050f8d854147bdb3e3d"
+  },
+  "completedGates": [
+    {
+      "name": "explicit evidence WRITE",
+      "mode": "BLUE_CYCLIC_TOPOLOGY_IDENTITY_ARTIFACT_MODE=WRITE",
+      "environment": ["Java 17", "published-artifact", "offline", "invocation-local repository"],
+      "result": "PASS",
+      "buildDuration": "2m36s"
+    },
+    {
+      "name": "focused evidence read mode",
+      "environment": ["Java 17", "published-artifact", "offline", "invocation-local repository"],
+      "result": "PASS",
+      "buildDuration": "3m13s",
+      "tests": 21,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "suites": {
+        "ContractsFullLifecycleAdmissionTest": 8,
+        "ContractsPublicInitializationTopologyTest": 5,
+        "CyclicTopologyIdentityEvidenceTest": 1,
+        "SdkStaticProcessEmbeddedAdmissionTest": 6,
+        "SdkCoreSeamsTest": 1
+      }
+    },
+    {
+      "name": "historical evidence immutability",
+      "result": "PASS",
+      "proof": "git diff --exit-code -- stabilization/cyclic-topology-round"
+    },
+    {
+      "name": "patch whitespace validation",
+      "result": "PASS",
+      "proof": "git diff --check"
+    }
+  ],
+  "pendingGates": [
+    "complete Java 17 gate set",
+    "complete Java 21 gate set",
+    "unit, integration, consumer, and scenario gates",
+    "Javadoc and public API gates",
+    "dependencyPreflight and release gates",
+    "final source commit and clean-tree receipt"
+  ],
+  "claims": {
+    "fullGatesGreen": false,
+    "releaseReady": false,
+    "historicalReceiptRewritten": false
+  }
+}

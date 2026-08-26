@@ -1,6 +1,5 @@
 package blue.coordination.internal;
 
-import blue.coordination.api.Contracts10Configuration;
 import blue.coordination.api.ContractsClosureAdmissionReceipt;
 import blue.coordination.api.CoordinationEngine;
 import blue.coordination.api.DocumentId;
@@ -17,12 +16,14 @@ import java.util.stream.IntStream;
 
 /** Exact test-only public-engine shapes used by the cyclic campaign. */
 final class CyclicPerformanceScenarios {
+    private static final BundledContracts10Release.Manifest BUNDLED_RELEASE =
+            BundledContracts10Release.manifest();
     static final String LANGUAGE_SPEC =
-            "sha256:01b038b64e3f0a9a11f3f70d544a63ff78a01d5169f1a03f8b8629cf73645a7d";
+            BUNDLED_RELEASE.blueLanguageSpecification();
     static final String CONTRACTS_SPEC =
-            "sha256:dfb444962a5a17b3a6519e8d148c2bf4a975a921b1fcb1277710052caaecd930";
+            BUNDLED_RELEASE.contractsSpecification();
     static final String CONTRACTS_RELEASE =
-            "sha256:7e6c3717bc28d21ebadec9f81725913e944bb3b9b70094531f19f10510a10e50";
+            BUNDLED_RELEASE.contractsRelease();
     static final int UNRELATED_DOCUMENTS = 1_000;
     private static final int UNRELATED_BATCH_SIZE = 25;
     private static final long ENTRY_TIME = 2_600_000_000_000_001L;
@@ -459,10 +460,7 @@ final class CyclicPerformanceScenarios {
     private static DefaultCoordinationEngine engine(Set<DocumentId> roots) {
         return (DefaultCoordinationEngine)
                 CoordinationEngine.inMemoryContracts10(
-                        new Contracts10Configuration(
-                                LANGUAGE_SPEC,
-                                CONTRACTS_SPEC,
-                                roots));
+                        BundledContracts10Release.configuration(roots));
     }
 
     private static String twoMemberA(DocumentId id) {

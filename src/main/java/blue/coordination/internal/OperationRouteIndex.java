@@ -18,6 +18,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 
@@ -30,9 +31,10 @@ final class OperationRouteIndex {
     static final String DIRECT_ROUTE_REVALIDATION_SNAPSHOTS =
             "routing.directRevalidationSnapshots";
 
-    private final Map<RouteKey, List<RouteRow>> rows = new LinkedHashMap<>();
-    private final Map<DocumentId, Set<RouteKey>> keysByDocument =
-            new LinkedHashMap<>();
+    private PersistentOrderedMap<RouteKey, List<RouteRow>> rows =
+            PersistentOrderedMap.empty(RouteKey.ORDER);
+    private PersistentOrderedMap<DocumentId, Set<RouteKey>> keysByDocument =
+            PersistentOrderedMap.empty(EmbeddingBinding.DOCUMENT_ORDER);
     private final EngineMetrics metrics;
     private final Function<DocumentId, DocumentSession> sessionResolver;
     private long generation;
@@ -89,59 +91,122 @@ final class OperationRouteIndex {
                             checked.activeSubscriptions()));
         }
 
-        ContractsStructuralWorkMetrics.recordGlobalPass(
-                metrics,
-                ContractsStructuralWorkMetrics
-                        .GLOBAL_ROUTE_ENTRIES_TRAVERSED,
-                rows.size());
-        Map<RouteKey, List<RouteRow>> preparedRows = copyRows(rows);
-        ContractsStructuralWorkMetrics.recordGlobalPass(
-                metrics,
-                ContractsStructuralWorkMetrics
-                        .GLOBAL_ROUTE_ENTRIES_TRAVERSED,
-                keysByDocument.size());
-        Map<DocumentId, Set<RouteKey>> preparedKeys = copyKeys(
-                keysByDocument);
+        PersistentOrderedMap<RouteKey, List<RouteRow>> preparedRows = rows;
+        PersistentOrderedMap<DocumentId, Set<RouteKey>> preparedKeys =
+                keysByDocument;
+        long comparisons = 0L;
+        long copiedNodes = 0L;
         long retainedKeys = 0L;
+        Set<RouteKey> changedRouteKeys = new LinkedHashSet<>();
+        List<OperationRouteChange> operationRouteChanges = new ArrayList<>();
         for (Replacement replacement : canonical) {
             DocumentId documentId = replacement.documentId();
             Map<RouteKey, List<RouteRow>> inserted = compiled.get(documentId);
+            PersistentOrderedMap.ReadResult<Set<RouteKey>> existingRead =
+                    preparedKeys.read(documentId);
+            comparisons = Math.addExact(
+                    comparisons, existingRead.comparisons());
+            Set<RouteKey> existing = existingRead.value() == null
+                    ? Set.of() : existingRead.value();
             Set<RouteKey> candidates = new LinkedHashSet<>(
-                    keysByDocument.getOrDefault(documentId, Set.of()));
+                    existing);
             candidates.addAll(inserted.keySet());
+            OperationRouteProjection beforeOperationRoutes =
+                    operationRoutes(documentId, existing, preparedRows);
+            comparisons = Math.addExact(
+                    comparisons, beforeOperationRoutes.comparisons());
+            List<OperationRouteState> afterOperationRoutes =
+                    operationRoutes(documentId, inserted);
+            operationRouteChanges.addAll(operationRouteChanges(
+                    documentId,
+                    beforeOperationRoutes.routes(),
+                    afterOperationRoutes));
+            boolean documentChanged = false;
             for (RouteKey key : candidates) {
-                List<RouteRow> current = rows.getOrDefault(
-                        key, List.of()).stream()
+                PersistentOrderedMap.ReadResult<List<RouteRow>> currentRead =
+                        preparedRows.read(key);
+                comparisons = Math.addExact(
+                        comparisons, currentRead.comparisons());
+                List<RouteRow> currentRows = currentRead.value() == null
+                        ? List.of() : currentRead.value();
+                List<RouteRow> current = currentRows.stream()
                         .filter(row -> row.documentId().equals(documentId))
                         .toList();
-                if (current.equals(inserted.getOrDefault(key, List.of()))) {
+                List<RouteRow> replacementRows = inserted.getOrDefault(
+                        key, List.of());
+                if (current.equals(replacementRows)) {
                     retainedKeys = Math.addExact(retainedKeys, 1L);
+                } else {
+                    documentChanged = true;
+                    changedRouteKeys.add(key);
                 }
             }
-            removeRows(preparedRows, preparedKeys, documentId);
+            if (!documentChanged) {
+                continue;
+            }
+            for (RouteKey key : existing) {
+                PersistentOrderedMap.ReadResult<List<RouteRow>> currentRead =
+                        preparedRows.read(key);
+                comparisons = Math.addExact(
+                        comparisons, currentRead.comparisons());
+                if (currentRead.value() == null) {
+                    continue;
+                }
+                List<RouteRow> retained = currentRead.value().stream()
+                        .filter(row -> !row.documentId().equals(documentId))
+                        .toList();
+                PersistentOrderedMap.Mutation<RouteKey, List<RouteRow>>
+                        mutation = retained.isEmpty()
+                                ? preparedRows.remove(key)
+                                : preparedRows.put(key, retained);
+                preparedRows = mutation.map();
+                comparisons = Math.addExact(
+                        comparisons, mutation.comparisons());
+                copiedNodes = Math.addExact(
+                        copiedNodes, mutation.copiedNodes());
+            }
+            PersistentOrderedMap.Mutation<DocumentId, Set<RouteKey>>
+                    removedKeys = preparedKeys.remove(documentId);
+            preparedKeys = removedKeys.map();
+            comparisons = Math.addExact(
+                    comparisons, removedKeys.comparisons());
+            copiedNodes = Math.addExact(
+                    copiedNodes, removedKeys.copiedNodes());
             for (Map.Entry<RouteKey, List<RouteRow>> entry
                     : inserted.entrySet()) {
-                List<RouteRow> targets = preparedRows.computeIfAbsent(
-                        entry.getKey(), ignored -> new ArrayList<>());
+                PersistentOrderedMap.ReadResult<List<RouteRow>> currentRead =
+                        preparedRows.read(entry.getKey());
+                comparisons = Math.addExact(
+                        comparisons, currentRead.comparisons());
+                List<RouteRow> targets = new ArrayList<>(
+                        currentRead.value() == null
+                                ? List.of() : currentRead.value());
                 targets.addAll(entry.getValue());
                 targets.sort(RouteRow.ORDER);
+                PersistentOrderedMap.Mutation<RouteKey, List<RouteRow>>
+                        mutation = preparedRows.put(
+                                entry.getKey(), List.copyOf(targets));
+                preparedRows = mutation.map();
+                comparisons = Math.addExact(
+                        comparisons, mutation.comparisons());
+                copiedNodes = Math.addExact(
+                        copiedNodes, mutation.copiedNodes());
             }
             if (!inserted.isEmpty()) {
-                preparedKeys.put(documentId,
+                Set<RouteKey> insertedKeys = Collections.unmodifiableSet(
                         new LinkedHashSet<>(inserted.keySet()));
+                PersistentOrderedMap.Mutation<DocumentId, Set<RouteKey>>
+                        mutation = preparedKeys.put(documentId, insertedKeys);
+                preparedKeys = mutation.map();
+                comparisons = Math.addExact(
+                        comparisons, mutation.comparisons());
+                copiedNodes = Math.addExact(
+                        copiedNodes, mutation.copiedNodes());
             }
         }
-        boolean changed = !rows.equals(preparedRows)
-                || !keysByDocument.equals(preparedKeys);
+        boolean changed = !changedRouteKeys.isEmpty();
         long resultingGeneration = changed
                 ? Math.addExact(generation, 1L) : generation;
-        ContractsStructuralWorkMetrics.recordGlobalPasses(
-                metrics,
-                ContractsStructuralWorkMetrics
-                        .GLOBAL_ROUTE_ENTRIES_TRAVERSED,
-                2L,
-                Math.addExact((long) rows.size(), preparedRows.size()));
-        Set<RouteKey> changedKeys = changedKeys(rows, preparedRows);
         long insertedRows = compiled.values().stream()
                 .flatMap(value -> value.values().stream())
                 .mapToLong(List::size)
@@ -151,9 +216,110 @@ final class OperationRouteIndex {
                 resultingGeneration,
                 preparedRows,
                 preparedKeys,
-                changedKeys.size(),
+                changedRouteKeys.size(),
                 retainedKeys,
-                insertedRows);
+                insertedRows,
+                comparisons,
+                copiedNodes,
+                operationRouteChanges);
+    }
+
+    private static OperationRouteProjection operationRoutes(
+            DocumentId documentId,
+            Set<RouteKey> routeKeys,
+            PersistentOrderedMap<RouteKey, List<RouteRow>> sourceRows) {
+        Map<RouteKey, List<RouteRow>> selected = new LinkedHashMap<>();
+        long comparisons = 0L;
+        for (RouteKey key : routeKeys.stream().sorted(RouteKey.ORDER)
+                .toList()) {
+            PersistentOrderedMap.ReadResult<List<RouteRow>> read =
+                    sourceRows.read(key);
+            comparisons = Math.addExact(comparisons, read.comparisons());
+            List<RouteRow> value = read.value();
+            if (value != null) {
+                selected.put(key, value);
+            }
+        }
+        return new OperationRouteProjection(
+                operationRoutes(documentId, selected), comparisons);
+    }
+
+    private static List<OperationRouteState> operationRoutes(
+            DocumentId documentId,
+            Map<RouteKey, List<RouteRow>> sourceRows) {
+        Map<OperationRouteIdentity, OperationRouteState> canonical =
+                new java.util.TreeMap<>(OperationRouteIdentity.ORDER);
+        sourceRows.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey(RouteKey.ORDER))
+                .forEach(entry -> entry.getValue().stream()
+                        .filter(row -> row.documentId().equals(documentId))
+                        .forEach(row -> {
+                            OperationRouteState state =
+                                    new OperationRouteState(
+                                            row.scopePath(),
+                                            entry.getKey().operation(),
+                                            entry.getKey().channel(),
+                                            row.sources());
+                            OperationRouteIdentity identity =
+                                    OperationRouteIdentity.from(state);
+                            OperationRouteState previous = canonical.putIfAbsent(
+                                    identity, state);
+                            if (previous != null && !previous.equals(state)) {
+                                throw new IllegalStateException(
+                                        "One operation route identity has "
+                                                + "conflicting compiled rows "
+                                                + documentId + " " + identity);
+                            }
+                        }));
+        return List.copyOf(canonical.values());
+    }
+
+    private static List<OperationRouteChange> operationRouteChanges(
+            DocumentId documentId,
+            List<OperationRouteState> before,
+            List<OperationRouteState> after) {
+        Map<OperationRouteIdentity, OperationRouteState> beforeByIdentity =
+                operationRoutesByIdentity(before);
+        Map<OperationRouteIdentity, OperationRouteState> afterByIdentity =
+                operationRoutesByIdentity(after);
+        Set<OperationRouteIdentity> identities = new java.util.TreeSet<>(
+                OperationRouteIdentity.ORDER);
+        identities.addAll(beforeByIdentity.keySet());
+        identities.addAll(afterByIdentity.keySet());
+        ArrayList<OperationRouteChange> changes = new ArrayList<>();
+        for (OperationRouteIdentity identity : identities) {
+            OperationRouteState beforeState = beforeByIdentity.get(identity);
+            OperationRouteState afterState = afterByIdentity.get(identity);
+            if (Objects.equals(beforeState, afterState)) {
+                continue;
+            }
+            OperationRouteChangeKind kind = beforeState == null
+                    ? OperationRouteChangeKind.ADD
+                    : afterState == null
+                    ? OperationRouteChangeKind.REMOVE
+                    : OperationRouteChangeKind.REPLACE;
+            changes.add(new OperationRouteChange(
+                    kind,
+                    documentId,
+                    Optional.ofNullable(beforeState),
+                    Optional.ofNullable(afterState)));
+        }
+        return List.copyOf(changes);
+    }
+
+    private static Map<OperationRouteIdentity, OperationRouteState>
+            operationRoutesByIdentity(List<OperationRouteState> routes) {
+        Map<OperationRouteIdentity, OperationRouteState> result =
+                new java.util.TreeMap<>(OperationRouteIdentity.ORDER);
+        for (OperationRouteState route : routes) {
+            OperationRouteState previous = result.putIfAbsent(
+                    OperationRouteIdentity.from(route), route);
+            if (previous != null) {
+                throw new IllegalStateException(
+                        "Duplicate operation route identity " + route);
+            }
+        }
+        return result;
     }
 
     private Map<RouteKey, List<RouteRow>> compile(
@@ -228,23 +394,13 @@ final class OperationRouteIndex {
                             + replacement.expectedGeneration + " but found "
                             + generation);
         }
-        ContractsStructuralWorkMetrics.recordGlobalPass(
-                metrics,
-                ContractsStructuralWorkMetrics
-                        .GLOBAL_ROUTE_ENTRIES_TRAVERSED,
-                replacement.rows.size());
-        rows.clear();
-        rows.putAll(copyRows(replacement.rows));
-        ContractsStructuralWorkMetrics.recordGlobalPass(
-                metrics,
-                ContractsStructuralWorkMetrics
-                        .GLOBAL_ROUTE_ENTRIES_TRAVERSED,
-                replacement.keysByDocument.size());
-        keysByDocument.clear();
-        keysByDocument.putAll(copyKeys(replacement.keysByDocument));
+        rows = replacement.rows;
+        keysByDocument = replacement.keysByDocument;
         generation = replacement.resultingGeneration;
         replacement.published = true;
         metrics.add("routing.routeKeysRetained", replacement.retainedKeys);
+        metrics.add("routing.routeIndexComparisons", replacement.comparisons);
+        metrics.add("routing.routeIndexNodesCopied", replacement.copiedNodes);
         if (replacement.expectedGeneration
                 == replacement.resultingGeneration) {
             metrics.increment("routing.surfacePublicationsSkipped");
@@ -253,52 +409,6 @@ final class OperationRouteIndex {
         metrics.increment("routing.surfaceCompilations");
         metrics.add("routing.routeKeysUpdated", replacement.changedKeys);
         metrics.add("routing.rowsCompiled", replacement.insertedRows);
-    }
-
-    private static Map<RouteKey, List<RouteRow>> copyRows(
-            Map<RouteKey, List<RouteRow>> source) {
-        Map<RouteKey, List<RouteRow>> result = new LinkedHashMap<>();
-        source.forEach((key, value) -> result.put(
-                key, new ArrayList<>(value)));
-        return result;
-    }
-
-    private static Map<DocumentId, Set<RouteKey>> copyKeys(
-            Map<DocumentId, Set<RouteKey>> source) {
-        Map<DocumentId, Set<RouteKey>> result = new LinkedHashMap<>();
-        source.forEach((key, value) -> result.put(
-                key, new LinkedHashSet<>(value)));
-        return result;
-    }
-
-    private static void removeRows(
-            Map<RouteKey, List<RouteRow>> targetRows,
-            Map<DocumentId, Set<RouteKey>> targetKeys,
-            DocumentId documentId) {
-        Set<RouteKey> existing = targetKeys.remove(documentId);
-        if (existing == null) {
-            return;
-        }
-        for (RouteKey key : existing) {
-            List<RouteRow> targets = targetRows.get(key);
-            if (targets == null) {
-                continue;
-            }
-            targets.removeIf(row -> row.documentId().equals(documentId));
-            if (targets.isEmpty()) {
-                targetRows.remove(key);
-            }
-        }
-    }
-
-    private static Set<RouteKey> changedKeys(
-            Map<RouteKey, List<RouteRow>> before,
-            Map<RouteKey, List<RouteRow>> after) {
-        Set<RouteKey> candidates = new LinkedHashSet<>(before.keySet());
-        candidates.addAll(after.keySet());
-        candidates.removeIf(key -> before.getOrDefault(key, List.of())
-                .equals(after.getOrDefault(key, List.of())));
-        return candidates;
     }
 
     public synchronized List<DocumentId> route(TimelineEntry entry) {
@@ -310,8 +420,10 @@ final class OperationRouteIndex {
         for (String eventKey
                 : TimelineProviderSupport.exactTimelineEntryEventKeys(
                 entry.timeline().timelineId(), entry.timeline().actorId())) {
-            for (RouteRow row : rows.getOrDefault(new RouteKey(
-                    entry.operation(), entry.channel(), eventKey), List.of())) {
+            List<RouteRow> routeRows = rows.get(new RouteKey(
+                    entry.operation(), entry.channel(), eventKey));
+            for (RouteRow row : routeRows == null ? List.<RouteRow>of()
+                    : routeRows) {
                 metrics.increment("routing.rowsInspected");
                 if (row.accepts(entry)
                         && target.accepts(
@@ -357,7 +469,9 @@ final class OperationRouteIndex {
                 entry.timeline().timelineId(), entry.timeline().actorId())) {
             RouteKey routeKey = new RouteKey(
                     entry.operation(), entry.channel(), eventKey);
-            for (RouteRow row : rows.getOrDefault(routeKey, List.of())) {
+            List<RouteRow> routeRows = rows.get(routeKey);
+            for (RouteRow row : routeRows == null ? List.<RouteRow>of()
+                    : routeRows) {
                 metrics.increment("routing.rowsInspected");
                 if (row.accepts(entry)
                         && target.accepts(
@@ -447,26 +561,9 @@ final class OperationRouteIndex {
         if (!keysByDocument.containsKey(documentId)) {
             return;
         }
-        long nextGeneration = Math.addExact(generation, 1L);
-        removeRows(documentId);
-        generation = nextGeneration;
-    }
-
-    private void removeRows(DocumentId documentId) {
-        Set<RouteKey> existing = keysByDocument.remove(documentId);
-        if (existing == null) {
-            return;
-        }
-        for (RouteKey key : existing) {
-            List<RouteRow> targets = rows.get(key);
-            if (targets == null) {
-                continue;
-            }
-            targets.removeIf(row -> row.documentId().equals(documentId));
-            if (targets.isEmpty()) {
-                rows.remove(key);
-            }
-        }
+        prepareReplacement(List.of(new Replacement(
+                documentId, new RoutingSurface(List.of(), false), List.of())))
+                .publish();
     }
 
     public synchronized int rowCount() {
@@ -483,9 +580,14 @@ final class OperationRouteIndex {
             return;
         }
         long nextGeneration = Math.addExact(generation, 1L);
-        rows.clear();
-        keysByDocument.clear();
+        rows = PersistentOrderedMap.empty(RouteKey.ORDER);
+        keysByDocument = PersistentOrderedMap.empty(
+                EmbeddingBinding.DOCUMENT_ORDER);
         generation = nextGeneration;
+    }
+
+    synchronized RouteStructureSnapshot routeStructureSnapshotForTesting() {
+        return new RouteStructureSnapshot(rows, keysByDocument);
     }
 
     /** One exact Root delivery selected from a frozen route generation. */
@@ -568,29 +670,44 @@ final class OperationRouteIndex {
         private final OperationRouteIndex owner;
         private final long expectedGeneration;
         private final long resultingGeneration;
-        private final Map<RouteKey, List<RouteRow>> rows;
-        private final Map<DocumentId, Set<RouteKey>> keysByDocument;
+        private final PersistentOrderedMap<RouteKey, List<RouteRow>> rows;
+        private final PersistentOrderedMap<DocumentId, Set<RouteKey>>
+                keysByDocument;
         private final long changedKeys;
         private final long retainedKeys;
         private final long insertedRows;
+        private final long comparisons;
+        private final long copiedNodes;
+        private final List<OperationRouteChange> operationRouteChanges;
         private boolean published;
 
         private PreparedReplacement(
                 long expectedGeneration,
                 long resultingGeneration,
-                Map<RouteKey, List<RouteRow>> rows,
-                Map<DocumentId, Set<RouteKey>> keysByDocument,
+                PersistentOrderedMap<RouteKey, List<RouteRow>> rows,
+                PersistentOrderedMap<DocumentId, Set<RouteKey>>
+                        keysByDocument,
                 long changedKeys,
                 long retainedKeys,
-                long insertedRows) {
+                long insertedRows,
+                long comparisons,
+                long copiedNodes,
+                List<OperationRouteChange> operationRouteChanges) {
             this.owner = OperationRouteIndex.this;
             this.expectedGeneration = expectedGeneration;
             this.resultingGeneration = resultingGeneration;
-            this.rows = copyRows(rows);
-            this.keysByDocument = copyKeys(keysByDocument);
+            this.rows = Objects.requireNonNull(rows, "rows");
+            this.keysByDocument = Objects.requireNonNull(
+                    keysByDocument, "keysByDocument");
             this.changedKeys = changedKeys;
             this.retainedKeys = retainedKeys;
             this.insertedRows = insertedRows;
+            this.comparisons = comparisons;
+            this.copiedNodes = copiedNodes;
+            this.operationRouteChanges = List.copyOf(
+                    Objects.requireNonNull(
+                            operationRouteChanges,
+                            "operationRouteChanges"));
         }
 
         long expectedGeneration() {
@@ -601,8 +718,122 @@ final class OperationRouteIndex {
             return resultingGeneration;
         }
 
+        /** Exact logical route delta compiled by this prepared replacement. */
+        List<OperationRouteChange> operationRouteChanges() {
+            return operationRouteChanges;
+        }
+
         void publish() {
             owner.publish(this);
+        }
+    }
+
+    /** Closed logical operation-route transition kind. */
+    enum OperationRouteChangeKind {
+        ADD,
+        REMOVE,
+        REPLACE
+    }
+
+    /** Exact externally routable operation state compiled for one document. */
+    record OperationRouteState(
+            String scopePath,
+            String operation,
+            String channel,
+            List<RoutingSurface.SourceAddress> acceptedSources) {
+        OperationRouteState {
+            scopePath = requireText(scopePath, "scopePath");
+            if (!scopePath.startsWith("/")) {
+                throw new IllegalArgumentException(
+                        "scopePath must be absolute");
+            }
+            operation = requireText(operation, "operation");
+            channel = requireText(channel, "channel");
+            acceptedSources = List.copyOf(Objects.requireNonNull(
+                    acceptedSources, "acceptedSources"));
+        }
+    }
+
+    /** One exact logical operation-route change from prepared reconciliation. */
+    record OperationRouteChange(
+            OperationRouteChangeKind kind,
+            DocumentId documentId,
+            Optional<OperationRouteState> before,
+            Optional<OperationRouteState> after) {
+        OperationRouteChange {
+            kind = Objects.requireNonNull(kind, "kind");
+            documentId = Objects.requireNonNull(documentId, "documentId");
+            before = Objects.requireNonNull(before, "before");
+            after = Objects.requireNonNull(after, "after");
+            if ((kind == OperationRouteChangeKind.ADD
+                    && (before.isPresent() || after.isEmpty()))
+                    || (kind == OperationRouteChangeKind.REMOVE
+                    && (before.isEmpty() || after.isPresent()))
+                    || (kind == OperationRouteChangeKind.REPLACE
+                    && (before.isEmpty() || after.isEmpty()))) {
+                throw new IllegalArgumentException(
+                        "Operation route change kind disagrees with its sides");
+            }
+        }
+    }
+
+    private record OperationRouteIdentity(
+            String scopePath,
+            String operation,
+            String channel) {
+        private static final Comparator<OperationRouteIdentity> ORDER =
+                Comparator.comparing(
+                                OperationRouteIdentity::scopePath,
+                                EmbeddingBinding.TEXT_ORDER)
+                        .thenComparing(
+                                OperationRouteIdentity::operation,
+                                EmbeddingBinding.TEXT_ORDER)
+                        .thenComparing(
+                                OperationRouteIdentity::channel,
+                                EmbeddingBinding.TEXT_ORDER);
+
+        private static OperationRouteIdentity from(
+                OperationRouteState state) {
+            return new OperationRouteIdentity(
+                    state.scopePath(), state.operation(), state.channel());
+        }
+
+        private OperationRouteIdentity {
+            scopePath = requireText(scopePath, "scopePath");
+            operation = requireText(operation, "operation");
+            channel = requireText(channel, "channel");
+        }
+    }
+
+    private record OperationRouteProjection(
+            List<OperationRouteState> routes,
+            long comparisons) {
+        private OperationRouteProjection {
+            routes = List.copyOf(Objects.requireNonNull(routes, "routes"));
+            if (comparisons < 0L) {
+                throw new IllegalArgumentException(
+                        "comparisons must be non-negative");
+            }
+        }
+    }
+
+    record RouteStructureSnapshot(
+            PersistentOrderedMap<RouteKey, List<RouteRow>> rows,
+            PersistentOrderedMap<DocumentId, Set<RouteKey>> keysByDocument) {
+        RouteStructureSnapshot {
+            rows = Objects.requireNonNull(rows, "rows");
+            keysByDocument = Objects.requireNonNull(
+                    keysByDocument, "keysByDocument");
+        }
+
+        int sharedRouteNodes(RouteStructureSnapshot other) {
+            return rows.sharedNodeCountForTesting(
+                    Objects.requireNonNull(other, "other").rows);
+        }
+
+        int sharedDocumentNodes(RouteStructureSnapshot other) {
+            return keysByDocument.sharedNodeCountForTesting(
+                    Objects.requireNonNull(other, "other").keysByDocument);
         }
     }
 
@@ -629,6 +860,12 @@ final class OperationRouteIndex {
             String operation,
             String channel,
             String subscriptionKey) {
+        private static final Comparator<RouteKey> ORDER = Comparator
+                .comparing(RouteKey::operation, EmbeddingBinding.TEXT_ORDER)
+                .thenComparing(RouteKey::channel, EmbeddingBinding.TEXT_ORDER)
+                .thenComparing(RouteKey::subscriptionKey,
+                        EmbeddingBinding.TEXT_ORDER);
+
         private RouteKey {
             operation = requireText(operation, "operation");
             channel = requireText(channel, "channel");

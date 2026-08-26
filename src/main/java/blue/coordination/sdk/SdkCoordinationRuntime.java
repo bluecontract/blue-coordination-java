@@ -2,6 +2,7 @@ package blue.coordination.sdk;
 
 import blue.coordination.api.ContractsClosureAdmissionReceipt;
 import blue.coordination.api.CoordinationEngine;
+import blue.coordination.api.CoordinationErrorCode;
 import blue.coordination.api.CoordinationException;
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.ExactValue;
@@ -13,14 +14,21 @@ import blue.coordination.api.TimelineAppendReceipt;
 import blue.coordination.api.TimelineEntry;
 import blue.coordination.internal.BundledContracts10Release;
 import blue.coordination.internal.Contracts10AuthoredClosureCompiler;
+import blue.coordination.internal.Contracts10StaticEmbeddedAdmissionCompiler;
 import blue.coordination.internal.ContractsManagedDraftPlan;
 import blue.coordination.internal.DefaultCoordinationEngine;
 import blue.language.model.Node;
 import blue.language.model.NodePathEditor;
 import blue.language.processor.ExternalOrderKey;
+import blue.language.processor.ProcessorDiagnostic;
+import blue.language.processor.closure.ClosureProcessResult;
+import blue.language.processor.closure.ClosureResourceDemand;
+import blue.language.snapshot.FrozenNode;
 
 import java.math.BigInteger;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -35,7 +43,10 @@ final class SdkCoordinationRuntime implements AutoCloseable {
     private final Object owner;
     private final DefaultCoordinationEngine engine;
     private final Contracts10AuthoredClosureCompiler compiler;
+    private final Contracts10StaticEmbeddedAdmissionCompiler staticCompiler;
     private final SdkDrainResultMapper mapper;
+    private final ScopedExactNodeProvider exactNodeProvider;
+    private final boolean contentDerivedDocumentIds;
     private final String languageSpecificationIdentity;
     private final String contractsSpecificationIdentity;
     private final boolean bundledRelease;
@@ -49,8 +60,14 @@ final class SdkCoordinationRuntime implements AutoCloseable {
     private SdkCoordinationRuntime(
             Object owner,
             String languageIdentity,
-            String contractsIdentity) {
+            String contractsIdentity,
+            ExactNodeProvider exactNodeProvider,
+            boolean contentDerivedDocumentIds) {
         this.owner = Objects.requireNonNull(owner, "owner");
+        this.exactNodeProvider = new ScopedExactNodeProvider(
+                Objects.requireNonNull(
+                        exactNodeProvider, "exactNodeProvider"));
+        this.contentDerivedDocumentIds = contentDerivedDocumentIds;
         BundledContracts10Release.Manifest bundled =
                 BundledContracts10Release.manifest();
         String language = languageIdentity == null
@@ -63,17 +80,24 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         contractsSpecificationIdentity = contracts;
         bundledRelease = languageIdentity == null;
         engine = DefaultCoordinationEngine.createContracts10Sdk(
-                language, contracts);
+                language, contracts, this.exactNodeProvider);
         compiler = new Contracts10AuthoredClosureCompiler(engine);
+        staticCompiler = new Contracts10StaticEmbeddedAdmissionCompiler(engine);
         mapper = new SdkDrainResultMapper(this, engine);
     }
 
     static SdkCoordinationRuntime create(
             Object owner,
             String languageIdentity,
-            String contractsIdentity) {
+            String contractsIdentity,
+            ExactNodeProvider exactNodeProvider,
+            boolean contentDerivedDocumentIds) {
         return new SdkCoordinationRuntime(
-                owner, languageIdentity, contractsIdentity);
+                owner,
+                languageIdentity,
+                contractsIdentity,
+                exactNodeProvider,
+                contentDerivedDocumentIds);
     }
 
     synchronized CoordinationEngine engine() {
@@ -93,6 +117,25 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                         audit.targetDocumentId(),
                         audit.activationGeneration(),
                         audit.active()));
+    }
+
+    synchronized List<OperationRouteSnapshot> auditOperationRoutes(
+            DocumentId documentId) {
+        ensureOpen();
+        return engine.auditOperationRoutes(Objects.requireNonNull(
+                        documentId, "documentId"))
+                .stream()
+                .map(route -> new OperationRouteSnapshot(
+                        route.scopePath(),
+                        route.operation(),
+                        route.channel(),
+                        route.requestPattern().map(ExactBlueValue::wrap),
+                        route.acceptedSources().stream()
+                                .map(source -> new TimelineSourceSnapshot(
+                                        source.timelineId(),
+                                        source.actorId()))
+                                .toList()))
+                .toList();
     }
 
     String languageSpecificationIdentity() {
@@ -123,20 +166,43 @@ final class SdkCoordinationRuntime implements AutoCloseable {
     synchronized TimelineHandle registerTimeline(
             String timelineId,
             String accountId) {
+        return registerTimeline(
+                timelineId, accountId, TimelineActorKind.PRINCIPAL);
+    }
+
+    synchronized TimelineHandle registerTimeline(
+            String timelineId,
+            String accountId,
+            TimelineActorKind actorKind) {
         ensureOpen();
+        TimelineActorKind kind = Objects.requireNonNull(
+                actorKind, "actorKind");
         Timeline registered = engine.registerTimeline(
                 requireText(timelineId, "timelineId"),
                 requireText(accountId, "accountId"));
+        engine.registerTimelineActorType(
+                registered.timelineId(), kind.blueType());
         TimelineHandle handle = new TimelineHandle(
-                owner, registered.timelineId(), registered.actorId());
+                owner, registered.timelineId(), registered.actorId(), kind);
         TimelineHandle prior = timelines.putIfAbsent(
                 registered.timelineId(), handle);
+        if (prior != null && prior.actorKind() != kind) {
+            throw new IllegalArgumentException(
+                    "Timeline " + registered.timelineId()
+                            + " already uses " + prior.actorKind());
+        }
         return prior == null ? handle : prior;
     }
 
     synchronized ExactBlueValue exactValue(String sourceYaml) {
         ensureOpen();
         return ExactBlueValue.wrap(engine.exactValue(
+                Objects.requireNonNull(sourceYaml, "sourceYaml")));
+    }
+
+    synchronized ExactBlueValue exactProviderValue(String sourceYaml) {
+        ensureOpen();
+        return ExactBlueValue.wrap(engine.exactProviderValue(
                 Objects.requireNonNull(sourceYaml, "sourceYaml")));
     }
 
@@ -167,8 +233,129 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                         List.of(),
                         Set.of(selected.id()),
                         activationInputs(selected.activationPolicy()));
-        admitCompiled(compiler.compile(request), Set.of(selected.id()));
+        Contracts10AuthoredClosureCompiler.CompiledClosure compiled =
+                contentDerivedDocumentIds
+                        ? compiler.compileContentIdentified(request)
+                        : compiler.compile(request);
+        admitCompiled(compiled, Set.of(selected.id()));
         return requireDocument(selected.id());
+    }
+
+    synchronized ClosureHandle admitStaticProcessEmbedded(
+            String authoredYaml) {
+        return admitStaticProcessEmbedded(
+                authoredYaml, ActivationPolicy.fromNow());
+    }
+
+    synchronized ClosureHandle admitStaticProcessEmbedded(
+            String authoredYaml,
+            ActivationPolicy activationPolicy) {
+        ensureOpen();
+        exactNodeProvider.beginLookupScope();
+        try {
+            return admitStaticProcessEmbeddedScoped(
+                    authoredYaml, activationPolicy);
+        } finally {
+            exactNodeProvider.endLookupScope();
+        }
+    }
+
+    private ClosureHandle admitStaticProcessEmbeddedScoped(
+            String authoredYaml,
+            ActivationPolicy activationPolicy) {
+        Contracts10StaticEmbeddedAdmissionCompiler.CompiledStaticAdmission
+                selected = staticCompiler.compile(
+                        Objects.requireNonNull(authoredYaml, "authoredYaml"),
+                        exactNodeProvider,
+                        activationInputs(Objects.requireNonNull(
+                                activationPolicy, "activationPolicy")));
+        DocumentId rootId = selected.rootDocumentId();
+        engine.authorizeContractsPublicRoots(Set.of(rootId));
+        Contracts10AuthoredClosureCompiler.ActivationInputs activation =
+                selected.activationInputs();
+        ContractsClosureAdmissionReceipt receipt = engine.admitContractsClosure(
+                selected.invocation(),
+                activation.policy(),
+                activation.verifiedFrontier(),
+                exactNodeProvider);
+        requirePublishedAdmission(receipt);
+        ClosureProcessResult result = receipt.attempt().processResult();
+        List<ClosureOccurrenceSnapshot> occurrences = result
+                .occurrenceBindings().stream()
+                .map(binding -> new ClosureOccurrenceSnapshot(
+                        DocumentId.of(binding.sourceDocumentId().value()),
+                        binding.sourcePath(),
+                        binding.activationGeneration(),
+                        DocumentId.of(binding.targetDocumentId().value()),
+                        binding.expectedTargetBlueId(),
+                        binding.active()))
+                .toList();
+        LinkedHashMap<String, DocumentId> aliases = staticAdmissionAliases(
+                rootId, result, occurrences);
+        LinkedHashMap<String, DocumentHandle> handles = new LinkedHashMap<>();
+        LinkedHashMap<String, ExactBlueValue> authored = new LinkedHashMap<>();
+        aliases.forEach((alias, documentId) -> {
+            handles.put(alias, requireDocument(documentId));
+            ExactValue initial = engine.history(documentId).get(0).before()
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Static admission lost authored history for "
+                                    + documentId));
+            authored.put(alias, ExactBlueValue.wrap(initial));
+        });
+        return new ClosureHandle(
+                owner,
+                result.outputClosureIdentity(),
+                handles,
+                Set.of("root"),
+                authored,
+                occurrences);
+    }
+
+    private static LinkedHashMap<String, DocumentId> staticAdmissionAliases(
+            DocumentId rootId,
+            ClosureProcessResult result,
+            List<ClosureOccurrenceSnapshot> occurrences) {
+        Comparator<ClosureOccurrenceSnapshot> occurrenceOrder = Comparator
+                .comparing(ClosureOccurrenceSnapshot::sourcePath)
+                .thenComparing(row -> row.targetDocumentId().value())
+                .thenComparing(ClosureOccurrenceSnapshot::expectedTargetBlueId);
+        LinkedHashMap<DocumentId, List<ClosureOccurrenceSnapshot>> outgoing =
+                new LinkedHashMap<>();
+        occurrences.forEach(row -> outgoing
+                .computeIfAbsent(row.sourceDocumentId(), ignored ->
+                        new ArrayList<>())
+                .add(row));
+        outgoing.values().forEach(rows -> rows.sort(occurrenceOrder));
+
+        LinkedHashMap<String, DocumentId> aliases = new LinkedHashMap<>();
+        LinkedHashSet<DocumentId> visited = new LinkedHashSet<>();
+        ArrayDeque<DocumentId> queue = new ArrayDeque<>();
+        aliases.put("root", rootId);
+        visited.add(rootId);
+        queue.add(rootId);
+        int embedded = 0;
+        while (!queue.isEmpty()) {
+            DocumentId source = queue.removeFirst();
+            for (ClosureOccurrenceSnapshot row
+                    : outgoing.getOrDefault(source, List.of())) {
+                if (visited.add(row.targetDocumentId())) {
+                    aliases.put("embedded-" + embedded++,
+                            row.targetDocumentId());
+                    queue.addLast(row.targetDocumentId());
+                }
+            }
+        }
+        ArrayList<DocumentId> remaining = result.resultingDocuments().stream()
+                .map(document -> DocumentId.of(
+                        document.documentId().value()))
+                .filter(visited::add)
+                .sorted(Comparator.comparing(DocumentId::value))
+                .collect(java.util.stream.Collectors.toCollection(
+                        ArrayList::new));
+        for (DocumentId documentId : remaining) {
+            aliases.put("embedded-" + embedded++, documentId);
+        }
+        return aliases;
     }
 
     synchronized ClosureHandle admit(ManagedClosure definition) {
@@ -202,7 +389,9 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                         roots,
                         activationInputs(selected.activationPolicy()));
         Contracts10AuthoredClosureCompiler.CompiledClosure compiled =
-                compiler.compile(request);
+                contentDerivedDocumentIds
+                        ? compiler.compileContentIdentified(request)
+                        : compiler.compile(request);
         ContractsClosureAdmissionReceipt receipt = admitCompiled(
                 compiled, roots);
         LinkedHashMap<String, DocumentHandle> handles = new LinkedHashMap<>();
@@ -219,6 +408,13 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         ensureOpen();
         engine.document(Objects.requireNonNull(id, "id"));
         return new SdkDocumentHandle(this, id);
+    }
+
+    synchronized DocumentHandle promotePublicRoot(DocumentId id) {
+        ensureOpen();
+        DocumentId selected = Objects.requireNonNull(id, "id");
+        engine.promoteContractsPublicRoot(selected);
+        return new SdkDocumentHandle(this, selected);
     }
 
     synchronized TargetSelection selectTarget(DocumentHandle document) {
@@ -304,22 +500,74 @@ final class SdkCoordinationRuntime implements AutoCloseable {
     }
 
     synchronized TimelineEntry retainedCoreEntry(String entryBlueId) {
-        CoreEntryRef ref = coreEntries.get(Objects.requireNonNull(
-                entryBlueId, "entryBlueId"));
-        return ref == null ? null : ref.entry();
+        String selected = Objects.requireNonNull(entryBlueId, "entryBlueId");
+        CoreEntryRef ref = coreEntries.get(selected);
+        return ref == null
+                ? engine.auditTimelineEntry(selected).orElse(null)
+                : ref.entry();
+    }
+
+    synchronized Optional<TimelineEntrySnapshot> auditTimelineEntry(
+            String entryBlueId) {
+        ensureOpen();
+        return engine.auditTimelineEntry(Objects.requireNonNull(
+                        entryBlueId, "entryBlueId"))
+                .map(this::publicTimelineEntry);
+    }
+
+    synchronized List<TimelineEntrySnapshot> auditTimelineEntries() {
+        ensureOpen();
+        return engine.auditTimelineEntries().stream()
+                .map(this::publicTimelineEntry)
+                .toList();
+    }
+
+    synchronized List<TimelineEntrySnapshot> auditTimeline(
+            String timelineId) {
+        ensureOpen();
+        String selected = requireText(timelineId, "timelineId");
+        return engine.auditTimeline(selected).stream()
+                .map(this::publicTimelineEntry)
+                .toList();
     }
 
     synchronized EntryHandle handle(TimelineEntry entry) {
-        TimelineHandle timeline = timelines.computeIfAbsent(
-                entry.timeline().timelineId(),
-                ignored -> new TimelineHandle(
-                        owner,
-                        entry.timeline().timelineId(),
-                        entry.timeline().actorId()));
+        TimelineHandle timeline = timelineHandle(entry);
         return new EntryHandle(
                 owner,
                 timeline,
                 entry.blueId(),
+                entry.globalSequence(),
+                entry.timelineSequence());
+    }
+
+    private TimelineHandle timelineHandle(TimelineEntry entry) {
+        return timelines.computeIfAbsent(
+                entry.timeline().timelineId(),
+                ignored -> new TimelineHandle(
+                        owner,
+                        entry.timeline().timelineId(),
+                        entry.timeline().actorId(),
+                        engine.timelineActorKind(entry.timeline().timelineId())
+                                .equals("MyOS/MyOS Agent Actor")
+                                ? TimelineActorKind.AGENT
+                                : TimelineActorKind.PRINCIPAL));
+    }
+
+    private TimelineEntrySnapshot publicTimelineEntry(TimelineEntry entry) {
+        FrozenNode previous = entry.exactEvent().canonicalAt("/prevEntry");
+        String previousBlueId = previous == null
+                ? null
+                : previous.isReferenceOnly()
+                        ? previous.getReferenceBlueId()
+                        : previous.blueId();
+        return new TimelineEntrySnapshot(
+                ExactBlueValue.wrap(entry.exactEvent()),
+                timelineHandle(entry),
+                Optional.ofNullable(previousBlueId),
+                entry.operation(),
+                entry.channel(),
+                entry.timestampMicros(),
                 entry.globalSequence(),
                 entry.timelineSequence());
     }
@@ -379,19 +627,63 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                         compiled.invocation(),
                         activation.policy(),
                         activation.verifiedFrontier());
-        if (!receipt.published()) {
-            if (!receipt.attempt().isComplete()) {
-                throw new IllegalStateException(
-                        "ADMISSION_NEEDS_RESOURCES: "
-                                + receipt.attempt().requiredExactBlueIds());
-            }
-            String status = receipt.attempt().processResult()
-                    .status().wireValue();
-            throw new IllegalStateException(
-                    "ADMISSION_REJECTED_"
-                            + status.toUpperCase().replace('-', '_'));
-        }
+        requirePublishedAdmission(receipt);
         return receipt;
+    }
+
+    private static void requirePublishedAdmission(
+            ContractsClosureAdmissionReceipt receipt) {
+        if (receipt.published()) {
+            return;
+        }
+        if (!receipt.attempt().isComplete()) {
+            LinkedHashMap<String, String> details = new LinkedHashMap<>();
+            List<String> required = receipt.attempt().requiredExactBlueIds();
+            if (!required.isEmpty()) {
+                details.put("blueId", required.get(0));
+            }
+            List<ClosureResourceDemand> demands =
+                    receipt.attempt().resourceDemands();
+            if (!demands.isEmpty()) {
+                ClosureResourceDemand first = demands.get(0);
+                details.put("sourceDocumentId",
+                        first.sourceDocumentId().value());
+                details.put("sourcePath", first.sourcePath());
+                details.putIfAbsent("blueId", first.suppliedValueBlueId());
+            }
+            throw new CoordinationException(
+                    CoordinationErrorCode.NEEDS_RESOURCES,
+                    "ADMISSION_NEEDS_RESOURCES: "
+                            + required,
+                    null,
+                    details);
+        }
+        throw admissionRejected(receipt.attempt().processResult());
+    }
+
+    private static CoordinationException admissionRejected(
+            ClosureProcessResult result) {
+        ProcessorDiagnostic diagnostic = result.diagnostic();
+        String status = result.status().wireValue();
+        String message = diagnostic == null
+                || diagnostic.message() == null
+                || diagnostic.message().isBlank()
+                ? "Contracts admission rejected with " + status
+                : diagnostic.message();
+        LinkedHashMap<String, String> details = new LinkedHashMap<>();
+        details.put("processorStatus", status);
+        details.put("invocationIdentity", result.invocationIdentity());
+        if (diagnostic != null) {
+            details.put("processorCategory",
+                    diagnostic.category().name());
+        }
+        return new CoordinationException(
+                CoordinationErrorCode.FROZEN_PROCESSING_FAILED,
+                message,
+                null,
+                details,
+                result.status(),
+                diagnostic);
     }
 
     private EntryHandle appendOperation(OperationCall call) {
@@ -542,7 +834,7 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         return selected;
     }
 
-    private static ContractsManagedDraftPlan.ManagedDraft managedDraft(
+    private ContractsManagedDraftPlan.ManagedDraft managedDraft(
             ManagedDocumentDraft draft) {
         if (draft.knownEpoch().isPresent()) {
             throw new UnsupportedOperationException(
@@ -553,7 +845,10 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                             + "supported");
         }
         return new ContractsManagedDraftPlan.ManagedDraft(
-                draft.id(), draft.initial().unwrap(), null);
+                draft.id(),
+                draft.initial().unwrap(),
+                null,
+                contentDerivedDocumentIds);
     }
 
     private static boolean sameManagedDraft(
@@ -561,7 +856,9 @@ final class SdkCoordinationRuntime implements AutoCloseable {
             ContractsManagedDraftPlan.ManagedDraft right) {
         return left.documentId().equals(right.documentId())
                 && left.initial().sameExactValue(right.initial())
-                && Objects.equals(left.knownEpoch(), right.knownEpoch());
+                && Objects.equals(left.knownEpoch(), right.knownEpoch())
+                && left.contentDerivedIdentity()
+                == right.contentDerivedIdentity();
     }
 
     private EntryHandle appendEvent(EventCall call) {
@@ -815,6 +1112,43 @@ final class SdkCoordinationRuntime implements AutoCloseable {
     private record CoreEntryRef(TimelineEntry entry) {
         private CoreEntryRef {
             entry = Objects.requireNonNull(entry, "entry");
+        }
+    }
+
+    /** Deduplicates provider transport reads within one static admission. */
+    private static final class ScopedExactNodeProvider
+            implements ExactNodeProvider {
+        private final ExactNodeProvider delegate;
+        private Map<String, Optional<String>> lookupScope;
+
+        private ScopedExactNodeProvider(ExactNodeProvider delegate) {
+            this.delegate = Objects.requireNonNull(delegate, "delegate");
+        }
+
+        private synchronized void beginLookupScope() {
+            if (lookupScope != null) {
+                throw new IllegalStateException(
+                        "Exact-node provider lookup scope is already active");
+            }
+            lookupScope = new LinkedHashMap<>();
+        }
+
+        private synchronized void endLookupScope() {
+            lookupScope = null;
+        }
+
+        @Override
+        public synchronized Optional<String> findExactContent(String blueId) {
+            String selected = Objects.requireNonNull(blueId, "blueId");
+            if (lookupScope != null && lookupScope.containsKey(selected)) {
+                return lookupScope.get(selected);
+            }
+            Optional<String> result = Objects.requireNonNull(
+                    delegate.findExactContent(selected), "provider result");
+            if (lookupScope != null) {
+                lookupScope.put(selected, result);
+            }
+            return result;
         }
     }
 

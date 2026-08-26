@@ -24,7 +24,26 @@ import java.util.TreeSet;
 record ContractsClosurePublicationReceipt(
         String publicationIdentity,
         List<DocumentId> documentIds,
-        ClosureAttemptResult attempt) {
+        ClosureAttemptResult attempt,
+        long automaticRetryCount,
+        ManagedSurfacePublicationEvidence managedSurfaceEvidence) {
+
+    ContractsClosurePublicationReceipt(
+            String publicationIdentity,
+            List<DocumentId> documentIds,
+            ClosureAttemptResult attempt) {
+        this(publicationIdentity, documentIds, attempt, 0L,
+                ManagedSurfacePublicationEvidence.empty());
+    }
+
+    ContractsClosurePublicationReceipt(
+            String publicationIdentity,
+            List<DocumentId> documentIds,
+            ClosureAttemptResult attempt,
+            long automaticRetryCount) {
+        this(publicationIdentity, documentIds, attempt, automaticRetryCount,
+                ManagedSurfacePublicationEvidence.empty());
+    }
 
     ContractsClosurePublicationReceipt {
         publicationIdentity = requireText(
@@ -34,6 +53,10 @@ record ContractsClosurePublicationReceipt(
             throw new IllegalArgumentException(
                     "A durable process receipt requires a completed attempt");
         }
+        MultiDocumentPublicationTransaction.requireSafeInteger(
+                automaticRetryCount, "automaticRetryCount");
+        managedSurfaceEvidence = Objects.requireNonNull(
+                managedSurfaceEvidence, "managedSurfaceEvidence");
         if (attempt.processResult().status()
                 == ProcessorStatus.CAPABILITY_FAILURE) {
             throw new IllegalArgumentException(
@@ -70,6 +93,27 @@ record ContractsClosurePublicationReceipt(
             throw new IllegalArgumentException(
                     "Process receipt cohort differs from its exact result");
         }
+        if (!result.commits()
+                && managedSurfaceEvidence.present()) {
+            throw new IllegalArgumentException(
+                    "A non-committing receipt cannot retain managed "
+                            + "publication evidence");
+        }
+    }
+
+    /** Returns the same receipt with its prepared route-index delta retained. */
+    ContractsClosurePublicationReceipt withOperationRouteChanges(
+            List<OperationRouteIndex.OperationRouteChange> changes) {
+        if (!commits()) {
+            throw new IllegalStateException(
+                    "A non-committing receipt has no route publication");
+        }
+        return new ContractsClosurePublicationReceipt(
+                publicationIdentity,
+                documentIds,
+                attempt,
+                automaticRetryCount,
+                managedSurfaceEvidence.withOperationRouteChanges(changes));
     }
 
     /** Whether the retained terminal result committed durable effects. */

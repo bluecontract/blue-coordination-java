@@ -58,6 +58,74 @@ final class OperationRouteIndexTest {
     }
 
     @Test
+    void preparedReplacementRetainsExactLogicalRouteDelta() {
+        // given
+        OperationRouteIndex index = new OperationRouteIndex(
+                new EngineMetrics());
+        RoutingSurface aliceSurface = surface("timeline-a", "alice");
+        RoutingSurface bobSurface = surface("timeline-b", "bob");
+
+        // when
+        OperationRouteIndex.PreparedReplacement added =
+                index.prepareReplacement(List.of(
+                        new OperationRouteIndex.Replacement(
+                                DOCUMENT,
+                                aliceSurface,
+                                List.of(active("timeline-a", "alice")))));
+
+        // then
+        assertEquals(List.of(new OperationRouteIndex.OperationRouteChange(
+                        OperationRouteIndex.OperationRouteChangeKind.ADD,
+                        DOCUMENT,
+                        java.util.Optional.empty(),
+                        java.util.Optional.of(routeState(
+                                "timeline-a", "alice")))),
+                added.operationRouteChanges());
+        added.publish();
+
+        // when / then: replace
+        OperationRouteIndex.PreparedReplacement replaced =
+                index.prepareReplacement(List.of(
+                        new OperationRouteIndex.Replacement(
+                                DOCUMENT,
+                                bobSurface,
+                                List.of(active("timeline-b", "bob")))));
+        assertEquals(List.of(new OperationRouteIndex.OperationRouteChange(
+                        OperationRouteIndex.OperationRouteChangeKind.REPLACE,
+                        DOCUMENT,
+                        java.util.Optional.of(routeState(
+                                "timeline-a", "alice")),
+                        java.util.Optional.of(routeState(
+                                "timeline-b", "bob")))),
+                replaced.operationRouteChanges());
+        replaced.publish();
+
+        OperationRouteIndex.PreparedReplacement unchanged =
+                index.prepareReplacement(List.of(
+                        new OperationRouteIndex.Replacement(
+                                DOCUMENT,
+                                bobSurface,
+                                List.of(active("timeline-b", "bob")))));
+        assertEquals(List.of(), unchanged.operationRouteChanges());
+        unchanged.publish();
+
+        // when / then: remove
+        OperationRouteIndex.PreparedReplacement removed =
+                index.prepareReplacement(List.of(
+                        new OperationRouteIndex.Replacement(
+                                DOCUMENT,
+                                new RoutingSurface(List.of(), false),
+                                List.of())));
+        assertEquals(List.of(new OperationRouteIndex.OperationRouteChange(
+                        OperationRouteIndex.OperationRouteChangeKind.REMOVE,
+                        DOCUMENT,
+                        java.util.Optional.of(routeState(
+                                "timeline-b", "bob")),
+                        java.util.Optional.empty())),
+                removed.operationRouteChanges());
+    }
+
+    @Test
     void invalidReplacementLeavesPriorRouteGenerationPublished() {
         // given
         OperationRouteIndex index = new OperationRouteIndex(
@@ -112,6 +180,67 @@ final class OperationRouteIndexTest {
                 ExternalOrderKey.of(List.of(5L)))));
         assertEquals(List.of(DOCUMENT), index.route(entry(
                 "timeline-b", "bob", "backupChannel")));
+    }
+
+    @Test
+    void replacesOneOfOneThousandRoutesByPersistentExactKeyWork() {
+        // given
+        EngineMetrics metrics = new EngineMetrics();
+        OperationRouteIndex index = new OperationRouteIndex(metrics);
+        ExternalOrderKey initial = ExternalOrderKey.of(List.of(0L));
+        for (int ordinal = 0; ordinal < 1_000; ordinal++) {
+            String suffix = String.format("%04d", ordinal);
+            String timeline = "timeline-" + suffix;
+            String actor = "actor-" + suffix;
+            index.replace(
+                    DocumentId.of("document-" + suffix),
+                    surface(timeline, actor),
+                    List.of(active(
+                            "ownerChannel", timeline, actor, initial)));
+        }
+        OperationRouteIndex.RouteStructureSnapshot before =
+                index.routeStructureSnapshotForTesting();
+        long comparisonsBefore = metrics.counter(
+                "routing.routeIndexComparisons");
+        long copiesBefore = metrics.counter(
+                "routing.routeIndexNodesCopied");
+        long globalBefore = metrics.counter(
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_ROUTE_ENTRIES_TRAVERSED);
+
+        // when
+        String selected = "0500";
+        ExternalOrderKey advanced = ExternalOrderKey.of(List.of(5L));
+        index.replace(
+                DocumentId.of("document-" + selected),
+                surface("timeline-" + selected, "actor-" + selected),
+                List.of(active(
+                        "ownerChannel",
+                        "timeline-" + selected,
+                        "actor-" + selected,
+                        advanced)));
+        OperationRouteIndex.RouteStructureSnapshot after =
+                index.routeStructureSnapshotForTesting();
+
+        // then
+        assertEquals(1_000, index.rowCount());
+        assertEquals(globalBefore, metrics.counter(
+                ContractsStructuralWorkMetrics
+                        .GLOBAL_ROUTE_ENTRIES_TRAVERSED));
+        assertTrue(after.sharedRouteNodes(before) > 950);
+        assertTrue(after.sharedDocumentNodes(before) > 950);
+        assertTrue(metrics.counter("routing.routeIndexComparisons")
+                - comparisonsBefore < 200L);
+        assertTrue(metrics.counter("routing.routeIndexNodesCopied")
+                - copiesBefore < 200L);
+        assertEquals(List.of(), index.route(entry(
+                "timeline-" + selected,
+                "actor-" + selected,
+                "ownerChannel",
+                ExactValue.verified(new Node().value("at-boundary")),
+                advanced)));
+        assertEquals(List.of(DocumentId.of("document-0999")), index.route(
+                entry("timeline-0999", "actor-0999")));
     }
 
     @Test
@@ -366,6 +495,16 @@ final class OperationRouteIndexTest {
                 "ownerChannel",
                 timeline,
                 actor)), false);
+    }
+
+    private static OperationRouteIndex.OperationRouteState routeState(
+            String timeline,
+            String actor) {
+        return new OperationRouteIndex.OperationRouteState(
+                "/",
+                "increment",
+                "ownerChannel",
+                List.of(new RoutingSurface.SourceAddress(timeline, actor)));
     }
 
     private static SubscriptionDelta.Entry active(

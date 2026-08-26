@@ -110,6 +110,12 @@ final class ProcessEmbeddedComponentIndexTest {
                 memberLists(index.cohorts().get(0).components()));
         assertEquals(List.of(List.of(C), List.of(B)),
                 memberLists(index.cohorts().get(1).components()));
+        assertEquals(List.of(
+                        List.of(A),
+                        List.of(C),
+                        List.of(B),
+                        List.of(z)),
+                memberLists(index.components()));
         assertEquals(index.cohort(A), index.cohort(z));
         assertFalse(index.cohort(A).equals(index.cohort(B)));
     }

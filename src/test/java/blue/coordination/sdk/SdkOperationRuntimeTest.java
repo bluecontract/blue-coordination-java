@@ -1,6 +1,11 @@
 package blue.coordination.sdk;
 
 import blue.coordination.api.DocumentId;
+import blue.coordination.api.Operation;
+import blue.coordination.api.Timeline;
+import blue.coordination.api.TimelineEntry;
+import blue.language.model.Node;
+import blue.language.model.NodePathEditor;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -62,6 +67,77 @@ final class SdkOperationRuntimeTest {
                     result.stats().documentStepOrder());
             assertEquals(1, result.closures().size());
             assertEquals(1, result.closures().get(0).changes().size());
+        }
+    }
+
+    @Test
+    void agentTimelineAuthorsAgentEvidenceAndMatchesAgentRoute() {
+        // given
+        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            TimelineHandle agent = blue.timelines().register(
+                    "agent-timeline",
+                    "agent-account",
+                    TimelineActorKind.AGENT);
+            String source = COUNTER
+                    .replace("timelineId: alice", "timelineId: agent-timeline")
+                    .replace("type: MyOS/Principal Actor",
+                            "type: MyOS/MyOS Agent Actor")
+                    .replace("accountId: alice", "accountId: agent-account");
+            DocumentHandle counter = blue.documents()
+                    .admit(ManagedDocument.yaml(COUNTER_ID, source)
+                            .publicRoot()
+                            .fromNow());
+
+            // when
+            EntryResult result = increment(blue, counter, agent, 2).execute();
+            TimelineEntrySnapshot entry = blue.advanced()
+                    .auditTimelineEntry(result.entry().blueId())
+                    .orElseThrow();
+
+            // then
+            assertEquals(TimelineActorKind.AGENT, agent.actorKind());
+            assertEquals(EntryDisposition.APPLIED, result.disposition());
+            assertEquals(2L, counter.snapshot().longAt("/counter"));
+            Node actor = NodePathEditor.getOrNull(
+                    entry.exact().copyNode(), "/actor");
+            assertEquals(
+                    "C2Fyt8obT6QR8WWFCPF5G36VXZLwzaM1SLtMKKAp4pwd",
+                    actor.getType().getBlueId());
+            assertEquals("agent-account", NodePathEditor.getOrNull(
+                    entry.exact().copyNode(),
+                    "/actor/accountId").getValue());
+        }
+    }
+
+    @Test
+    void timelineAuditReadsCanonicalJournalIncludingRawEngineAppends() {
+        // given
+        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            Timeline rawTimeline = blue.advanced().rawEngine()
+                    .registerTimeline("raw-timeline", "raw-actor");
+
+            // when
+            TimelineEntry rawEntry = blue.advanced().rawEngine().append(
+                    rawTimeline,
+                    Operation.yaml("raw-operation", "raw-channel", "{}"));
+            TimelineEntrySnapshot audited = blue.advanced()
+                    .auditTimelineEntry(rawEntry.blueId())
+                    .orElseThrow();
+
+            // then
+            assertEquals(rawEntry.blueId(), audited.blueId());
+            assertEquals("raw-timeline", audited.timeline().id());
+            assertEquals("raw-actor", audited.timeline().accountId());
+            assertEquals(TimelineActorKind.PRINCIPAL,
+                    audited.timeline().actorKind());
+            assertEquals("raw-operation", audited.operation());
+            assertEquals("raw-channel", audited.channel());
+            assertEquals(List.of(audited),
+                    blue.advanced().auditTimeline("raw-timeline"));
+            assertEquals(List.of(audited),
+                    blue.advanced().auditTimelineEntries());
+            assertThrows(UnsupportedOperationException.class,
+                    () -> blue.advanced().auditTimelineEntries().clear());
         }
     }
 

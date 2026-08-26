@@ -2,6 +2,7 @@ package blue.coordination.sdk;
 
 import blue.coordination.api.CoordinationEngine;
 import blue.coordination.api.DocumentId;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -32,6 +33,30 @@ public final class AdvancedCoordination {
         return runtime.auditManagedOccurrence(
                 Objects.requireNonNull(sourceDocumentId, "sourceDocumentId"),
                 SdkPreconditions.requireOccurrencePath(sourcePath));
+    }
+
+    /** Reads the current processor-compiled external operation routes. */
+    public List<OperationRouteSnapshot> auditOperationRoutes(DocumentId id) {
+        return runtime.auditOperationRoutes(
+                Objects.requireNonNull(id, "id"));
+    }
+
+    /** Reads one whole retained Timeline Entry without mutating processing. */
+    public Optional<TimelineEntrySnapshot> auditTimelineEntry(
+            String entryBlueId) {
+        return runtime.auditTimelineEntry(
+                SdkPreconditions.requireText(entryBlueId, "entryBlueId"));
+    }
+
+    /** Reads every retained Timeline Entry in canonical append order. */
+    public List<TimelineEntrySnapshot> auditTimelineEntries() {
+        return runtime.auditTimelineEntries();
+    }
+
+    /** Reads one Timeline's retained entries in source-local order. */
+    public List<TimelineEntrySnapshot> auditTimeline(String timelineId) {
+        return runtime.auditTimeline(
+                SdkPreconditions.requireText(timelineId, "timelineId"));
     }
 
     public String blueLanguageSpecificationIdentity() {

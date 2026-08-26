@@ -82,11 +82,49 @@ public final class DefaultCoordinationEngine
         }
     }
 
+    /** Narrow immutable source address used by advanced diagnostic adapters. */
+    public record OperationRouteSourceAuditView(
+            String timelineId,
+            String actorId) {
+        public OperationRouteSourceAuditView {
+            timelineId = requireAuditText(timelineId, "timelineId");
+            actorId = requireAuditText(actorId, "actorId");
+        }
+    }
+
+    /** Narrow immutable compiled route used by advanced diagnostic adapters. */
+    public record OperationRouteAuditView(
+            String scopePath,
+            String operation,
+            String channel,
+            Optional<ExactValue> requestPattern,
+            List<OperationRouteSourceAuditView> acceptedSources) {
+        public OperationRouteAuditView {
+            scopePath = requireAuditText(scopePath, "scopePath");
+            operation = requireAuditText(operation, "operation");
+            channel = requireAuditText(channel, "channel");
+            requestPattern = Objects.requireNonNull(
+                    requestPattern, "requestPattern");
+            acceptedSources = List.copyOf(Objects.requireNonNull(
+                    acceptedSources, "acceptedSources"));
+        }
+    }
+
+    private static String requireAuditText(String value, String label) {
+        String checked = Objects.requireNonNull(value, label);
+        if (checked.isBlank()) {
+            throw new IllegalArgumentException(label + " must not be blank");
+        }
+        return checked;
+    }
+
     private static final long BASE_TIMESTAMP_MICROS =
             1_800_000_000_000_000L;
 
     private final EngineMetrics metrics;
     private final WholeObjectStore objects;
+    private final blue.language.provider.NodeProvider
+            applicationExactNodeProvider;
     private final BlueRuntime runtime;
     private final WholeRequestEntryFactory entryFactory;
     private final InMemoryTimelineJournal journal;
@@ -105,6 +143,8 @@ public final class DefaultCoordinationEngine
     private ContractsRootFeederCoordinator contractsFeederCoordinator;
     private ContractsJournalDrainCoordinator contractsJournalCoordinator;
     private final Map<String, Timeline> timelines = new LinkedHashMap<>();
+    private final Map<String, String> timelineActorKinds =
+            new LinkedHashMap<>();
     private Consumer<FailurePoint> failureInjector = ignored -> { };
     private long logicalClockMicros = BASE_TIMESTAMP_MICROS;
     private long applicationClockMicros = BASE_TIMESTAMP_MICROS;
@@ -112,10 +152,22 @@ public final class DefaultCoordinationEngine
 
     private DefaultCoordinationEngine(
             ContractsBootstrap contractsConfiguration) {
+        this(contractsConfiguration, null);
+    }
+
+    private DefaultCoordinationEngine(
+            ContractsBootstrap contractsConfiguration,
+            blue.coordination.sdk.ExactNodeProvider exactNodeProvider) {
         metrics = new EngineMetrics();
         objects = new WholeObjectStore(metrics);
-        runtime = BlueRuntime.create(objects, metrics);
-        entryFactory = new WholeRequestEntryFactory(runtime, objects, metrics);
+        applicationExactNodeProvider = exactNodeProvider == null
+                ? null
+                : Contracts10StaticEmbeddedAdmissionCompiler
+                        .verifiedProvider(exactNodeProvider);
+        runtime = BlueRuntime.create(
+                objects, metrics, applicationExactNodeProvider);
+        entryFactory = new WholeRequestEntryFactory(
+                runtime, objects, metrics, this::timelineActorKind);
         journal = new InMemoryTimelineJournal(entryFactory, metrics);
         documents = new InMemoryDocumentStore(metrics);
         routeIndex = new OperationRouteIndex(
@@ -217,6 +269,23 @@ public final class DefaultCoordinationEngine
     }
 
     /**
+     * Creates the SDK Contracts runtime with one verified application exact
+     * node provider available to ordinary Language resolution.
+     */
+    public static DefaultCoordinationEngine createContracts10Sdk(
+            String blueLanguageSpecificationIdentity,
+            String contractsSpecificationIdentity,
+            blue.coordination.sdk.ExactNodeProvider exactNodeProvider) {
+        return new DefaultCoordinationEngine(
+                new ContractsBootstrap(
+                        blueLanguageSpecificationIdentity,
+                        contractsSpecificationIdentity,
+                        Set.of()),
+                Objects.requireNonNull(
+                        exactNodeProvider, "exactNodeProvider"));
+    }
+
+    /**
      * Authorizes additional public Root lineages for the SDK host profile.
      *
      * <p>This mutates only host routing configuration. It does not admit a
@@ -237,6 +306,26 @@ public final class DefaultCoordinationEngine
         contractsActiveSourceTimelines.addPublicRoots(checked);
     }
 
+    /**
+     * Exposes one already-admitted lineage as a public Root.
+     *
+     * <p>This changes only the host's Root/source catalogs. It does not append
+     * an entry, execute a process, change document content, or advance an
+     * epoch.</p>
+     */
+    public synchronized void promoteContractsPublicRoot(DocumentId id) {
+        ensureOpen();
+        if (contractsClosureProfile == null) {
+            throw new IllegalStateException(
+                    "Contracts 1.0 was not enabled for this engine");
+        }
+        DocumentId selected = Objects.requireNonNull(id, "id");
+        requireDocument(selected);
+        contractsClosureProfile.addPublicRoots(Set.of(selected));
+        contractsActiveSourceTimelines.addPublicRoots(Set.of(selected));
+        contractsActiveSourceTimelines.refresh(Set.of(selected), documents);
+    }
+
     @Override
     public synchronized Timeline registerTimeline(
             String timelineId,
@@ -250,6 +339,50 @@ public final class DefaultCoordinationEngine
                             + existing.actorId());
         }
         return existing == null ? proposed : existing;
+    }
+
+    /** Selects the exact actor contract used for SDK-authored entries. */
+    public synchronized void registerTimelineActorType(
+            String timelineId,
+            String actorType) {
+        if (!timelines.containsKey(timelineId)) {
+            throw new IllegalArgumentException(
+                    "Timeline is not registered: " + timelineId);
+        }
+        String checked = Objects.requireNonNull(actorType, "actorType");
+        String existing = timelineActorKinds.putIfAbsent(
+                timelineId, checked);
+        if (existing != null && !existing.equals(checked)) {
+            throw new IllegalArgumentException(
+                    "Timeline " + timelineId + " already uses " + existing);
+        }
+    }
+
+    /** Returns the exact actor contract used for SDK-authored entries. */
+    public synchronized String timelineActorKind(String timelineId) {
+        return timelineActorKinds.getOrDefault(
+                timelineId, "MyOS/Principal Actor");
+    }
+
+    /** Returns one canonical retained Timeline Entry for read-only audit. */
+    public synchronized Optional<TimelineEntry> auditTimelineEntry(
+            String entryBlueId) {
+        ensureOpen();
+        return journal.byBlueId(requireAuditText(
+                entryBlueId, "entryBlueId"));
+    }
+
+    /** Returns every canonical retained Timeline Entry in append order. */
+    public synchronized List<TimelineEntry> auditTimelineEntries() {
+        ensureOpen();
+        return journal.entries();
+    }
+
+    /** Returns canonical retained entries for one Timeline in append order. */
+    public synchronized List<TimelineEntry> auditTimeline(
+            String timelineId) {
+        ensureOpen();
+        return journal.entries(requireAuditText(timelineId, "timelineId"));
     }
 
     synchronized Timeline timeline(String timelineId, String actorId) {
@@ -371,6 +504,49 @@ public final class DefaultCoordinationEngine
                 input, selectedPolicy, frontier);
     }
 
+    /**
+     * SDK static-admission seam for resolving exact referenced occurrence
+     * content without changing the provider used by ordinary operations.
+     */
+    public synchronized ContractsClosureAdmissionReceipt
+            admitContractsClosure(
+                    ClosureInvocationInput input,
+                    CoordinationEngine.AdmissionPolicy policy,
+                    ExternalOrderKey verifiedFrontier,
+                    blue.coordination.sdk.ExactNodeProvider exactNodeProvider) {
+        ensureOpen();
+        if (contractsClosureAdapter == null) {
+            throw new CoordinationException(
+                    CoordinationErrorCode.ATOMIC_COMMIT_FAILED,
+                    "admitContractsClosure requires Contracts 1.0 mode");
+        }
+        CoordinationEngine.AdmissionPolicy selectedPolicy =
+                Objects.requireNonNull(policy, "policy");
+        ExternalOrderKey frontier = switch (selectedPolicy) {
+            case FULL_HISTORY -> {
+                requireNoExplicitFrontier(selectedPolicy, verifiedFrontier);
+                yield ExternalOrderKey.of(List.of(
+                        BigInteger.valueOf(Long.MIN_VALUE),
+                        "contracts-full-history-admission",
+                        Objects.requireNonNull(input, "input")
+                                .invocationIdentity()));
+            }
+            case FROM_FRONTIER -> requireRetainedFrontier(verifiedFrontier);
+            case FROM_NOW -> {
+                requireNoExplicitFrontier(selectedPolicy, verifiedFrontier);
+                yield currentContractsAdmissionFrontier(
+                        Objects.requireNonNull(input, "input"));
+            }
+        };
+        return contractsClosureAdmissionAdapter.admitAndPublish(
+                input,
+                selectedPolicy,
+                frontier,
+                Contracts10StaticEmbeddedAdmissionCompiler.verifiedProvider(
+                        Objects.requireNonNull(
+                                exactNodeProvider, "exactNodeProvider")));
+    }
+
     @Override
     public synchronized void configureEmbeddedAdmission(
             DocumentId documentId,
@@ -436,6 +612,25 @@ public final class DefaultCoordinationEngine
         ensureOpen();
         return runtime.exactSource(
                 sourceYaml, objects, "external-exact-value");
+    }
+
+    /**
+     * Parses provider content, preprocesses runtime aliases, and retains its
+     * direct identity without resolving the value's type as an instance.
+     *
+     * <p>This public method is an internal cross-package bridge for the
+     * developer SDK. Applications use
+     * {@link blue.coordination.sdk.ExactValues#providerContentYaml(String)}.
+     * The returned value is not installed in the engine object store.</p>
+     */
+    public synchronized ExactValue exactProviderValue(String sourceYaml) {
+        ensureOpen();
+        return runtime.exactProviderSource(sourceYaml);
+    }
+
+    /** Provider leaf shared with isolated authored-closure verification. */
+    blue.language.provider.NodeProvider applicationExactNodeProvider() {
+        return applicationExactNodeProvider;
     }
 
     synchronized ExactValue embeddedDocumentRequest(
@@ -937,6 +1132,31 @@ public final class DefaultCoordinationEngine
                         row.active()));
     }
 
+    /** Reads the current processor-compiled operation routes without mutation. */
+    public synchronized List<OperationRouteAuditView> auditOperationRoutes(
+            DocumentId documentId) {
+        ensureOpen();
+        return requireDocument(Objects.requireNonNull(
+                        documentId, "documentId"))
+                .layout()
+                .routingSurface()
+                .operationDefinitions()
+                .stream()
+                .map(definition -> new OperationRouteAuditView(
+                        definition.scopePath(),
+                        definition.operation(),
+                        definition.channelKey(),
+                        Optional.ofNullable(definition.requestPattern())
+                                .map(ExactValue::fromFrozen),
+                        definition.sources().stream()
+                                .map(source ->
+                                        new OperationRouteSourceAuditView(
+                                                source.timelineId(),
+                                                source.actorId()))
+                                .toList()))
+                .toList();
+    }
+
     private DocumentSession requireDocument(DocumentId documentId) {
         ensureOpen();
         try {
@@ -1178,16 +1398,41 @@ public final class DefaultCoordinationEngine
                         cohort.outcome();
                 entryAttempts.add(new ContractsClosureDispatchAttempt(
                         entry.blueId(),
-                        exact.members(),
+                        exact.publicationMembers(),
                         exact.attempt(),
                         exact.published(),
                         exact.publicationIdentity(),
-                        exact.replayed()));
+                        exact.replayed(),
+                        exact.automaticRetryCount(),
+                        exact.managedSurfaceEvidence()
+                                .resolvedOccurrences()
+                                .stream()
+                                .map(resolution -> new
+                                        ContractsClosureDispatchAttempt
+                                                .ManagedOccurrenceResolution(
+                                                resolution.demandIdentity(),
+                                                resolution.occurrence(),
+                                                ContractsClosureDispatchAttempt
+                                                        .TargetKind.valueOf(
+                                                        resolution.targetKind()
+                                                                .name()),
+                                                Optional.ofNullable(
+                                                        resolution
+                                                                .authoredInitial())))
+                                .toList(),
+                        exact.managedSurfaceEvidence().inputComponents(),
+                        exact.managedSurfaceEvidence()
+                                .operationRouteChanges()
+                                .stream()
+                                .map(DefaultCoordinationEngine
+                                        ::operationRouteChange)
+                                .toList()));
                 if (!cohort.outcome().published()
                         || cohort.outcome().replayed()) {
                     continue;
                 }
-                for (DocumentId member : cohort.outcome().members()) {
+                for (DocumentId member
+                        : cohort.outcome().publicationMembers()) {
                     documents.require(member).revisionForEntry(entry.blueId())
                             .ifPresent(revision -> entryOutcomes.add(
                                     new DocumentDispatchOutcome(
@@ -1215,6 +1460,32 @@ public final class DefaultCoordinationEngine
                 progress.paused(),
                 committed,
                 System.nanoTime() - started);
+    }
+
+    private static ContractsClosureDispatchAttempt.OperationRouteChange
+            operationRouteChange(
+                    OperationRouteIndex.OperationRouteChange change) {
+        return new ContractsClosureDispatchAttempt.OperationRouteChange(
+                ContractsClosureDispatchAttempt.OperationRouteChangeKind
+                        .valueOf(change.kind().name()),
+                change.documentId(),
+                change.before().map(
+                        DefaultCoordinationEngine::operationRouteState),
+                change.after().map(
+                        DefaultCoordinationEngine::operationRouteState));
+    }
+
+    private static ContractsClosureDispatchAttempt.OperationRouteState
+            operationRouteState(
+                    OperationRouteIndex.OperationRouteState state) {
+        return new ContractsClosureDispatchAttempt.OperationRouteState(
+                state.scopePath(),
+                state.operation(),
+                state.channel(),
+                state.acceptedSources().stream()
+                        .map(source -> new Timeline(
+                                source.timelineId(), source.actorId()))
+                        .toList());
     }
 
     private ContractsJournalDrainCoordinator createContractsJournalCoordinator() {

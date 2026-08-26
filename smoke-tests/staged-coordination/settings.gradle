@@ -1,0 +1,91 @@
+import groovy.json.JsonSlurper
+import org.gradle.api.initialization.resolve.RepositoriesMode
+
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'blue-coordination-staged-consumer'
+
+def checkedRepository = { String propertyName ->
+    String value = providers.gradleProperty(propertyName).orNull
+    if (value == null || value.isBlank()) {
+        throw new GradleException("-${'P'}${propertyName} is required")
+    }
+    File path = new File(value)
+    if (!path.isAbsolute() || !path.canonicalFile.isDirectory()) {
+        throw new GradleException("${propertyName} must be an absolute repository")
+    }
+    path.canonicalFile
+}
+def checkedManifest = { File repository, String propertyName ->
+    String expected = providers.gradleProperty(propertyName).orNull
+    if (expected == null || !(expected ==~ /sha256:[0-9a-f]{64}/)) {
+        throw new GradleException("-${'P'}${propertyName}=sha256:<hex> is required")
+    }
+    File manifest = new File(repository, 'artifact-manifest.json')
+    File sidecar = new File(repository, 'artifact-manifest.json.sha256')
+    if (!manifest.isFile() || java.nio.file.Files.isSymbolicLink(
+            manifest.toPath()) || !sidecar.isFile()
+            || java.nio.file.Files.isSymbolicLink(sidecar.toPath())) {
+        throw new GradleException('repository manifest or sidecar is missing')
+    }
+    String hash = java.security.MessageDigest.getInstance('SHA-256')
+            .digest(manifest.bytes).encodeHex().toString()
+    if (expected != 'sha256:' + hash
+            || sidecar.getText('UTF-8')
+            != hash + '  artifact-manifest.json\n') {
+        throw new GradleException('repository manifest identity differs')
+    }
+    new JsonSlurper().parse(manifest)
+}
+
+File coordinationRepository = checkedRepository('coordinationRepository')
+File contractsRepository = checkedRepository('contractsRepository')
+def coordinationManifest = checkedManifest(
+        coordinationRepository, 'coordinationManifestSha256')
+def contractsManifest = checkedManifest(
+        contractsRepository, 'contractsManifestSha256')
+if (coordinationManifest.groupId != 'blue.coordination'
+        || contractsManifest.groupId != 'blue.language'
+        || coordinationManifest.contracts.manifestIdentity
+        != providers.gradleProperty('contractsManifestSha256').get()) {
+    throw new GradleException(
+            'staged Coordination and Contracts manifests are not bound')
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        exclusiveContent {
+            forRepository {
+                maven {
+                    name = 'immutableCoordination'
+                    url = uri(coordinationRepository)
+                    metadataSources {
+                        mavenPom()
+                        artifact()
+                    }
+                }
+            }
+            filter { includeGroup 'blue.coordination' }
+        }
+        exclusiveContent {
+            forRepository {
+                maven {
+                    name = 'immutableContracts'
+                    url = uri(contractsRepository)
+                    metadataSources {
+                        mavenPom()
+                        artifact()
+                    }
+                }
+            }
+            filter { includeGroup 'blue.language' }
+        }
+        mavenCentral()
+    }
+}

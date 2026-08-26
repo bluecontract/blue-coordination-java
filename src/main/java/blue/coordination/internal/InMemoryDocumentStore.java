@@ -72,6 +72,7 @@ final class InMemoryDocumentStore {
                 nextSessions.values(), state.occurrenceInventory());
         state = state.withSessions(
                 nextSessions,
+                state.lineageIndex().withNewLineage(session),
                 nextIndex,
                 increment(state.componentIndexGeneration(),
                         "component index generation"));
@@ -90,6 +91,7 @@ final class InMemoryDocumentStore {
                 nextSessions.values(), state.occurrenceInventory());
         state = state.withSessions(
                 nextSessions,
+                state.lineageIndex().withoutLineage(selected),
                 nextIndex,
                 increment(state.componentIndexGeneration(),
                         "component index generation"));
@@ -109,8 +111,38 @@ final class InMemoryDocumentStore {
         return state.occurrenceInventory();
     }
 
+    /** Exact immutable managed-lineage indexes without a session scan. */
+    synchronized ManagedLineageIndex lineageIndex() {
+        return state.lineageIndex();
+    }
+
+    /**
+     * Captures the exact immutable indexes used by one occurrence-resolution
+     * attempt without opening or scanning document sessions.
+     */
+    synchronized OccurrenceResolutionSnapshot occurrenceResolutionSnapshot() {
+        return new OccurrenceResolutionSnapshot(
+                state.lineageIndex(),
+                state.occurrenceInventory(),
+                state.componentIndex(),
+                state.occurrenceInventoryGeneration(),
+                state.componentIndexGeneration());
+    }
+
     EngineMetrics metrics() {
         return metrics;
+    }
+
+    synchronized StoreStructureSnapshot storeStructureSnapshotForTesting() {
+        return new StoreStructureSnapshot(
+                state.sessionIndex(),
+                state.componentIndex(),
+                state.componentStateInventory(),
+                state.outboxLog(),
+                state.checkpointEvidenceLog(),
+                state.publicationReceiptIndex(),
+                state.admissionReceiptIndex(),
+                state.closurePublicationReceiptIndex());
     }
 
     /** Captures every durable head plus immutable publication evidence. */
@@ -126,7 +158,8 @@ final class InMemoryDocumentStore {
                 state.occurrenceInventoryGeneration(),
                 state.componentIndexGeneration(),
                 state.occurrenceInventory(),
-                state.componentIndex());
+                state.componentIndex(),
+                state.closureSubscriptions());
     }
 
     /** Captures only the durable heads and component states in one cohort. */
@@ -139,6 +172,20 @@ final class InMemoryDocumentStore {
     synchronized ClosureSnapshot closureSnapshot(
             Collection<DocumentId> documentIds,
             ClosureTopologySnapshot expectedTopology) {
+        return targetedClosureSnapshot(
+                documentIds, expectedTopology, true);
+    }
+
+    /** Captures a static-admission partition, including the empty partition. */
+    synchronized ClosureSnapshot admissionSnapshot(
+            Collection<DocumentId> documentIds) {
+        return targetedClosureSnapshot(documentIds, null, false);
+    }
+
+    private ClosureSnapshot targetedClosureSnapshot(
+            Collection<DocumentId> documentIds,
+            ClosureTopologySnapshot expectedTopology,
+            boolean requireMember) {
         if (expectedTopology != null
                 && (state.occurrenceInventoryGeneration()
                         != expectedTopology.occurrenceInventoryGeneration()
@@ -162,7 +209,7 @@ final class InMemoryDocumentStore {
                     session.epoch(),
                     session.currentRevision().after().blueId()));
         }
-        if (heads.isEmpty()) {
+        if (requireMember && heads.isEmpty()) {
             throw new IllegalArgumentException(
                     "A closure snapshot requires at least one document");
         }
@@ -206,6 +253,14 @@ final class InMemoryDocumentStore {
                         publicationIdentity, "publicationIdentity")));
     }
 
+    /** Looks up one typed admission receipt without opening document heads. */
+    synchronized Optional<ContractsClosureAdmissionReceipt> admissionReceipt(
+            String publicationIdentity) {
+        return Optional.ofNullable(state.admissionReceipts().get(
+                Objects.requireNonNull(
+                        publicationIdentity, "publicationIdentity")));
+    }
+
     /** Checks the generic idempotency ledger without opening document heads. */
     synchronized boolean hasPublicationReceipt(String publicationIdentity) {
         return state.publicationReceipts().contains(Objects.requireNonNull(
@@ -236,29 +291,136 @@ final class InMemoryDocumentStore {
         return Math.addExact(value, 1L);
     }
 
+    /** Immutable indexed store image for one managed-occurrence resolution. */
+    record OccurrenceResolutionSnapshot(
+            ManagedLineageIndex lineageIndex,
+            ManagedOccurrenceInventory occurrenceInventory,
+            ProcessEmbeddedComponentIndex componentIndex,
+            long occurrenceInventoryGeneration,
+            long componentIndexGeneration) {
+        OccurrenceResolutionSnapshot {
+            lineageIndex = Objects.requireNonNull(
+                    lineageIndex, "lineageIndex");
+            occurrenceInventory = Objects.requireNonNull(
+                    occurrenceInventory, "occurrenceInventory");
+            componentIndex = Objects.requireNonNull(
+                    componentIndex, "componentIndex");
+            MultiDocumentPublicationTransaction.requireSafeInteger(
+                    occurrenceInventoryGeneration,
+                    "occurrenceInventoryGeneration");
+            MultiDocumentPublicationTransaction.requireSafeInteger(
+                    componentIndexGeneration,
+                    "componentIndexGeneration");
+        }
+    }
+
+    record StoreStructureSnapshot(
+            PersistentOrderedMap<DocumentId, DocumentSession> sessions,
+            ProcessEmbeddedComponentIndex componentIndex,
+            ComponentStateInventory componentStates,
+            PersistentAppendLog<PublicEventOccurrence> outbox,
+            PersistentAppendLog<CheckpointWrite> checkpoints,
+            PersistentOrderedMap<String, Boolean> publicationReceipts,
+            PersistentOrderedMap<String, ContractsClosureAdmissionReceipt>
+                    admissionReceipts,
+            PersistentOrderedMap<String, ContractsClosurePublicationReceipt>
+                    closurePublicationReceipts) {
+        StoreStructureSnapshot {
+            sessions = Objects.requireNonNull(sessions, "sessions");
+            componentIndex = Objects.requireNonNull(
+                    componentIndex, "componentIndex");
+            componentStates = Objects.requireNonNull(
+                    componentStates, "componentStates");
+            outbox = Objects.requireNonNull(outbox, "outbox");
+            checkpoints = Objects.requireNonNull(checkpoints, "checkpoints");
+            publicationReceipts = Objects.requireNonNull(
+                    publicationReceipts, "publicationReceipts");
+            admissionReceipts = Objects.requireNonNull(
+                    admissionReceipts, "admissionReceipts");
+            closurePublicationReceipts = Objects.requireNonNull(
+                    closurePublicationReceipts,
+                    "closurePublicationReceipts");
+        }
+
+        int sharedSessionNodes(StoreStructureSnapshot other) {
+            return sessions.sharedNodeCountForTesting(
+                    Objects.requireNonNull(other, "other").sessions);
+        }
+
+        int sharedComponentIndexNodes(StoreStructureSnapshot other) {
+            return componentIndex.sharedComponentNodesForTesting(
+                    Objects.requireNonNull(other, "other").componentIndex);
+        }
+
+        int sharedComponentStateNodes(StoreStructureSnapshot other) {
+            return componentStates.sharedLineageNodesForTesting(
+                    Objects.requireNonNull(other, "other").componentStates);
+        }
+
+        boolean sameComponentIndexEntryIdentity(
+                StoreStructureSnapshot other,
+                DocumentId document) {
+            return componentIndex.sameComponentEntryIdentityForTesting(
+                    Objects.requireNonNull(other, "other").componentIndex,
+                    document);
+        }
+
+        boolean sameComponentStateEntryIdentity(
+                StoreStructureSnapshot other,
+                DocumentId document) {
+            return componentStates.sameStateEntryIdentityForTesting(
+                    Objects.requireNonNull(other, "other").componentStates,
+                    document);
+        }
+
+        boolean evidenceExtends(StoreStructureSnapshot prefix) {
+            StoreStructureSnapshot selected = Objects.requireNonNull(
+                    prefix, "prefix");
+            return outbox.extendsLog(selected.outbox)
+                    && checkpoints.extendsLog(selected.checkpoints);
+        }
+
+        int outboxSize() {
+            return outbox.size();
+        }
+
+        int checkpointSize() {
+            return checkpoints.size();
+        }
+    }
+
     /** Immutable durable publication image; exactly one instance is swapped. */
     static final class StoreState {
+        private final PersistentOrderedMap<DocumentId, DocumentSession>
+                sessionIndex;
         private final Map<DocumentId, DocumentSession> sessions;
+        private final ManagedLineageIndex lineageIndex;
         private final ManagedOccurrenceInventory occurrenceInventory;
         private final long occurrenceInventoryGeneration;
         private final ProcessEmbeddedComponentIndex componentIndex;
         private final long componentIndexGeneration;
         private final ClosureGraphGenerationInventory graphGenerations;
-        private final List<ComponentSnapshot> componentStates;
-        private final Map<DocumentId, ComponentSnapshot>
-                componentStateByDocument;
-        private final Map<String, Integer> componentStateOrder;
+        private final ComponentStateInventory componentStates;
         private final ClosureSubscriptionInventory closureSubscriptions;
-        private final List<PublicEventOccurrence> outbox;
-        private final List<CheckpointWrite> checkpointEvidence;
+        private final PersistentAppendLog<PublicEventOccurrence> outbox;
+        private final PersistentAppendLog<CheckpointWrite>
+                checkpointEvidence;
+        private final PersistentOrderedMap<String, Boolean>
+                publicationReceiptIndex;
         private final Set<String> publicationReceipts;
+        private final PersistentOrderedMap<String,
+                ContractsClosureAdmissionReceipt> admissionReceiptIndex;
         private final Map<String, ContractsClosureAdmissionReceipt>
                 admissionReceipts;
+        private final PersistentOrderedMap<String,
+                ContractsClosurePublicationReceipt>
+                closurePublicationReceiptIndex;
         private final Map<String, ContractsClosurePublicationReceipt>
                 closurePublicationReceipts;
 
         StoreState(
                 Map<DocumentId, DocumentSession> sessions,
+                ManagedLineageIndex lineageIndex,
                 ManagedOccurrenceInventory occurrenceInventory,
                 long occurrenceInventoryGeneration,
                 ProcessEmbeddedComponentIndex componentIndex,
@@ -273,9 +435,16 @@ final class InMemoryDocumentStore {
                         admissionReceipts,
                 Map<String, ContractsClosurePublicationReceipt>
                         closurePublicationReceipts) {
-            this.sessions = Collections.unmodifiableMap(
-                    new LinkedHashMap<>(Objects.requireNonNull(
-                            sessions, "sessions")));
+            this.sessionIndex = sessionIndex(sessions);
+            this.sessions = new PersistentMapView<>(sessionIndex);
+            this.lineageIndex = Objects.requireNonNull(
+                    lineageIndex, "lineageIndex");
+            if (!this.lineageIndex.documentIds().equals(
+                    this.sessions.keySet())) {
+                throw new IllegalArgumentException(
+                        "Managed-lineage index must cover every durable "
+                                + "document exactly once");
+            }
             this.occurrenceInventory = Objects.requireNonNull(
                     occurrenceInventory, "occurrenceInventory");
             this.occurrenceInventoryGeneration =
@@ -335,11 +504,8 @@ final class InMemoryDocumentStore {
                         component.componentStateIdentity(), statePosition);
             }
             requireCondensationOrder(canonicalComponents, componentIndex);
-            this.componentStates = List.copyOf(canonicalComponents);
-            this.componentStateByDocument = Collections.unmodifiableMap(
-                    byDocument);
-            this.componentStateOrder = Collections.unmodifiableMap(
-                    orderByIdentity);
+            this.componentStates = ComponentStateInventory.of(
+                    canonicalComponents);
             this.closureSubscriptions = Objects.requireNonNull(
                     closureSubscriptions, "closureSubscriptions");
             this.closureSubscriptions.states().forEach(state -> {
@@ -357,7 +523,7 @@ final class InMemoryDocumentStore {
                             "Closure subscription does not identify the durable "
                                     + "document head " + owner);
                 }
-                ComponentSnapshot component = componentStateByDocument.get(
+                ComponentSnapshot component = this.componentStates.forDocument(
                         owner);
                 if (component == null) {
                     throw new IllegalArgumentException(
@@ -377,13 +543,15 @@ final class InMemoryDocumentStore {
                                     + "for " + owner);
                 }
             });
-            this.outbox = List.copyOf(Objects.requireNonNull(
+            this.outbox = PersistentAppendLog.of(Objects.requireNonNull(
                     outbox, "outbox"));
-            this.checkpointEvidence = List.copyOf(Objects.requireNonNull(
-                    checkpointEvidence, "checkpointEvidence"));
+            this.checkpointEvidence = PersistentAppendLog.of(
+                    Objects.requireNonNull(
+                            checkpointEvidence, "checkpointEvidence"));
+            this.publicationReceiptIndex = publicationReceiptIndex(
+                    publicationReceipts);
             this.publicationReceipts = Collections.unmodifiableSet(
-                    new LinkedHashSet<>(Objects.requireNonNull(
-                            publicationReceipts, "publicationReceipts")));
+                    new PersistentMapView<>(publicationReceiptIndex).keySet());
             LinkedHashMap<String, ContractsClosureAdmissionReceipt>
                     typedReceipts = new LinkedHashMap<>();
             Objects.requireNonNull(
@@ -421,8 +589,9 @@ final class InMemoryDocumentStore {
                                 this.sessions,
                                 "Admission receipt");
                     });
-            this.admissionReceipts = Collections.unmodifiableMap(
-                    typedReceipts);
+            this.admissionReceiptIndex = admissionReceiptIndex(typedReceipts);
+            this.admissionReceipts = new PersistentMapView<>(
+                    admissionReceiptIndex);
             LinkedHashMap<String, ContractsClosurePublicationReceipt>
                     processReceipts = new LinkedHashMap<>();
             Objects.requireNonNull(
@@ -459,8 +628,105 @@ final class InMemoryDocumentStore {
                                 this.sessions,
                                 "Process receipt");
                     });
-            this.closurePublicationReceipts = Collections.unmodifiableMap(
-                    processReceipts);
+            this.closurePublicationReceiptIndex =
+                    closurePublicationReceiptIndex(processReceipts);
+            this.closurePublicationReceipts = new PersistentMapView<>(
+                    closurePublicationReceiptIndex);
+        }
+
+        private StoreState(
+                PersistentOrderedMap<DocumentId, DocumentSession> sessionIndex,
+                ManagedLineageIndex lineageIndex,
+                ManagedOccurrenceInventory occurrenceInventory,
+                long occurrenceInventoryGeneration,
+                ProcessEmbeddedComponentIndex componentIndex,
+                long componentIndexGeneration,
+                ClosureGraphGenerationInventory graphGenerations,
+                ComponentStateInventory componentStates,
+                ClosureSubscriptionInventory closureSubscriptions,
+                PersistentAppendLog<PublicEventOccurrence> outbox,
+                PersistentAppendLog<CheckpointWrite> checkpointEvidence,
+                PersistentOrderedMap<String, Boolean> publicationReceiptIndex,
+                PersistentOrderedMap<String, ContractsClosureAdmissionReceipt>
+                        admissionReceiptIndex,
+                PersistentOrderedMap<String,
+                        ContractsClosurePublicationReceipt>
+                        closurePublicationReceiptIndex) {
+            this.sessionIndex = Objects.requireNonNull(
+                    sessionIndex, "sessionIndex");
+            this.sessions = new PersistentMapView<>(sessionIndex);
+            this.lineageIndex = Objects.requireNonNull(
+                    lineageIndex, "lineageIndex");
+            this.occurrenceInventory = Objects.requireNonNull(
+                    occurrenceInventory, "occurrenceInventory");
+            this.occurrenceInventoryGeneration =
+                    MultiDocumentPublicationTransaction.requireSafeInteger(
+                            occurrenceInventoryGeneration,
+                            "occurrenceInventoryGeneration");
+            this.componentIndex = Objects.requireNonNull(
+                    componentIndex, "componentIndex");
+            this.componentIndexGeneration =
+                    MultiDocumentPublicationTransaction.requireSafeInteger(
+                            componentIndexGeneration,
+                            "componentIndexGeneration");
+            this.graphGenerations = Objects.requireNonNull(
+                    graphGenerations, "graphGenerations");
+
+            this.componentStates = Objects.requireNonNull(
+                    componentStates, "componentStates");
+            this.closureSubscriptions = Objects.requireNonNull(
+                    closureSubscriptions, "closureSubscriptions");
+            this.outbox = Objects.requireNonNull(outbox, "outbox");
+            this.checkpointEvidence = Objects.requireNonNull(
+                    checkpointEvidence, "checkpointEvidence");
+            this.publicationReceiptIndex = Objects.requireNonNull(
+                    publicationReceiptIndex, "publicationReceiptIndex");
+            this.publicationReceipts = Collections.unmodifiableSet(
+                    new PersistentMapView<>(publicationReceiptIndex).keySet());
+            this.admissionReceiptIndex = Objects.requireNonNull(
+                    admissionReceiptIndex, "admissionReceiptIndex");
+            this.admissionReceipts = new PersistentMapView<>(
+                    admissionReceiptIndex);
+            this.closurePublicationReceiptIndex = Objects.requireNonNull(
+                    closurePublicationReceiptIndex,
+                    "closurePublicationReceiptIndex");
+            this.closurePublicationReceipts = new PersistentMapView<>(
+                    closurePublicationReceiptIndex);
+        }
+
+        static StoreState trustedTransition(
+                PersistentOrderedMap<DocumentId, DocumentSession> sessions,
+                ManagedLineageIndex lineageIndex,
+                ManagedOccurrenceInventory occurrenceInventory,
+                long occurrenceInventoryGeneration,
+                ProcessEmbeddedComponentIndex componentIndex,
+                long componentIndexGeneration,
+                ClosureGraphGenerationInventory graphGenerations,
+                ComponentStateInventory componentStates,
+                ClosureSubscriptionInventory closureSubscriptions,
+                PersistentAppendLog<PublicEventOccurrence> outbox,
+                PersistentAppendLog<CheckpointWrite> checkpointEvidence,
+                PersistentOrderedMap<String, Boolean> publicationReceipts,
+                PersistentOrderedMap<String, ContractsClosureAdmissionReceipt>
+                        admissionReceipts,
+                PersistentOrderedMap<String,
+                        ContractsClosurePublicationReceipt>
+                        closurePublicationReceipts) {
+            return new StoreState(
+                    sessions,
+                    lineageIndex,
+                    occurrenceInventory,
+                    occurrenceInventoryGeneration,
+                    componentIndex,
+                    componentIndexGeneration,
+                    graphGenerations,
+                    componentStates,
+                    closureSubscriptions,
+                    outbox,
+                    checkpointEvidence,
+                    publicationReceipts,
+                    admissionReceipts,
+                    closurePublicationReceipts);
         }
 
         static StoreState empty() {
@@ -468,6 +734,7 @@ final class InMemoryDocumentStore {
                     ManagedOccurrenceInventory.empty();
             return new StoreState(
                     Map.of(),
+                    ManagedLineageIndex.empty(),
                     inventory,
                     0L,
                     InMemoryDocumentStore.componentIndex(
@@ -485,9 +752,11 @@ final class InMemoryDocumentStore {
 
         StoreState withSessions(
                 Map<DocumentId, DocumentSession> replacementSessions,
+                ManagedLineageIndex replacementLineages,
                 ProcessEmbeddedComponentIndex replacementIndex,
                 long replacementIndexGeneration) {
-            List<ComponentSnapshot> retainedComponents = componentStates.stream()
+            List<ComponentSnapshot> retainedComponents = componentStates()
+                    .stream()
                     .filter(component -> component.orderedMemberDocumentIds()
                             .stream().allMatch(documentId ->
                                     replacementSessions.containsKey(DocumentId.of(
@@ -495,6 +764,7 @@ final class InMemoryDocumentStore {
                     .toList();
             return new StoreState(
                     replacementSessions,
+                    replacementLineages,
                     occurrenceInventory,
                     occurrenceInventoryGeneration,
                     replacementIndex,
@@ -504,15 +774,23 @@ final class InMemoryDocumentStore {
                     retainedComponents,
                     closureSubscriptions.retainingDocuments(
                             replacementSessions.keySet()),
-                    outbox,
-                    checkpointEvidence,
+                    outbox.values(),
+                    checkpointEvidence.values(),
                     publicationReceipts,
                     admissionReceipts,
                     closurePublicationReceipts);
         }
 
+        PersistentOrderedMap<DocumentId, DocumentSession> sessionIndex() {
+            return sessionIndex;
+        }
+
         Map<DocumentId, DocumentSession> sessions() {
             return sessions;
+        }
+
+        ManagedLineageIndex lineageIndex() {
+            return lineageIndex;
         }
 
         ManagedOccurrenceInventory occurrenceInventory() {
@@ -536,27 +814,20 @@ final class InMemoryDocumentStore {
         }
 
         List<ComponentSnapshot> componentStates() {
-            return componentStates;
+            return componentStates.states(componentIndex);
         }
 
         List<ComponentSnapshot> componentStatesFor(
                 Collection<DocumentId> documentIds) {
-            LinkedHashMap<String, ComponentSnapshot> selected =
-                    new LinkedHashMap<>();
-            for (DocumentId documentId : documentIds) {
-                ComponentSnapshot component = componentStateByDocument.get(
-                        Objects.requireNonNull(documentId, "documentId"));
-                if (component != null) {
-                    selected.putIfAbsent(
-                            component.componentStateIdentity(), component);
-                }
-            }
-            ArrayList<ComponentSnapshot> canonical = new ArrayList<>(
-                    selected.values());
-            canonical.sort((left, right) -> Integer.compare(
-                    componentStateOrder.get(left.componentStateIdentity()),
-                    componentStateOrder.get(right.componentStateIdentity())));
-            return List.copyOf(canonical);
+            return componentStates.statesFor(documentIds, componentIndex);
+        }
+
+        ComponentStateInventory componentStateInventory() {
+            return componentStates;
+        }
+
+        ComponentSnapshot componentState(String componentIdentity) {
+            return componentStates.byLineage(componentIdentity);
         }
 
         ClosureSubscriptionInventory closureSubscriptions() {
@@ -564,11 +835,38 @@ final class InMemoryDocumentStore {
         }
 
         List<PublicEventOccurrence> outbox() {
-            return outbox;
+            return outbox.values();
         }
 
         List<CheckpointWrite> checkpointEvidence() {
+            return checkpointEvidence.values();
+        }
+
+        PersistentAppendLog<PublicEventOccurrence> outboxLog() {
+            return outbox;
+        }
+
+        PersistentAppendLog<CheckpointWrite> checkpointEvidenceLog() {
             return checkpointEvidence;
+        }
+
+        boolean hasPublicationReceipt(String identity) {
+            return publicationReceiptIndex.containsKey(
+                    Objects.requireNonNull(identity, "identity"));
+        }
+
+        PersistentOrderedMap<String, Boolean> publicationReceiptIndex() {
+            return publicationReceiptIndex;
+        }
+
+        PersistentOrderedMap<String, ContractsClosureAdmissionReceipt>
+                admissionReceiptIndex() {
+            return admissionReceiptIndex;
+        }
+
+        PersistentOrderedMap<String, ContractsClosurePublicationReceipt>
+                closurePublicationReceiptIndex() {
+            return closurePublicationReceiptIndex;
         }
 
         Set<String> publicationReceipts() {
@@ -582,6 +880,82 @@ final class InMemoryDocumentStore {
         Map<String, ContractsClosurePublicationReceipt>
                 closurePublicationReceipts() {
             return closurePublicationReceipts;
+        }
+
+        private static PersistentOrderedMap<DocumentId, DocumentSession>
+                sessionIndex(Map<DocumentId, DocumentSession> sessions) {
+            PersistentOrderedMap<DocumentId, DocumentSession> result =
+                    PersistentOrderedMap.empty(
+                            EmbeddingBinding.DOCUMENT_ORDER);
+            for (Map.Entry<DocumentId, DocumentSession> entry
+                    : Objects.requireNonNull(sessions, "sessions").entrySet()) {
+                DocumentId documentId = Objects.requireNonNull(
+                        entry.getKey(), "documentId");
+                DocumentSession session = Objects.requireNonNull(
+                        entry.getValue(), "session");
+                if (!documentId.equals(session.documentId())
+                        || result.containsKey(documentId)) {
+                    throw new IllegalArgumentException(
+                            "Session index contains a duplicate or wrong key "
+                                    + documentId);
+                }
+                result = result.put(documentId, session).map();
+            }
+            return result;
+        }
+
+        private static PersistentOrderedMap<String, Boolean>
+                publicationReceiptIndex(Collection<String> identities) {
+            PersistentOrderedMap<String, Boolean> result =
+                    PersistentOrderedMap.empty(EmbeddingBinding.TEXT_ORDER);
+            for (String identity : Objects.requireNonNull(
+                    identities, "publicationReceipts")) {
+                String selected = Objects.requireNonNull(
+                        identity, "publicationReceipt");
+                if (result.containsKey(selected)) {
+                    throw new IllegalArgumentException(
+                            "Duplicate publication receipt " + selected);
+                }
+                result = result.put(selected, Boolean.TRUE).map();
+            }
+            return result;
+        }
+
+        private static PersistentOrderedMap<String,
+                ContractsClosureAdmissionReceipt> admissionReceiptIndex(
+                        Map<String, ContractsClosureAdmissionReceipt>
+                                receipts) {
+            PersistentOrderedMap<String, ContractsClosureAdmissionReceipt>
+                    result = PersistentOrderedMap.empty(
+                            EmbeddingBinding.TEXT_ORDER);
+            for (Map.Entry<String, ContractsClosureAdmissionReceipt> entry
+                    : Objects.requireNonNull(
+                            receipts, "admissionReceipts").entrySet()) {
+                result = result.put(
+                        Objects.requireNonNull(entry.getKey(), "identity"),
+                        Objects.requireNonNull(entry.getValue(), "receipt"))
+                        .map();
+            }
+            return result;
+        }
+
+        private static PersistentOrderedMap<String,
+                ContractsClosurePublicationReceipt>
+                closurePublicationReceiptIndex(
+                        Map<String, ContractsClosurePublicationReceipt>
+                                receipts) {
+            PersistentOrderedMap<String, ContractsClosurePublicationReceipt>
+                    result = PersistentOrderedMap.empty(
+                            EmbeddingBinding.TEXT_ORDER);
+            for (Map.Entry<String, ContractsClosurePublicationReceipt> entry
+                    : Objects.requireNonNull(
+                            receipts, "closurePublicationReceipts").entrySet()) {
+                result = result.put(
+                        Objects.requireNonNull(entry.getKey(), "identity"),
+                        Objects.requireNonNull(entry.getValue(), "receipt"))
+                        .map();
+            }
+            return result;
         }
 
         private static void requireRetainedResult(
@@ -683,7 +1057,8 @@ final class InMemoryDocumentStore {
             long occurrenceInventoryGeneration,
             long componentIndexGeneration,
             ManagedOccurrenceInventory occurrenceInventory,
-            ProcessEmbeddedComponentIndex componentIndex) {
+            ProcessEmbeddedComponentIndex componentIndex,
+            ClosureSubscriptionInventory closureSubscriptions) {
         ClosureTopologySnapshot {
             MultiDocumentPublicationTransaction.requireSafeInteger(
                     occurrenceInventoryGeneration,
@@ -695,6 +1070,8 @@ final class InMemoryDocumentStore {
                     occurrenceInventory, "occurrenceInventory");
             componentIndex = Objects.requireNonNull(
                     componentIndex, "componentIndex");
+            closureSubscriptions = Objects.requireNonNull(
+                    closureSubscriptions, "closureSubscriptions");
         }
     }
 

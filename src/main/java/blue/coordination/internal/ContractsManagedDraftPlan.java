@@ -177,7 +177,16 @@ public final class ContractsManagedDraftPlan {
     public record ManagedDraft(
             DocumentId documentId,
             ExactValue initial,
-            Long knownEpoch) {
+            Long knownEpoch,
+            boolean contentDerivedIdentity) {
+        /** Preserves the legacy authored {@code /documentId} identity policy. */
+        public ManagedDraft(
+                DocumentId documentId,
+                ExactValue initial,
+                Long knownEpoch) {
+            this(documentId, initial, knownEpoch, false);
+        }
+
         public ManagedDraft {
             documentId = Objects.requireNonNull(documentId, "documentId");
             initial = Objects.requireNonNull(initial, "initial");
@@ -186,11 +195,17 @@ public final class ContractsManagedDraftPlan {
                         "Managed PROCESS expansion requires a direct exact "
                                 + "draft input");
             }
-            if (!DocumentIdentityReader.requireDocumentId(initial).equals(
-                    documentId)) {
+            DocumentId exactIdentity = DocumentId.of(initial.blueId());
+            DocumentId selectedIdentity = contentDerivedIdentity
+                    ? exactIdentity
+                    : DocumentIdentityReader.requireDocumentId(initial);
+            if (!selectedIdentity.equals(documentId)) {
                 throw new IllegalArgumentException(
-                        "Managed draft documentId does not match its exact "
-                                + "initial state " + documentId);
+                        "Managed draft DocumentId does not match its "
+                                + (contentDerivedIdentity
+                                ? "exact authored BlueId "
+                                : "authored /documentId ")
+                                + documentId);
             }
             if (knownEpoch != null) {
                 MultiDocumentPublicationTransaction.requireSafeInteger(

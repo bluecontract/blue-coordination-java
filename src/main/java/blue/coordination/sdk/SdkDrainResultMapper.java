@@ -11,15 +11,25 @@ import blue.language.processor.ProcessorDiagnostic;
 import blue.language.processor.ProcessorStatus;
 import blue.language.processor.closure.ClosureAttemptResult;
 import blue.language.processor.closure.ClosureProcessResult;
+import blue.language.processor.closure.ClosureResourceDemand;
+import blue.language.processor.closure.ComponentSnapshot;
+import blue.language.processor.closure.DocumentTransitionEvidence;
 import blue.language.processor.closure.GasTraceEntry;
+import blue.language.processor.closure.GraphChange;
+import blue.language.processor.closure.ManagedOccurrenceBinding;
 import blue.language.processor.closure.PublicEventOccurrence;
+import blue.language.processor.closure.SubscriptionDelta;
+import blue.language.processor.closure.SubscriptionState;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 
 /** Translates retained engine evidence into stable SDK entry outcomes. */
 final class SdkDrainResultMapper {
@@ -132,7 +142,10 @@ final class SdkDrainResultMapper {
                     List.of(),
                     List.of(),
                     ProcessingStats.zero(),
-                    diagnostic);
+                    diagnostic,
+                    resourceDemands(attempt.resourceDemands()),
+                    processorAttemptCount(retained),
+                    ManagedSurfaceEvidence.empty());
         }
 
         ClosureProcessResult result = attempt.processResult();
@@ -149,7 +162,360 @@ final class SdkDrainResultMapper {
                 changes,
                 events,
                 stats,
-                diagnostic);
+                diagnostic,
+                List.of(),
+                processorAttemptCount(retained),
+                retained.published()
+                        ? managedSurfaceEvidence(retained, result)
+                        : ManagedSurfaceEvidence.empty());
+    }
+
+    private static List<ClosureResult.ResourceDemand> resourceDemands(
+            List<ClosureResourceDemand> demands) {
+        return Objects.requireNonNull(demands, "demands").stream()
+                .map(demand -> new ClosureResult.ResourceDemand(
+                        demand.kind().name(),
+                        demand.demandIdentity(),
+                        demand.suppliedValueBlueId(),
+                        DocumentId.of(demand.sourceDocumentId().value()),
+                        demand.sourcePath()))
+                .toList();
+    }
+
+    private static ManagedSurfaceEvidence managedSurfaceEvidence(
+            ContractsClosureDispatchAttempt retained,
+            ClosureProcessResult result) {
+        if (!result.commits()) {
+            return ManagedSurfaceEvidence.empty();
+        }
+        List<ManagedSurfaceEvidence.OccurrenceResolution> resolutions =
+                retained.managedOccurrenceResolutions().stream()
+                        .map(SdkDrainResultMapper::occurrenceResolution)
+                        .toList();
+        List<ManagedSurfaceEvidence.GraphChange> graphChanges = result
+                .graphChanges()
+                .stream()
+                .map(SdkDrainResultMapper::graphChange)
+                .toList();
+        List<ManagedSurfaceEvidence.ComponentTransition> components =
+                componentTransitions(
+                        retained.inputComponents(),
+                        result.resultingComponents());
+        List<ManagedSurfaceEvidence.SubscriptionChange> subscriptions =
+                result.subscriptionDeltas().stream()
+                        .map(SdkDrainResultMapper::subscriptionChange)
+                        .toList();
+        List<ManagedSurfaceEvidence.DocumentTransition> transitions = result
+                .documentTransitionEvidence()
+                .stream()
+                .map(SdkDrainResultMapper::documentTransition)
+                .toList();
+        List<ManagedSurfaceEvidence.OperationRouteChange> routeChanges =
+                new ArrayList<>();
+        for (int index = 0;
+                index < retained.operationRouteChanges().size();
+                index++) {
+            routeChanges.add(operationRouteChange(
+                    index, retained.operationRouteChanges().get(index)));
+        }
+        return new ManagedSurfaceEvidence(
+                result.graphGeneration(),
+                resolutions,
+                graphChanges,
+                components,
+                subscriptions,
+                transitions,
+                routeChanges);
+    }
+
+    private static ManagedSurfaceEvidence.OperationRouteChange
+            operationRouteChange(
+                    long ordinal,
+                    ContractsClosureDispatchAttempt.OperationRouteChange
+                            change) {
+        return new ManagedSurfaceEvidence.OperationRouteChange(
+                ordinal,
+                ManagedSurfaceEvidence.OperationRouteChangeKind.valueOf(
+                        change.kind().name()),
+                change.documentId(),
+                change.before().map(
+                        SdkDrainResultMapper::operationRouteState),
+                change.after().map(
+                        SdkDrainResultMapper::operationRouteState));
+    }
+
+    private static ManagedSurfaceEvidence.OperationRouteState
+            operationRouteState(
+                    ContractsClosureDispatchAttempt.OperationRouteState
+                            state) {
+        return new ManagedSurfaceEvidence.OperationRouteState(
+                state.scopePath(),
+                state.operation(),
+                state.channel(),
+                state.acceptedSources().stream()
+                        .map(source -> new TimelineSourceSnapshot(
+                                source.timelineId(), source.actorId()))
+                        .toList());
+    }
+
+    private static ManagedSurfaceEvidence.OccurrenceResolution
+            occurrenceResolution(
+                    ContractsClosureDispatchAttempt
+                            .ManagedOccurrenceResolution resolution) {
+        ManagedOccurrenceBinding occurrence = resolution.occurrence();
+        ClosureOccurrenceSnapshot snapshot = new ClosureOccurrenceSnapshot(
+                DocumentId.of(occurrence.sourceDocumentId().value()),
+                occurrence.sourcePath(),
+                occurrence.activationGeneration(),
+                DocumentId.of(occurrence.targetDocumentId().value()),
+                occurrence.expectedTargetBlueId(),
+                occurrence.active());
+        return new ManagedSurfaceEvidence.OccurrenceResolution(
+                resolution.demandIdentity(),
+                occurrence.occurrenceIdentity(),
+                occurrence.bindingIdentity(),
+                snapshot,
+                ManagedSurfaceEvidence.ResolutionKind.valueOf(
+                        resolution.targetKind().name()),
+                resolution.authoredInitial().map(ExactBlueValue::wrap));
+    }
+
+    private static ManagedSurfaceEvidence.GraphChange graphChange(
+            GraphChange change) {
+        return new ManagedSurfaceEvidence.GraphChange(
+                change.graphChangeOrdinal(),
+                ManagedSurfaceEvidence.GraphChangeKind.valueOf(
+                        change.changeKind().name()),
+                DocumentId.of(change.sourceDocumentId().value()),
+                change.sourcePath(),
+                Optional.ofNullable(change.before()).map(
+                        SdkDrainResultMapper::graphSide),
+                Optional.ofNullable(change.after()).map(
+                        SdkDrainResultMapper::graphSide));
+    }
+
+    private static ManagedSurfaceEvidence.GraphSide graphSide(
+            GraphChange.Side side) {
+        return new ManagedSurfaceEvidence.GraphSide(
+                side.activationGeneration(),
+                side.occurrenceIdentity(),
+                side.bindingIdentity(),
+                DocumentId.of(side.targetDocumentId().value()),
+                side.targetBlueId());
+    }
+
+    private static List<ManagedSurfaceEvidence.ComponentTransition>
+            componentTransitions(
+                    List<ComponentSnapshot> input,
+                    List<ComponentSnapshot> resulting) {
+        List<ComponentSnapshot> before = List.copyOf(input);
+        List<ComponentSnapshot> after = List.copyOf(resulting);
+        boolean[] visitedBefore = new boolean[before.size()];
+        boolean[] visitedAfter = new boolean[after.size()];
+        ArrayList<ManagedSurfaceEvidence.ComponentTransition> transitions =
+                new ArrayList<>();
+        for (int start = 0; start < before.size(); start++) {
+            if (visitedBefore[start]) {
+                continue;
+            }
+            LinkedHashSet<Integer> beforeGroup = new LinkedHashSet<>();
+            LinkedHashSet<Integer> afterGroup = new LinkedHashSet<>();
+            beforeGroup.add(start);
+            boolean changed;
+            do {
+                changed = false;
+                for (int afterIndex = 0;
+                        afterIndex < after.size(); afterIndex++) {
+                    final int candidateAfter = afterIndex;
+                    if (afterGroup.contains(afterIndex)
+                            || beforeGroup.stream().noneMatch(
+                                    beforeIndex -> overlaps(
+                                            before.get(beforeIndex),
+                                            after.get(candidateAfter)))) {
+                        continue;
+                    }
+                    afterGroup.add(afterIndex);
+                    changed = true;
+                }
+                for (int beforeIndex = 0;
+                        beforeIndex < before.size(); beforeIndex++) {
+                    final int candidateBefore = beforeIndex;
+                    if (beforeGroup.contains(beforeIndex)
+                            || afterGroup.stream().noneMatch(
+                                    afterIndex -> overlaps(
+                                            before.get(candidateBefore),
+                                            after.get(afterIndex)))) {
+                        continue;
+                    }
+                    beforeGroup.add(beforeIndex);
+                    changed = true;
+                }
+            } while (changed);
+            beforeGroup.forEach(index -> visitedBefore[index] = true);
+            afterGroup.forEach(index -> visitedAfter[index] = true);
+            transitions.add(componentTransition(
+                    beforeGroup.stream().map(before::get).toList(),
+                    afterGroup.stream().map(after::get).toList()));
+        }
+        for (int index = 0; index < after.size(); index++) {
+            if (!visitedAfter[index]) {
+                transitions.add(componentTransition(
+                        List.of(), List.of(after.get(index))));
+            }
+        }
+        return List.copyOf(transitions);
+    }
+
+    private static boolean overlaps(
+            ComponentSnapshot before,
+            ComponentSnapshot after) {
+        Set<String> members = before.orderedMemberDocumentIds().stream()
+                .map(blue.language.processor.closure.DocumentId::value)
+                .collect(java.util.stream.Collectors.toSet());
+        return after.orderedMemberDocumentIds().stream()
+                .map(blue.language.processor.closure.DocumentId::value)
+                .anyMatch(members::contains);
+    }
+
+    private static ManagedSurfaceEvidence.ComponentTransition
+            componentTransition(
+                    List<ComponentSnapshot> before,
+                    List<ComponentSnapshot> after) {
+        ManagedSurfaceEvidence.ComponentTransitionKind kind =
+                componentTransitionKind(before, after);
+        return new ManagedSurfaceEvidence.ComponentTransition(
+                kind,
+                before.stream().map(SdkDrainResultMapper::componentState)
+                        .toList(),
+                after.stream().map(SdkDrainResultMapper::componentState)
+                        .toList());
+    }
+
+    private static ManagedSurfaceEvidence.ComponentTransitionKind
+            componentTransitionKind(
+                    List<ComponentSnapshot> before,
+                    List<ComponentSnapshot> after) {
+        if (before.isEmpty()) {
+            return ManagedSurfaceEvidence.ComponentTransitionKind.CREATED;
+        }
+        if (after.isEmpty()) {
+            return ManagedSurfaceEvidence.ComponentTransitionKind.RETIRED;
+        }
+        if (before.size() > 1 && after.size() == 1) {
+            return ManagedSurfaceEvidence.ComponentTransitionKind.MERGED;
+        }
+        if (before.size() == 1 && after.size() > 1) {
+            return ManagedSurfaceEvidence.ComponentTransitionKind.SPLIT;
+        }
+        if (before.size() > 1) {
+            return ManagedSurfaceEvidence.ComponentTransitionKind
+                    .REPARTITIONED;
+        }
+        Set<String> beforeMembers = componentMembers(before.get(0));
+        Set<String> afterMembers = componentMembers(after.get(0));
+        if (beforeMembers.equals(afterMembers)) {
+            return ManagedSurfaceEvidence.ComponentTransitionKind
+                    .UNCHANGED_MEMBERSHIP;
+        }
+        if (afterMembers.containsAll(beforeMembers)) {
+            return ManagedSurfaceEvidence.ComponentTransitionKind.EXPANDED;
+        }
+        if (beforeMembers.containsAll(afterMembers)) {
+            return ManagedSurfaceEvidence.ComponentTransitionKind.CONTRACTED;
+        }
+        return ManagedSurfaceEvidence.ComponentTransitionKind.REPARTITIONED;
+    }
+
+    private static Set<String> componentMembers(ComponentSnapshot component) {
+        return Collections.unmodifiableSet(new LinkedHashSet<>(component
+                .orderedMemberDocumentIds().stream()
+                .map(blue.language.processor.closure.DocumentId::value)
+                .toList()));
+    }
+
+    private static ManagedSurfaceEvidence.ComponentState componentState(
+            ComponentSnapshot component) {
+        return new ManagedSurfaceEvidence.ComponentState(
+                component.componentIdentity(),
+                component.componentStateIdentity(),
+                component.componentGeneration(),
+                ManagedSurfaceEvidence.ComponentKind.valueOf(
+                        component.kind().name()),
+                component.orderedMemberDocumentIds().stream()
+                        .map(documentId -> DocumentId.of(documentId.value()))
+                        .toList(),
+                component.orderedMemberBlueIds(),
+                Optional.ofNullable(component.masterBlueId()),
+                Optional.ofNullable(component.cyclicProofIdentity()));
+    }
+
+    private static ManagedSurfaceEvidence.SubscriptionChange
+            subscriptionChange(SubscriptionDelta change) {
+        return new ManagedSurfaceEvidence.SubscriptionChange(
+                change.subscriptionDeltaOrdinal(),
+                ManagedSurfaceEvidence.SubscriptionOperation.valueOf(
+                        change.operation().name()),
+                change.targetManagedScopeIdentity(),
+                change.channelOccurrenceIdentity(),
+                Optional.ofNullable(change.beforeSubscription()).map(
+                        SdkDrainResultMapper::subscriptionState),
+                Optional.ofNullable(change.afterSubscription()).map(
+                        SdkDrainResultMapper::subscriptionState));
+    }
+
+    private static ManagedSurfaceEvidence.SubscriptionState subscriptionState(
+            SubscriptionState state) {
+        return new ManagedSurfaceEvidence.SubscriptionState(
+                state.subscriptionIdentity(),
+                state.channelOccurrence().channelOccurrenceIdentity(),
+                DocumentId.of(state.channelOccurrence()
+                        .managedDocumentId().value()),
+                state.channelOccurrence().scopePath(),
+                state.channelOccurrence().scopeActivationGeneration(),
+                state.channelOccurrence().rawChannelKey(),
+                state.channelOccurrence()
+                        .effectiveRuntimeContributionBlueId(),
+                state.channelOccurrence().subscriptionHeaderBlueId(),
+                state.documentBlueId(),
+                state.graphGeneration(),
+                state.componentGeneration());
+    }
+
+    static ManagedSurfaceEvidence.DocumentTransition
+            documentTransition(DocumentTransitionEvidence transition) {
+        return new ManagedSurfaceEvidence.DocumentTransition(
+                DocumentId.of(transition.documentId().value()),
+                transition.workOccurrenceIdentity(),
+                transition.beforeDocumentBlueId(),
+                transition.afterDocumentBlueId(),
+                transition.beforeEffectiveTypeBlueId(),
+                transition.afterEffectiveTypeBlueId(),
+                transition.authoredContractPatches().stream()
+                        .map(SdkDrainResultMapper::contractPatch)
+                        .toList(),
+                transition.generatedGeneralizationWrites().stream()
+                        .map(write -> new ManagedSurfaceEvidence
+                                .GeneralizationWrite(
+                                write.path(),
+                                write.valueBlueId(),
+                                write.requiringPatchIndex()))
+                        .toList());
+    }
+
+    private static ManagedSurfaceEvidence.ContractPatch contractPatch(
+            DocumentTransitionEvidence.AuthoredContractPatch patch) {
+        return new ManagedSurfaceEvidence.ContractPatch(
+                ManagedSurfaceEvidence.ContractPatchOperation.valueOf(
+                        patch.operation().name()),
+                patch.path(),
+                patch.authoredValueBlueId(),
+                patch.beforeValueBlueId(),
+                patch.afterValueBlueId());
+    }
+
+    private static long processorAttemptCount(
+            ContractsClosureDispatchAttempt retained) {
+        return Math.addExact(retained.automaticRetryCount(), 1L);
     }
 
     private List<DocumentChange> changes(

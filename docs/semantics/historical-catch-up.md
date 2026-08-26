@@ -1,5 +1,29 @@
 # Historical catch-up
 
+This page separates the normal Contracts SDK behavior from retained low-level
+temporal compatibility evidence. They are not interchangeable.
+
+## Normal rc.3 Contracts SDK
+
+Top-level document/closure admission supports full-history and exact-frontier
+eligibility over retained in-memory provider evidence. Admission publishes the
+initialized epoch-zero documents as `READY`; it does not drain historical work
+inside `admit(...)`. Call `processing().drain()` afterward to process eligible
+retained entries. History already past the environment's completed frontier is
+not resurrected by a later admission.
+
+Operation-created managed documents are narrower: they support only genuinely
+new `FROM_NOW` lineages. The current draft API does not attach an independently
+existing historical document, import a draft epoch, or run the child/parent
+barrier model described below.
+
+## Retained legacy temporal compatibility model
+
+The remainder of this page documents the earlier low-level temporal coordinator
+and historical scenario evidence. It is relevant only to an explicit legacy
+host/migration integration and must not be read as additional
+`BlueCoordination.inMemory()` capability.
+
 An attachment captures exact cause evidence and an exclusive canonical cutoff
 `T`. A verified frontier `F` defines the historical interval `F < entry < T`;
 the attachment entry itself is never delivered to a newly activated child.
@@ -45,9 +69,10 @@ every child epoch is terminally processed, and every parent cursor and embedded
 state agree through the cutoff. A later external entry cannot overtake this
 work.
 
-Top-level admission uses the same advancement engine. `FULL_HISTORY` starts at
-the complete beginning, `FROM_FRONTIER` requires verified nonzero evidence, and
-`FROM_NOW` establishes a birth frontier without replay.
+In that compatibility profile, top-level admission uses the same advancement
+engine. `FULL_HISTORY` starts at the complete beginning, `FROM_FRONTIER`
+requires verified nonzero evidence, and `FROM_NOW` establishes a birth frontier
+without replay.
 
 A work-bounded drain may pause an open entry or catch-up frame between frozen
 PROCESS commits. The frame, barrier, graph generation, document-local cursors,

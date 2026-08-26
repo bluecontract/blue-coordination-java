@@ -1,0 +1,791 @@
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.Path
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
+import java.util.zip.ZipFile
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.gradle.api.tasks.GradleBuild
+
+/*
+ * Dynamic-evolution handoff tooling. The immutable repository is deliberately
+ * invocation-owned and outside this source tree. It is never a Gradle output:
+ * Gradle must not pre-create or replace the non-overwriting handoff directory.
+ */
+
+def coordinationStageSchema =
+        'blue-coordination-staged-dependency-repository/1.0'
+def coordinationStageGroup = 'blue.coordination'
+def coordinationStageArtifact = 'blue-coordination-java'
+def coordinationStageVersion = project.version.toString()
+def acceptedCompatibilityBase =
+        'c6f9c80d0a33c6c209c7ba3d2b8bff89a223fc5f'
+def coordinationUsesImmutableContracts = providers.gradleProperty(
+        'blueDependencyMode').getOrElse('published-artifact').trim()
+        == 'immutable-staged-contracts'
+
+configurations.runtimeClasspath.resolutionStrategy.failOnVersionConflict()
+
+def sha256Hex = { File input ->
+    MessageDigest digest = MessageDigest.getInstance('SHA-256')
+    input.withInputStream { stream ->
+        byte[] buffer = new byte[8192]
+        int count
+        while ((count = stream.read(buffer)) != -1) {
+            digest.update(buffer, 0, count)
+        }
+    }
+    digest.digest().encodeHex().toString()
+}
+def sha256IdentityFor = { File input -> 'sha256:' + sha256Hex(input) }
+def canonicalJson = { Object value ->
+    JsonOutput.prettyPrint(JsonOutput.toJson(value)) + '\n'
+}
+def regularFile = { File input ->
+    Files.isRegularFile(input.toPath(), LinkOption.NOFOLLOW_LINKS)
+            && !Files.isSymbolicLink(input.toPath())
+}
+def writeChecksum = { File input ->
+    File checksum = new File(input.parentFile, input.name + '.sha256')
+    checksum.setText(sha256Hex(input) + '  ' + input.name + '\n', 'UTF-8')
+}
+def relativeFiles = { File root, List<String> failures ->
+    if (!root.isDirectory()) {
+        failures << "repository does not exist ${root}"
+        return [] as Set
+    }
+    Set<String> result = new TreeSet<>()
+    def paths = Files.walk(root.toPath())
+    try {
+        paths.forEach { path ->
+            if (path == root.toPath()) {
+                return
+            }
+            if (Files.isSymbolicLink(path)) {
+                failures << ('symbolic link in staged repository '
+                        + root.toPath().relativize(path))
+            } else if (Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+                result.add(root.toPath().relativize(path).toString()
+                        .replace(File.separator, '/'))
+            }
+        }
+    } finally {
+        paths.close()
+    }
+    result
+}
+def sameTree = { File left, File right ->
+    List<String> failures = []
+    Set<String> leftPaths = relativeFiles(left, failures)
+    Set<String> rightPaths = relativeFiles(right, failures)
+    if (!failures.empty || leftPaths != rightPaths) {
+        return false
+    }
+    leftPaths.every { relative ->
+        Files.mismatch(new File(left, relative).toPath(),
+                new File(right, relative).toPath()) == -1L
+    }
+}
+def moveDirectory = { File source, File target ->
+    try {
+        Files.move(source.toPath(), target.toPath(),
+                StandardCopyOption.ATOMIC_MOVE)
+    } catch (AtomicMoveNotSupportedException ignored) {
+        Files.move(source.toPath(), target.toPath())
+    }
+}
+def checkedAbsoluteRepository = { String propertyName ->
+    String value = providers.gradleProperty(propertyName).orNull
+    if (value == null || value.isBlank()) {
+        throw new GradleException(
+                "-${'P'}${propertyName}=/absolute/path is required")
+    }
+    File path = new File(value)
+    if (!path.isAbsolute()) {
+        throw new GradleException("${propertyName} must be an absolute path")
+    }
+    path.canonicalFile
+}
+def checkedSha256Property = { String propertyName ->
+    String value = providers.gradleProperty(propertyName).orNull
+    if (value == null || !(value ==~ /sha256:[0-9a-f]{64}/)) {
+        throw new GradleException(
+                "-${'P'}${propertyName}=sha256:<64 lowercase hex> is required")
+    }
+    value
+}
+def checkedSourceCommit = {
+    String expected = providers.gradleProperty(
+            'coordinationSourceCommit').orNull
+    if (expected == null || !(expected ==~ /[0-9a-f]{40}|[0-9a-f]{64}/)) {
+        throw new GradleException(
+                '-PcoordinationSourceCommit=<exact Git commit> is required')
+    }
+    Process headProcess = new ProcessBuilder(
+            'git', 'rev-parse', '--verify', 'HEAD^{commit}')
+            .directory(rootDir).redirectErrorStream(true).start()
+    String head = headProcess.inputStream.getText('UTF-8').trim()
+    if (headProcess.waitFor() != 0 || head != expected) {
+        throw new GradleException(
+                "coordinationSourceCommit ${expected} does not identify HEAD ${head}")
+    }
+    Process statusProcess = new ProcessBuilder(
+            'git', 'status', '--porcelain', '--untracked-files=normal')
+            .directory(rootDir).redirectErrorStream(true).start()
+    String status = statusProcess.inputStream.getText('UTF-8').trim()
+    if (statusProcess.waitFor() != 0) {
+        throw new GradleException('Cannot inspect the Coordination worktree')
+    }
+    if (!status.isEmpty()) {
+        throw new GradleException(
+                'Immutable Coordination staging requires a clean worktree')
+    }
+    expected
+}
+def inspectContractsBinding = {
+    if (providers.gradleProperty('blueDependencyMode')
+            .getOrElse('published-artifact').trim()
+            != 'immutable-staged-contracts') {
+        throw new GradleException(
+                'Coordination staging requires '
+                        + '-PblueDependencyMode=immutable-staged-contracts')
+    }
+    File repository = checkedAbsoluteRepository('blueContractsRepository')
+    String expectedIdentity = checkedSha256Property(
+            'blueContractsManifestSha256')
+    File manifestFile = new File(repository, 'artifact-manifest.json')
+    File sidecar = new File(repository, 'artifact-manifest.json.sha256')
+    if (!regularFile(manifestFile) || !regularFile(sidecar)) {
+        throw new GradleException(
+                'Contracts repository lacks its regular manifest and checksum')
+    }
+    String actualIdentity = sha256IdentityFor(manifestFile)
+    if (actualIdentity != expectedIdentity
+            || sidecar.getText('UTF-8') != sha256Hex(manifestFile)
+            + '  artifact-manifest.json\n') {
+        throw new GradleException(
+                'Contracts manifest identity or checksum companion differs')
+    }
+    def manifest = new JsonSlurper().parse(manifestFile)
+    if (manifest.schema != 'blue-staged-dependency-repository/1.0'
+            || manifest.groupId != 'blue.language'
+            || !(manifest.sourceCommit ==~ /[0-9a-f]{40}|[0-9a-f]{64}/)) {
+        throw new GradleException(
+                'Contracts repository is not an exact immutable handoff')
+    }
+    [
+            repository: repository,
+            manifest: manifest,
+            manifestIdentity: actualIdentity,
+            sourceCommit: manifest.sourceCommit,
+            specificationIdentity: manifest.contractsSpecificationIdentity,
+            fixturePackageIdentity: manifest.contractsFixturePackageIdentity,
+            releaseIdentity: manifest.contractsReleaseIdentity
+    ]
+}
+def publicationFiles = { File repository ->
+    String base = coordinationStageGroup.replace('.', '/') +
+            '/' + coordinationStageArtifact + '/' +
+            coordinationStageVersion + '/' +
+            coordinationStageArtifact + '-' + coordinationStageVersion
+    [
+            [kind: 'javadoc', path: base + '-javadoc.jar'],
+            [kind: 'pom', path: base + '.pom'],
+            [kind: 'runtime', path: base + '.jar'],
+            [kind: 'sources', path: base + '-sources.jar']
+    ].collect { value -> value + [file: new File(repository, value.path)] }
+}
+def resolvedDependencyRecords = {
+    def artifacts = configurations.runtimeClasspath.resolvedConfiguration
+            .resolvedArtifacts.collect { artifact ->
+        String coordinate = artifact.moduleVersion.id.group + ':' +
+                artifact.name + ':' + artifact.moduleVersion.id.version
+        [
+                coordinate: coordinate,
+                classifier: artifact.classifier,
+                extension: artifact.extension,
+                fileName: artifact.file.name,
+                bytes: artifact.file.length(),
+                sha256: sha256IdentityFor(artifact.file)
+        ]
+    }.sort { left, right ->
+        (left.coordinate <=> right.coordinate)
+                ?: (String.valueOf(left.classifier)
+                <=> String.valueOf(right.classifier))
+                ?: (left.extension <=> right.extension)
+                ?: (left.fileName <=> right.fileName)
+    }
+    if (artifacts.collect { record ->
+        record.coordinate + ':' + record.classifier + ':' + record.extension
+    }.toSet().size() != artifacts.size()) {
+        throw new GradleException(
+                'Resolved Coordination dependency identities are ambiguous')
+    }
+    artifacts
+}
+def verifyResolvedContractsArtifacts = {
+    Map contractsBinding, List<Map<String, Object>> dependencies ->
+    Map<String, String> expected = contractsBinding.manifest.artifacts
+            .findAll { record -> record.kind == 'runtime' }
+            .collectEntries { record ->
+        [(String.valueOf(record.coordinate)): String.valueOf(record.sha256)]
+    }
+    Map<String, String> actual = dependencies.findAll { record ->
+        record.coordinate.startsWith('blue.language:')
+    }.collectEntries { record ->
+        [(String.valueOf(record.coordinate)): String.valueOf(record.sha256)]
+    }
+    if (actual.isEmpty() || actual.any { coordinate, identity ->
+        expected[coordinate] != identity
+    }) {
+        throw new GradleException(
+                'Resolved Language bytes differ from the immutable Contracts manifest')
+    }
+}
+def expectedStageManifest = {
+    File repository, String sourceCommit, Map contractsBinding,
+    List<Map<String, Object>> dependencies ->
+    List<Map<String, Object>> artifacts = publicationFiles(repository)
+            .collect { value ->
+        File input = value.file
+        if (!regularFile(input)) {
+            throw new GradleException(
+                    "Required staged publication is missing ${input}")
+        }
+        [
+                bytes: input.length(),
+                checksumPath: value.path + '.sha256',
+                coordinate: coordinationStageGroup + ':' +
+                        coordinationStageArtifact + ':' +
+                        coordinationStageVersion,
+                kind: value.kind,
+                path: value.path,
+                sha256: sha256IdentityFor(input)
+        ]
+    }.sort { left, right ->
+        (left.coordinate <=> right.coordinate)
+                ?: (left.kind <=> right.kind)
+                ?: (left.path <=> right.path)
+    }
+    [
+            schema: coordinationStageSchema,
+            groupId: coordinationStageGroup,
+            artifactId: coordinationStageArtifact,
+            version: coordinationStageVersion,
+            sourceCommit: sourceCommit,
+            contracts: [
+                    manifestIdentity: contractsBinding.manifestIdentity,
+                    sourceCommit: contractsBinding.sourceCommit,
+                    specificationIdentity:
+                            contractsBinding.specificationIdentity,
+                    fixturePackageIdentity:
+                            contractsBinding.fixturePackageIdentity,
+                    releaseIdentity: contractsBinding.releaseIdentity
+            ],
+            dependencies: dependencies,
+            artifacts: artifacts
+    ]
+}
+def verifyClosedStage = {
+    File repository, Map expectedManifest ->
+    List<String> failures = []
+    File manifestFile = new File(repository, 'artifact-manifest.json')
+    File sidecar = new File(repository, 'artifact-manifest.json.sha256')
+    if (!regularFile(manifestFile)
+            || manifestFile.getText('UTF-8') != canonicalJson(expectedManifest)) {
+        failures << 'artifact manifest does not bind the exact staged bytes'
+    }
+    if (!regularFile(sidecar)
+            || !regularFile(manifestFile)
+            || sidecar.getText('UTF-8') != sha256Hex(manifestFile)
+            + '  artifact-manifest.json\n') {
+        failures << 'artifact manifest checksum companion differs'
+    }
+    Set<String> expectedPaths = [
+            'artifact-manifest.json',
+            'artifact-manifest.json.sha256'
+    ] as Set
+    expectedManifest.artifacts.each { record ->
+        File payload = new File(repository, record.path)
+        File checksum = new File(repository, record.checksumPath)
+        expectedPaths.add(record.path)
+        expectedPaths.add(record.checksumPath)
+        if (!regularFile(payload) || !regularFile(checksum)) {
+            failures << "missing regular staged payload ${record.path}"
+        } else {
+            if (sha256IdentityFor(payload) != record.sha256
+                    || payload.length() != record.bytes) {
+                failures << "staged payload identity differs ${record.path}"
+            }
+            if (checksum.getText('UTF-8') != sha256Hex(payload)
+                    + '  ' + payload.name + '\n') {
+                failures << "staged checksum differs ${record.checksumPath}"
+            }
+        }
+    }
+    Set<String> actualPaths = relativeFiles(repository, failures)
+    if (actualPaths != expectedPaths) {
+        failures << ('staged repository closure differs; missing '
+                + (expectedPaths - actualPaths).toList().sort()
+                + ', unexpected '
+                + (actualPaths - expectedPaths).toList().sort())
+    }
+    if (!failures.empty) {
+        throw new GradleException(
+                'Immutable Coordination repository failed:\n - '
+                        + failures.join('\n - '))
+    }
+    sha256IdentityFor(manifestFile)
+}
+
+def prepareCoordinationMutableStaging = tasks.register(
+        'prepareCoordinationMutableStaging', Delete) {
+    group = 'publishing'
+    description = 'Clears only the invocation-owned mutable Coordination publication directory.'
+    delete layout.buildDirectory.dir('dynamic-evolution-staging')
+}
+
+def stageCoordinationCandidatePublications = tasks.register(
+        'stageCoordinationCandidatePublications') {
+    group = 'publishing'
+    description = 'Builds the unpublished dynamic-evolution Maven payload without changing rc.3 release authority.'
+    dependsOn prepareCoordinationMutableStaging,
+            tasks.named('jar'), tasks.named('sourcesJar'),
+            tasks.named('javadocJar'),
+            tasks.named('generatePomFileForMavenJavaPublication')
+    def mutableRepository = layout.buildDirectory.dir(
+            'dynamic-evolution-staging')
+    outputs.dir(mutableRepository)
+    doLast {
+        File repository = mutableRepository.get().asFile
+        String base = coordinationStageGroup.replace('.', '/') +
+                '/' + coordinationStageArtifact + '/' +
+                coordinationStageVersion + '/' +
+                coordinationStageArtifact + '-' +
+                coordinationStageVersion
+        def payloads = [
+                [source: tasks.named('javadocJar').get()
+                        .archiveFile.get().asFile,
+                 path: base + '-javadoc.jar'],
+                [source: layout.buildDirectory.file(
+                        'publications/mavenJava/pom-default.xml')
+                        .get().asFile,
+                 path: base + '.pom'],
+                [source: tasks.named('jar').get()
+                        .archiveFile.get().asFile,
+                 path: base + '.jar'],
+                [source: tasks.named('sourcesJar').get()
+                        .archiveFile.get().asFile,
+                 path: base + '-sources.jar']
+        ]
+        payloads.each { payload ->
+            if (!regularFile(payload.source)) {
+                throw new GradleException(
+                        "Candidate publication is missing ${payload.source}")
+            }
+            File output = new File(repository, payload.path)
+            output.parentFile.mkdirs()
+            Files.copy(payload.source.toPath(), output.toPath())
+        }
+    }
+}
+
+def assembleImmutableStagedCoordinationRepository = tasks.register(
+        'assembleImmutableStagedCoordinationRepository') {
+    group = 'publishing'
+    description = 'Exports exact Coordination artifacts into a non-overwriting repository.'
+    dependsOn stageCoordinationCandidatePublications
+    outputs.upToDateWhen { false }
+    doLast {
+        String sourceCommit = checkedSourceCommit()
+        Map contractsBinding = inspectContractsBinding()
+        File mutableRepository = layout.buildDirectory.dir(
+                'dynamic-evolution-staging').get().asFile.canonicalFile
+        File target = checkedAbsoluteRepository(
+                'coordinationStagedRepository')
+        if (target.toPath().startsWith(rootDir.canonicalFile.toPath())
+                || mutableRepository.toPath().startsWith(target.toPath())
+                || target.toPath().startsWith(mutableRepository.toPath())) {
+            throw new GradleException(
+                    'Immutable Coordination repository must be external and disjoint')
+        }
+        if (!gradle.includedBuilds.empty) {
+            throw new GradleException(
+                    'Included builds leaked into immutable Coordination staging')
+        }
+        List<Map<String, Object>> dependencyRecords =
+                resolvedDependencyRecords()
+        verifyResolvedContractsArtifacts(
+                contractsBinding, dependencyRecords)
+        File parent = target.parentFile
+        if (parent == null) {
+            throw new GradleException(
+                    'Immutable Coordination repository has no parent')
+        }
+        parent.mkdirs()
+        File temporary = new File(parent, target.name
+                + '.assembling-' + UUID.randomUUID())
+        if (!temporary.mkdir()) {
+            throw new GradleException(
+                    "Cannot create temporary handoff ${temporary}")
+        }
+        try {
+            publicationFiles(mutableRepository).each { value ->
+                if (!regularFile(value.file)) {
+                    throw new GradleException(
+                            "Required publication is missing ${value.file}")
+                }
+                File output = new File(temporary, value.path)
+                output.parentFile.mkdirs()
+                Files.copy(value.file.toPath(), output.toPath(),
+                        StandardCopyOption.COPY_ATTRIBUTES)
+                writeChecksum(output)
+            }
+            Map manifest = expectedStageManifest(
+                    temporary, sourceCommit, contractsBinding,
+                    dependencyRecords)
+            File manifestFile = new File(
+                    temporary, 'artifact-manifest.json')
+            manifestFile.setText(canonicalJson(manifest), 'UTF-8')
+            writeChecksum(manifestFile)
+            verifyClosedStage(temporary, manifest)
+            if (target.exists()) {
+                if (!sameTree(temporary, target)) {
+                    throw new GradleException(
+                            'Immutable staged Coordination repository already '
+                                    + 'exists with different bytes: ' + target)
+                }
+                delete temporary
+            } else {
+                moveDirectory(temporary, target)
+            }
+        } catch (RuntimeException | IOException failure) {
+            delete temporary
+            throw failure
+        }
+    }
+}
+
+def verifyImmutableStagedCoordinationRepository = tasks.register(
+        'verifyImmutableStagedCoordinationRepository') {
+    group = 'verification'
+    description = 'Verifies the exact closed Coordination handoff and dependency identities.'
+    dependsOn assembleImmutableStagedCoordinationRepository
+    outputs.upToDateWhen { false }
+    doLast {
+        String sourceCommit = checkedSourceCommit()
+        Map contractsBinding = inspectContractsBinding()
+        File repository = checkedAbsoluteRepository(
+                'coordinationStagedRepository')
+        List<Map<String, Object>> dependencies = resolvedDependencyRecords()
+        verifyResolvedContractsArtifacts(contractsBinding, dependencies)
+        Map expected = expectedStageManifest(
+                repository, sourceCommit, contractsBinding, dependencies)
+        String manifestIdentity = verifyClosedStage(repository, expected)
+        File report = layout.buildDirectory.file(
+                'reports/dynamic-evolution/coordination-staged-repository.json')
+                .get().asFile
+        report.parentFile.mkdirs()
+        report.setText(canonicalJson([
+                schema: 'blue-coordination-staged-repository-verification/1.0',
+                status: 'PASS',
+                sourceCommit: sourceCommit,
+                manifestIdentity: manifestIdentity,
+                contractsManifestIdentity:
+                        contractsBinding.manifestIdentity,
+                dependencyArtifacts: dependencies.size(),
+                stagedArtifacts: expected.artifacts.size()
+        ]), 'UTF-8')
+        logger.lifecycle(
+                'Immutable Coordination repository verified: {}',
+                manifestIdentity)
+    }
+}
+
+def stagedCoordinationConsumer = tasks.register(
+        'stagedCoordinationConsumer', GradleBuild) {
+    group = 'verification'
+    description = 'Resolves and executes an isolated consumer from the two immutable repositories.'
+    dependsOn verifyImmutableStagedCoordinationRepository
+    dir = file('smoke-tests/staged-coordination')
+    tasks = ['clean', 'stagedConsumerCheck']
+    startParameter.refreshDependencies = true
+    doFirst {
+        File coordinationRepository = checkedAbsoluteRepository(
+                'coordinationStagedRepository')
+        File coordinationManifest = new File(
+                coordinationRepository, 'artifact-manifest.json')
+        Map contractsBinding = inspectContractsBinding()
+        startParameter.projectProperties = [
+                coordinationRepository:
+                        coordinationRepository.absolutePath,
+                coordinationManifestSha256:
+                        sha256IdentityFor(coordinationManifest),
+                coordinationVersion: coordinationStageVersion,
+                contractsRepository:
+                        contractsBinding.repository.absolutePath,
+                contractsManifestSha256:
+                        contractsBinding.manifestIdentity,
+                smokeReport: layout.buildDirectory.file(
+                        'reports/dynamic-evolution/staged-consumer.json')
+                        .get().asFile.absolutePath
+        ]
+    }
+}
+
+def inspectPublicSurface = { File jar, File javap ->
+    Map<String, Set<String>> inventory = new TreeMap<>()
+    ZipFile zip = new ZipFile(jar)
+    List<String> classes
+    try {
+        classes = Collections.list(zip.entries()).findAll { entry ->
+            !entry.directory && entry.name.endsWith('.class')
+                    && !entry.name.endsWith('module-info.class')
+                    && (entry.name.startsWith('blue/coordination/api/')
+                    || entry.name.startsWith('blue/coordination/sdk/')
+                    || entry.name.startsWith('blue/coordination/processor/'))
+        }.collect { entry ->
+            entry.name.substring(0, entry.name.length() - 6)
+                    .replace('/', '.')
+        }.sort()
+    } finally {
+        zip.close()
+    }
+    classes.each { className ->
+        Process process = new ProcessBuilder(
+                javap.absolutePath, '-protected', '-s',
+                '-classpath', jar.absolutePath, className)
+                .redirectErrorStream(true).start()
+        List<String> lines = process.inputStream.getText('UTF-8')
+                .readLines().collect { it.trim() }.findAll {
+            !it.isEmpty() && !it.startsWith('Compiled from')
+        }
+        if (process.waitFor() != 0) {
+            throw new GradleException(
+                    "javap failed for ${className}: ${lines.join(' ')}")
+        }
+        int declarationIndex = lines.findIndexOf { line ->
+            line.endsWith('{')
+        }
+        if (declarationIndex < 0
+                || !lines[declarationIndex].startsWith('public ')) {
+            return
+        }
+        Set<String> entries = new TreeSet<>()
+        entries.add('TYPE ' + lines[declarationIndex])
+        String pending = null
+        lines.drop(declarationIndex + 1).each { line ->
+            if (line == '}') {
+                if (pending != null) {
+                    entries.add('MEMBER ' + pending)
+                    pending = null
+                }
+            } else if (line.startsWith('descriptor:')) {
+                if (pending != null) {
+                    entries.add('MEMBER ' + pending + ' | ' + line)
+                    pending = null
+                }
+            } else {
+                if (pending != null) {
+                    entries.add('MEMBER ' + pending)
+                }
+                pending = line
+            }
+        }
+        if (pending != null) {
+            entries.add('MEMBER ' + pending)
+        }
+        inventory[className] = entries
+    }
+    inventory
+}
+
+def verifyAcceptedBaseApiCompatibility = tasks.register(
+        'verifyAcceptedBaseApiCompatibility') {
+    group = 'verification'
+    description = 'Rejects public API or binary removals against accepted base c6f9c80.'
+    dependsOn tasks.named('jar')
+    outputs.upToDateWhen { false }
+    doLast {
+        Map contractsBinding = inspectContractsBinding()
+        File compatibilityRoot = layout.buildDirectory.dir(
+                'compatibility/c6f9c80').get().asFile
+        delete compatibilityRoot
+        compatibilityRoot.mkdirs()
+        File archive = new File(compatibilityRoot, 'baseline.zip')
+        Process archiveProcess = new ProcessBuilder(
+                'git', 'archive', '--format=zip',
+                '--output=' + archive.absolutePath,
+                acceptedCompatibilityBase)
+                .directory(rootDir).redirectErrorStream(true).start()
+        String archiveOutput = archiveProcess.inputStream.getText('UTF-8')
+        if (archiveProcess.waitFor() != 0) {
+            throw new GradleException(
+                    'Cannot extract accepted API base: ' + archiveOutput)
+        }
+        File baselineSource = new File(compatibilityRoot, 'source')
+        copy { from zipTree(archive); into baselineSource }
+        File repositoryInit = new File(
+                compatibilityRoot, 'immutable-contracts.init.gradle')
+        String escapedContractsRepository = contractsBinding.repository
+                .absolutePath.replace('\\', '\\\\')
+                .replace("'", "\\'")
+        repositoryInit.setText("""
+                allprojects {
+                    repositories {
+                        exclusiveContent {
+                            forRepository {
+                                maven {
+                                    name = 'acceptedBaseImmutableContracts'
+                                    url = uri('${escapedContractsRepository}')
+                                    metadataSources {
+                                        mavenPom()
+                                        artifact()
+                                    }
+                                }
+                            }
+                            filter { includeGroup 'blue.language' }
+                        }
+                    }
+                }
+                """.stripIndent(), 'UTF-8')
+        List<String> command = [
+                file('gradlew').absolutePath,
+                '--no-daemon', '--no-build-cache', '--max-workers=1',
+                '--init-script', repositoryInit.absolutePath,
+                '-p', baselineSource.absolutePath,
+                'jar', '-PblueDependencyMode=published-artifact',
+                '-PtestJavaVersion=17'
+        ]
+        Process baselineBuild = new ProcessBuilder(command)
+                .directory(baselineSource).redirectErrorStream(true).start()
+        baselineBuild.inputStream.eachLine { logger.lifecycle(it) }
+        if (baselineBuild.waitFor() != 0) {
+            throw new GradleException(
+                    'Accepted-base compatibility JAR could not be built')
+        }
+        File baselineJar = new File(baselineSource,
+                'build/libs/blue-coordination-java-3.0.0-rc.3.jar')
+        File currentJar = tasks.named('jar').get()
+                .archiveFile.get().asFile
+        if (!regularFile(baselineJar) || !regularFile(currentJar)) {
+            throw new GradleException(
+                    'Compatibility JARs are missing')
+        }
+        def launcher = javaToolchains.launcherFor {
+            languageVersion = JavaLanguageVersion.of(17)
+        }.get()
+        String javapName = System.getProperty('os.name')
+                .toLowerCase(Locale.ROOT).contains('windows')
+                ? 'javap.exe' : 'javap'
+        File javap = launcher.metadata.installationPath
+                .file('bin/' + javapName).asFile
+        Map<String, Set<String>> baseline = inspectPublicSurface(
+                baselineJar, javap)
+        Map<String, Set<String>> current = inspectPublicSurface(
+                currentJar, javap)
+        List<String> removedClasses = (baseline.keySet()
+                - current.keySet()).toList().sort()
+        Map<String, List<String>> removedEntries = new TreeMap<>()
+        baseline.each { className, entries ->
+            if (current.containsKey(className)) {
+                List<String> removed = (entries - current[className])
+                        .toList().sort()
+                if (!removed.empty) {
+                    removedEntries[className] = removed
+                }
+            }
+        }
+        int addedClasses = (current.keySet() - baseline.keySet()).size()
+        int addedEntries = current.collect { className, entries ->
+            baseline.containsKey(className)
+                    ? (entries - baseline[className]).size()
+                    : entries.size()
+        }.sum() ?: 0
+        boolean compatible = removedClasses.isEmpty()
+                && removedEntries.isEmpty()
+        File report = layout.buildDirectory.file(
+                'reports/dynamic-evolution/api-binary-compatibility.json')
+                .get().asFile
+        report.parentFile.mkdirs()
+        report.setText(canonicalJson([
+                schema: 'blue-coordination-api-binary-compatibility/1.0',
+                status: compatible ? 'PASS' : 'FAIL',
+                acceptedBase: acceptedCompatibilityBase,
+                currentVersion: coordinationStageVersion,
+                baselinePublicClasses: baseline.size(),
+                currentPublicClasses: current.size(),
+                addedClasses: addedClasses,
+                addedEntries: addedEntries,
+                removedClasses: removedClasses,
+                removedEntries: removedEntries
+        ]), 'UTF-8')
+        if (!compatible) {
+            throw new GradleException(
+                    'Public API/binary compatibility failed against '
+                            + acceptedCompatibilityBase + '; see ' + report)
+        }
+    }
+}
+
+tasks.register('verifyCoordinationStagingTooling') {
+    group = 'verification'
+    description = 'Protects the isolated, fail-closed staged-consumer boundary.'
+    inputs.files('gradle/coordination-staging.gradle',
+            fileTree('smoke-tests/staged-coordination'))
+    doLast {
+        String staging = file('gradle/coordination-staging.gradle')
+                .getText('UTF-8')
+        String fixture = fileTree('smoke-tests/staged-coordination')
+                .files.sort().collect { it.getText('UTF-8') }.join('\n')
+        def failures = []
+        ['maven' + 'Local()', 'include' + 'Build(', 'flat' + 'Dir {']
+                .each { forbidden ->
+            if (staging.contains(forbidden)
+                    || fixture.contains(forbidden)) {
+                failures << "forbidden dependency fallback ${forbidden}"
+            }
+        }
+        [
+                'assembleImmutableStagedCoordinationRepository',
+                'verifyImmutableStagedCoordinationRepository',
+                'stagedCoordinationConsumer',
+                'verifyAcceptedBaseApiCompatibility',
+                'coordinationSourceCommit',
+                'coordinationStagedRepository'
+        ].each { required ->
+            if (!staging.contains(required)) {
+                failures << "missing staging contract ${required}"
+            }
+        }
+        if (!fixture.contains("includeGroup 'blue.coordination'")
+                || !fixture.contains("includeGroup 'blue.language'")) {
+            failures << 'consumer repositories are not group-exclusive'
+        }
+        if (!failures.empty) {
+            throw new GradleException(failures.join('; '))
+        }
+    }
+}
+
+tasks.register('dynamicEvolutionCoordinationHandoff') {
+    group = 'verification'
+    description = 'Runs compatibility, immutable staging, and isolated consumer gates.'
+    dependsOn verifyAcceptedBaseApiCompatibility,
+            stagedCoordinationConsumer
+}
+
+tasks.named('releaseCheck') {
+    dependsOn tasks.named('verifyCoordinationStagingTooling')
+    if (coordinationUsesImmutableContracts) {
+        dependsOn verifyAcceptedBaseApiCompatibility
+    }
+}
+
+tasks.named('check') {
+    dependsOn tasks.named('verifyCoordinationStagingTooling')
+}

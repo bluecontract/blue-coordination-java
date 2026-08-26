@@ -283,12 +283,17 @@ final class MultiDocumentPublicationTransactionTest {
             InMemoryDocumentStore store = engine.documents();
             InMemoryDocumentStore.PublicationSnapshot base =
                     store.publicationSnapshot();
+            InMemoryDocumentStore.StoreStructureSnapshot baseStructure =
+                    store.storeStructureSnapshotForTesting();
 
             MultiDocumentPublicationTransaction updateA = transaction(
                     store, "disconnected-a", base)
                     .expectHead(A, 0L, head(originalA))
                     .stageDocument(update(originalA), originalA.layout(), null,
                             originalA.activeSubscriptions(), "isolated|a|1")
+                    .stageOutbox(List.of(event()))
+                    .stageCheckpointEvidence(List.of(checkpoint(
+                            originalA.currentRevision().after().blueId())))
                     .stageComponentStates(List.of(
                             component(originalA, '1', '2')));
             MultiDocumentPublicationTransaction updateB = transaction(
@@ -300,6 +305,8 @@ final class MultiDocumentPublicationTransactionTest {
                             component(originalB, '3', '4')));
 
             updateA.commit();
+            InMemoryDocumentStore.StoreStructureSnapshot afterA =
+                    store.storeStructureSnapshotForTesting();
             updateB.commit();
 
             // when
@@ -316,6 +323,14 @@ final class MultiDocumentPublicationTransactionTest {
             assertEquals(2, after.componentStates().size());
             assertEquals(List.of("disconnected-a", "disconnected-b"),
                     after.publicationReceipts().stream().toList());
+            assertTrue(afterA.sharedSessionNodes(baseStructure) > 0,
+                    "updating A must retain B's exact persistent session node");
+            assertTrue(afterA.evidenceExtends(baseStructure),
+                    "new evidence must retain the exact prior log roots");
+            assertEquals(baseStructure.outboxSize() + 1,
+                    afterA.outboxSize());
+            assertEquals(baseStructure.checkpointSize() + 1,
+                    afterA.checkpointSize());
         }
     }
 

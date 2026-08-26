@@ -16,7 +16,14 @@ import java.nio.charset.StandardCharsets;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Public-API-only smoke scenarios resolved from the published Maven artifact. */
+/**
+ * Low-level public API compatibility scenarios compiled against the built JAR.
+ *
+ * <p>The SDK-first consumer examples live in {@link SdkBuiltJarConsumerTest}
+ * and {@link SdkDeveloperGuideTest}. This class retains representative legacy
+ * engine flows whose runtime dependencies must also work from the packaged
+ * artifact.
+ */
 final class PublishedArtifactConsumerTest {
     private static final long T0 = 1_700_000_000_000_000L;
 

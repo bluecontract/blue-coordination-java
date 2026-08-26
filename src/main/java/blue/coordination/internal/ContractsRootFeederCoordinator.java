@@ -1,6 +1,7 @@
 package blue.coordination.internal;
 
 import blue.coordination.api.TimelineEntry;
+import blue.language.processor.closure.ClosureResourceDemand;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -98,7 +99,8 @@ final class ContractsRootFeederCoordinator {
             ContractsClosureAdapter.FrozenBatch batch,
             List<CohortProgress> cohorts,
             boolean terminal,
-            Map<ContractsRootFeederWindow.LaneId, List<String>>
+            Map<ContractsRootFeederWindow.LaneId,
+                    List<ClosureResourceDemand>>
                     requiredResourcesByLane) {
         EventProgress {
             batch = Objects.requireNonNull(batch, "batch");

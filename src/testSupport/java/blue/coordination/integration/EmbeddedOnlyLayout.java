@@ -6,7 +6,7 @@ import blue.language.model.Node;
 
 import java.util.List;
 
-/** Read-only physical-layout evidence projected from DocumentSnapshot. */
+/** Shared read-only physical-layout evidence projected from DocumentSnapshot. */
 final class EmbeddedOnlyLayout {
     private final DocumentSnapshot snapshot;
 

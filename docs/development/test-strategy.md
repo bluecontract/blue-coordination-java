@@ -10,8 +10,14 @@ consumer checkout to prove that it works.
 | --- | --- | --- |
 | `test` | SDK, types, compiler and compact internals | Immutable SDK values, authored closure compilation, exact targeting/results, closed inputs, graph/cursor immutability, exact event occurrences, workflow state and BEX accounting |
 | `integrationTest` | In-memory engine with public operations | Append/process separation, engine-selected drain, entry-frame ordering, admission, collection paths, catch-up barriers, identity, ownership, atomic retry and removal/re-addition |
-| `consumerTest` | Built production JAR only | SDK compilation without main-source output or test fixtures, runtime dependency completeness and representative managed-document behavior |
+| `consumerTest` | Built production JAR only | SDK compilation without compiled main, `testFixtures`, or test-support outputs; runtime dependency completeness and representative managed-document behavior |
 | `scenarioTest` | Complete business lifecycles | Multi-order NBA convergence and the large host/PayNote lifecycle |
+
+These are execution boundaries, not buckets sized by test count. `consumerTest`
+is intentionally small because its distinct value is compiling and running
+against the built JAR without compiled production output on its compile
+classpath. `scenarioTest` stays separate because complete lifecycle,
+convergence, and scale cases form the slow acceptance lane.
 
 The suites intentionally overlap at important boundaries. Atomicity has focused
 integration coverage and is exercised again by realistic scenarios. The
@@ -19,6 +25,17 @@ consumer suite repeats representative behavior because compilation and
 execution against the JAR catch packaging and dependency mistakes that
 source-based tests cannot. The complete graph resolves from Maven Central in
 every suite and CI repeats the release gate on Java 17 and Java 21.
+
+`./gradlew check` runs `test`, `integrationTest`, and `consumerTest` for the
+standard development gate. `releaseCheck` adds `scenarioTest` and is the
+required final gate. This keeps slow scenarios out of routine checks without
+weakening release evidence.
+
+Shared engine fixtures live in `src/testSupport`. This private, non-executable
+source set contains no `@Test` methods, is available to `integrationTest` and
+`scenarioTest`, and is not published. In particular, scenarios do not compile
+against integration-test output; the two suites depend independently on the
+same support layer.
 
 ## Given/When/Then structure
 
@@ -35,7 +52,8 @@ Every `@Test` has exactly one meaningful lowercase sequence:
 Setup belongs under `given`, the behavior being exercised under `when`, and
 observable outcomes under `then`. Exception tests may prepare an `Executable`
 under `when` and assert it under `then`. `verifyTestArchitecture` rejects
-missing, duplicated, or misordered markers across all four source sets.
+missing, duplicated, or misordered markers across all four executable test
+suites; `testSupport` contains no executable tests.
 
 ## SDK freeze acceptance
 
@@ -54,12 +72,23 @@ proves:
 - detach followed by a terminating call;
 - remove/re-add with fresh authenticated cyclic identities;
 - append-only `submit()` parity with `execute()`;
+- full-history and exact-frontier top-level admission, including initialized
+  READY state before the later replay drain and strict frontier exclusion;
 - an operation-produced Order draft admitted as a new `FROM_NOW` lineage;
 - five effective occurrences mapped to three new lineages, including duplicate
   lineage reuse and declaration-order permutations;
-- managed-draft preflight, exact-path/value completeness, atomic rollback, and
+- sequential nested growth in which an applied operation-created parent later
+  creates its own managed child;
+- managed-draft preflight, including cyclic-target and cycle-crossing rejection
+  before append, exact-path/value completeness, atomic rollback, and
   deterministic retry failure matrices;
-- immutable owner-bound values and a consumer compiled from the built JAR.
+- immutable exact values, owner-bound handles and drafts, and a consumer
+  compiled from the built JAR;
+- the canonical developer-guide narrative compiled against the built JAR:
+  a complete provider entry against an initially known cyclic closure, plus
+  sequential operations from several Timelines, atomic Receipt draft attachment
+  from the acyclic Payment member, and a later operation on the newly active
+  Receipt lineage.
 
 Operation-result managed admission is deliberately limited to new `FROM_NOW`
 lineages. Acceptance tests prove that a known imported epoch and every

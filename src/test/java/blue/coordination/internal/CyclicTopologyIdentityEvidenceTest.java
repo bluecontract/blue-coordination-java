@@ -36,17 +36,20 @@ import java.util.TreeMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-/** Deterministic literal identity evidence from the public topology tests. */
+/**
+ * Deterministic mixed-lane identity evidence from public Coordination tests
+ * and one explicitly labeled package-private bounded-compatibility proof.
+ */
 final class CyclicTopologyIdentityEvidenceTest {
     private static final String WRITE_MODE_ENV =
             "BLUE_CYCLIC_TOPOLOGY_IDENTITY_ARTIFACT_MODE";
     private static final String WRITE_MODE = "WRITE";
     private static final Path ARTIFACT_DIRECTORY = Path.of(
-            "stabilization", "cyclic-topology-round");
+            "stabilization", "full-lifecycle-admission-phase2");
     private static final Path JSON_ARTIFACT = ARTIFACT_DIRECTORY.resolve(
-            "cyclic-topology-identities.json");
+            "full-lifecycle-admission-identities.json");
     private static final Path MARKDOWN_ARTIFACT = ARTIFACT_DIRECTORY.resolve(
-            "cyclic-topology-identities.md");
+            "full-lifecycle-admission-identities.md");
     private static final ThreadLocal<Recorder> ACTIVE = new ThreadLocal<>();
     private static final List<String> REQUIRED_SCENARIO_IDS = List.of(
             "P2.1.finite-three-member-ring",
@@ -77,7 +80,7 @@ final class CyclicTopologyIdentityEvidenceTest {
             "P6.dynamic-topology-DECLARED",
             "P6.dynamic-topology-REVERSED",
             "P6.late-initialization-failure",
-            "P6.c-clo-08-public-host-boundary",
+            "P6.c-clo-08-bounded-compatibility",
             "P7.ordinary-nested-scope",
             "P7.cyclic-root-only-admission",
             "P7.cyclic-root-only-operation");
@@ -163,11 +166,11 @@ final class CyclicTopologyIdentityEvidenceTest {
         initialization
                 .staticInitializationOrderAndIdentitiesIgnoreInputPermutation();
         initialization
-                .dynamicTopologyPatchInsideCycleFailsAtSubscriptionBoundary();
+                .dynamicTopologyPatchInsideCycleFailsAtManagedBindingBoundary();
         initialization
                 .laterMemberInitializationFailureRollsBackEveryMarkerAndPublication();
         initialization
-                .cClo08FirstFormationNeedsItsConformanceRuntimeAndAnEventBridgeFailsClosed();
+                .cClo08BoundedCompatibilityPreservesHistoricalFailClosedEvidence();
 
         ContractsPublicNestedScopeBoundaryTest nested =
                 new ContractsPublicNestedScopeBoundaryTest();
@@ -250,7 +253,7 @@ final class CyclicTopologyIdentityEvidenceTest {
     private static String readRequired(Path path) throws IOException {
         if (!Files.isRegularFile(path)) {
             throw new IllegalStateException(
-                    "Missing committed cyclic identity artifact " + path);
+                    "Missing committed Phase 2 identity artifact " + path);
         }
         return Files.readString(path, StandardCharsets.UTF_8);
     }
@@ -282,11 +285,13 @@ final class CyclicTopologyIdentityEvidenceTest {
 
     private static String renderMarkdown(Map<String, Object> document) {
         StringBuilder result = new StringBuilder();
-        result.append("# Cyclic topology literal identity evidence\n\n")
-                .append("This artifact is generated from the real public ")
-                .append("Coordination topology tests. No identity below is ")
-                .append("hand-authored. Graph diagrams and semantic relations ")
-                .append("remain in `CYCLIC_TOPOLOGY_COVERAGE.md`.\n\n")
+        result.append("# Full-lifecycle admission Phase 2 identity evidence\n\n")
+                .append("This mixed evidence artifact is generated from real ")
+                .append("public Coordination admission/topology tests and one ")
+                .append("explicitly labeled package-private bounded-")
+                .append("compatibility proof. No identity below is ")
+                .append("hand-authored; the bounded record states its lane ")
+                .append("and that it does not exercise the public API.\n\n")
                 .append("`implementationConformanceClaimed = false`\n\n")
                 .append("## Frozen inputs\n\n");
         @SuppressWarnings("unchecked")
@@ -453,18 +458,32 @@ final class CyclicTopologyIdentityEvidenceTest {
         }
 
         Map<String, Object> document() {
+            BundledContracts10Release.Manifest manifest =
+                    BundledContracts10Release.manifest();
             LinkedHashMap<String, Object> result = new LinkedHashMap<>();
-            result.put("schemaVersion", "cyclic-topology-identities/1.0");
+            result.put("schemaVersion",
+                    "full-lifecycle-admission-phase2-identities/1.0");
             result.put("implementationConformanceClaimed", false);
             result.put("source",
-                    "runtime-derived public Coordination topology evidence");
+                    "runtime-derived mixed Coordination evidence: public "
+                            + "full-lifecycle paths plus one explicitly "
+                            + "labeled package-private bounded-compatibility "
+                            + "proof");
             result.put("inputs", normalizeMap(Map.of(
                     "blueLanguageSpecification",
-                    "sha256:01b038b64e3f0a9a11f3f70d544a63ff78a01d5169f1a03f8b8629cf73645a7d",
+                    manifest.blueLanguageSpecification(),
                     "contractsSpecification",
-                    "sha256:dfb444962a5a17b3a6519e8d148c2bf4a975a921b1fcb1277710052caaecd930",
+                    manifest.contractsSpecification(),
                     "contractsRelease",
-                    "sha256:7e6c3717bc28d21ebadec9f81725913e944bb3b9b70094531f19f10510a10e50")));
+                    manifest.contractsRelease(),
+                    "fixturePackage",
+                    manifest.fixturePackage(),
+                    "gasManifest",
+                    manifest.gasManifest(),
+                    "cyclicFinalizer",
+                    manifest.cyclicFinalizer(),
+                    "cyclicProofVerifier",
+                    manifest.cyclicProofVerifier())));
             result.put("boundaryFacts", boundaryFacts());
             List<Map<String, Object>> values = new ArrayList<>();
             scenarios.forEach((id, scenario) -> {
@@ -490,12 +509,12 @@ final class CyclicTopologyIdentityEvidenceTest {
                     boundary(
                             "phase6DynamicInitialization",
                             "BLOCKED",
-                            "Successful dynamic-initialization cycle/collection "
-                                    + "identities are not extractable because "
-                                    + "the public host lacks the conformance-"
-                                    + "runtime initialization-patch seam; exact "
-                                    + "failure input/result identities are "
-                                    + "recorded instead."),
+                            "Full-lifecycle admission reaches dynamic topology "
+                                    + "evolution, but automatic managed-"
+                                    + "occurrence evidence is not yet "
+                                    + "available; the exact missing-binding "
+                                    + "rollback identities are recorded "
+                                    + "instead."),
                     boundary(
                             "phase7NestedCyclicScope",
                             "BLOCKED",

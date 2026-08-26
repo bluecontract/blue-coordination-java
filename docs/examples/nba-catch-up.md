@@ -1,5 +1,11 @@
 # NBA historical catch-up
 
+This page summarizes retained historical/temporal scenario evidence. It is not
+the rc.3 application quickstart. The current SDK supports top-level history
+import with exact evidence, while operation-created managed children are new
+`FROM_NOW` lineages only. Start with the
+[SDK developer guide](../guides/developer-guide.md).
+
 The NBA scenario replays start, scoring plays, and game end on commissioner
 Timelines. A statistics Root discovers Games from direct stable-key members of
 `Process Embedded.collectionPaths`. Each Game processes each source entry once;

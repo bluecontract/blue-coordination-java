@@ -3,6 +3,7 @@ package blue.coordination.internal;
 import blue.coordination.api.DocumentId;
 import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.closure.ClosureAttemptResult;
+import blue.language.processor.closure.ClosureResourceDemand;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -123,7 +124,7 @@ final class ContractsRootFeederWindow {
             recordNeedsResources(
                     selected,
                     actual.members(),
-                    attempt.requiredExactBlueIds());
+                    attempt.resourceDemands());
             return;
         }
         recordTerminal(
@@ -136,11 +137,11 @@ final class ContractsRootFeederWindow {
     synchronized void recordNeedsResources(
             AttemptTicket ticket,
             List<DocumentId> members,
-            List<String> requiredExactBlueIds) {
+            List<ClosureResourceDemand> resourceDemands) {
         AttemptTicket selected = requireSelected(ticket);
         requireMembers(selected, members);
         PendingProgress replacement = new PendingProgress(
-                selected, requiredExactBlueIds);
+                selected, resourceDemands);
         PendingProgress existing = pendingByLane.put(
                 selected.lane(), replacement);
         if (existing != null
@@ -205,11 +206,13 @@ final class ContractsRootFeederWindow {
         return true;
     }
 
-    /** Exact named resource demand retained for each blocked Root lane. */
-    synchronized Map<LaneId, List<String>> requiredResourcesByLane() {
-        Map<LaneId, List<String>> result = new LinkedHashMap<>();
+    /** Canonical typed resource demands retained for each blocked Root lane. */
+    synchronized Map<LaneId, List<ClosureResourceDemand>>
+            requiredResourcesByLane() {
+        Map<LaneId, List<ClosureResourceDemand>> result =
+                new LinkedHashMap<>();
         pendingByLane.forEach((lane, progress) -> result.put(
-                lane, progress.requiredExactBlueIds()));
+                lane, progress.resourceDemands()));
         return Collections.unmodifiableMap(result);
     }
 
@@ -330,14 +333,14 @@ final class ContractsRootFeederWindow {
     /** Retained exact resource suspension for one lane. */
     record PendingProgress(
             AttemptTicket ticket,
-            List<String> requiredExactBlueIds) {
+            List<ClosureResourceDemand> resourceDemands) {
         PendingProgress {
             ticket = Objects.requireNonNull(ticket, "ticket");
-            requiredExactBlueIds = List.copyOf(Objects.requireNonNull(
-                    requiredExactBlueIds, "requiredExactBlueIds"));
-            if (requiredExactBlueIds.isEmpty()) {
+            resourceDemands = List.copyOf(Objects.requireNonNull(
+                    resourceDemands, "resourceDemands"));
+            if (resourceDemands.isEmpty()) {
                 throw new IllegalArgumentException(
-                        "Pending progress must retain an exact resource demand");
+                        "Pending progress must retain a typed resource demand");
             }
         }
     }

@@ -1,6 +1,5 @@
 package blue.coordination.internal;
 
-import blue.coordination.api.Contracts10Configuration;
 import blue.coordination.api.ContractsClosureAdmissionReceipt;
 import blue.coordination.api.CoordinationEngine;
 import blue.coordination.api.DocumentId;
@@ -41,10 +40,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Public Contracts proof for cyclic detachment and exact reactivation. */
 final class ContractsPublicCycleDetachmentTest {
-    private static final String LANGUAGE_SPEC = "sha256:01b038b64e3f0a9a"
-            + "11f3f70d544a63ff78a01d5169f1a03f8b8629cf73645a7d";
-    private static final String CONTRACTS_SPEC = "sha256:dfb444962a5a17b3"
-            + "a6519e8d148c2bf4a975a921b1fcb1277710052caaecd930";
     private static final long ENTRY_TIME = 2_200_000_000_000_001L;
 
     private static final BranchingIds BRANCHING = new BranchingIds(
@@ -1393,10 +1388,7 @@ final class ContractsPublicCycleDetachmentTest {
 
     private static CoordinationEngine engine(Set<DocumentId> publicRoots) {
         return CoordinationEngine.inMemoryContracts10(
-                new Contracts10Configuration(
-                        LANGUAGE_SPEC,
-                        CONTRACTS_SPEC,
-                        publicRoots));
+                BundledContracts10Release.configuration(publicRoots));
     }
 
     private record BranchingIds(

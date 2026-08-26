@@ -13,9 +13,17 @@ public final class BlueCoordination implements AutoCloseable {
     private final ExactValues values;
     private final AdvancedCoordination advanced;
 
-    private BlueCoordination(String languageIdentity, String contractsIdentity) {
+    private BlueCoordination(
+            String languageIdentity,
+            String contractsIdentity,
+            ExactNodeProvider exactNodeProvider,
+            boolean contentDerivedDocumentIds) {
         runtime = SdkCoordinationRuntime.create(
-                this, languageIdentity, contractsIdentity);
+                this,
+                languageIdentity,
+                contractsIdentity,
+                exactNodeProvider,
+                contentDerivedDocumentIds);
         timelines = new TimelineCatalog(runtime);
         documents = new DocumentCatalog(runtime);
         operations = new OperationGateway(runtime);
@@ -58,6 +66,8 @@ public final class BlueCoordination implements AutoCloseable {
     public static final class Builder {
         private String languageIdentity;
         private String contractsIdentity;
+        private ExactNodeProvider exactNodeProvider = ExactNodeProvider.empty();
+        private boolean contentDerivedDocumentIds;
 
         /** Selects an explicit exact Contracts release identity pair. */
         public Builder release(
@@ -72,13 +82,47 @@ public final class BlueCoordination implements AutoCloseable {
             return this;
         }
 
+        /**
+         * Supplies read-only serialized application exact values and type
+         * definitions to ordinary runtime resolution and Process Embedded
+         * admission.
+         *
+         * <p>Every returned whole value is parsed defensively and must
+         * establish the exact requested BlueId before it can participate in
+         * resolution. Use
+         * {@link ExactValues#providerContentYaml(String)} to prepare authored
+         * provider YAML that contains aliases or schema-bearing type
+         * definitions.</p>
+         */
+        public Builder exactNodeProvider(ExactNodeProvider provider) {
+            exactNodeProvider = Objects.requireNonNull(provider, "provider");
+            return this;
+        }
+
+        /**
+         * Selects exact authored pre-initialization BlueIds as managed
+         * lineages for explicit SDK admissions.
+         *
+         * <p>Any authored {@code /documentId} remains ordinary untouched
+         * content. It contributes to the exact BlueId but never selects the
+         * managed lineage.</p>
+         */
+        public Builder contentDerivedDocumentIds() {
+            contentDerivedDocumentIds = true;
+            return this;
+        }
+
         /** Builds an in-memory runtime, using the bundled release by default. */
         public BlueCoordination build() {
             if ((languageIdentity == null) != (contractsIdentity == null)) {
                 throw new IllegalStateException(
                         "Both custom release identities are required");
             }
-            return new BlueCoordination(languageIdentity, contractsIdentity);
+            return new BlueCoordination(
+                    languageIdentity,
+                    contractsIdentity,
+                    exactNodeProvider,
+                    contentDerivedDocumentIds);
         }
 
         private static String requireIdentity(String value, String label) {

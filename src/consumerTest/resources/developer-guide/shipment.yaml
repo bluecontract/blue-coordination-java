@@ -1,0 +1,34 @@
+documentId: guide-shipment-42
+status: pending
+carrier: none
+contracts:
+  embedded:
+    type: Process Embedded
+    paths:
+      - /route
+  logisticsChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: guide/orders/42/logistics
+    actor:
+      type: MyOS/Principal Actor
+      accountId: carol
+  dispatch:
+    type: Coordination/Sequential Workflow Operation
+    channel: logisticsChannel
+    request:
+      carrier: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /status
+              val: dispatched
+          - $appendChange:
+              op: replace
+              path: /carrier
+              val:
+                $binding: event/message/request/carrier
+          - $return: true

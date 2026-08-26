@@ -3,6 +3,7 @@ package blue.coordination.consumer;
 import blue.coordination.sdk.BlueCoordination;
 import blue.coordination.sdk.DocumentHandle;
 import blue.coordination.sdk.EntryDisposition;
+import blue.coordination.sdk.EntryResult;
 import blue.coordination.sdk.ManagedDocument;
 import blue.coordination.sdk.TimelineHandle;
 import org.junit.jupiter.api.Test;
@@ -10,10 +11,10 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Compiles and runs solely against the built Coordination JAR surface. */
+/** Minimal SDK packaging smoke test compiled against the built JAR. */
 final class SdkBuiltJarConsumerTest {
     @Test
-    void bundledContractsSdkRunsFromTheBuiltJar() {
+    void sdkCounterCompilesAndRunsAgainstBuiltJar() {
         // given
         String timelineId = "consumer/sdk-counter/alice";
         String id = "consumer-sdk-counter";
@@ -26,7 +27,7 @@ final class SdkBuiltJarConsumerTest {
                             .fromNow());
 
             // when
-            var result = coordination.operations().on(counter)
+            EntryResult result = coordination.operations().on(counter)
                     .from(timeline)
                     .call("increment")
                     .through("ownerChannel")

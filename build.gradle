@@ -10,6 +10,17 @@ group = 'blue.coordination'
 def dependencyMode = providers.gradleProperty('blueDependencyMode')
         .getOrElse('published-artifact')
         .trim()
+def immutableStagedContracts =
+        dependencyMode == 'immutable-staged-contracts'
+def publishedLanguageVersion = '3.1.0-rc.22'
+def immutableStagedLanguageVersion = '3.1.0-rc.21'
+def activeLanguageVersion = immutableStagedContracts
+        ? immutableStagedLanguageVersion
+        : publishedLanguageVersion
+def stagedContractsRepositoryValue = providers.gradleProperty(
+        'blueContractsRepository').orNull
+def stagedContractsManifestIdentity = providers.gradleProperty(
+        'blueContractsManifestSha256').orNull
 def versionMatches = file('.cz.toml').getText('UTF-8') =~
         /(?m)^version = "([^"]+)"$/
 if (!versionMatches.find()) {
@@ -19,26 +30,68 @@ def declaredProjectVersion = versionMatches.group(1)
 version = declaredProjectVersion
 
 def publishedBlueCoordinates = [
-        'blue.language:blue-language-model': '3.1.0-rc.21',
-        'blue.language:blue-language-core': '3.1.0-rc.21',
-        'blue.language:blue-language-mapping': '3.1.0-rc.21',
-        'blue.language:blue-language-ipfs': '3.1.0-rc.21',
-        'blue.language:blue-language-java': '3.1.0-rc.21',
-        'blue.language:blue-contracts-core': '3.1.0-rc.21',
+        'blue.language:blue-language-model': publishedLanguageVersion,
+        'blue.language:blue-language-core': publishedLanguageVersion,
+        'blue.language:blue-language-mapping': publishedLanguageVersion,
+        'blue.language:blue-language-ipfs': publishedLanguageVersion,
+        'blue.language:blue-language-java': publishedLanguageVersion,
+        'blue.language:blue-contracts-core': publishedLanguageVersion,
         'blue.repo:blue-repo-java': '3.0.0-rc.21',
         'blue.bex:blue-bex-core': '1.1.0-rc.4',
         'blue.bex:blue-bex-contracts': '1.1.0-rc.4'
 ]
-if (dependencyMode != 'published-artifact') {
-    throw new GradleException(
-            'Only blueDependencyMode=published-artifact is supported')
+def immutableStagedBlueCoordinates = publishedBlueCoordinates.collectEntries {
+    coordinate, expectedVersion ->
+        [(coordinate): coordinate.startsWith('blue.language:')
+                ? immutableStagedLanguageVersion
+                : expectedVersion]
 }
+def activeBlueCoordinates = immutableStagedContracts
+        ? immutableStagedBlueCoordinates
+        : publishedBlueCoordinates
+def acceptedDependencyModes = [
+        'published-artifact',
+        'immutable-staged-contracts'
+] as Set
+if (!acceptedDependencyModes.contains(dependencyMode)) {
+    throw new GradleException(
+            'blueDependencyMode must be published-artifact or '
+                    + 'immutable-staged-contracts')
+}
+
+def stagedContractsArtifacts = [
+        'blue-language-model',
+        'blue-language-core',
+        'blue-language-mapping',
+        'blue-language-ipfs',
+        'blue-contracts-core',
+        'blue-conformance',
+        'blue-language-java'
+] as Set
 
 base {
     archivesName = 'blue-coordination-java'
 }
 
 repositories {
+    if (immutableStagedContracts) {
+        exclusiveContent {
+            forRepository {
+                maven {
+                    name = 'immutableStagedContracts'
+                    url = uri(file(stagedContractsRepositoryValue)
+                            .canonicalFile)
+                    metadataSources {
+                        mavenPom()
+                        artifact()
+                    }
+                }
+            }
+            filter {
+                includeGroup 'blue.language'
+            }
+        }
+    }
     mavenCentral()
 }
 
@@ -49,26 +102,37 @@ java {
 }
 
 sourceSets {
+    testSupport
     integrationTest
     scenarioTest {
-        resources.setSrcDirs(['src/integrationTest/resources'])
+        resources.setSrcDirs([
+                'src/scenarioTest/resources',
+                'src/integrationTest/resources'
+        ])
     }
     consumerTest {
-        resources.setSrcDirs(['src/integrationTest/resources'])
+        resources.setSrcDirs([
+                'src/consumerTest/resources',
+                'src/integrationTest/resources'
+        ])
     }
 }
 
 configurations {
-    integrationTestImplementation.extendsFrom testImplementation
-    integrationTestRuntimeOnly.extendsFrom testRuntimeOnly
-    scenarioTestImplementation.extendsFrom testImplementation
-    scenarioTestRuntimeOnly.extendsFrom testRuntimeOnly
+    testSupportImplementation.extendsFrom testImplementation
+    testSupportRuntimeOnly.extendsFrom testRuntimeOnly
+    integrationTestImplementation.extendsFrom testSupportImplementation
+    integrationTestRuntimeOnly.extendsFrom testSupportRuntimeOnly
+    scenarioTestImplementation.extendsFrom testSupportImplementation
+    scenarioTestRuntimeOnly.extendsFrom testSupportRuntimeOnly
 }
 
 dependencyLocking {
     lockAllConfigurations()
     lockFile = layout.projectDirectory.file(
-            'gradle/published-artifact.lockfile')
+            immutableStagedContracts
+                    ? 'gradle/immutable-staged-contracts.lockfile'
+                    : 'gradle/published-artifact.lockfile')
 }
 
 tasks.withType(JavaCompile).configureEach {
@@ -106,30 +170,39 @@ tasks.withType(Jar).configureEach {
 }
 
 dependencies {
-    api 'blue.language:blue-contracts-core:3.1.0-rc.21'
-    implementation 'blue.language:blue-language-java:3.1.0-rc.21'
+    api "blue.language:blue-contracts-core:${activeLanguageVersion}"
+    implementation "blue.language:blue-language-java:${activeLanguageVersion}"
     implementation('blue.repo:blue-repo-java:3.0.0-rc.21') {
         // Repository rc.21 was published against Language rc.20. Coordination
-        // owns the rc.21 runtime and excludes that stale transitive edge.
+        // owns the active pinned Language runtime and excludes that stale edge.
         exclude group: 'blue.language', module: 'blue-language-java'
     }
-    api 'blue.bex:blue-bex-core:1.1.0-rc.4'
-    api 'blue.bex:blue-bex-contracts:1.1.0-rc.4'
+    api('blue.bex:blue-bex-core:1.1.0-rc.4') {
+        exclude group: 'blue.language'
+    }
+    api('blue.bex:blue-bex-contracts:1.1.0-rc.4') {
+        exclude group: 'blue.language'
+    }
     implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
 
     testImplementation platform('org.junit:junit-bom:5.14.1')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 
+    testSupportImplementation sourceSets.main.output
+    testSupportImplementation sourceSets.testFixtures.output
+
     integrationTestImplementation sourceSets.main.output
     integrationTestImplementation sourceSets.testFixtures.output
+    integrationTestImplementation sourceSets.testSupport.output
 
     scenarioTestImplementation sourceSets.main.output
     scenarioTestImplementation sourceSets.testFixtures.output
-    scenarioTestImplementation sourceSets.integrationTest.output
+    scenarioTestImplementation sourceSets.testSupport.output
 
     consumerTestImplementation files(tasks.named('jar'))
-    consumerTestImplementation 'blue.language:blue-contracts-core:3.1.0-rc.21'
+    consumerTestImplementation \
+            "blue.language:blue-contracts-core:${activeLanguageVersion}"
     consumerTestImplementation platform('org.junit:junit-bom:5.14.1')
     consumerTestImplementation 'org.junit.jupiter:junit-jupiter'
     consumerTestRuntimeOnly files(configurations.runtimeClasspath)
@@ -187,7 +260,9 @@ def playgroundSmokeTest = tasks.register('playgroundSmokeTest', Test) {
     testClassesDirs = files(
             sourceSets.integrationTest.output.classesDirs,
             sourceSets.scenarioTest.output.classesDirs)
-    classpath = sourceSets.scenarioTest.runtimeClasspath
+    classpath = files(
+            sourceSets.integrationTest.runtimeClasspath,
+            sourceSets.scenarioTest.runtimeClasspath)
     dependsOn tasks.named(sourceSets.integrationTest.classesTaskName),
             tasks.named(sourceSets.scenarioTest.classesTaskName)
     filter {
@@ -407,14 +482,16 @@ def publicBoundarySources = files(
         fileTree('src/main/java/blue/coordination/sdk') {
             include '**/*.java'
         })
-// Current Contracts 1.0 maintainability guardrails. These are deliberately
-// bounded caps over the SDK baseline of 163 production source files, 39,656
-// lines, and 49 public api+sdk source types. They are not retained Round 13
-// counts and are not performance evidence.
+// Dynamic-evolution maintainability guardrails. These are deliberately bounded
+// caps over the frozen SDK baseline plus reviewed automatic occurrence
+// resolution, managed transition evidence, exact-provider and runtime
+// conformance and prepared route-delta evidence additions: currently 182
+// production sources, 50,119 lines and 57 public api+sdk source types. They
+// are not historical Round 13 counts and are not performance evidence.
 def currentProductionShapeLimits = [
-        classes: 170,
-        lines: 42_000L,
-        publicApiTypes: 50
+        classes: 184,
+        lines: 50_119L,
+        publicApiTypes: 58
 ]
 def forbiddenArchitectureTokens = [
         'AutonomousLink', 'TemporalWave', 'ConsistencyMode',
@@ -436,16 +513,16 @@ tasks.register('validateProductionShape') {
         }
         def failures = []
         if (classes > currentProductionShapeLimits.classes) {
-            failures << "production classes ${classes} > "
-                    + currentProductionShapeLimits.classes
+            failures << ("production classes ${classes} > "
+                    + currentProductionShapeLimits.classes)
         }
         if (lines > currentProductionShapeLimits.lines) {
-            failures << "production lines ${lines} > "
-                    + currentProductionShapeLimits.lines
+            failures << ("production lines ${lines} > "
+                    + currentProductionShapeLimits.lines)
         }
         if (apiSources.size() > currentProductionShapeLimits.publicApiTypes) {
-            failures << "public API types ${apiSources.size()} > "
-                    + currentProductionShapeLimits.publicApiTypes
+            failures << ("public API types ${apiSources.size()} > "
+                    + currentProductionShapeLimits.publicApiTypes)
         }
         ['engine', 'fastpath'].each { legacy ->
             if (file("src/main/java/blue/coordination/${legacy}").exists()) {
@@ -507,6 +584,7 @@ tasks.register('verifyPublicApiBoundary') {
                 'src/main/java/blue/coordination/internal/DefaultCoordinationEngine.java',
                 'src/main/java/blue/coordination/internal/BundledContracts10Release.java',
                 'src/main/java/blue/coordination/internal/Contracts10AuthoredClosureCompiler.java',
+                'src/main/java/blue/coordination/internal/Contracts10StaticEmbeddedAdmissionCompiler.java',
                 'src/main/java/blue/coordination/internal/ContractsManagedDraftPlan.java'
         ] as Set
         fileTree('src/main/java/blue/coordination/internal') {
@@ -650,28 +728,265 @@ tasks.register('verifySdkPublicApiBoundary') {
     }
 }
 
+def sha256Identity = { File input ->
+    def digest = java.security.MessageDigest.getInstance('SHA-256')
+    input.withInputStream { stream ->
+        byte[] buffer = new byte[8192]
+        int count
+        while ((count = stream.read(buffer)) != -1) {
+            digest.update(buffer, 0, count)
+        }
+    }
+    'sha256:' + digest.digest().encodeHex().toString()
+}
+
+def inspectImmutableStagedContractsRepository = {
+    if (!immutableStagedContracts) {
+        throw new GradleException(
+                'Immutable staged Contracts verification requires '
+                        + '-PblueDependencyMode=immutable-staged-contracts')
+    }
+    File repository = file(stagedContractsRepositoryValue).canonicalFile
+    File manifestFile = new File(repository, 'artifact-manifest.json')
+    File manifestChecksum = new File(
+            repository, 'artifact-manifest.json.sha256')
+    def failures = []
+    def regularFile = { File candidate ->
+        java.nio.file.Files.isRegularFile(candidate.toPath(),
+                java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                && !java.nio.file.Files.isSymbolicLink(candidate.toPath())
+    }
+    if (!repository.isDirectory()) {
+        failures << "staged repository is not a directory ${repository}"
+    }
+    if (repository.toPath().startsWith(rootDir.canonicalFile.toPath())) {
+        failures << 'staged repository must be outside the Coordination source tree'
+    }
+    if (!regularFile(manifestFile) || !regularFile(manifestChecksum)) {
+        failures << 'regular artifact manifest and checksum companion are required'
+    }
+    if (!failures.empty) {
+        throw new GradleException(
+                'Immutable staged Contracts repository failed:\n - '
+                        + failures.join('\n - '))
+    }
+
+    String actualManifestIdentity = sha256Identity(manifestFile)
+    if (actualManifestIdentity != stagedContractsManifestIdentity) {
+        failures << ('manifest identity is ' + actualManifestIdentity
+                + '; expected ' + stagedContractsManifestIdentity)
+    }
+    String expectedManifestChecksum = actualManifestIdentity.substring(
+            'sha256:'.length()) + '  artifact-manifest.json\n'
+    if (manifestChecksum.getText('UTF-8') != expectedManifestChecksum) {
+        failures << 'artifact manifest checksum companion differs'
+    }
+
+    def manifest
+    try {
+        manifest = new groovy.json.JsonSlurper().parse(manifestFile)
+    } catch (RuntimeException exception) {
+        throw new GradleException(
+                'Cannot parse immutable staged Contracts manifest', exception)
+    }
+    if (manifest.schema != 'blue-staged-dependency-repository/1.0') {
+        failures << "unexpected manifest schema ${manifest.schema}"
+    }
+    if (manifest.groupId != 'blue.language') {
+        failures << "unexpected staged group ${manifest.groupId}"
+    }
+    if (manifest.version != immutableStagedLanguageVersion) {
+        failures << "unexpected staged Contracts version ${manifest.version}"
+    }
+    if (!(manifest.sourceCommit instanceof String)
+            || !(manifest.sourceCommit ==~ /[0-9a-f]{40}|[0-9a-f]{64}/)) {
+        failures << 'manifest sourceCommit is not an exact Git identity'
+    }
+    [
+            'contractsSpecificationIdentity',
+            'contractsFixturePackageIdentity',
+            'contractsReleaseIdentity'
+    ].each { field ->
+        if (!(manifest[field] instanceof String)
+                || !(manifest[field] ==~ /sha256:[0-9a-f]{64}/)) {
+            failures << "manifest ${field} is not a SHA-256 identity"
+        }
+    }
+    if (!(manifest.artifacts instanceof List)) {
+        failures << 'manifest artifacts must be a list'
+    }
+
+    def kinds = [
+            javadoc: '-javadoc.jar',
+            pom: '.pom',
+            runtime: '.jar',
+            sources: '-sources.jar'
+    ]
+    def expectedRecords = []
+    stagedContractsArtifacts.toList().sort().each { artifact ->
+        kinds.keySet().toList().sort().each { kind ->
+            String base = 'blue/language/' + artifact + '/' +
+                    immutableStagedLanguageVersion + '/' + artifact + '-' +
+                    immutableStagedLanguageVersion
+            expectedRecords << [
+                    key: artifact + ':' + kind,
+                    coordinate: 'blue.language:' + artifact +
+                            ':' + immutableStagedLanguageVersion,
+                    kind: kind,
+                    path: base + kinds[kind]
+            ]
+        }
+    }
+    def records = manifest.artifacts instanceof List
+            ? manifest.artifacts : []
+    def recordKeys = records.collect { record ->
+        String.valueOf(record.coordinate) + ':' +
+                String.valueOf(record.kind)
+    }
+    if (recordKeys != recordKeys.toList().sort()) {
+        failures << 'manifest artifact records are not canonically ordered'
+    }
+    if (recordKeys.toSet().size() != recordKeys.size()) {
+        failures << 'manifest contains duplicate artifact records'
+    }
+    def recordsByKey = records.collectEntries { record ->
+        [(String.valueOf(record.coordinate) + ':'
+                + String.valueOf(record.kind)): record]
+    }
+    def expectedFiles = [
+            'artifact-manifest.json',
+            'artifact-manifest.json.sha256'
+    ] as Set
+    expectedRecords.each { expected ->
+        String lookup = expected.coordinate + ':' + expected.kind
+        def record = recordsByKey[lookup]
+        if (record == null) {
+            failures << "missing manifest artifact record ${lookup}"
+            return
+        }
+        if (record.path != expected.path
+                || record.checksumPath != expected.path + '.sha256') {
+            failures << "noncanonical manifest paths for ${lookup}"
+            return
+        }
+        expectedFiles.add(expected.path)
+        expectedFiles.add(expected.path + '.sha256')
+        File payload = new File(repository, expected.path).canonicalFile
+        File checksum = new File(
+                repository, expected.path + '.sha256').canonicalFile
+        if (!payload.toPath().startsWith(repository.toPath())
+                || !checksum.toPath().startsWith(repository.toPath())) {
+            failures << "artifact path escapes repository for ${lookup}"
+            return
+        }
+        if (!regularFile(payload) || !regularFile(checksum)) {
+            failures << "missing regular payload/checksum for ${lookup}"
+            return
+        }
+        String payloadIdentity = sha256Identity(payload)
+        if (record.sha256 != payloadIdentity) {
+            failures << "payload identity differs for ${lookup}"
+        }
+        if (!(record.bytes instanceof Number)
+                || record.bytes.longValue() != payload.length()) {
+            failures << "payload byte count differs for ${lookup}"
+        }
+        String expectedChecksum = payloadIdentity.substring(
+                'sha256:'.length()) + '  ' + payload.name + '\n'
+        if (checksum.getText('UTF-8') != expectedChecksum) {
+            failures << "payload checksum companion differs for ${lookup}"
+        }
+    }
+    if (records.size() != expectedRecords.size()) {
+        failures << ('manifest has ' + records.size()
+                + ' artifact records; expected ' + expectedRecords.size())
+    }
+
+    def actualFiles = [] as Set
+    def stream = java.nio.file.Files.walk(repository.toPath())
+    try {
+        stream.forEach { path ->
+            if (path == repository.toPath()) {
+                return
+            }
+            if (java.nio.file.Files.isSymbolicLink(path)) {
+                failures << ('symbolic link in staged repository '
+                        + repository.toPath().relativize(path))
+                return
+            }
+            if (java.nio.file.Files.isRegularFile(path,
+                    java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                actualFiles.add(repository.toPath().relativize(path)
+                        .toString().replace(File.separator, '/'))
+            }
+        }
+    } finally {
+        stream.close()
+    }
+    if (actualFiles != expectedFiles) {
+        failures << ('staged repository closure differs; missing '
+                + (expectedFiles - actualFiles).toList().sort()
+                + ', unexpected '
+                + (actualFiles - expectedFiles).toList().sort())
+    }
+    if (!failures.empty) {
+        throw new GradleException(
+                'Immutable staged Contracts repository failed:\n - '
+                        + failures.join('\n - '))
+    }
+    manifest
+}
+
+def immutableStagedContractsRepository = tasks.register(
+        'verifyImmutableStagedContractsRepository') {
+    group = 'verification'
+    description = 'Verifies the manifest-pinned, closed Contracts repository before dependency resolution.'
+    if (immutableStagedContracts) {
+        inputs.dir(file(stagedContractsRepositoryValue))
+        inputs.property('blueContractsManifestSha256',
+                stagedContractsManifestIdentity)
+    }
+    doLast {
+        def manifest = inspectImmutableStagedContractsRepository()
+        logger.lifecycle(
+                'Immutable staged Contracts repository verified: {} from {}',
+                stagedContractsManifestIdentity, manifest.sourceCommit)
+    }
+}
+
+if (immutableStagedContracts) {
+    tasks.named('compileJava') {
+        dependsOn immutableStagedContractsRepository
+    }
+}
+
 tasks.register('dependencyPreflight') {
     group = 'verification'
-    description = 'Resolves every release dependency from published repositories.'
+    description = 'Resolves every release dependency from the selected isolated lane.'
+    if (immutableStagedContracts) {
+        dependsOn immutableStagedContractsRepository
+    }
     doLast {
-        if (dependencyMode != 'published-artifact') {
-            throw new GradleException(
-                    'dependencyPreflight requires '
-                            + '-PblueDependencyMode=published-artifact')
-        }
         def repositoryDependency = dependencies.create(
                 'blue.repo:blue-repo-java:3.0.0-rc.21')
         repositoryDependency.exclude(
                 group: 'blue.language', module: 'blue-language-java')
+        def bexCoreDependency = dependencies.create(
+                'blue.bex:blue-bex-core:1.1.0-rc.4')
+        bexCoreDependency.exclude(group: 'blue.language')
+        def bexContractsDependency = dependencies.create(
+                'blue.bex:blue-bex-contracts:1.1.0-rc.4')
+        bexContractsDependency.exclude(group: 'blue.language')
         def releaseDependencies = configurations.detachedConfiguration(
                 dependencies.create(
-                        'blue.language:blue-contracts-core:3.1.0-rc.21'),
+                        'blue.language:blue-contracts-core:' +
+                                activeLanguageVersion),
                 dependencies.create(
-                        'blue.language:blue-language-java:3.1.0-rc.21'),
+                        'blue.language:blue-language-java:' +
+                                activeLanguageVersion),
                 repositoryDependency,
-                dependencies.create('blue.bex:blue-bex-core:1.1.0-rc.4'),
-                dependencies.create(
-                        'blue.bex:blue-bex-contracts:1.1.0-rc.4'),
+                bexCoreDependency,
+                bexContractsDependency,
                 dependencies.create('org.bouncycastle:bcprov-jdk18on:1.78.1'))
         releaseDependencies.transitive = true
         releaseDependencies.resolutionStrategy.failOnVersionConflict()
@@ -686,13 +1001,14 @@ tasks.register('dependencyPreflight') {
             [(component.id.group + ':' + component.id.module):
                      component.id.version]
         }
-        if (selectedBlue != publishedBlueCoordinates) {
+        if (selectedBlue != activeBlueCoordinates) {
             throw new GradleException(
-                    'Published Blue dependency graph differs from the release '
+                    'Selected Blue dependency graph differs from the active '
                             + "pin: ${selectedBlue}")
         }
         logger.lifecycle(
-                'All published release dependencies resolved at exact pins.')
+                'All {} release dependencies resolved at exact pins.',
+                dependencyMode)
     }
 }
 
@@ -776,8 +1092,8 @@ tasks.register('verifyPublicationPom') {
                     }
                 }
         def expectedVersions = [
-                'blue.language:blue-contracts-core': '3.1.0-rc.21',
-                'blue.language:blue-language-java': '3.1.0-rc.21',
+                'blue.language:blue-contracts-core': activeLanguageVersion,
+                'blue.language:blue-language-java': activeLanguageVersion,
                 'blue.repo:blue-repo-java': '3.0.0-rc.21',
                 'blue.bex:blue-bex-core': '1.1.0-rc.4',
                 'blue.bex:blue-bex-contracts': '1.1.0-rc.4',
@@ -856,12 +1172,15 @@ tasks.register('verifyReleaseMetadata') {
         [
                 'README.md',
                 'START-HERE.md',
+                'docs/README.md',
+                'docs/guides/developer-guide.md',
                 'CHANGELOG.md',
                 'CONTRIBUTING.md',
                 'SECURITY.md',
                 'docs/development/build-and-test.md',
                 'docs/development/test-strategy.md',
                 'docs/development/releasing.md',
+                'docs/releases/3.0.0-rc.4.md',
                 'docs/releases/3.0.0-rc.3.md',
                 'docs/releases/3.0.0-rc.1-test-report.md',
                 'docs/releases/3.0.0-rc.1-evidence.json',
@@ -873,6 +1192,7 @@ tasks.register('verifyReleaseMetadata') {
                 'scripts/run-round13-same-machine-ab.sh',
                 'docs/reference/public-api.md',
                 'docs/reference/metrics.md',
+                'docs/limitations.md',
                 'docs/operations/failure-model.md'
         ].each { required ->
             if (!file(required).isFile()) {
@@ -1024,9 +1344,90 @@ tasks.register('verifyDocumentation') {
             'scripts/round13-ab-evidence.mjs',
             'scripts/round13-published-dependencies.gradle',
             'scripts/run-round13-same-machine-ab.sh',
+            'src/consumerTest/java/blue/coordination/consumer/SdkDeveloperGuideTest.java',
             productionSources)
     doLast {
         def failures = []
+        File developerGuide = file('docs/guides/developer-guide.md')
+        def requiredGuideSections = [
+                '## Mental model',
+                '## Use case 1: process an existing document and exact entry',
+                '## Use case 2: evolve an initial closure through several Timelines',
+                '## Ordering, `execute()`, and batching',
+                '## Admission and history policies',
+                '## Results, diagnostics, and reads',
+                '## Atomicity, retries, and process failure',
+                '## Application testing checklist',
+                '## Production-readiness checklist'
+        ]
+        def requiredGuideEvidence = [
+                'ManagedClosure.builder()',
+                '.bindOccurrence(',
+                '.exact(exactEntry)',
+                'request.managed(',
+                '.expectOccurrence(',
+                'canonical external source order',
+                'cyclic-set member',
+                'IllegalArgumentException',
+                'SdkDeveloperGuideTest'
+        ]
+        if (!developerGuide.isFile()) {
+            failures << 'Canonical SDK developer guide is missing'
+        } else {
+            String guideText = developerGuide.getText('UTF-8')
+            requiredGuideSections.findAll {
+                !guideText.contains(it)
+            }.each { missing ->
+                failures << "Canonical SDK developer guide is missing ${missing}"
+            }
+            requiredGuideEvidence.findAll {
+                !guideText.contains(it)
+            }.each { missing ->
+                failures << "Canonical SDK developer guide is missing evidence ${missing}"
+            }
+        }
+        File guideConsumer = file(
+                'src/consumerTest/java/blue/coordination/consumer/SdkDeveloperGuideTest.java')
+        if (!guideConsumer.isFile()) {
+            failures << 'Built-JAR developer-guide consumer test is missing'
+        } else {
+            String guideConsumerText = guideConsumer.getText('UTF-8')
+            [
+                    'completeGuideEvolvesACyclicClosureAcrossSeveralTimelines',
+                    'completeProviderEntryProcessesTheInitiallyKnownCyclicClosure',
+                    'ManagedClosure.builder()',
+                    '.bindOccurrence(',
+                    '.expectOccurrence(',
+                    'var exactEntry = blue.values().yaml(',
+                    '.exact(exactEntry)'
+            ].findAll {
+                !guideConsumerText.contains(it)
+            }.each { missing ->
+                failures << "Built-JAR developer-guide consumer test is missing ${missing}"
+            }
+        }
+        [file('README.md'), file('START-HERE.md')].each { landing ->
+            if (!landing.getText('UTF-8').contains(
+                    'docs/guides/developer-guide.md')) {
+                failures << "${landing} does not link the canonical SDK developer guide"
+            }
+        }
+        File metricsReference = file('docs/reference/metrics.md')
+        if (!metricsReference.getText('UTF-8').contains(
+                '**Advanced low-level API.**')) {
+            failures << 'Metrics reference does not identify its raw-engine scope'
+        }
+        [file('README.md'), file('START-HERE.md'),
+                file('docs/guides/developer-guide.md'),
+                file('docs/examples/playground-five-occurrence.md')].each {
+            currentDoc ->
+            String currentText = currentDoc.getText('UTF-8')
+            if (currentText.contains(
+                    'try (CoordinationEngine engine = CoordinationEngine.inMemory())')
+                    || currentText.contains('engine.startDocument(host')) {
+                failures << "${currentDoc} presents the legacy engine as current SDK guidance"
+            }
+        }
         inputs.files.files.findAll { it.name.endsWith('.md') }.each { source ->
             String markdown = source.getText('UTF-8')
             def links = markdown =~ /\[[^\]]*\]\(([^)]+)\)/
@@ -2542,7 +2943,7 @@ def sourceArchiveIncludes = [
         'CHANGELOG.md', 'CONTRIBUTING.md', 'LICENSE', 'README.md',
         'SECURITY.md', 'START-HERE.md', 'build.gradle', 'docs/**',
         'gradle/**', 'gradle.properties', 'gradlew',
-        'gradlew.bat', 'scripts/**', 'settings.gradle', 'src/**',
+        'gradlew.bat', 'scripts/**', 'settings.gradle', 'smoke-tests/**', 'src/**',
         'stabilization/cyclic-topology-rc3-final/**'
 ]
 def sourceArchiveExcludes = [
@@ -2591,12 +2992,17 @@ def sourceArchiveChecksum = tasks.register(
 
 def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
     group = 'verification'
-    description = 'Verifies the extracted archive against published dependencies.'
+    description = 'Verifies the extracted archive against the selected isolated dependency lane.'
     dependsOn sourceArchiveChecksum
     inputs.file(coordinationSourceArchive.flatMap { it.archiveFile })
     inputs.property('dependencyMode', dependencyMode)
     inputs.property('testJavaVersion', providers.gradleProperty(
             'testJavaVersion').getOrElse('17'))
+    if (immutableStagedContracts) {
+        inputs.dir(file(stagedContractsRepositoryValue))
+        inputs.property('blueContractsManifestSha256',
+                stagedContractsManifestIdentity)
+    }
     outputs.dir(layout.buildDirectory.dir('source-archive-smoke'))
     def verificationReceipt = layout.buildDirectory.file(
             'reports/contracts10/source-archive-verification.json')
@@ -2663,10 +3069,23 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
                 '--no-daemon', '--max-workers=1', 'help',
                 '-PtestJavaVersion=' + providers.gradleProperty(
                         'testJavaVersion').getOrElse('17'),
-                'verifyDependencyModeIsolation',
-                'verifyPublishedDependencyIsolation',
-                '-PblueDependencyMode=published-artifact'
+                'verifyDependencyModeIsolation'
         ])
+        if (immutableStagedContracts) {
+            command.addAll([
+                    'verifyImmutableStagedContractsRepository',
+                    '-PblueDependencyMode=immutable-staged-contracts',
+                    '-PblueContractsRepository=' +
+                            file(stagedContractsRepositoryValue).canonicalPath,
+                    '-PblueContractsManifestSha256=' +
+                            stagedContractsManifestIdentity
+            ])
+        } else {
+            command.addAll([
+                    'verifyPublishedDependencyIsolation',
+                    '-PblueDependencyMode=published-artifact'
+            ])
+        }
         Process process = new ProcessBuilder(command)
                 .directory(extracted).redirectErrorStream(true).start()
         process.inputStream.eachLine { logger.lifecycle(it) }
@@ -2694,6 +3113,8 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
                 checksumPath: rootDir.toPath().relativize(
                         sidecar.toPath()).toString().replace('\\', '/'),
                 dependencyMode: dependencyMode,
+                contractsManifestSha256: immutableStagedContracts
+                        ? stagedContractsManifestIdentity : null,
                 java: providers.gradleProperty(
                         'testJavaVersion').getOrElse('17'),
                 extractedConfiguration: 'PASS',
@@ -2711,7 +3132,7 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
 
 tasks.register('verifyDependencyModeIsolation') {
     group = 'verification'
-    description = 'Proves Maven Central artifacts are the only live dependency lane.'
+    description = 'Proves published and manifest-pinned Contracts lanes are explicit and isolated.'
     inputs.files('settings.gradle', 'build.gradle')
     doLast {
         String settings = file('settings.gradle').getText('UTF-8')
@@ -2726,26 +3147,51 @@ tasks.register('verifyDependencyModeIsolation') {
             throw new GradleException(
                     'Published artifacts must remain the default dependency mode')
         }
-        def forbiddenLiveModes = [
-                'include' + 'Build(', 'local-' + 'composite',
-                'staged-' + 'artifact',
-                'blueLanguage' + 'CompositePath',
-                'blueBex' + 'CompositePath',
-                'blueRepository' + 'CompositePath',
-                'blueStaging' + 'Repository', 'maven' + 'Local()'
+        def forbiddenLivePlumbing = [
+                'include' + 'Build(',
+                'dependency' + 'Substitution {',
+                'maven' + 'Local()',
+                'flat' + 'Dir {'
         ]
-        def leaked = forbiddenLiveModes.findAll { token ->
+        def leaked = forbiddenLivePlumbing.findAll { token ->
             settings.contains(token) || buildScript.contains(token)
         }
         if (!leaked.empty) {
             throw new GradleException(
-                    'Retired local dependency plumbing remains: ' + leaked)
+                    'Implicit dependency plumbing remains: ' + leaked)
         }
-        if (!settings.contains("dependencyMode != 'published-artifact'")
-                || !buildScript.contains(
-                "dependencyMode != 'published-artifact'")) {
+        def requiredStagedEvidence = [
+                "'immutable-staged-contracts'",
+                "'blueContractsRepository'",
+                "'blueContractsManifestSha256'",
+                "'artifact-manifest.json'",
+                "'artifact-manifest.json.sha256'"
+        ]
+        if (requiredStagedEvidence.any { token ->
+            !settings.contains(token) || !buildScript.contains(token)
+        }) {
             throw new GradleException(
-                    'Published-only dependency mode is not fail-closed')
+                    'Manifest-pinned Contracts dependency configuration is incomplete')
+        }
+        if (!buildScript.contains('exclusiveContent {')
+                || !buildScript.contains("includeGroup 'blue.language'")
+                || !buildScript.contains(
+                "name = 'immutableStagedContracts'")) {
+            throw new GradleException(
+                    'The staged blue.language group is not repository-exclusive')
+        }
+        def legacyProperties = [
+                'blueLanguageCompositePath',
+                'blueBexCompositePath',
+                'blueRepositoryCompositePath',
+                'blueStagingRepository',
+                'bluePublishedRepository'
+        ]
+        if (legacyProperties.any { property ->
+            !settings.contains("'${property}'")
+        } || !settings.contains('forbiddenDependencyProperties')) {
+            throw new GradleException(
+                    'Retired dependency properties are not rejected fail-closed')
         }
     }
 }
@@ -2805,9 +3251,106 @@ tasks.register('verifyPublishedArtifactDependencies') {
     }
 }
 
+def immutableStagedContractsDependencies = tasks.register(
+        'verifyImmutableStagedContractsDependencies') {
+    group = 'verification'
+    description = 'Compiles against the manifest-pinned Contracts graph and verifies resolved JAR bytes.'
+    if (immutableStagedContracts) {
+        dependsOn immutableStagedContractsRepository,
+                tasks.named('compileJava')
+    }
+    doLast {
+        if (!immutableStagedContracts) {
+            throw new GradleException(
+                    'verifyImmutableStagedContractsDependencies requires '
+                            + '-PblueDependencyMode=immutable-staged-contracts')
+        }
+        def manifest = inspectImmutableStagedContractsRepository()
+        def failures = []
+        def components = configurations.runtimeClasspath
+                .incoming.resolutionResult.allComponents
+        def leakedProjects = components.findAll { component ->
+            component.id instanceof
+                    org.gradle.api.artifacts.component.ProjectComponentIdentifier
+                    && component.id.displayName
+                    != "root project '${rootProject.name}'"
+        }.collect { component -> component.id.displayName }.sort()
+        if (!leakedProjects.empty || !gradle.includedBuilds.empty) {
+            failures << ('project/composite substitution leaked into staged '
+                    + 'Contracts mode: ' + leakedProjects
+                    + gradle.includedBuilds.collect { it.name }.sort())
+        }
+        def selectedBlue = components.findAll { component ->
+            component.id instanceof
+                    org.gradle.api.artifacts.component.ModuleComponentIdentifier
+                    && ['blue.language', 'blue.bex', 'blue.repo'].contains(
+                    component.id.group)
+        }.collectEntries { component ->
+            [(component.id.group + ':' + component.id.module):
+                     component.id.version]
+        }
+        if (selectedBlue != immutableStagedBlueCoordinates) {
+            failures << ('selected Blue graph differs from exact pins: '
+                    + selectedBlue)
+        }
+        def manifestRuntimeIdentities = manifest.artifacts.findAll { record ->
+            record.kind == 'runtime'
+        }.collectEntries { record ->
+            [(record.coordinate): record.sha256]
+        }
+        def resolvedLanguageArtifacts = configurations.runtimeClasspath
+                .resolvedConfiguration.resolvedArtifacts.findAll { artifact ->
+            artifact.moduleVersion.id.group == 'blue.language'
+        }
+        def expectedLanguageCoordinates = immutableStagedBlueCoordinates.findAll {
+            coordinate, ignored -> coordinate.startsWith('blue.language:')
+        }.collectEntries { coordinate, expectedVersion ->
+            [(coordinate + ':' + expectedVersion):
+                     manifestRuntimeIdentities[
+                             coordinate + ':' + expectedVersion]]
+        }
+        def resolvedLanguageIdentities = resolvedLanguageArtifacts
+                .collectEntries { artifact ->
+            String coordinate = artifact.moduleVersion.id.group + ':' +
+                    artifact.name + ':' + artifact.moduleVersion.id.version
+            [(coordinate): sha256Identity(artifact.file)]
+        }
+        if (expectedLanguageCoordinates.any { coordinate, identity ->
+            identity == null
+        }) {
+            failures << 'staged manifest does not bind every selected Language runtime'
+        }
+        if (resolvedLanguageIdentities != expectedLanguageCoordinates) {
+            failures << ('resolved Language artifact bytes differ from '
+                    + 'the staged manifest: ' + resolvedLanguageIdentities)
+        }
+        if (!failures.empty) {
+            throw new GradleException(
+                    'Immutable staged Contracts dependency graph failed:\n - '
+                            + failures.join('\n - '))
+        }
+        logger.lifecycle(
+                'Manifest-pinned Contracts dependencies resolved without fallback: {}',
+                stagedContractsManifestIdentity)
+    }
+}
+
+def activeDependencyLane = tasks.register('verifyActiveDependencyLane') {
+    group = 'verification'
+    description = 'Verifies the dependency lane selected for this invocation.'
+    if (immutableStagedContracts) {
+        dependsOn immutableStagedContractsDependencies
+    } else {
+        dependsOn tasks.named('verifyPublishedArtifactDependencies')
+    }
+}
+
 tasks.register('verifyTestArchitecture') {
     group = 'verification'
-    description = 'Protects test depth, Given/When/Then shape, and JAR-only consumer isolation.'
+    description = 'Protects test shape, suite isolation, and the JAR-only consumer boundary.'
+    def supportSources = fileTree('src/testSupport/java') {
+        include '**/*.java'
+    }
     def suites = [
             unit: fileTree('src/test/java') { include '**/*Test.java' },
             integration: fileTree('src/integrationTest/java') {
@@ -2820,7 +3363,7 @@ tasks.register('verifyTestArchitecture') {
                 include '**/*Test.java'
             }
     ]
-    inputs.files(suites.values())
+    inputs.files(suites.values(), supportSources)
     inputs.file('build.gradle')
     dependsOn tasks.named('jar')
     doLast {
@@ -2936,6 +3479,11 @@ tasks.register('verifyTestArchitecture') {
         if (integrationSources.contains('blue.coordination.basic')) {
             failures << 'release tests retain the historical basic package'
         }
+        if (supportSources.files.any { source ->
+            source.getText('UTF-8') =~ /(?m)^[ \t]*@Test\b/
+        }) {
+            failures << 'testSupport must contain helpers, not executable tests'
+        }
 
         fileTree('src/consumerTest/java') { include '**/*.java' }
                 .each { source ->
@@ -2972,18 +3520,42 @@ tasks.register('verifyTestArchitecture') {
                 failures << 'SDK built-JAR consumer does not use BlueCoordination'
             }
         }
-        Set<File> mainOutputs = sourceSets.main.output.files.collect {
-            it.canonicalFile
-        } as Set
         Set<File> consumerClasspath = sourceSets.consumerTest
                 .compileClasspath.files.collect { it.canonicalFile } as Set
-        if (!mainOutputs.intersect(consumerClasspath).empty) {
-            failures << 'consumer compile classpath contains main source outputs'
+        Set<File> forbiddenConsumerOutputs = [
+                sourceSets.main,
+                sourceSets.testFixtures,
+                sourceSets.testSupport,
+                sourceSets.test,
+                sourceSets.integrationTest,
+                sourceSets.scenarioTest
+        ].collectMany { sourceSet ->
+            sourceSet.output.files.collect { it.canonicalFile }
+        } as Set
+        if (!forbiddenConsumerOutputs.intersect(consumerClasspath).empty) {
+            failures << 'consumer compile classpath contains project class outputs'
         }
         File mainJar = tasks.named('jar').get().archiveFile.get().asFile
                 .canonicalFile
         if (!consumerClasspath.contains(mainJar)) {
             failures << 'consumer compile classpath does not contain the built JAR'
+        }
+        Set<File> scenarioCompileClasspath = sourceSets.scenarioTest
+                .compileClasspath.files.collect { it.canonicalFile } as Set
+        Set<File> scenarioRuntimeClasspath = sourceSets.scenarioTest
+                .runtimeClasspath.files.collect { it.canonicalFile } as Set
+        Set<File> integrationClassDirs = sourceSets.integrationTest.output
+                .classesDirs.files.collect { it.canonicalFile } as Set
+        if (!integrationClassDirs.intersect(scenarioCompileClasspath).empty
+                || !integrationClassDirs.intersect(
+                scenarioRuntimeClasspath).empty) {
+            failures << 'scenario classpath contains integration test output'
+        }
+        Set<File> supportClassDirs = sourceSets.testSupport.output
+                .classesDirs.files.collect { it.canonicalFile } as Set
+        if (!scenarioCompileClasspath.containsAll(supportClassDirs)
+                || !scenarioRuntimeClasspath.containsAll(supportClassDirs)) {
+            failures << 'scenario classpath lacks private testSupport output'
         }
         String historicalProject = '../blue-' + 'basic'
         if (file('build.gradle').getText('UTF-8').contains(
@@ -3024,14 +3596,16 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
     description = 'Runs the published-dependency gate for the bounded external-pilot RC.'
     inputs.files('.cz.toml', 'settings.gradle', 'build.gradle',
             'gradle/published-artifact.lockfile',
-            'stabilization/cyclic-topology-rc3-final/final-receipt.json',
-            'docs/releases/3.0.0-rc.3.md')
+            'dynamic-evolution-coordination-handoff-receipt.json',
+            'docs/releases/3.0.0-rc.4.md')
     def rcTestSources = files(
             fileTree('src/test/java') { include '**/*Test.java' },
+            fileTree('src/testSupport/java') { include '**/*.java' },
             fileTree('src/integrationTest/java') {
                 include '**/*Test.java'
             },
             fileTree('src/consumerTest/java') { include '**/*Test.java' },
+            fileTree('src/consumerTest/resources'),
             fileTree('src/scenarioTest/java') { include '**/*Test.java' })
     inputs.files(rcTestSources)
     inputs.files(tasks.named('jar').flatMap { it.archiveFile },
@@ -3041,12 +3615,12 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
     dependsOn 'releaseCheck', 'dependencyPreflight',
             'jar', 'sourcesJar', 'javadocJar', 'testFixturesJar'
     def readinessReport = layout.buildDirectory.file(
-            'reports/release/3.0.0-rc.3-readiness.json')
+            'reports/release/3.0.0-rc.4-readiness.json')
     outputs.file(readinessReport)
     doLast {
         def failures = []
-        if (version.toString() != '3.0.0-rc.3') {
-            failures << "release version is ${version}; expected 3.0.0-rc.3"
+        if (version.toString() != '3.0.0-rc.4') {
+            failures << "release version is ${version}; expected 3.0.0-rc.4"
         }
         if (dependencyMode != 'published-artifact') {
             failures << 'published-artifact is not the active dependency mode'
@@ -3065,30 +3639,64 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
         }
 
         def semanticReceipt = new groovy.json.JsonSlurper().parse(
-                file('stabilization/cyclic-topology-rc3-final/final-receipt.json'))
-        if (semanticReceipt.receiptState
-                != 'FINAL_EXTERNAL_PILOT_RC_EVIDENCE'
-                || semanticReceipt.overallStatus
-                != 'PASS_FOR_BOUNDED_EXTERNAL_PILOT'
-                || semanticReceipt.implementationConformanceClaimed != true
-                || semanticReceipt.externalPilotReady != true
-                || semanticReceipt.releaseReady != false
-                || semanticReceipt.publicReleaseReady != false
-                || semanticReceipt.productionReleaseReady != false
-                || semanticReceipt.stableLatencySlaClaimed != false) {
-            failures << 'retained semantic evidence does not authorize the bounded pilot tier'
+                file('dynamic-evolution-coordination-handoff-receipt.json'))
+        def requiredCapabilities = [
+                'automaticManagedOccurrenceResolutionSupported',
+                'automaticCurrentExactStateResolutionSupported',
+                'automaticNewAuthoredInitialDocumentResolutionSupported',
+                'typedResourceDemandRetrySupported',
+                'suspensionIsNonPublishing',
+                'atomicManagedPublicationSupported',
+                'activePathRebindSupported',
+                'dynamicCycleFormationAndDissolutionSupported',
+                'runtimeGeneralizationSupported',
+                'typedDocumentTransitionEvidenceSupported',
+                'typedOperationRouteDeltaEvidenceSupported'
+        ]
+        def retainedLimitations = [
+                'existingSessionAuthoredInitialAttachmentSupported',
+                'historicalRetainedEpochCatchUpSupported',
+                'timelineImportAndCompletenessSupported',
+                'mandatesSupported',
+                'multiNodeDurabilitySupported',
+                'productionReady',
+                'published',
+                'deployed'
+        ]
+        def java17 = semanticReceipt.verification?.java17
+        def java21 = semanticReceipt.verification?.java21
+        if (semanticReceipt.schema
+                != 'blue.coordination/dynamic-evolution-handoff-receipt/v1'
+                || semanticReceipt.status != 'PASS'
+                || semanticReceipt.sourceBinding
+                        ?.semanticSourceUnderTestCommit
+                        != '612f864ec7101bcac5a0cc596ad6b6f11cd10c98'
+                || requiredCapabilities.any {
+                    (semanticReceipt.capabilities ?: [:])[it] != true
+                }
+                || retainedLimitations.any {
+                    (semanticReceipt.capabilities ?: [:])[it] != false
+                }
+                || [java17, java21].any { lane ->
+                    lane?.status != 'PASS'
+                            || lane?.failures != 0
+                            || lane?.errors != 0
+                            || lane?.skipped != 0
+                }
+                || semanticReceipt.immutableStage?.published != false) {
+            failures << 'retained dynamic-evolution evidence does not authorize the bounded pilot tier'
         }
-        String releaseNotes = file('docs/releases/3.0.0-rc.3.md')
+        String releaseNotes = file('docs/releases/3.0.0-rc.4.md')
                 .getText('UTF-8')
         if (!releaseNotes.contains(
-                'RC3_RELEASE_TIER: BOUNDED_EXTERNAL_PILOT')
+                'RC4_RELEASE_TIER: BOUNDED_EXTERNAL_PILOT')
                 || !releaseNotes.contains(
-                'RC3_DEPENDENCY_MODE: PUBLISHED_ARTIFACTS_ONLY')
+                'RC4_DEPENDENCY_MODE: PUBLISHED_ARTIFACTS_ONLY')
                 || !releaseNotes.contains(
-                'RC3_PUBLIC_ARTIFACT_READY: true')
+                'RC4_PUBLIC_ARTIFACT_READY: true')
                 || !releaseNotes.contains(
-                'RC3_PRODUCTION_READY: false')) {
-            failures << 'rc.3 release notes do not state the exact release tier'
+                'RC4_PRODUCTION_READY: false')) {
+            failures << 'rc.4 release notes do not state the exact release tier'
         }
 
         if (System.getenv('CI') != null) {
@@ -3136,7 +3744,7 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
                         dependencies: publishedBlueCoordinates,
                         testMethods: testMethods,
                         semanticEvidence:
-                                'stabilization/cyclic-topology-rc3-final/final-receipt.json',
+                                'dynamic-evolution-coordination-handoff-receipt.json',
                         publicArtifactReady: true,
                         productionReady: false,
                         stableLatencySlaClaimed: false,
@@ -3153,7 +3761,7 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
 tasks.register('stageRelease') {
     group = 'publishing'
     description = 'Builds the verified Maven Central staging repository.'
-    dependsOn(version.toString() == '3.0.0-rc.3'
+    dependsOn(version.toString() == '3.0.0-rc.4'
             ? rcReadiness
             : tasks.named('releaseCheck'))
     dependsOn 'dependencyPreflight',
@@ -3168,17 +3776,17 @@ tasks.register('stageRelease') {
 }
 
 tasks.named('publishMavenJavaPublicationToStagingRepository') {
-    dependsOn(version.toString() == '3.0.0-rc.3'
+    dependsOn(version.toString() == '3.0.0-rc.4'
             ? rcReadiness
             : tasks.named('releaseCheck'))
     dependsOn 'dependencyPreflight'
 }
 
 tasks.named('releaseCheck') {
-    dependsOn 'verifyPublishedArtifactDependencies'
+    dependsOn activeDependencyLane
 }
 tasks.named('productionizationCheck') {
-    dependsOn 'verifyPublishedArtifactDependencies'
+    dependsOn activeDependencyLane
 }
 
 tasks.matching {
@@ -3194,3 +3802,5 @@ tasks.named('check') {
             'verifyArtifactContents', 'integrationTest', 'consumerTest',
             'verifyTestArchitecture'
 }
+
+apply from: 'gradle/coordination-staging.gradle'

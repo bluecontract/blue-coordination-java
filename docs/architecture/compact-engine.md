@@ -1,13 +1,21 @@
 # Compact engine architecture
 
-The supported runtime has three layers:
+The supported runtime has four layers:
 
-1. `blue.coordination.api` is the small immutable application boundary.
-2. `blue.coordination.internal` owns one exact journal, whole-object store,
+1. `blue.coordination.sdk` is the normal immutable application boundary and
+   lifecycle owner.
+2. `blue.coordination.api` is the retained low-level host-integration and
+   legacy compatibility surface.
+3. `blue.coordination.internal` owns one exact journal, whole-object store,
    document store, Channel route index, Process Embedded inventories, Root
    feeder, processor, and copy-on-write closure publication boundary.
-3. `blue.coordination.processor` retains the semantic Contracts/BEX workflow
+4. `blue.coordination.processor` retains the semantic Contracts/BEX workflow
    closure used by the compact runtime and advanced processor registration.
+
+New applications start with `BlueCoordination.inMemory()`. The plain
+`CoordinationEngine.inMemory()` factory is not an equivalent shorter spelling;
+it selects the earlier acyclic compatibility profile. See the
+[SDK developer guide](../guides/developer-guide.md) for application flow.
 
 Append validates the Timeline/provider/actor envelope, establishes one exact
 Timeline Entry BlueId, stores the entry once, and publishes its journal

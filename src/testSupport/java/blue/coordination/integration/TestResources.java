@@ -3,7 +3,7 @@ package blue.coordination.integration;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
-/** UTF-8 resource loading for executable basic-test documents. */
+/** Shared UTF-8 resource loading for executable test documents. */
 final class TestResources {
     private TestResources() {
     }

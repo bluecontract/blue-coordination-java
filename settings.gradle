@@ -10,9 +10,81 @@ rootProject.name = 'blue-coordination-java'
 def dependencyMode = providers.gradleProperty('blueDependencyMode')
         .getOrElse('published-artifact')
         .trim()
-if (dependencyMode != 'published-artifact') {
+def acceptedDependencyModes = [
+        'published-artifact',
+        'immutable-staged-contracts'
+] as Set
+if (!acceptedDependencyModes.contains(dependencyMode)) {
     throw new GradleException(
-            'Only blueDependencyMode=published-artifact is supported; '
-                    + 'local composite and staged file-repository modes '
-                    + 'were retired for the 3.0.0-rc.3 release line')
+            'blueDependencyMode must be published-artifact or '
+                    + 'immutable-staged-contracts')
+}
+
+def forbiddenDependencyProperties = [
+        'blueLanguageCompositePath',
+        'blueBexCompositePath',
+        'blueRepositoryCompositePath',
+        'blueStagingRepository',
+        'bluePublishedRepository'
+]
+def suppliedForbiddenProperties = forbiddenDependencyProperties.findAll {
+    providers.gradleProperty(it).isPresent()
+}
+if (!suppliedForbiddenProperties.empty) {
+    throw new GradleException(
+            'Retired dependency properties are forbidden: '
+                    + suppliedForbiddenProperties.sort())
+}
+
+if (dependencyMode == 'immutable-staged-contracts') {
+    String repositoryValue = providers.gradleProperty(
+            'blueContractsRepository').orNull
+    String manifestIdentity = providers.gradleProperty(
+            'blueContractsManifestSha256').orNull
+    if (repositoryValue == null || repositoryValue.isBlank()) {
+        throw new GradleException(
+                'immutable-staged-contracts mode requires '
+                        + '-PblueContractsRepository=/absolute/path')
+    }
+    File repositoryPath = new File(repositoryValue)
+    if (!repositoryPath.isAbsolute()) {
+        throw new GradleException(
+                'blueContractsRepository must be an absolute path')
+    }
+    File repository = repositoryPath.canonicalFile
+    if (!repository.isDirectory()) {
+        throw new GradleException(
+                'blueContractsRepository is not an immutable staged '
+                        + 'Contracts repository: ' + repository)
+    }
+    if (manifestIdentity == null
+            || !(manifestIdentity ==~ /sha256:[0-9a-f]{64}/)) {
+        throw new GradleException(
+                'immutable-staged-contracts mode requires '
+                        + '-PblueContractsManifestSha256=sha256:<64 lowercase hex>')
+    }
+    File manifest = new File(repository, 'artifact-manifest.json')
+    File sidecar = new File(repository, 'artifact-manifest.json.sha256')
+    if (!manifest.isFile() || java.nio.file.Files.isSymbolicLink(
+            manifest.toPath()) || !sidecar.isFile()
+            || java.nio.file.Files.isSymbolicLink(sidecar.toPath())) {
+        throw new GradleException(
+                'blueContractsRepository is missing the regular manifest '
+                        + 'and checksum companion')
+    }
+    String actualIdentity = 'sha256:' + java.security.MessageDigest
+            .getInstance('SHA-256').digest(manifest.bytes)
+            .encodeHex().toString()
+    if (actualIdentity != manifestIdentity) {
+        throw new GradleException(
+                'blueContractsManifestSha256 does not identify '
+                        + 'artifact-manifest.json')
+    }
+    String expectedSidecar = (actualIdentity.substring('sha256:'.length())
+            + '  artifact-manifest.json\n')
+    if (sidecar.getText('UTF-8') != expectedSidecar) {
+        throw new GradleException(
+                'artifact-manifest.json.sha256 does not identify the '
+                        + 'staged Contracts manifest')
+    }
 }
