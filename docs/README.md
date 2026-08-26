@@ -79,7 +79,7 @@ Executable public-SDK examples live in:
 ## Release status and historical evidence
 
 The current application claim is the bounded external-pilot
-[`3.0.0-rc.3` decision](releases/3.0.0-rc.3.md). It is not a stable or
+[`3.0.0-rc.4` decision](releases/3.0.0-rc.4.md). It is not a stable or
 production-readiness claim.
 
 Documents named `3.0.0-rc.1`, Round 11, Round 12, or Round 13 are immutable or

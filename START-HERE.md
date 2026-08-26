@@ -8,7 +8,7 @@ selects the earlier acyclic compatibility profile.
 ## Five-minute path
 
 1. Use Java 17 or newer.
-2. Resolve `blue.coordination:blue-coordination-java:3.0.0-rc.3` from Maven
+2. Resolve `blue.coordination:blue-coordination-java:3.0.0-rc.4` from Maven
    Central.
 3. Create one `BlueCoordination.inMemory()` owner in a try-with-resources
    block.
@@ -52,7 +52,7 @@ occurrence bindings and let Language/Contracts derive and verify cyclic
 identity evidence.
 
 Operation-created managed lineages support only new `FROM_NOW` children in
-rc.3. Imported draft epochs and historical/frontier/attach-current/passive
+rc.4. Imported draft epochs and historical/frontier/attach-current/passive
 operation-result activation fail closed. Draft-path preflight also requires a
 non-cyclic, independently processable operation target whose effective
 `Process Embedded` catalog does not cross a cyclic-set member. If a cyclic

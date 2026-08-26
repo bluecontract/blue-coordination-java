@@ -1,7 +1,7 @@
 # Blue Coordination SDK developer guide
 
 This is the canonical application-development guide for
-`blue.coordination:blue-coordination-java:3.0.0-rc.3`. It starts with authored
+`blue.coordination:blue-coordination-java:3.0.0-rc.4`. It starts with authored
 Blue documents and follows them through admission, exact Timeline processing,
 managed embedded documents, cycles, later operations, topology expansion,
 results, and failure handling.
@@ -22,7 +22,7 @@ acyclic semantics.
 - atomic publication of one connected affected closure; and
 - a compact, local runtime for development or a bounded external pilot.
 
-It is not a database or a production service host. The rc.3 runtime is one JVM,
+It is not a database or a production service host. The rc.4 runtime is one JVM,
 in-memory, and sequential. A process crash loses its stores. Durable recovery,
 provider completeness, production authorization and tenant isolation,
 parallel/distributed scheduling, durable outbox recovery, and a stable latency
@@ -39,7 +39,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'blue.coordination:blue-coordination-java:3.0.0-rc.3'
+    implementation 'blue.coordination:blue-coordination-java:3.0.0-rc.4'
 }
 ```
 
@@ -561,7 +561,7 @@ private static void requireApplied(EntryResult result) {
 }
 ```
 
-Operation-produced managed admission in rc.3 supports only a genuinely new
+Operation-produced managed admission in rc.4 supports only a genuinely new
 `FROM_NOW` lineage. `draft.atEpoch(...)` and full-history, frontier,
 attach-current, or passive operation-result activation fail closed. If a new
 group must already be cyclic at birth, include the complete group in the
@@ -642,8 +642,8 @@ Choose temporal semantics explicitly:
 | Policy | Meaning | Top-level admission | Operation-created draft |
 | --- | --- | --- | --- |
 | `fromNow()` | Begin at admission/attachment; do not replay earlier entries. | supported | supported and required |
-| `importFullHistory()` | Start eligibility at the retained full-history frontier; a later drain processes eligible retained entries. | supported | unsupported in rc.3 |
-| `importFromFrontier(evidence)` | Start eligibility strictly after verified exact frontier evidence; a later drain processes eligible retained entries. | supported | unsupported in rc.3 |
+| `importFullHistory()` | Start eligibility at the retained full-history frontier; a later drain processes eligible retained entries. | supported | unsupported in rc.4 |
+| `importFromFrontier(evidence)` | Start eligibility strictly after verified exact frontier evidence; a later drain processes eligible retained entries. | supported | unsupported in rc.4 |
 | `attachCurrentState()` | Attach a lineage proven current through the cutoff. | rejected at current high-level admission boundary | unsupported |
 | `passiveSnapshot()` | Retain exact evidence without a live process. | rejected at current high-level admission boundary | unsupported |
 
@@ -667,7 +667,7 @@ var imported = ManagedDocument.yaml(orderId, orderYaml)
 The three components are the retained entry's signed-64-bit timestamp,
 Timeline ID, and exact entry BlueId—the canonical external order tuple. The
 tuple must match retained journal evidence exactly, and replay is strictly
-after it. A fabricated or non-retained tuple is rejected. The rc.3 SDK has no
+after it. A fabricated or non-retained tuple is rejected. The rc.4 SDK has no
 typed `EntryHandle`-to-frontier converter, so treat this as an advanced/provider
 integration unless the provider already supplies and persists that evidence;
 do not derive it from Java append order or sequence numbers.
@@ -824,7 +824,7 @@ The bundled in-memory runtime does not answer those production-host questions.
   internal data flow without application-only details.
 - [SDK migration and ownership ledger](../reference/sdk-migration-and-ownership.md)
   when replacing a low-level or 2.x integration.
-- [Known limitations](../limitations.md) for the exact rc.3 non-claims.
+- [Known limitations](../limitations.md) for the exact rc.4 non-claims.
 
 The two principal walkthroughs in this guide are executable as the built-JAR-only
 [`SdkDeveloperGuideTest`](../../src/consumerTest/java/blue/coordination/consumer/SdkDeveloperGuideTest.java).

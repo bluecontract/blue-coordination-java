@@ -1,6 +1,6 @@
 # Known limitations
 
-`3.0.0-rc.3` is a bounded external-pilot release candidate from Maven Central.
+`3.0.0-rc.4` is a bounded external-pilot release candidate from Maven Central.
 It is not stable, production-ready, or a production MyOS runtime.
 
 Read the [SDK developer guide](guides/developer-guide.md) for supported
@@ -9,7 +9,7 @@ non-claims.
 
 ## Capability matrix
 
-| Capability | Rc.3 status |
+| Capability | Rc.4 status |
 | --- | --- |
 | Ordinary authored document admission | supported |
 | Complete initially known managed closure | supported |
@@ -42,7 +42,7 @@ attach-current, or passive operation-result activation fail closed. There is no
 fallback to legacy child/parent admission.
 
 Put every member that already exists, including every initially known cycle, in
-one complete `ManagedClosure`. The rc.3 draft API does not claim arbitrary
+one complete `ManagedClosure`. The rc.4 draft API does not claim arbitrary
 creation of a new multi-member cyclic group from one operation result.
 Managed-draft path preflight also requires an independently processable,
 non-cyclic operation target whose own effective catalog does not cross a
@@ -125,5 +125,5 @@ permitted semantic shortcut.
 
 The Round 13 performance exception and exact latency numbers belong only to the
 historical [`3.0.0-rc.1` report](releases/3.0.0-rc.1-test-report.md). That policy
-does not authorize rc.3 or a stable release and is not a current performance
+does not authorize rc.4 or a stable release and is not a current performance
 claim.

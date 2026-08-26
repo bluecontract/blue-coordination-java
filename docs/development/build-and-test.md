@@ -16,14 +16,20 @@ rejected in both lanes.
 
 | Modules | Version |
 | --- | --- |
-| `blue.language:*` | `3.1.0-rc.21` |
+| `blue.language:*` | `3.1.0-rc.22` |
 | `blue.bex:blue-bex-core`, `blue-bex-contracts` | `1.1.0-rc.4` |
 | `blue.repo:blue-repo-java` | `3.0.0-rc.21` |
 
 Repository rc.21 advertises `blue-language-java:3.1.0-rc.20`. The project
-excludes that one stale transitive edge and directly owns Language rc.21. The
+excludes that one stale transitive edge and directly owns Language rc.22. The
 same exclusion is published in the Coordination POM. The exact graph is locked
 in `gradle/published-artifact.lockfile`.
+
+The retained `immutable-staged-contracts` evidence lane remains bound to
+Language `3.1.0-rc.21` and uses its own
+`gradle/immutable-staged-contracts.lockfile`. It preserves the exact staged
+repository recorded by the dynamic-evolution handoff; it is not the public
+rc.4 dependency graph.
 
 The staged lane accepts only the non-overwriting repository exported by the
 Contracts release gate. Its absolute path and exact manifest identity are both
@@ -113,9 +119,9 @@ For the current bounded external-pilot candidate, run:
 ```
 
 This task includes `releaseCheck` and `dependencyPreflight`, validates the
-rc.3 release authority and explicit non-claims, then records the freshly built
+rc.4 release authority and explicit non-claims, then records the freshly built
 artifact hashes in
-`build/reports/release/3.0.0-rc.3-readiness.json`.
+`build/reports/release/3.0.0-rc.4-readiness.json`.
 
 The source distribution and checksum can be built independently with:
 
@@ -139,4 +145,4 @@ is not read by the build and is not release evidence.
 
 See [Test strategy](test-strategy.md),
 [Releasing](releasing.md), and the
-[3.0.0-rc.3 decision](../releases/3.0.0-rc.3.md).
+[3.0.0-rc.4 decision](../releases/3.0.0-rc.4.md).

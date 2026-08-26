@@ -3,6 +3,33 @@
 This project follows Semantic Versioning. Release candidates may still refine
 the new 3.x API before the first stable 3.0.0 release.
 
+## 3.0.0-rc.4 - dynamic contract and occurrence evolution candidate
+
+### Added
+
+- Automatic managed-occurrence resolution for exact current state and complete
+  new authored initial documents.
+- Typed resource demands, non-publishing suspension/retry, active-path rebind,
+  atomic managed publication, and dynamic cycle formation and dissolution.
+- Runtime contract generalization plus typed document-transition and
+  operation-route evidence.
+
+### Changed
+
+- The Maven Central graph is pinned to Language `3.1.0-rc.22`, BEX
+  `1.1.0-rc.4`, Repository `3.0.0-rc.21`, and Coordination
+  `3.0.0-rc.4`.
+- The rc.4 readiness gate is bound to the sealed dynamic-evolution handoff and
+  rebuilds fresh release artifacts from the published dependency graph.
+
+### Known limitations
+
+- Existing-session authored-initial attachment, retained historical epoch
+  catch-up, authoritative external Timeline completeness, Mandates, and
+  production multi-node durability remain unsupported.
+- The candidate remains in-memory, one-JVM, and sequential. It is not stable or
+  production-ready.
+
 ## 3.0.0-rc.3 - bounded external-pilot cyclic-topology SDK candidate
 
 ### Added

@@ -4,7 +4,7 @@ const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 
 const CZ_TOML = '.cz.toml';
-const RELEASE_AUTHORITY = 'docs/releases/3.0.0-rc.3.md';
+const RELEASE_AUTHORITY = 'docs/releases/3.0.0-rc.4.md';
 const MAIN_REF = process.env.RC_BASE_REF || 'origin/main';
 const VALID_BUMPS = new Set(['major', 'minor', 'patch']);
 
@@ -110,9 +110,9 @@ function nextVersionForCurrentRc(currentVersion, latestTaggedRc) {
 }
 
 function authorityRelease(content) {
-  const match = content.match(/^RC3_VERSION:\s*(\S+)\s*$/m);
+  const match = content.match(/^RC4_VERSION:\s*(\S+)\s*$/m);
   if (!match) {
-    throw new Error(`Release authority is missing RC3_VERSION: ${RELEASE_AUTHORITY}`);
+    throw new Error(`Release authority is missing RC4_VERSION: ${RELEASE_AUTHORITY}`);
   }
   return match[1];
 }

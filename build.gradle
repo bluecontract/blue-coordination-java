@@ -12,6 +12,11 @@ def dependencyMode = providers.gradleProperty('blueDependencyMode')
         .trim()
 def immutableStagedContracts =
         dependencyMode == 'immutable-staged-contracts'
+def publishedLanguageVersion = '3.1.0-rc.22'
+def immutableStagedLanguageVersion = '3.1.0-rc.21'
+def activeLanguageVersion = immutableStagedContracts
+        ? immutableStagedLanguageVersion
+        : publishedLanguageVersion
 def stagedContractsRepositoryValue = providers.gradleProperty(
         'blueContractsRepository').orNull
 def stagedContractsManifestIdentity = providers.gradleProperty(
@@ -25,16 +30,25 @@ def declaredProjectVersion = versionMatches.group(1)
 version = declaredProjectVersion
 
 def publishedBlueCoordinates = [
-        'blue.language:blue-language-model': '3.1.0-rc.21',
-        'blue.language:blue-language-core': '3.1.0-rc.21',
-        'blue.language:blue-language-mapping': '3.1.0-rc.21',
-        'blue.language:blue-language-ipfs': '3.1.0-rc.21',
-        'blue.language:blue-language-java': '3.1.0-rc.21',
-        'blue.language:blue-contracts-core': '3.1.0-rc.21',
+        'blue.language:blue-language-model': publishedLanguageVersion,
+        'blue.language:blue-language-core': publishedLanguageVersion,
+        'blue.language:blue-language-mapping': publishedLanguageVersion,
+        'blue.language:blue-language-ipfs': publishedLanguageVersion,
+        'blue.language:blue-language-java': publishedLanguageVersion,
+        'blue.language:blue-contracts-core': publishedLanguageVersion,
         'blue.repo:blue-repo-java': '3.0.0-rc.21',
         'blue.bex:blue-bex-core': '1.1.0-rc.4',
         'blue.bex:blue-bex-contracts': '1.1.0-rc.4'
 ]
+def immutableStagedBlueCoordinates = publishedBlueCoordinates.collectEntries {
+    coordinate, expectedVersion ->
+        [(coordinate): coordinate.startsWith('blue.language:')
+                ? immutableStagedLanguageVersion
+                : expectedVersion]
+}
+def activeBlueCoordinates = immutableStagedContracts
+        ? immutableStagedBlueCoordinates
+        : publishedBlueCoordinates
 def acceptedDependencyModes = [
         'published-artifact',
         'immutable-staged-contracts'
@@ -116,7 +130,9 @@ configurations {
 dependencyLocking {
     lockAllConfigurations()
     lockFile = layout.projectDirectory.file(
-            'gradle/published-artifact.lockfile')
+            immutableStagedContracts
+                    ? 'gradle/immutable-staged-contracts.lockfile'
+                    : 'gradle/published-artifact.lockfile')
 }
 
 tasks.withType(JavaCompile).configureEach {
@@ -154,15 +170,19 @@ tasks.withType(Jar).configureEach {
 }
 
 dependencies {
-    api 'blue.language:blue-contracts-core:3.1.0-rc.21'
-    implementation 'blue.language:blue-language-java:3.1.0-rc.21'
+    api "blue.language:blue-contracts-core:${activeLanguageVersion}"
+    implementation "blue.language:blue-language-java:${activeLanguageVersion}"
     implementation('blue.repo:blue-repo-java:3.0.0-rc.21') {
         // Repository rc.21 was published against Language rc.20. Coordination
-        // owns the rc.21 runtime and excludes that stale transitive edge.
+        // owns the active pinned Language runtime and excludes that stale edge.
         exclude group: 'blue.language', module: 'blue-language-java'
     }
-    api 'blue.bex:blue-bex-core:1.1.0-rc.4'
-    api 'blue.bex:blue-bex-contracts:1.1.0-rc.4'
+    api('blue.bex:blue-bex-core:1.1.0-rc.4') {
+        exclude group: 'blue.language'
+    }
+    api('blue.bex:blue-bex-contracts:1.1.0-rc.4') {
+        exclude group: 'blue.language'
+    }
     implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
 
     testImplementation platform('org.junit:junit-bom:5.14.1')
@@ -181,7 +201,8 @@ dependencies {
     scenarioTestImplementation sourceSets.testSupport.output
 
     consumerTestImplementation files(tasks.named('jar'))
-    consumerTestImplementation 'blue.language:blue-contracts-core:3.1.0-rc.21'
+    consumerTestImplementation \
+            "blue.language:blue-contracts-core:${activeLanguageVersion}"
     consumerTestImplementation platform('org.junit:junit-bom:5.14.1')
     consumerTestImplementation 'org.junit.jupiter:junit-jupiter'
     consumerTestRuntimeOnly files(configurations.runtimeClasspath)
@@ -774,7 +795,7 @@ def inspectImmutableStagedContractsRepository = {
     if (manifest.groupId != 'blue.language') {
         failures << "unexpected staged group ${manifest.groupId}"
     }
-    if (manifest.version != '3.1.0-rc.21') {
+    if (manifest.version != immutableStagedLanguageVersion) {
         failures << "unexpected staged Contracts version ${manifest.version}"
     }
     if (!(manifest.sourceCommit instanceof String)
@@ -804,12 +825,13 @@ def inspectImmutableStagedContractsRepository = {
     def expectedRecords = []
     stagedContractsArtifacts.toList().sort().each { artifact ->
         kinds.keySet().toList().sort().each { kind ->
-            String base = 'blue/language/' + artifact + '/3.1.0-rc.21/' +
-                    artifact + '-3.1.0-rc.21'
+            String base = 'blue/language/' + artifact + '/' +
+                    immutableStagedLanguageVersion + '/' + artifact + '-' +
+                    immutableStagedLanguageVersion
             expectedRecords << [
                     key: artifact + ':' + kind,
                     coordinate: 'blue.language:' + artifact +
-                            ':3.1.0-rc.21',
+                            ':' + immutableStagedLanguageVersion,
                     kind: kind,
                     path: base + kinds[kind]
             ]
@@ -949,15 +971,22 @@ tasks.register('dependencyPreflight') {
                 'blue.repo:blue-repo-java:3.0.0-rc.21')
         repositoryDependency.exclude(
                 group: 'blue.language', module: 'blue-language-java')
+        def bexCoreDependency = dependencies.create(
+                'blue.bex:blue-bex-core:1.1.0-rc.4')
+        bexCoreDependency.exclude(group: 'blue.language')
+        def bexContractsDependency = dependencies.create(
+                'blue.bex:blue-bex-contracts:1.1.0-rc.4')
+        bexContractsDependency.exclude(group: 'blue.language')
         def releaseDependencies = configurations.detachedConfiguration(
                 dependencies.create(
-                        'blue.language:blue-contracts-core:3.1.0-rc.21'),
+                        'blue.language:blue-contracts-core:' +
+                                activeLanguageVersion),
                 dependencies.create(
-                        'blue.language:blue-language-java:3.1.0-rc.21'),
+                        'blue.language:blue-language-java:' +
+                                activeLanguageVersion),
                 repositoryDependency,
-                dependencies.create('blue.bex:blue-bex-core:1.1.0-rc.4'),
-                dependencies.create(
-                        'blue.bex:blue-bex-contracts:1.1.0-rc.4'),
+                bexCoreDependency,
+                bexContractsDependency,
                 dependencies.create('org.bouncycastle:bcprov-jdk18on:1.78.1'))
         releaseDependencies.transitive = true
         releaseDependencies.resolutionStrategy.failOnVersionConflict()
@@ -972,9 +1001,9 @@ tasks.register('dependencyPreflight') {
             [(component.id.group + ':' + component.id.module):
                      component.id.version]
         }
-        if (selectedBlue != publishedBlueCoordinates) {
+        if (selectedBlue != activeBlueCoordinates) {
             throw new GradleException(
-                    'Published Blue dependency graph differs from the release '
+                    'Selected Blue dependency graph differs from the active '
                             + "pin: ${selectedBlue}")
         }
         logger.lifecycle(
@@ -1063,8 +1092,8 @@ tasks.register('verifyPublicationPom') {
                     }
                 }
         def expectedVersions = [
-                'blue.language:blue-contracts-core': '3.1.0-rc.21',
-                'blue.language:blue-language-java': '3.1.0-rc.21',
+                'blue.language:blue-contracts-core': activeLanguageVersion,
+                'blue.language:blue-language-java': activeLanguageVersion,
                 'blue.repo:blue-repo-java': '3.0.0-rc.21',
                 'blue.bex:blue-bex-core': '1.1.0-rc.4',
                 'blue.bex:blue-bex-contracts': '1.1.0-rc.4',
@@ -1151,6 +1180,7 @@ tasks.register('verifyReleaseMetadata') {
                 'docs/development/build-and-test.md',
                 'docs/development/test-strategy.md',
                 'docs/development/releasing.md',
+                'docs/releases/3.0.0-rc.4.md',
                 'docs/releases/3.0.0-rc.3.md',
                 'docs/releases/3.0.0-rc.1-test-report.md',
                 'docs/releases/3.0.0-rc.1-evidence.json',
@@ -3259,7 +3289,7 @@ def immutableStagedContractsDependencies = tasks.register(
             [(component.id.group + ':' + component.id.module):
                      component.id.version]
         }
-        if (selectedBlue != publishedBlueCoordinates) {
+        if (selectedBlue != immutableStagedBlueCoordinates) {
             failures << ('selected Blue graph differs from exact pins: '
                     + selectedBlue)
         }
@@ -3272,7 +3302,7 @@ def immutableStagedContractsDependencies = tasks.register(
                 .resolvedConfiguration.resolvedArtifacts.findAll { artifact ->
             artifact.moduleVersion.id.group == 'blue.language'
         }
-        def expectedLanguageCoordinates = publishedBlueCoordinates.findAll {
+        def expectedLanguageCoordinates = immutableStagedBlueCoordinates.findAll {
             coordinate, ignored -> coordinate.startsWith('blue.language:')
         }.collectEntries { coordinate, expectedVersion ->
             [(coordinate + ':' + expectedVersion):
@@ -3566,8 +3596,8 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
     description = 'Runs the published-dependency gate for the bounded external-pilot RC.'
     inputs.files('.cz.toml', 'settings.gradle', 'build.gradle',
             'gradle/published-artifact.lockfile',
-            'stabilization/cyclic-topology-rc3-final/final-receipt.json',
-            'docs/releases/3.0.0-rc.3.md')
+            'dynamic-evolution-coordination-handoff-receipt.json',
+            'docs/releases/3.0.0-rc.4.md')
     def rcTestSources = files(
             fileTree('src/test/java') { include '**/*Test.java' },
             fileTree('src/testSupport/java') { include '**/*.java' },
@@ -3585,12 +3615,12 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
     dependsOn 'releaseCheck', 'dependencyPreflight',
             'jar', 'sourcesJar', 'javadocJar', 'testFixturesJar'
     def readinessReport = layout.buildDirectory.file(
-            'reports/release/3.0.0-rc.3-readiness.json')
+            'reports/release/3.0.0-rc.4-readiness.json')
     outputs.file(readinessReport)
     doLast {
         def failures = []
-        if (version.toString() != '3.0.0-rc.3') {
-            failures << "release version is ${version}; expected 3.0.0-rc.3"
+        if (version.toString() != '3.0.0-rc.4') {
+            failures << "release version is ${version}; expected 3.0.0-rc.4"
         }
         if (dependencyMode != 'published-artifact') {
             failures << 'published-artifact is not the active dependency mode'
@@ -3609,30 +3639,64 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
         }
 
         def semanticReceipt = new groovy.json.JsonSlurper().parse(
-                file('stabilization/cyclic-topology-rc3-final/final-receipt.json'))
-        if (semanticReceipt.receiptState
-                != 'FINAL_EXTERNAL_PILOT_RC_EVIDENCE'
-                || semanticReceipt.overallStatus
-                != 'PASS_FOR_BOUNDED_EXTERNAL_PILOT'
-                || semanticReceipt.implementationConformanceClaimed != true
-                || semanticReceipt.externalPilotReady != true
-                || semanticReceipt.releaseReady != false
-                || semanticReceipt.publicReleaseReady != false
-                || semanticReceipt.productionReleaseReady != false
-                || semanticReceipt.stableLatencySlaClaimed != false) {
-            failures << 'retained semantic evidence does not authorize the bounded pilot tier'
+                file('dynamic-evolution-coordination-handoff-receipt.json'))
+        def requiredCapabilities = [
+                'automaticManagedOccurrenceResolutionSupported',
+                'automaticCurrentExactStateResolutionSupported',
+                'automaticNewAuthoredInitialDocumentResolutionSupported',
+                'typedResourceDemandRetrySupported',
+                'suspensionIsNonPublishing',
+                'atomicManagedPublicationSupported',
+                'activePathRebindSupported',
+                'dynamicCycleFormationAndDissolutionSupported',
+                'runtimeGeneralizationSupported',
+                'typedDocumentTransitionEvidenceSupported',
+                'typedOperationRouteDeltaEvidenceSupported'
+        ]
+        def retainedLimitations = [
+                'existingSessionAuthoredInitialAttachmentSupported',
+                'historicalRetainedEpochCatchUpSupported',
+                'timelineImportAndCompletenessSupported',
+                'mandatesSupported',
+                'multiNodeDurabilitySupported',
+                'productionReady',
+                'published',
+                'deployed'
+        ]
+        def java17 = semanticReceipt.verification?.java17
+        def java21 = semanticReceipt.verification?.java21
+        if (semanticReceipt.schema
+                != 'blue.coordination/dynamic-evolution-handoff-receipt/v1'
+                || semanticReceipt.status != 'PASS'
+                || semanticReceipt.sourceBinding
+                        ?.semanticSourceUnderTestCommit
+                        != '612f864ec7101bcac5a0cc596ad6b6f11cd10c98'
+                || requiredCapabilities.any {
+                    (semanticReceipt.capabilities ?: [:])[it] != true
+                }
+                || retainedLimitations.any {
+                    (semanticReceipt.capabilities ?: [:])[it] != false
+                }
+                || [java17, java21].any { lane ->
+                    lane?.status != 'PASS'
+                            || lane?.failures != 0
+                            || lane?.errors != 0
+                            || lane?.skipped != 0
+                }
+                || semanticReceipt.immutableStage?.published != false) {
+            failures << 'retained dynamic-evolution evidence does not authorize the bounded pilot tier'
         }
-        String releaseNotes = file('docs/releases/3.0.0-rc.3.md')
+        String releaseNotes = file('docs/releases/3.0.0-rc.4.md')
                 .getText('UTF-8')
         if (!releaseNotes.contains(
-                'RC3_RELEASE_TIER: BOUNDED_EXTERNAL_PILOT')
+                'RC4_RELEASE_TIER: BOUNDED_EXTERNAL_PILOT')
                 || !releaseNotes.contains(
-                'RC3_DEPENDENCY_MODE: PUBLISHED_ARTIFACTS_ONLY')
+                'RC4_DEPENDENCY_MODE: PUBLISHED_ARTIFACTS_ONLY')
                 || !releaseNotes.contains(
-                'RC3_PUBLIC_ARTIFACT_READY: true')
+                'RC4_PUBLIC_ARTIFACT_READY: true')
                 || !releaseNotes.contains(
-                'RC3_PRODUCTION_READY: false')) {
-            failures << 'rc.3 release notes do not state the exact release tier'
+                'RC4_PRODUCTION_READY: false')) {
+            failures << 'rc.4 release notes do not state the exact release tier'
         }
 
         if (System.getenv('CI') != null) {
@@ -3680,7 +3744,7 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
                         dependencies: publishedBlueCoordinates,
                         testMethods: testMethods,
                         semanticEvidence:
-                                'stabilization/cyclic-topology-rc3-final/final-receipt.json',
+                                'dynamic-evolution-coordination-handoff-receipt.json',
                         publicArtifactReady: true,
                         productionReady: false,
                         stableLatencySlaClaimed: false,
@@ -3697,7 +3761,7 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
 tasks.register('stageRelease') {
     group = 'publishing'
     description = 'Builds the verified Maven Central staging repository.'
-    dependsOn(version.toString() == '3.0.0-rc.3'
+    dependsOn(version.toString() == '3.0.0-rc.4'
             ? rcReadiness
             : tasks.named('releaseCheck'))
     dependsOn 'dependencyPreflight',
@@ -3712,7 +3776,7 @@ tasks.register('stageRelease') {
 }
 
 tasks.named('publishMavenJavaPublicationToStagingRepository') {
-    dependsOn(version.toString() == '3.0.0-rc.3'
+    dependsOn(version.toString() == '3.0.0-rc.4'
             ? rcReadiness
             : tasks.named('releaseCheck'))
     dependsOn 'dependencyPreflight'

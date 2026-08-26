@@ -6,31 +6,26 @@ separate from Maven Central staging and is intentionally non-overwriting.
 
 ## Current decision
 
-`3.0.0-rc.3` is authorized as a bounded external-pilot release candidate.
+`3.0.0-rc.4` is authorized as a bounded external-pilot release candidate.
 It is not stable or production-ready. The exact scope and non-claims are in the
-[rc.3 release decision](../releases/3.0.0-rc.3.md).
+[rc.4 release decision](../releases/3.0.0-rc.4.md).
 
 The release consumes only Maven Central artifacts:
 
 | Component | Version |
 | --- | --- |
-| Language | `3.1.0-rc.21` |
+| Language | `3.1.0-rc.22` |
 | BEX core/contracts | `1.1.0-rc.4` |
 | Repository | `3.0.0-rc.21` |
-| Coordination | `3.0.0-rc.3` |
+| Coordination | `3.0.0-rc.4` |
 
-Repository rc.21's stale Language rc.20 transitive edge is excluded; the direct
-Language rc.21 pin is authoritative and the generated POM publishes the same
-exclusion.
+Repository rc.21 and BEX rc.4's older Language transitive edges are excluded;
+the direct Language rc.22 pin is authoritative and the generated POM publishes
+the same exclusions.
 
-The dynamic-contract-evolution evidence round is deliberately separate from
-this retained rc.3 publication authority. It consumes the exact unpublished
-Contracts checkpoint through `blueDependencyMode=immutable-staged-contracts`,
-`blueContractsRepository`, and `blueContractsManifestSha256`. That lane permits
-only manifest-bound `blue.language` bytes from the immutable handoff repository;
-it has no Maven Local, included-build, source-copy, or Maven Central fallback.
-The resulting Coordination candidate must receive its own receipt and release
-authority before publication.
+The retained dynamic-contract-evolution handoff is semantic evidence for this
+release. Its invocation-local rc.3 artifact and Contracts checkpoint remain
+historical; rc.4 is rebuilt from the published Language rc.22 graph.
 
 ## Before merging to `next`
 
@@ -60,11 +55,11 @@ A push to `next` starts `.github/workflows/release-rc.yml`. It:
 2. pins Temurin 17.0.19+10 for the canonical build and Temurin
    21.0.11+10.0.LTS for compatibility verification;
 3. validates release credentials and the wrapper;
-4. prepares the version authorized by `docs/releases/3.0.0-rc.3.md`;
+4. prepares the version authorized by `docs/releases/3.0.0-rc.4.md`;
 5. creates the annotated tag locally and verifies push permissions;
 6. resolves the exact published dependency graph;
 7. runs the complete Java 21 release gate before any staging;
-8. runs `stageRelease` on Java 17, including the complete release and rc.3
+8. runs `stageRelease` on Java 17, including the complete release and rc.4
    gates;
 9. deploys the signed bundle to Maven Central;
 10. pushes the release commit, if any, and tag only after deployment succeeds;
@@ -99,11 +94,11 @@ recovery, durable provider completeness, provider-backed Mandates,
 parallel/distributed scheduling, production MyOS operations, or a stable
 latency SLA.
 
-The retained local rc.3 receipt proves the semantic bounded-pilot profile. Its
+The retained local dynamic-evolution receipt proves the semantic bounded-pilot profile. Its
 local artifact hashes are historical and are not compared with Maven Central
 bytes. `verifyRcReadiness` produces fresh artifact hashes after executing the
 current published-dependency build.
 
 The rc.1 Round 13 reports and schemas are immutable historical evidence. Their
-performance exception is rc.1-specific and is not part of rc.3 or any future
+performance exception is rc.1-specific and is not part of rc.4 or any future
 stable release.
