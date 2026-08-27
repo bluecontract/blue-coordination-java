@@ -561,6 +561,7 @@ def registerStagedCoordinationConsumer = {
         dependsOn verifyImmutableStagedCoordinationRepository,
                 purgeStagedConsumerReceipts
         dir = file('smoke-tests/staged-coordination')
+        buildName = 'staged-coordination-java' + javaVersion
         tasks = ['clean', 'stagedConsumerCheck']
         startParameter.refreshDependencies = true
         doFirst {
@@ -840,6 +841,7 @@ tasks.register('verifyCoordinationStagingTooling') {
                 'stagedCoordinationConsumer',
                 'stagedCoordinationConsumerJava17',
                 'stagedCoordinationConsumerJava21',
+                "buildName = 'staged-coordination-java' + javaVersion",
                 'staged-consumer-java17.json',
                 'staged-consumer-java21.json',
                 'verifyAcceptedBaseApiCompatibility',
