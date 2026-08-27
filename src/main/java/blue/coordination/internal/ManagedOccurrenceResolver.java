@@ -4,14 +4,20 @@ import blue.coordination.api.DocumentId;
 import blue.coordination.api.CoordinationException;
 import blue.coordination.api.ExactValue;
 import blue.language.api.NodeProviderOutcome;
+import blue.language.identity.BlueIds;
 import blue.language.model.Node;
 import blue.language.processor.closure.ClosureInvocationInput;
 import blue.language.processor.closure.ClosureResourceDemand;
 import blue.language.processor.closure.ExactNodeDemand;
 import blue.language.processor.closure.ManagedOccurrenceBinding;
 import blue.language.processor.closure.ManagedOccurrenceEvidenceDemand;
+import blue.language.processor.util.ProcessorContractConstants;
+import blue.language.provider.CyclicAwareNodeProvider;
+import blue.language.provider.CyclicSetProof;
+import blue.language.provider.CyclicSetProofResult;
 import blue.language.provider.NodeProvider;
 import blue.language.provider.NodeProviderResult;
+import blue.language.provider.VerifyingNodeProvider;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -34,14 +40,20 @@ final class ManagedOccurrenceResolver {
             "contracts.occurrenceResolver.currentExactResolved";
     static final String RESOLVED_NEW =
             "contracts.occurrenceResolver.newAuthoredResolved";
+    static final String RESOLVED_AUTHORED_INITIAL =
+            "contracts.occurrenceResolver.authoredInitialResolved";
+    static final String RESOLVED_EPOCH_ZERO =
+            "contracts.occurrenceResolver.initializedEpochZeroResolved";
+    static final String RESOLVED_RETAINED =
+            "contracts.occurrenceResolver.retainedEpochResolved";
 
-    private final NodeProvider exactNodes;
+    private final NodeProvider exactNodeSource;
     private final EngineMetrics metrics;
 
     ManagedOccurrenceResolver(
             NodeProvider exactNodes,
             EngineMetrics metrics) {
-        this.exactNodes = Objects.requireNonNull(
+        this.exactNodeSource = Objects.requireNonNull(
                 exactNodes, "exactNodes");
         this.metrics = Objects.requireNonNull(metrics, "metrics");
     }
@@ -52,13 +64,15 @@ final class ManagedOccurrenceResolver {
         ArrayList<ResolvedOccurrence> occurrences = new ArrayList<>();
         ArrayList<ResolvedExactNode> exactNodes = new ArrayList<>();
         ArrayList<UnresolvedDemand> unresolved = new ArrayList<>();
+        LinkedHashSet<String> resolvedSelectorPaths = new LinkedHashSet<>();
         LinkedHashMap<String, ContractsManagedDraftPlan.ManagedDraft>
                 pendingDrafts = new LinkedHashMap<>();
         for (ClosureResourceDemand demand : selected.demands()) {
             if (demand instanceof ExactNodeDemand exact) {
                 metrics.increment(EXACT_NODE_LOOKUPS);
-                Node exactNode = exactBody(exact.blueId(), exact);
-                if (exactNode == null) {
+                FetchedExactEvidence evidence = exactEvidence(
+                        exact.blueId(), exact);
+                if (evidence == null) {
                     unresolved.add(new UnresolvedDemand(
                             exact,
                             ResolutionStatus.MISSING_EXACT_CONTENT,
@@ -66,8 +80,8 @@ final class ManagedOccurrenceResolver {
                 } else {
                     exactNodes.add(new ResolvedExactNode(
                             exact,
-                            ExactValue.verified(
-                                    exact.blueId(), exactNode)));
+                            evidence.toExactValue(exact.blueId()),
+                            evidence.cyclicProof()));
                 }
                 continue;
             }
@@ -88,10 +102,17 @@ final class ManagedOccurrenceResolver {
                     selected.storeState(),
                     occurrence,
                     exactBody,
-                    pendingDrafts).fold(occurrences::add, unresolved::add);
+                    pendingDrafts,
+                    selected.selectionPlan(),
+                    resolvedSelectorPaths).fold(
+                            occurrences::add, unresolved::add);
         }
         return new Resolution(
-                selected.demands(), occurrences, exactNodes, unresolved);
+                selected.demands(),
+                occurrences,
+                exactNodes,
+                unresolved,
+                resolvedSelectorPaths);
     }
 
     private Node suppliedBody(ManagedOccurrenceEvidenceDemand demand) {
@@ -104,9 +125,19 @@ final class ManagedOccurrenceResolver {
     private Node exactBody(
             String blueId,
             ClosureResourceDemand demand) {
+        FetchedExactEvidence evidence = exactEvidence(blueId, demand);
+        return evidence == null ? null : evidence.body();
+    }
+
+    private FetchedExactEvidence exactEvidence(
+            String blueId,
+            ClosureResourceDemand demand) {
+        ProofCapturingProvider provider = new ProofCapturingProvider(
+                exactNodeSource);
         NodeProviderResult result;
         try {
-            result = exactNodes.fetchResultByBlueId(blueId);
+            result = new VerifyingNodeProvider(provider)
+                    .fetchResultByBlueId(blueId);
         } catch (CoordinationException failure) {
             LinkedHashMap<String, String> details = new LinkedHashMap<>(
                     failure.details());
@@ -122,11 +153,31 @@ final class ManagedOccurrenceResolver {
         }
         if (result.outcome() != NodeProviderOutcome.FOUND
                 || result.nodes().size() != 1) {
+            if (result.outcome() == NodeProviderOutcome.INVALID_EVIDENCE) {
+                throw new IllegalArgumentException(result.diagnostic()
+                        .orElse("Provider returned " + result.outcome()
+                                + " for exact evidence " + blueId));
+            }
             return null;
         }
         Node supplied = result.nodes().get(0);
-        ExactValue.verified(blueId, supplied);
-        return supplied;
+        if (!BlueIds.hasCyclicMemberSeparator(blueId)) {
+            return new FetchedExactEvidence(supplied, null);
+        }
+        CyclicSetProofResult proofResult = provider.proofResult(blueId);
+        if (proofResult == null
+                || proofResult.outcome() != NodeProviderOutcome.FOUND) {
+            throw new IllegalArgumentException(
+                    "Verified cyclic provider result omitted its complete "
+                            + "proof for " + blueId);
+        }
+        CyclicSetProof proof = proofResult.proof().orElseThrow(
+                () -> new IllegalArgumentException(
+                        "Found cyclic proof result omitted proof for "
+                                + blueId));
+        return new FetchedExactEvidence(
+                supplied,
+                proof);
     }
 
     private FoldedResolution resolveOccurrence(
@@ -134,10 +185,24 @@ final class ManagedOccurrenceResolver {
             ManagedOccurrenceEvidenceDemand demand,
             Node suppliedBody,
             Map<String, ContractsManagedDraftPlan.ManagedDraft>
-                    pendingDrafts) {
+                    pendingDrafts,
+            ContractsManagedEpochSelectionPlan selectionPlan,
+            Set<String> resolvedSelectorPaths) {
         ManagedLineageIndex index = storeState.lineageIndex();
         metrics.increment(INDEX_LOOKUPS);
         String suppliedBlueId = demand.suppliedValueBlueId();
+
+        ContractsManagedEpochSelectionPlan.Selection explicit =
+                selectionPlan == null
+                        ? null : selectionPlan.selectionFor(
+                                DocumentId.of(
+                                        demand.sourceDocumentId().value()),
+                                demand.sourcePath());
+        if (explicit != null) {
+            resolvedSelectorPaths.add(explicit.targetOccurrencePath());
+            return resolveExplicitSelection(
+                    index, demand, suppliedBody, explicit);
+        }
 
         ManagedOccurrenceBinding retained = storeState
                 .occurrenceInventory()
@@ -164,7 +229,7 @@ final class ManagedOccurrenceResolver {
         if (candidates.size() > 1) {
             return FoldedResolution.unresolved(new UnresolvedDemand(
                     demand,
-                    ResolutionStatus.AMBIGUOUS_LINEAGE,
+                    ResolutionStatus.AMBIGUOUS_MANAGED_LINEAGE,
                     "Exact state matches more than one managed lineage: "
                             + candidates.keySet()));
         }
@@ -175,6 +240,26 @@ final class ManagedOccurrenceResolver {
                     suppliedBody,
                     candidates.values().iterator().next(),
                     false);
+        }
+
+        if (hasKnownNonReplayablePosition(index, suppliedBlueId)) {
+            return FoldedResolution.unresolved(new UnresolvedDemand(
+                    demand,
+                    ResolutionStatus.UNPROVEN_MANAGED_HISTORY,
+                    "Exact state belongs to immutable managed history but "
+                            + "has no contiguous receipt path from its "
+                            + "component representation"));
+        }
+
+        if (lifecycleMarkerTrue(suppliedBody,
+                ProcessorContractConstants.KEY_INITIALIZED)
+                || lifecycleMarkerTrue(suppliedBody,
+                        ProcessorContractConstants.KEY_TERMINATED)) {
+            return FoldedResolution.unresolved(new UnresolvedDemand(
+                    demand,
+                    ResolutionStatus.UNPROVEN_MANAGED_HISTORY,
+                    "Unknown initialized or progressed exact state cannot "
+                            + "create a new managed lineage"));
         }
 
         ContractsManagedDraftPlan.ManagedDraft draft = pendingDrafts.get(
@@ -217,7 +302,91 @@ final class ManagedOccurrenceResolver {
                 draft.documentId(),
                 suppliedBlueId,
                 TargetKind.NEW_AUTHORED,
+                -1L,
                 draft));
+    }
+
+    private FoldedResolution resolveExplicitSelection(
+            ManagedLineageIndex index,
+            ManagedOccurrenceEvidenceDemand demand,
+            Node suppliedBody,
+            ContractsManagedEpochSelectionPlan.Selection selection) {
+        String suppliedBlueId = demand.suppliedValueBlueId();
+        if (!selection.expectedSourceBlueId().equals(suppliedBlueId)) {
+            return FoldedResolution.unresolved(new UnresolvedDemand(
+                    demand,
+                    ResolutionStatus.EXACT_STATE_MISMATCH,
+                    "Managed epoch selector expected "
+                            + selection.expectedSourceBlueId()
+                            + " but the occurrence supplied "
+                            + suppliedBlueId));
+        }
+        requirePlainBodyIdentity(suppliedBlueId, suppliedBody);
+        ManagedLineageIndex.Lineage lineage = index.byDocumentId(
+                selection.sourceDocumentId());
+        if (lineage == null) {
+            return FoldedResolution.unresolved(new UnresolvedDemand(
+                    demand,
+                    ResolutionStatus.EXACT_STATE_MISMATCH,
+                    "Managed epoch selector names an absent lineage "
+                            + selection.sourceDocumentId()));
+        }
+        String selectedBlueId = blueIdAt(
+                lineage, selection.sourceEpoch());
+        if (selectedBlueId == null
+                || !selectedBlueId.equals(
+                        selection.expectedSourceBlueId())) {
+            return FoldedResolution.unresolved(new UnresolvedDemand(
+                    demand,
+                    ResolutionStatus.EXACT_STATE_MISMATCH,
+                    "Managed epoch selector does not match "
+                            + selection.sourceDocumentId()
+                            + " at epoch " + selection.sourceEpoch()));
+        }
+
+        TargetKind kind;
+        if (selection.sourceEpoch() == -1L) {
+            kind = TargetKind.EXISTING_AUTHORED_INITIAL;
+            metrics.increment(RESOLVED_AUTHORED_INITIAL);
+        } else if (selection.sourceEpoch() == lineage.currentEpoch()) {
+            kind = TargetKind.CURRENT_EXISTING;
+            metrics.increment(RESOLVED_CURRENT);
+        } else if (selection.sourceEpoch() == 0L) {
+            kind = TargetKind.EXISTING_INITIALIZED_EPOCH_ZERO;
+            metrics.increment(RESOLVED_EPOCH_ZERO);
+        } else {
+            kind = TargetKind.EXISTING_RETAINED_EPOCH;
+            metrics.increment(RESOLVED_RETAINED);
+        }
+        return FoldedResolution.resolved(new ResolvedOccurrence(
+                demand,
+                lineage.documentId(),
+                suppliedBlueId,
+                kind,
+                selection.sourceEpoch(),
+                null));
+    }
+
+    private static String blueIdAt(
+            ManagedLineageIndex.Lineage lineage,
+            long sourceEpoch) {
+        if (sourceEpoch == -1L) {
+            return lineage.isReplayableHistoricalPosition(sourceEpoch)
+                    ? lineage.authoredInitialBlueId() : null;
+        }
+        if (sourceEpoch == lineage.currentEpoch()) {
+            return lineage.currentBlueId();
+        }
+        if (!lineage.isReplayableHistoricalPosition(sourceEpoch)) {
+            return null;
+        }
+        for (ManagedLineageIndex.RetainedState state
+                : lineage.retainedStates()) {
+            if (state.epoch() == sourceEpoch) {
+                return state.blueId();
+            }
+        }
+        return null;
     }
 
     private FoldedResolution resolveSelectedLineage(
@@ -227,7 +396,7 @@ final class ManagedOccurrenceResolver {
             ManagedLineageIndex.Lineage lineage,
             boolean stableIdentitySelected) {
         String suppliedBlueId = demand.suppliedValueBlueId();
-        ExactValue.verified(suppliedBlueId, suppliedBody);
+        requirePlainBodyIdentity(suppliedBlueId, suppliedBody);
         if (lineage.currentBlueId().equals(suppliedBlueId)) {
             metrics.increment(RESOLVED_CURRENT);
             return FoldedResolution.resolved(new ResolvedOccurrence(
@@ -235,29 +404,56 @@ final class ManagedOccurrenceResolver {
                     lineage.documentId(),
                     suppliedBlueId,
                     TargetKind.CURRENT_EXISTING,
+                    lineage.currentEpoch(),
                     null));
         }
         List<Long> retainedEpochs = index.retainedMatches(suppliedBlueId)
                 .stream()
                 .filter(state -> state.documentId().equals(
                         lineage.documentId()))
+                .filter(state -> lineage.isReplayableHistoricalPosition(
+                        state.epoch()))
                 .map(ManagedLineageIndex.RetainedState::epoch)
+                .distinct()
                 .toList();
-        if (retainedEpochs.size() > 1) {
-            return FoldedResolution.unresolved(new UnresolvedDemand(
-                    demand,
-                    ResolutionStatus.AMBIGUOUS_EPOCH,
-                    "Exact state occurs at multiple retained epochs "
-                            + retainedEpochs + " in " + lineage.documentId()));
+        LinkedHashSet<Long> matchingPositions = new LinkedHashSet<>();
+        if (lineage.authoredInitialBlueId().equals(suppliedBlueId)
+                && lineage.isReplayableHistoricalPosition(-1L)) {
+            matchingPositions.add(-1L);
         }
-        if (!retainedEpochs.isEmpty()
-                || lineage.authoredInitialBlueId().equals(suppliedBlueId)
-                || lineage.initializedBlueId().equals(suppliedBlueId)) {
+        if (lineage.initializedBlueId().equals(suppliedBlueId)
+                && lineage.isReplayableHistoricalPosition(0L)) {
+            matchingPositions.add(0L);
+        }
+        matchingPositions.addAll(retainedEpochs);
+        if (matchingPositions.size() > 1) {
             return FoldedResolution.unresolved(new UnresolvedDemand(
                     demand,
-                    ResolutionStatus.UNPROVEN_PROGRESSED_HISTORY,
-                    "Historical state cannot be attached without complete "
-                            + "history evidence for " + lineage.documentId()));
+                    ResolutionStatus.AMBIGUOUS_MANAGED_EPOCH,
+                    "Exact state occurs at multiple managed positions "
+                            + matchingPositions + " in "
+                            + lineage.documentId()));
+        }
+        if (!matchingPositions.isEmpty()) {
+            long admittedEpoch = matchingPositions.iterator().next();
+            TargetKind kind;
+            if (admittedEpoch == -1L) {
+                kind = TargetKind.EXISTING_AUTHORED_INITIAL;
+                metrics.increment(RESOLVED_AUTHORED_INITIAL);
+            } else if (admittedEpoch == 0L) {
+                kind = TargetKind.EXISTING_INITIALIZED_EPOCH_ZERO;
+                metrics.increment(RESOLVED_EPOCH_ZERO);
+            } else {
+                kind = TargetKind.EXISTING_RETAINED_EPOCH;
+                metrics.increment(RESOLVED_RETAINED);
+            }
+            return FoldedResolution.resolved(new ResolvedOccurrence(
+                    demand,
+                    lineage.documentId(),
+                    suppliedBlueId,
+                    kind,
+                    admittedEpoch,
+                    null));
         }
         String reason = stableIdentitySelected
                 ? "Stable occurrence identity does not establish the "
@@ -269,14 +465,30 @@ final class ManagedOccurrenceResolver {
                 reason));
     }
 
+    /**
+     * Plain values are independently rehashed here. Cyclic member bodies have
+     * already crossed {@link VerifyingNodeProvider}, which authenticates the
+     * complete placeholder set and compares the selected resolved member. A
+     * direct hash of that resolved body is intentionally not its
+     * {@code MASTER#n} identity.
+     */
+    private static void requirePlainBodyIdentity(
+            String suppliedBlueId,
+            Node suppliedBody) {
+        if (!BlueIds.hasCyclicMemberSeparator(suppliedBlueId)) {
+            ExactValue.verified(suppliedBlueId, suppliedBody);
+        }
+    }
+
     private static LinkedHashMap<DocumentId, ManagedLineageIndex.Lineage>
             candidates(ManagedLineageIndex index, String suppliedBlueId) {
         LinkedHashMap<DocumentId, ManagedLineageIndex.Lineage> candidates =
                 new LinkedHashMap<>();
         addCandidates(candidates, index.currentMatches(suppliedBlueId));
-        addCandidates(candidates, index.initializedMatches(suppliedBlueId));
-        addCandidates(candidates,
-                index.authoredInitialMatches(suppliedBlueId));
+        addReplayableCandidates(
+                candidates, index.initializedMatches(suppliedBlueId), 0L);
+        addReplayableCandidates(
+                candidates, index.authoredInitialMatches(suppliedBlueId), -1L);
         for (ManagedLineageIndex.RetainedState retained
                 : index.retainedMatches(suppliedBlueId)) {
             ManagedLineageIndex.Lineage lineage = index.byDocumentId(
@@ -286,9 +498,53 @@ final class ManagedOccurrenceResolver {
                         "Retained state has no indexed lineage "
                                 + retained.documentId());
             }
-            candidates.putIfAbsent(lineage.documentId(), lineage);
+            if (lineage.isReplayableHistoricalPosition(retained.epoch())) {
+                candidates.putIfAbsent(lineage.documentId(), lineage);
+            }
         }
         return candidates;
+    }
+
+    private static boolean hasKnownNonReplayablePosition(
+            ManagedLineageIndex index,
+            String suppliedBlueId) {
+        for (ManagedLineageIndex.Lineage lineage
+                : index.authoredInitialMatches(suppliedBlueId)) {
+            if (!lineage.isReplayableHistoricalPosition(-1L)) {
+                return true;
+            }
+        }
+        for (ManagedLineageIndex.Lineage lineage
+                : index.initializedMatches(suppliedBlueId)) {
+            if (!lineage.isReplayableHistoricalPosition(0L)) {
+                return true;
+            }
+        }
+        for (ManagedLineageIndex.RetainedState retained
+                : index.retainedMatches(suppliedBlueId)) {
+            ManagedLineageIndex.Lineage lineage = index.byDocumentId(
+                    retained.documentId());
+            if (lineage == null) {
+                throw new IllegalStateException(
+                        "Retained state has no indexed lineage "
+                                + retained.documentId());
+            }
+            if (!lineage.isReplayableHistoricalPosition(retained.epoch())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void addReplayableCandidates(
+            Map<DocumentId, ManagedLineageIndex.Lineage> candidates,
+            Collection<ManagedLineageIndex.Lineage> lineages,
+            long historicalPosition) {
+        for (ManagedLineageIndex.Lineage lineage : lineages) {
+            if (lineage.isReplayableHistoricalPosition(historicalPosition)) {
+                candidates.putIfAbsent(lineage.documentId(), lineage);
+            }
+        }
     }
 
     private static void addCandidates(
@@ -299,18 +555,31 @@ final class ManagedOccurrenceResolver {
         }
     }
 
+    private static boolean lifecycleMarkerTrue(Node document, String key) {
+        Map<String, Node> properties = Objects.requireNonNull(
+                document, "document").getProperties();
+        if (properties == null) {
+            return false;
+        }
+        Node marker = properties.get(key);
+        return marker != null && Boolean.TRUE.equals(marker.getValue());
+    }
+
     enum ResolutionStatus {
         MISSING_EXACT_CONTENT,
-        AMBIGUOUS_LINEAGE,
-        AMBIGUOUS_EPOCH,
-        UNPROVEN_PROGRESSED_HISTORY,
+        AMBIGUOUS_MANAGED_LINEAGE,
+        AMBIGUOUS_MANAGED_EPOCH,
+        UNPROVEN_MANAGED_HISTORY,
         EXACT_STATE_MISMATCH,
         INVALID_AUTHORED_DOCUMENT
     }
 
     enum TargetKind {
         CURRENT_EXISTING,
-        NEW_AUTHORED
+        NEW_AUTHORED,
+        EXISTING_AUTHORED_INITIAL,
+        EXISTING_INITIALIZED_EPOCH_ZERO,
+        EXISTING_RETAINED_EPOCH
     }
 
     record ResolutionRequest(
@@ -319,7 +588,26 @@ final class ManagedOccurrenceResolver {
             long inputGraphGeneration,
             Set<DocumentId> inputMembers,
             List<ClosureResourceDemand> demands,
-            InMemoryDocumentStore.OccurrenceResolutionSnapshot storeState) {
+            InMemoryDocumentStore.OccurrenceResolutionSnapshot storeState,
+            ContractsManagedEpochSelectionPlan selectionPlan) {
+        ResolutionRequest(
+                String logicalCauseIdentity,
+                String inputClosureIdentity,
+                long inputGraphGeneration,
+                Set<DocumentId> inputMembers,
+                List<ClosureResourceDemand> demands,
+                InMemoryDocumentStore.OccurrenceResolutionSnapshot
+                        storeState) {
+            this(
+                    logicalCauseIdentity,
+                    inputClosureIdentity,
+                    inputGraphGeneration,
+                    inputMembers,
+                    demands,
+                    storeState,
+                    null);
+        }
+
         ResolutionRequest {
             logicalCauseIdentity = requireText(
                     logicalCauseIdentity, "logicalCauseIdentity");
@@ -359,6 +647,15 @@ final class ManagedOccurrenceResolver {
                 Collection<? extends ClosureResourceDemand> demands,
                 InMemoryDocumentStore.OccurrenceResolutionSnapshot
                         storeState) {
+            return from(input, demands, storeState, null);
+        }
+
+        static ResolutionRequest from(
+                ClosureInvocationInput input,
+                Collection<? extends ClosureResourceDemand> demands,
+                InMemoryDocumentStore.OccurrenceResolutionSnapshot
+                        storeState,
+                ContractsManagedEpochSelectionPlan selectionPlan) {
             ClosureInvocationInput selected = Objects.requireNonNull(
                     input, "input");
             return new ResolutionRequest(
@@ -371,7 +668,8 @@ final class ManagedOccurrenceResolver {
                             .collect(java.util.stream.Collectors.toCollection(
                                     LinkedHashSet::new)),
                     List.copyOf(Objects.requireNonNull(demands, "demands")),
-                    storeState);
+                    storeState,
+                    selectionPlan);
         }
 
         private static List<ClosureResourceDemand> canonicalDemands(
@@ -408,6 +706,7 @@ final class ManagedOccurrenceResolver {
             DocumentId targetDocumentId,
             String expectedTargetBlueId,
             TargetKind targetKind,
+            long admittedSourceEpoch,
             ContractsManagedDraftPlan.ManagedDraft newDraft) {
         ResolvedOccurrence {
             demand = Objects.requireNonNull(demand, "demand");
@@ -416,11 +715,40 @@ final class ManagedOccurrenceResolver {
             expectedTargetBlueId = requireText(
                     expectedTargetBlueId, "expectedTargetBlueId");
             targetKind = Objects.requireNonNull(targetKind, "targetKind");
+            if (admittedSourceEpoch < -1L) {
+                throw new IllegalArgumentException(
+                        "admittedSourceEpoch must be -1 or non-negative");
+            }
             if ((targetKind == TargetKind.NEW_AUTHORED)
                     != (newDraft != null)) {
                 throw new IllegalArgumentException(
                         "Only a new authored target retains a draft");
             }
+            if ((targetKind == TargetKind.NEW_AUTHORED
+                            || targetKind
+                                    == TargetKind.EXISTING_AUTHORED_INITIAL)
+                    != (admittedSourceEpoch == -1L)) {
+                throw new IllegalArgumentException(
+                        "Only authored-initial targets use epoch -1");
+            }
+            if (targetKind == TargetKind
+                            .EXISTING_INITIALIZED_EPOCH_ZERO
+                    && admittedSourceEpoch != 0L) {
+                throw new IllegalArgumentException(
+                        "Initialized target must select source epoch zero");
+            }
+        }
+
+        boolean historicalExisting() {
+            return targetKind == TargetKind.EXISTING_AUTHORED_INITIAL
+                    || targetKind
+                            == TargetKind.EXISTING_INITIALIZED_EPOCH_ZERO
+                    || targetKind == TargetKind.EXISTING_RETAINED_EPOCH;
+        }
+
+        Long pendingHistoricalEpoch() {
+            return historicalExisting()
+                    ? Long.valueOf(admittedSourceEpoch) : null;
         }
     }
 
@@ -437,7 +765,14 @@ final class ManagedOccurrenceResolver {
 
     record ResolvedExactNode(
             ExactNodeDemand demand,
-            ExactValue exactValue) {
+            ExactValue exactValue,
+            CyclicSetProof cyclicProof) {
+        ResolvedExactNode(
+                ExactNodeDemand demand,
+                ExactValue exactValue) {
+            this(demand, exactValue, null);
+        }
+
         ResolvedExactNode {
             demand = Objects.requireNonNull(demand, "demand");
             exactValue = Objects.requireNonNull(exactValue, "exactValue");
@@ -445,6 +780,74 @@ final class ManagedOccurrenceResolver {
                 throw new IllegalArgumentException(
                         "Resolved exact-node evidence has the wrong BlueId");
             }
+            boolean cyclic = BlueIds.hasCyclicMemberSeparator(
+                    demand.blueId());
+            if (cyclic != exactValue.isCyclicMember()
+                    || cyclic != (cyclicProof != null)) {
+                throw new IllegalArgumentException(
+                        "Resolved exact-node cyclic evidence is incomplete");
+            }
+        }
+    }
+
+    private record FetchedExactEvidence(
+            Node body,
+            CyclicSetProof cyclicProof) {
+        private FetchedExactEvidence {
+            body = Objects.requireNonNull(body, "body").clone();
+        }
+
+        @Override
+        public Node body() {
+            return body.clone();
+        }
+
+        private ExactValue toExactValue(String blueId) {
+            return cyclicProof == null
+                    ? ExactValue.verified(blueId, body)
+                    : ExactValue.fromVerifiedProviderEvidence(
+                            blueId, body, cyclicProof);
+        }
+    }
+
+    /** Captures the same typed proof consumed by the verifying boundary. */
+    private static final class ProofCapturingProvider
+            implements NodeProvider, CyclicAwareNodeProvider {
+        private final NodeProvider delegate;
+        private final Map<String, CyclicSetProofResult> proofResults =
+                new LinkedHashMap<>();
+
+        private ProofCapturingProvider(NodeProvider delegate) {
+            this.delegate = Objects.requireNonNull(delegate, "delegate");
+        }
+
+        @Override
+        public List<Node> fetchByBlueId(String blueId) {
+            return delegate.fetchByBlueId(blueId);
+        }
+
+        @Override
+        public NodeProviderResult fetchResultByBlueId(String blueId) {
+            return delegate.fetchResultByBlueId(blueId);
+        }
+
+        @Override
+        public CyclicSetProofResult cyclicSetProofFor(String blueId) {
+            CyclicSetProofResult result = delegate
+                    instanceof CyclicAwareNodeProvider cyclic
+                    ? cyclic.cyclicSetProofFor(blueId)
+                    : CyclicSetProofResult.notFound();
+            if (result == null) {
+                throw new IllegalArgumentException(
+                        "Cyclic-aware provider returned no typed proof result "
+                                + "for " + blueId);
+            }
+            proofResults.put(blueId, result);
+            return result;
+        }
+
+        private CyclicSetProofResult proofResult(String blueId) {
+            return proofResults.get(blueId);
         }
     }
 
@@ -452,7 +855,21 @@ final class ManagedOccurrenceResolver {
             List<ClosureResourceDemand> demands,
             List<ResolvedOccurrence> resolvedOccurrences,
             List<ResolvedExactNode> resolvedExactNodes,
-            List<UnresolvedDemand> unresolvedDemands) {
+            List<UnresolvedDemand> unresolvedDemands,
+            Set<String> resolvedSelectorPaths) {
+        Resolution(
+                List<ClosureResourceDemand> demands,
+                List<ResolvedOccurrence> resolvedOccurrences,
+                List<ResolvedExactNode> resolvedExactNodes,
+                List<UnresolvedDemand> unresolvedDemands) {
+            this(
+                    demands,
+                    resolvedOccurrences,
+                    resolvedExactNodes,
+                    unresolvedDemands,
+                    Set.of());
+        }
+
         Resolution {
             demands = List.copyOf(Objects.requireNonNull(
                     demands, "demands"));
@@ -462,6 +879,10 @@ final class ManagedOccurrenceResolver {
                     resolvedExactNodes, "resolvedExactNodes"));
             unresolvedDemands = List.copyOf(Objects.requireNonNull(
                     unresolvedDemands, "unresolvedDemands"));
+            resolvedSelectorPaths = Collections.unmodifiableSet(
+                    new LinkedHashSet<>(Objects.requireNonNull(
+                            resolvedSelectorPaths,
+                            "resolvedSelectorPaths")));
             if (demands.isEmpty()
                     || resolvedOccurrences.size() + resolvedExactNodes.size()
                             + unresolvedDemands.size() != demands.size()) {
@@ -500,7 +921,7 @@ final class ManagedOccurrenceResolver {
         Set<DocumentId> existingTargets() {
             LinkedHashSet<DocumentId> targets = new LinkedHashSet<>();
             for (ResolvedOccurrence occurrence : resolvedOccurrences) {
-                if (occurrence.targetKind() == TargetKind.CURRENT_EXISTING) {
+                if (occurrence.targetKind() != TargetKind.NEW_AUTHORED) {
                     targets.add(occurrence.targetDocumentId());
                 }
             }

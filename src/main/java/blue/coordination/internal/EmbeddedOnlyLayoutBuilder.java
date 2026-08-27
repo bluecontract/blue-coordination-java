@@ -140,6 +140,7 @@ final class EmbeddedOnlyLayoutBuilder {
 
     private Map<DocumentId, ExactValue> retainClosureMembers(
             ClosureProcessResult result) {
+        objects.retainVerifiedClosureProofs(result);
         Map<DocumentId, ExactValue> retained = new LinkedHashMap<>();
         for (ResultingDocument document : result.resultingDocuments()) {
             DocumentId member = DocumentId.of(document.documentId().value());

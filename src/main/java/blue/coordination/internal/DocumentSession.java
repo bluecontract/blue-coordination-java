@@ -25,8 +25,12 @@ final class DocumentSession {
     private final List<DocumentRevision> revisions = new ArrayList<>();
     private final Set<String> terminalEntryBlueIds = new LinkedHashSet<>();
     private final Set<String> transitionReceipts = new LinkedHashSet<>();
+    private final List<ComponentRepresentationTransition>
+            componentRepresentationTransitions = new ArrayList<>();
     private final StateEpochs stateEpochs = new StateEpochs();
     private EmbeddedOnlyLayout layout;
+    private EmbeddedOnlyLayout readyLayout;
+    private Map<String, DocumentId> readyEmbeddedChildren;
     private SessionStatus status;
     private ExternalOrderKey readyThrough;
     private long epoch;
@@ -46,6 +50,8 @@ final class DocumentSession {
                 authoredInitialState, "authoredInitialState").blueId();
         this.layout = Objects.requireNonNull(
                 initializedLayout, "initializedLayout");
+        this.readyLayout = this.layout;
+        this.readyEmbeddedChildren = childrenFromLayout(this.readyLayout);
         this.activeSubscriptions = List.copyOf(Objects.requireNonNull(
                 activeSubscriptions, "activeSubscriptions"));
         this.status = SessionStatus.READY;
@@ -77,8 +83,12 @@ final class DocumentSession {
         this.revisions.addAll(source.revisions);
         this.terminalEntryBlueIds.addAll(source.terminalEntryBlueIds);
         this.transitionReceipts.addAll(source.transitionReceipts);
+        this.componentRepresentationTransitions.addAll(
+                source.componentRepresentationTransitions);
         this.stateEpochs.copyFrom(source.stateEpochs);
         this.layout = source.layout;
+        this.readyLayout = source.readyLayout;
+        this.readyEmbeddedChildren = source.readyEmbeddedChildren;
         this.status = source.status;
         this.readyThrough = source.readyThrough;
         this.epoch = source.epoch;
@@ -130,6 +140,32 @@ final class DocumentSession {
         return layout;
     }
 
+    /** Returns the exact currently published component representation. */
+    public synchronized ExactValue currentRepresentation() {
+        return layout.semanticRoot();
+    }
+
+    /** Returns the exact layout at the application-visible ready head. */
+    public synchronized EmbeddedOnlyLayout readyLayout() {
+        return readyLayout;
+    }
+
+    /** Returns the exact application-visible component representation. */
+    public synchronized ExactValue readyRepresentation() {
+        return readyLayout.semanticRoot();
+    }
+
+    /** Returns the topology published with the application-visible head. */
+    synchronized Map<String, DocumentId> readyEmbeddedChildren() {
+        return readyEmbeddedChildren;
+    }
+
+    /** Restores topology evidence already authenticated for the ready head. */
+    synchronized void restoreReadyEmbeddedChildren(
+            Map<String, DocumentId> embeddedChildren) {
+        readyEmbeddedChildren = copyChildren(embeddedChildren);
+    }
+
     public synchronized List<SubscriptionDelta.Entry> activeSubscriptions() {
         return activeSubscriptions;
     }
@@ -144,6 +180,11 @@ final class DocumentSession {
 
     public synchronized DocumentRevision currentRevision() {
         return revisions.get(revisions.size() - 1);
+    }
+
+    /** Returns the exact revision exposed to normal application reads. */
+    public synchronized DocumentRevision readyRevision() {
+        return revision(readyEpoch);
     }
 
     public synchronized List<DocumentRevision> revisions() {
@@ -191,6 +232,19 @@ final class DocumentSession {
                 receiptId, "receiptId"));
     }
 
+    synchronized boolean hasComponentRepresentationTransition(
+            long transitionEpoch,
+            String beforeBlueId,
+            String afterBlueId,
+            String transitionReceiptIdentity) {
+        return componentRepresentationTransitions.contains(
+                new ComponentRepresentationTransition(
+                        transitionEpoch,
+                        beforeBlueId,
+                        afterBlueId,
+                        transitionReceiptIdentity));
+    }
+
     public synchronized OptionalLong epochForState(String exactBlueId) {
         return stateEpochs.first(exactBlueId);
     }
@@ -227,7 +281,33 @@ final class DocumentSession {
         graphPublishedEpoch = epoch;
     }
 
+    /** Publishes one verified terminal head as the application-visible head. */
+    public synchronized void markTerminated() {
+        markTerminated(childrenFromLayout(layout));
+    }
+
+    /** Publishes a terminal head and its exact occurrence topology together. */
+    synchronized void markTerminated(
+            Map<String, DocumentId> embeddedChildren) {
+        if (graphPublishedEpoch != epoch) {
+            throw new IllegalStateException(
+                    "Cannot publish TERMINATED before graph epoch " + epoch
+                            + " is published for " + documentId);
+        }
+        status = SessionStatus.TERMINATED;
+        readyEpoch = epoch;
+        readyLayout = layout;
+        readyEmbeddedChildren = copyChildren(embeddedChildren);
+    }
+
     public synchronized void markReady(ExternalOrderKey frontier) {
+        markReady(frontier, childrenFromLayout(layout));
+    }
+
+    /** Publishes one ready head and its exact occurrence topology together. */
+    synchronized void markReady(
+            ExternalOrderKey frontier,
+            Map<String, DocumentId> embeddedChildren) {
         if (status == SessionStatus.BLOCKED
                 || status == SessionStatus.TERMINATED) {
             throw new IllegalStateException(
@@ -240,6 +320,8 @@ final class DocumentSession {
         }
         status = SessionStatus.READY;
         readyEpoch = epoch;
+        readyLayout = layout;
+        readyEmbeddedChildren = copyChildren(embeddedChildren);
         if (readyThrough == null || frontier.compareTo(readyThrough) > 0) {
             readyThrough = frontier;
         }
@@ -310,6 +392,121 @@ final class DocumentSession {
                 || committedFrontier.compareTo(readyThrough) > 0)) {
             readyThrough = committedFrontier;
         }
+    }
+
+    /**
+     * Publishes a Contracts-authenticated component representation without
+     * inventing a document epoch or reprocessing the managed Root.
+     *
+     * <p>The retained revision list remains the immutable source-epoch lane.
+     * A cyclic finalizer may nevertheless give that same source epoch a new
+     * authoritative member BlueId. The surrounding store transaction owns the
+     * transition/component proof and calls this method only on its detached
+     * session image.</p>
+     */
+    synchronized void rebindComponentRepresentation(
+            long expectedEpoch,
+            EmbeddedOnlyLayout nextLayout,
+            List<SubscriptionDelta.Entry> nextSubscriptions,
+            String transitionReceipt) {
+        if (expectedEpoch != epoch) {
+            throw new IllegalStateException(
+                    "Component representation epoch changed for " + documentId);
+        }
+        EmbeddedOnlyLayout replacement = Objects.requireNonNull(
+                nextLayout, "nextLayout");
+        String beforeBlueId = layout.rootBlueId();
+        if (beforeBlueId.equals(replacement.rootBlueId())) {
+            throw new IllegalArgumentException(
+                    "Component representation rebind requires a new BlueId");
+        }
+        String receipt = Objects.requireNonNull(
+                transitionReceipt, "transitionReceipt");
+        if (receipt.isBlank() || transitionReceipts.contains(receipt)) {
+            throw new IllegalStateException(
+                    "Duplicate or blank transition receipt " + receipt);
+        }
+        if (status == SessionStatus.BLOCKED
+                || status == SessionStatus.TERMINATED) {
+            throw new IllegalStateException(
+                    "Cannot rebind component representation from " + status);
+        }
+        this.layout = replacement;
+        this.activeSubscriptions = List.copyOf(Objects.requireNonNull(
+                nextSubscriptions, "nextSubscriptions"));
+        this.status = SessionStatus.CATCHING_UP;
+        this.graphPublishedEpoch = epoch - 1L;
+        transitionReceipts.add(receipt);
+        componentRepresentationTransitions.add(
+                new ComponentRepresentationTransition(
+                        epoch,
+                        beforeBlueId,
+                        replacement.rootBlueId(),
+                        receipt));
+    }
+
+    private record ComponentRepresentationTransition(
+            long epoch,
+            String beforeBlueId,
+            String afterBlueId,
+            String transitionReceiptIdentity) {
+        private ComponentRepresentationTransition {
+            if (epoch < 0L) {
+                throw new IllegalArgumentException(
+                        "Component representation epoch must be non-negative");
+            }
+            beforeBlueId = Objects.requireNonNull(
+                    beforeBlueId, "beforeBlueId");
+            afterBlueId = Objects.requireNonNull(
+                    afterBlueId, "afterBlueId");
+            transitionReceiptIdentity = Objects.requireNonNull(
+                    transitionReceiptIdentity,
+                    "transitionReceiptIdentity");
+            if (beforeBlueId.equals(afterBlueId)
+                    || transitionReceiptIdentity.isBlank()) {
+                throw new IllegalArgumentException(
+                        "Invalid component representation transition");
+            }
+        }
+    }
+
+    private static Map<String, DocumentId> childrenFromLayout(
+            EmbeddedOnlyLayout selectedLayout) {
+        LinkedHashMap<String, DocumentId> children = new LinkedHashMap<>();
+        for (EmbeddedOccurrence occurrence : Objects.requireNonNull(
+                selectedLayout, "layout").directOccurrences()) {
+            DocumentId prior = children.putIfAbsent(
+                    occurrence.scopePath(), occurrence.childDocumentId());
+            if (prior != null && !prior.equals(occurrence.childDocumentId())) {
+                throw new IllegalArgumentException(
+                        "Layout occurrences disagree at "
+                                + occurrence.scopePath());
+            }
+        }
+        return Collections.unmodifiableMap(children);
+    }
+
+    private static Map<String, DocumentId> copyChildren(
+            Map<String, DocumentId> supplied) {
+        LinkedHashMap<String, DocumentId> children = new LinkedHashMap<>();
+        Objects.requireNonNull(supplied, "embeddedChildren")
+                .forEach((path, documentId) -> {
+                    String selectedPath = Objects.requireNonNull(path, "path");
+                    if (selectedPath.isBlank()) {
+                        throw new IllegalArgumentException(
+                                "Embedded child path must not be blank");
+                    }
+                    DocumentId duplicate = children.putIfAbsent(
+                            selectedPath,
+                            Objects.requireNonNull(
+                                    documentId, "embedded child documentId"));
+                    if (duplicate != null && !duplicate.equals(documentId)) {
+                        throw new IllegalArgumentException(
+                                "Embedded children disagree at "
+                                        + selectedPath);
+                    }
+                });
+        return Collections.unmodifiableMap(children);
     }
 
     static final class StateEpochs {

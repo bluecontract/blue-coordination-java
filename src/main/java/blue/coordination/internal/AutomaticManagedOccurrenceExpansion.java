@@ -109,7 +109,10 @@ record AutomaticManagedOccurrenceExpansion(
             if (prior != null && (!prior.targetDocumentId().equals(
                     occurrence.targetDocumentId())
                     || !prior.expectedTargetBlueId().equals(
-                            occurrence.expectedTargetBlueId()))) {
+                            occurrence.expectedTargetBlueId())
+                    || prior.targetKind() != occurrence.targetKind()
+                    || prior.admittedSourceEpoch()
+                            != occurrence.admittedSourceEpoch())) {
                 throw new IllegalStateException(
                         "Automatic retry changed a resolved occurrence demand");
             }

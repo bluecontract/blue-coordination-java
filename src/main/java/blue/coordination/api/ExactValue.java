@@ -1,5 +1,7 @@
 package blue.coordination.api;
 
+import blue.language.api.NodeProviderOutcome;
+import blue.language.identity.BlueIds;
 import blue.language.merge.ResolvedSnapshot;
 import blue.language.model.Node;
 import blue.language.model.wire.JsonPointer;
@@ -9,8 +11,15 @@ import blue.language.processor.closure.ComponentKind;
 import blue.language.processor.closure.ComponentSnapshot;
 import blue.language.processor.closure.ManagedDocumentSnapshot;
 import blue.language.processor.closure.ResultingDocument;
+import blue.language.provider.CyclicAwareNodeProvider;
+import blue.language.provider.CyclicSetProof;
+import blue.language.provider.CyclicSetProofResult;
+import blue.language.provider.NodeProvider;
+import blue.language.provider.NodeProviderResult;
+import blue.language.provider.VerifyingNodeProvider;
 import blue.language.snapshot.FrozenNode;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -97,13 +106,63 @@ public final class ExactValue {
     }
 
     /**
+     * Retains one exact provider body after independently verifying its
+     * complete cyclic-set proof.
+     *
+     * <p>Ordinary provider content must continue through
+     * {@link #verified(String, Node)}. A cyclic member cannot be rehashed in
+     * isolation, so this boundary reconstructs a one-value cyclic-aware
+     * provider and runs Language's {@link VerifyingNodeProvider} over the body
+     * and complete placeholder set before associating the body with its
+     * {@code MASTER#n} identity. A claimed member identity, body, or proof that
+     * does not agree is rejected.</p>
+     *
+     * @param expectedBlueId requested cyclic member identity
+     * @param exact provider-returned resolved member body
+     * @param proof complete declared placeholder-set proof
+     * @return immutable exact value authenticated by the complete proof
+     */
+    public static ExactValue fromVerifiedProviderEvidence(
+            String expectedBlueId,
+            Node exact,
+            CyclicSetProof proof) {
+        String expected = requireText(expectedBlueId, "expectedBlueId");
+        if (!BlueIds.hasCyclicMemberSeparator(expected)) {
+            throw new IllegalArgumentException(
+                    "Provider cyclic evidence requires a member BlueId");
+        }
+        Node candidate = Objects.requireNonNull(exact, "exact").clone();
+        CyclicSetProof complete = Objects.requireNonNull(proof, "proof");
+        NodeProviderResult verified = new VerifyingNodeProvider(
+                new CandidateCyclicProvider(expected, candidate, complete))
+                .fetchResultByBlueId(expected);
+        if (verified.outcome() != NodeProviderOutcome.FOUND
+                || verified.nodes().size() != 1) {
+            throw new IllegalArgumentException(verified.diagnostic().orElse(
+                    "Cyclic provider evidence does not establish "
+                            + expected));
+        }
+        Node authenticated = verified.nodes().get(0);
+        if (expected.equals(authenticated.getBlueId())) {
+            authenticated.blueId(null);
+        }
+        return new ExactValue(
+                expected,
+                FrozenNode.fromNode(authenticated),
+                null,
+                true);
+    }
+
+    /**
      * Retains one document from an already verified successful closure result.
      *
-     * <p>This is the only Coordination boundary that may associate a local
+     * <p>This is the Contracts-result boundary that may associate a local
      * cyclic member body with its {@code MASTER#n} identity. The supplied
-     * Contracts result has already verified the complete component proof and
-     * every resulting document together; callers cannot inject a claimed
-     * cyclic identity independently of that evidence.</p>
+     * result has already verified the complete component proof and every
+     * resulting document together. Exact-node provider evidence has the
+     * separate proof-verifying boundary in
+     * {@link #fromVerifiedProviderEvidence(String, Node, CyclicSetProof)};
+     * neither path accepts an independently claimed cyclic identity.</p>
      *
      * @param result verified successful Contracts closure result
      * @param documentId selected managed document lineage
@@ -294,5 +353,36 @@ public final class ExactValue {
             throw new IllegalArgumentException(label + " must not be blank");
         }
         return checked;
+    }
+
+    /** Defensive verifier input used only by the proof-authentication factory. */
+    private static final class CandidateCyclicProvider
+            implements NodeProvider, CyclicAwareNodeProvider {
+        private final String blueId;
+        private final Node body;
+        private final CyclicSetProof proof;
+
+        private CandidateCyclicProvider(
+                String blueId,
+                Node body,
+                CyclicSetProof proof) {
+            this.blueId = blueId;
+            this.body = body.clone();
+            this.proof = proof;
+        }
+
+        @Override
+        public List<Node> fetchByBlueId(String requestedBlueId) {
+            return blueId.equals(requestedBlueId)
+                    ? List.of(body.clone()) : List.of();
+        }
+
+        @Override
+        public CyclicSetProofResult cyclicSetProofFor(
+                String requestedBlueId) {
+            return blueId.equals(requestedBlueId)
+                    ? CyclicSetProofResult.found(proof)
+                    : CyclicSetProofResult.notFound();
+        }
     }
 }

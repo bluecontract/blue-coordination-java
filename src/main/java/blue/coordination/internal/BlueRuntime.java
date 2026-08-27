@@ -5,6 +5,7 @@ import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationProcessors;
 import blue.language.api.BlueCachePolicy;
 import blue.language.api.BlueCacheStats;
+import blue.language.api.NodeProviderOutcome;
 import blue.language.codec.BlueFormat;
 import blue.language.codec.jackson.UncheckedObjectMapper;
 import blue.language.conformance.ConformanceEngine;
@@ -108,7 +109,8 @@ final class BlueRuntime implements AutoCloseable {
         if (exactNodeProvider != null) {
             providers.add(metered(exactNodeProvider, metrics));
         }
-        NodeProvider nodeProvider = new SequentialNodeProvider(providers);
+        NodeProvider nodeProvider =
+                new CyclicAwareSequentialNodeProvider(providers);
 
         Map<String, String> imports = new LinkedHashMap<>();
         imports.putAll(RuntimeTypeAliases.AGGREGATE_NAME_TO_BLUE_ID);
@@ -409,6 +411,46 @@ final class BlueRuntime implements AutoCloseable {
         @Override
         public CyclicSetProofResult cyclicSetProofFor(String blueId) {
             return cyclicDelegate.cyclicSetProofFor(blueId);
+        }
+    }
+
+    /** Ordered provider chain that preserves complete cyclic-proof lookup. */
+    private static final class CyclicAwareSequentialNodeProvider
+            extends SequentialNodeProvider
+            implements CyclicAwareNodeProvider {
+        private final List<NodeProvider> orderedProviders;
+
+        private CyclicAwareSequentialNodeProvider(
+                List<NodeProvider> providers) {
+            super(providers);
+            orderedProviders = Collections.unmodifiableList(
+                    new ArrayList<>(providers));
+        }
+
+        @Override
+        public boolean hasVerifiedContentForBlueId(String blueId) {
+            for (NodeProvider provider : orderedProviders) {
+                if (provider instanceof CyclicAwareNodeProvider cyclic
+                        && cyclic.hasVerifiedContentForBlueId(blueId)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        @Override
+        public CyclicSetProofResult cyclicSetProofFor(String blueId) {
+            for (NodeProvider provider : orderedProviders) {
+                if (!(provider instanceof CyclicAwareNodeProvider cyclic)) {
+                    continue;
+                }
+                CyclicSetProofResult result = cyclic.cyclicSetProofFor(
+                        blueId);
+                if (result.outcome() != NodeProviderOutcome.NOT_FOUND) {
+                    return result;
+                }
+            }
+            return CyclicSetProofResult.notFound();
         }
     }
 

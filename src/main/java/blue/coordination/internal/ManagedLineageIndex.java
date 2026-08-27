@@ -117,7 +117,7 @@ final class ManagedLineageIndex {
                 prior.currentEpoch());
         if (additions.isEmpty()) {
             if (selected.epoch() == prior.currentEpoch()
-                    && selected.currentRevision().after().blueId()
+                    && selected.currentRepresentation().blueId()
                             .equals(prior.currentBlueId())) {
                 return this;
             }
@@ -127,6 +127,15 @@ final class ManagedLineageIndex {
         }
         ArrayList<RetainedState> retained = new ArrayList<>(
                 prior.retainedStates());
+        /*
+         * Any transient mismatch at the indexed head becomes an anchored
+         * receipt gap as soon as a later source revision exists. The first
+         * added revision starts from prior.currentBlueId(), not from the
+         * immutable retained after-state at prior.currentEpoch().
+         */
+        long lastAnchoredNonReplayableEpoch =
+                prior.lastNonReplayableEpoch();
+        String expectedBeforeBlueId = prior.currentBlueId();
         long expectedEpoch = Math.addExact(prior.currentEpoch(), 1L);
         for (DocumentRevision revision : additions) {
             if (!revision.documentId().equals(prior.documentId())
@@ -135,10 +144,21 @@ final class ManagedLineageIndex {
                         "Noncontiguous retained revision for "
                                 + prior.documentId());
             }
+            if (!revision.before().orElseThrow(() ->
+                    new IllegalArgumentException(
+                            "Advanced managed revision has no before state "
+                                    + revision.documentId()
+                                    + "@" + revision.epoch()))
+                    .blueId().equals(expectedBeforeBlueId)) {
+                lastAnchoredNonReplayableEpoch = Math.max(
+                        lastAnchoredNonReplayableEpoch,
+                        Math.subtractExact(revision.epoch(), 1L));
+            }
             retained.add(new RetainedState(
                     prior.documentId(),
                     revision.epoch(),
                     revision.after().blueId()));
+            expectedBeforeBlueId = revision.after().blueId();
             expectedEpoch = Math.addExact(expectedEpoch, 1L);
         }
         DocumentRevision current = additions.get(additions.size() - 1);
@@ -147,10 +167,11 @@ final class ManagedLineageIndex {
                 prior.authoredInitialBlueId(),
                 prior.initializedBlueId(),
                 current.epoch(),
-                current.after().blueId(),
-                retained);
+                selected.currentRepresentation().blueId(),
+                retained,
+                lastAnchoredNonReplayableEpoch);
         if (selected.epoch() != advanced.currentEpoch()
-                || !selected.currentRevision().after().blueId()
+                || !selected.currentRepresentation().blueId()
                         .equals(advanced.currentBlueId())) {
             throw new IllegalArgumentException(
                     "Indexed additions do not reach the session head "
@@ -158,6 +179,43 @@ final class ManagedLineageIndex {
         }
         return advancing(prior, advanced, retained.subList(
                 prior.retainedStates().size(), retained.size()));
+    }
+
+    /**
+     * Rebinds only the authoritative component representation of one lineage.
+     * Retained source epochs and their exact state index remain untouched.
+     */
+    ManagedLineageIndex withComponentRepresentationRebound(
+            DocumentSession session) {
+        DocumentSession selected = Objects.requireNonNull(session, "session");
+        Lineage prior = byDocumentId.get(selected.documentId());
+        if (prior == null) {
+            throw new IllegalArgumentException(
+                    "Unknown managed lineage " + selected.documentId());
+        }
+        List<DocumentRevision> additions = selected.revisionsAfter(
+                prior.currentEpoch());
+        String retainedHead = prior.retainedStates()
+                .get(prior.retainedStates().size() - 1).blueId();
+        String representation = selected.currentRepresentation().blueId();
+        if (!additions.isEmpty()
+                || selected.epoch() != prior.currentEpoch()
+                || !selected.currentRevision().after().blueId().equals(
+                        retainedHead)
+                || prior.currentBlueId().equals(representation)) {
+            throw new IllegalArgumentException(
+                    "Session is not one same-epoch representation rebind "
+                            + selected.documentId());
+        }
+        Lineage rebound = new Lineage(
+                prior.documentId(),
+                prior.authoredInitialBlueId(),
+                prior.initializedBlueId(),
+                prior.currentEpoch(),
+                representation,
+                prior.retainedStates(),
+                prior.lastAnchoredNonReplayableEpoch());
+        return advancing(prior, rebound, List.of());
     }
 
     /** Removes one retired lineage without inspecting any other session. */
@@ -482,7 +540,8 @@ final class ManagedLineageIndex {
             String initializedBlueId,
             long currentEpoch,
             String currentBlueId,
-            List<RetainedState> retainedStates) {
+            List<RetainedState> retainedStates,
+            long lastAnchoredNonReplayableEpoch) {
         Lineage {
             documentId = Objects.requireNonNull(documentId, "documentId");
             authoredInitialBlueId = requireBlueId(authoredInitialBlueId);
@@ -497,11 +556,15 @@ final class ManagedLineageIndex {
             if (retainedStates.isEmpty()
                     || retainedStates.get(0).epoch() != 0L
                     || retainedStates.get(retainedStates.size() - 1).epoch()
-                            != currentEpoch
-                    || !retainedStates.get(retainedStates.size() - 1)
-                            .blueId().equals(currentBlueId)) {
+                            != currentEpoch) {
                 throw new IllegalArgumentException(
-                        "Retained states do not describe the lineage head");
+                        "Retained states do not reach the lineage epoch");
+            }
+            if (lastAnchoredNonReplayableEpoch < -1L
+                    || lastAnchoredNonReplayableEpoch >= currentEpoch) {
+                throw new IllegalArgumentException(
+                        "Anchored representation discontinuity must precede "
+                                + "the lineage head or be -1");
             }
         }
 
@@ -515,7 +578,9 @@ final class ManagedLineageIndex {
                                 + selected.documentId());
             }
             ArrayList<RetainedState> retained = new ArrayList<>();
+            long lastAnchoredNonReplayableEpoch = -1L;
             long expectedEpoch = 0L;
+            String priorAfterBlueId = null;
             for (DocumentRevision revision : revisions) {
                 if (!revision.documentId().equals(selected.documentId())
                         || revision.epoch() != expectedEpoch) {
@@ -523,10 +588,24 @@ final class ManagedLineageIndex {
                             "Managed lineage history is not contiguous "
                                     + selected.documentId());
                 }
+                if (priorAfterBlueId != null
+                        && !revision.before().orElseThrow(() ->
+                                new IllegalArgumentException(
+                                        "Retained managed revision has no "
+                                                + "before state "
+                                                + revision.documentId()
+                                                + "@" + revision.epoch()))
+                                .blueId().equals(
+                                priorAfterBlueId)) {
+                    lastAnchoredNonReplayableEpoch = Math.max(
+                            lastAnchoredNonReplayableEpoch,
+                            Math.subtractExact(revision.epoch(), 1L));
+                }
                 retained.add(new RetainedState(
                         selected.documentId(),
                         revision.epoch(),
                         revision.after().blueId()));
+                priorAfterBlueId = revision.after().blueId();
                 expectedEpoch = Math.addExact(expectedEpoch, 1L);
             }
             DocumentRevision current = revisions.get(revisions.size() - 1);
@@ -542,8 +621,44 @@ final class ManagedLineageIndex {
                     selected.authoredInitialBlueId(),
                     revisions.get(0).after().blueId(),
                     current.epoch(),
-                    current.after().blueId(),
-                    retained);
+                    selected.currentRepresentation().blueId(),
+                    retained,
+                    lastAnchoredNonReplayableEpoch);
+        }
+
+        /**
+         * Latest historical position without a receipt-contiguous path to the
+         * current representation.
+         *
+         * <p>Receipt gaps are durable once a later source revision anchors
+         * them. A mismatch at the current epoch is transient: another
+         * eventless component rebind may restore the immutable retained head
+         * before any later source revision exists.</p>
+         */
+        long lastNonReplayableEpoch() {
+            String retainedHead = retainedStates.get(
+                    retainedStates.size() - 1).blueId();
+            return currentBlueId.equals(retainedHead)
+                    ? lastAnchoredNonReplayableEpoch
+                    : currentEpoch;
+        }
+
+        /**
+         * Whether an immutable historical position has a contiguous receipt
+         * path to the current component representation.
+         *
+         * <p>A same-epoch component rebind deliberately does not invent a
+         * managed epoch receipt. Positions at or before the latest such
+         * boundary remain auditable, but cannot be selected as catch-up
+         * predecessors because the next real receipt starts from the rebound
+         * representation.</p>
+         */
+        boolean isReplayableHistoricalPosition(long epoch) {
+            if (epoch < -1L || epoch >= currentEpoch) {
+                return false;
+            }
+            long boundary = lastNonReplayableEpoch();
+            return boundary < 0L || epoch > boundary;
         }
 
         List<Long> epochsFor(String blueId) {

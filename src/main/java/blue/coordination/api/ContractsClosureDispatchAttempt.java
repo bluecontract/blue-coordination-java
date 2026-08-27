@@ -24,6 +24,9 @@ import java.util.Optional;
  *                             this retained attempt
  * @param operationRouteChanges exact committed route-index reconciliation
  *                              changes
+ * @param managedOccurrenceResolutionIssues typed unresolved matching
+ *                                          classifications for a suspended
+ *                                          attempt
  */
 public record ContractsClosureDispatchAttempt(
         String entryBlueId,
@@ -35,7 +38,9 @@ public record ContractsClosureDispatchAttempt(
         long automaticRetryCount,
         List<ManagedOccurrenceResolution> managedOccurrenceResolutions,
         List<ComponentSnapshot> inputComponents,
-        List<OperationRouteChange> operationRouteChanges) {
+        List<OperationRouteChange> operationRouteChanges,
+        List<ManagedOccurrenceResolutionIssue>
+                managedOccurrenceResolutionIssues) {
 
     /**
      * Preserves the original additive SDK seam for callers that do not need
@@ -50,7 +55,7 @@ public record ContractsClosureDispatchAttempt(
             boolean replayed) {
         this(entryBlueId, documentIds, attempt, published,
                 publicationIdentity, replayed, 0L, List.of(), List.of(),
-                List.of());
+                List.of(), List.of());
     }
 
     /**
@@ -67,7 +72,7 @@ public record ContractsClosureDispatchAttempt(
             long automaticRetryCount) {
         this(entryBlueId, documentIds, attempt, published,
                 publicationIdentity, replayed, automaticRetryCount,
-                List.of(), List.of(), List.of());
+                List.of(), List.of(), List.of(), List.of());
     }
 
     /**
@@ -86,7 +91,29 @@ public record ContractsClosureDispatchAttempt(
             List<ComponentSnapshot> inputComponents) {
         this(entryBlueId, documentIds, attempt, published,
                 publicationIdentity, replayed, automaticRetryCount,
-                managedOccurrenceResolutions, inputComponents, List.of());
+                managedOccurrenceResolutions, inputComponents, List.of(),
+                List.of());
+    }
+
+    /**
+     * Preserves the managed-publication and route constructor for callers
+     * compiled before typed unresolved matching evidence was added.
+     */
+    public ContractsClosureDispatchAttempt(
+            String entryBlueId,
+            List<DocumentId> documentIds,
+            ClosureAttemptResult attempt,
+            boolean published,
+            String publicationIdentity,
+            boolean replayed,
+            long automaticRetryCount,
+            List<ManagedOccurrenceResolution> managedOccurrenceResolutions,
+            List<ComponentSnapshot> inputComponents,
+            List<OperationRouteChange> operationRouteChanges) {
+        this(entryBlueId, documentIds, attempt, published,
+                publicationIdentity, replayed, automaticRetryCount,
+                managedOccurrenceResolutions, inputComponents,
+                operationRouteChanges, List.of());
     }
 
     /** Validates immutable cohort evidence. */
@@ -102,6 +129,10 @@ public record ContractsClosureDispatchAttempt(
                 inputComponents, "inputComponents"));
         operationRouteChanges = List.copyOf(Objects.requireNonNull(
                 operationRouteChanges, "operationRouteChanges"));
+        managedOccurrenceResolutionIssues = List.copyOf(
+                Objects.requireNonNull(
+                        managedOccurrenceResolutionIssues,
+                        "managedOccurrenceResolutionIssues"));
         if (automaticRetryCount < 0L) {
             throw new IllegalArgumentException(
                     "automaticRetryCount must be non-negative");
@@ -125,6 +156,31 @@ public record ContractsClosureDispatchAttempt(
             throw new IllegalArgumentException(
                     "Only a published attempt can expose managed "
                             + "publication evidence");
+        }
+        if ((published || attempt.isComplete())
+                && !managedOccurrenceResolutionIssues.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Only a suspended unpublished attempt may expose typed "
+                            + "unresolved matching evidence");
+        }
+        java.util.Set<String> demandIdentities = attempt.resourceDemands()
+                .stream()
+                .map(demand -> demand.demandIdentity())
+                .collect(java.util.stream.Collectors.toSet());
+        java.util.Set<String> issueIdentities = new java.util.LinkedHashSet<>();
+        for (ManagedOccurrenceResolutionIssue issue
+                : managedOccurrenceResolutionIssues) {
+            if (!demandIdentities.contains(issue.demandIdentity())) {
+                throw new IllegalArgumentException(
+                        "Unresolved matching evidence does not identify a "
+                                + "retained resource demand "
+                                + issue.demandIdentity());
+            }
+            if (!issueIdentities.add(issue.demandIdentity())) {
+                throw new IllegalArgumentException(
+                        "Unresolved matching evidence repeats demand "
+                                + issue.demandIdentity());
+            }
         }
     }
 
@@ -155,7 +211,44 @@ public record ContractsClosureDispatchAttempt(
         /** The exact current state of an existing managed lineage. */
         CURRENT_EXISTING,
         /** A new lineage initialized from the exact authored value. */
-        NEW_AUTHORED
+        NEW_AUTHORED,
+        /** An existing lineage selected at its authored initial value. */
+        EXISTING_AUTHORED_INITIAL,
+        /** An existing lineage selected at initialized source epoch zero. */
+        EXISTING_INITIALIZED_EPOCH_ZERO,
+        /** An existing lineage selected at one unique retained epoch. */
+        EXISTING_RETAINED_EPOCH
+    }
+
+    /** Closed automatic managed-occurrence matching failure vocabulary. */
+    public enum ResolutionStatus {
+        /** The supplied pure reference or partial value is unavailable. */
+        MISSING_EXACT_CONTENT,
+        /** More than one managed lineage matches the supplied exact value. */
+        AMBIGUOUS_MANAGED_LINEAGE,
+        /** More than one retained epoch matches within the selected lineage. */
+        AMBIGUOUS_MANAGED_EPOCH,
+        /** The value appears progressed but no retained lineage proves it. */
+        UNPROVEN_MANAGED_HISTORY,
+        /** Explicit selection evidence disagrees with retained exact state. */
+        EXACT_STATE_MISMATCH,
+        /** Authored content cannot initialize a valid managed document. */
+        INVALID_AUTHORED_DOCUMENT
+    }
+
+    /** Typed unresolved classification for one retained resource demand. */
+    public record ManagedOccurrenceResolutionIssue(
+            String demandIdentity,
+            ResolutionStatus status,
+            String diagnostic) {
+
+        /** Validates immutable host-persistable matching evidence. */
+        public ManagedOccurrenceResolutionIssue {
+            demandIdentity = requireText(
+                    demandIdentity, "demandIdentity");
+            status = Objects.requireNonNull(status, "status");
+            diagnostic = requireText(diagnostic, "diagnostic");
+        }
     }
 
     /** Closed operation-route transition kind. */

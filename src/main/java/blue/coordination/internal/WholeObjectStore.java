@@ -4,11 +4,18 @@ import blue.coordination.api.Timeline;
 
 import blue.coordination.api.ExactValue;
 
+import blue.language.identity.BlueIds;
 import blue.language.merge.ResolvedSnapshot;
 import blue.language.model.Node;
-import blue.language.snapshot.FrozenNode;
+import blue.language.processor.closure.ClosureProcessResult;
+import blue.language.processor.closure.ComponentKind;
+import blue.language.processor.closure.ComponentSnapshot;
+import blue.language.provider.CyclicAwareNodeProvider;
+import blue.language.provider.CyclicSetProof;
+import blue.language.provider.CyclicSetProofResult;
 import blue.language.provider.NodeProvider;
 import blue.language.provider.NodeProviderResult;
+import blue.language.snapshot.FrozenNode;
 
 import java.util.Collections;
 import java.util.ArrayList;
@@ -29,12 +36,14 @@ import java.util.Objects;
  * frozen runtime use representation invariance without losing the fully
  * materialized semantic value held by the document session.</p>
  */
-final class WholeObjectStore implements NodeProvider {
+final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
     private final Map<String, ExactValue> canonicalByBlueId =
             new LinkedHashMap<>();
     private final Map<String, ExactValue> providerByBlueId =
             new LinkedHashMap<>();
     private final Map<String, String> purposeByBlueId = new LinkedHashMap<>();
+    private final Map<String, CyclicSetProof> cyclicProofByMasterBlueId =
+            new LinkedHashMap<>();
     private final java.util.Set<String> unavailableProviderBlueIds =
             new LinkedHashSet<>();
     private final List<Mark> activeMarks = new ArrayList<>();
@@ -93,6 +102,47 @@ final class WholeObjectStore implements NodeProvider {
         metrics.increment("wholeObjectStore.insertions");
         metrics.increment("wholeObjectStore.purpose." + normalizedPurpose);
         return checked;
+    }
+
+    /**
+     * Retains exact-node retry evidence without stripping cyclic proof.
+     *
+     * <p>The resolver has already crossed a verifying provider boundary, but
+     * this durable cache boundary independently authenticates a cyclic value
+     * again before retaining both its member body and complete proof under the
+     * same object-store savepoint. Ordinary values remain subject to their
+     * direct exact identity.</p>
+     */
+    synchronized ExactValue putVerifiedProviderEvidence(
+            ExactValue value,
+            CyclicSetProof cyclicProof,
+            String purpose) {
+        ExactValue selected = Objects.requireNonNull(value, "value");
+        if (!selected.isCyclicMember()) {
+            if (cyclicProof != null) {
+                throw new IllegalArgumentException(
+                        "Ordinary provider evidence cannot carry cyclic proof");
+            }
+            return put(selected, purpose);
+        }
+        ExactValue authenticated = ExactValue.fromVerifiedProviderEvidence(
+                selected.blueId(),
+                selected.copyNode(),
+                Objects.requireNonNull(cyclicProof, "cyclicProof"));
+        if (!authenticated.sameExactValue(selected)) {
+            throw new IllegalArgumentException(
+                    "Cyclic retry evidence changed after proof verification");
+        }
+        ExactValue retained = put(authenticated, purpose);
+        String masterBlueId = BlueIds.cyclicSetMasterBlueId(
+                selected.blueId());
+        recordProofBeforeMutation(masterBlueId);
+        cyclicProofByMasterBlueId.put(
+                masterBlueId,
+                CyclicSetProof.fromDeclaredPlaceholderSet(
+                        cyclicProof.declaredPlaceholderSet()));
+        metrics.increment("wholeObjectStore.cyclicProviderProofsRetained");
+        return retained;
     }
 
     /**
@@ -156,6 +206,34 @@ final class WholeObjectStore implements NodeProvider {
         metrics.increment("wholeObjectStore.providerRepresentationsPreferred");
     }
 
+    /**
+     * Retains the complete cyclic proof already authenticated by one committed
+     * Contracts result. The proof shares the surrounding object-store
+     * savepoint, so a failed Coordination publication cannot leak provider
+     * evidence for an unpublished component state.
+     */
+    synchronized void retainVerifiedClosureProofs(
+            ClosureProcessResult result) {
+        ClosureProcessResult verified = Objects.requireNonNull(
+                result, "result");
+        if (!verified.commits()) {
+            throw new IllegalArgumentException(
+                    "Only a committed closure result can retain cyclic proof");
+        }
+        for (ComponentSnapshot component : verified.resultingComponents()) {
+            if (component.kind() != ComponentKind.CYCLIC) {
+                continue;
+            }
+            String masterBlueId = component.masterBlueId();
+            CyclicSetProof proof = CyclicSetProof.fromDeclaredPlaceholderSet(
+                    component.completeCyclicProof()
+                            .declaredPlaceholderSet());
+            recordProofBeforeMutation(masterBlueId);
+            cyclicProofByMasterBlueId.put(masterBlueId, proof);
+            metrics.increment("wholeObjectStore.cyclicProofsRetained");
+        }
+    }
+
     public synchronized ExactValue require(String blueId) {
         ExactValue value = canonicalByBlueId.get(Objects.requireNonNull(
                 blueId, "blueId"));
@@ -169,6 +247,56 @@ final class WholeObjectStore implements NodeProvider {
     public synchronized boolean contains(String blueId) {
         return canonicalByBlueId.containsKey(Objects.requireNonNull(
                 blueId, "blueId"));
+    }
+
+    /**
+     * Returns whether the verified provider owns complete ordinary content
+     * for one exact identity.
+     *
+     * <p>This deliberately excludes pure references and cyclic members.  A
+     * caller may use the positive result to substitute an inline ordinary
+     * exact subtree with its representation-equivalent pure reference; a
+     * cyclic member has no independently verifiable ordinary body.</p>
+     */
+    synchronized boolean hasCompleteOrdinaryProviderBody(String blueId) {
+        ExactValue provider = providerByBlueId.get(Objects.requireNonNull(
+                blueId, "blueId"));
+        return provider != null
+                && !provider.isCyclicMember()
+                && !provider.frozen().isReferenceOnly()
+                && provider.blueId().equals(provider.frozen().blueId());
+    }
+
+    /** Returns the retained provider body under its authoritative identity. */
+    synchronized ExactValue requireProviderRepresentation(
+            ExactValue authoritative) {
+        ExactValue selected = Objects.requireNonNull(
+                authoritative, "authoritative");
+        ExactValue provider = providerByBlueId.get(selected.blueId());
+        if (provider == null || provider.frozen().isReferenceOnly()) {
+            throw new IllegalStateException(
+                    "No complete provider representation for "
+                            + selected.blueId());
+        }
+        if (!selected.isCyclicMember()) {
+            return provider;
+        }
+        CyclicSetProof proof = cyclicProofByMasterBlueId.get(
+                BlueIds.cyclicSetMasterBlueId(selected.blueId()));
+        if (proof == null) {
+            throw new IllegalStateException(
+                    "No retained complete cyclic proof for "
+                            + selected.blueId());
+        }
+        try {
+            return ExactValue.fromVerifiedProviderEvidence(
+                    selected.blueId(), provider.copyNode(), proof);
+        } catch (IllegalArgumentException invalid) {
+            throw new IllegalStateException(
+                    "Retained provider representation is inconsistent with "
+                            + selected.blueId(),
+                    invalid);
+        }
     }
 
     public synchronized int size() {
@@ -216,9 +344,18 @@ final class WholeObjectStore implements NodeProvider {
             restore(purposeByBlueId, change.getKey(),
                     change.getValue().purpose());
         }
+        List<Map.Entry<String, Prior<CyclicSetProof>>> proofChanges =
+                new ArrayList<>(mark.priorProofByMasterBlueId.entrySet());
+        for (int index = proofChanges.size() - 1; index >= 0; index--) {
+            Map.Entry<String, Prior<CyclicSetProof>> change =
+                    proofChanges.get(index);
+            restore(cyclicProofByMasterBlueId,
+                    change.getKey(), change.getValue());
+        }
         activeMarks.remove(activeMarks.size() - 1);
         mark.close();
-        metrics.add("wholeObjectStore.markKeysRolledBack", changes.size());
+        metrics.add("wholeObjectStore.markKeysRolledBack",
+                Math.addExact(changes.size(), proofChanges.size()));
     }
 
     @Override
@@ -244,6 +381,52 @@ final class WholeObjectStore implements NodeProvider {
         return NodeProvider.super.fetchResultByBlueId(blueId);
     }
 
+    @Override
+    public synchronized boolean hasVerifiedContentForBlueId(String blueId) {
+        String selected = Objects.requireNonNull(blueId, "blueId");
+        ExactValue provider = providerByBlueId.get(selected);
+        if (unavailableProviderBlueIds.contains(selected)
+                || provider == null
+                || provider.frozen().isReferenceOnly()) {
+            return false;
+        }
+        if (!BlueIds.hasCyclicMemberSeparator(selected)) {
+            return true;
+        }
+        return cyclicProofByMasterBlueId.containsKey(
+                        BlueIds.cyclicSetMasterBlueId(selected));
+    }
+
+    @Override
+    public synchronized CyclicSetProofResult cyclicSetProofFor(
+            String blueId) {
+        String selected = Objects.requireNonNull(blueId, "blueId");
+        if (unavailableProviderBlueIds.contains(selected)) {
+            return CyclicSetProofResult.unavailable(
+                    "Test-controlled exact resource is unavailable");
+        }
+        CyclicSetProof proof = cyclicProofByMasterBlueId.get(
+                BlueIds.cyclicSetMasterBlueId(selected));
+        if (proof == null) {
+            return CyclicSetProofResult.notFound();
+        }
+        ExactValue provider = providerByBlueId.get(selected);
+        if (provider != null && !provider.frozen().isReferenceOnly()) {
+            try {
+                ExactValue.fromVerifiedProviderEvidence(
+                        selected, provider.copyNode(), proof);
+            } catch (IllegalArgumentException invalid) {
+                return CyclicSetProofResult.invalidEvidence(
+                        "Retained cyclic proof is inconsistent with "
+                                + selected + ": " + invalid.getMessage());
+            }
+        }
+        metrics.increment("wholeObjectStore.cyclicProofReads");
+        return CyclicSetProofResult.found(
+                CyclicSetProof.fromDeclaredPlaceholderSet(
+                        proof.declaredPlaceholderSet()));
+    }
+
     private static String sanitize(String purpose) {
         String checked = Objects.requireNonNull(purpose, "purpose").trim();
         if (checked.isEmpty()) {
@@ -262,6 +445,17 @@ final class WholeObjectStore implements NodeProvider {
                 prior(purposeByBlueId, blueId));
         for (Mark mark : activeMarks) {
             mark.record(blueId, prior);
+        }
+    }
+
+    private void recordProofBeforeMutation(String masterBlueId) {
+        if (activeMarks.isEmpty()) {
+            return;
+        }
+        Prior<CyclicSetProof> prior = prior(
+                cyclicProofByMasterBlueId, masterBlueId);
+        for (Mark mark : activeMarks) {
+            mark.recordProof(masterBlueId, prior);
         }
     }
 
@@ -294,6 +488,8 @@ final class WholeObjectStore implements NodeProvider {
     static final class Mark {
         private final Map<String, PriorState> priorByBlueId =
                 new LinkedHashMap<>();
+        private final Map<String, Prior<CyclicSetProof>>
+                priorProofByMasterBlueId = new LinkedHashMap<>();
         private boolean active = true;
 
         private void record(String blueId, PriorState prior) {
@@ -303,8 +499,19 @@ final class WholeObjectStore implements NodeProvider {
             priorByBlueId.putIfAbsent(blueId, prior);
         }
 
+        private void recordProof(
+                String masterBlueId,
+                Prior<CyclicSetProof> prior) {
+            if (!active) {
+                throw new IllegalStateException("Object-store mark is closed");
+            }
+            priorProofByMasterBlueId.putIfAbsent(masterBlueId, prior);
+        }
+
         int changedKeyCount() {
-            return priorByBlueId.size();
+            return Math.addExact(
+                    priorByBlueId.size(),
+                    priorProofByMasterBlueId.size());
         }
 
         private void close() {
