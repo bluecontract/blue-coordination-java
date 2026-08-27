@@ -20,6 +20,14 @@ import blue.coordination.api.CoordinationMetrics;
 import blue.coordination.api.Contracts10Configuration;
 import blue.coordination.api.ContractsClosureAdmissionReceipt;
 import blue.coordination.api.ContractsClosureDispatchAttempt;
+import blue.coordination.api.ManagedCatchUpBarrier;
+import blue.coordination.api.ManagedDocumentReadiness;
+import blue.coordination.api.ManagedEpochApplicationAttempt;
+import blue.coordination.api.ManagedEpochApplicationReceipt;
+import blue.coordination.api.ManagedEpochApplicationWork;
+import blue.coordination.api.ManagedEpochEvidenceFailure;
+import blue.coordination.api.ManagedEpochReceipt;
+import blue.coordination.api.ManagedOccurrenceCatchUpPlan;
 import blue.coordination.api.ProcessingDrainReceipt;
 import blue.coordination.api.TimelineAppendReceipt;
 import blue.coordination.api.ActivationMode;
@@ -49,8 +57,12 @@ import java.util.function.Consumer;
 /** Sequential in-memory Process Embedded temporal-profile engine. */
 public final class DefaultCoordinationEngine
         implements CoordinationEngine {
+    private static final BigInteger PORTABLE_FULL_HISTORY_ORDER =
+            BigInteger.valueOf(-9_007_199_254_740_991L);
+
     enum FailurePoint {
         AFTER_MANAGED_DRAFT_PLAN_REGISTERED,
+        AFTER_MANAGED_EPOCH_SELECTION_PLAN_REGISTERED,
         BEFORE_FROZEN_PROCESS,
         AFTER_FROZEN_BEFORE_STAGE,
         AFTER_STAGING_CHILD_SESSION,
@@ -464,7 +476,7 @@ public final class DefaultCoordinationEngine
             String authoredYaml) {
         requireLegacyOnly("startDocument");
         try {
-            return snapshot(start(documentId, authoredYaml));
+            return snapshot(start(documentId, authoredYaml), true);
         } catch (RuntimeException failure) {
             throw translateStartFailure(documentId, failure);
         }
@@ -488,7 +500,7 @@ public final class DefaultCoordinationEngine
             case FULL_HISTORY -> {
                 requireNoExplicitFrontier(selectedPolicy, verifiedFrontier);
                 yield ExternalOrderKey.of(List.of(
-                        BigInteger.valueOf(Long.MIN_VALUE),
+                        PORTABLE_FULL_HISTORY_ORDER,
                         "contracts-full-history-admission",
                         Objects.requireNonNull(input, "input")
                                 .invocationIdentity()));
@@ -514,6 +526,22 @@ public final class DefaultCoordinationEngine
                     CoordinationEngine.AdmissionPolicy policy,
                     ExternalOrderKey verifiedFrontier,
                     blue.coordination.sdk.ExactNodeProvider exactNodeProvider) {
+        return admitContractsClosure(
+                input,
+                policy,
+                verifiedFrontier,
+                exactNodeProvider,
+                null);
+    }
+
+    /** Static-admission seam with occurrence-specific retained selectors. */
+    public synchronized ContractsClosureAdmissionReceipt
+            admitContractsClosure(
+                    ClosureInvocationInput input,
+                    CoordinationEngine.AdmissionPolicy policy,
+                    ExternalOrderKey verifiedFrontier,
+                    blue.coordination.sdk.ExactNodeProvider exactNodeProvider,
+                    ContractsManagedEpochSelectionPlan selectionPlan) {
         ensureOpen();
         if (contractsClosureAdapter == null) {
             throw new CoordinationException(
@@ -526,7 +554,7 @@ public final class DefaultCoordinationEngine
             case FULL_HISTORY -> {
                 requireNoExplicitFrontier(selectedPolicy, verifiedFrontier);
                 yield ExternalOrderKey.of(List.of(
-                        BigInteger.valueOf(Long.MIN_VALUE),
+                        PORTABLE_FULL_HISTORY_ORDER,
                         "contracts-full-history-admission",
                         Objects.requireNonNull(input, "input")
                                 .invocationIdentity()));
@@ -538,13 +566,22 @@ public final class DefaultCoordinationEngine
                         Objects.requireNonNull(input, "input"));
             }
         };
-        return contractsClosureAdmissionAdapter.admitAndPublish(
-                input,
-                selectedPolicy,
-                frontier,
+        blue.language.provider.NodeProvider verifiedProvider =
                 Contracts10StaticEmbeddedAdmissionCompiler.verifiedProvider(
                         Objects.requireNonNull(
-                                exactNodeProvider, "exactNodeProvider")));
+                                exactNodeProvider, "exactNodeProvider"));
+        return selectionPlan == null
+                ? contractsClosureAdmissionAdapter.admitAndPublish(
+                        input,
+                        selectedPolicy,
+                        frontier,
+                        verifiedProvider)
+                : contractsClosureAdmissionAdapter.admitAndPublish(
+                        input,
+                        selectedPolicy,
+                        frontier,
+                        verifiedProvider,
+                        selectionPlan);
     }
 
     @Override
@@ -590,7 +627,7 @@ public final class DefaultCoordinationEngine
                     documentId,
                     authoredYaml,
                     policy,
-                    verifiedFrontier));
+                    verifiedFrontier), true);
         } catch (RuntimeException failure) {
             throw translateStartFailure(documentId, failure);
         }
@@ -706,20 +743,89 @@ public final class DefaultCoordinationEngine
             Timeline timeline,
             Operation operation,
             ContractsManagedDraftPlan managedDraftPlan) {
+        return appendManagedOperation(
+                timeline,
+                operation,
+                Objects.requireNonNull(
+                        managedDraftPlan, "managedDraftPlan"),
+                null);
+    }
+
+    /**
+     * Atomically appends one Contracts operation and its exact epoch selectors.
+     */
+    public synchronized TimelineEntry append(
+            Timeline timeline,
+            Operation operation,
+            ContractsManagedEpochSelectionPlan managedEpochSelectionPlan) {
+        return appendManagedOperation(
+                timeline,
+                operation,
+                null,
+                Objects.requireNonNull(
+                        managedEpochSelectionPlan,
+                        "managedEpochSelectionPlan"));
+    }
+
+    /**
+     * Atomically appends one Contracts operation with draft and epoch evidence.
+     */
+    public synchronized TimelineEntry append(
+            Timeline timeline,
+            Operation operation,
+            ContractsManagedDraftPlan managedDraftPlan,
+            ContractsManagedEpochSelectionPlan managedEpochSelectionPlan) {
+        return appendManagedOperation(
+                timeline,
+                operation,
+                Objects.requireNonNull(
+                        managedDraftPlan, "managedDraftPlan"),
+                Objects.requireNonNull(
+                        managedEpochSelectionPlan,
+                        "managedEpochSelectionPlan"));
+    }
+
+    private TimelineEntry appendManagedOperation(
+            Timeline timeline,
+            Operation operation,
+            ContractsManagedDraftPlan managedDraftPlan,
+            ContractsManagedEpochSelectionPlan managedEpochSelectionPlan) {
         ensureOpen();
         if (contractsClosureAdapter == null) {
             throw new IllegalStateException(
                     "Contracts 1.0 was not enabled for this engine");
         }
         Timeline canonicalTimeline = requireRegisteredTimeline(timeline);
-        ContractsManagedDraftPlan plan = Objects.requireNonNull(
-                managedDraftPlan, "managedDraftPlan");
-        contractsClosureAdapter.preflightManagedDraftPlan(plan);
+        if (managedDraftPlan == null && managedEpochSelectionPlan == null) {
+            throw new IllegalArgumentException(
+                    "Managed operation append requires exact host evidence");
+        }
+        if (managedDraftPlan != null) {
+            contractsClosureAdapter.preflightManagedDraftPlan(
+                    managedDraftPlan);
+        }
+        if (managedEpochSelectionPlan != null) {
+            contractsClosureAdapter.preflightManagedEpochSelectionPlan(
+                    managedEpochSelectionPlan);
+        }
+        if (managedDraftPlan != null
+                && managedEpochSelectionPlan != null
+                && (!managedDraftPlan.targetDocumentId().equals(
+                        managedEpochSelectionPlan.targetDocumentId())
+                || managedDraftPlan.targetEpoch()
+                        != managedEpochSelectionPlan.targetEpoch()
+                || !managedDraftPlan.targetBlueId().equals(
+                        managedEpochSelectionPlan.targetBlueId()))) {
+            throw new IllegalArgumentException(
+                    "Managed draft and epoch selector plans capture different "
+                            + "operation target heads");
+        }
         long previousLogicalClock = logicalClockMicros;
         long candidateTimestamp = Math.addExact(logicalClockMicros, 1L);
         InMemoryTimelineJournal.Mark mark = journal.mark();
         WholeObjectStore.Mark objectMark = objects.mark();
-        String registeredEntryBlueId = null;
+        String registeredDraftEntryBlueId = null;
+        String registeredSelectionEntryBlueId = null;
         try {
             TimelineEntry entry = metrics.timed(
                     "append.total",
@@ -728,22 +834,48 @@ public final class DefaultCoordinationEngine
                             operation,
                             candidateTimestamp));
             requireAfterProcessedFrontier(entry);
-            if (!contractsClosureAdapter.registerManagedDraftPlan(
-                    entry.blueId(), plan)) {
-                throw new IllegalStateException(
-                        "Managed draft plan already exists for new entry "
-                                + entry.blueId());
+            if (managedDraftPlan != null) {
+                if (!contractsClosureAdapter.registerManagedDraftPlan(
+                        entry.blueId(), managedDraftPlan)) {
+                    throw new IllegalStateException(
+                            "Managed draft plan already exists for new entry "
+                                    + entry.blueId());
+                }
+                registeredDraftEntryBlueId = entry.blueId();
+                inject(FailurePoint.AFTER_MANAGED_DRAFT_PLAN_REGISTERED);
             }
-            registeredEntryBlueId = entry.blueId();
-            inject(FailurePoint.AFTER_MANAGED_DRAFT_PLAN_REGISTERED);
+            if (managedEpochSelectionPlan != null) {
+                if (!contractsClosureAdapter
+                        .registerManagedEpochSelectionPlan(
+                                entry.blueId(),
+                                managedEpochSelectionPlan)) {
+                    throw new IllegalStateException(
+                            "Managed epoch selection plan already exists for "
+                                    + "new entry " + entry.blueId());
+                }
+                registeredSelectionEntryBlueId = entry.blueId();
+                inject(FailurePoint
+                        .AFTER_MANAGED_EPOCH_SELECTION_PLAN_REGISTERED);
+            }
             logicalClockMicros = candidateTimestamp;
             objects.commit(objectMark);
             return entry;
         } catch (RuntimeException failure) {
-            if (registeredEntryBlueId != null) {
+            if (registeredSelectionEntryBlueId != null) {
+                try {
+                    contractsClosureAdapter
+                            .unregisterManagedEpochSelectionPlan(
+                                    registeredSelectionEntryBlueId,
+                                    managedEpochSelectionPlan);
+                } catch (RuntimeException cleanupFailure) {
+                    failure.addSuppressed(cleanupFailure);
+                }
+            }
+            if (registeredDraftEntryBlueId != null) {
                 try {
                     contractsClosureAdapter.unregisterManagedDraftPlan(
-                            registeredEntryBlueId, plan);
+                            registeredDraftEntryBlueId,
+                            managedDraftPlan);
                 } catch (RuntimeException cleanupFailure) {
                     failure.addSuppressed(cleanupFailure);
                 }
@@ -907,6 +1039,10 @@ public final class DefaultCoordinationEngine
                         session.activeSubscriptions()));
         drainCoordinator = drainCoordinator.restartFromStores(this::inject);
         if (contractsClosureAdapter != null) {
+            // Retain ContractsRecoveryState, including the deterministic
+            // managed-consumer deferral round, across route reconstruction.
+            contractsClosureAdapter
+                    .resetManagedEpochReconciliationAfterRouteRebuild();
             contractsActiveSourceTimelines.rebuild(documents);
             contractsFeederCoordinator = createContractsFeederCoordinator();
             contractsJournalCoordinator = createContractsJournalCoordinator();
@@ -1092,10 +1228,18 @@ public final class DefaultCoordinationEngine
     @Override
     public synchronized DocumentSnapshot document(DocumentId documentId) {
         DocumentSession session = requireDocument(documentId);
-        String readinessFailure = contractsClosureAdapter == null
-                ? drainCoordinator.applicationReadinessFailure(session)
-                : contractsReadinessFailure(session);
-        if (readinessFailure != null) {
+        boolean pendingTopLevelAdmission = drainCoordinator
+                .hasPendingTopLevelAdmission(session.documentId());
+        String readinessFailure = pendingTopLevelAdmission
+                ? "top-level historical admission remains pending"
+                : contractsClosureAdapter == null
+                        ? drainCoordinator.applicationReadinessFailure(session)
+                        : contractsReadinessFailure(session);
+        boolean mayReadEarlierReadyHead = session.status()
+                        == SessionStatus.CATCHING_UP
+                && !pendingTopLevelAdmission;
+        if (readinessFailure != null
+                && !mayReadEarlierReadyHead) {
             metrics.increment("temporal.applicationReadsRejected");
             throw new CoordinationException(
                     CoordinationErrorCode.DOCUMENT_NOT_READY,
@@ -1109,13 +1253,109 @@ public final class DefaultCoordinationEngine
                             "graphPublishedEpoch", Long.toString(
                                     session.graphPublishedEpoch())));
         }
-        return snapshot(session);
+        return snapshot(session, true);
     }
 
     @Override
     public synchronized DocumentSnapshot auditDocument(
             DocumentId documentId) {
-        return snapshot(requireDocument(documentId));
+        return snapshot(requireDocument(documentId), false);
+    }
+
+    @Override
+    public synchronized Optional<ManagedEpochReceipt> auditManagedEpoch(
+            DocumentId documentId,
+            long epoch) {
+        ensureOpen();
+        requireDocument(Objects.requireNonNull(documentId, "documentId"));
+        if (epoch < 0L
+                || epoch > MultiDocumentPublicationTransaction
+                        .MAX_SAFE_INTEGER) {
+            throw new IllegalArgumentException(
+                    "epoch must be a non-negative JSON safe integer");
+        }
+        return documents.managedEpochReceipt(documentId, epoch);
+    }
+
+    @Override
+    public synchronized List<ManagedEpochReceipt> auditManagedEpochs(
+            DocumentId documentId) {
+        ensureOpen();
+        requireDocument(Objects.requireNonNull(documentId, "documentId"));
+        return documents.managedEpochReceipts(documentId);
+    }
+
+    @Override
+    public synchronized Optional<ManagedEpochReceipt>
+            auditManagedEpochReceipt(String receiptIdentity) {
+        ensureOpen();
+        return documents.managedEpochReceipt(Objects.requireNonNull(
+                receiptIdentity, "receiptIdentity"));
+    }
+
+    @Override
+    public synchronized Optional<ManagedOccurrenceCatchUpPlan>
+            auditManagedCatchUpPlan(String planIdentity) {
+        ensureOpen();
+        return documents.catchUpPlan(Objects.requireNonNull(
+                planIdentity, "planIdentity"));
+    }
+
+    @Override
+    public synchronized List<ManagedOccurrenceCatchUpPlan>
+            auditManagedCatchUpPlans(DocumentId consumerDocumentId) {
+        ensureOpen();
+        requireDocument(Objects.requireNonNull(
+                consumerDocumentId, "consumerDocumentId"));
+        return documents.catchUpPlans(consumerDocumentId);
+    }
+
+    @Override
+    public synchronized Optional<ManagedCatchUpBarrier>
+            auditManagedCatchUpBarrier(String barrierIdentity) {
+        ensureOpen();
+        return documents.catchUpBarrier(Objects.requireNonNull(
+                barrierIdentity, "barrierIdentity"));
+    }
+
+    @Override
+    public synchronized Optional<ManagedEpochApplicationWork>
+            auditManagedEpochApplicationWork(String workIdentity) {
+        ensureOpen();
+        return documents.catchUpWork(Objects.requireNonNull(
+                workIdentity, "workIdentity"));
+    }
+
+    @Override
+    public synchronized Optional<ManagedEpochApplicationReceipt>
+            auditManagedEpochApplicationReceipt(
+                    String applicationReceiptIdentity) {
+        ensureOpen();
+        return documents.catchUpApplication(Objects.requireNonNull(
+                applicationReceiptIdentity,
+                "applicationReceiptIdentity"));
+    }
+
+    @Override
+    public synchronized Optional<ManagedDocumentReadiness>
+            auditManagedDocumentReadiness(DocumentId documentId) {
+        ensureOpen();
+        DocumentId selected = Objects.requireNonNull(
+                documentId, "documentId");
+        if (documents.find(selected).isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(documents.managedReadiness(selected));
+    }
+
+    /** Whether this document currently feeds an incomplete catch-up plan. */
+    public synchronized boolean hasActiveManagedCatchUpFrom(
+            DocumentId sourceDocumentId) {
+        ensureOpen();
+        DocumentId selected = Objects.requireNonNull(
+                sourceDocumentId, "sourceDocumentId");
+        requireDocument(selected);
+        return documents.hasActiveCatchUpFrom(selected);
     }
 
     /** Reads one retained managed occurrence without opening document heads. */
@@ -1196,21 +1436,28 @@ public final class DefaultCoordinationEngine
                 logicalClockMicros);
     }
 
-    private DocumentSnapshot snapshot(DocumentSession session) {
+    private DocumentSnapshot snapshot(
+            DocumentSession session,
+            boolean applicationReadyHead) {
         Map<String, DocumentId> children = contractsClosureAdapter == null
                 ? legacyChildren(session.documentId())
-                : closureChildren(session.documentId());
-        EmbeddedOnlyLayout layout = session.layout();
+                : applicationReadyHead
+                        ? session.readyEmbeddedChildren()
+                        : closureChildren(session.documentId());
+        EmbeddedOnlyLayout layout = applicationReadyHead
+                ? session.readyLayout() : session.layout();
+        DocumentRevision revision = applicationReadyHead
+                ? session.readyRevision() : session.currentRevision();
         Map<String, ExactValue> physicalObjects = new LinkedHashMap<>();
         layout.scopePaths().forEach(path -> physicalObjects.put(
                 path, layout.stored(path)));
         return new DocumentSnapshot(
                 session.documentId(),
-                session.epoch(),
+                revision.epoch(),
                 session.status(),
                 session.readyThrough(),
                 session.authoredInitialBlueId(),
-                session.currentRevision().after(),
+                layout.semanticRoot(),
                 physicalObjects,
                 children,
                 layout.boundaries().stream()
@@ -1281,10 +1528,7 @@ public final class DefaultCoordinationEngine
 
     private Map<String, DocumentId> closureChildren(DocumentId parent) {
         Map<String, DocumentId> result = new LinkedHashMap<>();
-        documents.publicationSnapshot().occurrenceInventory().activeRows()
-                .stream()
-                .filter(row -> row.sourceDocumentId().value().equals(
-                        parent.value()))
+        documents.activeOccurrencesFrom(parent).stream()
                 .forEach(row -> {
                     DocumentId child = DocumentId.of(
                             row.targetDocumentId().value());
@@ -1303,30 +1547,29 @@ public final class DefaultCoordinationEngine
         if (session.status() == SessionStatus.BLOCKED) {
             return "session is administratively blocked";
         }
-        InMemoryDocumentStore.PublicationSnapshot publication =
-                documents.publicationSnapshot();
-        InMemoryDocumentStore.DocumentHead head = publication.requireHead(
-                session.documentId());
-        if (head.epoch() != session.epoch()
-                || !head.blueId().equals(
-                        session.currentRevision().after().blueId())) {
-            return "session state disagrees with the durable document head";
-        }
+        InMemoryDocumentStore.ManagedReadSnapshot publication;
         try {
-            publication.graphGenerations().require(
+            publication = documents.managedReadSnapshot(
                     session.documentId());
-        } catch (RuntimeException missing) {
+        } catch (IllegalArgumentException missing) {
             return "no durable Contracts graph generation";
         }
-        for (blue.language.processor.closure.ComponentSnapshot component
-                : publication.componentStates()) {
-            for (int index = 0;
-                    index < component.orderedMemberDocumentIds().size();
-                    index++) {
-                if (!component.orderedMemberDocumentIds().get(index).value()
-                        .equals(session.documentId().value())) {
-                    continue;
-                }
+        InMemoryDocumentStore.DocumentHead head = publication.head();
+        if (head.epoch() != session.epoch()
+                || !head.blueId().equals(
+                        session.currentRepresentation().blueId())) {
+            return "session state disagrees with the durable document head";
+        }
+        blue.language.processor.closure.ComponentSnapshot component =
+                publication.componentState();
+        if (component == null) {
+            return "no durable Contracts component state";
+        }
+        for (int index = 0;
+                index < component.orderedMemberDocumentIds().size();
+                index++) {
+            if (component.orderedMemberDocumentIds().get(index).value()
+                    .equals(session.documentId().value())) {
                 return component.orderedMemberBlueIds().get(index)
                         .equals(head.blueId())
                         ? null
@@ -1372,31 +1615,190 @@ public final class DefaultCoordinationEngine
         return new ContractsRootFeederCoordinator(
                 contractsClosureAdapter,
                 new ContractsRootFeederWindow(
-                        contractsRecoveryState.feederWindow));
+                        contractsRecoveryState.feederWindow),
+                contractsClosureAdapter::executeAndPublish,
+                invocation -> invocation.existingMemberSet().stream()
+                        .noneMatch(member -> documents.require(member).status()
+                                == SessionStatus.CATCHING_UP));
     }
 
     private ProcessingDrainReceipt drainContracts(
             ExternalOrderKey inclusiveCutoff,
             CoordinationEngine.DrainBudget budget) {
         long started = System.nanoTime();
-        ContractsJournalDrainCoordinator.DrainProgress progress =
-                contractsJournalCoordinator.drainThrough(
-                        inclusiveCutoff, budget);
+        CoordinationEngine.DrainBudget limits = Objects.requireNonNull(
+                budget, "budget");
+        ArrayList<ContractsJournalDrainCoordinator.DrainProgress> progresses =
+                new ArrayList<>();
+        ArrayList<blue.coordination.api.ManagedEpochApplicationReceipt>
+                managedApplications = new ArrayList<>();
+        ArrayList<ManagedEpochApplicationAttempt> managedAttempts =
+                new ArrayList<>();
+        ArrayList<ManagedEpochEvidenceFailure> managedEvidenceFailures =
+                new ArrayList<>();
+        Set<DocumentId> failedManagedConsumers = new LinkedHashSet<>();
+        LinkedHashMap<String, TimelineEntry> completedEntries =
+                new LinkedHashMap<>();
+        long committedTransitions = 0L;
+        long selectedEntries = 0L;
+        boolean madeProgress;
+        do {
+            madeProgress = false;
+            boolean managedFirst = contractsRecoveryState.managedEpochTurn;
+            for (int phase = 0; phase < 2; phase++) {
+                if (committedTransitions
+                                >= limits.maxCommittedProcessTransitions()
+                        || selectedEntries
+                                >= limits.maxSelectedEntries()) {
+                    break;
+                }
+                boolean managedPhase = managedFirst == (phase == 0);
+                if (!managedPhase) {
+                    CoordinationEngine.DrainBudget remaining =
+                            new CoordinationEngine.DrainBudget(
+                                    Math.subtractExact(
+                                            limits
+                                                    .maxCommittedProcessTransitions(),
+                                            committedTransitions),
+                                    Math.subtractExact(
+                                            limits.maxSelectedEntries(),
+                                            selectedEntries));
+                    ContractsJournalDrainCoordinator.DrainProgress progress =
+                            contractsJournalCoordinator.drainThrough(
+                                    inclusiveCutoff, remaining);
+                    progresses.add(progress);
+                    for (TimelineEntry entry : progress.completedEntries()) {
+                        completedEntries.putIfAbsent(entry.blueId(), entry);
+                    }
+                    long selectedThisPass = progress.attempts().size();
+                    selectedEntries = Math.addExact(
+                            selectedEntries, selectedThisPass);
+                    committedTransitions = Math.addExact(
+                            committedTransitions,
+                            progress.committedTransitions());
+                    if (selectedThisPass != 0L
+                            || progress.committedTransitions() != 0L) {
+                        contractsRecoveryState.managedEpochTurn = true;
+                    }
+                    madeProgress = madeProgress
+                            || !progress.completedEntries().isEmpty()
+                            || progress.committedTransitions() != 0L;
+                    continue;
+                }
+
+                boolean selectedManaged = false;
+                while (committedTransitions
+                                < limits.maxCommittedProcessTransitions()
+                        && selectedEntries
+                                < limits.maxSelectedEntries()) {
+                    Optional<ContractsClosureAdapter.ManagedApplicationOutcome>
+                            managed;
+                    try {
+                        managed = selectNextManagedEpochApplication(
+                                failedManagedConsumers);
+                    } catch (ManagedEpochEvidenceException failure) {
+                        selectedEntries = Math.addExact(selectedEntries, 1L);
+                        documents.recordManagedEpochEvidenceFailure(failure);
+                        managedEvidenceFailures.add(
+                                new ManagedEpochEvidenceFailure(
+                                        failure.work(),
+                                        failure.planStatus(),
+                                        failure.code(),
+                                        failure.message()));
+                        if (!failedManagedConsumers.add(
+                                failure.work().consumerDocumentId())) {
+                            throw new IllegalStateException(
+                                    "Failed managed consumer was selected "
+                                            + "twice",
+                                    failure);
+                        }
+                        contractsRecoveryState.deferManagedEpochConsumer(
+                                failure.work().consumerDocumentId());
+                        selectedManaged = true;
+                        contractsRecoveryState.managedEpochTurn = false;
+                        madeProgress = true;
+                        continue;
+                    }
+                    if (managed.isEmpty()) {
+                        if (!selectedManaged) {
+                            contractsRecoveryState.managedEpochTurn = false;
+                        }
+                        break;
+                    }
+                    selectedManaged = true;
+                    selectedEntries = Math.addExact(selectedEntries, 1L);
+                    contractsRecoveryState.managedEpochTurn = false;
+                    ContractsClosureAdapter.ManagedApplicationOutcome outcome =
+                            managed.orElseThrow();
+                    managedAttempts.add(new ManagedEpochApplicationAttempt(
+                            outcome.work(),
+                            outcome.attempt(),
+                            outcome.published(),
+                            outcome.replayed(),
+                            outcome.receipt(),
+                            outcome.automaticRetryCount(),
+                            outcome.automaticResolutionStopReason()
+                                    .map(reason -> ManagedEpochApplicationAttempt
+                                            .AutomaticResolutionStopReason
+                                            .valueOf(reason.name())),
+                            outcome.unresolvedDemands().stream()
+                                    .map(unresolved -> new
+                                            ManagedEpochApplicationAttempt
+                                                    .ManagedOccurrenceResolutionIssue(
+                                                    unresolved.demand()
+                                                            .demandIdentity(),
+                                                    ManagedEpochApplicationAttempt
+                                                            .ResolutionStatus
+                                                            .valueOf(
+                                                                    unresolved
+                                                                            .status()
+                                                                            .name()),
+                                                    unresolved.diagnostic()))
+                                    .toList()));
+                    contractsRecoveryState.deferManagedEpochConsumer(
+                            outcome.work().consumerDocumentId());
+                    if (!outcome.published()) {
+                        if (!failedManagedConsumers.add(
+                                outcome.work().consumerDocumentId())) {
+                            throw new IllegalStateException(
+                                    "Failed managed consumer was selected "
+                                            + "twice");
+                        }
+                        continue;
+                    }
+                    madeProgress = true;
+                    if (!outcome.replayed()) {
+                        managedApplications.add(
+                                outcome.receipt().orElseThrow());
+                        committedTransitions = Math.addExact(
+                                committedTransitions, 1L);
+                    }
+                    break;
+                }
+            }
+        } while (madeProgress
+                && committedTransitions
+                        < limits.maxCommittedProcessTransitions()
+                && selectedEntries < limits.maxSelectedEntries());
+
         Map<String, List<DocumentDispatchOutcome>> outcomes =
                 new LinkedHashMap<>();
         Map<String, List<ContractsClosureDispatchAttempt>> attempts =
                 new LinkedHashMap<>();
-        for (ContractsRootFeederCoordinator.EventProgress attempt
-                : progress.attempts()) {
-            TimelineEntry entry = attempt.batch().entry();
-            List<DocumentDispatchOutcome> entryOutcomes = new ArrayList<>();
-            List<ContractsClosureDispatchAttempt> entryAttempts =
-                    new ArrayList<>();
-            for (ContractsRootFeederCoordinator.CohortProgress cohort
-                    : attempt.cohorts()) {
-                ContractsClosureAdapter.CohortOutcome exact =
-                        cohort.outcome();
-                entryAttempts.add(new ContractsClosureDispatchAttempt(
+        for (ContractsJournalDrainCoordinator.DrainProgress progress
+                : progresses) {
+            for (ContractsRootFeederCoordinator.EventProgress attempt
+                    : progress.attempts()) {
+                TimelineEntry entry = attempt.batch().entry();
+                List<DocumentDispatchOutcome> entryOutcomes =
+                        new ArrayList<>();
+                List<ContractsClosureDispatchAttempt> entryAttempts =
+                        new ArrayList<>();
+                for (ContractsRootFeederCoordinator.CohortProgress cohort
+                        : attempt.cohorts()) {
+                    ContractsClosureAdapter.CohortOutcome exact =
+                            cohort.outcome();
+                    entryAttempts.add(new ContractsClosureDispatchAttempt(
                         entry.blueId(),
                         exact.publicationMembers(),
                         exact.attempt(),
@@ -1421,45 +1823,101 @@ public final class DefaultCoordinationEngine
                                                                 .authoredInitial())))
                                 .toList(),
                         exact.managedSurfaceEvidence().inputComponents(),
-                        exact.managedSurfaceEvidence()
-                                .operationRouteChanges()
-                                .stream()
-                                .map(DefaultCoordinationEngine
-                                        ::operationRouteChange)
-                                .toList()));
-                if (!cohort.outcome().published()
-                        || cohort.outcome().replayed()) {
-                    continue;
+                            exact.managedSurfaceEvidence()
+                                    .operationRouteChanges()
+                                    .stream()
+                                    .map(DefaultCoordinationEngine
+                                            ::operationRouteChange)
+                                    .toList(),
+                            exact.unresolvedDemands().stream()
+                                    .map(unresolved -> new
+                                            ContractsClosureDispatchAttempt
+                                                    .ManagedOccurrenceResolutionIssue(
+                                                    unresolved.demand()
+                                                            .demandIdentity(),
+                                                    ContractsClosureDispatchAttempt
+                                                            .ResolutionStatus
+                                                            .valueOf(
+                                                                    unresolved
+                                                                            .status()
+                                                                            .name()),
+                                                    unresolved.diagnostic()))
+                                    .toList()));
+                    if (!cohort.outcome().published()
+                            || cohort.outcome().replayed()) {
+                        continue;
+                    }
+                    for (DocumentId member
+                            : cohort.outcome().publicationMembers()) {
+                        documents.require(member)
+                                .revisionForEntry(entry.blueId())
+                                .ifPresent(revision -> entryOutcomes.add(
+                                        new DocumentDispatchOutcome(
+                                                member, revision, 0L)));
+                    }
                 }
-                for (DocumentId member
-                        : cohort.outcome().publicationMembers()) {
-                    documents.require(member).revisionForEntry(entry.blueId())
-                            .ifPresent(revision -> entryOutcomes.add(
-                                    new DocumentDispatchOutcome(
-                                            member, revision, 0L)));
+                if (!entryOutcomes.isEmpty()) {
+                    outcomes.computeIfAbsent(
+                            entry.blueId(), ignored -> new ArrayList<>())
+                            .addAll(entryOutcomes);
                 }
-            }
-            if (!entryOutcomes.isEmpty()) {
-                outcomes.put(entry.blueId(), List.copyOf(entryOutcomes));
-            }
-            if (!entryAttempts.isEmpty()) {
-                attempts.computeIfAbsent(
-                        entry.blueId(), ignored -> new ArrayList<>())
-                        .addAll(entryAttempts);
+                if (!entryAttempts.isEmpty()) {
+                    attempts.computeIfAbsent(
+                            entry.blueId(), ignored -> new ArrayList<>())
+                            .addAll(entryAttempts);
+                }
             }
         }
-        long committed = outcomes.values().stream()
-                .mapToLong(List::size)
-                .sum();
+        boolean activeCatchUp = documents.hasActiveCatchUp();
+        ContractsJournalDrainCoordinator.DrainProgress last = progresses
+                .isEmpty() ? null : progresses.get(progresses.size() - 1);
+        boolean journalQuiescent = last == null
+                ? journal.nextExternal(
+                        contractsJournalCoordinator.processedThrough(),
+                        inclusiveCutoff).isEmpty()
+                : last.quiescent();
+        boolean remainingWork = activeCatchUp || !journalQuiescent;
+        boolean budgetExhausted = committedTransitions
+                        >= limits.maxCommittedProcessTransitions()
+                || selectedEntries >= limits.maxSelectedEntries();
+        boolean quiescent = !remainingWork;
+        boolean paused = remainingWork && budgetExhausted;
         return new ProcessingDrainReceipt(
-                progress.completedEntries(),
+                new ArrayList<>(completedEntries.values()),
                 outcomes,
                 attempts,
-                progress.processedThrough(),
-                progress.quiescent(),
-                progress.paused(),
-                committed,
-                System.nanoTime() - started);
+                contractsJournalCoordinator.processedThrough(),
+                quiescent,
+                paused,
+                committedTransitions,
+                System.nanoTime() - started,
+                managedApplications,
+                managedAttempts,
+                managedEvidenceFailures);
+    }
+
+    private Optional<ContractsClosureAdapter.ManagedApplicationOutcome>
+            selectNextManagedEpochApplication(
+                    Set<DocumentId> failedManagedConsumers) {
+        Set<DocumentId> failed = Set.copyOf(Objects.requireNonNull(
+                failedManagedConsumers, "failedManagedConsumers"));
+        LinkedHashSet<DocumentId> excluded = new LinkedHashSet<>(
+                contractsRecoveryState.deferredManagedConsumers());
+        excluded.addAll(failed);
+        Optional<ContractsClosureAdapter.ManagedApplicationOutcome> selected =
+                contractsClosureAdapter.processNextManagedEpochApplication(
+                        excluded);
+        if (selected.isPresent()
+                || !contractsRecoveryState.hasDeferredManagedConsumers()) {
+            return selected;
+        }
+
+        // Every non-failed lane in this deterministic fairness round has been
+        // visited. Start the next round without allowing one lane to run twice
+        // in the current drain call.
+        contractsRecoveryState.completeManagedEpochFairnessRound();
+        return contractsClosureAdapter.processNextManagedEpochApplication(
+                failed);
     }
 
     private static ContractsClosureDispatchAttempt.OperationRouteChange
@@ -1543,6 +2001,27 @@ public final class DefaultCoordinationEngine
         private final ContractsJournalDrainCoordinator.DurableState
                 journalDrain =
                 new ContractsJournalDrainCoordinator.DurableState();
+        private final LinkedHashSet<DocumentId> deferredManagedConsumers =
+                new LinkedHashSet<>();
+        /** Retained fair turn between external and managed transition lanes. */
+        private boolean managedEpochTurn;
+
+        private Set<DocumentId> deferredManagedConsumers() {
+            return Set.copyOf(deferredManagedConsumers);
+        }
+
+        private boolean hasDeferredManagedConsumers() {
+            return !deferredManagedConsumers.isEmpty();
+        }
+
+        private void deferManagedEpochConsumer(DocumentId consumer) {
+            deferredManagedConsumers.add(Objects.requireNonNull(
+                    consumer, "consumer"));
+        }
+
+        private void completeManagedEpochFairnessRound() {
+            deferredManagedConsumers.clear();
+        }
     }
 
     private long nextApplicationTimestamp() {

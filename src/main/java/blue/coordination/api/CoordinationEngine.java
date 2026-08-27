@@ -7,6 +7,8 @@ import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.closure.ClosureInvocationInput;
 
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -157,6 +159,83 @@ public interface CoordinationEngine extends AutoCloseable {
 
     /** Reads the immutable ordered revision stream of one document. */
     List<DocumentRevision> history(DocumentId documentId);
+
+    /** Reads one complete managed source epoch receipt by document and epoch. */
+    default Optional<ManagedEpochReceipt> auditManagedEpoch(
+            DocumentId documentId,
+            long epoch) {
+        Objects.requireNonNull(documentId, "documentId");
+        ManagedIdentity.requireSafeInteger(epoch, "epoch");
+        return history(documentId).stream()
+                .filter(revision -> revision.epoch() == epoch)
+                .map(DocumentRevision::managedEpochReceipt)
+                .flatMap(Optional::stream)
+                .findFirst();
+    }
+
+    /** Reads all complete managed epoch receipts for one source lineage. */
+    default List<ManagedEpochReceipt> auditManagedEpochs(
+            DocumentId documentId) {
+        Objects.requireNonNull(documentId, "documentId");
+        return history(documentId).stream()
+                .map(DocumentRevision::managedEpochReceipt)
+                .flatMap(Optional::stream)
+                .toList();
+    }
+
+    /**
+     * Reads one receipt by canonical identity when the implementation owns a
+     * receipt index. The compatibility default never performs a global scan.
+     */
+    default Optional<ManagedEpochReceipt> auditManagedEpochReceipt(
+            String receiptIdentity) {
+        ManagedIdentity.requireSha256(receiptIdentity, "receiptIdentity");
+        return Optional.empty();
+    }
+
+    /** Reads one occurrence catch-up plan when durable plan storage is enabled. */
+    default Optional<ManagedOccurrenceCatchUpPlan> auditManagedCatchUpPlan(
+            String planIdentity) {
+        ManagedIdentity.requireSha256(planIdentity, "planIdentity");
+        return Optional.empty();
+    }
+
+    /** Reads canonical catch-up plans owned by one consumer document. */
+    default List<ManagedOccurrenceCatchUpPlan> auditManagedCatchUpPlans(
+            DocumentId consumerDocumentId) {
+        Objects.requireNonNull(consumerDocumentId, "consumerDocumentId");
+        return List.of();
+    }
+
+    /** Reads one aggregate readiness barrier by canonical identity. */
+    default Optional<ManagedCatchUpBarrier> auditManagedCatchUpBarrier(
+            String barrierIdentity) {
+        ManagedIdentity.requireSha256(barrierIdentity, "barrierIdentity");
+        return Optional.empty();
+    }
+
+    /** Reads one selected source-epoch application work item. */
+    default Optional<ManagedEpochApplicationWork>
+            auditManagedEpochApplicationWork(String workIdentity) {
+        ManagedIdentity.requireSha256(workIdentity, "workIdentity");
+        return Optional.empty();
+    }
+
+    /** Reads one committed application receipt by canonical identity. */
+    default Optional<ManagedEpochApplicationReceipt>
+            auditManagedEpochApplicationReceipt(
+                    String applicationReceiptIdentity) {
+        ManagedIdentity.requireSha256(
+                applicationReceiptIdentity, "applicationReceiptIdentity");
+        return Optional.empty();
+    }
+
+    /** Reads committed-versus-ready evidence when readiness storage is enabled. */
+    default Optional<ManagedDocumentReadiness> auditManagedDocumentReadiness(
+            DocumentId documentId) {
+        Objects.requireNonNull(documentId, "documentId");
+        return Optional.empty();
+    }
 
     /** Returns source Timeline IDs reachable by a document and its children. */
     Set<String> effectiveTimelineIds(DocumentId documentId);

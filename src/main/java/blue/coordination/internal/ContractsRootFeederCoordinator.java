@@ -7,26 +7,39 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Predicate;
 
 /** Executes eligible closure cohorts under lane-local feeder barriers. */
 final class ContractsRootFeederCoordinator {
     private final ContractsClosureAdapter adapter;
     private final ContractsRootFeederWindow window;
     private final CohortExecutor executor;
+    private final Predicate<ContractsClosureAdapter.CohortInvocation>
+            eligibility;
 
     ContractsRootFeederCoordinator(
             ContractsClosureAdapter adapter,
             ContractsRootFeederWindow window) {
-        this(adapter, window, adapter::executeAndPublish);
+        this(adapter, window, adapter::executeAndPublish, ignored -> true);
     }
 
     ContractsRootFeederCoordinator(
             ContractsClosureAdapter adapter,
             ContractsRootFeederWindow window,
             CohortExecutor executor) {
+        this(adapter, window, executor, ignored -> true);
+    }
+
+    ContractsRootFeederCoordinator(
+            ContractsClosureAdapter adapter,
+            ContractsRootFeederWindow window,
+            CohortExecutor executor,
+            Predicate<ContractsClosureAdapter.CohortInvocation> eligibility) {
         this.adapter = Objects.requireNonNull(adapter, "adapter");
         this.window = Objects.requireNonNull(window, "window");
         this.executor = Objects.requireNonNull(executor, "executor");
+        this.eligibility = Objects.requireNonNull(
+                eligibility, "eligibility");
     }
 
     /** Captures one exact event and executes every currently eligible lane. */
@@ -56,6 +69,10 @@ final class ContractsRootFeederCoordinator {
                     || !ticket.members().equals(invocation.members())) {
                 throw new IllegalStateException(
                         "Feeder ticket no longer identifies its frozen cohort");
+            }
+            if (!eligibility.test(invocation)) {
+                window.releaseUnexecuted(ticket);
+                continue;
             }
             ContractsClosureAdapter.CohortOutcome outcome =
                     executor.execute(frozen, invocation);

@@ -991,7 +991,7 @@ final class OperationRouteIndex {
             }
             DocumentSession session = resolver.apply(documentId);
             return session != null && (exact
-                    ? session.currentRevision().after().blueId()
+                    ? session.currentRepresentation().blueId()
                     .equals(stateBlueId)
                     : session.epochForState(stateBlueId).isPresent());
         }

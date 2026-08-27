@@ -111,34 +111,81 @@ final class ClosureGraphGenerationInventory {
             throw new IllegalArgumentException(
                     "Only a committing closure result can advance graph state");
         }
+        long expectedGeneration = selected.platformCommitCompanion()
+                .expectedInputGraphGeneration();
+        LinkedHashMap<DocumentId, Long> expected = new LinkedHashMap<>();
+        selected.platformCommitCompanion().expectedInputDocuments()
+                .forEach(document -> {
+                    DocumentId member = DocumentId.of(
+                            document.documentId().value());
+                    if (expected.putIfAbsent(
+                            member, expectedGeneration) != null) {
+                        throw new IllegalArgumentException(
+                                "Duplicate expected graph-generation member "
+                                        + member);
+                    }
+                });
+        return apply(selected, expected);
+    }
+
+    /**
+     * Applies one committing result after fencing each previously independent
+     * member at its exact durable generation. Contracts receives the maximum
+     * captured generation as its single deterministic merge generation; the
+     * lower member generations remain exact CAS evidence rather than being
+     * rewritten before publication.
+     */
+    ClosureGraphGenerationInventory apply(
+            ClosureProcessResult result,
+            Map<DocumentId, Long> expectedGenerations) {
+        ClosureProcessResult selected = Objects.requireNonNull(
+                result, "result");
+        if (!selected.commits()
+                || selected.platformCommitCompanion() == null) {
+            throw new IllegalArgumentException(
+                    "Only a committing closure result can advance graph state");
+        }
         ClosureCommitCompanion companion =
                 selected.platformCommitCompanion();
-        Work work = new Work();
-        Set<DocumentId> expectedMembers = new LinkedHashSet<>();
+        LinkedHashMap<DocumentId, Long> expected =
+                canonicalExpectedGenerations(expectedGenerations);
+        LinkedHashSet<DocumentId> companionMembers = new LinkedHashSet<>();
         companion.expectedInputDocuments().forEach(document -> {
             DocumentId member = DocumentId.of(document.documentId().value());
-            if (!expectedMembers.add(member)) {
+            if (!companionMembers.add(member)) {
                 throw new IllegalArgumentException(
                         "Duplicate expected graph-generation member "
                                 + member);
             }
-            long actual = require(member, work);
-            if (actual != companion.expectedInputGraphGeneration()) {
+        });
+        if (!companionMembers.equals(expected.keySet())) {
+            throw new IllegalArgumentException(
+                    "Closure result graph members differ from its exact "
+                            + "generation fences");
+        }
+        long maximumExpected = maximumGeneration(expected.values());
+        if (companion.expectedInputGraphGeneration() != maximumExpected) {
+            throw new IllegalArgumentException(
+                    "Closure result does not bind the maximum captured graph "
+                            + "generation");
+        }
+        Work work = new Work();
+        for (Map.Entry<DocumentId, Long> entry : expected.entrySet()) {
+            long actual = require(entry.getKey(), work);
+            if (actual != entry.getValue().longValue()) {
                 throw new MultiDocumentPublicationTransaction
                         .AtomicPublicationCasException(
-                                "Stale graph generation for " + member
-                                        + ": expected "
-                                        + companion
-                                                .expectedInputGraphGeneration()
+                                "Stale graph generation for " + entry.getKey()
+                                        + ": expected " + entry.getValue()
                                         + " but found " + actual);
             }
-        });
+        }
         Set<DocumentId> resultingMembers = new LinkedHashSet<>();
         for (ResultingDocument document : selected.resultingDocuments()) {
             resultingMembers.add(DocumentId.of(
                     document.documentId().value()));
         }
-        if (!resultingMembers.equals(expectedMembers)) {
+        if (!resultingMembers.equals(expected.keySet())) {
             throw new IllegalArgumentException(
                     "Closure result graph members differ from its input "
                             + "generation cohort");
@@ -233,31 +280,64 @@ final class ClosureGraphGenerationInventory {
             throw new IllegalArgumentException(
                     "Only a committing closure result can expand graph state");
         }
-        LinkedHashSet<DocumentId> present = new LinkedHashSet<>(
-                Objects.requireNonNull(expectedPresent, "expectedPresent"));
+        long expectedGeneration = selected.platformCommitCompanion()
+                .expectedInputGraphGeneration();
+        LinkedHashMap<DocumentId, Long> present = new LinkedHashMap<>();
+        for (DocumentId documentId : Objects.requireNonNull(
+                expectedPresent, "expectedPresent")) {
+            if (present.putIfAbsent(
+                    Objects.requireNonNull(documentId, "documentId"),
+                    expectedGeneration) != null) {
+                throw new IllegalArgumentException(
+                        "Duplicate present closure expansion member "
+                                + documentId);
+            }
+        }
+        return applyExpansion(selected, present, expectedAbsent);
+    }
+
+    /** Applies an expansion while retaining exact per-member generations. */
+    ClosureGraphGenerationInventory applyExpansion(
+            ClosureProcessResult result,
+            Map<DocumentId, Long> expectedPresent,
+            Collection<DocumentId> expectedAbsent) {
+        ClosureProcessResult selected = Objects.requireNonNull(
+                result, "result");
+        if (!selected.commits()
+                || selected.platformCommitCompanion() == null) {
+            throw new IllegalArgumentException(
+                    "Only a committing closure result can expand graph state");
+        }
+        LinkedHashMap<DocumentId, Long> present =
+                canonicalExpectedGenerations(expectedPresent);
         LinkedHashSet<DocumentId> absent = new LinkedHashSet<>(
                 Objects.requireNonNull(expectedAbsent, "expectedAbsent"));
         if (present.isEmpty() || absent.isEmpty()) {
             throw new IllegalArgumentException(
                     "A closure expansion requires present and absent members");
         }
-        LinkedHashSet<DocumentId> overlap = new LinkedHashSet<>(present);
+        LinkedHashSet<DocumentId> overlap = new LinkedHashSet<>(
+                present.keySet());
         overlap.retainAll(absent);
         if (!overlap.isEmpty()) {
             throw new IllegalArgumentException(
                     "Closure expansion fences overlap " + overlap);
         }
-        long expectedGeneration = selected.platformCommitCompanion()
-                .expectedInputGraphGeneration();
+        long maximumExpected = maximumGeneration(present.values());
+        if (selected.platformCommitCompanion()
+                .expectedInputGraphGeneration() != maximumExpected) {
+            throw new IllegalArgumentException(
+                    "Closure expansion does not bind the maximum captured "
+                            + "graph generation");
+        }
         Work work = new Work();
-        for (DocumentId documentId : present) {
-            long actual = require(documentId, work);
-            if (actual != expectedGeneration) {
+        for (Map.Entry<DocumentId, Long> entry : present.entrySet()) {
+            long actual = require(entry.getKey(), work);
+            if (actual != entry.getValue().longValue()) {
                 throw new MultiDocumentPublicationTransaction
                         .AtomicPublicationCasException(
-                                "Stale graph generation for " + documentId
-                                        + ": expected "
-                                        + expectedGeneration
+                                "Stale graph generation for " + entry.getKey()
+                                        + ": expected " + entry.getValue()
                                         + " but found " + actual);
             }
         }
@@ -274,7 +354,7 @@ final class ClosureGraphGenerationInventory {
         }
 
         LinkedHashSet<DocumentId> expectedMembers = new LinkedHashSet<>(
-                present);
+                present.keySet());
         expectedMembers.addAll(absent);
         LinkedHashSet<DocumentId> companionMembers = new LinkedHashSet<>();
         selected.platformCommitCompanion().expectedInputDocuments()
@@ -301,6 +381,43 @@ final class ClosureGraphGenerationInventory {
             replacement = mutation.map();
         }
         return new ClosureGraphGenerationInventory(replacement, work);
+    }
+
+    private static LinkedHashMap<DocumentId, Long>
+            canonicalExpectedGenerations(
+                    Map<DocumentId, Long> expectedGenerations) {
+        Map<DocumentId, Long> selected = Objects.requireNonNull(
+                expectedGenerations, "expectedGenerations");
+        if (selected.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Exact graph-generation fences must not be empty");
+        }
+        TreeSet<DocumentId> ordered = new TreeSet<>(
+                EmbeddingBinding.DOCUMENT_ORDER);
+        ordered.addAll(selected.keySet());
+        LinkedHashMap<DocumentId, Long> result = new LinkedHashMap<>();
+        for (DocumentId documentId : ordered) {
+            Long generation = Objects.requireNonNull(
+                    selected.get(documentId), "graphGeneration");
+            result.put(
+                    Objects.requireNonNull(documentId, "documentId"),
+                    safeGeneration(generation.longValue()));
+        }
+        return result;
+    }
+
+    private static long maximumGeneration(Collection<Long> generations) {
+        long maximum = -1L;
+        for (Long generation : Objects.requireNonNull(
+                generations, "generations")) {
+            maximum = Math.max(maximum, safeGeneration(Objects.requireNonNull(
+                    generation, "graphGeneration").longValue()));
+        }
+        if (maximum < 0L) {
+            throw new IllegalArgumentException(
+                    "A graph-generation cohort must not be empty");
+        }
+        return maximum;
     }
 
     Map<DocumentId, Long> generations() {

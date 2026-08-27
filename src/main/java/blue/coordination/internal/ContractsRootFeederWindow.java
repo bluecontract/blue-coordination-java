@@ -134,6 +134,16 @@ final class ContractsRootFeederWindow {
                 actual.published());
     }
 
+    /** Releases one transient ticket which was selected but not executed. */
+    synchronized void releaseUnexecuted(AttemptTicket ticket) {
+        AttemptTicket selected = requireSelected(ticket);
+        if (!selectedAttempts.remove(
+                selected.attemptKey(), selected)) {
+            throw new IllegalStateException(
+                    "Unexecuted feeder ticket was not retained");
+        }
+    }
+
     synchronized void recordNeedsResources(
             AttemptTicket ticket,
             List<DocumentId> members,

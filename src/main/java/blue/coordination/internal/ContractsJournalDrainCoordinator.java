@@ -114,8 +114,12 @@ final class ContractsJournalDrainCoordinator {
                 }
                 ContractsRootFeederCoordinator.EventProgress progress =
                         feeder.process(entry);
-                attempts.add(progress);
-                selectedEntries = Math.addExact(selectedEntries, 1L);
+                boolean selectedForProcessing = progress.terminal()
+                        || !progress.cohorts().isEmpty();
+                if (selectedForProcessing) {
+                    attempts.add(progress);
+                    selectedEntries = Math.addExact(selectedEntries, 1L);
+                }
                 committedTransitions = Math.addExact(
                         committedTransitions,
                         committedTransitions(progress));
@@ -180,8 +184,10 @@ final class ContractsJournalDrainCoordinator {
         return progress.cohorts().stream()
                 .filter(cohort -> cohort.outcome().published()
                         && !cohort.outcome().replayed())
-                .mapToLong(cohort -> cohort.outcome()
-                        .publicationMembers().size())
+                .mapToLong(cohort -> cohort.outcome().attempt()
+                        .processResult()
+                        .managedTransitionReceipts()
+                        .size())
                 .sum();
     }
 

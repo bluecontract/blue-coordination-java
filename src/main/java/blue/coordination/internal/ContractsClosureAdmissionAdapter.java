@@ -7,6 +7,7 @@ import blue.coordination.api.CoordinationException;
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.DocumentRevision;
 import blue.coordination.api.ExactValue;
+import blue.coordination.api.ManagedEpochReceipt;
 import blue.coordination.api.SessionStatus;
 import blue.language.model.Node;
 import blue.language.processor.ExternalOrderKey;
@@ -29,6 +30,7 @@ import blue.language.processor.closure.ComponentSnapshot;
 import blue.language.processor.closure.ExecutionPolicy;
 import blue.language.processor.closure.GasTraceEntry;
 import blue.language.processor.closure.ManagedDocumentSnapshot;
+import blue.language.processor.closure.ManagedDocumentTransitionReceipt;
 import blue.language.processor.closure.ManagedDocumentGraph;
 import blue.language.processor.closure.ManagedOccurrenceBinding;
 import blue.language.processor.closure.PublicEventOccurrence;
@@ -140,7 +142,8 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
         return admitAndPublish(
                 input, policy, admissionFrontier,
                 AdmissionLane.FULL_LIFECYCLE,
-                runtime.nodeProvider());
+                runtime.nodeProvider(),
+                null);
     }
 
     synchronized ContractsClosureAdmissionReceipt admitAndPublish(
@@ -153,7 +156,23 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                 policy,
                 admissionFrontier,
                 AdmissionLane.FULL_LIFECYCLE,
-                exactNodes);
+                exactNodes,
+                null);
+    }
+
+    synchronized ContractsClosureAdmissionReceipt admitAndPublish(
+            ClosureInvocationInput input,
+            CoordinationEngine.AdmissionPolicy policy,
+            ExternalOrderKey admissionFrontier,
+            NodeProvider exactNodes,
+            ContractsManagedEpochSelectionPlan selectionPlan) {
+        return admitAndPublish(
+                input,
+                policy,
+                admissionFrontier,
+                AdmissionLane.FULL_LIFECYCLE,
+                exactNodes,
+                Objects.requireNonNull(selectionPlan, "selectionPlan"));
     }
 
     synchronized ContractsClosureAdmissionReceipt
@@ -164,7 +183,8 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
         return admitAndPublish(
                 input, policy, admissionFrontier,
                 AdmissionLane.BOUNDED_COMPATIBILITY,
-                runtime.nodeProvider());
+                runtime.nodeProvider(),
+                null);
     }
 
     private ContractsClosureAdmissionReceipt admitAndPublish(
@@ -172,7 +192,8 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
             CoordinationEngine.AdmissionPolicy policy,
             ExternalOrderKey admissionFrontier,
             AdmissionLane lane,
-            NodeProvider exactNodes) {
+            NodeProvider exactNodes,
+            ContractsManagedEpochSelectionPlan selectionPlan) {
         ensureOpen();
         ClosureInvocationInput admission = Objects.requireNonNull(
                 input, "input");
@@ -184,11 +205,14 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
         NodeProvider selectedExactNodes = Objects.requireNonNull(
                 exactNodes, "exactNodes");
         requireExactAdmissionInput(admission);
+        if (selectionPlan != null) {
+            requireStaticAdmissionSelectionPlan(admission, selectionPlan);
+        }
         List<DocumentId> identityMembers = coordinationIds(
                 admission.snapshot().managedDocuments());
         String publicationIdentity = switch (selectedLane) {
             case FULL_LIFECYCLE -> publicationIdentity(
-                    admission, temporalPolicy, frontier);
+                    admission, temporalPolicy, frontier, selectionPlan);
             case BOUNDED_COMPATIBILITY ->
                     boundedCompatibilityPublicationIdentity(
                             admission, temporalPolicy, frontier);
@@ -218,7 +242,8 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                         requireAutomaticExpansionLimit(),
                         ignored -> documents.admissionReceipt(
                                 publicationIdentity),
-                        this::requireAutomaticRetryStillCurrent);
+                        this::requireAutomaticRetryStillCurrent,
+                        selectionPlan);
         if (automatic.replayed()) {
             ContractsClosureAdmissionReceipt retained = automatic.replay();
             requireExactlyPresent(retained.documentIds());
@@ -280,6 +305,81 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
     synchronized ExecutionPolicy executionPolicy() {
         ensureOpen();
         return profile.executionPolicy();
+    }
+
+    private void requireStaticAdmissionSelectionPlan(
+            ClosureInvocationInput input,
+            ContractsManagedEpochSelectionPlan plan) {
+        ContractsManagedEpochSelectionPlan selected = Objects.requireNonNull(
+                plan, "plan");
+        if (selected.targetEpoch() != -1L) {
+            throw new IllegalArgumentException(
+                    "MANAGED_EPOCH_SELECTOR_TARGET_MISMATCH: static "
+                            + "admission target position must be authored "
+                            + "initial (-1)");
+        }
+        ManagedDocumentSnapshot target = null;
+        for (ManagedDocumentSnapshot document
+                : Objects.requireNonNull(input, "input")
+                        .snapshot().managedDocuments()) {
+            if (!document.documentId().value().equals(
+                    selected.targetDocumentId().value())) {
+                continue;
+            }
+            if (target != null) {
+                throw new IllegalArgumentException(
+                        "MANAGED_EPOCH_SELECTOR_TARGET_MISMATCH: static "
+                                + "admission repeats target "
+                                + selected.targetDocumentId());
+            }
+            target = document;
+        }
+        if (target == null
+                || target.initialized()
+                || !target.blueId().equals(selected.targetBlueId())) {
+            throw new IllegalArgumentException(
+                    "MANAGED_EPOCH_SELECTOR_TARGET_MISMATCH: static "
+                            + "admission does not contain the exact authored "
+                            + "Root " + selected.targetDocumentId());
+        }
+        ManagedLineageIndex lineages = documents.lineageIndex();
+        for (ContractsManagedEpochSelectionPlan.Selection selection
+                : selected.selections()) {
+            ManagedLineageIndex.Lineage lineage = lineages.byDocumentId(
+                    selection.sourceDocumentId());
+            if (lineage == null) {
+                throw new IllegalArgumentException(
+                        "MANAGED_EPOCH_SELECTOR_LINEAGE_MISMATCH: absent "
+                                + selection.sourceDocumentId());
+            }
+            String exactBlueId = selectedEpochBlueId(
+                    lineage, selection.sourceEpoch());
+            if (exactBlueId == null
+                    || !exactBlueId.equals(
+                            selection.expectedSourceBlueId())) {
+                throw new IllegalArgumentException(
+                        "MANAGED_EPOCH_SELECTOR_STATE_MISMATCH: "
+                                + selection.sourceDocumentId()
+                                + " epoch " + selection.sourceEpoch()
+                                + " does not equal "
+                                + selection.expectedSourceBlueId());
+            }
+        }
+    }
+
+    private static String selectedEpochBlueId(
+            ManagedLineageIndex.Lineage lineage,
+            long sourceEpoch) {
+        if (sourceEpoch == -1L) {
+            return lineage.authoredInitialBlueId();
+        }
+        for (ManagedLineageIndex.RetainedState state
+                : lineage.retainedStates()) {
+            if (state.epoch() == sourceEpoch) {
+                return state.blueId();
+            }
+        }
+        return null;
     }
 
     synchronized void onFailurePoint(
@@ -444,8 +544,9 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
         }
         for (ManagedOccurrenceResolver.ResolvedExactNode exact
                 : selected.resolvedExactNodes()) {
-            ExactValue retained = objects.put(
-                    exact.exactValue().copyNode(),
+            ExactValue retained = objects.putVerifiedProviderEvidence(
+                    exact.exactValue(),
+                    exact.cyclicProof(),
                     "automatic-admission-retry-resource");
             if (!retained.sameExactValue(exact.exactValue())) {
                 throw new IllegalStateException(
@@ -469,14 +570,19 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                     durable.requireHead(documentId);
             CapturedAdmissionDocument prior = captured.get(documentId);
             if (prior != null) {
-                if (!prior.head().equals(head)) {
+                if (!prior.head().equals(head)
+                        || prior.graphGeneration()
+                                != durable.graphGenerations().require(
+                                        documentId)) {
                     throw stale("Document head changed during automatic "
                             + "admission expansion " + documentId);
                 }
                 continue;
             }
             captured.put(documentId, captureAdmissionDocument(
-                    documentId, head));
+                    documentId,
+                    head,
+                    durable.graphGenerations().require(documentId)));
         }
 
         TreeMap<DocumentId, ExactValue> newDocuments = new TreeMap<>(
@@ -538,8 +644,8 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                                     occurrence.demand().sourcePath(), 1L),
                             closureId(occurrence.targetDocumentId()),
                             occurrence.expectedTargetBlueId(),
-                            true,
-                            null);
+                            !occurrence.historicalExisting(),
+                            occurrence.pendingHistoricalEpoch());
             mergeAutomaticRow(rows, prospective);
             prospectiveIdentities.add(prospective.occurrenceIdentity());
         }
@@ -642,8 +748,12 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                 .toList();
         long graphGeneration = existingMembers.isEmpty()
                 ? current.input().snapshot().graphGeneration()
-                : durable.graphGenerations().requireCohortGeneration(
-                        existingMembers);
+                : captured.values().stream()
+                        .mapToLong(CapturedAdmissionDocument::graphGeneration)
+                        .max()
+                        .orElseThrow(() -> new IllegalStateException(
+                                "Existing admission members were not "
+                                        + "captured"));
         AffectedClosureSnapshot snapshot = ClosureEvidenceFactory
                 .affectedClosure(
                         graphGeneration,
@@ -681,18 +791,19 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
 
     private CapturedAdmissionDocument captureAdmissionDocument(
             DocumentId documentId,
-            InMemoryDocumentStore.DocumentHead expectedHead) {
+            InMemoryDocumentStore.DocumentHead expectedHead,
+            long expectedGraphGeneration) {
         DocumentSession session = documents.require(documentId);
         synchronized (session) {
             InMemoryDocumentStore.DocumentHead actual =
                     new InMemoryDocumentStore.DocumentHead(
                             session.epoch(),
-                            session.currentRevision().after().blueId());
+                            session.currentRepresentation().blueId());
             if (!actual.equals(expectedHead)) {
                 throw stale("Document head changed during admission capture "
                         + documentId);
             }
-            ExactValue current = session.currentRevision().after();
+            ExactValue current = session.currentRepresentation();
             if (!current.blueId().equals(session.layout().rootBlueId())) {
                 throw new IllegalStateException(
                         "Session layout disagrees with durable head "
@@ -701,6 +812,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
             return new CapturedAdmissionDocument(
                     documentId,
                     actual,
+                    expectedGraphGeneration,
                     current,
                     session.layout(),
                     session.activeSubscriptions(),
@@ -920,14 +1032,24 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                 before.componentIndexGeneration(),
                 componentIndexChanged,
                 "component index generation");
+        TreeMap<DocumentId, Long> existingGraphGenerations = new TreeMap<>(
+                EmbeddingBinding.DOCUMENT_ORDER);
+        invocation.existingDocuments().values().forEach(document ->
+                existingGraphGenerations.put(
+                        document.documentId(), document.graphGeneration()));
         ClosureSubscriptionInventory subscriptions = before
-                .closureSubscriptions().apply(result);
+                .closureSubscriptions().apply(
+                        result, existingGraphGenerations);
         Map<DocumentId, ResultingDocument> resultingDocuments =
                 resultingDocuments(result, memberSet);
         Map<DocumentId, ManagedDocumentSnapshot> inputDocuments =
                 inputDocuments(input, memberSet);
-        Map<DocumentId, Long> gas = gasByDocument(
-                result, memberSet);
+        Map<DocumentId, ManagedDocumentTransitionReceipt>
+                transitionReceipts = transitionReceipts(result, memberSet);
+        Map<DocumentId, ManagedCatchUpPlanner.Head> resultingHeads =
+                new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
+        Map<DocumentId, ManagedEpochReceipt> committedEpochReceipts =
+                new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
         ContractsClosureAdmissionReceipt durableReceipt =
                 new ContractsClosureAdmissionReceipt(
                         attempt,
@@ -941,11 +1063,15 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                         publicationIdentity,
                         before.occurrenceInventoryGeneration(),
                         before.componentIndexGeneration());
-        invocation.existingDocuments().values().forEach(document ->
-                transaction.expectHead(
-                        document.documentId(),
-                        document.head().epoch(),
-                        document.head().blueId()));
+        for (CapturedAdmissionDocument document
+                : invocation.existingDocuments().values()) {
+            transaction.expectHead(
+                    document.documentId(),
+                    document.head().epoch(),
+                    document.head().blueId());
+            transaction.expectGraphGeneration(
+                    document.documentId(), document.graphGeneration());
+        }
         invocation.newDocuments().keySet().forEach(transaction::expectAbsent);
         input.snapshot().components().forEach(component -> {
             boolean allExisting = component.orderedMemberDocumentIds().stream()
@@ -994,6 +1120,11 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                                     documentId,
                                     existing.layout().routingSurface(),
                                     existing.activeSubscriptions()));
+                    resultingHeads.put(
+                            documentId,
+                            new ManagedCatchUpPlanner.Head(
+                                    existing.head().epoch(),
+                                    existing.head().blueId()));
                     continue;
                 }
                 if (admitted.epoch() != 0L || admitted.initialized()
@@ -1025,7 +1156,9 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                 EmbeddedOnlyLayout layout = layoutBuilder
                         .retainVerifiedClosureRoot(
                                 result, documentId, routingSurface);
-                ExactValue initialized = layout.semanticRoot();
+                ExactValue initialized = objects.put(
+                        layout.semanticRoot(),
+                        "closure-admission-initialization-revision");
                 requireExactRootSubscriptionSurface(
                         documentId,
                         rootSurface,
@@ -1048,6 +1181,24 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                                 .equals(documentId.value()))
                         .map(PublicEventOccurrence::event)
                         .toList();
+                ManagedDocumentTransitionReceipt transition =
+                        transitionReceipts.get(documentId);
+                if (transition == null) {
+                    throw new AdmissionProjectionUnavailableException(
+                            "New closure admission has no complete managed "
+                                    + "transition receipt " + documentId);
+                }
+                ManagedEpochReceipt epochReceipt =
+                        ManagedEpochReceiptMapper.map(
+                                documentId,
+                                0L,
+                                DocumentRevision.Kind.INITIALIZATION,
+                                authored,
+                                initialized,
+                                null,
+                                frontier,
+                                transition,
+                                result.platformCommitCompanion());
                 DocumentRevision revision = new DocumentRevision(
                         documentId,
                         0L,
@@ -1060,7 +1211,8 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                         causeBlueId,
                         null,
                         emitted,
-                        gas.getOrDefault(documentId, 0L));
+                        transition.admittedGas(),
+                        epochReceipt);
                 DocumentSession session = new DocumentSession(
                         documentId,
                         authored,
@@ -1076,11 +1228,47 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                         0L,
                         0L);
                 transaction.stageNewSession(session);
+                transaction.stageManagedEpochReceipt(
+                        epochReceipt, transition);
+                resultingHeads.put(
+                        documentId,
+                        new ManagedCatchUpPlanner.Head(
+                                0L, initialized.blueId()));
+                committedEpochReceipts.put(documentId, epochReceipt);
                 routeReplacements.add(new OperationRouteIndex.Replacement(
                         documentId,
                         layout.routingSurface(),
                         activeSubscriptions));
             }
+            CatchUpPlanStore beforeCatchUpPlans =
+                    documents.catchUpPlansSnapshot();
+            ManagedCatchUpPlanner.PlanningResult catchUp =
+                    ManagedCatchUpPlanner.afterPublication(
+                            beforeCatchUpPlans,
+                            before.occurrenceInventory(),
+                            resultingInventory,
+                            memberSet,
+                            committedEpochReceipts.values(),
+                            input.cause().causeIdentity(),
+                            frontier,
+                            documentId -> resultingManagedHead(
+                                    resultingHeads, documentId),
+                            (documentId, epoch) -> {
+                                ManagedEpochReceipt staged =
+                                        committedEpochReceipts.get(documentId);
+                                if (staged != null
+                                        && staged.epoch() == epoch) {
+                                    return staged;
+                                }
+                                return documents.managedEpochReceipt(
+                                                documentId, epoch)
+                                        .orElse(null);
+                            },
+                            documentId -> memberSet.contains(documentId)
+                                    ? result.graphGeneration()
+                                    : documents.graphGeneration(documentId));
+            transaction.stageCatchUpPlans(
+                    beforeCatchUpPlans, catchUp.plans());
             OperationRouteIndex.PreparedReplacement preparedRoutes = routes
                     .prepareReplacement(routeReplacements);
             transaction.commit();
@@ -1098,6 +1286,23 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                 objects.rollbackTo(objectMark);
             }
             throw failure;
+        }
+    }
+
+    private ManagedCatchUpPlanner.Head resultingManagedHead(
+            Map<DocumentId, ManagedCatchUpPlanner.Head> resultingHeads,
+            DocumentId documentId) {
+        ManagedCatchUpPlanner.Head staged = Objects.requireNonNull(
+                resultingHeads, "resultingHeads").get(
+                        Objects.requireNonNull(documentId, "documentId"));
+        if (staged != null) {
+            return staged;
+        }
+        DocumentSession session = documents.require(documentId);
+        synchronized (session) {
+            return new ManagedCatchUpPlanner.Head(
+                    session.epoch(),
+                    session.currentRepresentation().blueId());
         }
     }
 
@@ -1251,6 +1456,27 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
         if (!indexed.keySet().equals(expectedMembers)) {
             throw new IllegalStateException(
                     "Admission result document set is incomplete");
+        }
+        return Collections.unmodifiableMap(indexed);
+    }
+
+    private static Map<DocumentId, ManagedDocumentTransitionReceipt>
+            transitionReceipts(
+                    ClosureProcessResult result,
+                    Set<DocumentId> expectedMembers) {
+        TreeMap<DocumentId, ManagedDocumentTransitionReceipt> indexed =
+                new TreeMap<>();
+        for (ManagedDocumentTransitionReceipt receipt
+                : Objects.requireNonNull(result, "result")
+                        .managedTransitionReceipts()) {
+            DocumentId documentId = DocumentId.of(
+                    receipt.documentId().value());
+            if (!expectedMembers.contains(documentId)
+                    || indexed.putIfAbsent(documentId, receipt) != null) {
+                throw new IllegalStateException(
+                        "Admission transition receipts do not name one unique "
+                                + "member " + documentId);
+            }
         }
         return Collections.unmodifiableMap(indexed);
     }
@@ -1495,7 +1721,21 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                 input,
                 policy,
                 frontier,
-                FULL_LIFECYCLE_IDENTITY_DOMAIN);
+                FULL_LIFECYCLE_IDENTITY_DOMAIN,
+                null);
+    }
+
+    static String publicationIdentity(
+            ClosureInvocationInput input,
+            CoordinationEngine.AdmissionPolicy policy,
+            ExternalOrderKey frontier,
+            ContractsManagedEpochSelectionPlan selectionPlan) {
+        return publicationIdentity(
+                input,
+                policy,
+                frontier,
+                FULL_LIFECYCLE_IDENTITY_DOMAIN,
+                selectionPlan);
     }
 
     private static String boundedCompatibilityPublicationIdentity(
@@ -1506,14 +1746,16 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                 input,
                 policy,
                 frontier,
-                BOUNDED_COMPATIBILITY_IDENTITY_DOMAIN);
+                BOUNDED_COMPATIBILITY_IDENTITY_DOMAIN,
+                null);
     }
 
     private static String publicationIdentity(
             ClosureInvocationInput input,
             CoordinationEngine.AdmissionPolicy policy,
             ExternalOrderKey frontier,
-            String identityDomain) {
+            String identityDomain,
+            ContractsManagedEpochSelectionPlan selectionPlan) {
         Objects.requireNonNull(input, "input");
         Objects.requireNonNull(policy, "policy");
         Objects.requireNonNull(frontier, "frontier");
@@ -1545,6 +1787,29 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                 throw new IllegalArgumentException(
                         "Unsupported external frontier component "
                                 + component);
+            }
+        }
+        if (selectionPlan != null) {
+            updatePublicationIdentityFrame(
+                    digest, 7, selectionPlan.targetDocumentId().value());
+            updatePublicationIdentityFrame(
+                    digest, 8, Long.toString(selectionPlan.targetEpoch()));
+            updatePublicationIdentityFrame(
+                    digest, 9, selectionPlan.targetBlueId());
+            updatePublicationIdentityFrame(
+                    digest,
+                    10,
+                    Integer.toString(selectionPlan.selections().size()));
+            for (ContractsManagedEpochSelectionPlan.Selection selection
+                    : selectionPlan.selections()) {
+                updatePublicationIdentityFrame(
+                        digest, 11, selection.sourceDocumentId().value());
+                updatePublicationIdentityFrame(
+                        digest, 12, Long.toString(selection.sourceEpoch()));
+                updatePublicationIdentityFrame(
+                        digest, 13, selection.expectedSourceBlueId());
+                updatePublicationIdentityFrame(
+                        digest, 14, selection.targetOccurrencePath());
             }
         }
         return domain + ":sha256:"
@@ -1635,6 +1900,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
     private record CapturedAdmissionDocument(
             DocumentId documentId,
             InMemoryDocumentStore.DocumentHead head,
+            long graphGeneration,
             ExactValue current,
             EmbeddedOnlyLayout layout,
             List<SubscriptionDelta.Entry> activeSubscriptions,
@@ -1643,6 +1909,8 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
         private CapturedAdmissionDocument {
             documentId = Objects.requireNonNull(documentId, "documentId");
             head = Objects.requireNonNull(head, "head");
+            MultiDocumentPublicationTransaction.requireSafeInteger(
+                    graphGeneration, "graphGeneration");
             current = Objects.requireNonNull(current, "current");
             layout = Objects.requireNonNull(layout, "layout");
             activeSubscriptions = List.copyOf(Objects.requireNonNull(

@@ -162,10 +162,19 @@ final class ManagedOccurrenceInventory {
 
     /** Active authored edges whose source is one managed lineage. */
     List<ManagedOccurrenceBinding> activeRowsFrom(DocumentId documentId) {
-        PersistentOrderedMap<RowOrderKey, ManagedOccurrenceBinding> bucket =
-                activeRowsBySourceDocument.get(Objects.requireNonNull(
-                        documentId, "documentId"));
-        return bucket == null ? List.of() : bucket.values();
+        return activeRowsFromRead(documentId).rows();
+    }
+
+    /**
+     * Opens only the exact active-source bucket and reports its real index work.
+     */
+    RowsRead activeRowsFromRead(DocumentId documentId) {
+        PersistentOrderedMap.ReadResult<PersistentOrderedMap<RowOrderKey,
+                ManagedOccurrenceBinding>> read = activeRowsBySourceDocument
+                .read(Objects.requireNonNull(documentId, "documentId"));
+        List<ManagedOccurrenceBinding> rows = read.found()
+                ? read.value().values() : List.of();
+        return new RowsRead(rows, read.comparisons(), rows.size(), 0);
     }
 
     /** All active and inactive retained rows sourced by one lineage. */
@@ -174,6 +183,21 @@ final class ManagedOccurrenceInventory {
                 rowsBySourceDocument.get(Objects.requireNonNull(
                         documentId, "documentId"));
         return bucket == null ? List.of() : bucket.values();
+    }
+
+    record RowsRead(
+            List<ManagedOccurrenceBinding> rows,
+            int indexComparisons,
+            int occurrenceRowsRead,
+            int unrelatedDocumentReads) {
+        RowsRead {
+            rows = List.copyOf(Objects.requireNonNull(rows, "rows"));
+            if (indexComparisons < 0 || occurrenceRowsRead < 0
+                    || unrelatedDocumentReads < 0) {
+                throw new IllegalArgumentException(
+                        "Occurrence read counters must be non-negative");
+            }
+        }
     }
 
     /** Returns the unique retained row for one source/path. */
