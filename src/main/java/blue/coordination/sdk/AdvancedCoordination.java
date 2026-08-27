@@ -5,6 +5,7 @@ import blue.coordination.api.DocumentId;
 import blue.coordination.api.ManagedCatchUpBarrier;
 import blue.coordination.api.ManagedDocumentReadiness;
 import blue.coordination.api.ManagedOccurrenceCatchUpPlan;
+import blue.coordination.api.ProcessingAvailability;
 import blue.coordination.api.ProcessingSelection;
 import java.util.List;
 import java.util.Objects;
@@ -95,6 +96,16 @@ public final class AdvancedCoordination {
      */
     public ProcessingSelection auditNextProcessingSelection() {
         return runtime.engine().auditNextProcessingSelection();
+    }
+
+    /**
+     * Reads the exact next fair bounded lane while considering whether the
+     * host can immediately admit one ordinary journal entry.
+     */
+    public ProcessingSelection auditNextProcessingSelection(
+            ProcessingAvailability availability) {
+        return runtime.engine().auditNextProcessingSelection(
+                Objects.requireNonNull(availability, "availability"));
     }
 
     /** Reads one committed managed-epoch application receipt. */

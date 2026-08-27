@@ -219,13 +219,21 @@ unbounded stream keeps extending the frontier and remains truthfully
 `CATCHING_UP`. Direct work for that consumer remains behind the barrier.
 
 Durable hosts can mirror that exact private turn without guessing from the
-work index. `auditNextProcessingSelection()` returns `NONE`, `JOURNAL`, or the
-exact next `MANAGED_EPOCH_APPLICATION` work without changing state. After the
-host durably claims the selected identity, it invokes either
+work index. `auditNextProcessingSelection()` considers retained state and
+returns `NONE`, `JOURNAL`, or the exact next
+`MANAGED_EPOCH_APPLICATION` work without changing state. The overload taking
+`ProcessingAvailability` additionally tells the selector whether the host can
+immediately admit one queued ordinary entry. A retained managed turn wins;
+otherwise an actual journal entry or true availability receives `JOURNAL`
+before managed fallback. Repeated true availability therefore alternates
+bounded journal admissions with advancing managed work rather than starving
+the catch-up cursor. After the host durably claims the selected identity, it
+invokes either
 `drainManagedEpochApplication(workIdentity)` or `drainJournal(...)`. Each call
-revalidates the same scheduler before mutation. The managed call processes only
-that identity. The journal call selects at most one ordinary entry and has no
-managed fallback; repeated slices retain canonical continuation and fairness.
+revalidates the retained no-hint scheduler before mutation. The managed call
+processes only that identity. The journal call requires a real appended entry,
+selects at most one ordinary entry, and has no managed fallback; availability
+alone cannot drain. Repeated slices retain canonical continuation and fairness.
 Legacy drain calls keep their existing combined behavior.
 
 ## Application and cycles
@@ -362,7 +370,8 @@ The rc.6 source profile exposes these read-only SDK diagnostics through
 - `auditManagedCatchUpBarrier(barrierIdentity)`;
 - `auditManagedEpochApplicationWork(workIdentity)`;
 - `auditManagedEpochApplicationReceipt(applicationReceiptIdentity)`;
-- `auditNextProcessingSelection()` for the read-only exact fair lane; and
+- `auditNextProcessingSelection()` and its `ProcessingAvailability` overload
+  for the read-only exact fair lane; and
 - `auditManagedDocumentReadiness(documentId)` plus `auditDocument(documentId)`
   for committed-versus-ready inspection.
 

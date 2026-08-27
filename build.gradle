@@ -488,13 +488,13 @@ def publicBoundarySources = files(
 // bounded caps over the frozen rc.4 SDK baseline plus the reviewed receipt,
 // matching, occurrence-plan, barrier, application, readiness, audit, and
 // recovery responsibilities plus the reviewed host-driven fair-selection and
-// unsupported nested-new publication boundary: currently 217 production
-// sources, 64,547 lines and 78 public api+sdk source types. These are not
+// unsupported nested-new publication boundary: currently 218 production
+// sources, 64,601 lines and 79 public api+sdk source types. These are not
 // historical Round 13 counts and are not performance evidence.
 def currentProductionShapeLimits = [
-        classes: 217,
-        lines: 64_547L,
-        publicApiTypes: 78,
+        classes: 218,
+        lines: 64_601L,
+        publicApiTypes: 79,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]
 def retainedManagedEpochProductionSources = [
@@ -510,6 +510,7 @@ def retainedManagedEpochProductionSources = [
         'src/main/java/blue/coordination/api/ManagedEventOccurrence.java',
         'src/main/java/blue/coordination/api/ManagedIdentity.java',
         'src/main/java/blue/coordination/api/ManagedOccurrenceCatchUpPlan.java',
+        'src/main/java/blue/coordination/api/ProcessingAvailability.java',
         'src/main/java/blue/coordination/api/ProcessingSelection.java',
         'src/main/java/blue/coordination/internal/CatchUpPlanStore.java',
         'src/main/java/blue/coordination/internal/ContractsManagedEpochSelectionPlan.java',

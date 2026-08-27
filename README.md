@@ -29,10 +29,11 @@ source profile but is staged, unpublished, and non-production; there is no rc.6
 Maven Central installation claim. Its build consumes an invocation-owned,
 manifest-pinned immutable Language/Contracts `3.1.0-rc.23` Maven stage derived
 from the exact published rc.22 baseline plus additive transition receipts.
-The rc.6 source adds authoritative fair-lane audit and targeted one-selection
-processing for host-preleased durable execution. Unsupported nested authored
-lineage creation during retained catch-up returns a typed unpublished attempt
-and atomically blocks only its exact plan/barrier without partial publication.
+The rc.6 source adds authoritative fair-lane audit, a non-mutating host journal
+availability hint, and targeted one-selection processing for host-preleased
+durable execution. Unsupported nested authored lineage creation during
+retained catch-up returns a typed unpublished attempt and atomically blocks
+only its exact plan/barrier without partial publication.
 
 For application development, follow the
 [complete SDK developer guide](docs/guides/developer-guide.md). It covers both

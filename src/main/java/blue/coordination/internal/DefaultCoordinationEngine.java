@@ -29,6 +29,7 @@ import blue.coordination.api.ManagedEpochEvidenceFailure;
 import blue.coordination.api.ManagedEpochReceipt;
 import blue.coordination.api.ManagedOccurrenceCatchUpPlan;
 import blue.coordination.api.ProcessingDrainReceipt;
+import blue.coordination.api.ProcessingAvailability;
 import blue.coordination.api.ProcessingSelection;
 import blue.coordination.api.TimelineAppendReceipt;
 import blue.coordination.api.ActivationMode;
@@ -1425,14 +1426,23 @@ public final class DefaultCoordinationEngine
 
     @Override
     public synchronized ProcessingSelection auditNextProcessingSelection() {
+        return auditNextProcessingSelection(ProcessingAvailability.none());
+    }
+
+    @Override
+    public synchronized ProcessingSelection auditNextProcessingSelection(
+            ProcessingAvailability availability) {
         ensureOpen();
+        ProcessingAvailability supplied = Objects.requireNonNull(
+                availability, "availability");
         if (contractsJournalCoordinator == null) {
             return ProcessingSelection.none();
         }
         Optional<ManagedEpochApplicationWork> managed =
                 nextFairManagedEpochApplicationWork();
         boolean journal = contractsJournalCoordinator
-                .hasPendingJournalTurn();
+                .hasPendingJournalTurn()
+                || supplied.journalAdmissionAvailable();
         if (contractsRecoveryState.managedEpochTurn
                 && managed.isPresent()) {
             return ProcessingSelection.managedEpochApplication(

@@ -9,6 +9,9 @@ the new 3.x API before the first stable 3.0.0 release.
 
 - A read-only exact fair-lane selection and targeted one-selection journal or
   managed-epoch processing calls for durable host lease orchestration.
+- An immutable `ProcessingAvailability` audit hint lets a durable host expose
+  a queued ordinary admission before appending it, without reserving or
+  manufacturing drainable journal work.
 - A stable `UNSUPPORTED_NESTED_NEW_LINEAGE` publication-failure outcome with
   exact work details and an atomic blocked plan/barrier transition.
 
@@ -17,6 +20,10 @@ the new 3.x API before the first stable 3.0.0 release.
 - Journal-only slices select at most one ordinary entry and never fall through
   to managed work. Exact managed slices revalidate the retained fair turn and
   selected work identity before processing.
+- A retained managed turn wins over host availability; otherwise a real
+  pending journal entry or available host admission receives the journal turn
+  before managed fallback, preserving bounded progress under a continuous
+  source stream.
 - Managed application attempts now distinguish a complete committing Contracts
   result that failed at Coordination publication from processor rollback or
   suspension, and expose that evidence through both public API layers.

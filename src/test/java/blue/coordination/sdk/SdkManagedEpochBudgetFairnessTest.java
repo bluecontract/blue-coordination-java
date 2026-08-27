@@ -5,12 +5,14 @@ import blue.coordination.api.CoordinationException;
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.ManagedCatchUpStatus;
 import blue.coordination.api.ManagedOccurrenceCatchUpPlan;
+import blue.coordination.api.ProcessingAvailability;
 import blue.coordination.api.ProcessingSelection;
 import blue.coordination.internal.CoordinationTestControl;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -74,7 +76,7 @@ final class SdkManagedEpochBudgetFairnessTest {
     }
 
     @Test
-    void exactNextSelectionPreventsLookupByWorkFromOvertakingFairTurn() {
+    void hostAvailabilityJoinsFairSelectionWithoutCreatingJournalWork() {
         String poisonASecondWork;
         try (Scenario reference = scenario()) {
             poisonASecondWork = null;
@@ -94,7 +96,7 @@ final class SdkManagedEpochBudgetFairnessTest {
         }
         String retainedPoisonASecondWork = poisonASecondWork;
 
-        try (Scenario subject = scenario()) {
+        try (Scenario subject = scenario(false)) {
             ProcessingSelection first = subject.coordination().advanced()
                     .auditNextProcessingSelection();
             assertManagedSelection(first, POISON_A, 1L);
@@ -119,11 +121,23 @@ final class SdkManagedEpochBudgetFairnessTest {
                             retainedPoisonASecondWork)
                     .isPresent(),
                     "by-work lookup alone sees A2 as executable");
-            ProcessingSelection beforeRestart = subject.coordination()
-                    .advanced().auditNextProcessingSelection();
+            ProcessingSelection managedWithoutAvailability = subject
+                    .coordination().advanced()
+                    .auditNextProcessingSelection();
+            assertManagedSelection(
+                    managedWithoutAvailability, POISON_B, 1L);
+            ProcessingSelection journalWithAvailability = subject
+                    .coordination().advanced().auditNextProcessingSelection(
+                            ProcessingAvailability.of(true));
             assertEquals(ProcessingSelection.Kind.JOURNAL,
-                    beforeRestart.kind(),
-                    "the ordinary lane owns the fair turn before A2");
+                    journalWithAvailability.kind());
+            assertSameSelection(journalWithAvailability, subject
+                    .coordination().advanced().auditNextProcessingSelection(
+                            ProcessingAvailability.of(true)));
+            assertSameSelection(managedWithoutAvailability, subject
+                    .coordination().advanced().auditNextProcessingSelection(
+                            ProcessingAvailability.of(false)));
+
             CoordinationException managedMismatch = assertThrows(
                     CoordinationException.class,
                     () -> subject.coordination().processing()
@@ -132,26 +146,113 @@ final class SdkManagedEpochBudgetFairnessTest {
             assertEquals(
                     CoordinationErrorCode.PROCESSING_SELECTION_MISMATCH,
                     managedMismatch.code());
-            assertSameSelection(beforeRestart, subject.coordination()
-                    .advanced().auditNextProcessingSelection());
+            CoordinationException unavailableJournal = assertThrows(
+                    CoordinationException.class,
+                    () -> subject.coordination().processing().drainJournal(
+                            new DrainBudget(1L, 99L)));
+            assertEquals(
+                    CoordinationErrorCode.PROCESSING_SELECTION_MISMATCH,
+                    unavailableJournal.code(),
+                    "a host hint alone must not create drainable work");
+            assertSameSelection(managedWithoutAvailability, subject
+                    .coordination().advanced().auditNextProcessingSelection());
 
             subject.control().restartFromStores();
             ProcessingSelection afterRestart = subject.coordination()
                     .advanced().auditNextProcessingSelection();
-            assertEquals(beforeRestart.kind(), afterRestart.kind());
-            assertTrue(afterRestart.managedEpochApplicationWork().isEmpty());
+            assertSameSelection(managedWithoutAvailability, afterRestart);
+            assertSameSelection(journalWithAvailability, subject
+                    .coordination().advanced().auditNextProcessingSelection(
+                            ProcessingAvailability.of(true)));
 
-            DrainResult direct = drainSelected(subject.coordination());
+            EntryHandle firstDirect = submitDirect(subject);
+            assertEquals(ProcessingSelection.Kind.JOURNAL,
+                    subject.coordination().advanced()
+                            .auditNextProcessingSelection().kind());
+            DrainResult direct = subject.coordination().processing()
+                    .drainJournal(new DrainBudget(1L, 99L));
             assertTrue(direct.managedEpochApplicationAttempts().isEmpty());
             assertEquals(1, direct.entries().size(),
                     "journal-targeted drain is capped to one selection");
-            assertEquals(subject.directEntry(), direct.entries().get(0).entry());
-            ProcessingSelection nextManaged = subject.coordination()
-                    .advanced().auditNextProcessingSelection();
-            assertManagedSelection(nextManaged, POISON_B, 1L);
-            assertFalse(nextManaged.managedEpochApplicationWork()
-                    .orElseThrow().workIdentity().equals(
-                            retainedPoisonASecondWork));
+            assertEquals(firstDirect, direct.entries().get(0).entry());
+
+            ProcessingSelection managedAfterJournal = subject.coordination()
+                    .advanced().auditNextProcessingSelection(
+                            ProcessingAvailability.of(true));
+            assertSameSelection(
+                    managedWithoutAvailability,
+                    managedAfterJournal);
+            DrainResult exactManaged = drainSelected(
+                    subject.coordination(), managedAfterJournal);
+            assertEquals(managedAfterJournal.managedEpochApplicationWork()
+                            .orElseThrow().workIdentity(),
+                    exactManaged.managedEpochApplicationAttempts().get(0)
+                            .work().workIdentity());
+
+            ProcessingSelection finiteAvailabilityOff = subject
+                    .coordination().advanced().auditNextProcessingSelection(
+                            ProcessingAvailability.of(false));
+            assertEquals(
+                    ProcessingSelection.Kind.MANAGED_EPOCH_APPLICATION,
+                    finiteAvailabilityOff.kind());
+            assertEquals(ProcessingSelection.Kind.JOURNAL,
+                    subject.coordination().advanced()
+                            .auditNextProcessingSelection(
+                                    ProcessingAvailability.of(true))
+                            .kind());
+
+            EntryHandle secondDirect = submitDirect(subject);
+            DrainResult secondJournal = subject.coordination().processing()
+                    .drainJournal(new DrainBudget(1L, 99L));
+            assertEquals(List.of(secondDirect), secondJournal.entries()
+                    .stream().map(EntryResult::entry).toList());
+            assertSameSelection(finiteAvailabilityOff, subject
+                    .coordination().advanced().auditNextProcessingSelection(
+                            ProcessingAvailability.of(true)));
+
+            List<String> continuousManagedWork = new ArrayList<>();
+            for (int cycle = 0; cycle < 3; cycle++) {
+                ProcessingSelection managedTurn = subject.coordination()
+                        .advanced().auditNextProcessingSelection(
+                                ProcessingAvailability.of(true));
+                assertEquals(
+                        ProcessingSelection.Kind.MANAGED_EPOCH_APPLICATION,
+                        managedTurn.kind(),
+                        "retained managed turn wins over continuous host "
+                                + "availability");
+                String workIdentity = managedTurn
+                        .managedEpochApplicationWork().orElseThrow()
+                        .workIdentity();
+                if (!continuousManagedWork.isEmpty()) {
+                    assertFalse(continuousManagedWork.get(
+                                    continuousManagedWork.size() - 1)
+                            .equals(workIdentity),
+                            "managed work must advance between journal turns");
+                }
+                DrainResult managed = drainSelected(
+                        subject.coordination(), managedTurn);
+                assertEquals(List.of(workIdentity), managed
+                        .managedEpochApplicationAttempts().stream()
+                        .map(ManagedEpochApplicationAttempt::work)
+                        .map(ManagedEpochApplicationWork::workIdentity)
+                        .toList());
+                continuousManagedWork.add(workIdentity);
+
+                assertEquals(ProcessingSelection.Kind.JOURNAL,
+                        subject.coordination().advanced()
+                                .auditNextProcessingSelection(
+                                        ProcessingAvailability.of(true))
+                                .kind());
+                EntryHandle admitted = submitDirect(subject);
+                DrainResult journal = subject.coordination().processing()
+                        .drainJournal(new DrainBudget(1L, 1L));
+                assertEquals(List.of(admitted), journal.entries().stream()
+                        .map(EntryResult::entry).toList());
+                assertTrue(journal.managedEpochApplicationAttempts()
+                        .isEmpty());
+            }
+            assertEquals(3, continuousManagedWork.stream().distinct()
+                    .count());
         }
     }
 
@@ -183,7 +284,7 @@ final class SdkManagedEpochBudgetFairnessTest {
                         selectedTurn.kind());
                 assertTrue(result.managedEpochApplicationAttempts().isEmpty());
                 assertEquals(1, result.entries().size());
-                assertEquals(scenario.directEntry(),
+                assertEquals(scenario.directEntry().orElseThrow(),
                         result.entries().get(0).entry());
                 assertEquals(EntryDisposition.APPLIED,
                         result.entries().get(0).disposition());
@@ -316,6 +417,10 @@ final class SdkManagedEpochBudgetFairnessTest {
     }
 
     private static Scenario scenario() {
+        return scenario(true);
+    }
+
+    private static Scenario scenario(boolean submitDirectEntry) {
         BlueCoordination coordination = BlueCoordination.inMemory();
         try {
             CoordinationTestControl control = CoordinationTestControl.attach(
@@ -402,24 +507,43 @@ final class SdkManagedEpochBudgetFairnessTest {
                     attached.entry(attachmentEntry).disposition());
             assertTrue(attached.managedEpochApplicationAttempts().isEmpty());
 
-            EntryHandle directEntry = coordination.operations()
-                    .on(direct)
-                    .from(directTimeline)
-                    .call("increment")
-                    .through("ownerChannel")
-                    .request(request -> { })
-                    .submit();
+            Optional<EntryHandle> directEntry = submitDirectEntry
+                    ? Optional.of(submitDirect(
+                            coordination, direct, directTimeline))
+                    : Optional.empty();
             return new Scenario(
                     coordination,
                     control,
                     poisonA,
                     poisonB,
                     healthy,
+                    direct,
+                    directTimeline,
                     directEntry);
         } catch (RuntimeException failure) {
             coordination.close();
             throw failure;
         }
+    }
+
+    private static EntryHandle submitDirect(Scenario scenario) {
+        return submitDirect(
+                scenario.coordination(),
+                scenario.direct(),
+                scenario.directTimeline());
+    }
+
+    private static EntryHandle submitDirect(
+            BlueCoordination coordination,
+            DocumentHandle direct,
+            TimelineHandle directTimeline) {
+        return coordination.operations()
+                .on(direct)
+                .from(directTimeline)
+                .call("increment")
+                .through("ownerChannel")
+                .request(request -> { })
+                .submit();
     }
 
     private static long nextSourceEpoch(
@@ -729,7 +853,9 @@ final class SdkManagedEpochBudgetFairnessTest {
             DocumentHandle poisonA,
             DocumentHandle poisonB,
             DocumentHandle healthy,
-            EntryHandle directEntry) implements AutoCloseable {
+            DocumentHandle direct,
+            TimelineHandle directTimeline,
+            Optional<EntryHandle> directEntry) implements AutoCloseable {
         @Override
         public void close() {
             coordination.close();

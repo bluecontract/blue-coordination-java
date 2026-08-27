@@ -253,6 +253,16 @@ public interface CoordinationEngine extends AutoCloseable {
         return ProcessingSelection.none();
     }
 
+    /**
+     * Reads the exact next fair bounded lane while considering non-mutating
+     * host availability. Compatibility implementations may ignore the hint.
+     */
+    default ProcessingSelection auditNextProcessingSelection(
+            ProcessingAvailability availability) {
+        Objects.requireNonNull(availability, "availability");
+        return auditNextProcessingSelection();
+    }
+
     /** Reads one committed application receipt by canonical identity. */
     default Optional<ManagedEpochApplicationReceipt>
             auditManagedEpochApplicationReceipt(

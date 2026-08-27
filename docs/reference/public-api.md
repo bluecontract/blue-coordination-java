@@ -410,11 +410,17 @@ A durable host that must precommit its own lease before Coordination mutates
 state uses one-selection slices from the same retained scheduler:
 
 ```java
+ProcessingAvailability availability = ProcessingAvailability.of(
+        hostQueue.hasEligibleJournalAdmission());
 ProcessingSelection next = blue.advanced()
-        .auditNextProcessingSelection();
+        .auditNextProcessingSelection(availability);
 
 switch (next.kind()) {
-    case JOURNAL -> blue.processing().drainJournal(new DrainBudget(1, 1));
+    case JOURNAL -> {
+        // Persist the host claim, then append one eligible ordinary entry.
+        hostQueue.admitClaimedEntry(blue);
+        blue.processing().drainJournal(new DrainBudget(1, 1));
+    }
     case MANAGED_EPOCH_APPLICATION -> {
         String workIdentity = next.managedEpochApplicationWork()
                 .orElseThrow().workIdentity();
@@ -425,15 +431,22 @@ switch (next.kind()) {
 }
 ```
 
-The audit is read-only and is not a reservation. Both targeted calls therefore
-revalidate the authoritative fair turn before mutation and fail with
-`PROCESSING_SELECTION_MISMATCH` if the lane or managed work identity changed.
-`drainJournal(...)` selects at most one ordinary journal entry, uses the
-supplied transition bound, and never falls through to managed work. Callers
-repeat these slices until their submitted entry is terminal; canonical earlier
-journal work and intervening managed turns remain visible instead of being
-skipped. Existing `drain()` and `drain(DrainBudget)` behavior is preserved for
-hosts that do not require a precommitted external lease.
+The availability value is a read-only hint that the host can immediately admit
+an ordinary journal entry. It does not append, reserve, or make work drainable.
+A retained managed turn wins even when availability is true. Otherwise a real
+pending journal entry or a true hint selects `JOURNAL` before managed fallback.
+The no-argument audit considers retained Coordination state only.
+
+Both targeted calls revalidate that retained, no-hint scheduler before mutation
+and fail with `PROCESSING_SELECTION_MISMATCH` if the lane or managed work
+identity changed. A hint by itself therefore cannot make `drainJournal(...)`
+succeed: the host must first append the claimed entry. The journal call selects
+at most one ordinary entry, uses the supplied transition bound, and never falls
+through to managed work. Callers repeat these slices until their submitted
+entry is terminal; canonical earlier journal work and intervening managed turns
+remain visible instead of being skipped. Existing `drain()` and
+`drain(DrainBudget)` behavior is preserved for hosts that do not require a
+precommitted external lease.
 
 ## Results and reads
 
@@ -530,8 +543,10 @@ The staged rc.6 profile adds these read-only retained-epoch diagnostics:
 - `auditManagedEpochApplicationWork(workIdentity)` and
   `auditManagedEpochApplicationReceipt(applicationReceiptIdentity)` expose
   exact `blue.coordination.api` host evidence;
-- `auditNextProcessingSelection()` exposes the read-only authoritative next
-  fair lane and exact managed work identity, when that lane is selected; and
+- `auditNextProcessingSelection()` exposes the retained authoritative next fair
+  lane, while `auditNextProcessingSelection(ProcessingAvailability)` can also
+  account for an immediately admissible host journal entry; both return the
+  exact managed work identity when that lane is selected; and
 - `auditManagedDocumentReadiness(documentId)` reports committed versus READY
   heads, session status, waiting evidence, and active barriers.
 

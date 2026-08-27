@@ -42,7 +42,7 @@ non-claims.
 | Same-epoch component representation change | not applicable | bounded to the Contracts-authenticated, eventless finite two-member cycle; a larger merge requiring source-epoch change fails closed |
 | Reinitialize or replay the source during catch-up | not applicable | never supported or performed |
 | SDK work-bounded drain/resume | unsupported | supported with retained fair external/managed turns between selected entries and committed PROCESS transitions |
-| Host-preleased exact processing slice | unsupported | read-only fair selection plus journal-only or exact managed targeted invocation; selection is revalidated before mutation |
+| Host-preleased exact processing slice | unsupported | read-only fair selection, including an immutable queued-journal availability hint, plus journal-only or exact managed targeted invocation; selection is revalidated against real retained work before mutation |
 | Operation-created lineage from or across a cyclic-set member | preflight rejects it | the new-draft restriction remains; retained attachment uses the ordinary proven-lineage path |
 | General operation-created multi-member cyclic closure | not claimed | not claimed |
 | Direct stable-key `collectionPaths` members | supported | supported |
