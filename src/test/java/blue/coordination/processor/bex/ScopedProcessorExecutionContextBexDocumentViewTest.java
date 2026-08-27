@@ -131,6 +131,36 @@ class ScopedProcessorExecutionContextBexDocumentViewTest {
     }
 
     @Test
+    void shouldNotPairCanonicalChildIdentityWithDifferentResolvedBody() {
+        // given
+        FrozenNode canonicalChild = FrozenNode.fromNode(
+                new Node().properties(
+                        "marker",
+                        new Node().value("canonical")));
+        FrozenNode resolvedChild = FrozenNode.fromResolvedNode(
+                new Node().properties(
+                        "marker",
+                        new Node().value("resolved")));
+        CanonicalChildFrozenAccess access =
+                new CanonicalChildFrozenAccess(
+                        "candidateC",
+                        canonicalChild,
+                        resolvedChild);
+        ScopedProcessorExecutionContextBexDocumentView view =
+                new ScopedProcessorExecutionContextBexDocumentView(
+                        access, null);
+
+        // when
+        BexValue child = view.resolvedAt("/")
+                .get("candidateC");
+
+        // then
+        assertTrue(child.isExact());
+        assertEquals(resolvedChild.blueId(), child.exactBlueId());
+        assertEquals("resolved", child.get("marker").asText());
+    }
+
+    @Test
     void shouldExposeResolvedBooleanWithoutCursorScalarCoercion() {
         // given
         ExactValue exact = exactBoolean(false);
@@ -375,6 +405,91 @@ class ScopedProcessorExecutionContextBexDocumentViewTest {
         @Override
         public FrozenNode workingResolvedRoot() {
             return collapsedRoot;
+        }
+    }
+
+    private static final class CanonicalChildFrozenAccess
+            implements ScopedProcessorExecutionContextBexDocumentView
+                    .FrozenAccess {
+        private final String childPointer;
+        private final FrozenNode canonicalChild;
+        private final FrozenNode resolvedChild;
+        private final FrozenNode canonicalRoot;
+        private final FrozenNode resolvedRoot;
+
+        private CanonicalChildFrozenAccess(
+                String childKey,
+                FrozenNode canonicalChild,
+                FrozenNode resolvedChild) {
+            this.childPointer = "/" + childKey;
+            this.canonicalChild = canonicalChild;
+            this.resolvedChild = resolvedChild;
+            this.canonicalRoot = FrozenNode.fromNode(
+                    new Node().properties(
+                            childKey,
+                            new Node().blueId(
+                                    canonicalChild.blueId())));
+            this.resolvedRoot = FrozenNode.fromResolvedNode(
+                    new Node().properties(
+                            childKey,
+                            resolvedChild.toNode()));
+        }
+
+        @Override
+        public String resolvePointer(
+                String authoredPointer) {
+            return authoredPointer;
+        }
+
+        @Override
+        public String currentScopePath() {
+            return "/";
+        }
+
+        @Override
+        public FrozenNode workingCanonicalAt(
+                String absolutePointer) {
+            if ("/".equals(absolutePointer)) {
+                return canonicalRoot;
+            }
+            return childPointer.equals(absolutePointer)
+                    ? FrozenNode.fromNode(
+                            new Node().blueId(
+                                    canonicalChild.blueId()))
+                    : null;
+        }
+
+        @Override
+        public FrozenNode workingResolvedAt(
+                String absolutePointer) {
+            if ("/".equals(absolutePointer)) {
+                return resolvedRoot;
+            }
+            return childPointer.equals(absolutePointer)
+                    ? resolvedChild
+                    : null;
+        }
+
+        @Override
+        public FrozenNode processorCanonicalAt(
+                String absolutePointer) {
+            return null;
+        }
+
+        @Override
+        public FrozenNode processorResolvedAt(
+                String absolutePointer) {
+            return null;
+        }
+
+        @Override
+        public FrozenNode workingCanonicalRoot() {
+            return canonicalRoot;
+        }
+
+        @Override
+        public FrozenNode workingResolvedRoot() {
+            return resolvedRoot;
         }
     }
 

@@ -13,8 +13,10 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Public result mapping for typed suspended-resource evidence. */
 final class SdkDrainResultMapperTest {
@@ -100,8 +102,83 @@ final class SdkDrainResultMapperTest {
             assertEquals(unavailableBlueId, demand.blueId());
             assertEquals(childId, demand.sourceDocumentId());
             assertEquals("/peer", demand.sourcePath());
+            assertEquals(
+                    Optional.of(ClosureResult.ManagedResolutionStatus
+                            .MISSING_EXACT_CONTENT),
+                    demand.managedResolutionStatus());
+            assertTrue(demand.managedResolutionDiagnostic().isPresent());
             assertEquals(before, host.snapshot().blueId());
             assertEquals(0L, host.snapshot().epoch());
+        }
+    }
+
+    @Test
+    void mapsRetainedResolutionStatusWithoutInterpretingDiagnosticText() {
+        // given
+        Object owner = new Object();
+        try (SdkCoordinationRuntime runtime = SdkCoordinationRuntime.create(
+                owner, null, null, ExactNodeProvider.empty(), false)) {
+            DefaultCoordinationEngine engine =
+                    (DefaultCoordinationEngine) runtime.engine();
+            Timeline timeline = engine.registerTimeline(
+                    "sdk/typed-resolution-status", "alice");
+            TimelineEntry entry = engine.append(
+                    timeline,
+                    Operation.yaml("attach", "ownerChannel", "{}"));
+            DocumentId source = DocumentId.of("sdk-resolution-source");
+            String blueId = "sha256:" + "b".repeat(64);
+            ExactNodeDemand demand = ExactNodeDemand.derived(
+                    blueId,
+                    new blue.language.processor.closure.DocumentId(
+                            source.value()),
+                    "/historical-peer");
+            ClosureAttemptResult suspended =
+                    ClosureAttemptResult.needsResources(List.of(demand));
+            String opaqueDiagnostic = "opaque wording with no enum token";
+            ContractsClosureDispatchAttempt retained =
+                    new ContractsClosureDispatchAttempt(
+                            entry.blueId(),
+                            List.of(source),
+                            suspended,
+                            false,
+                            null,
+                            false,
+                            0L,
+                            List.of(),
+                            List.of(),
+                            List.of(),
+                            List.of(new ContractsClosureDispatchAttempt
+                                    .ManagedOccurrenceResolutionIssue(
+                                            demand.demandIdentity(),
+                                            ContractsClosureDispatchAttempt
+                                                    .ResolutionStatus
+                                                    .AMBIGUOUS_MANAGED_EPOCH,
+                                            opaqueDiagnostic)));
+            ProcessingDrainReceipt receipt = new ProcessingDrainReceipt(
+                    List.of(entry),
+                    Map.of(),
+                    Map.of(entry.blueId(), List.of(retained)),
+                    null,
+                    false,
+                    false,
+                    0L,
+                    0L);
+
+            // when
+            ClosureResult.ResourceDemand projected =
+                    new SdkDrainResultMapper(runtime, engine)
+                            .map(receipt)
+                            .entries().get(0)
+                            .closures().get(0)
+                            .resourceDemands().get(0);
+
+            // then
+            assertEquals(
+                    Optional.of(ClosureResult.ManagedResolutionStatus
+                            .AMBIGUOUS_MANAGED_EPOCH),
+                    projected.managedResolutionStatus());
+            assertEquals(Optional.of(opaqueDiagnostic),
+                    projected.managedResolutionDiagnostic());
         }
     }
 

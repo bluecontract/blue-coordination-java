@@ -243,6 +243,8 @@ final class ContractsClosureAdapterTest {
                             .AdmissionPolicy.FROM_NOW);
             InMemoryDocumentStore store = new InMemoryDocumentStore();
             store.insert(admitted);
+            ManagedEpochReceiptTestFixtures.seedInitialization(
+                    store, admitted, 10_000L);
             seedAcyclicComponent(store, runtime, admitted, true);
 
             OperationRouteIndex routes = new OperationRouteIndex(

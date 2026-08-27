@@ -3,28 +3,39 @@ package blue.coordination.internal;
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.DocumentRevision;
 import blue.coordination.api.ExactValue;
+import blue.language.api.NodeProviderOutcome;
 import blue.language.model.Node;
+import blue.language.model.wire.JsonPointer;
+import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.closure.ComponentKind;
 import blue.language.processor.closure.ComponentSnapshot;
 import blue.language.processor.closure.ExactNodeDemand;
 import blue.language.processor.closure.ManagedOccurrenceBinding;
 import blue.language.processor.closure.ManagedOccurrenceEvidenceDemand;
 import blue.language.processor.closure.ScopeAddress;
+import blue.language.preprocess.provider.BasicNodeProvider;
+import blue.language.provider.CyclicAwareNodeProvider;
+import blue.language.provider.CyclicSetProofResult;
+import blue.language.provider.NodeProvider;
+import blue.language.provider.VerifyingNodeProvider;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class ManagedOccurrenceResolverTest {
     private static final DocumentId A = DocumentId.of("runtime-a");
     private static final DocumentId B = DocumentId.of("runtime-b");
+    private static final DocumentId C = DocumentId.of("runtime-c");
     private static final String CAUSE = hash('1');
     private static final String CLOSURE = hash('2');
     private static final String DECLARATION = blueId('3');
@@ -84,8 +95,482 @@ final class ManagedOccurrenceResolverTest {
                     .targetDocumentId());
             assertEquals(ManagedOccurrenceResolver.TargetKind.CURRENT_EXISTING,
                     result.resolvedOccurrences().get(0).targetKind());
+            assertEquals(1L, result.resolvedOccurrences().get(0)
+                    .admittedSourceEpoch());
             assertEquals(List.of(0L, 1L), engine.documents().lineageIndex()
                     .byDocumentId(A).epochsFor(current.blueId()));
+        }
+    }
+
+    @Test
+    void existingAuthoredInitialSelectsPreInitializationEpoch() {
+        try (DefaultCoordinationEngine engine =
+                DefaultCoordinationEngine.create()) {
+            // given
+            ExactValue authored = exact("authored");
+            DocumentSession lineage = lineage(
+                    A, authored, exact("initialized"));
+            appendRevision(lineage, exact("current"));
+            ManagedOccurrenceEvidenceDemand demand = demand(
+                    A, "/child", authored);
+
+            // when
+            ManagedOccurrenceResolver.Resolution result = resolver(engine)
+                    .resolve(requestWithLineages(
+                            engine, Set.of(A), List.of(demand), lineage));
+
+            // then
+            assertTrue(result.complete());
+            ManagedOccurrenceResolver.ResolvedOccurrence occurrence = result
+                    .resolvedOccurrences().get(0);
+            assertEquals(A, occurrence.targetDocumentId());
+            assertEquals(
+                    ManagedOccurrenceResolver.TargetKind
+                            .EXISTING_AUTHORED_INITIAL,
+                    occurrence.targetKind());
+            assertEquals(-1L, occurrence.admittedSourceEpoch());
+        }
+    }
+
+    @Test
+    void uniqueInitializedEpochZeroSelectsEpochZero() {
+        try (DefaultCoordinationEngine engine =
+                DefaultCoordinationEngine.create()) {
+            // given
+            ExactValue initialized = exact("initialized");
+            DocumentSession lineage = lineage(
+                    A, exact("authored"), initialized);
+            appendRevision(lineage, exact("current"));
+            ManagedOccurrenceEvidenceDemand demand = demand(
+                    A, "/child", initialized);
+
+            // when
+            ManagedOccurrenceResolver.Resolution result = resolver(engine)
+                    .resolve(requestWithLineages(
+                            engine, Set.of(A), List.of(demand), lineage));
+
+            // then
+            assertTrue(result.complete());
+            ManagedOccurrenceResolver.ResolvedOccurrence occurrence = result
+                    .resolvedOccurrences().get(0);
+            assertEquals(A, occurrence.targetDocumentId());
+            assertEquals(
+                    ManagedOccurrenceResolver.TargetKind
+                            .EXISTING_INITIALIZED_EPOCH_ZERO,
+                    occurrence.targetKind());
+            assertEquals(0L, occurrence.admittedSourceEpoch());
+        }
+    }
+
+    @Test
+    void uniqueRetainedEpochSelectsItsExactEpoch() {
+        try (DefaultCoordinationEngine engine =
+                DefaultCoordinationEngine.create()) {
+            // given
+            DocumentSession lineage = lineage(
+                    A, exact("authored"), exact("initialized"));
+            ExactValue retained = exact("retained");
+            appendRevision(lineage, retained);
+            appendRevision(lineage, exact("current"));
+            ManagedOccurrenceEvidenceDemand demand = demand(
+                    A, "/child", retained);
+
+            // when
+            ManagedOccurrenceResolver.Resolution result = resolver(engine)
+                    .resolve(requestWithLineages(
+                            engine, Set.of(A), List.of(demand), lineage));
+
+            // then
+            assertTrue(result.complete());
+            ManagedOccurrenceResolver.ResolvedOccurrence occurrence = result
+                    .resolvedOccurrences().get(0);
+            assertEquals(A, occurrence.targetDocumentId());
+            assertEquals(
+                    ManagedOccurrenceResolver.TargetKind
+                            .EXISTING_RETAINED_EPOCH,
+                    occurrence.targetKind());
+            assertEquals(1L, occurrence.admittedSourceEpoch());
+        }
+    }
+
+    @Test
+    void repeatedHistoricalBlueIdIsAmbiguous() {
+        try (DefaultCoordinationEngine engine =
+                DefaultCoordinationEngine.create()) {
+            // given
+            DocumentSession lineage = lineage(
+                    A, exact("authored"), exact("initialized"));
+            ExactValue repeated = exact("repeated");
+            appendRevision(lineage, repeated);
+            appendRevision(lineage, exact("intermediate"));
+            appendRevision(lineage, repeated);
+            appendRevision(lineage, exact("current"));
+            ManagedOccurrenceEvidenceDemand demand = demand(
+                    A, "/child", repeated);
+
+            // when
+            ManagedOccurrenceResolver.Resolution result = resolver(engine)
+                    .resolve(requestWithLineages(
+                            engine, Set.of(A), List.of(demand), lineage));
+
+            // then
+            assertFalse(result.complete());
+            assertTrue(result.resolvedOccurrences().isEmpty());
+            assertEquals(
+                    ManagedOccurrenceResolver.ResolutionStatus
+                            .AMBIGUOUS_MANAGED_EPOCH,
+                    result.unresolvedDemands().get(0).status());
+        }
+    }
+
+    @Test
+    void exactSelectorChoosesOneRepeatedHistoricalEpoch() {
+        try (DefaultCoordinationEngine engine =
+                DefaultCoordinationEngine.create()) {
+            // given
+            DocumentSession lineage = lineage(
+                    A, exact("authored"), exact("initialized"));
+            ExactValue repeated = exact("repeated");
+            appendRevision(lineage, repeated);
+            appendRevision(lineage, exact("intermediate"));
+            appendRevision(lineage, repeated);
+            appendRevision(lineage, exact("current"));
+            ManagedOccurrenceEvidenceDemand demand = demand(
+                    B, "/child", repeated);
+            ContractsManagedEpochSelectionPlan plan = selectionPlan(
+                    B, A, 1L, repeated, "/child");
+
+            // when
+            ManagedOccurrenceResolver.Resolution result = resolver(engine)
+                    .resolve(requestWithLineagesAndSelection(
+                            engine,
+                            Set.of(B),
+                            List.of(demand),
+                            plan,
+                            lineage));
+
+            // then
+            assertTrue(result.complete());
+            ManagedOccurrenceResolver.ResolvedOccurrence occurrence = result
+                    .resolvedOccurrences().get(0);
+            assertEquals(A, occurrence.targetDocumentId());
+            assertEquals(1L, occurrence.admittedSourceEpoch());
+            assertEquals(ManagedOccurrenceResolver.TargetKind
+                    .EXISTING_RETAINED_EPOCH, occurrence.targetKind());
+            assertEquals(Set.of("/child"),
+                    result.resolvedSelectorPaths());
+        }
+    }
+
+    @Test
+    void exactSelectorDisambiguatesIdenticalStateAcrossLineages() {
+        try (DefaultCoordinationEngine engine =
+                DefaultCoordinationEngine.create()) {
+            // given
+            ExactValue shared = exact("shared");
+            DocumentSession first = lineage(A, exact("first"), shared);
+            DocumentSession second = lineage(B, exact("second"), shared);
+            ManagedOccurrenceEvidenceDemand demand = demand(
+                    C, "/child", shared);
+            ContractsManagedEpochSelectionPlan plan = selectionPlan(
+                    C, B, 0L, shared, "/child");
+
+            // when
+            ManagedOccurrenceResolver.Resolution result = resolver(engine)
+                    .resolve(requestWithLineagesAndSelection(
+                            engine,
+                            Set.of(C),
+                            List.of(demand),
+                            plan,
+                            first,
+                            second));
+
+            // then
+            assertTrue(result.complete());
+            assertEquals(B, result.resolvedOccurrences().get(0)
+                    .targetDocumentId());
+            assertEquals(ManagedOccurrenceResolver.TargetKind
+                    .CURRENT_EXISTING, result.resolvedOccurrences().get(0)
+                    .targetKind());
+        }
+    }
+
+    @Test
+    void exactSelectorRejectsWrongEpochStateAndOccurrenceState() {
+        try (DefaultCoordinationEngine engine =
+                DefaultCoordinationEngine.create()) {
+            // given
+            ExactValue initialized = exact("initialized");
+            ExactValue retained = exact("retained");
+            DocumentSession lineage = lineage(
+                    A, exact("authored"), initialized);
+            appendRevision(lineage, retained);
+            ManagedOccurrenceEvidenceDemand demand = demand(
+                    B, "/child", retained);
+
+            // when
+            ManagedOccurrenceResolver.Resolution wrongEpoch = resolver(engine)
+                    .resolve(requestWithLineagesAndSelection(
+                            engine,
+                            Set.of(B),
+                            List.of(demand),
+                            selectionPlan(
+                                    B, A, 0L, retained, "/child"),
+                            lineage));
+            ManagedOccurrenceResolver.Resolution wrongOccurrence =
+                    resolver(engine).resolve(
+                            requestWithLineagesAndSelection(
+                                    engine,
+                                    Set.of(B),
+                                    List.of(demand),
+                                    selectionPlan(
+                                            B,
+                                            A,
+                                            0L,
+                                            initialized,
+                                            "/child"),
+                                    lineage));
+
+            // then
+            assertFalse(wrongEpoch.complete());
+            assertEquals(ManagedOccurrenceResolver.ResolutionStatus
+                    .EXACT_STATE_MISMATCH, wrongEpoch.unresolvedDemands()
+                    .get(0).status());
+            assertFalse(wrongOccurrence.complete());
+            assertEquals(ManagedOccurrenceResolver.ResolutionStatus
+                    .EXACT_STATE_MISMATCH, wrongOccurrence
+                    .unresolvedDemands().get(0).status());
+        }
+    }
+
+    @Test
+    void exactSelectorUsesCurrentRepresentationAtTheCurrentSourceEpoch() {
+        try (DefaultCoordinationEngine engine =
+                DefaultCoordinationEngine.create()) {
+            // given
+            ExactValue initialized = exact("immutable-source-epoch-zero");
+            DocumentSession source = lineage(
+                    A, exact("authored"), initialized);
+            ExactValue representation = exact("component-representation");
+            DocumentSession rebound = source.copyForAtomicPublication();
+            rebound.rebindComponentRepresentation(
+                    source.epoch(),
+                    layout(representation),
+                    source.activeSubscriptions(),
+                    hash('7'));
+            ManagedOccurrenceEvidenceDemand demand = demand(
+                    B, "/child", representation);
+
+            // when
+            ManagedOccurrenceResolver.Resolution result = resolver(engine)
+                    .resolve(requestWithLineagesAndSelection(
+                            engine,
+                            Set.of(B),
+                            List.of(demand),
+                            selectionPlan(
+                                    B,
+                                    A,
+                                    source.epoch(),
+                                    representation,
+                                    "/child"),
+                            rebound));
+
+            // then
+            assertTrue(result.complete());
+            ManagedOccurrenceResolver.ResolvedOccurrence occurrence = result
+                    .resolvedOccurrences().get(0);
+            assertEquals(A, occurrence.targetDocumentId());
+            assertEquals(0L, occurrence.admittedSourceEpoch());
+            assertEquals(ManagedOccurrenceResolver.TargetKind
+                    .CURRENT_EXISTING, occurrence.targetKind());
+            ManagedLineageIndex.Lineage indexed = ManagedLineageIndex.empty()
+                    .withNewLineage(rebound).byDocumentId(A);
+            assertEquals(representation.blueId(), indexed.currentBlueId());
+            assertEquals(initialized.blueId(),
+                    indexed.retainedStates().get(0).blueId(),
+                    "component representation must not rewrite source epoch");
+        }
+    }
+
+    @Test
+    void sameEpochRebindExposesOnlyRepresentationContiguousHistory() {
+        try (DefaultCoordinationEngine engine =
+                DefaultCoordinationEngine.create()) {
+            // given
+            ExactValue authored = exact("authored");
+            ExactValue epochZero = managedExact("epoch-zero");
+            DocumentSession source = lineage(A, authored, epochZero);
+            ExactValue reboundHead = managedExact("rebound-epoch-zero");
+            DocumentSession rebound = source.copyForAtomicPublication();
+            rebound.rebindComponentRepresentation(
+                    source.epoch(),
+                    layout(reboundHead),
+                    source.activeSubscriptions(),
+                    hash('8'));
+
+            // when
+            ManagedOccurrenceResolver.Resolution staleAtCurrent =
+                    resolver(engine).resolve(requestWithLineages(
+                            engine,
+                            Set.of(B),
+                            List.of(demand(B, "/child", epochZero)),
+                            rebound));
+            ManagedOccurrenceResolver.Resolution authoredAtCurrent =
+                    resolver(engine).resolve(requestWithLineages(
+                            engine,
+                            Set.of(B),
+                            List.of(demand(B, "/authored", authored)),
+                            rebound));
+            ManagedOccurrenceResolver.Resolution current = resolver(engine)
+                    .resolve(requestWithLineages(
+                            engine,
+                            Set.of(B),
+                            List.of(demand(B, "/child", reboundHead)),
+                            rebound));
+            ManagedOccurrenceResolver.Resolution explicitStale =
+                    resolver(engine).resolve(
+                            requestWithLineagesAndSelection(
+                                    engine,
+                                    Set.of(B),
+                                    List.of(demand(
+                                            B, "/child", epochZero)),
+                                    selectionPlan(
+                                            B, A, 0L, epochZero, "/child"),
+                                    rebound));
+            ExactValue epochOne = managedExact("epoch-one");
+            appendRevision(rebound, epochOne);
+            ManagedOccurrenceResolver.Resolution staleAfterAdvance =
+                    resolver(engine).resolve(requestWithLineages(
+                            engine,
+                            Set.of(B),
+                            List.of(demand(B, "/child", epochZero)),
+                            rebound));
+            ManagedOccurrenceResolver.Resolution authoredAfterAdvance =
+                    resolver(engine).resolve(requestWithLineages(
+                            engine,
+                            Set.of(B),
+                            List.of(demand(B, "/authored", authored)),
+                            rebound));
+            ExactValue epochTwo = managedExact("epoch-two");
+            appendRevision(rebound, epochTwo);
+            ManagedOccurrenceResolver.Resolution contiguousRetained =
+                    resolver(engine).resolve(requestWithLineages(
+                            engine,
+                            Set.of(B),
+                                    List.of(demand(B, "/child", epochOne)),
+                                    rebound));
+
+            // then
+            assertFalse(staleAtCurrent.complete());
+            assertEquals(ManagedOccurrenceResolver.ResolutionStatus
+                    .UNPROVEN_MANAGED_HISTORY,
+                    staleAtCurrent.unresolvedDemands().get(0).status());
+            assertFalse(authoredAtCurrent.complete());
+            assertTrue(authoredAtCurrent.newDrafts().isEmpty(),
+                    "known non-replayable authored content must not create a "
+                            + "duplicate lineage");
+            assertEquals(ManagedOccurrenceResolver.ResolutionStatus
+                    .UNPROVEN_MANAGED_HISTORY,
+                    authoredAtCurrent.unresolvedDemands().get(0).status());
+            assertTrue(current.complete());
+            assertEquals(ManagedOccurrenceResolver.TargetKind
+                    .CURRENT_EXISTING,
+                    current.resolvedOccurrences().get(0).targetKind());
+            assertFalse(explicitStale.complete());
+            assertEquals(ManagedOccurrenceResolver.ResolutionStatus
+                    .EXACT_STATE_MISMATCH,
+                    explicitStale.unresolvedDemands().get(0).status());
+            assertFalse(staleAfterAdvance.complete());
+            assertEquals(ManagedOccurrenceResolver.ResolutionStatus
+                    .UNPROVEN_MANAGED_HISTORY,
+                    staleAfterAdvance.unresolvedDemands().get(0).status());
+            assertFalse(authoredAfterAdvance.complete());
+            assertTrue(authoredAfterAdvance.newDrafts().isEmpty());
+            assertEquals(ManagedOccurrenceResolver.ResolutionStatus
+                    .UNPROVEN_MANAGED_HISTORY,
+                    authoredAfterAdvance.unresolvedDemands().get(0).status());
+            assertTrue(contiguousRetained.complete());
+            assertEquals(1L, contiguousRetained.resolvedOccurrences().get(0)
+                    .admittedSourceEpoch());
+            assertEquals(ManagedOccurrenceResolver.TargetKind
+                    .EXISTING_RETAINED_EPOCH,
+                    contiguousRetained.resolvedOccurrences().get(0)
+                            .targetKind());
+        }
+    }
+
+    @Test
+    void fencedAuthoredSentinelCannotBecomeANewLineage() {
+        try (DefaultCoordinationEngine engine =
+                DefaultCoordinationEngine.create()) {
+            // given
+            ExactValue authored = exact("fenced-authored");
+            DocumentSession source = lineage(
+                    A, authored, managedExact("fenced-epoch-zero"));
+            DocumentSession rebound = source.copyForAtomicPublication();
+            rebound.rebindComponentRepresentation(
+                    0L,
+                    layout(managedExact("fenced-representation")),
+                    rebound.activeSubscriptions(),
+                    hash('9'));
+            ManagedOccurrenceEvidenceDemand implicitDemand = demand(
+                    B, "/implicit-authored", authored);
+            ManagedOccurrenceEvidenceDemand explicitDemand = demand(
+                    B, "/explicit-authored", authored);
+            ManagedOccurrenceEvidenceDemand stableDemand = demand(
+                    B, "/stable-authored", authored);
+            ManagedOccurrenceBinding stableAuthored =
+                    ManagedOccurrenceBinding.derived(
+                            BINDING_POLICY,
+                            closureId(B),
+                            ScopeAddress.embedded("/stable-authored", 1L),
+                            closureId(A),
+                            authored.blueId(),
+                            false,
+                            -1L);
+
+            // when
+            ManagedOccurrenceResolver.Resolution implicit = resolver(engine)
+                    .resolve(requestWithLineages(
+                            engine,
+                            Set.of(B),
+                            List.of(implicitDemand),
+                            rebound));
+            ManagedOccurrenceResolver.Resolution explicit = resolver(engine)
+                    .resolve(requestWithLineagesAndSelection(
+                            engine,
+                            Set.of(B),
+                            List.of(explicitDemand),
+                            selectionPlan(
+                                    B,
+                                    A,
+                                    -1L,
+                                    authored,
+                                    "/explicit-authored"),
+                            rebound));
+            ManagedOccurrenceResolver.Resolution stable = resolver(engine)
+                    .resolve(requestWithLineagesAndBinding(
+                            engine,
+                            Set.of(B),
+                            List.of(stableDemand),
+                            stableAuthored,
+                            rebound));
+
+            // then
+            assertUnresolvedWithoutDraft(
+                    implicit,
+                    ManagedOccurrenceResolver.ResolutionStatus
+                            .UNPROVEN_MANAGED_HISTORY);
+            assertUnresolvedWithoutDraft(
+                    explicit,
+                    ManagedOccurrenceResolver.ResolutionStatus
+                            .EXACT_STATE_MISMATCH);
+            assertUnresolvedWithoutDraft(
+                    stable,
+                    ManagedOccurrenceResolver.ResolutionStatus
+                            .EXACT_STATE_MISMATCH);
+            assertEquals(-1L,
+                    stableAuthored.pendingHistoricalEpoch().longValue());
         }
     }
 
@@ -106,9 +591,10 @@ final class ManagedOccurrenceResolverTest {
 
             // then
             assertFalse(result.complete());
+            assertTrue(result.resolvedOccurrences().isEmpty());
             assertEquals(
                     ManagedOccurrenceResolver.ResolutionStatus
-                            .AMBIGUOUS_LINEAGE,
+                            .AMBIGUOUS_MANAGED_LINEAGE,
                     result.unresolvedDemands().get(0).status());
         }
     }
@@ -223,6 +709,160 @@ final class ManagedOccurrenceResolverTest {
     }
 
     @Test
+    void cyclicExactNodeCarriesTheVerifiedBodyAndCompleteProof() {
+        try (DefaultCoordinationEngine engine =
+                DefaultCoordinationEngine.create()) {
+            // given
+            CyclicFixture fixture = cyclicFixture();
+            ExactNodeDemand demand = ExactNodeDemand.derived(
+                    fixture.memberBlueId(), closureId(A), "/cyclic");
+            ManagedOccurrenceResolver resolver =
+                    new ManagedOccurrenceResolver(
+                            fixture.provider(), engine.engineMetrics());
+
+            // when
+            ManagedOccurrenceResolver.Resolution result = resolver.resolve(
+                    request(engine, Set.of(A), List.of(demand)));
+
+            // then
+            assertTrue(result.complete());
+            ManagedOccurrenceResolver.ResolvedExactNode resolved = result
+                    .resolvedExactNodes().get(0);
+            assertEquals(fixture.memberBlueId(),
+                    resolved.exactValue().blueId());
+            assertTrue(resolved.exactValue().isCyclicMember());
+            assertTrue(resolved.cyclicProof() != null);
+            assertEquals("resolver-cycle-a",
+                    resolved.exactValue().copyNode().getName());
+
+            engine.objects().putVerifiedProviderEvidence(
+                    resolved.exactValue(),
+                    resolved.cyclicProof(),
+                    "resolver-cyclic-test");
+            assertEquals(NodeProviderOutcome.FOUND,
+                    new VerifyingNodeProvider(engine.objects())
+                            .fetchResultByBlueId(fixture.memberBlueId())
+                            .outcome(),
+                    "retry cache must retain the complete proof with body");
+        }
+    }
+
+    @Test
+    void cyclicExactNodeRejectsMissingAndInvalidProofEvidence() {
+        try (DefaultCoordinationEngine engine =
+                DefaultCoordinationEngine.create()) {
+            // given
+            CyclicFixture fixture = cyclicFixture();
+            ExactNodeDemand demand = ExactNodeDemand.derived(
+                    fixture.memberBlueId(), closureId(A), "/cyclic");
+            NodeProvider missingProof = proofOverride(
+                    fixture, CyclicSetProofResult.notFound());
+            NodeProvider invalidProof = proofOverride(
+                    fixture, CyclicSetProofResult.invalidEvidence(
+                            "invalid test proof"));
+
+            // when
+            Runnable resolveMissing = () -> new ManagedOccurrenceResolver(
+                            missingProof, engine.engineMetrics()).resolve(
+                                    request(engine, Set.of(A),
+                                            List.of(demand)));
+            Runnable resolveInvalid = () -> new ManagedOccurrenceResolver(
+                    invalidProof, engine.engineMetrics()).resolve(
+                            request(engine, Set.of(A), List.of(demand)));
+
+            // then
+            assertThrows(IllegalArgumentException.class,
+                    resolveMissing::run);
+            IllegalArgumentException invalid = assertThrows(
+                    IllegalArgumentException.class,
+                    resolveInvalid::run);
+            assertTrue(invalid.getMessage().contains("invalid test proof"));
+        }
+    }
+
+    @Test
+    void cyclicExactNodeKeepsAbsentBodyAndUnavailableProofUnresolved() {
+        try (DefaultCoordinationEngine engine =
+                DefaultCoordinationEngine.create()) {
+            // given
+            CyclicFixture fixture = cyclicFixture();
+            ExactNodeDemand demand = ExactNodeDemand.derived(
+                    fixture.memberBlueId(), closureId(A), "/cyclic");
+            NodeProvider absentBody = ignored -> List.of();
+            NodeProvider unavailableProof = proofOverride(
+                    fixture,
+                    CyclicSetProofResult.unavailable("proof store offline"));
+
+            // when
+            ManagedOccurrenceResolver.Resolution absent =
+                    new ManagedOccurrenceResolver(
+                            absentBody, engine.engineMetrics()).resolve(
+                                    request(engine, Set.of(A),
+                                            List.of(demand)));
+            ManagedOccurrenceResolver.Resolution unavailable =
+                    new ManagedOccurrenceResolver(
+                            unavailableProof, engine.engineMetrics()).resolve(
+                                    request(engine, Set.of(A),
+                                            List.of(demand)));
+
+            // then
+            assertFalse(absent.complete());
+            assertFalse(unavailable.complete());
+            assertEquals(ManagedOccurrenceResolver.ResolutionStatus
+                    .MISSING_EXACT_CONTENT,
+                    absent.unresolvedDemands().get(0).status());
+            assertEquals(ManagedOccurrenceResolver.ResolutionStatus
+                    .MISSING_EXACT_CONTENT,
+                    unavailable.unresolvedDemands().get(0).status());
+        }
+    }
+
+    @Test
+    void cyclicExactNodeRejectsACompleteButWrongProof() {
+        try (DefaultCoordinationEngine engine =
+                DefaultCoordinationEngine.create()) {
+            // given
+            CyclicFixture fixture = cyclicFixture();
+            CyclicFixture unrelated = cyclicFixture("unrelated-cycle");
+            ExactNodeDemand demand = ExactNodeDemand.derived(
+                    fixture.memberBlueId(), closureId(A), "/cyclic");
+            NodeProvider wrongProof = proofOverride(
+                    fixture,
+                    unrelated.provider().cyclicSetProofFor(
+                            unrelated.memberBlueId()));
+
+            // when
+            Runnable resolve = () -> new ManagedOccurrenceResolver(
+                    wrongProof, engine.engineMetrics()).resolve(
+                            request(engine, Set.of(A), List.of(demand)));
+
+            // then
+            assertThrows(IllegalArgumentException.class, resolve::run);
+        }
+    }
+
+    @Test
+    void ordinaryExactNodeStillRejectsMismatchedProviderContent() {
+        try (DefaultCoordinationEngine engine =
+                DefaultCoordinationEngine.create()) {
+            // given
+            ExactValue expected = exact("expected");
+            Node wrong = exact("wrong").copyNode();
+            ExactNodeDemand demand = ExactNodeDemand.derived(
+                    expected.blueId(), closureId(A), "/ordinary");
+
+            // when
+            Runnable resolve = () -> new ManagedOccurrenceResolver(
+                    ignored -> List.of(wrong),
+                    engine.engineMetrics()).resolve(
+                            request(engine, Set.of(A), List.of(demand)));
+
+            // then
+            assertThrows(IllegalArgumentException.class, resolve::run);
+        }
+    }
+
+    @Test
     void duplicateNewOccurrencesShareOnePendingLineage() {
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.create()) {
@@ -244,6 +884,74 @@ final class ManagedOccurrenceResolverTest {
             assertEquals(1, result.newDrafts().size());
             assertEquals(result.resolvedOccurrences().get(0).targetDocumentId(),
                     result.resolvedOccurrences().get(1).targetDocumentId());
+        }
+    }
+
+    @Test
+    void unknownInitializedValueIsUnprovenHistoryNotANewLineage() {
+        try (DefaultCoordinationEngine engine =
+                DefaultCoordinationEngine.create()) {
+            // given
+            ExactValue progressed = ExactValue.verified(new Node().properties(
+                    "initialized", new Node().value(true),
+                    "state", new Node().value("unknown-progressed")));
+            ManagedOccurrenceEvidenceDemand demand = demand(
+                    A, "/child", progressed);
+
+            // when
+            ManagedOccurrenceResolver.Resolution result = resolver(engine)
+                    .resolve(request(engine, Set.of(A), List.of(demand)));
+
+            // then
+            assertFalse(result.complete());
+            assertTrue(result.newDrafts().isEmpty());
+            assertEquals(ManagedOccurrenceResolver.ResolutionStatus
+                    .UNPROVEN_MANAGED_HISTORY,
+                    result.unresolvedDemands().get(0).status());
+        }
+    }
+
+    @Test
+    void inlineAndPureReferenceResolveToTheSameManagedPosition() {
+        try (DefaultCoordinationEngine engine =
+                DefaultCoordinationEngine.create()) {
+            // given
+            DocumentSession lineage = start(engine, A, "parity");
+            ExactValue current = lineage.currentRevision().after();
+            ManagedOccurrenceEvidenceDemand inline = demand(
+                    B, "/child", current);
+            ManagedOccurrenceEvidenceDemand reference =
+                    ManagedOccurrenceEvidenceDemand.derived(
+                            CAUSE,
+                            CLOSURE,
+                            0L,
+                            closureId(B),
+                            "/child",
+                            DECLARATION,
+                            current.blueId(),
+                            0L);
+
+            // when
+            ManagedOccurrenceResolver.Resolution inlineResult =
+                    resolver(engine).resolve(request(
+                            engine, Set.of(B), List.of(inline)));
+            ManagedOccurrenceResolver.Resolution referenceResult =
+                    resolver(engine).resolve(request(
+                            engine, Set.of(B), List.of(reference)));
+
+            // then
+            assertTrue(inlineResult.complete());
+            assertTrue(referenceResult.complete());
+            ManagedOccurrenceResolver.ResolvedOccurrence inlineOccurrence =
+                    inlineResult.resolvedOccurrences().get(0);
+            ManagedOccurrenceResolver.ResolvedOccurrence referenceOccurrence =
+                    referenceResult.resolvedOccurrences().get(0);
+            assertEquals(inlineOccurrence.targetDocumentId(),
+                    referenceOccurrence.targetDocumentId());
+            assertEquals(inlineOccurrence.targetKind(),
+                    referenceOccurrence.targetKind());
+            assertEquals(inlineOccurrence.admittedSourceEpoch(),
+                    referenceOccurrence.admittedSourceEpoch());
         }
     }
 
@@ -317,6 +1025,108 @@ final class ManagedOccurrenceResolverTest {
                 engine.documents().occurrenceResolutionSnapshot());
     }
 
+    private static ManagedOccurrenceResolver.ResolutionRequest
+            requestWithLineages(
+                    DefaultCoordinationEngine engine,
+                    Set<DocumentId> members,
+                    List<? extends blue.language.processor.closure
+                            .ClosureResourceDemand> demands,
+                    DocumentSession... lineages) {
+        ManagedLineageIndex index = ManagedLineageIndex.empty();
+        for (DocumentSession lineage : lineages) {
+            index = index.withNewLineage(lineage);
+        }
+        InMemoryDocumentStore.OccurrenceResolutionSnapshot base = engine
+                .documents().occurrenceResolutionSnapshot();
+        InMemoryDocumentStore.OccurrenceResolutionSnapshot storeState =
+                new InMemoryDocumentStore.OccurrenceResolutionSnapshot(
+                        index,
+                        base.occurrenceInventory(),
+                        base.componentIndex(),
+                        base.occurrenceInventoryGeneration(),
+                        base.componentIndexGeneration());
+        return new ManagedOccurrenceResolver.ResolutionRequest(
+                CAUSE,
+                CLOSURE,
+                0L,
+                members,
+                List.copyOf(demands),
+                storeState);
+    }
+
+    private static ManagedOccurrenceResolver.ResolutionRequest
+            requestWithLineagesAndSelection(
+                    DefaultCoordinationEngine engine,
+                    Set<DocumentId> members,
+                    List<? extends blue.language.processor.closure
+                            .ClosureResourceDemand> demands,
+                    ContractsManagedEpochSelectionPlan selectionPlan,
+                    DocumentSession... lineages) {
+        ManagedOccurrenceResolver.ResolutionRequest base =
+                requestWithLineages(engine, members, demands, lineages);
+        return new ManagedOccurrenceResolver.ResolutionRequest(
+                base.logicalCauseIdentity(),
+                base.inputClosureIdentity(),
+                base.inputGraphGeneration(),
+                base.inputMembers(),
+                base.demands(),
+                base.storeState(),
+                selectionPlan);
+    }
+
+    private static ManagedOccurrenceResolver.ResolutionRequest
+            requestWithLineagesAndBinding(
+                    DefaultCoordinationEngine engine,
+                    Set<DocumentId> members,
+                    List<? extends blue.language.processor.closure
+                            .ClosureResourceDemand> demands,
+                    ManagedOccurrenceBinding binding,
+                    DocumentSession... lineages) {
+        ManagedOccurrenceResolver.ResolutionRequest base =
+                requestWithLineages(engine, members, demands, lineages);
+        InMemoryDocumentStore.OccurrenceResolutionSnapshot storeState =
+                new InMemoryDocumentStore.OccurrenceResolutionSnapshot(
+                        base.storeState().lineageIndex(),
+                        ManagedOccurrenceInventory.of(List.of(binding)),
+                        base.storeState().componentIndex(),
+                        base.storeState().occurrenceInventoryGeneration(),
+                        base.storeState().componentIndexGeneration());
+        return new ManagedOccurrenceResolver.ResolutionRequest(
+                base.logicalCauseIdentity(),
+                base.inputClosureIdentity(),
+                base.inputGraphGeneration(),
+                base.inputMembers(),
+                base.demands(),
+                storeState);
+    }
+
+    private static void assertUnresolvedWithoutDraft(
+            ManagedOccurrenceResolver.Resolution resolution,
+            ManagedOccurrenceResolver.ResolutionStatus expectedStatus) {
+        assertFalse(resolution.complete());
+        assertTrue(resolution.resolvedOccurrences().isEmpty());
+        assertTrue(resolution.newDrafts().isEmpty());
+        assertEquals(expectedStatus,
+                resolution.unresolvedDemands().get(0).status());
+    }
+
+    private static ContractsManagedEpochSelectionPlan selectionPlan(
+            DocumentId target,
+            DocumentId source,
+            long epoch,
+            ExactValue expected,
+            String path) {
+        return new ContractsManagedEpochSelectionPlan(
+                target,
+                0L,
+                exact("target").blueId(),
+                List.of(new ContractsManagedEpochSelectionPlan.Selection(
+                        source,
+                        epoch,
+                        expected.blueId(),
+                        path)));
+    }
+
     private static ManagedOccurrenceEvidenceDemand demand(
             DocumentId source,
             String path,
@@ -349,6 +1159,131 @@ final class ManagedOccurrenceResolverTest {
                 userDocumentId: arbitrary
                 state: %s
                 """.formatted(state));
+    }
+
+    private static DocumentSession lineage(
+            DocumentId documentId,
+            ExactValue authored,
+            ExactValue initialized) {
+        ExternalOrderKey admission = ExternalOrderKey.of(List.of(
+                0L, "resolver-admission", documentId.value()));
+        DocumentRevision initialization = new DocumentRevision(
+                documentId,
+                0L,
+                0L,
+                DocumentRevision.Kind.INITIALIZATION,
+                authored,
+                initialized,
+                null,
+                admission,
+                initialized.blueId(),
+                null,
+                List.of(),
+                0L);
+        return new DocumentSession(
+                documentId,
+                authored,
+                layout(initialized),
+                List.of(),
+                admission,
+                initialization);
+    }
+
+    private static void appendRevision(
+            DocumentSession session,
+            ExactValue after) {
+        long epoch = Math.addExact(session.epoch(), 1L);
+        DocumentRevision revision = new DocumentRevision(
+                session.documentId(),
+                epoch,
+                session.nextApplicationOrder(),
+                DocumentRevision.Kind.CATCH_UP_COMPLETED,
+                session.currentRepresentation(),
+                after,
+                null,
+                null,
+                List.of(),
+                0L);
+        session.commit(
+                revision,
+                layout(after),
+                null,
+                session.activeSubscriptions(),
+                "resolver-revision|" + session.documentId().value()
+                        + "|" + epoch);
+    }
+
+    private static EmbeddedOnlyLayout layout(ExactValue value) {
+        return new EmbeddedOnlyLayout(
+                value,
+                value.frozen(),
+                Map.of(JsonPointer.ROOT, value),
+                List.of(),
+                List.of(),
+                EmbeddedLayoutPlan.managedRoot(
+                        new RoutingSurface(List.of(), false)));
+    }
+
+    private static ExactValue exact(String state) {
+        return ExactValue.verified(new Node().properties(
+                "state", new Node().value(state)));
+    }
+
+    private static ExactValue managedExact(String state) {
+        return ExactValue.verified(new Node().properties(
+                "initialized", new Node().value(true),
+                "state", new Node().value(state)));
+    }
+
+    private static CyclicFixture cyclicFixture() {
+        return cyclicFixture("resolver-cycle");
+    }
+
+    private static CyclicFixture cyclicFixture(String namePrefix) {
+        Node documents = new Node().items(List.of(
+                new Node().name(namePrefix + "-a").properties(
+                        "peer", new Node().blueId("this#1")),
+                new Node().name(namePrefix + "-b").properties(
+                        "peer", new Node().blueId("this#0"))));
+        BasicNodeProvider provider = new BasicNodeProvider(documents);
+        return new CyclicFixture(
+                provider,
+                provider.getBlueIdByName(namePrefix + "-a"));
+    }
+
+    private static NodeProvider proofOverride(
+            CyclicFixture fixture,
+            CyclicSetProofResult proofResult) {
+        return new ProofOverrideProvider(
+                fixture.provider(), proofResult);
+    }
+
+    private record CyclicFixture(
+            BasicNodeProvider provider,
+            String memberBlueId) {
+    }
+
+    private static final class ProofOverrideProvider
+            implements NodeProvider, CyclicAwareNodeProvider {
+        private final NodeProvider content;
+        private final CyclicSetProofResult proofResult;
+
+        private ProofOverrideProvider(
+                NodeProvider content,
+                CyclicSetProofResult proofResult) {
+            this.content = content;
+            this.proofResult = proofResult;
+        }
+
+        @Override
+        public List<Node> fetchByBlueId(String blueId) {
+            return content.fetchByBlueId(blueId);
+        }
+
+        @Override
+        public CyclicSetProofResult cyclicSetProofFor(String blueId) {
+            return proofResult;
+        }
     }
 
     private static void appendNoOpRevision(

@@ -1,6 +1,5 @@
 package blue.coordination.integration;
 
-import blue.coordination.api.CoordinationException;
 import blue.coordination.api.DocumentRevision;
 import blue.coordination.api.Operation;
 import blue.coordination.api.SessionStatus;
@@ -51,8 +50,7 @@ final class InitializationRetryIdempotencyTest {
                     () -> engine.dispatch(activation));
             assertEquals(SessionStatus.CATCHING_UP,
                     engine.session(HOST_ID).status());
-            assertThrows(CoordinationException.class,
-                    () -> engine.readyDocument(HOST_ID));
+            assertCommittedAndReadyHeads(engine, HOST_ID, 1L, 0L);
             assertEquals(1L, engine.history(HOST_ID).stream()
                     .filter(revision -> revision.kind()
                             == DocumentRevision.Kind.TIMELINE_ENTRY)
@@ -179,8 +177,8 @@ final class InitializationRetryIdempotencyTest {
                     "/revisionApplications"));
             assertEquals(SessionStatus.CATCHING_UP,
                     engine.session(secondHostId).status());
-            assertThrows(CoordinationException.class,
-                    () -> engine.readyDocument(secondHostId));
+            assertCommittedAndReadyHeads(
+                    engine, secondHostId, 1L, 0L);
 
             engine.clearFailureInjection();
             EngineMetrics.MetricsSnapshot beforeRetry =
@@ -281,8 +279,8 @@ final class InitializationRetryIdempotencyTest {
             engine.restartFromStores();
             assertEquals(SessionStatus.CATCHING_UP,
                     engine.session(recoveringHostId).status());
-            assertThrows(CoordinationException.class,
-                    () -> engine.readyDocument(recoveringHostId));
+            assertCommittedAndReadyHeads(
+                    engine, recoveringHostId, 1L, 0L);
 
             EngineMetrics.MetricsSnapshot beforeResume =
                     engine.metricsSnapshot();
@@ -368,8 +366,7 @@ final class InitializationRetryIdempotencyTest {
                     "/initializationCount"));
             assertEquals(SessionStatus.CATCHING_UP,
                     engine.session(HOST_ID).status());
-            assertThrows(CoordinationException.class,
-                    () -> engine.readyDocument(HOST_ID));
+            assertCommittedAndReadyHeads(engine, HOST_ID, 2L, 0L);
 
             // when
             engine.restartFromStores();
@@ -427,5 +424,32 @@ final class InitializationRetryIdempotencyTest {
         return engine.history(documentId).stream()
                 .filter(revision -> revision.kind() == kind)
                 .count();
+    }
+
+    private static void assertCommittedAndReadyHeads(
+            TestEngine engine,
+            String documentId,
+            long expectedCommittedEpoch,
+            long expectedReadyEpoch) {
+        TestEngine.DocumentView committed = engine.session(documentId);
+        TestEngine.DocumentView ready = engine.readyDocument(documentId);
+        assertEquals(SessionStatus.CATCHING_UP, committed.status());
+        assertEquals(expectedCommittedEpoch, committed.epoch());
+        assertEquals(SessionStatus.CATCHING_UP, ready.status());
+        assertEquals(expectedReadyEpoch, ready.epoch());
+        assertEquals(
+                engine.history(documentId)
+                        .get(Math.toIntExact(expectedCommittedEpoch))
+                        .after()
+                        .blueId(),
+                committed.current().blueId(),
+                "audit state must expose the exact committed revision");
+        assertEquals(
+                engine.history(documentId)
+                        .get(Math.toIntExact(expectedReadyEpoch))
+                        .after()
+                        .blueId(),
+                ready.current().blueId(),
+                "normal reads must remain fenced to the exact ready state");
     }
 }

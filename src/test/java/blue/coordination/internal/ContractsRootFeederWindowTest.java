@@ -533,6 +533,8 @@ final class ContractsRootFeederWindowTest {
                 ExternalOrderKey.of(List.of(0L, "admission", documentId.value())),
                 CoordinationEngine.AdmissionPolicy.FROM_NOW);
         store.insert(session);
+        ManagedEpochReceiptTestFixtures.seedInitialization(
+                store, session, documentId.equals(A) ? 40_000L : 50_000L);
         InMemoryDocumentStore.PublicationSnapshot snapshot =
                 store.publicationSnapshot();
         Node document = session.currentRevision().after().copyNode();

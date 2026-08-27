@@ -137,6 +137,10 @@ final class ClosureSubscriptionInventoryTest {
                                         beforeAttempt
                                                 .componentIndexGeneration())
                                 .expectHead(A, 0L, document.beforeBlueId())
+                                .expectGraphGeneration(
+                                        A,
+                                        beforeAttempt.graphGenerations()
+                                                .require(A))
                                 .stageClosureSubscriptionDeltas(result)
                                 .commit());
         assertTrue(headFailure.getMessage().contains("Stale document head"));
@@ -176,6 +180,76 @@ final class ClosureSubscriptionInventoryTest {
                         document.afterBlueId(),
                         result.graphGeneration(),
                         document.componentGeneration() + 1L));
+    }
+
+    @Test
+    void rebasesUnmentionedRowOnlyFromItsExactCapturedGraphFence() {
+        // given
+        ClosureProcessResult result = ContractsPublicComponentMergeSplitTest
+                .topologyChangingResultForInventoryTest();
+        SubscriptionState exemplar = result.subscriptionDeltas().stream()
+                .map(delta -> delta.afterSubscription() != null
+                        ? delta.afterSubscription()
+                        : delta.beforeSubscription())
+                .findFirst()
+                .orElseThrow();
+        DocumentId documentId = DocumentId.of(exemplar.channelOccurrence()
+                .managedDocumentId().value());
+        ResultingDocument document = resultingDocument(result, documentId);
+        ChannelOccurrence retainedOccurrence = ChannelOccurrence.root(
+                exemplar.channelOccurrence().managedDocumentId(),
+                "retainedUnmentionedChannel",
+                exemplar.channelOccurrence()
+                        .effectiveRuntimeContributionBlueId(),
+                exemplar.channelOccurrence().subscriptionHeaderBlueId());
+        long capturedGeneration = result.platformCommitCompanion()
+                .expectedInputGraphGeneration();
+        assertTrue(capturedGeneration < result.graphGeneration());
+        LinkedHashMap<DocumentId, Long> exactGraphFences =
+                new LinkedHashMap<>();
+        result.platformCommitCompanion().expectedInputDocuments().forEach(
+                input -> exactGraphFences.put(
+                        DocumentId.of(input.documentId().value()),
+                        capturedGeneration));
+        SubscriptionState retained = SubscriptionState.identified(
+                retainedOccurrence,
+                document.afterBlueId(),
+                capturedGeneration,
+                document.componentGeneration());
+
+        // when
+        ClosureSubscriptionInventory rebased =
+                ClosureSubscriptionInventory.of(List.of(retained)).apply(
+                        result, exactGraphFences);
+
+        // then
+        SubscriptionState resulting = rebased.statesFor(documentId).stream()
+                .filter(state -> state.channelOccurrence().rawChannelKey()
+                        .equals("retainedUnmentionedChannel"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(retainedOccurrence.channelOccurrenceIdentity(),
+                resulting.channelOccurrence().channelOccurrenceIdentity());
+        assertEquals(document.afterBlueId(), resulting.documentBlueId());
+        assertEquals(result.graphGeneration(), resulting.graphGeneration());
+        assertEquals(document.componentGeneration(),
+                resulting.componentGeneration());
+        assertFalse(retained.subscriptionIdentity().equals(
+                resulting.subscriptionIdentity()));
+
+        IllegalStateException staleFence = assertThrows(
+                IllegalStateException.class,
+                () -> {
+                    LinkedHashMap<DocumentId, Long> staleGraphFences =
+                            new LinkedHashMap<>(exactGraphFences);
+                    staleGraphFences.put(
+                            documentId,
+                            Math.addExact(capturedGeneration, 1L));
+                    ClosureSubscriptionInventory.of(List.of(retained))
+                            .apply(result, staleGraphFences);
+                });
+        assertTrue(staleFence.getMessage().contains(
+                "stale after publication"));
     }
 
     @Test
@@ -587,6 +661,10 @@ final class ClosureSubscriptionInventoryTest {
                     transitionProcessor, B, 1_900_000_000_000_002L);
             store.insert(sessionA);
             store.insert(sessionB);
+            ManagedEpochReceiptTestFixtures.seedInitialization(
+                    store, sessionA, 20_000L);
+            ManagedEpochReceiptTestFixtures.seedInitialization(
+                    store, sessionB, 30_000L);
             seedAcyclicComponent(store, runtime, sessionA);
             seedAcyclicComponent(store, runtime, sessionB);
 

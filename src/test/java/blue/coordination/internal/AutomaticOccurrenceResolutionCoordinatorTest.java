@@ -51,6 +51,11 @@ final class AutomaticOccurrenceResolutionCoordinatorTest {
             assertEquals(2, attempts.get());
             assertEquals(1, fences.get());
             assertEquals(1L, result.expansionCount());
+            assertEquals(
+                    Optional.of(
+                            AutomaticOccurrenceResolutionCoordinator.StopReason
+                                    .REPEATED_PROGRESS),
+                    result.automaticResolutionStopReason());
             assertEquals(1L, engine.engineMetrics().counter(
                     AutomaticOccurrenceResolutionCoordinator
                             .REPEATED_DEMAND_STOPS));
@@ -98,6 +103,7 @@ final class AutomaticOccurrenceResolutionCoordinatorTest {
             assertEquals(2, attempts.get());
             assertEquals(2, expansions.get());
             assertEquals(2L, result.expansionCount());
+            assertTrue(result.automaticResolutionStopReason().isEmpty());
             assertEquals(0L, engine.engineMetrics().counter(
                     AutomaticOccurrenceResolutionCoordinator
                             .REPEATED_DEMAND_STOPS));
@@ -138,8 +144,61 @@ final class AutomaticOccurrenceResolutionCoordinatorTest {
             assertEquals(2, attempts.get());
             assertEquals(1, expansions.get());
             assertEquals(1L, result.expansionCount());
+            assertEquals(
+                    Optional.of(
+                            AutomaticOccurrenceResolutionCoordinator.StopReason
+                                    .EXPANSION_LIMIT),
+                    result.automaticResolutionStopReason());
             assertEquals(1L, engine.engineMetrics().counter(
                     AutomaticOccurrenceResolutionCoordinator.LIMIT_STOPS));
+        }
+    }
+
+    @Test
+    void unresolvedExactContentRetainsTypedStatusWithoutExpanding() {
+        try (DefaultCoordinationEngine engine = contractsEngine()) {
+            // given
+            FakeInvocation invocation = invocation(engine, "missing-exact");
+            String missingBlueId = engine.exactProviderValue(
+                    "value: missing-exact-content").blueId();
+            ExactNodeDemand demand = ExactNodeDemand.derived(
+                    missingBlueId, closureId(ROOT), "/missing");
+            ClosureAttemptResult needs = ClosureAttemptResult.needsResources(
+                    List.of(demand));
+            AutomaticOccurrenceResolutionCoordinator<FakeInvocation>
+                    coordinator = coordinator(
+                            engine,
+                            ignored -> needs,
+                            (current, resolution, storeState) -> {
+                                throw new AssertionError(
+                                        "unresolved content must not expand");
+                            });
+
+            // when
+            AutomaticOccurrenceResolutionCoordinator.RunResult<
+                    FakeInvocation, String> result = coordinator.run(
+                            invocation,
+                            4L,
+                            ignored -> Optional.empty(),
+                            (before, after, storeState) -> { });
+
+            // then
+            assertFalse(result.replayed());
+            assertFalse(result.attempt().isComplete());
+            assertEquals(0L, result.expansionCount());
+            assertEquals(
+                    Optional.of(
+                            AutomaticOccurrenceResolutionCoordinator.StopReason
+                                    .UNRESOLVED_DEMANDS),
+                    result.automaticResolutionStopReason());
+            assertEquals(1, result.unresolvedDemands().size());
+            ManagedOccurrenceResolver.UnresolvedDemand unresolved =
+                    result.unresolvedDemands().get(0);
+            assertEquals(demand, unresolved.demand());
+            assertEquals(
+                    ManagedOccurrenceResolver.ResolutionStatus
+                            .MISSING_EXACT_CONTENT,
+                    unresolved.status());
         }
     }
 

@@ -1,7 +1,5 @@
 package blue.coordination.integration;
 
-import blue.coordination.api.CoordinationErrorCode;
-import blue.coordination.api.CoordinationException;
 import blue.coordination.api.DocumentRevision;
 import blue.coordination.api.Operation;
 import blue.coordination.api.SessionStatus;
@@ -159,6 +157,14 @@ final class SharedManagedChildTwoParentsTest {
                     "embedded-parent-one").size();
             int secondParentHistoryBefore = engine.history(
                     "embedded-parent-two").size();
+            TestEngine.DocumentView firstParentReadyBefore =
+                    engine.readyDocument("embedded-parent-one");
+            TestEngine.DocumentView secondParentReadyBefore =
+                    engine.readyDocument("embedded-parent-two");
+            assertEquals(SessionStatus.READY,
+                    firstParentReadyBefore.status());
+            assertEquals(SessionStatus.READY,
+                    secondParentReadyBefore.status());
             EngineMetrics.MetricsSnapshot beforeFailure =
                     engine.metricsSnapshot();
             engine.failOnceAt(TestEngine.FailurePoint
@@ -200,12 +206,40 @@ final class SharedManagedChildTwoParentsTest {
             assertEquals(0L, plan(
                     engine, "embedded-parent-two").link()
                     .appliedChildEpoch());
+            TestEngine.DocumentView firstParentCommittedAfterFailure =
+                    engine.session("embedded-parent-one");
+            TestEngine.DocumentView secondParentCommittedAfterFailure =
+                    engine.session("embedded-parent-two");
             assertEquals(SessionStatus.CATCHING_UP,
-                    engine.session("embedded-parent-one").status());
+                    firstParentCommittedAfterFailure.status());
             assertEquals(SessionStatus.CATCHING_UP,
-                    engine.session("embedded-parent-two").status());
-            assertNotReady(engine, "embedded-parent-one");
-            assertNotReady(engine, "embedded-parent-two");
+                    secondParentCommittedAfterFailure.status());
+            assertEquals(Math.addExact(
+                            firstParentReadyBefore.epoch(), 1L),
+                    firstParentCommittedAfterFailure.epoch(),
+                    "the first parent commit survives above its ready head");
+            assertEquals(secondParentReadyBefore.epoch(),
+                    secondParentCommittedAfterFailure.epoch(),
+                    "the pending sibling keeps its committed head");
+            TestEngine.DocumentView firstParentReadyAfterFailure =
+                    engine.readyDocument("embedded-parent-one");
+            TestEngine.DocumentView secondParentReadyAfterFailure =
+                    engine.readyDocument("embedded-parent-two");
+            assertEquals(SessionStatus.CATCHING_UP,
+                    firstParentReadyAfterFailure.status());
+            assertEquals(SessionStatus.CATCHING_UP,
+                    secondParentReadyAfterFailure.status());
+            assertEquals(firstParentReadyBefore.epoch(),
+                    firstParentReadyAfterFailure.epoch());
+            assertEquals(secondParentReadyBefore.epoch(),
+                    secondParentReadyAfterFailure.epoch());
+            assertEquals(firstParentReadyBefore.current().blueId(),
+                    firstParentReadyAfterFailure.current().blueId(),
+                    "the surviving commit must not overtake the prior ready "
+                            + "head");
+            assertEquals(secondParentReadyBefore.current().blueId(),
+                    secondParentReadyAfterFailure.current().blueId(),
+                    "pending sibling work must retain the prior ready head");
 
             engine.clearFailureInjection();
             EngineMetrics.MetricsSnapshot beforeRetry =
@@ -251,16 +285,6 @@ final class SharedManagedChildTwoParentsTest {
             assertEquals(SessionStatus.READY,
                     engine.readyDocument("embedded-parent-two").status());
         }
-    }
-
-    private static void assertNotReady(
-            TestEngine engine,
-            String documentId) {
-        CoordinationException failure = assertThrows(
-                CoordinationException.class,
-                () -> engine.readyDocument(documentId));
-        assertEquals(CoordinationErrorCode.DOCUMENT_NOT_READY,
-                failure.code());
     }
 
     private static long revisionsCausedBy(
