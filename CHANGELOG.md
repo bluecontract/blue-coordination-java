@@ -3,6 +3,37 @@
 This project follows Semantic Versioning. Release candidates may still refine
 the new 3.x API before the first stable 3.0.0 release.
 
+## 3.0.0-rc.5 - retained managed-epoch catch-up candidate
+
+### Added
+
+- Complete Coordination managed-epoch receipts, duplicate-preserving event
+  occurrences, occurrence-specific catch-up plans, extendable barriers,
+  committed-versus-ready heads, and bounded application/audit SDK surfaces.
+- Historical matching for an existing authored initial, initialized epoch
+  zero, and unique retained epochs, with current-state precedence and explicit
+  selector support for ambiguous history.
+- Durable application receipts, exact failed-attempt evidence, response-loss
+  reconciliation, restart-safe route rebuilding, and indexed locality metrics.
+
+### Changed
+
+- The candidate build consumes the invocation-owned immutable
+  `blue.language` `3.1.0-rc.23` stage derived from published rc.22 sources and
+  the additive Contracts transition-receipt change. Published-artifact mode
+  remains pinned to `3.1.0-rc.22`; Maven Local and composite builds remain
+  forbidden.
+- The drain scheduler fences later consumer work behind active barriers while
+  allowing unrelated source and sibling-parent lanes to continue and extend
+  catch-up frontiers.
+
+### Known limitations
+
+- Timeline-provider completeness, Mandates, MyOS persistence/UI integration,
+  and production multi-node durability are outside this candidate. The
+  release remains unpublished, in-memory, sequential, and not
+  production-ready.
+
 ## 3.0.0-rc.4 - dynamic contract and occurrence evolution candidate
 
 ### Added

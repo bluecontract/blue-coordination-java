@@ -22,13 +22,41 @@ def coordinationStageSchema =
 def coordinationStageGroup = 'blue.coordination'
 def coordinationStageArtifact = 'blue-coordination-java'
 def coordinationStageVersion = project.version.toString()
-def acceptedCompatibilityBase =
-        'c6f9c80d0a33c6c209c7ba3d2b8bff89a223fc5f'
+def acceptedCompatibilityCoordinate =
+        'blue.coordination:blue-coordination-java:3.0.0-rc.4'
+def acceptedCompatibilityJarSha256 =
+        'a8dc99f5bcc62902496ee3bdb5e8f085b78d9781e7928ef20f5a83b65581cd34'
+def acceptedCompatibilitySourceCommit =
+        'acf02f3ce7c141e4fc9eabb6f19dacde471e30f4'
 def coordinationUsesImmutableContracts = providers.gradleProperty(
         'blueDependencyMode').getOrElse('published-artifact').trim()
         == 'immutable-staged-contracts'
 
 configurations.runtimeClasspath.resolutionStrategy.failOnVersionConflict()
+
+repositories {
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = 'publishedCoordinationCompatibilityCentral'
+                url = uri('https://repo1.maven.org/maven2')
+                metadataSources {
+                    mavenPom()
+                    artifact()
+                }
+            }
+        }
+        filter {
+            includeModule coordinationStageGroup, coordinationStageArtifact
+        }
+    }
+}
+
+def acceptedCompatibilityArtifact = configurations.detachedConfiguration(
+        dependencies.create(acceptedCompatibilityCoordinate))
+acceptedCompatibilityArtifact.transitive = false
+acceptedCompatibilityArtifact.resolutionStrategy.failOnVersionConflict()
+acceptedCompatibilityArtifact.resolutionStrategy.deactivateDependencyLocking()
 
 def sha256Hex = { File input ->
     MessageDigest digest = MessageDigest.getInstance('SHA-256')
@@ -506,34 +534,111 @@ def verifyImmutableStagedCoordinationRepository = tasks.register(
     }
 }
 
-def stagedCoordinationConsumer = tasks.register(
-        'stagedCoordinationConsumer', GradleBuild) {
+def stagedConsumerReport = { int javaVersion ->
+    layout.buildDirectory.file(
+            'reports/dynamic-evolution/staged-consumer-java'
+                    + javaVersion + '.json').get().asFile
+}
+def stagedConsumerAggregateReport = layout.buildDirectory.file(
+        'reports/dynamic-evolution/staged-consumers.json')
+
+def purgeStagedConsumerReceipts = tasks.register(
+        'purgeStagedConsumerReceipts') {
     group = 'verification'
-    description = 'Resolves and executes an isolated consumer from the two immutable repositories.'
-    dependsOn verifyImmutableStagedCoordinationRepository
-    dir = file('smoke-tests/staged-coordination')
-    tasks = ['clean', 'stagedConsumerCheck']
-    startParameter.refreshDependencies = true
-    doFirst {
-        File coordinationRepository = checkedAbsoluteRepository(
-                'coordinationStagedRepository')
-        File coordinationManifest = new File(
-                coordinationRepository, 'artifact-manifest.json')
-        Map contractsBinding = inspectContractsBinding()
-        startParameter.projectProperties = [
-                coordinationRepository:
-                        coordinationRepository.absolutePath,
-                coordinationManifestSha256:
-                        sha256IdentityFor(coordinationManifest),
-                coordinationVersion: coordinationStageVersion,
-                contractsRepository:
-                        contractsBinding.repository.absolutePath,
-                contractsManifestSha256:
-                        contractsBinding.manifestIdentity,
-                smokeReport: layout.buildDirectory.file(
-                        'reports/dynamic-evolution/staged-consumer.json')
-                        .get().asFile.absolutePath
-        ]
+    description = 'Deletes stale staged-consumer evidence before either runtime lane executes.'
+    doLast {
+        delete stagedConsumerReport(17), stagedConsumerReport(21),
+                stagedConsumerAggregateReport.get().asFile
+    }
+}
+
+def registerStagedCoordinationConsumer = {
+        String taskName, int javaVersion ->
+    tasks.register(taskName, GradleBuild) {
+        group = 'verification'
+        description = 'Resolves and executes the isolated staged consumer on Java '
+                + javaVersion + '.'
+        dependsOn verifyImmutableStagedCoordinationRepository,
+                purgeStagedConsumerReceipts
+        dir = file('smoke-tests/staged-coordination')
+        tasks = ['clean', 'stagedConsumerCheck']
+        startParameter.refreshDependencies = true
+        doFirst {
+            File coordinationRepository = checkedAbsoluteRepository(
+                    'coordinationStagedRepository')
+            File coordinationManifest = new File(
+                    coordinationRepository, 'artifact-manifest.json')
+            Map contractsBinding = inspectContractsBinding()
+            File report = stagedConsumerReport(javaVersion)
+            delete report
+            startParameter.projectProperties = [
+                    coordinationRepository:
+                            coordinationRepository.absolutePath,
+                    coordinationManifestSha256:
+                            sha256IdentityFor(coordinationManifest),
+                    coordinationVersion: coordinationStageVersion,
+                    contractsRepository:
+                            contractsBinding.repository.absolutePath,
+                    contractsManifestSha256:
+                            contractsBinding.manifestIdentity,
+                    testJavaVersion: String.valueOf(javaVersion),
+                    consumerBuildDirectory: layout.buildDirectory.dir(
+                            'staged-consumer/java' + javaVersion)
+                            .get().asFile.absolutePath,
+                    smokeReport: report.absolutePath
+            ]
+        }
+    }
+}
+
+def stagedCoordinationConsumerJava17 = registerStagedCoordinationConsumer(
+        'stagedCoordinationConsumerJava17', 17)
+def stagedCoordinationConsumerJava21 = registerStagedCoordinationConsumer(
+        'stagedCoordinationConsumerJava21', 21)
+stagedCoordinationConsumerJava21.configure {
+    mustRunAfter stagedCoordinationConsumerJava17
+}
+
+def stagedCoordinationConsumer = tasks.register(
+        'stagedCoordinationConsumer') {
+    group = 'verification'
+    description = 'Executes and aggregates the Java 17 and Java 21 immutable staged-consumer lanes.'
+    dependsOn stagedCoordinationConsumerJava17,
+            stagedCoordinationConsumerJava21
+    doLast {
+        List<Map<String, Object>> lanes = [17, 21].collect { javaVersion ->
+            File report = stagedConsumerReport(javaVersion)
+            if (!regularFile(report)) {
+                throw new GradleException(
+                        'Staged-consumer Java ' + javaVersion
+                                + ' receipt is missing: ' + report)
+            }
+            Map receipt = new JsonSlurper().parse(report) as Map
+            if (receipt.schema
+                    != 'blue-coordination-staged-consumer/2.0'
+                    || receipt.status != 'PASS'
+                    || receipt.requestedJavaVersion != javaVersion
+                    || receipt.compileRelease != 17
+                    || receipt.runtimeVersionAssertion != 'PASS') {
+                throw new GradleException(
+                        'Staged-consumer Java ' + javaVersion
+                                + ' receipt is invalid: ' + report)
+            }
+            [
+                    javaVersion: javaVersion,
+                    report: rootDir.toPath().relativize(report.toPath())
+                            .toString().replace(File.separator, '/'),
+                    status: receipt.status
+            ]
+        }
+        File aggregate = stagedConsumerAggregateReport.get().asFile
+        aggregate.parentFile.mkdirs()
+        aggregate.setText(canonicalJson([
+                schema: 'blue-coordination-staged-consumers/1.0',
+                status: 'PASS',
+                compileRelease: 17,
+                lanes: lanes
+        ]), 'UTF-8')
     }
 }
 
@@ -607,74 +712,48 @@ def inspectPublicSurface = { File jar, File javap ->
 def verifyAcceptedBaseApiCompatibility = tasks.register(
         'verifyAcceptedBaseApiCompatibility') {
     group = 'verification'
-    description = 'Rejects public API or binary removals against accepted base c6f9c80.'
+    description = 'Rejects API or binary removals against the exact published Coordination rc.4 JAR.'
     dependsOn tasks.named('jar')
+    inputs.property('acceptedCompatibilityCoordinate',
+            acceptedCompatibilityCoordinate)
+    inputs.property('acceptedCompatibilityJarSha256',
+            acceptedCompatibilityJarSha256)
+    inputs.property('acceptedCompatibilitySourceCommit',
+            acceptedCompatibilitySourceCommit)
     outputs.upToDateWhen { false }
     doLast {
-        Map contractsBinding = inspectContractsBinding()
-        File compatibilityRoot = layout.buildDirectory.dir(
-                'compatibility/c6f9c80').get().asFile
-        delete compatibilityRoot
-        compatibilityRoot.mkdirs()
-        File archive = new File(compatibilityRoot, 'baseline.zip')
-        Process archiveProcess = new ProcessBuilder(
-                'git', 'archive', '--format=zip',
-                '--output=' + archive.absolutePath,
-                acceptedCompatibilityBase)
-                .directory(rootDir).redirectErrorStream(true).start()
-        String archiveOutput = archiveProcess.inputStream.getText('UTF-8')
-        if (archiveProcess.waitFor() != 0) {
+        def resolvedArtifacts = acceptedCompatibilityArtifact
+                .resolvedConfiguration.resolvedArtifacts
+        if (resolvedArtifacts.size() != 1) {
             throw new GradleException(
-                    'Cannot extract accepted API base: ' + archiveOutput)
+                    'Published compatibility resolution selected '
+                            + resolvedArtifacts.size()
+                            + ' artifacts; expected exactly one')
         }
-        File baselineSource = new File(compatibilityRoot, 'source')
-        copy { from zipTree(archive); into baselineSource }
-        File repositoryInit = new File(
-                compatibilityRoot, 'immutable-contracts.init.gradle')
-        String escapedContractsRepository = contractsBinding.repository
-                .absolutePath.replace('\\', '\\\\')
-                .replace("'", "\\'")
-        repositoryInit.setText("""
-                allprojects {
-                    repositories {
-                        exclusiveContent {
-                            forRepository {
-                                maven {
-                                    name = 'acceptedBaseImmutableContracts'
-                                    url = uri('${escapedContractsRepository}')
-                                    metadataSources {
-                                        mavenPom()
-                                        artifact()
-                                    }
-                                }
-                            }
-                            filter { includeGroup 'blue.language' }
-                        }
-                    }
-                }
-                """.stripIndent(), 'UTF-8')
-        List<String> command = [
-                file('gradlew').absolutePath,
-                '--no-daemon', '--no-build-cache', '--max-workers=1',
-                '--init-script', repositoryInit.absolutePath,
-                '-p', baselineSource.absolutePath,
-                'jar', '-PblueDependencyMode=published-artifact',
-                '-PtestJavaVersion=17'
-        ]
-        Process baselineBuild = new ProcessBuilder(command)
-                .directory(baselineSource).redirectErrorStream(true).start()
-        baselineBuild.inputStream.eachLine { logger.lifecycle(it) }
-        if (baselineBuild.waitFor() != 0) {
-            throw new GradleException(
-                    'Accepted-base compatibility JAR could not be built')
-        }
-        File baselineJar = new File(baselineSource,
-                'build/libs/blue-coordination-java-3.0.0-rc.3.jar')
+        def baselineArtifact = resolvedArtifacts.iterator().next()
+        String selectedCoordinate = [
+                baselineArtifact.moduleVersion.id.group,
+                baselineArtifact.name,
+                baselineArtifact.moduleVersion.id.version
+        ].join(':')
+        File baselineJar = baselineArtifact.file
         File currentJar = tasks.named('jar').get()
                 .archiveFile.get().asFile
-        if (!regularFile(baselineJar) || !regularFile(currentJar)) {
+        if (selectedCoordinate != acceptedCompatibilityCoordinate
+                || baselineArtifact.extension != 'jar'
+                || baselineArtifact.classifier != null
+                || !regularFile(baselineJar)
+                || !regularFile(currentJar)) {
             throw new GradleException(
-                    'Compatibility JARs are missing')
+                    'Published compatibility resolution did not return the '
+                            + 'exact runtime JAR ' + acceptedCompatibilityCoordinate)
+        }
+        String baselineJarSha256 = sha256Hex(baselineJar)
+        if (baselineJarSha256 != acceptedCompatibilityJarSha256) {
+            throw new GradleException(
+                    'Published compatibility JAR identity differs for '
+                            + acceptedCompatibilityCoordinate + ': sha256:'
+                            + baselineJarSha256)
         }
         def launcher = javaToolchains.launcherFor {
             languageVersion = JavaLanguageVersion.of(17)
@@ -713,9 +792,13 @@ def verifyAcceptedBaseApiCompatibility = tasks.register(
                 .get().asFile
         report.parentFile.mkdirs()
         report.setText(canonicalJson([
-                schema: 'blue-coordination-api-binary-compatibility/1.0',
+                schema: 'blue-coordination-api-binary-compatibility/2.0',
                 status: compatible ? 'PASS' : 'FAIL',
-                acceptedBase: acceptedCompatibilityBase,
+                acceptedBaseCoordinate: acceptedCompatibilityCoordinate,
+                acceptedBaseJarSha256: 'sha256:'
+                        + acceptedCompatibilityJarSha256,
+                acceptedBaseSourceCommit:
+                        acceptedCompatibilitySourceCommit,
                 currentVersion: coordinationStageVersion,
                 baselinePublicClasses: baseline.size(),
                 currentPublicClasses: current.size(),
@@ -727,7 +810,8 @@ def verifyAcceptedBaseApiCompatibility = tasks.register(
         if (!compatible) {
             throw new GradleException(
                     'Public API/binary compatibility failed against '
-                            + acceptedCompatibilityBase + '; see ' + report)
+                            + acceptedCompatibilityCoordinate
+                            + '; see ' + report)
         }
     }
 }
@@ -754,17 +838,46 @@ tasks.register('verifyCoordinationStagingTooling') {
                 'assembleImmutableStagedCoordinationRepository',
                 'verifyImmutableStagedCoordinationRepository',
                 'stagedCoordinationConsumer',
+                'stagedCoordinationConsumerJava17',
+                'stagedCoordinationConsumerJava21',
+                'staged-consumer-java17.json',
+                'staged-consumer-java21.json',
                 'verifyAcceptedBaseApiCompatibility',
                 'coordinationSourceCommit',
-                'coordinationStagedRepository'
+                'coordinationStagedRepository',
+                'blue.coordination:blue-coordination-java:3.0.0-rc.4',
+                'a8dc99f5bcc62902496ee3bdb5e8f085b78d9781e7928ef20f5a83b65581cd34',
+                'acf02f3ce7c141e4fc9eabb6f19dacde471e30f4',
+                'https://repo1.maven.org/maven2',
+                'deactivateDependencyLocking()'
         ].each { required ->
             if (!staging.contains(required)) {
                 failures << "missing staging contract ${required}"
             }
         }
+        [
+                "'git', " + "'archive'",
+                'blue-coordination-java-3.0.0-' + 'rc.3.jar',
+                'c6f9c80d0a33c6c209c7' + 'ba3d2b8bff89a223fc5f'
+        ].each { retired ->
+            if (staging.contains(retired)) {
+                failures << "retired source-built compatibility base ${retired}"
+            }
+        }
         if (!fixture.contains("includeGroup 'blue.coordination'")
                 || !fixture.contains("includeGroup 'blue.language'")) {
             failures << 'consumer repositories are not group-exclusive'
+        }
+        [
+                "providers.gradleProperty('testJavaVersion')",
+                'options.release = 17',
+                'javaLauncher =',
+                'Runtime.version().feature()',
+                'runtimeVersionAssertion'
+        ].each { required ->
+            if (!fixture.contains(required)) {
+                failures << "missing staged-consumer runtime contract ${required}"
+            }
         }
         if (!failures.empty) {
             throw new GradleException(failures.join('; '))

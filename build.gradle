@@ -484,16 +484,55 @@ def publicBoundarySources = files(
         fileTree('src/main/java/blue/coordination/sdk') {
             include '**/*.java'
         })
-// Dynamic-evolution maintainability guardrails. These are deliberately bounded
-// caps over the frozen SDK baseline plus reviewed automatic occurrence
-// resolution, managed transition evidence, exact-provider and runtime
-// conformance and prepared route-delta evidence additions: currently 182
-// production sources, 50,119 lines and 57 public api+sdk source types. They
-// are not historical Round 13 counts and are not performance evidence.
+// Retained managed-epoch maintainability guardrails. These are deliberately
+// bounded caps over the frozen rc.4 SDK baseline plus the reviewed receipt,
+// matching, occurrence-plan, barrier, application, readiness, audit, and
+// recovery responsibilities: currently 215 production sources, 63,956 lines
+// and 77 public api+sdk source types. The two additional public types are the
+// durable/API and SDK projections of pre-PROCESS evidence failure; the two
+// additional internal types split invocation capture and source verification
+// out of the application executor. They are not historical Round 13 counts and
+// are not performance evidence.
 def currentProductionShapeLimits = [
-        classes: 184,
-        lines: 50_119L,
-        publicApiTypes: 58
+        classes: 215,
+        lines: 63_956L,
+        publicApiTypes: 77,
+        maxLinesPerRetainedManagedEpochSource: 1_166L
+]
+def retainedManagedEpochProductionSources = [
+        'src/main/java/blue/coordination/api/ManagedCatchUpBarrier.java',
+        'src/main/java/blue/coordination/api/ManagedCatchUpBarrierStatus.java',
+        'src/main/java/blue/coordination/api/ManagedCatchUpStatus.java',
+        'src/main/java/blue/coordination/api/ManagedDocumentReadiness.java',
+        'src/main/java/blue/coordination/api/ManagedEpochApplicationAttempt.java',
+        'src/main/java/blue/coordination/api/ManagedEpochApplicationReceipt.java',
+        'src/main/java/blue/coordination/api/ManagedEpochApplicationWork.java',
+        'src/main/java/blue/coordination/api/ManagedEpochEvidenceFailure.java',
+        'src/main/java/blue/coordination/api/ManagedEpochReceipt.java',
+        'src/main/java/blue/coordination/api/ManagedEventOccurrence.java',
+        'src/main/java/blue/coordination/api/ManagedIdentity.java',
+        'src/main/java/blue/coordination/api/ManagedOccurrenceCatchUpPlan.java',
+        'src/main/java/blue/coordination/internal/CatchUpPlanStore.java',
+        'src/main/java/blue/coordination/internal/ContractsManagedEpochSelectionPlan.java',
+        'src/main/java/blue/coordination/internal/ManagedCatchUpPlanIndex.java',
+        'src/main/java/blue/coordination/internal/ManagedCatchUpPlanner.java',
+        'src/main/java/blue/coordination/internal/ManagedCatchUpWorkIndex.java',
+        'src/main/java/blue/coordination/internal/ManagedEpochApplicationExecutor.java',
+        'src/main/java/blue/coordination/internal/ManagedEpochEvidenceException.java',
+        'src/main/java/blue/coordination/internal/ManagedEpochInvocationCapturer.java',
+        'src/main/java/blue/coordination/internal/ManagedEpochReceiptMapper.java',
+        'src/main/java/blue/coordination/internal/ManagedEpochReceiptStore.java',
+        'src/main/java/blue/coordination/internal/ManagedEpochSourceEvidenceVerifier.java',
+        'src/main/java/blue/coordination/internal/PersistentMinimumMap.java',
+        'src/main/java/blue/coordination/sdk/DrainBudget.java',
+        'src/main/java/blue/coordination/sdk/ManagedEpochApplicationAttempt.java',
+        'src/main/java/blue/coordination/sdk/ManagedEpochApplicationReceipt.java',
+        'src/main/java/blue/coordination/sdk/ManagedEpochApplicationWork.java',
+        'src/main/java/blue/coordination/sdk/ManagedEpochEvidenceFailure.java',
+        'src/main/java/blue/coordination/sdk/ManagedEpochReceipt.java',
+        'src/main/java/blue/coordination/sdk/ManagedEpochSelector.java',
+        'src/main/java/blue/coordination/sdk/ManagedEventOccurrence.java',
+        'src/main/java/blue/coordination/sdk/SourceOrder.java'
 ]
 def forbiddenArchitectureTokens = [
         'AutonomousLink', 'TemporalWave', 'ConsistencyMode',
@@ -525,6 +564,24 @@ tasks.register('validateProductionShape') {
         if (apiSources.size() > currentProductionShapeLimits.publicApiTypes) {
             failures << ("public API types ${apiSources.size()} > "
                     + currentProductionShapeLimits.publicApiTypes)
+        }
+        long maximumRetainedManagedEpochSourceLines = 0L
+        retainedManagedEpochProductionSources.each { relative ->
+            File source = file(relative)
+            if (!source.isFile()) {
+                failures << "reviewed retained managed-epoch source is missing: ${relative}"
+                return
+            }
+            long sourceLines = source.readLines('UTF-8').size()
+            maximumRetainedManagedEpochSourceLines = Math.max(
+                    maximumRetainedManagedEpochSourceLines, sourceLines)
+            if (sourceLines > currentProductionShapeLimits
+                    .maxLinesPerRetainedManagedEpochSource) {
+                failures << ("retained managed-epoch source ${relative} has "
+                        + "${sourceLines} lines > "
+                        + currentProductionShapeLimits
+                                .maxLinesPerRetainedManagedEpochSource)
+            }
         }
         ['engine', 'fastpath'].each { legacy ->
             if (file("src/main/java/blue/coordination/${legacy}").exists()) {
@@ -562,7 +619,12 @@ tasks.register('validateProductionShape') {
         if (!failures.empty) throw new GradleException(failures.join('; '))
         logger.lifecycle(
                 "Production shape: ${classes} classes, ${lines} lines, "
-                        + "${apiSources.size()} public API types")
+                        + "${apiSources.size()} public API types; retained "
+                        + "managed-epoch max source "
+                        + "${maximumRetainedManagedEpochSourceLines}/"
+                        + currentProductionShapeLimits
+                                .maxLinesPerRetainedManagedEpochSource
+                        + " lines")
     }
 }
 
@@ -587,7 +649,8 @@ tasks.register('verifyPublicApiBoundary') {
                 'src/main/java/blue/coordination/internal/BundledContracts10Release.java',
                 'src/main/java/blue/coordination/internal/Contracts10AuthoredClosureCompiler.java',
                 'src/main/java/blue/coordination/internal/Contracts10StaticEmbeddedAdmissionCompiler.java',
-                'src/main/java/blue/coordination/internal/ContractsManagedDraftPlan.java'
+                'src/main/java/blue/coordination/internal/ContractsManagedDraftPlan.java',
+                'src/main/java/blue/coordination/internal/ContractsManagedEpochSelectionPlan.java'
         ] as Set
         fileTree('src/main/java/blue/coordination/internal') {
             include '**/*.java'
@@ -3067,16 +3130,35 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
         List<String> command = windows
                 ? ['cmd', '/d', '/c', wrapper.absolutePath]
                 : [wrapper.absolutePath]
-        command.addAll([
-                '--no-daemon', '--max-workers=1', 'help',
-                '-PtestJavaVersion=' + providers.gradleProperty(
-                        'testJavaVersion').getOrElse('17'),
+        List<String> focusedTasks = [
+                'clean',
+                'test',
+                'verifyActiveDependencyLane',
+                'dependencyPreflight',
                 'verifyDependencyModeIsolation'
+        ]
+        List<String> focusedTests = [
+                'blue.coordination.sdk.SdkCanonicalRetainedManagedEpochScenarioTest',
+                'blue.coordination.internal.ManagedSameStateEpochPublicationTest',
+                'blue.coordination.sdk.SdkManagedDraftAcceptanceTest',
+                'blue.coordination.sdk.SdkManagedEpochCycleAcceptanceTest'
+        ]
+        command.addAll([
+                '--no-daemon', '--no-build-cache', '--max-workers=1'
         ])
+        command.addAll(['clean', 'test'])
+        focusedTests.each { focusedTest ->
+            command.addAll(['--tests', focusedTest])
+        }
+        command.addAll(focusedTasks.drop(2))
+        command.add(
+                '-PtestJavaVersion=' + providers.gradleProperty(
+                        'testJavaVersion').getOrElse('17'))
         if (immutableStagedContracts) {
             command.addAll([
-                    'verifyImmutableStagedContractsRepository',
                     '-PblueDependencyMode=immutable-staged-contracts',
+                    '-PblueContractsVersion=' +
+                            immutableStagedLanguageVersion,
                     '-PblueContractsRepository=' +
                             file(stagedContractsRepositoryValue).canonicalPath,
                     '-PblueContractsManifestSha256=' +
@@ -3084,7 +3166,6 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
             ])
         } else {
             command.addAll([
-                    'verifyPublishedDependencyIsolation',
                     '-PblueDependencyMode=published-artifact'
             ])
         }
@@ -3108,7 +3189,7 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
         File receipt = verificationReceipt.get().asFile
         receipt.parentFile.mkdirs()
         def receiptValue = [
-                schemaId: 'blue-coordination-contracts10-source-archive-verification-v1',
+                schemaId: 'blue-coordination-contracts10-source-archive-verification-v2',
                 archiveName: sourceArchive.name,
                 archiveSha256: archiveHash,
                 checksumMode: 'DETACHED_SHA256_SIDECAR',
@@ -3120,11 +3201,11 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
                 java: providers.gradleProperty(
                         'testJavaVersion').getOrElse('17'),
                 extractedConfiguration: 'PASS',
+                compileStatus: 'PASS',
                 dependencyIsolationStatus: 'PASS',
-                focusedTestsStatus: 'NOT_EXECUTED',
-                publishedArtifactCompatibility: 'PASS',
-                publishedArtifactCompatibilityReason: null,
-                focusedTasks: []
+                focusedTestsStatus: 'PASS',
+                focusedTasks: focusedTasks,
+                focusedTests: focusedTests
         ]
         receipt.setText(groovy.json.JsonOutput.prettyPrint(
                 groovy.json.JsonOutput.toJson(receiptValue)) + '\n',
