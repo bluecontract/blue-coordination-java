@@ -1,7 +1,7 @@
 # Retained managed-epoch catch-up
 
 This page specifies the retained managed-epoch profile implemented by the
-`3.0.0-rc.5` Coordination source. The profile is staged, unpublished, and
+`3.0.0-rc.6` Coordination source. The profile is staged, unpublished, and
 non-production. It is not part of the published `3.0.0-rc.4` Maven Central
 artifact and this page is not release evidence.
 
@@ -218,6 +218,16 @@ finite source stream therefore eventually reaches READY after it stops; an
 unbounded stream keeps extending the frontier and remains truthfully
 `CATCHING_UP`. Direct work for that consumer remains behind the barrier.
 
+Durable hosts can mirror that exact private turn without guessing from the
+work index. `auditNextProcessingSelection()` returns `NONE`, `JOURNAL`, or the
+exact next `MANAGED_EPOCH_APPLICATION` work without changing state. After the
+host durably claims the selected identity, it invokes either
+`drainManagedEpochApplication(workIdentity)` or `drainJournal(...)`. Each call
+revalidates the same scheduler before mutation. The managed call processes only
+that identity. The journal call selects at most one ordinary entry and has no
+managed fallback; repeated slices retain canonical continuation and fairness.
+Legacy drain calls keep their existing combined behavior.
+
 ## Application and cycles
 
 For each due epoch, Coordination verifies the public receipt against the exact
@@ -236,7 +246,13 @@ cursor advance, graph/components, and epoch/application receipts. Unresolved or
 ambiguous evidence publishes neither the occurrence nor a barrier extension.
 This candidate supports that nested existing-lineage case. It does not support
 creating a genuinely new authored lineage from a nested handler during catch-up;
-that case remains fail-closed.
+that case remains fail-closed. The complete committing Contracts attempt is
+returned as an unpublished `ManagedEpochApplicationAttempt` with typed
+`UNSUPPORTED_NESTED_NEW_LINEAGE` publication-failure details. Tentative
+consumer and new-lineage publication is rolled back, while the exact owning
+plan and barrier atomically become `BLOCKED` at the unchanged cursor and the
+due row is removed. This terminal outcome cannot repeatedly win fair selection
+or stall independent consumers.
 
 Catch-up does not introduce a parent-recursion engine or a second cyclic
 scheduler. If the affected managed closure is cyclic, Contracts uses its
@@ -334,7 +350,7 @@ made eligible.
 
 ## Audit surface
 
-The rc.5 source profile exposes these read-only SDK diagnostics through
+The rc.6 source profile exposes these read-only SDK diagnostics through
 `AdvancedCoordination`:
 
 - `auditManagedOccurrence(sourceDocumentId, sourcePath)`;
@@ -345,7 +361,8 @@ The rc.5 source profile exposes these read-only SDK diagnostics through
   `auditManagedCatchUpPlans(consumerDocumentId)`;
 - `auditManagedCatchUpBarrier(barrierIdentity)`;
 - `auditManagedEpochApplicationWork(workIdentity)`;
-- `auditManagedEpochApplicationReceipt(applicationReceiptIdentity)`; and
+- `auditManagedEpochApplicationReceipt(applicationReceiptIdentity)`;
+- `auditNextProcessingSelection()` for the read-only exact fair lane; and
 - `auditManagedDocumentReadiness(documentId)` plus `auditDocument(documentId)`
   for committed-versus-ready inspection.
 
@@ -356,8 +373,8 @@ commands.
 
 This source profile does not claim:
 
-- a published `3.0.0-rc.5` coordinate, stable API, production readiness, or
-  completed release gates;
+- a published `3.0.0-rc.6` coordinate, stable API, production readiness, or
+  authority to publish the staged candidate;
 - Maven Local, composite substitution, a mutable sibling checkout, or remote
   fallback for staged `blue.language` artifacts;
 - re-execution of source INITIALIZE or source Timeline entries;
@@ -369,7 +386,7 @@ This source profile does not claim:
 - changing Blue Language model/core/mapping, BlueId, BEX, or Repository
   semantics.
 
-## Build the rc.5 source profile
+## Build the rc.6 source profile
 
 Use a closed immutable Contracts Maven repository outside this source tree and
 pin its manifest on every invocation:
@@ -386,11 +403,11 @@ pin its manifest on every invocation:
 The stage manifest must use `blue-staged-dependency-repository/1.0`, bind its
 exact source commit and artifacts, and pass the build's checksum validation.
 The command above is the required verification shape, not a statement that the
-gate has been run for a particular checkout. Do not publish or deploy an rc.5
+gate has been run for a particular checkout. Do not publish or deploy an rc.6
 artifact without separate release authority.
 
 After the required gates actually pass on a clean committed source tree, an
-invocation may export the rc.5 JAR, POM, sources, Javadocs, checksums, and bound
+invocation may export the rc.6 JAR, POM, sources, Javadocs, checksums, and bound
 manifest to a different immutable Maven repository:
 
 ```bash

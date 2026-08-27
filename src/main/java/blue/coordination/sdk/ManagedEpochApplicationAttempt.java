@@ -1,9 +1,12 @@
 package blue.coordination.sdk;
 
+import blue.coordination.api.CoordinationErrorCode;
 import blue.coordination.api.DocumentId;
 
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -25,7 +28,8 @@ public record ManagedEpochApplicationAttempt(
         Optional<AutomaticResolutionStopReason>
                 automaticResolutionStopReason,
         List<ManagedOccurrenceResolutionIssue>
-                managedOccurrenceResolutionIssues) {
+                managedOccurrenceResolutionIssues,
+        Optional<PublicationFailure> publicationFailure) {
 
     /**
      * Preserves the original constructor for callers that do not consume
@@ -38,7 +42,7 @@ public record ManagedEpochApplicationAttempt(
             boolean replayed,
             Optional<ManagedEpochApplicationReceipt> receipt) {
         this(work, attempt, published, replayed, receipt, 0L,
-                Optional.empty(), List.of());
+                Optional.empty(), List.of(), Optional.empty());
     }
 
     /**
@@ -62,7 +66,32 @@ public record ManagedEpochApplicationAttempt(
                 receipt,
                 automaticRetryCount,
                 inferredStopReason(managedOccurrenceResolutionIssues),
-                managedOccurrenceResolutionIssues);
+                managedOccurrenceResolutionIssues,
+                Optional.empty());
+    }
+
+    /** Preserves the complete pre-publication-failure constructor. */
+    public ManagedEpochApplicationAttempt(
+            ManagedEpochApplicationWork work,
+            ProcessorAttempt attempt,
+            boolean published,
+            boolean replayed,
+            Optional<ManagedEpochApplicationReceipt> receipt,
+            long automaticRetryCount,
+            Optional<AutomaticResolutionStopReason>
+                    automaticResolutionStopReason,
+            List<ManagedOccurrenceResolutionIssue>
+                    managedOccurrenceResolutionIssues) {
+        this(
+                work,
+                attempt,
+                published,
+                replayed,
+                receipt,
+                automaticRetryCount,
+                automaticResolutionStopReason,
+                managedOccurrenceResolutionIssues,
+                Optional.empty());
     }
 
     /** Validates publication and receipt coherence. */
@@ -73,6 +102,8 @@ public record ManagedEpochApplicationAttempt(
         automaticResolutionStopReason = Objects.requireNonNull(
                 automaticResolutionStopReason,
                 "automaticResolutionStopReason");
+        publicationFailure = Objects.requireNonNull(
+                publicationFailure, "publicationFailure");
         managedOccurrenceResolutionIssues = List.copyOf(
                 Objects.requireNonNull(
                         managedOccurrenceResolutionIssues,
@@ -110,6 +141,22 @@ public record ManagedEpochApplicationAttempt(
                     "Only a suspended unpublished attempt may expose an "
                             + "automatic resolution stop reason");
         }
+        if (publicationFailure.isPresent()
+                && (published
+                || replayed
+                || !attempt.isComplete()
+                || !attempt.processResult().commits())) {
+            throw new IllegalArgumentException(
+                    "A publication failure requires one complete committing "
+                            + "but unpublished SDK attempt");
+        }
+        if (publicationFailure.isPresent()
+                && (automaticResolutionStopReason.isPresent()
+                || !managedOccurrenceResolutionIssues.isEmpty())) {
+            throw new IllegalArgumentException(
+                    "A publication failure cannot also be an automatic "
+                            + "resolution stop");
+        }
         boolean unresolvedStop = automaticResolutionStopReason
                 .filter(reason -> reason
                         == AutomaticResolutionStopReason.UNRESOLVED_DEMANDS)
@@ -137,6 +184,26 @@ public record ManagedEpochApplicationAttempt(
                         "Unresolved matching evidence repeats demand "
                                 + issue.demandIdentity());
             }
+        }
+    }
+
+    /** Stable owning-layer failure after Contracts completed but before commit. */
+    public record PublicationFailure(
+            CoordinationErrorCode code,
+            String message,
+            Map<String, String> details) {
+
+        /** Retains immutable exact failure fields for durable host evidence. */
+        public PublicationFailure {
+            code = Objects.requireNonNull(code, "code");
+            message = text(message, "message");
+            details = java.util.Collections.unmodifiableMap(
+                    new LinkedHashMap<>(Objects.requireNonNull(
+                            details, "details")));
+            details.forEach((key, value) -> {
+                text(key, "detail key");
+                text(value, "detail value");
+            });
         }
     }
 

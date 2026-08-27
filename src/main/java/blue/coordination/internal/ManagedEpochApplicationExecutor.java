@@ -1,5 +1,6 @@
 package blue.coordination.internal;
 
+import blue.coordination.api.CoordinationErrorCode;
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.DocumentRevision;
 import blue.coordination.api.ExactValue;
@@ -156,7 +157,8 @@ final class ManagedEpochApplicationExecutor {
                     true,
                     retained.automaticRetryCount(),
                     Optional.empty(),
-                    List.of());
+                    List.of(),
+                    Optional.empty());
         }
 
         WholeObjectStore.Mark attemptMark = objects.mark();
@@ -192,7 +194,8 @@ final class ManagedEpochApplicationExecutor {
                                 false,
                                 automatic.expansionCount(),
                                 automatic.automaticResolutionStopReason(),
-                                automatic.unresolvedDemands());
+                                automatic.unresolvedDemands(),
+                                Optional.empty());
                 objects.rollbackTo(attemptMark);
                 attemptMarkClosed = true;
                 return outcome;
@@ -212,8 +215,33 @@ final class ManagedEpochApplicationExecutor {
                             automatic.expansionCount(),
                             ManagedSurfacePublicationEvidence.committed(
                                     capture.invocation(), result));
-            ManagedEpochApplicationReceipt application = publish(
-                    capture, receipt, excludedConsumers);
+            ManagedEpochApplicationReceipt application;
+            try {
+                application = publish(capture, receipt, excludedConsumers);
+            } catch (UnsupportedNestedNewLineageException failure) {
+                objects.rollbackTo(attemptMark);
+                attemptMarkClosed = true;
+                documents.recordManagedEpochApplicationFailure(
+                        selected,
+                        CoordinationErrorCode.UNSUPPORTED_NESTED_NEW_LINEAGE
+                                .name(),
+                        failure.getMessage());
+                return new ContractsClosureAdapter.ManagedApplicationOutcome(
+                        selected,
+                        attempt,
+                        null,
+                        false,
+                        false,
+                        automatic.expansionCount(),
+                        Optional.empty(),
+                        List.of(),
+                        Optional.of(new ContractsClosureAdapter
+                                .ManagedApplicationPublicationFailure(
+                                CoordinationErrorCode
+                                        .UNSUPPORTED_NESTED_NEW_LINEAGE,
+                                failure.getMessage(),
+                                failure.details())));
+            }
             ContractsClosureAdapter.ManagedApplicationOutcome outcome =
                     new ContractsClosureAdapter.ManagedApplicationOutcome(
                             selected,
@@ -223,7 +251,8 @@ final class ManagedEpochApplicationExecutor {
                             false,
                             automatic.expansionCount(),
                             Optional.empty(),
-                            List.of());
+                            List.of(),
+                            Optional.empty());
             objects.commit(attemptMark);
             attemptMarkClosed = true;
             return outcome;
@@ -354,9 +383,8 @@ final class ManagedEpochApplicationExecutor {
                 ContractsClosureAdapter.CapturedDocument before =
                         invocation.documents().get(entry.getKey());
                 if (before == null) {
-                    throw new IllegalStateException(
-                            "Managed application cannot create a source "
-                                    + "lineage " + entry.getKey());
+                    throw new UnsupportedNestedNewLineageException(
+                            work, entry.getKey());
                 }
                 ResultingDocument after = entry.getValue();
                 ManagedDocumentTransitionReceipt transition =

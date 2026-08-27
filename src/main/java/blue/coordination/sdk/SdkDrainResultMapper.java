@@ -149,7 +149,12 @@ final class SdkDrainResultMapper {
                 retained.managedOccurrenceResolutionIssues().stream()
                         .map(SdkDrainResultMapper
                                 ::managedEpochResolutionIssue)
-                        .toList());
+                        .toList(),
+                retained.publicationFailure().map(failure ->
+                        new ManagedEpochApplicationAttempt.PublicationFailure(
+                                failure.code(),
+                                failure.message(),
+                                failure.details())));
     }
 
     private static ManagedEpochApplicationAttempt

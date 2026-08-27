@@ -29,6 +29,7 @@ import blue.coordination.api.ManagedEpochEvidenceFailure;
 import blue.coordination.api.ManagedEpochReceipt;
 import blue.coordination.api.ManagedOccurrenceCatchUpPlan;
 import blue.coordination.api.ProcessingDrainReceipt;
+import blue.coordination.api.ProcessingSelection;
 import blue.coordination.api.TimelineAppendReceipt;
 import blue.coordination.api.ActivationMode;
 import blue.coordination.api.DocumentDispatchOutcome;
@@ -989,6 +990,102 @@ public final class DefaultCoordinationEngine
     }
 
     @Override
+    public synchronized ProcessingDrainReceipt drainJournal(
+            CoordinationEngine.DrainBudget budget) {
+        ensureOpen();
+        CoordinationEngine.DrainBudget selected = Objects.requireNonNull(
+                budget, "budget");
+        ProcessingSelection next = auditNextProcessingSelection();
+        if (next.kind() != ProcessingSelection.Kind.JOURNAL) {
+            throw processingSelectionMismatch(
+                    "JOURNAL", next, null);
+        }
+        try {
+            ProcessingDrainReceipt drained = drainContracts(
+                    null,
+                    new CoordinationEngine.DrainBudget(
+                            selected.maxCommittedProcessTransitions(), 1L),
+                    false);
+            boolean journalSelected = !drained.processedEntries().isEmpty()
+                    || !drained.contractsAttemptsByEntry().isEmpty();
+            if (!journalSelected
+                    && nextFairManagedEpochApplicationWork().isPresent()) {
+                // The ordinary phase inspected only already-terminal,
+                // inactive, or resource-blocked journal rows. A compatibility
+                // drain would now fall through to its managed phase in this
+                // same call; retain that continuation as the next sliced turn.
+                contractsRecoveryState.managedEpochTurn = true;
+            }
+            return drained;
+        } catch (RuntimeException failure) {
+            throw translateDispatchFailure(failure);
+        }
+    }
+
+    @Override
+    public synchronized ProcessingDrainReceipt
+            drainManagedEpochApplication(String expectedWorkIdentity) {
+        ensureOpen();
+        String expected = Objects.requireNonNull(
+                expectedWorkIdentity, "expectedWorkIdentity");
+        if (!expected.matches("sha256:[0-9a-f]{64}")) {
+            throw new IllegalArgumentException(
+                    "expectedWorkIdentity must be a lowercase sha256 identity");
+        }
+        ProcessingSelection next = auditNextProcessingSelection();
+        String actual = next.managedEpochApplicationWork()
+                .map(ManagedEpochApplicationWork::workIdentity)
+                .orElse(null);
+        if (next.kind()
+                        != ProcessingSelection.Kind
+                                .MANAGED_EPOCH_APPLICATION
+                || !expected.equals(actual)) {
+            throw processingSelectionMismatch(
+                    "MANAGED_EPOCH_APPLICATION", next, expected);
+        }
+        try {
+            ProcessingDrainReceipt drained = drainContracts(
+                    null, new CoordinationEngine.DrainBudget(1L, 1L));
+            boolean selected = drained.managedEpochApplicationAttempts()
+                            .stream()
+                            .map(ManagedEpochApplicationAttempt::work)
+                            .map(ManagedEpochApplicationWork::workIdentity)
+                            .anyMatch(expected::equals)
+                    || drained.managedEpochEvidenceFailures().stream()
+                            .map(ManagedEpochEvidenceFailure::work)
+                            .map(ManagedEpochApplicationWork::workIdentity)
+                            .anyMatch(expected::equals);
+            if (!selected || !drained.processedEntries().isEmpty()) {
+                throw new IllegalStateException(
+                        "Targeted managed drain selected different work");
+            }
+            return drained;
+        } catch (RuntimeException failure) {
+            throw translateDispatchFailure(failure);
+        }
+    }
+
+    private static CoordinationException processingSelectionMismatch(
+            String expectedKind,
+            ProcessingSelection actual,
+            String expectedWorkIdentity) {
+        LinkedHashMap<String, String> details = new LinkedHashMap<>();
+        details.put("expectedKind", expectedKind);
+        details.put("actualKind", actual.kind().name());
+        if (expectedWorkIdentity != null) {
+            details.put("expectedWorkIdentity", expectedWorkIdentity);
+        }
+        actual.managedEpochApplicationWork().ifPresent(work ->
+                details.put("actualWorkIdentity", work.workIdentity()));
+        return new CoordinationException(
+                CoordinationErrorCode.PROCESSING_SELECTION_MISMATCH,
+                "Targeted processing call disagrees with the retained fair "
+                        + "selection",
+                null,
+                details);
+    }
+
+    @Override
     public synchronized ProcessingDrainReceipt drainThrough(
             ExternalOrderKey inclusiveCutoff) {
         try {
@@ -1327,6 +1424,42 @@ public final class DefaultCoordinationEngine
     }
 
     @Override
+    public synchronized ProcessingSelection auditNextProcessingSelection() {
+        ensureOpen();
+        if (contractsJournalCoordinator == null) {
+            return ProcessingSelection.none();
+        }
+        Optional<ManagedEpochApplicationWork> managed =
+                nextFairManagedEpochApplicationWork();
+        boolean journal = contractsJournalCoordinator
+                .hasPendingJournalTurn();
+        if (contractsRecoveryState.managedEpochTurn
+                && managed.isPresent()) {
+            return ProcessingSelection.managedEpochApplication(
+                    managed.orElseThrow());
+        }
+        if (journal) {
+            return ProcessingSelection.journal();
+        }
+        return managed
+                .map(ProcessingSelection::managedEpochApplication)
+                .orElseGet(ProcessingSelection::none);
+    }
+
+    /** Mirrors managed round rollover without mutating the retained round. */
+    private Optional<ManagedEpochApplicationWork>
+            nextFairManagedEpochApplicationWork() {
+        Set<DocumentId> deferred = contractsRecoveryState
+                .deferredManagedConsumers();
+        Optional<ManagedEpochApplicationWork> selected = documents
+                .nextCatchUpWorkExcluding(deferred);
+        if (selected.isPresent() || deferred.isEmpty()) {
+            return selected;
+        }
+        return documents.nextCatchUpWorkExcluding(Set.of());
+    }
+
+    @Override
     public synchronized Optional<ManagedEpochApplicationReceipt>
             auditManagedEpochApplicationReceipt(
                     String applicationReceiptIdentity) {
@@ -1499,6 +1632,13 @@ public final class DefaultCoordinationEngine
         if (failure instanceof InjectedFailureException) {
             return failure;
         }
+        if (failure instanceof UnsupportedNestedNewLineageException nested) {
+            return new CoordinationException(
+                    CoordinationErrorCode.UNSUPPORTED_NESTED_NEW_LINEAGE,
+                    nested.getMessage(),
+                    nested,
+                    nested.details());
+        }
         String message = failure.getMessage() == null
                 ? "Frozen document processing failed"
                 : failure.getMessage();
@@ -1625,6 +1765,13 @@ public final class DefaultCoordinationEngine
     private ProcessingDrainReceipt drainContracts(
             ExternalOrderKey inclusiveCutoff,
             CoordinationEngine.DrainBudget budget) {
+        return drainContracts(inclusiveCutoff, budget, true);
+    }
+
+    private ProcessingDrainReceipt drainContracts(
+            ExternalOrderKey inclusiveCutoff,
+            CoordinationEngine.DrainBudget budget,
+            boolean managedAllowed) {
         long started = System.nanoTime();
         CoordinationEngine.DrainBudget limits = Objects.requireNonNull(
                 budget, "budget");
@@ -1644,8 +1791,10 @@ public final class DefaultCoordinationEngine
         boolean madeProgress;
         do {
             madeProgress = false;
-            boolean managedFirst = contractsRecoveryState.managedEpochTurn;
-            for (int phase = 0; phase < 2; phase++) {
+            boolean managedFirst = managedAllowed
+                    && contractsRecoveryState.managedEpochTurn;
+            int phaseCount = managedAllowed ? 2 : 1;
+            for (int phase = 0; phase < phaseCount; phase++) {
                 if (committedTransitions
                                 >= limits.maxCommittedProcessTransitions()
                         || selectedEntries
@@ -1754,7 +1903,13 @@ public final class DefaultCoordinationEngine
                                                                             .status()
                                                                             .name()),
                                                     unresolved.diagnostic()))
-                                    .toList()));
+                                    .toList(),
+                            outcome.publicationFailure().map(failure ->
+                                    new ManagedEpochApplicationAttempt
+                                            .PublicationFailure(
+                                            failure.code(),
+                                            failure.message(),
+                                            failure.details()))));
                     contractsRecoveryState.deferManagedEpochConsumer(
                             outcome.work().consumerDocumentId());
                     if (!outcome.published()) {

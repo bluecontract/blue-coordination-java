@@ -1,5 +1,6 @@
 package blue.coordination.internal;
 
+import blue.coordination.api.CoordinationErrorCode;
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.DocumentRevision;
 import blue.coordination.api.ExactValue;
@@ -3670,7 +3671,9 @@ final class ContractsClosureAdapter implements AutoCloseable {
             Optional<AutomaticOccurrenceResolutionCoordinator.StopReason>
                     automaticResolutionStopReason,
             List<ManagedOccurrenceResolver.UnresolvedDemand>
-                    unresolvedDemands) {
+                    unresolvedDemands,
+            Optional<ManagedApplicationPublicationFailure>
+                    publicationFailure) {
         ManagedApplicationOutcome {
             work = Objects.requireNonNull(work, "work");
             attempt = Objects.requireNonNull(attempt, "attempt");
@@ -3681,6 +3684,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     "automaticResolutionStopReason");
             unresolvedDemands = List.copyOf(Objects.requireNonNull(
                     unresolvedDemands, "unresolvedDemands"));
+            publicationFailure = Objects.requireNonNull(
+                    publicationFailure, "publicationFailure");
             if (published != (applicationReceipt != null)) {
                 throw new IllegalArgumentException(
                         "Published managed work requires its application "
@@ -3708,6 +3713,22 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         "A suspended managed application requires an automatic "
                                 + "resolution stop reason");
             }
+            if (publicationFailure.isPresent()
+                    && (published
+                    || replayed
+                    || !attempt.isComplete()
+                    || !attempt.processResult().commits())) {
+                throw new IllegalArgumentException(
+                        "A managed publication failure requires one complete "
+                                + "committing but unpublished attempt");
+            }
+            if (publicationFailure.isPresent()
+                    && (automaticResolutionStopReason.isPresent()
+                    || !unresolvedDemands.isEmpty())) {
+                throw new IllegalArgumentException(
+                        "A managed publication failure cannot also be an "
+                                + "automatic resolution stop");
+            }
             boolean unresolvedStop = automaticResolutionStopReason
                     .filter(reason -> reason
                             == AutomaticOccurrenceResolutionCoordinator
@@ -3722,6 +3743,22 @@ final class ContractsClosureAdapter implements AutoCloseable {
 
         Optional<ManagedEpochApplicationReceipt> receipt() {
             return Optional.ofNullable(applicationReceipt);
+        }
+    }
+
+    record ManagedApplicationPublicationFailure(
+            CoordinationErrorCode code,
+            String message,
+            Map<String, String> details) {
+        ManagedApplicationPublicationFailure {
+            code = Objects.requireNonNull(code, "code");
+            message = Objects.requireNonNull(message, "message");
+            if (message.isBlank()) {
+                throw new IllegalArgumentException(
+                        "Publication failure message must not be blank");
+            }
+            details = Collections.unmodifiableMap(new LinkedHashMap<>(
+                    Objects.requireNonNull(details, "details")));
         }
     }
 

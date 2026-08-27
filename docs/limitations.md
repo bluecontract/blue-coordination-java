@@ -4,7 +4,7 @@
 Maven Central. It is not stable, production-ready, or a production MyOS
 runtime.
 
-The repository is now versioned `3.0.0-rc.5`. Its retained managed-epoch
+The repository is now versioned `3.0.0-rc.6`. Its retained managed-epoch
 profile is staged, unpublished, and non-production. It is built only against
 an invocation-owned immutable Blue Language/Contracts `3.1.0-rc.23` Maven
 stage derived from the exact published `3.1.0-rc.22` baseline plus additive
@@ -17,7 +17,7 @@ non-claims.
 
 ## Capability matrix
 
-| Capability | Published rc.4 | Staged rc.5 source |
+| Capability | Published rc.4 | Staged rc.6 source |
 | --- | --- | --- |
 | Ordinary authored document admission | supported | supported |
 | Complete initially known managed closure | supported | supported |
@@ -30,7 +30,7 @@ non-claims.
 | Top-level full-history/frontier import | supported with exact in-memory provider evidence | supported with the same boundary |
 | Operation-created new managed lineage | exact `FROM_NOW` draft only | exact `FROM_NOW` draft only |
 | Nested handler attaches an existing lineage during catch-up | not applicable | supported through typed exact demand/resolution and barrier extension |
-| Nested handler creates a newly authored lineage during catch-up | not applicable | unsupported; fails closed |
+| Nested handler creates a newly authored lineage during catch-up | not applicable | unsupported; returns typed publication failure and durably blocks the exact plan/barrier without partial publication |
 | Attach an existing lineage at its current state | unsupported by the historical managed-draft profile | supported by exact automatic matching |
 | Attach authored-initial, epoch-zero, or retained source state | unsupported | supported through immutable source epoch receipts |
 | Ambiguous repeated retained state | unsupported | requires `ManagedEpochSelector` |
@@ -42,6 +42,7 @@ non-claims.
 | Same-epoch component representation change | not applicable | bounded to the Contracts-authenticated, eventless finite two-member cycle; a larger merge requiring source-epoch change fails closed |
 | Reinitialize or replay the source during catch-up | not applicable | never supported or performed |
 | SDK work-bounded drain/resume | unsupported | supported with retained fair external/managed turns between selected entries and committed PROCESS transitions |
+| Host-preleased exact processing slice | unsupported | read-only fair selection plus journal-only or exact managed targeted invocation; selection is revalidated before mutation |
 | Operation-created lineage from or across a cyclic-set member | preflight rejects it | the new-draft restriction remains; retained attachment uses the ordinary proven-lineage path |
 | General operation-created multi-member cyclic closure | not claimed | not claimed |
 | Direct stable-key `collectionPaths` members | supported | supported |
@@ -75,7 +76,7 @@ initially.
 list-position identity and arbitrary collection reshaping are not implied.
 Same-invocation remove-then-re-add remains outside the published rc.4 claim.
 
-The staged rc.5 source does not weaken the new-draft rule. It adds a separate
+The staged rc.6 source does not weaken the new-draft rule. It adds a separate
 path for an exact value already proven in managed lineage history. An
 unambiguous current, authored-initial, epoch-zero, or retained state is matched
 automatically. A repeated historical state requires an exact
@@ -102,7 +103,7 @@ participation without typed demand.
 
 Managed embedded-document epochs and broad historical synchronization are not
 capabilities of the published rc.4 artifact or frozen Contracts 1.0 semantics.
-The staged rc.5 source implements the narrower retained managed-epoch profile
+The staged rc.6 source implements the narrower retained managed-epoch profile
 described in
 [Retained managed-epoch catch-up](semantics/retained-managed-epoch-catch-up.md).
 It applies complete immutable receipts from the already processed source
@@ -128,12 +129,12 @@ provider evidence; a
 
 Both profiles are one JVM, in-memory, and sequential. Journal completeness is
 proven only for the current in-memory journal. A process crash loses document,
-journal, topology, route, checkpoint, receipt, and outbox state. For rc.5 that
+journal, topology, route, checkpoint, receipt, and outbox state. For rc.6 that
 list also includes managed source/application receipts, occurrence plans,
 barriers, readiness heads, and due-work indexes.
 
 Coordinator reconstruction inside the same live engine is possible while its
-typed in-memory stores survive. In the rc.5 source, a committed catch-up
+typed in-memory stores survive. In the rc.6 source, a committed catch-up
 application receipt also makes response-loss reconciliation idempotent without
 calling PROCESS again. Neither behavior is a fresh engine reconstructed from a
 serialized store. Exact cross-process recovery requires a future durable
@@ -178,7 +179,7 @@ processing; it does not introduce a parent-recursion engine. Across Timelines,
 canonical external source order—not Java submission order—is authoritative.
 
 The published rc.4 normal SDK does not expose `DrainBudget`; only its advanced
-low-level boundary has the work limit. The staged rc.5 SDK adds
+low-level boundary has the work limit. The staged rc.6 SDK adds
 `processing().drain(new DrainBudget(...))`. In either boundary the budget
 counts selected entries and committed PROCESS transitions. It cannot preempt a
 frozen processor call or epoch-zero INITIALIZE and is not a wall-clock

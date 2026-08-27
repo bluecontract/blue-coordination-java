@@ -143,6 +143,30 @@ public interface CoordinationEngine extends AutoCloseable {
     ProcessingDrainReceipt drain(DrainBudget budget);
 
     /**
+     * Drains only the ordinary journal lane after revalidating that it owns
+     * the next fair turn. Managed-epoch work is never selected by this call.
+     */
+    default ProcessingDrainReceipt drainJournal(DrainBudget budget) {
+        Objects.requireNonNull(budget, "budget");
+        throw new CoordinationException(
+                CoordinationErrorCode.PROCESSING_SELECTION_MISMATCH,
+                "Targeted journal processing is unavailable");
+    }
+
+    /**
+     * Applies one exact managed work item only when it owns the next fair
+     * bounded turn. A mismatch fails before processing state changes.
+     */
+    default ProcessingDrainReceipt drainManagedEpochApplication(
+            String expectedWorkIdentity) {
+        ManagedIdentity.requireSha256(
+                expectedWorkIdentity, "expectedWorkIdentity");
+        throw new CoordinationException(
+                CoordinationErrorCode.PROCESSING_SELECTION_MISMATCH,
+                "Targeted managed-epoch processing is unavailable");
+    }
+
+    /**
      * Drains every eligible entry through the inclusive canonical cutoff.
      * The cutoff cannot force a named entry to overtake earlier work.
      */
@@ -219,6 +243,14 @@ public interface CoordinationEngine extends AutoCloseable {
             auditManagedEpochApplicationWork(String workIdentity) {
         ManagedIdentity.requireSha256(workIdentity, "workIdentity");
         return Optional.empty();
+    }
+
+    /**
+     * Reads the exact lane that owns the next bounded processing turn.
+     * Implementations without retained fair-lane scheduling report none.
+     */
+    default ProcessingSelection auditNextProcessingSelection() {
+        return ProcessingSelection.none();
     }
 
     /** Reads one committed application receipt by canonical identity. */

@@ -1,8 +1,11 @@
 package blue.coordination.sdk;
 
+import blue.coordination.api.CoordinationErrorCode;
+import blue.coordination.api.CoordinationException;
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.ManagedCatchUpStatus;
 import blue.coordination.api.ManagedOccurrenceCatchUpPlan;
+import blue.coordination.api.ProcessingSelection;
 import blue.coordination.internal.CoordinationTestControl;
 import org.junit.jupiter.api.Test;
 
@@ -11,6 +14,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Bounded-drain fairness proofs for permanently failing managed lanes. */
@@ -69,6 +73,88 @@ final class SdkManagedEpochBudgetFairnessTest {
         assertTrue(restarted.restartObserved());
     }
 
+    @Test
+    void exactNextSelectionPreventsLookupByWorkFromOvertakingFairTurn() {
+        String poisonASecondWork;
+        try (Scenario reference = scenario()) {
+            poisonASecondWork = null;
+            for (int call = 0; call < 8 && poisonASecondWork == null; call++) {
+                DrainResult drained = drainSelected(reference.coordination());
+                poisonASecondWork = drained
+                        .managedEpochApplicationAttempts().stream()
+                        .map(ManagedEpochApplicationAttempt::work)
+                        .filter(work -> work.consumerDocumentId()
+                                .equals(POISON_A))
+                        .filter(work -> work.sourceEpoch() == 2L)
+                        .map(ManagedEpochApplicationWork::workIdentity)
+                        .findFirst()
+                        .orElse(null);
+            }
+            assertTrue(poisonASecondWork != null);
+        }
+        String retainedPoisonASecondWork = poisonASecondWork;
+
+        try (Scenario subject = scenario()) {
+            ProcessingSelection first = subject.coordination().advanced()
+                    .auditNextProcessingSelection();
+            assertManagedSelection(first, POISON_A, 1L);
+            CoordinationException journalMismatch = assertThrows(
+                    CoordinationException.class,
+                    () -> subject.coordination().processing().drainJournal(
+                            new DrainBudget(1L, 99L)));
+            assertEquals(
+                    CoordinationErrorCode.PROCESSING_SELECTION_MISMATCH,
+                    journalMismatch.code());
+            assertSameSelection(first, subject.coordination().advanced()
+                    .auditNextProcessingSelection());
+            DrainResult firstManaged = drainSelected(
+                    subject.coordination(), first);
+            assertEquals(first.managedEpochApplicationWork()
+                            .orElseThrow().workIdentity(),
+                    firstManaged.managedEpochApplicationAttempts().get(0)
+                            .work().workIdentity());
+
+            assertTrue(subject.coordination().advanced()
+                    .auditManagedEpochApplicationWork(
+                            retainedPoisonASecondWork)
+                    .isPresent(),
+                    "by-work lookup alone sees A2 as executable");
+            ProcessingSelection beforeRestart = subject.coordination()
+                    .advanced().auditNextProcessingSelection();
+            assertEquals(ProcessingSelection.Kind.JOURNAL,
+                    beforeRestart.kind(),
+                    "the ordinary lane owns the fair turn before A2");
+            CoordinationException managedMismatch = assertThrows(
+                    CoordinationException.class,
+                    () -> subject.coordination().processing()
+                            .drainManagedEpochApplication(
+                                    retainedPoisonASecondWork));
+            assertEquals(
+                    CoordinationErrorCode.PROCESSING_SELECTION_MISMATCH,
+                    managedMismatch.code());
+            assertSameSelection(beforeRestart, subject.coordination()
+                    .advanced().auditNextProcessingSelection());
+
+            subject.control().restartFromStores();
+            ProcessingSelection afterRestart = subject.coordination()
+                    .advanced().auditNextProcessingSelection();
+            assertEquals(beforeRestart.kind(), afterRestart.kind());
+            assertTrue(afterRestart.managedEpochApplicationWork().isEmpty());
+
+            DrainResult direct = drainSelected(subject.coordination());
+            assertTrue(direct.managedEpochApplicationAttempts().isEmpty());
+            assertEquals(1, direct.entries().size(),
+                    "journal-targeted drain is capped to one selection");
+            assertEquals(subject.directEntry(), direct.entries().get(0).entry());
+            ProcessingSelection nextManaged = subject.coordination()
+                    .advanced().auditNextProcessingSelection();
+            assertManagedSelection(nextManaged, POISON_B, 1L);
+            assertFalse(nextManaged.managedEpochApplicationWork()
+                    .orElseThrow().workIdentity().equals(
+                            retainedPoisonASecondWork));
+        }
+    }
+
     private static RunEvidence runBounded(
             Scenario scenario,
             boolean restartAfterFirstFailure) {
@@ -80,8 +166,10 @@ final class SdkManagedEpochBudgetFairnessTest {
         boolean restartObserved = false;
 
         for (int call = 0; call < 16; call++) {
-            DrainResult result = scenario.coordination().processing().drain(
-                    new DrainBudget(1L, 1L));
+            ProcessingSelection selectedTurn = scenario.coordination()
+                    .advanced().auditNextProcessingSelection();
+            DrainResult result = drainSelected(
+                    scenario.coordination(), selectedTurn);
             int selected = Math.addExact(
                     result.entries().size(),
                     result.managedEpochApplicationAttempts().size());
@@ -91,6 +179,8 @@ final class SdkManagedEpochBudgetFairnessTest {
             assertTrue(result.managedEpochApplications().size() <= 1);
 
             if (!result.entries().isEmpty()) {
+                assertEquals(ProcessingSelection.Kind.JOURNAL,
+                        selectedTurn.kind());
                 assertTrue(result.managedEpochApplicationAttempts().isEmpty());
                 assertEquals(1, result.entries().size());
                 assertEquals(scenario.directEntry(),
@@ -102,11 +192,17 @@ final class SdkManagedEpochBudgetFairnessTest {
             }
 
             if (!result.managedEpochApplicationAttempts().isEmpty()) {
+                assertEquals(
+                        ProcessingSelection.Kind.MANAGED_EPOCH_APPLICATION,
+                        selectedTurn.kind());
                 assertTrue(result.entries().isEmpty());
                 assertEquals(1,
                         result.managedEpochApplicationAttempts().size());
                 ManagedEpochApplicationAttempt attempt = result
                         .managedEpochApplicationAttempts().get(0);
+                assertEquals(attempt.work().workIdentity(),
+                        selectedTurn.managedEpochApplicationWork()
+                                .orElseThrow().workIdentity());
                 order.add("managed:"
                         + attempt.work().consumerDocumentId().value()
                         + ":" + attempt.work().sourceEpoch()
@@ -171,6 +267,52 @@ final class SdkManagedEpochBudgetFairnessTest {
         }
         return new RunEvidence(
                 order, directApplied, restartObserved);
+    }
+
+    private static void assertManagedSelection(
+            ProcessingSelection selection,
+            DocumentId consumer,
+            long sourceEpoch) {
+        assertEquals(ProcessingSelection.Kind.MANAGED_EPOCH_APPLICATION,
+                selection.kind());
+        blue.coordination.api.ManagedEpochApplicationWork work = selection
+                .managedEpochApplicationWork().orElseThrow();
+        assertEquals(consumer, work.consumerDocumentId());
+        assertEquals(sourceEpoch, work.sourceEpoch());
+    }
+
+    private static void assertSameSelection(
+            ProcessingSelection expected,
+            ProcessingSelection actual) {
+        assertEquals(expected.kind(), actual.kind());
+        assertEquals(
+                expected.managedEpochApplicationWork()
+                        .map(work -> work.workIdentity()),
+                actual.managedEpochApplicationWork()
+                        .map(work -> work.workIdentity()));
+    }
+
+    private static DrainResult drainSelected(
+            BlueCoordination coordination) {
+        return drainSelected(
+                coordination,
+                coordination.advanced().auditNextProcessingSelection());
+    }
+
+    private static DrainResult drainSelected(
+            BlueCoordination coordination,
+            ProcessingSelection selection) {
+        return switch (selection.kind()) {
+            case JOURNAL -> coordination.processing().drainJournal(
+                    new DrainBudget(1L, 99L));
+            case MANAGED_EPOCH_APPLICATION -> coordination.processing()
+                    .drainManagedEpochApplication(selection
+                            .managedEpochApplicationWork()
+                            .orElseThrow()
+                            .workIdentity());
+            case NONE -> throw new IllegalStateException(
+                    "Scenario unexpectedly became quiescent");
+        };
     }
 
     private static Scenario scenario() {

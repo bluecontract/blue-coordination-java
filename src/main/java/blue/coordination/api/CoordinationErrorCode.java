@@ -24,6 +24,10 @@ public enum CoordinationErrorCode {
     INVALID_TIMELINE_ENTRY,
     /** Language, Contracts, or BEX rejected frozen semantic processing. */
     FROZEN_PROCESSING_FAILED,
+    /** A targeted bounded call disagreed with the retained fair selection. */
+    PROCESSING_SELECTION_MISMATCH,
+    /** Retained catch-up attempted to author an unsupported nested lineage. */
+    UNSUPPORTED_NESTED_NEW_LINEAGE,
     /** The in-memory atomic publication boundary could not commit. */
     ATOMIC_COMMIT_FAILED,
     /** A parent attempted to mutate state owned by a managed child. */

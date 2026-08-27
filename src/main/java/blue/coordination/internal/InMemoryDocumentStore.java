@@ -496,6 +496,19 @@ final class InMemoryDocumentStore {
         state = state.withCatchUpPlans(changed);
     }
 
+    /**
+     * Atomically blocks one complete PROCESS result rejected by the managed
+     * application publication boundary, without changing document state.
+     */
+    synchronized void recordManagedEpochApplicationFailure(
+            ManagedEpochApplicationWork work,
+            String code,
+            String message) {
+        CatchUpPlanStore changed = state.catchUpPlans()
+                .withApplicationFailure(work, code, message);
+        state = state.withCatchUpPlans(changed);
+    }
+
     synchronized boolean hasActiveCatchUp() {
         return state.catchUpPlans().hasActiveBarriers();
     }

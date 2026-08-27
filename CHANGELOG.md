@@ -3,6 +3,31 @@
 This project follows Semantic Versioning. Release candidates may still refine
 the new 3.x API before the first stable 3.0.0 release.
 
+## 3.0.0-rc.6 - host-driven retained processing candidate
+
+### Added
+
+- A read-only exact fair-lane selection and targeted one-selection journal or
+  managed-epoch processing calls for durable host lease orchestration.
+- A stable `UNSUPPORTED_NESTED_NEW_LINEAGE` publication-failure outcome with
+  exact work details and an atomic blocked plan/barrier transition.
+
+### Changed
+
+- Journal-only slices select at most one ordinary entry and never fall through
+  to managed work. Exact managed slices revalidate the retained fair turn and
+  selected work identity before processing.
+- Managed application attempts now distinguish a complete committing Contracts
+  result that failed at Coordination publication from processor rollback or
+  suspension, and expose that evidence through both public API layers.
+
+### Known limitations
+
+- Creating a genuinely new authored nested lineage during retained catch-up
+  remains unsupported and now durably blocks only its exact occurrence plan.
+- Timeline-provider completeness, Mandates, cross-process durability, and
+  multi-node scheduling remain outside this unpublished candidate.
+
 ## 3.0.0-rc.5 - retained managed-epoch catch-up candidate
 
 ### Added

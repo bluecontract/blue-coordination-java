@@ -147,6 +147,12 @@ final class ContractsJournalDrainCoordinator {
         return durableState.processedThrough;
     }
 
+    /** Whether the ordinary lane has journal work at its retained frontier. */
+    synchronized boolean hasPendingJournalTurn() {
+        return journal.nextExternal(
+                durableState.processedThrough, null).isPresent();
+    }
+
     synchronized DurableState durableState() {
         return durableState;
     }

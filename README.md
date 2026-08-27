@@ -24,11 +24,15 @@ Central and is compiled with `--release 17`. It is not a stable or production
 release. Version 3 is a breaking API reset; the removed 2.x planning,
 fragmentation, session-store, and fast-path APIs are not shimmed.
 
-The repository version is `3.0.0-rc.5`. It contains the retained managed-epoch
-source profile but is staged, unpublished, and non-production; there is no rc.5
+The repository version is `3.0.0-rc.6`. It contains the retained managed-epoch
+source profile but is staged, unpublished, and non-production; there is no rc.6
 Maven Central installation claim. Its build consumes an invocation-owned,
 manifest-pinned immutable Language/Contracts `3.1.0-rc.23` Maven stage derived
 from the exact published rc.22 baseline plus additive transition receipts.
+The rc.6 source adds authoritative fair-lane audit and targeted one-selection
+processing for host-preleased durable execution. Unsupported nested authored
+lineage creation during retained catch-up returns a typed unpublished attempt
+and atomically blocks only its exact plan/barrier without partial publication.
 
 For application development, follow the
 [complete SDK developer guide](docs/guides/developer-guide.md). It covers both
@@ -134,7 +138,7 @@ lineage. The runtime verifies the request fields, occurrence paths, exact
 values, and complete affected closure before one atomic publication; a
 terminal failure leaves no partial document or topology mutation. In published
 rc.4, imported draft state (`ManagedDocumentDraft.atEpoch(...)`) and historical
-occurrence activation remain unsupported and fail closed. The rc.5 source
+occurrence activation remain unsupported and fail closed. The rc.6 source
 profile adds automatic exact matching for existing current, authored-initial,
 epoch-zero, and retained states. Historical matches apply immutable source
 receipts through occurrence-specific plans and barriers; repeated historical
@@ -183,7 +187,7 @@ Central. Repository rc.21 still advertises Language rc.20 transitively, so the
 build and published POM exclude that one edge and directly own Language
 rc.22. Local composites and Maven Local are rejected.
 
-The unpublished rc.5 retained-epoch source must instead use the closed,
+The unpublished rc.6 retained-epoch source must instead use the closed,
 invocation-owned immutable Contracts stage. Pin its absolute repository and
 manifest identity explicitly:
 
@@ -199,17 +203,17 @@ manifest identity explicitly:
 The stage must be outside this source tree and immutable. Exclusive repository
 routing prevents fallback for `blue.language`; Maven Local and composite
 substitution remain forbidden. This is the required invocation shape, not a
-claim that release gates have run or permission to publish rc.5.
+claim that release gates have run or permission to publish rc.6.
 
 Once those gates genuinely pass on a clean committed checkout, use the
 [immutable Coordination handoff](docs/development/immutable-staged-coordination.md)
-to export and consumer-test an invocation-owned rc.5 Maven stage. A staged
+to export and consumer-test an invocation-owned rc.6 Maven stage. A staged
 handoff is not a public release.
 
 The rc.4 release workflow ran the same gates, staged signed artifacts,
 published through JReleaser, and pushed its tag only after publication
 succeeded. That is retained release history, not authorization to publish the
-rc.5 source. See the [release procedure](docs/development/releasing.md) and
+rc.6 source. See the [release procedure](docs/development/releasing.md) and
 [rc.4 release decision](docs/releases/3.0.0-rc.4.md).
 
 `releaseCheck` does not read or execute `../blue-basic`. That sibling is

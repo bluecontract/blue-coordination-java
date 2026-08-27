@@ -1,6 +1,6 @@
 # Failure and retry model
 
-This page distinguishes the published Contracts 1.0 SDK, the unpublished rc.5
+This page distinguishes the published Contracts 1.0 SDK, the unpublished rc.6
 retained managed-epoch source profile, and the earlier low-level temporal
 compatibility profile. None of the in-memory profiles is a fresh-process
 durability claim.
@@ -66,9 +66,9 @@ After append, processing state is represented by `EntryResult`,
 `NEEDS_RESOURCES` and `BLOCKED` report that the lane has not reached a terminal
 result. Branch on diagnostic code, not message text.
 
-## Retained managed-epoch source profile (rc.5)
+## Retained managed-epoch source profile (rc.6)
 
-This profile is present in `3.0.0-rc.5` source only. It is staged,
+This profile is present in `3.0.0-rc.6` source only. It is staged,
 unpublished, non-production, and depends on the verified immutable
 Language/Contracts rc.23 stage. The published rc.4 JAR does not expose these
 semantics.
@@ -113,6 +113,17 @@ drain. Cyclic affected closures use the ordinary Contracts cyclic processor and
 the same deterministic gas/convergence failures. Catch-up never retries source
 INITIALIZE, a source Timeline Entry, a source Operation/local handler, or source
 PROCESS/public-outbox work.
+
+A complete committing Contracts attempt can still fail Coordination's
+publication boundary. `ManagedEpochApplicationAttempt.publicationFailure()`
+distinguishes that outcome from processor rollback and resource suspension.
+The currently defined typed case is
+`UNSUPPORTED_NESTED_NEW_LINEAGE`: tentative consumer/new-lineage state is
+rolled back, the exact occurrence plan and barrier atomically become `BLOCKED`
+at the unchanged cursor, and the due row is removed. Its details bind the exact
+work, plan, barrier, source receipt, source epoch, occurrence/path, consumer,
+source, and rejected new-lineage identity. Persist the code and details as
+terminal per-attempt evidence; do not parse the display message.
 
 The complete cyclic proof is provider-completeness evidence alongside, not
 inside, `ManagedEpochReceipt`. This includes a cyclic same-state eventless
@@ -166,7 +177,7 @@ for matching, plan, ordering, receipt, and audit details.
 The paragraphs below describe the earlier document-local temporal coordinator
 using `EmbeddingBinding` and `EmbeddedEpochCursor`. They are relevant only to
 an explicit low-level compatibility or migration integration, not the normal
-`BlueCoordination.inMemory()` Contracts publication model or the rc.5 managed
+`BlueCoordination.inMemory()` Contracts publication model or the rc.6 managed
 receipt/plan/barrier profile.
 
 Child and parent synchronization are intentionally separate commits. If a

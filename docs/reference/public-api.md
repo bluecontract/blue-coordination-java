@@ -8,8 +8,8 @@ Full signatures are in the generated Javadocs.
 This reference covers two explicitly different profiles. The Maven Central
 artifact is the published `3.0.0-rc.4` bounded external-pilot candidate. The
 repository version is the staged, unpublished, non-production
-`3.0.0-rc.5` source profile. Sections marked rc.5 describe source APIs that are
-not available from the rc.4 coordinate. The rc.5 source must be built against
+`3.0.0-rc.6` source profile. Sections marked rc.6 describe source APIs that are
+not available from the rc.4 coordinate. The rc.6 source must be built against
 an invocation-owned immutable Blue Language/Contracts `3.1.0-rc.23` stage;
 that candidate starts at the exact published `3.1.0-rc.22` baseline and adds
 the managed-transition receipt surface.
@@ -293,7 +293,7 @@ one call can declare edges between drafts. All new heads and topology changes
 publish atomically with the parent result; a terminal failure leaves no partial
 expansion.
 
-The published rc.4 candidate and staged rc.5 source both restrict this draft
+The published rc.4 candidate and staged rc.6 source both restrict this draft
 lane to new `FROM_NOW` lineages. Imported-state evidence created with
 `draft.atEpoch(...)` and historical, frontier, attach-current, or passive
 operation-result activation fail closed. The SDK never emulates this lane
@@ -307,9 +307,9 @@ an independently processable, non-cyclic operation target whose effective
 `Process Embedded` catalog does not cross a cyclic-set member. Either condition
 is rejected before append.
 
-## Existing managed-epoch attachment (rc.5 source only)
+## Existing managed-epoch attachment (rc.6 source only)
 
-The staged rc.5 profile adds a distinct path for attaching an exact value
+The staged rc.6 profile adds a distinct path for attaching an exact value
 already proven in managed lineage history. Put the exact value in the ordinary
 request with `RequestBuilder.exact(...)`; do not construct a
 `ManagedDocumentDraft` and do not supply a reconstructed event list.
@@ -399,12 +399,41 @@ for intentional append batching or independent provider entries. Across
 Timelines, the environment's canonical source order wins; Java submission order
 is not a workflow scheduler.
 
-The staged rc.5 SDK also accepts
+The staged rc.6 SDK also accepts
 `processing().drain(new DrainBudget(maxCommittedProcessTransitions,
 maxSelectedEntries))`. The budget can pause only between selected entries or
 committed PROCESS transitions. It does not preempt one frozen PROCESS or
 INITIALIZE call and is not a wall-clock deadline. A later drain resumes from
 retained plan cursors and receipts.
+
+A durable host that must precommit its own lease before Coordination mutates
+state uses one-selection slices from the same retained scheduler:
+
+```java
+ProcessingSelection next = blue.advanced()
+        .auditNextProcessingSelection();
+
+switch (next.kind()) {
+    case JOURNAL -> blue.processing().drainJournal(new DrainBudget(1, 1));
+    case MANAGED_EPOCH_APPLICATION -> {
+        String workIdentity = next.managedEpochApplicationWork()
+                .orElseThrow().workIdentity();
+        // Persist the host lease for workIdentity before this exact call.
+        blue.processing().drainManagedEpochApplication(workIdentity);
+    }
+    case NONE -> { }
+}
+```
+
+The audit is read-only and is not a reservation. Both targeted calls therefore
+revalidate the authoritative fair turn before mutation and fail with
+`PROCESSING_SELECTION_MISMATCH` if the lane or managed work identity changed.
+`drainJournal(...)` selects at most one ordinary journal entry, uses the
+supplied transition bound, and never falls through to managed work. Callers
+repeat these slices until their submitted entry is terminal; canonical earlier
+journal work and intervening managed turns remain visible instead of being
+skipped. Existing `drain()` and `drain(DrainBudget)` behavior is preserved for
+hosts that do not require a precommitted external lease.
 
 ## Results and reads
 
@@ -429,7 +458,7 @@ closed `ManagedResolutionStatus`; the diagnostic is operator text. This lets an
 `EntryResult` persist several unresolved BlueIds without interpreting an
 exception message or publishing a partial closure.
 
-In the staged rc.5 profile, `DrainResult.managedEpochApplications()` contains
+In the staged rc.6 profile, `DrainResult.managedEpochApplications()` contains
 only the `ManagedEpochApplicationReceipt` values newly committed by that drain.
 `managedEpochApplicationAttempts()` contains SDK-owned typed attempt evidence
 for committed, rolled-back, suspended, and reconciled work, including processor
@@ -438,6 +467,14 @@ automatic retry count, and typed managed-occurrence resolution issues. Each
 issue binds a demand identity to the closed SDK `ResolutionStatus` vocabulary;
 its diagnostic string is display text, not a host control signal. These normal
 SDK signatures do not expose processor implementation types.
+
+An unpublished attempt whose Contracts result completed and committed may
+carry `publicationFailure()`. This is distinct from processor rollback or
+resource suspension. `UNSUPPORTED_NESTED_NEW_LINEAGE` includes the exact work,
+plan, barrier, source receipt, occurrence/path, consumer/source epoch, and
+rejected new-lineage identities. Coordination atomically blocks that plan and
+barrier and removes its due row, so the typed attempt is durable terminal host
+evidence and does not stall independent fair lanes.
 
 For an applied managed closure, `ClosureResult.managedSurfaceEvidence()`
 retains the exact committed processor and host publication delta. Alongside
@@ -454,7 +491,7 @@ DocumentId, epoch, BlueId, exact content, and public events. `history()` returns
 immutable application-safe revisions. Physical objects, topology generations,
 proofs, and storage layout are not part of the normal snapshot.
 
-For rc.5 catch-up, a graph-changing consumer revision may be committed before
+For rc.6 catch-up, a graph-changing consumer revision may be committed before
 its historical suffix is READY. `snapshot()` and ordinary `document()` reads
 continue to return the last READY head. Advanced diagnostics can inspect the
 newer committed head, active barrier identities, waiting/blocked evidence, and
@@ -479,7 +516,7 @@ target `DocumentId`, positive activation generation, and active/inactive flag;
 it intentionally omits component snapshots, proof values, and mutable
 inventory internals.
 
-The staged rc.5 profile adds these read-only retained-epoch diagnostics:
+The staged rc.6 profile adds these read-only retained-epoch diagnostics:
 
 - `auditManagedEpoch(documentId, epoch)`,
   `auditManagedEpochs(documentId)`, and
@@ -492,7 +529,9 @@ The staged rc.5 profile adds these read-only retained-epoch diagnostics:
   readiness barrier;
 - `auditManagedEpochApplicationWork(workIdentity)` and
   `auditManagedEpochApplicationReceipt(applicationReceiptIdentity)` expose
-  exact `blue.coordination.api` host evidence; and
+  exact `blue.coordination.api` host evidence;
+- `auditNextProcessingSelection()` exposes the read-only authoritative next
+  fair lane and exact managed work identity, when that lane is selected; and
 - `auditManagedDocumentReadiness(documentId)` reports committed versus READY
   heads, session status, waiting evidence, and active barriers.
 
@@ -527,7 +566,7 @@ signatures require those types. Repository `3.0.0-rc.21` and Bouncy Castle
 remain runtime implementation dependencies. Every coordinate is exact and
 dependency-locked.
 
-The staged rc.5 source instead resolves every `blue.language` artifact at
+The staged rc.6 source instead resolves every `blue.language` artifact at
 `3.1.0-rc.23` exclusively from a manifest-pinned, invocation-owned immutable
 Maven repository outside this checkout. Maven Local, composite substitution,
 mutable checkout input, and remote fallback for that protected group are not

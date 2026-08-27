@@ -6,8 +6,8 @@ semantic explanation, contributor internals, and historical release evidence do
 not compete as different starting points.
 
 Maven Central `3.0.0-rc.4` remains the latest published bounded-pilot artifact.
-The repository version `3.0.0-rc.5` is an unpublished, staged, non-production
-source profile; sections explicitly marked rc.5 describe source behavior, not
+The repository version `3.0.0-rc.6` is an unpublished, staged, non-production
+source profile; sections explicitly marked rc.6 describe source behavior, not
 the rc.4 JAR or an authorized release.
 
 ## Start here
@@ -19,10 +19,10 @@ the rc.4 JAR or an authorized release.
    production boundaries.
 2. Keep the published rc.4 [public API reference](reference/public-api.md)
    nearby while writing shared code; use the retained-epoch page below for
-   rc.5-only additions.
+   rc.6-only additions.
 3. Read [Managed Process Embedded documents](semantics/process-embedded-documents.md)
    before designing shared lineages, repeated occurrences, or cycles.
-4. Check published rc.4 [Known limitations](limitations.md) and the rc.5
+4. Check published rc.4 [Known limitations](limitations.md) and the rc.6
    retained-epoch non-goals before selecting an operational deployment profile.
 
 For a five-minute path, use the repository [Start here](../START-HERE.md) and
@@ -47,10 +47,10 @@ Executable public-SDK examples live in:
 - [`SdkManagedDraftAcceptanceTest`](../src/test/java/blue/coordination/sdk/SdkManagedDraftAcceptanceTest.java)
   for new managed lineages, repeated occurrences, validation, and rollback;
 - [`SdkRetainedManagedEpochCatchUpTest`](../src/test/java/blue/coordination/sdk/SdkRetainedManagedEpochCatchUpTest.java)
-  for rc.5 authored-initial, retained, current, and duplicate-occurrence
+  for rc.6 authored-initial, retained, current, and duplicate-occurrence
   catch-up behavior;
 - [`SdkManagedEpochSelectorAcceptanceTest`](../src/test/java/blue/coordination/sdk/SdkManagedEpochSelectorAcceptanceTest.java)
-  for rc.5 explicit selection of a repeated historical BlueId;
+  for rc.6 explicit selection of a repeated historical BlueId;
 - [`SdkDeveloperGuideTest`](../src/consumerTest/java/blue/coordination/consumer/SdkDeveloperGuideTest.java)
   for both canonical application use cases compiled against the production JAR;
 - [`SdkBuiltJarConsumerTest`](../src/consumerTest/java/blue/coordination/consumer/SdkBuiltJarConsumerTest.java)
@@ -93,7 +93,7 @@ Executable public-SDK examples live in:
 
 The current published application claim remains the bounded external-pilot
 [`3.0.0-rc.4` decision](releases/3.0.0-rc.4.md). It is not a stable or
-production-readiness claim. The rc.5 source profile has no publication or
+production-readiness claim. The rc.6 source profile has no publication or
 production authority, and its build/test gates must be evaluated separately;
 documentation of a required gate is not a claim that it passed.
 

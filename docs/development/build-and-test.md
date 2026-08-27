@@ -8,7 +8,7 @@ Java 21.
 
 ## Dependency graph
 
-The published `3.0.0-rc.4` artifact and the staged `3.0.0-rc.5` source use
+The published `3.0.0-rc.4` artifact and the staged `3.0.0-rc.6` source use
 different, explicit lanes. `blueDependencyMode=published-artifact` remains the
 build default so the rc.4 Maven Central graph cannot be silently replaced.
 The current retained-epoch source must use
@@ -16,7 +16,7 @@ The current retained-epoch source must use
 composite builds, Maven Local, flat/unverified repositories, and mutable
 checkout substitution are rejected.
 
-| Modules | Published rc.4 | Staged rc.5 source |
+| Modules | Published rc.4 | Staged rc.6 source |
 | --- | --- | --- |
 | `blue.language:*` | Maven Central `3.1.0-rc.22` | immutable stage `3.1.0-rc.23` |
 | `blue.bex:blue-bex-core`, `blue-bex-contracts` | `1.1.0-rc.4` | `1.1.0-rc.4` |
@@ -67,7 +67,7 @@ conflict-free Maven Central graph with:
 ./gradlew --no-daemon verifyPublishedDependencyIsolation
 ```
 
-For the staged rc.5 source, use the manifest-pinned command above instead; do
+For the staged rc.6 source, use the manifest-pinned command above instead; do
 not run it first against Maven Central and then reuse a warmed dependency
 cache as substitute evidence.
 
@@ -80,7 +80,7 @@ The published rc.4 tag used the Maven-Central-only release gate:
   -PtestJavaVersion=17
 ```
 
-For the staged rc.5 retained-epoch source, the complete local verification
+For the staged rc.6 retained-epoch source, the complete local verification
 shape carries the immutable Contracts stage on the same invocation:
 
 ```bash
@@ -93,7 +93,7 @@ shape carries the immutable Contracts stage on the same invocation:
 ```
 
 Repeat the applicable command with `-PtestJavaVersion=21`. Passing these gates
-is required evidence, but does not publish rc.5 or make it production-ready.
+is required evidence, but does not publish rc.6 or make it production-ready.
 The suites remain separate because each protects a different boundary:
 
 | Task | Boundary | Execution policy |
@@ -109,7 +109,7 @@ On the published rc.4 tag, the standard development gate is:
 ./gradlew --no-daemon check
 ```
 
-On the rc.5 source, add the same four immutable-stage properties shown above to
+On the rc.6 source, add the same four immutable-stage properties shown above to
 `check` or to any focused task. The development gate deliberately omits the
 slow scenario lane. `releaseCheck` always adds that lane, so release evidence
 never relies only on the shorter gate.
@@ -146,8 +146,8 @@ On that tag, the task includes `releaseCheck` and `dependencyPreflight`,
 validates the rc.4 release authority and explicit non-claims, then records the
 fresh artifact hashes in
 `build/reports/release/3.0.0-rc.4-readiness.json`. It intentionally validates
-version `3.0.0-rc.4` and the published-artifact lane, so it is not an rc.5 gate
-and must not be cited as rc.5 evidence.
+version `3.0.0-rc.4` and the published-artifact lane, so it is not an rc.6 gate
+and must not be cited as rc.6 evidence.
 
 The source distribution and checksum can be built independently with:
 
@@ -156,12 +156,12 @@ The source distribution and checksum can be built independently with:
 ./gradlew verifyExtractedSourceArchive
 ```
 
-For rc.4 the extracted archive resolves the same Maven Central graph. For rc.5,
+For rc.4 the extracted archive resolves the same Maven Central graph. For rc.6,
 pass the immutable-stage properties to archive verification; the extracted
 build validates that same absolute manifest-pinned repository. Neither lane
 reaches an adjacent checkout or Maven Local.
 
-After rc.5 gates pass on a clean committed source tree, export a separate
+After rc.6 gates pass on a clean committed source tree, export a separate
 invocation-owned immutable Coordination repository with:
 
 ```bash

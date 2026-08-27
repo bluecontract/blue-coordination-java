@@ -5,6 +5,7 @@ import blue.coordination.api.DocumentId;
 import blue.coordination.api.ManagedCatchUpBarrier;
 import blue.coordination.api.ManagedDocumentReadiness;
 import blue.coordination.api.ManagedOccurrenceCatchUpPlan;
+import blue.coordination.api.ProcessingSelection;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -87,6 +88,13 @@ public final class AdvancedCoordination {
             auditManagedEpochApplicationWork(String workIdentity) {
         return runtime.engine().auditManagedEpochApplicationWork(
                 requireIdentity(workIdentity, "workIdentity"));
+    }
+
+    /**
+     * Reads the exact next fair bounded lane without executing or reserving it.
+     */
+    public ProcessingSelection auditNextProcessingSelection() {
+        return runtime.engine().auditNextProcessingSelection();
     }
 
     /** Reads one committed managed-epoch application receipt. */

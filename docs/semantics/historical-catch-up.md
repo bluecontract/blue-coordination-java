@@ -3,11 +3,11 @@
 This page separates three temporal surfaces that must not be conflated:
 
 1. the published `3.0.0-rc.4` Contracts SDK behavior;
-2. the staged, unpublished `3.0.0-rc.5` retained managed-epoch source
+2. the staged, unpublished `3.0.0-rc.6` retained managed-epoch source
    profile; and
 3. the earlier low-level compatibility model retained for migration history.
 
-The rc.5 profile is non-production and is not present in the Maven Central
+The rc.6 profile is non-production and is not present in the Maven Central
 rc.4 JAR. Its normative source semantics are in
 [Retained managed-epoch catch-up](retained-managed-epoch-catch-up.md).
 
@@ -29,9 +29,9 @@ source lineage's missing epochs through a new occurrence.
 Those statements remain the historical rc.4 artifact boundary. The source
 work described below does not retroactively add APIs or behavior to rc.4.
 
-## Staged rc.5 retained managed-epoch profile
+## Staged rc.6 retained managed-epoch profile
 
-The rc.5 source consumes an invocation-owned immutable Blue
+The rc.6 source consumes an invocation-owned immutable Blue
 Language/Contracts `3.1.0-rc.23` Maven stage. That stage starts from the exact
 published `3.1.0-rc.22` baseline and adds complete managed-transition receipts.
 It is manifest-pinned on every build invocation; Maven Local, sibling composite
@@ -147,7 +147,7 @@ until a durable host persists and validates that whole atomic boundary.
 
 The earlier temporal coordinator remains migration history, not additional
 `BlueCoordination.inMemory()` capability and not the implementation contract
-for rc.5.
+for rc.6.
 
 That model attached one exact parent occurrence at an exclusive canonical
 cutoff `T`. A verified frontier `F` selected `F < entry < T`; the attachment
@@ -169,4 +169,4 @@ proved only a revisioned in-memory journal and distinguished eligible,
 complete/empty, unavailable, and invalid evidence. Reconstruction around those
 surviving stores was not fresh-process recovery. These historical claims remain
 useful for migration analysis but do not extend the published rc.4 SDK or grant
-release authority to rc.5.
+release authority to rc.6.

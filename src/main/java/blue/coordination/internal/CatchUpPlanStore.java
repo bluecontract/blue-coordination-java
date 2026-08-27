@@ -157,7 +157,33 @@ final class CatchUpPlanStore {
             ManagedEpochEvidenceException failure) {
         ManagedEpochEvidenceException selected = Objects.requireNonNull(
                 failure, "failure");
-        ManagedEpochApplicationWork selectedWork = selected.work();
+        return withTerminalFailure(
+                selected.work(),
+                selected.planStatus(),
+                selected.code(),
+                selected.message(),
+                "Immutable-evidence");
+    }
+
+    /** Blocks one post-PROCESS publication failure at the same cursor. */
+    CatchUpPlanStore withApplicationFailure(
+            ManagedEpochApplicationWork work,
+            String code,
+            String message) {
+        return withTerminalFailure(
+                Objects.requireNonNull(work, "work"),
+                ManagedCatchUpStatus.BLOCKED,
+                Objects.requireNonNull(code, "code"),
+                Objects.requireNonNull(message, "message"),
+                "Managed-application publication");
+    }
+
+    private CatchUpPlanStore withTerminalFailure(
+            ManagedEpochApplicationWork selectedWork,
+            ManagedCatchUpStatus status,
+            String code,
+            String message,
+            String failureKind) {
         ManagedOccurrenceCatchUpPlan plan = requirePlan(
                 selectedWork.planIdentity());
         ManagedCatchUpBarrier barrier = requireBarrier(
@@ -175,28 +201,29 @@ final class CatchUpPlanStore {
                 || !pending.work().workIdentity().equals(
                         selectedWork.workIdentity())) {
             throw new IllegalArgumentException(
-                    "Immutable-evidence failure does not own the pending due "
+                    failureKind + " failure does not own the pending due "
                             + "work slot");
         }
         if (plan.status().terminal()) {
             throw new IllegalArgumentException(
-                    "A terminal catch-up plan cannot accept an evidence "
-                            + "failure");
+                    "A terminal catch-up plan cannot accept a "
+                            + failureKind.toLowerCase(java.util.Locale.ROOT)
+                            + " failure");
         }
 
         ManagedOccurrenceCatchUpPlan failed = copyPlan(
                 plan,
                 plan.nextSourceEpoch(),
                 plan.requiredThroughSourceEpoch(),
-                selected.planStatus(),
-                selected.code(),
-                selected.message());
+                Objects.requireNonNull(status, "status"),
+                code,
+                message);
         ManagedCatchUpPlanIndex changedPlans = plans.withPlan(failed, false);
         ManagedCatchUpWorkIndex changedWork =
                 work.withoutPendingWorkForPlan(plan.planIdentity());
         if (changedWork == work) {
             throw new IllegalStateException(
-                    "Immutable-evidence failure did not remove its due row");
+                    failureKind + " failure did not remove its due row");
         }
         CatchUpPlanStore changed = new CatchUpPlanStore(
                 changedPlans,

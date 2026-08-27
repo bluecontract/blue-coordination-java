@@ -487,16 +487,14 @@ def publicBoundarySources = files(
 // Retained managed-epoch maintainability guardrails. These are deliberately
 // bounded caps over the frozen rc.4 SDK baseline plus the reviewed receipt,
 // matching, occurrence-plan, barrier, application, readiness, audit, and
-// recovery responsibilities: currently 215 production sources, 63,956 lines
-// and 77 public api+sdk source types. The two additional public types are the
-// durable/API and SDK projections of pre-PROCESS evidence failure; the two
-// additional internal types split invocation capture and source verification
-// out of the application executor. They are not historical Round 13 counts and
-// are not performance evidence.
+// recovery responsibilities plus the reviewed host-driven fair-selection and
+// unsupported nested-new publication boundary: currently 217 production
+// sources, 64,547 lines and 78 public api+sdk source types. These are not
+// historical Round 13 counts and are not performance evidence.
 def currentProductionShapeLimits = [
-        classes: 215,
-        lines: 63_956L,
-        publicApiTypes: 77,
+        classes: 217,
+        lines: 64_547L,
+        publicApiTypes: 78,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]
 def retainedManagedEpochProductionSources = [
@@ -512,6 +510,7 @@ def retainedManagedEpochProductionSources = [
         'src/main/java/blue/coordination/api/ManagedEventOccurrence.java',
         'src/main/java/blue/coordination/api/ManagedIdentity.java',
         'src/main/java/blue/coordination/api/ManagedOccurrenceCatchUpPlan.java',
+        'src/main/java/blue/coordination/api/ProcessingSelection.java',
         'src/main/java/blue/coordination/internal/CatchUpPlanStore.java',
         'src/main/java/blue/coordination/internal/ContractsManagedEpochSelectionPlan.java',
         'src/main/java/blue/coordination/internal/ManagedCatchUpPlanIndex.java',
@@ -523,6 +522,7 @@ def retainedManagedEpochProductionSources = [
         'src/main/java/blue/coordination/internal/ManagedEpochReceiptMapper.java',
         'src/main/java/blue/coordination/internal/ManagedEpochReceiptStore.java',
         'src/main/java/blue/coordination/internal/ManagedEpochSourceEvidenceVerifier.java',
+        'src/main/java/blue/coordination/internal/UnsupportedNestedNewLineageException.java',
         'src/main/java/blue/coordination/internal/PersistentMinimumMap.java',
         'src/main/java/blue/coordination/sdk/DrainBudget.java',
         'src/main/java/blue/coordination/sdk/ManagedEpochApplicationAttempt.java',
