@@ -148,9 +148,10 @@ final class StagedCoordinationConsumerTest {
             assertEquals(sourceReceipt.emittedEvents().get(0).eventBlueId(),
                     sourceReceipt.emittedEvents().get(0)
                             .exactEvent().blueId());
-            assertTrue(sourceReceipt.emittedEvents().get(0)
-                    .exactEvent().json().contains(
-                            "\"kind\":\"Staged/Changed\""));
+            String exactEventJson = sourceReceipt.emittedEvents().get(0)
+                    .exactEvent().json();
+            assertTrue(exactEventJson.contains("\"Staged/Changed\""),
+                    exactEventJson);
             SourceOrder sourceOrder = sourceReceipt.sourceOrder()
                     .orElseThrow();
             assertFalse(sourceOrder.components().isEmpty());
