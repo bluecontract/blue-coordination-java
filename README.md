@@ -24,6 +24,12 @@ Central and is compiled with `--release 17`. It is not a stable or production
 release. Version 3 is a breaking API reset; the removed 2.x planning,
 fragmentation, session-store, and fast-path APIs are not shimmed.
 
+The repository version is `3.0.0-rc.5`. It contains the retained managed-epoch
+source profile but is staged, unpublished, and non-production; there is no rc.5
+Maven Central installation claim. Its build consumes an invocation-owned,
+manifest-pinned immutable Language/Contracts `3.1.0-rc.23` Maven stage derived
+from the exact published rc.22 baseline plus additive transition receipts.
+
 For application development, follow the
 [complete SDK developer guide](docs/guides/developer-guide.md). It covers both
 processing an existing document/closure with a complete Timeline Entry and
@@ -126,9 +132,14 @@ effective occurrence with `expectOccurrence(...)`, and selects `fromNow`
 activation. One draft can bind several occurrences without duplicating the
 lineage. The runtime verifies the request fields, occurrence paths, exact
 values, and complete affected closure before one atomic publication; a
-terminal failure leaves no partial document or topology mutation. Imported
-state (`ManagedDocumentDraft.atEpoch(...)`) and historical occurrence
-activation remain unsupported and fail closed.
+terminal failure leaves no partial document or topology mutation. In published
+rc.4, imported draft state (`ManagedDocumentDraft.atEpoch(...)`) and historical
+occurrence activation remain unsupported and fail closed. The rc.5 source
+profile adds automatic exact matching for existing current, authored-initial,
+epoch-zero, and retained states. Historical matches apply immutable source
+receipts through occurrence-specific plans and barriers; repeated historical
+BlueIds require `OperationCall.selectManagedEpoch(...)`. See
+[Retained managed-epoch catch-up](docs/semantics/retained-managed-epoch-catch-up.md).
 
 Operational tooling can inspect a retained occurrence without exposing graph
 internals through
@@ -149,7 +160,8 @@ state to operational tooling.
 
 ## Build and verification
 
-The normal and release builds use Maven Central artifacts only:
+The published rc.4 tag was verified through the Maven-Central-only artifact
+lane:
 
 ```bash
 ./gradlew --no-daemon dependencyPreflight
@@ -169,12 +181,35 @@ lowercase `// given`, `// when`, `// then` sequence, enforced by
 `dependencyPreflight` resolves the exact conflict-free Blue graph from Maven
 Central. Repository rc.21 still advertises Language rc.20 transitively, so the
 build and published POM exclude that one edge and directly own Language
-rc.22. Local composites, Maven Local, and file-based staging repositories are
-retired from the live build.
+rc.22. Local composites and Maven Local are rejected.
 
-The release workflow runs the same gates, stages signed artifacts, publishes
-through JReleaser, and pushes the rc.4 tag only after publication succeeds. See
-the [release procedure](docs/development/releasing.md) and
+The unpublished rc.5 retained-epoch source must instead use the closed,
+invocation-owned immutable Contracts stage. Pin its absolute repository and
+manifest identity explicitly:
+
+```bash
+./gradlew --no-daemon --no-build-cache clean releaseCheck \
+  -PtestJavaVersion=17 \
+  -PblueDependencyMode=immutable-staged-contracts \
+  -PblueContractsVersion=3.1.0-rc.23 \
+  -PblueContractsRepository=/absolute/path/to/invocation-owned/contracts-repository \
+  -PblueContractsManifestSha256=sha256:<64-lowercase-hex>
+```
+
+The stage must be outside this source tree and immutable. Exclusive repository
+routing prevents fallback for `blue.language`; Maven Local and composite
+substitution remain forbidden. This is the required invocation shape, not a
+claim that release gates have run or permission to publish rc.5.
+
+Once those gates genuinely pass on a clean committed checkout, use the
+[immutable Coordination handoff](docs/development/immutable-staged-coordination.md)
+to export and consumer-test an invocation-owned rc.5 Maven stage. A staged
+handoff is not a public release.
+
+The rc.4 release workflow ran the same gates, staged signed artifacts,
+published through JReleaser, and pushed its tag only after publication
+succeeded. That is retained release history, not authorization to publish the
+rc.5 source. See the [release procedure](docs/development/releasing.md) and
 [rc.4 release decision](docs/releases/3.0.0-rc.4.md).
 
 `releaseCheck` does not read or execute `../blue-basic`. That sibling is
@@ -216,6 +251,8 @@ Developer references:
 - [Build and test](docs/development/build-and-test.md)
 - [Test strategy](docs/development/test-strategy.md)
 - [Initialization causality](docs/semantics/initialization-causality.md)
+- [Retained managed-epoch catch-up](docs/semantics/retained-managed-epoch-catch-up.md)
+- [MyOS retained managed-epoch integration guide](MYOS_RETAINED_MANAGED_EPOCH_INTEGRATION_GUIDE.md)
 - [Shared NBA Game lifecycle](docs/examples/nba-shared-game-lifecycle.md)
 - [Five-occurrence Playground API example](docs/examples/playground-five-occurrence.md)
 - [3.0.0-rc.4 release decision](docs/releases/3.0.0-rc.4.md)

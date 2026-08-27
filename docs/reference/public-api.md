@@ -5,6 +5,15 @@ The normal application boundary is `blue.coordination.sdk`.
 Contracts 1.0 environment pinned to the release manifest bundled in the JAR.
 Full signatures are in the generated Javadocs.
 
+This reference covers two explicitly different profiles. The Maven Central
+artifact is the published `3.0.0-rc.4` bounded external-pilot candidate. The
+repository version is the staged, unpublished, non-production
+`3.0.0-rc.5` source profile. Sections marked rc.5 describe source APIs that are
+not available from the rc.4 coordinate. The rc.5 source must be built against
+an invocation-owned immutable Blue Language/Contracts `3.1.0-rc.23` stage;
+that candidate starts at the exact published `3.1.0-rc.22` baseline and adds
+the managed-transition receipt surface.
+
 For a task-oriented walkthrough from authored documents through several
 Timelines and operation-created managed members, read the
 [SDK developer guide](../guides/developer-guide.md). This page is the concise
@@ -91,7 +100,7 @@ occurrence evidence and are rejected at this boundary.
 
 Frontier evidence encodes the exact retained external-order tuple as
 `components: [timestamp, timelineId, entryBlueId]`. The tuple must equal one
-retained journal entry; replay is strictly after it. Rc.3 has no typed
+retained journal entry; replay is strictly after it. Published rc.4 has no typed
 `EntryHandle` converter, so this is an advanced/provider integration boundary,
 not evidence applications should reconstruct from append sequence numbers.
 
@@ -144,8 +153,9 @@ environments remain outside this handle.
 
 ## Static Process Embedded admission
 
-For a bounded all-new graph already present in one authored Root value, the SDK
-can discover the complete static closure before admission:
+For a bounded graph already present in one new authored Root value, the SDK can
+discover the complete static closure before admission. Its embedded members
+may be all-new authored values or exact states of existing managed lineages:
 
 ```java
 ClosureHandle closure = blue.documents()
@@ -156,33 +166,68 @@ The overload
 `admitStaticProcessEmbedded(rootYaml, activationPolicy)` applies an existing
 supported `ActivationPolicy` to the resulting closure; the one-argument form
 uses `ActivationPolicy.fromNow()`. The policy controls temporal admission of
-the all-new closure. It does not select an existing lineage or a historical
-version for attachment.
+new members. It does not select an existing lineage or a historical version
+for attachment.
+
+Repeated historical states use the same typed occurrence-specific selector as
+operation attachment:
+
+```java
+ClosureHandle closure = blue.documents().admitStaticProcessEmbedded(
+        rootYaml,
+        List.of(ManagedEpochSelector.exact(
+                sourceDocumentId,
+                sourceEpoch,
+                expectedSourceBlueId,
+                "/child")));
+```
+
+The three-argument overload accepts both `ActivationPolicy` and the selector
+list. Every selector path is relative to the new authored Root and must resolve
+exactly once. The authored `-1` position is a selector sentinel only; no
+managed epoch receipt can have a negative epoch. Selector evidence is bound
+into the atomic admission identity.
 
 Discovery follows only the effective `Process Embedded` `paths` and
 `collectionPaths` catalog compiled from each exact member. A complete inline
-value becomes another member. A pure `{blueId: ...}` value is resolved through
-the configured `ExactNodeProvider`. Discovery then recurses, coalesces repeated
-occurrences of the same exact authored value into one lineage, and delegates
+value supplies its exact content directly. A pure `{blueId: ...}` value is
+resolved through the configured `ExactNodeProvider`, whose returned whole
+content must establish that exact BlueId. Discovery then recurses and delegates
 the explicit bindings, public Root, compilation, initialization, proof, and
-atomic publication to the ordinary closure-admission path. Every managed
-`DocumentId` is the member's exact pre-initialization authored BlueId; any
-authored `/documentId` value remains untouched content.
+atomic publication to the ordinary closure-admission path.
 
-The entire discovered member set must be new. Discovery and provider identity
-verification complete before the first managed write. If a pure reference is
-unavailable, the SDK throws a typed `CoordinationException` with code
-`NEEDS_RESOURCES` and exact `blueId`, `sourceDocumentId`, and `sourcePath`
-details; no member is admitted. A host may retain that demand, supply the exact
-resource, and retry the same admission. If the provider returns content with a
-different BlueId, admission fails with `INVALID_DOCUMENT_IDENTITY`, also before
-managed state is written.
+An exact embedded value that has no managed history creates one all-new
+content-identified lineage. An exact value already proven in one managed
+lineage automatically matches current, authored-initial, initialized
+epoch-zero, or one unique retained epoch. Current reuse activates immediately
+and creates no catch-up plan. Historical reuse initializes or processes the
+source zero additional times: it creates an occurrence-specific cursor and
+applies only the immutable source-receipt suffix through ordinary closure and
+cyclic processing. The consumer remains behind its aggregate readiness barrier
+until every path in that admission catches up. If the same exact state is
+ambiguous across lineages or retained positions, this no-selector convenience
+method fails closed; the typed-selector overload selects an exact stable
+lineage, epoch, expected state BlueId, and occurrence path.
 
-This API is deliberately static and all-new. It does not scan arbitrary object
-shape for children, attach an existing lineage, choose a historical child
-state, reserve a future occurrence, or discover an occurrence first created by
-an operation. It also does not infer a post-operation affected closure or add a
-dynamic cycle; those cases require a different semantic API.
+Every new managed `DocumentId` is its exact pre-initialization authored BlueId;
+an existing match retains its established lineage `DocumentId`. Any authored
+`/documentId` value remains untouched content. This does not change
+`ManagedClosure`: that explicit authored-admission API still describes one
+complete all-new closure and does not select retained states.
+
+Discovery, retained-state matching, and provider identity verification complete
+before the first publication. If a pure reference is unavailable, the SDK
+throws a typed `CoordinationException` with code `NEEDS_RESOURCES` and exact
+`blueId`, `sourceDocumentId`, and `sourcePath` details; no partial closure is
+admitted. A host may retain that demand, supply the exact resource, and retry
+the same admission. If the provider returns content with a different BlueId,
+admission fails with `INVALID_DOCUMENT_IDENTITY`, also before managed state is
+written.
+
+This API remains deliberately static. It does not scan arbitrary object shape
+for children, reserve a future occurrence, or discover an occurrence first
+created by an operation. It also does not infer a post-operation affected
+closure or add a dynamic cycle; those cases require the operation-result API.
 
 ## Targeted operations
 
@@ -248,10 +293,11 @@ one call can declare edges between drafts. All new heads and topology changes
 publish atomically with the parent result; a terminal failure leaves no partial
 expansion.
 
-This candidate supports only new `FROM_NOW` lineages. Imported-state evidence
-created with `draft.atEpoch(...)` and historical, frontier, attach-current, or
-passive operation-result activation fail closed. The SDK never emulates this
-lane through legacy child/parent admission.
+The published rc.4 candidate and staged rc.5 source both restrict this draft
+lane to new `FROM_NOW` lineages. Imported-state evidence created with
+`draft.atEpoch(...)` and historical, frontier, attach-current, or passive
+operation-result activation fail closed. The SDK never emulates this lane
+through legacy child/parent admission.
 
 Put every member that already exists—including every initially known cycle—in
 the initial `ManagedClosure`. The draft API adds exact new lineages from the
@@ -260,6 +306,50 @@ closure with imported history. Managed-draft path preflight currently requires
 an independently processable, non-cyclic operation target whose effective
 `Process Embedded` catalog does not cross a cyclic-set member. Either condition
 is rejected before append.
+
+## Existing managed-epoch attachment (rc.5 source only)
+
+The staged rc.5 profile adds a distinct path for attaching an exact value
+already proven in managed lineage history. Put the exact value in the ordinary
+request with `RequestBuilder.exact(...)`; do not construct a
+`ManagedDocumentDraft` and do not supply a reconstructed event list.
+
+Coordination automatically resolves one unambiguous match to the source
+lineage's current state, authored initial (`-1` sentinel), initialized epoch
+zero, or retained epoch. A current match opens no historical plan. A historical
+match applies each missing immutable `ManagedEpochReceipt` through the target
+occurrence by ordinary closure/cyclic PROCESS. The source is never initialized
+again and its Timeline entries are never replayed.
+
+If one exact historical BlueId occurs at several epochs, bind all four facts
+with `OperationCall.selectManagedEpoch(targetPath, sourceDocumentId,
+sourceEpoch, expectedSourceBlueId)` or an equivalent `ManagedEpochSelector`.
+The selector disambiguates retained evidence; it cannot create history or
+override an exact mismatch.
+
+One call may carry selectors for several distinct target paths, and one
+ordinary closure may resolve or demand several BlueIds. Each target occurrence
+is matched independently. A historical match owns its own plan/cursor, while
+all plans introduced by the same graph-changing cause belong to one barrier.
+Missing exact content is returned as typed resource-demand evidence; callers do
+not push an event list, binding array, or document patch into the process.
+
+Each occurrence activation generation owns a separate
+`ManagedOccurrenceCatchUpPlan`, cursor, and membership in a
+`ManagedCatchUpBarrier`. Two paths or two parents that consume the same source
+therefore advance independently. A detach/re-add or retarget creates a new
+generation and never reuses the retired cursor. The consumer has distinct
+committed and READY heads while its barrier is active; normal document reads
+continue to expose only the last READY head.
+
+`ManagedEpochReceipt` retains the complete source transition, original cause,
+source order when present, Contracts transition and commit identities,
+processing gas, and an ordered duplicate-preserving list of
+`ManagedEventOccurrence`. `DocumentRevision.managedEpochReceipt()` returns an
+optional value and contains the same complete receipt for a retained managed
+source epoch. Absence is unavailable evidence, not a reconstructible receipt.
+Event-only epochs remain real epochs even when before and after BlueIds are
+equal.
 
 ## Broadcast events
 
@@ -309,6 +399,13 @@ for intentional append batching or independent provider entries. Across
 Timelines, the environment's canonical source order wins; Java submission order
 is not a workflow scheduler.
 
+The staged rc.5 SDK also accepts
+`processing().drain(new DrainBudget(maxCommittedProcessTransitions,
+maxSelectedEntries))`. The budget can pause only between selected entries or
+committed PROCESS transitions. It does not preempt one frozen PROCESS or
+INITIALIZE call and is not a wall-clock deadline. A later drain resumes from
+retained plan cursors and receipts.
+
 ## Results and reads
 
 `EntryDisposition` contains `APPLIED`, `NO_MATCH`, `STALE`, `MIXED`,
@@ -324,6 +421,24 @@ document-step order, an elapsed field, and named counters. Current host elapsed
 time is populated on aggregate `DrainResult.stats()`; entry and closure elapsed
 fields remain zero and are not per-entry latency measurements.
 
+For ordinary entry processing, `ClosureResult.resourceDemands()` exposes each
+typed exact demand and `automaticRetryCount()` exposes bounded automatic
+resolution progress. A managed demand additionally carries optional
+`managedResolutionStatus()` and `managedResolutionDiagnostic()`. Branch on the
+closed `ManagedResolutionStatus`; the diagnostic is operator text. This lets an
+`EntryResult` persist several unresolved BlueIds without interpreting an
+exception message or publishing a partial closure.
+
+In the staged rc.5 profile, `DrainResult.managedEpochApplications()` contains
+only the `ManagedEpochApplicationReceipt` values newly committed by that drain.
+`managedEpochApplicationAttempts()` contains SDK-owned typed attempt evidence
+for committed, rolled-back, suspended, and reconciled work, including processor
+status, gas, rejected work/charge, resource demands, any committed receipt, the
+automatic retry count, and typed managed-occurrence resolution issues. Each
+issue binds a demand identity to the closed SDK `ResolutionStatus` vocabulary;
+its diagnostic string is display text, not a host control signal. These normal
+SDK signatures do not expose processor implementation types.
+
 For an applied managed closure, `ClosureResult.managedSurfaceEvidence()`
 retains the exact committed processor and host publication delta. Alongside
 contract, graph, component, and Channel/subscription transitions,
@@ -338,6 +453,12 @@ publication receipt.
 DocumentId, epoch, BlueId, exact content, and public events. `history()` returns
 immutable application-safe revisions. Physical objects, topology generations,
 proofs, and storage layout are not part of the normal snapshot.
+
+For rc.5 catch-up, a graph-changing consumer revision may be committed before
+its historical suffix is READY. `snapshot()` and ordinary `document()` reads
+continue to return the last READY head. Advanced diagnostics can inspect the
+newer committed head, active barrier identities, waiting/blocked evidence, and
+the READY head without making that intermediate state application-visible.
 
 Branch on `Diagnostic.code()`, not message text. A sequence of entries is not
 one global transaction: a committing connected affected closure has one atomic
@@ -357,6 +478,27 @@ cyclic finalizer, and proof-verifier identities used by evidence tooling.
 target `DocumentId`, positive activation generation, and active/inactive flag;
 it intentionally omits component snapshots, proof values, and mutable
 inventory internals.
+
+The staged rc.5 profile adds these read-only retained-epoch diagnostics:
+
+- `auditManagedEpoch(documentId, epoch)`,
+  `auditManagedEpochs(documentId)`, and
+  `auditManagedEpochReceipt(receiptIdentity)` return SDK
+  `ManagedEpochReceipt` values;
+- `auditManagedCatchUpPlan(planIdentity)` and
+  `auditManagedCatchUpPlans(consumerDocumentId)` expose occurrence-specific
+  plan snapshots;
+- `auditManagedCatchUpBarrier(barrierIdentity)` exposes one aggregate
+  readiness barrier;
+- `auditManagedEpochApplicationWork(workIdentity)` and
+  `auditManagedEpochApplicationReceipt(applicationReceiptIdentity)` expose
+  exact `blue.coordination.api` host evidence; and
+- `auditManagedDocumentReadiness(documentId)` reports committed versus READY
+  heads, session status, waiting evidence, and active barriers.
+
+These methods authenticate already retained state. They are not repair,
+replay, or mutation commands. `auditDocument(id)` remains the deliberate
+non-READY document read for host diagnostics.
 
 `auditTimelineEntry(blueId)`, `auditTimeline(timelineId)`, and
 `auditTimelineEntries()` return immutable `TimelineEntrySnapshot` values from
@@ -379,10 +521,17 @@ policies are not permitted in normal SDK signatures.
 
 ## Dependency and package surface
 
-The POM exposes Contracts and BEX artifacts at compile scope where retained
-advanced API and processor signatures require their types. Repository and
-Bouncy Castle remain runtime implementation dependencies. Every coordinate is
-exact and dependency-locked.
+The published rc.4 POM exposes its exact Maven Central Contracts/Language
+`3.1.0-rc.22` and BEX `1.1.0-rc.4` graph where advanced API and processor
+signatures require those types. Repository `3.0.0-rc.21` and Bouncy Castle
+remain runtime implementation dependencies. Every coordinate is exact and
+dependency-locked.
+
+The staged rc.5 source instead resolves every `blue.language` artifact at
+`3.1.0-rc.23` exclusively from a manifest-pinned, invocation-owned immutable
+Maven repository outside this checkout. Maven Local, composite substitution,
+mutable checkout input, and remote fallback for that protected group are not
+permitted. This build lane is integration evidence, not a publication claim.
 
 `blue.coordination.processor` is an advanced semantic-integration surface.
 `blue.coordination.internal` is not application API and may change between
