@@ -13,7 +13,8 @@ def dependencyMode = providers.gradleProperty('blueDependencyMode')
 def immutableStagedContracts =
         dependencyMode == 'immutable-staged-contracts'
 def publishedLanguageVersion = '3.1.0-rc.22'
-def immutableStagedLanguageVersion = '3.1.0-rc.21'
+def immutableStagedLanguageVersion = providers.gradleProperty(
+        'blueContractsVersion').getOrElse('3.1.0-rc.23')
 def activeLanguageVersion = immutableStagedContracts
         ? immutableStagedLanguageVersion
         : publishedLanguageVersion
@@ -184,6 +185,7 @@ dependencies {
         exclude group: 'blue.language'
     }
     implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
+    implementation 'io.github.erdtman:java-json-canonicalization:1.1'
 
     testImplementation platform('org.junit:junit-bom:5.14.1')
     testImplementation 'org.junit.jupiter:junit-jupiter'
