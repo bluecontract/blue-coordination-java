@@ -14,4 +14,9 @@ public final class ProcessingGateway {
     public DrainResult drain() {
         return runtime.drain();
     }
+
+    /** Drains eligible work without exceeding the supplied deterministic limits. */
+    public DrainResult drain(DrainBudget budget) {
+        return runtime.drain(Objects.requireNonNull(budget, "budget"));
+    }
 }

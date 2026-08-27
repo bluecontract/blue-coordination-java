@@ -17,7 +17,9 @@ public final class DocumentRevision {
         /** Parent state advanced through one managed child epoch. */
         EMBEDDED_REVISION_APPLICATION,
         /** Readiness marker after historical work reached its frontier. */
-        CATCH_UP_COMPLETED
+        CATCH_UP_COMPLETED,
+        /** Successful Root-event transition whose exact state did not change. */
+        EVENT_ONLY
     }
 
     private final DocumentId documentId;
@@ -28,6 +30,7 @@ public final class DocumentRevision {
     private final EntryHandle sourceEntry;
     private final List<PublicEvent> publicEvents;
     private final long processingGas;
+    private final ManagedEpochReceipt managedEpochReceipt;
 
     /** Creates one immutable public revision. */
     public DocumentRevision(
@@ -39,6 +42,29 @@ public final class DocumentRevision {
             EntryHandle sourceEntry,
             List<PublicEvent> publicEvents,
             long processingGas) {
+        this(
+                documentId,
+                epoch,
+                kind,
+                before,
+                after,
+                sourceEntry,
+                publicEvents,
+                processingGas,
+                null);
+    }
+
+    /** Creates one public revision with complete managed source evidence. */
+    public DocumentRevision(
+            DocumentId documentId,
+            long epoch,
+            Kind kind,
+            ExactBlueValue before,
+            ExactBlueValue after,
+            EntryHandle sourceEntry,
+            List<PublicEvent> publicEvents,
+            long processingGas,
+            ManagedEpochReceipt managedEpochReceipt) {
         this.documentId = Objects.requireNonNull(documentId, "documentId");
         this.epoch = SdkPreconditions.requireNonNegative(epoch, "epoch");
         this.kind = Objects.requireNonNull(kind, "kind");
@@ -49,6 +75,7 @@ public final class DocumentRevision {
                 publicEvents, "publicEvents"));
         this.processingGas = SdkPreconditions.requireNonNegative(
                 processingGas, "processingGas");
+        this.managedEpochReceipt = managedEpochReceipt;
         if (kind == Kind.INITIALIZATION && before != null) {
             throw new IllegalArgumentException(
                     "Initialization cannot have a prior exact state");
@@ -57,6 +84,7 @@ public final class DocumentRevision {
             throw new IllegalArgumentException(
                     "Timeline revision requires a source entry");
         }
+        requireManagedEpochReceipt();
     }
 
     /** Managed lineage whose state committed. */
@@ -97,5 +125,34 @@ public final class DocumentRevision {
     /** Frozen semantic gas charged to this transition. */
     public long processingGas() {
         return processingGas;
+    }
+
+    /** Complete source epoch evidence, when retained for this revision. */
+    public Optional<ManagedEpochReceipt> managedEpochReceipt() {
+        return Optional.ofNullable(managedEpochReceipt);
+    }
+
+    private void requireManagedEpochReceipt() {
+        if (kind == Kind.EVENT_ONLY && managedEpochReceipt == null) {
+            throw new IllegalArgumentException(
+                    "EVENT_ONLY requires a complete managed epoch receipt");
+        }
+        if (managedEpochReceipt == null) {
+            return;
+        }
+        if (!managedEpochReceipt.documentId().equals(documentId)
+                || managedEpochReceipt.epoch() != epoch
+                || managedEpochReceipt.kind() != kind
+                || !managedEpochReceipt.afterBlueId().equals(after.blueId())
+                || managedEpochReceipt.processingGas() != processingGas) {
+            throw new IllegalArgumentException(
+                    "Managed epoch receipt disagrees with its SDK revision");
+        }
+        if (before != null && managedEpochReceipt.beforeBlueId().isPresent()
+                && !managedEpochReceipt.beforeBlueId().orElseThrow()
+                        .equals(before.blueId())) {
+            throw new IllegalArgumentException(
+                    "Managed epoch receipt disagrees with prior SDK state");
+        }
     }
 }

@@ -4,6 +4,7 @@ import blue.coordination.api.DocumentId;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /** Independent terminal result for one affected disconnected closure. */
 public record ClosureResult(
@@ -91,7 +92,23 @@ public record ClosureResult(
             String demandIdentity,
             String blueId,
             DocumentId sourceDocumentId,
-            String sourcePath) {
+            String sourcePath,
+            Optional<ManagedResolutionStatus> managedResolutionStatus,
+            Optional<String> managedResolutionDiagnostic) {
+
+        /**
+         * Preserves the original demand constructor when automatic managed
+         * matching did not classify the suspended resource.
+         */
+        public ResourceDemand(
+                String kind,
+                String demandIdentity,
+                String blueId,
+                DocumentId sourceDocumentId,
+                String sourcePath) {
+            this(kind, demandIdentity, blueId, sourceDocumentId, sourcePath,
+                    Optional.empty(), Optional.empty());
+        }
 
         /** Validates the immutable evidence tuple. */
         public ResourceDemand {
@@ -103,6 +120,36 @@ public record ClosureResult(
                     sourceDocumentId, "sourceDocumentId");
             sourcePath = SdkPreconditions.requireText(
                     sourcePath, "sourcePath");
+            managedResolutionStatus = Objects.requireNonNull(
+                    managedResolutionStatus, "managedResolutionStatus");
+            managedResolutionDiagnostic = Objects.requireNonNull(
+                    managedResolutionDiagnostic,
+                    "managedResolutionDiagnostic");
+            managedResolutionDiagnostic = managedResolutionDiagnostic.map(
+                    diagnostic -> SdkPreconditions.requireText(
+                            diagnostic, "managedResolutionDiagnostic value"));
+            if (managedResolutionStatus.isPresent()
+                    != managedResolutionDiagnostic.isPresent()) {
+                throw new IllegalArgumentException(
+                        "Managed resolution status and diagnostic must be "
+                                + "present together");
+            }
         }
+    }
+
+    /** Closed host-persistable automatic managed matching classification. */
+    public enum ManagedResolutionStatus {
+        /** Exact referenced or partially materialized content is unavailable. */
+        MISSING_EXACT_CONTENT,
+        /** Several managed lineages match the supplied exact value. */
+        AMBIGUOUS_MANAGED_LINEAGE,
+        /** Several historical epochs match in the selected lineage. */
+        AMBIGUOUS_MANAGED_EPOCH,
+        /** No retained lineage proves a progressed supplied value. */
+        UNPROVEN_MANAGED_HISTORY,
+        /** Explicit selection disagrees with retained exact state. */
+        EXACT_STATE_MISMATCH,
+        /** Authored content cannot initialize a valid managed document. */
+        INVALID_AUTHORED_DOCUMENT
     }
 }

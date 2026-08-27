@@ -15,6 +15,7 @@ import blue.coordination.api.TimelineEntry;
 import blue.coordination.internal.BundledContracts10Release;
 import blue.coordination.internal.Contracts10AuthoredClosureCompiler;
 import blue.coordination.internal.Contracts10StaticEmbeddedAdmissionCompiler;
+import blue.coordination.internal.ContractsManagedEpochSelectionPlan;
 import blue.coordination.internal.ContractsManagedDraftPlan;
 import blue.coordination.internal.DefaultCoordinationEngine;
 import blue.language.model.Node;
@@ -117,6 +118,32 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                         audit.targetDocumentId(),
                         audit.activationGeneration(),
                         audit.active()));
+    }
+
+    synchronized Optional<ManagedEpochReceipt> auditManagedEpoch(
+            DocumentId documentId,
+            long epoch) {
+        ensureOpen();
+        return engine.auditManagedEpoch(
+                        Objects.requireNonNull(documentId, "documentId"), epoch)
+                .map(this::publicManagedEpochReceipt);
+    }
+
+    synchronized List<ManagedEpochReceipt> auditManagedEpochs(
+            DocumentId documentId) {
+        ensureOpen();
+        return engine.auditManagedEpochs(Objects.requireNonNull(
+                        documentId, "documentId"))
+                .stream()
+                .map(this::publicManagedEpochReceipt)
+                .toList();
+    }
+
+    synchronized Optional<ManagedEpochReceipt> auditManagedEpochReceipt(
+            String receiptIdentity) {
+        ensureOpen();
+        return engine.auditManagedEpochReceipt(receiptIdentity)
+                .map(this::publicManagedEpochReceipt);
     }
 
     synchronized List<OperationRouteSnapshot> auditOperationRoutes(
@@ -244,17 +271,34 @@ final class SdkCoordinationRuntime implements AutoCloseable {
     synchronized ClosureHandle admitStaticProcessEmbedded(
             String authoredYaml) {
         return admitStaticProcessEmbedded(
-                authoredYaml, ActivationPolicy.fromNow());
+                authoredYaml, ActivationPolicy.fromNow(), List.of());
     }
 
     synchronized ClosureHandle admitStaticProcessEmbedded(
             String authoredYaml,
             ActivationPolicy activationPolicy) {
+        return admitStaticProcessEmbedded(
+                authoredYaml, activationPolicy, List.of());
+    }
+
+    synchronized ClosureHandle admitStaticProcessEmbedded(
+            String authoredYaml,
+            List<ManagedEpochSelector> selectors) {
+        return admitStaticProcessEmbedded(
+                authoredYaml, ActivationPolicy.fromNow(), selectors);
+    }
+
+    synchronized ClosureHandle admitStaticProcessEmbedded(
+            String authoredYaml,
+            ActivationPolicy activationPolicy,
+            List<ManagedEpochSelector> selectors) {
         ensureOpen();
+        List<ManagedEpochSelector> selectedSelectors = List.copyOf(
+                Objects.requireNonNull(selectors, "selectors"));
         exactNodeProvider.beginLookupScope();
         try {
             return admitStaticProcessEmbeddedScoped(
-                    authoredYaml, activationPolicy);
+                    authoredYaml, activationPolicy, selectedSelectors);
         } finally {
             exactNodeProvider.endLookupScope();
         }
@@ -262,7 +306,8 @@ final class SdkCoordinationRuntime implements AutoCloseable {
 
     private ClosureHandle admitStaticProcessEmbeddedScoped(
             String authoredYaml,
-            ActivationPolicy activationPolicy) {
+            ActivationPolicy activationPolicy,
+            List<ManagedEpochSelector> selectors) {
         Contracts10StaticEmbeddedAdmissionCompiler.CompiledStaticAdmission
                 selected = staticCompiler.compile(
                         Objects.requireNonNull(authoredYaml, "authoredYaml"),
@@ -273,11 +318,22 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         engine.authorizeContractsPublicRoots(Set.of(rootId));
         Contracts10AuthoredClosureCompiler.ActivationInputs activation =
                 selected.activationInputs();
-        ContractsClosureAdmissionReceipt receipt = engine.admitContractsClosure(
-                selected.invocation(),
-                activation.policy(),
-                activation.verifiedFrontier(),
-                exactNodeProvider);
+        ContractsManagedEpochSelectionPlan selectionPlan =
+                staticManagedEpochSelectionPlan(
+                        rootId,
+                        selectors);
+        ContractsClosureAdmissionReceipt receipt = selectionPlan == null
+                ? engine.admitContractsClosure(
+                        selected.invocation(),
+                        activation.policy(),
+                        activation.verifiedFrontier(),
+                        exactNodeProvider)
+                : engine.admitContractsClosure(
+                        selected.invocation(),
+                        activation.policy(),
+                        activation.verifiedFrontier(),
+                        exactNodeProvider,
+                        selectionPlan);
         requirePublishedAdmission(receipt);
         ClosureProcessResult result = receipt.attempt().processResult();
         List<ClosureOccurrenceSnapshot> occurrences = result
@@ -309,6 +365,29 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                 Set.of("root"),
                 authored,
                 occurrences);
+    }
+
+    private static ContractsManagedEpochSelectionPlan
+            staticManagedEpochSelectionPlan(
+                    DocumentId rootId,
+                    List<ManagedEpochSelector> selectors) {
+        List<ManagedEpochSelector> selected = List.copyOf(
+                Objects.requireNonNull(selectors, "selectors"));
+        if (selected.isEmpty()) {
+            return null;
+        }
+        return new ContractsManagedEpochSelectionPlan(
+                Objects.requireNonNull(rootId, "rootId"),
+                -1L,
+                rootId.value(),
+                selected.stream()
+                        .map(selector -> new ContractsManagedEpochSelectionPlan
+                                .Selection(
+                                        selector.sourceDocumentId(),
+                                        selector.sourceEpoch(),
+                                        selector.expectedSourceBlueId(),
+                                        selector.targetOccurrencePath()))
+                        .toList());
     }
 
     private static LinkedHashMap<String, DocumentId> staticAdmissionAliases(
@@ -433,6 +512,7 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                 ExactBlueValue.wrap(snapshot.current()),
                 snapshot.epoch(),
                 true,
+                requireExactTarget(snapshot),
                 null);
     }
 
@@ -441,12 +521,13 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         DocumentId id = Objects.requireNonNull(documentId, "documentId");
         try {
             blue.coordination.api.DocumentSnapshot snapshot =
-                    engine.auditDocument(id);
+                    engine.document(id);
             return new TargetSelection(
                     id,
                     ExactBlueValue.wrap(snapshot.current()),
                     snapshot.epoch(),
                     true,
+                    requireExactTarget(snapshot),
                     null);
         } catch (CoordinationException failure) {
             ExactBlueValue lineageEvidence = ExactBlueValue.wrap(
@@ -457,8 +538,14 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                     lineageEvidence,
                     -1L,
                     false,
+                    true,
                     "document is not managed");
         }
+    }
+
+    private boolean requireExactTarget(
+            blue.coordination.api.DocumentSnapshot snapshot) {
+        return snapshot.status() != SessionStatus.CATCHING_UP;
     }
 
     synchronized EntryHandle submitOperation(OperationCall call) {
@@ -491,6 +578,15 @@ final class SdkCoordinationRuntime implements AutoCloseable {
     synchronized DrainResult drain() {
         ensureOpen();
         return retain(mapper.map(engine.drain()));
+    }
+
+    synchronized DrainResult drain(DrainBudget budget) {
+        ensureOpen();
+        DrainBudget selected = Objects.requireNonNull(budget, "budget");
+        return retain(mapper.map(engine.drain(
+                new CoordinationEngine.DrainBudget(
+                        selected.maxCommittedProcessTransitions(),
+                        selected.maxSelectedEntries()))));
     }
 
     synchronized EntryIntent intent(String entryBlueId) {
@@ -578,7 +674,9 @@ final class SdkCoordinationRuntime implements AutoCloseable {
 
     synchronized List<DocumentRevision> history(DocumentId id) {
         ensureOpen();
+        long readyEpoch = engine.document(id).epoch();
         return engine.history(id).stream()
+                .filter(revision -> revision.epoch() <= readyEpoch)
                 .map(this::publicRevision)
                 .toList();
     }
@@ -587,16 +685,12 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         ensureOpen();
         blue.coordination.api.DocumentSnapshot snapshot =
                 engine.document(id);
-        if (snapshot.status() != SessionStatus.READY) {
-            throw new IllegalStateException(
-                    "DOCUMENT_NOT_READY: " + id);
-        }
         return new DocumentSnapshot(
                 id,
                 snapshot.epoch(),
                 true,
                 ExactBlueValue.wrap(snapshot.current()),
-                latestPublicEvents(id));
+                publicEventsAt(id, snapshot.epoch()));
     }
 
     synchronized ExactBlueValue current(DocumentId id) {
@@ -689,6 +783,8 @@ final class SdkCoordinationRuntime implements AutoCloseable {
     private EntryHandle appendOperation(OperationCall call) {
         requireOwned(call.timeline());
         ManagedDraftEvidence managed = managedDraftEvidence(call);
+        ContractsManagedEpochSelectionPlan epochSelections =
+                managedEpochSelectionPlan(call);
         ExactValue request;
         if (call.requestYaml() != null) {
             request = engine.exactValue(call.requestYaml());
@@ -700,23 +796,38 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         TargetSelection target = call.target();
         Operation operation = Operation.exact(
                 call.operation(), call.channel(), request)
-                .targeting(target.exact().unwrap(), true);
+                .targeting(
+                        target.exact().unwrap(),
+                        target.requireExactDocumentVersion());
         Timeline timeline = new Timeline(
                 call.timeline().id(), call.timeline().accountId());
         TimelineEntry appended;
-        if (managed == null || !target.presentAtSelection()) {
+        if ((managed == null && epochSelections == null)
+                || !target.presentAtSelection()) {
             // Preserve the ordinary precise zero-attempt target diagnostic.
             // A missing target cannot own an affected closure or new lineage.
             appended = engine.append(timeline, operation);
         } else {
-            ContractsManagedDraftPlan plan = new ContractsManagedDraftPlan(
-                    target.id(),
-                    target.epochAtSelection(),
-                    target.exact().blueId(),
-                    managed.drafts(),
-                    managed.requestFields(),
-                    managed.expectedOccurrences());
-            appended = engine.append(timeline, operation, plan);
+            ContractsManagedDraftPlan draftPlan = managed == null
+                    ? null : new ContractsManagedDraftPlan(
+                            target.id(),
+                            target.epochAtSelection(),
+                            target.exact().blueId(),
+                            managed.drafts(),
+                            managed.requestFields(),
+                            managed.expectedOccurrences());
+            if (draftPlan != null && epochSelections != null) {
+                appended = engine.append(
+                        timeline,
+                        operation,
+                        draftPlan,
+                        epochSelections);
+            } else if (draftPlan != null) {
+                appended = engine.append(timeline, operation, draftPlan);
+            } else {
+                appended = engine.append(
+                        timeline, operation, epochSelections);
+            }
         }
         intents.put(appended.blueId(), EntryIntent.targeted(
                 target,
@@ -724,6 +835,32 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                 call.channel(),
                 call.timeline()));
         return retainCoreEntry(appended);
+    }
+
+    private ContractsManagedEpochSelectionPlan managedEpochSelectionPlan(
+            OperationCall call) {
+        List<ManagedEpochSelector> selectors = call.managedEpochSelectors();
+        if (selectors.isEmpty()) {
+            return null;
+        }
+        TargetSelection target = call.target();
+        if (!target.presentAtSelection()) {
+            throw new IllegalArgumentException(
+                    "MANAGED_EPOCH_SELECTOR_TARGET_MISMATCH: absent "
+                            + target.id());
+        }
+        return new ContractsManagedEpochSelectionPlan(
+                target.id(),
+                target.epochAtSelection(),
+                target.exact().blueId(),
+                selectors.stream()
+                        .map(selector -> new ContractsManagedEpochSelectionPlan
+                                .Selection(
+                                        selector.sourceDocumentId(),
+                                        selector.sourceEpoch(),
+                                        selector.expectedSourceBlueId(),
+                                        selector.targetOccurrencePath()))
+                        .toList());
     }
 
     private ManagedDraftEvidence managedDraftEvidence(OperationCall call) {
@@ -944,6 +1081,9 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                         revision.documentId(),
                         null))
                 .toList();
+        ManagedEpochReceipt managedReceipt = revision.managedEpochReceipt()
+                .map(this::publicManagedEpochReceipt)
+                .orElse(null);
         return new DocumentRevision(
                 revision.documentId(),
                 revision.epoch(),
@@ -957,16 +1097,26 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                 ExactBlueValue.wrap(revision.after()),
                 source,
                 events,
-                revision.processingGas());
+                revision.processingGas(),
+                managedReceipt);
     }
 
-    private List<PublicEvent> latestPublicEvents(DocumentId id) {
-        List<blue.coordination.api.DocumentRevision> revisions =
-                engine.history(id);
-        if (revisions.isEmpty()) {
-            return List.of();
-        }
-        return revisions.get(revisions.size() - 1).emittedEvents().stream()
+    private ManagedEpochReceipt publicManagedEpochReceipt(
+            blue.coordination.api.ManagedEpochReceipt receipt) {
+        TimelineEntrySnapshot source = receipt.sourceEntry()
+                .map(this::publicTimelineEntry)
+                .orElse(null);
+        return new ManagedEpochReceipt(receipt, source);
+    }
+
+    private List<PublicEvent> publicEventsAt(DocumentId id, long epoch) {
+        blue.coordination.api.DocumentRevision revision = engine.history(id)
+                .stream()
+                .filter(candidate -> candidate.epoch() == epoch)
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "READY revision " + epoch + " is missing for " + id));
+        return revision.emittedEvents().stream()
                 .map(event -> new PublicEvent(
                         ExactBlueValue.wrap(ExactValue.verified(event)),
                         id,
@@ -1052,6 +1202,7 @@ final class SdkCoordinationRuntime implements AutoCloseable {
             ExactBlueValue exact,
             long epochAtSelection,
             boolean presentAtSelection,
+            boolean requireExactDocumentVersion,
             String selectionFailure) {
         TargetSelection {
             id = Objects.requireNonNull(id, "id");

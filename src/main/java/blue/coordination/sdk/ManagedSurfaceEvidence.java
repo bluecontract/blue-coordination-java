@@ -83,7 +83,13 @@ public record ManagedSurfaceEvidence(
         /** The authored value matched the exact current state of a lineage. */
         CURRENT_EXISTING,
         /** The authored value initialized a new managed lineage. */
-        NEW_AUTHORED
+        NEW_AUTHORED,
+        /** The value matched an existing lineage's authored initial state. */
+        EXISTING_AUTHORED_INITIAL,
+        /** The value matched an existing lineage at initialized epoch zero. */
+        EXISTING_INITIALIZED_EPOCH_ZERO,
+        /** The value matched one unique retained source epoch. */
+        EXISTING_RETAINED_EPOCH
     }
 
     /** Exact outcome of one automatic managed-occurrence resolution. */
