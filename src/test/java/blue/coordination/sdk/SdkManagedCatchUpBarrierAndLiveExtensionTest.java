@@ -699,11 +699,15 @@ final class SdkManagedCatchUpBarrierAndLiveExtensionTest {
                     .auditManagedDocumentReadiness(B)
                     .orElseThrow()
                     .status());
-            assertTrue(coordination.advanced()
+            assertFalse(coordination.advanced()
                     .auditManagedDocumentReadiness(A)
                     .orElseThrow()
                     .ready());
-            long aEpochBefore = a.snapshot().epoch();
+            assertEquals(List.of(plan.barrierIdentity()), coordination.advanced()
+                    .auditManagedDocumentReadiness(A).orElseThrow().activeBarrierIdentities());
+            assertTrue(coordination.advanced().auditManagedCatchUpPlans(A).isEmpty(),
+                    "A waits for B's owned barrier without acquiring a duplicate C plan");
+            long aEpochBefore = coordination.advanced().auditDocument(A).epoch();
             CoordinationTestControl.MetricsSnapshot beforeApplication =
                     control.metricsSnapshot();
 

@@ -446,6 +446,9 @@ final class SequentialDrainCoordinator {
 
     private String synchronizationFailure(DocumentSession session) {
         DocumentId documentId = session.documentId();
+        if (!documents.activeCatchUpBarrierIdentities(documentId).isEmpty()) {
+            return "a managed source catch-up barrier remains open";
+        }
         if (openBarrierByParent.containsKey(documentId)) {
             return "an embedded catch-up barrier remains open";
         }

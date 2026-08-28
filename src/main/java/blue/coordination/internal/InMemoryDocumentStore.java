@@ -525,12 +525,12 @@ final class InMemoryDocumentStore {
                 documentId, "documentId"));
     }
 
-    /** Reads only barriers indexed to one consumer and still holding ready. */
+    /** Reads owned and transitive source barriers still holding this Root ready. */
     synchronized List<String> activeCatchUpBarrierIdentities(
             DocumentId consumerDocumentId) {
-        CatchUpPlanStore.ActiveBarriersRead read = state.catchUpPlans()
-                .activeBarriersForConsumer(Objects.requireNonNull(
-                        consumerDocumentId, "consumerDocumentId"));
+        CatchUpPlanStore.ActiveBarriersRead read = new ManagedCatchUpReadiness(
+                state.catchUpPlans(), state.occurrenceInventory()).read(
+                        Objects.requireNonNull(consumerDocumentId, "consumerDocumentId"));
         recordActiveBarrierRead(read);
         return read.barrierIdentities();
     }
@@ -540,8 +540,8 @@ final class InMemoryDocumentStore {
             DocumentId documentId) {
         DocumentSession session = require(Objects.requireNonNull(
                 documentId, "documentId"));
-        CatchUpPlanStore.ActiveBarriersRead activeRead = state.catchUpPlans()
-                .activeBarriersForConsumer(documentId);
+        CatchUpPlanStore.ActiveBarriersRead activeRead = new ManagedCatchUpReadiness(
+                state.catchUpPlans(), state.occurrenceInventory()).read(documentId);
         recordActiveBarrierRead(activeRead);
         List<String> active = activeRead.barrierIdentities();
         String waitingCode = null;

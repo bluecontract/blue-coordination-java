@@ -41,7 +41,9 @@ import java.util.function.Consumer;
  * every document lineage whose exact head they depend on. Touched sessions are
  * copied and committed off-store, while bindings, component state, outbox, and
  * checkpoint evidence remain staged in replacement collections. Only the
- * enclosing store performs the final reference swap.</p>
+ * enclosing store performs the final reference swap. Readiness-only parents
+ * outside the processing cohort are derived from that same immutable store
+ * image under the commit lock; they receive no document or graph revision.</p>
  */
 final class MultiDocumentPublicationTransaction {
     static final long MAX_SAFE_INTEGER = 9_007_199_254_740_991L;
@@ -747,6 +749,11 @@ final class MultiDocumentPublicationTransaction {
                         ? before.occurrenceInventoryGeneration()
                         : this.resultingOccurrenceInventoryGeneration;
 
+        ManagedCatchUpReadiness resultingReadiness = new ManagedCatchUpReadiness(
+                publicationCatchUpPlans, resultingInventory);
+        ManagedCatchUpReadiness priorReadiness = new ManagedCatchUpReadiness(
+                before.catchUpPlans(), before.occurrenceInventory());
+
         PersistentOrderedMap<DocumentId, DocumentSession> resultingSessionIndex =
                 before.sessionIndex();
         long sessionIndexComparisons = 0L;
@@ -765,8 +772,7 @@ final class MultiDocumentPublicationTransaction {
                     entry.getValue().copyForAtomicPublication();
             replacement.restoreReadyEmbeddedChildren(
                     activeChildren(resultingInventory, entry.getKey()));
-            if (publicationCatchUpPlans.hasActiveBarrierForConsumer(
-                    entry.getKey())) {
+            if (resultingReadiness.blocked(entry.getKey())) {
                 replacement.markCatchingUp();
             }
             PersistentOrderedMap.Mutation<DocumentId, DocumentSession>
@@ -802,8 +808,7 @@ final class MultiDocumentPublicationTransaction {
                 if (update.terminated()) {
                     replacement.markTerminated(activeChildren(
                             resultingInventory, documentId));
-                } else if (!publicationCatchUpPlans.hasActiveBarrierForConsumer(
-                        documentId)) {
+                } else if (!resultingReadiness.blocked(documentId)) {
                     replacement.markReady(
                             update.committedFrontier(),
                             activeChildren(resultingInventory, documentId));
@@ -844,8 +849,7 @@ final class MultiDocumentPublicationTransaction {
                     update.resultingSubscriptions(),
                     update.transitionReceipt().transitionReceiptIdentity());
             replacement.markGraphPublished();
-            if (!publicationCatchUpPlans.hasActiveBarrierForConsumer(
-                    documentId)) {
+            if (!resultingReadiness.blocked(documentId)) {
                 replacement.markReady(
                         current.readyThrough(),
                         activeChildren(resultingInventory, documentId));
@@ -868,19 +872,31 @@ final class MultiDocumentPublicationTransaction {
                             update.resultingDocument().afterBlueId(),
                             update.transitionReceipt());
         }
-        if (expectedCatchUpPlans != null) {
-            for (DocumentId documentId : expectedHeads.keySet()) {
+        if (expectedCatchUpPlans != null
+                && (before.catchUpPlans().hasActiveBarriers()
+                        || publicationCatchUpPlans.hasActiveBarriers())) {
+            // This is status-only dependency publication, not additional Root
+            // processing. Parents without typed demands are outside the
+            // Contracts cohort; derive their replacement from the current
+            // immutable store image under its atomic commit lock. The exact
+            // inventory generation is already fenced above.
+            Set<DocumentId> readinessDependents = ManagedCatchUpReadiness.dependents(
+                    expectedHeads.keySet(), before.occurrenceInventory(), resultingInventory);
+            for (DocumentId documentId : readinessDependents) {
                 if (documentUpdates.containsKey(documentId)
                         || componentRepresentationUpdates.containsKey(
                                 documentId)
-                        || !expectedCatchUpPlans
-                                .hasActiveBarrierForConsumer(documentId)
-                        || publicationCatchUpPlans
-                                .hasActiveBarrierForConsumer(documentId)) {
+                        || priorReadiness.blocked(documentId)
+                                == resultingReadiness.blocked(documentId)) {
                     continue;
                 }
                 DocumentSession current = requireSession(before, documentId);
-                if (current.status()
+                if (current.status() == blue.coordination.api.SessionStatus.BLOCKED
+                        || current.status() == blue.coordination.api.SessionStatus.TERMINATED
+                        || current.status() == blue.coordination.api.SessionStatus.PENDING_INITIALIZATION) {
+                    continue;
+                }
+                if (!resultingReadiness.blocked(documentId) && current.status()
                         != blue.coordination.api.SessionStatus.CATCHING_UP) {
                     throw new IllegalStateException(
                             "A completed catch-up barrier belongs to a "
@@ -888,9 +904,13 @@ final class MultiDocumentPublicationTransaction {
                 }
                 DocumentSession replacement =
                         current.copyForAtomicPublication();
-                replacement.markReady(
-                        current.readyThrough(),
-                        activeChildren(resultingInventory, documentId));
+                if (resultingReadiness.blocked(documentId)) {
+                    replacement.markCatchingUp();
+                } else {
+                    replacement.markReady(
+                            current.readyThrough(),
+                            activeChildren(resultingInventory, documentId));
+                }
                 PersistentOrderedMap.Mutation<DocumentId, DocumentSession>
                         mutation = resultingSessionIndex.put(
                                 documentId, replacement);
