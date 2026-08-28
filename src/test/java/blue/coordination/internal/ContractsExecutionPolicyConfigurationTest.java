@@ -16,14 +16,19 @@ final class ContractsExecutionPolicyConfigurationTest {
 
     @Test
     void sdkDefaultRetainsReleaseSharedGasExactly() {
+        // given
         try (BlueCoordination coordination = BlueCoordination.inMemory()) {
-            assertEquals(RELEASE_DEFAULT_SHARED_GAS,
-                    selectedPolicy(coordination).sharedLimit());
+            // when
+            long selected = selectedPolicy(coordination).sharedLimit();
+
+            // then
+            assertEquals(RELEASE_DEFAULT_SHARED_GAS, selected);
         }
     }
 
     @Test
     void sdkBuilderHonorsExplicitExactSharedGasPolicy() {
+        // given
         try (BlueCoordination defaultCoordination =
                      BlueCoordination.inMemory();
                 BlueCoordination interactiveCoordination =
@@ -33,10 +38,12 @@ final class ContractsExecutionPolicyConfigurationTest {
                                              INTERACTIVE_LAB_SHARED_GAS,
                                              "myos-interactive-lab-5000"))
                              .build()) {
+            // when
             ExecutionPolicy release = selectedPolicy(defaultCoordination);
             ExecutionPolicy interactive = selectedPolicy(
                     interactiveCoordination);
 
+            // then
             assertEquals(RELEASE_DEFAULT_SHARED_GAS,
                     release.sharedLimit());
             assertEquals(INTERACTIVE_LAB_SHARED_GAS,
@@ -47,18 +54,31 @@ final class ContractsExecutionPolicyConfigurationTest {
 
     @Test
     void explicitPolicyRejectsNonPositiveGasAndBlankLabel() {
-        assertEquals("sharedGasLimit must be positive", assertThrows(
+        // given
+        long zero = 0L;
+        long negative = -1L;
+        String blank = "  ";
+
+        // when
+        IllegalArgumentException zeroFailure = assertThrows(
                 IllegalArgumentException.class,
                 () -> ContractsExecutionPolicy.exactSharedGas(
-                        0L, "interactive-zero")).getMessage());
-        assertEquals("sharedGasLimit must be positive", assertThrows(
+                        zero, "interactive-zero"));
+        IllegalArgumentException negativeFailure = assertThrows(
                 IllegalArgumentException.class,
                 () -> ContractsExecutionPolicy.exactSharedGas(
-                        -1L, "interactive-negative")).getMessage());
-        assertEquals("label must not be blank", assertThrows(
+                        negative, "interactive-negative"));
+        IllegalArgumentException blankFailure = assertThrows(
                 IllegalArgumentException.class,
                 () -> ContractsExecutionPolicy.exactSharedGas(
-                        INTERACTIVE_LAB_SHARED_GAS, "  ")).getMessage());
+                        INTERACTIVE_LAB_SHARED_GAS, blank));
+
+        // then
+        assertEquals("sharedGasLimit must be positive",
+                zeroFailure.getMessage());
+        assertEquals("sharedGasLimit must be positive",
+                negativeFailure.getMessage());
+        assertEquals("label must not be blank", blankFailure.getMessage());
     }
 
     private static ExecutionPolicy selectedPolicy(

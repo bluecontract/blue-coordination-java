@@ -45,6 +45,125 @@ final class SdkManagedEpochBudgetFairnessTest {
     private static final String DIRECT_TIMELINE = "scheduler/direct";
 
     @Test
+    void targetedSlicesRetainFailureIsolationUntilHealthyConsumerCompletes() {
+        // given
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            CoordinationTestControl control = CoordinationTestControl.attach(
+                    coordination.advanced().rawEngine());
+            TimelineHandle sourceTimeline = coordination.timelines().register(
+                    SOURCE_TIMELINE, ACTOR);
+            TimelineHandle consumerTimeline = coordination.timelines()
+                    .register(CONSUMER_TIMELINE, ACTOR);
+
+            ClosureHandle poisonClosure = coordination.documents().admit(
+                    ManagedClosure.builder()
+                            .document("consumer", POISON_A,
+                                    failingConsumerYaml(POISON_A))
+                            .document("peer", POISON_A_PEER,
+                                    loopPeerYaml(POISON_A_PEER))
+                            .bindOccurrence("consumer", "/peer", "peer")
+                            .bindOccurrence("peer", "/peer", "consumer")
+                            .publicRoot("consumer")
+                            .fromNow()
+                            .build());
+            DocumentHandle poison = poisonClosure.document("consumer");
+            DocumentHandle healthy = coordination.documents().admit(
+                    ManagedDocument.yaml(
+                                    HEALTHY,
+                                    successfulConsumerYaml(HEALTHY))
+                            .publicRoot()
+                            .fromNow());
+            ExactBlueValue authoredSource = coordination.values().yaml(
+                    sourceYaml());
+            DocumentHandle source = coordination.documents().admit(
+                    ManagedDocument.yaml(SOURCE, sourceYaml())
+                            .publicRoot()
+                            .fromNow());
+            assertApplied(sourceOperation(
+                    coordination, source, sourceTimeline, "fail").execute());
+
+            EntryHandle poisonAttachment = coordination.operations()
+                    .on(poison)
+                    .from(consumerTimeline)
+                    .call("attach")
+                    .through("ownerChannel")
+                    .request(request -> request.exact(
+                            "source", authoredSource))
+                    .submit();
+            DrainResult attachedPoison = coordination.processing()
+                    .drainJournal(new DrainBudget(1L, 1L));
+            assertEquals(EntryDisposition.APPLIED,
+                    attachedPoison.entry(poisonAttachment).disposition());
+
+            ProcessingSelection poisonZero = coordination.advanced()
+                    .auditNextProcessingSelection();
+            assertManagedSelection(poisonZero, POISON_A, 0L);
+            assertTrue(drainSelected(coordination, poisonZero)
+                    .managedEpochApplicationAttempts().get(0).published());
+
+            ProcessingSelection poisonOne = coordination.advanced()
+                    .auditNextProcessingSelection();
+            assertManagedSelection(poisonOne, POISON_A, 1L);
+            ManagedEpochApplicationAttempt poisonFailure = drainSelected(
+                    coordination, poisonOne)
+                    .managedEpochApplicationAttempts().get(0);
+            assertFalse(poisonFailure.published());
+            assertEquals(1L, poisonFailure.work().sourceEpoch());
+
+            EntryHandle healthyAttachment = coordination.operations()
+                    .on(healthy)
+                    .from(consumerTimeline)
+                    .call("attach")
+                    .through("ownerChannel")
+                    .request(request -> request.exact(
+                            "source", authoredSource))
+                    .submit();
+            DrainResult attachedHealthy = coordination.processing()
+                    .drainJournal(new DrainBudget(1L, 1L));
+            assertEquals(EntryDisposition.APPLIED,
+                    attachedHealthy.entry(healthyAttachment).disposition());
+
+            ProcessingSelection healthyZero = coordination.advanced()
+                    .auditNextProcessingSelection();
+            assertManagedSelection(healthyZero, HEALTHY, 0L);
+            assertTrue(drainSelected(coordination, healthyZero)
+                    .managedEpochApplicationAttempts().get(0).published());
+
+            // when
+            control.restartFromStores();
+            ProcessingSelection healthyOne = coordination.advanced()
+                    .auditNextProcessingSelection();
+            CoordinationException poisonCannotOvertake = assertThrows(
+                    CoordinationException.class,
+                    () -> coordination.processing()
+                            .drainManagedEpochApplication(poisonOne
+                                    .managedEpochApplicationWork()
+                                    .orElseThrow()
+                                    .workIdentity()));
+            ProcessingSelection afterMismatch = coordination.advanced()
+                    .auditNextProcessingSelection();
+            DrainResult completedHealthy = drainSelected(
+                    coordination, healthyOne);
+            ProcessingSelection retryFrontier = coordination.advanced()
+                    .auditNextProcessingSelection();
+
+            // then
+            assertManagedSelection(healthyOne, HEALTHY, 1L);
+            assertEquals(
+                    CoordinationErrorCode.PROCESSING_SELECTION_MISMATCH,
+                    poisonCannotOvertake.code());
+            assertSameSelection(healthyOne, afterMismatch);
+            assertTrue(completedHealthy
+                    .managedEpochApplicationAttempts().get(0).published());
+            assertEquals(ManagedCatchUpStatus.COMPLETE,
+                    onlyPlan(coordination, HEALTHY).status());
+            assertManagedSelection(retryFrontier, POISON_A, 1L);
+            assertEquals(1L, onlyPlan(coordination, POISON_A)
+                    .nextSourceEpoch());
+        }
+    }
+
+    @Test
     void poisonLanesRoundRobinAndHealthyProgressSurviveRestart() {
         // given
         RunEvidence uninterrupted;
@@ -559,7 +678,13 @@ final class SdkManagedEpochBudgetFairnessTest {
     private static ManagedOccurrenceCatchUpPlan onlyPlan(
             Scenario scenario,
             DocumentId consumer) {
-        List<ManagedOccurrenceCatchUpPlan> plans = scenario.coordination()
+        return onlyPlan(scenario.coordination(), consumer);
+    }
+
+    private static ManagedOccurrenceCatchUpPlan onlyPlan(
+            BlueCoordination coordination,
+            DocumentId consumer) {
+        List<ManagedOccurrenceCatchUpPlan> plans = coordination
                 .advanced().auditManagedCatchUpPlans(consumer);
         assertEquals(1, plans.size());
         return plans.get(0);

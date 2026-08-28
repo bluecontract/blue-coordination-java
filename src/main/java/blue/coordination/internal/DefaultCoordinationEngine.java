@@ -1486,11 +1486,27 @@ public final class DefaultCoordinationEngine
             nextFairManagedEpochApplicationWork() {
         Set<DocumentId> deferred = contractsRecoveryState
                 .deferredManagedConsumers();
+        Set<DocumentId> isolated = contractsRecoveryState
+                .isolatedManagedConsumers();
+        LinkedHashSet<DocumentId> excluded = new LinkedHashSet<>(deferred);
+        excluded.addAll(isolated);
         Optional<ManagedEpochApplicationWork> selected = documents
-                .nextCatchUpWorkExcluding(deferred);
-        if (selected.isPresent() || deferred.isEmpty()) {
+                .nextCatchUpWorkExcluding(excluded);
+        if (selected.isPresent()) {
             return selected;
         }
+        if (!deferred.isEmpty()) {
+            selected = documents.nextCatchUpWorkExcluding(isolated);
+            if (selected.isPresent()) {
+                return selected;
+            }
+        }
+        if (isolated.isEmpty()) {
+            return Optional.empty();
+        }
+        // Every independently progressing lane is exhausted. Expose the
+        // canonical isolated lane as the next explicit retry frontier without
+        // mutating either retained round during an audit.
         return documents.nextCatchUpWorkExcluding(Set.of());
     }
 
@@ -1954,8 +1970,16 @@ public final class DefaultCoordinationEngine
                                     "Failed managed consumer was selected "
                                             + "twice");
                         }
+                        if (outcome.publicationFailure().isEmpty()) {
+                            contractsRecoveryState
+                                    .isolateManagedEpochConsumer(
+                                            outcome.work()
+                                                    .consumerDocumentId());
+                        }
                         continue;
                     }
+                    contractsRecoveryState.completeManagedEpochIsolation(
+                            outcome.work().consumerDocumentId());
                     madeProgress = true;
                     if (!outcome.replayed()) {
                         managedApplications.add(
@@ -2093,21 +2117,58 @@ public final class DefaultCoordinationEngine
                 failedManagedConsumers, "failedManagedConsumers"));
         LinkedHashSet<DocumentId> excluded = new LinkedHashSet<>(
                 contractsRecoveryState.deferredManagedConsumers());
+        excluded.addAll(
+                contractsRecoveryState.isolatedManagedConsumers());
         excluded.addAll(failed);
         Optional<ContractsClosureAdapter.ManagedApplicationOutcome> selected =
                 contractsClosureAdapter.processNextManagedEpochApplication(
                         excluded);
-        if (selected.isPresent()
-                || !contractsRecoveryState.hasDeferredManagedConsumers()) {
+        if (selected.isPresent()) {
             return selected;
         }
 
-        // Every non-failed lane in this deterministic fairness round has been
-        // visited. Start the next round without allowing one lane to run twice
-        // in the current drain call.
-        contractsRecoveryState.completeManagedEpochFairnessRound();
-        return contractsClosureAdapter.processNextManagedEpochApplication(
-                failed);
+        if (contractsRecoveryState.hasDeferredManagedConsumers()) {
+            // Every non-failed lane in this deterministic fairness round has
+            // been visited. Start the next round without allowing one lane to
+            // run twice in the current drain call or an isolated lane to
+            // overtake independent work in a later exact slice.
+            contractsRecoveryState.completeManagedEpochFairnessRound();
+            LinkedHashSet<DocumentId> nextRoundExcluded =
+                    new LinkedHashSet<>(contractsRecoveryState
+                            .isolatedManagedConsumers());
+            nextRoundExcluded.addAll(failed);
+            selected = contractsClosureAdapter
+                    .processNextManagedEpochApplication(nextRoundExcluded);
+            if (selected.isPresent()) {
+                return selected;
+            }
+        }
+
+        if (!contractsRecoveryState.hasIsolatedManagedConsumers()) {
+            return Optional.empty();
+        }
+
+        // No independent due lane remains. Begin one deterministic retry
+        // sweep, still excluding failures already attempted by this same
+        // monolithic drain call. Exact sliced calls reconstruct this frontier
+        // from retained recovery state.
+        Set<DocumentId> isolated = contractsRecoveryState
+                .isolatedManagedConsumers();
+        contractsRecoveryState.completeManagedEpochIsolationSweep();
+        try {
+            selected = contractsClosureAdapter
+                    .processNextManagedEpochApplication(failed);
+            if (selected.isEmpty()) {
+                contractsRecoveryState.restoreManagedEpochIsolation(
+                        isolated);
+            }
+            return selected;
+        } catch (ManagedEpochEvidenceException retainedFailure) {
+            throw retainedFailure;
+        } catch (RuntimeException failure) {
+            contractsRecoveryState.restoreManagedEpochIsolation(isolated);
+            throw failure;
+        }
     }
 
     private static ContractsClosureDispatchAttempt.OperationRouteChange
@@ -2196,6 +2257,9 @@ public final class DefaultCoordinationEngine
                 new ContractsJournalDrainCoordinator.DurableState();
         private final LinkedHashSet<DocumentId> deferredManagedConsumers =
                 new LinkedHashSet<>();
+        /** Failed/suspended consumers isolated across exact processing slices. */
+        private final LinkedHashSet<DocumentId> isolatedManagedConsumers =
+                new LinkedHashSet<>();
         /** Retained fair turn between external and managed transition lanes. */
         private boolean managedEpochTurn;
 
@@ -2207,6 +2271,14 @@ public final class DefaultCoordinationEngine
             return !deferredManagedConsumers.isEmpty();
         }
 
+        private Set<DocumentId> isolatedManagedConsumers() {
+            return Set.copyOf(isolatedManagedConsumers);
+        }
+
+        private boolean hasIsolatedManagedConsumers() {
+            return !isolatedManagedConsumers.isEmpty();
+        }
+
         private void deferManagedEpochConsumer(DocumentId consumer) {
             deferredManagedConsumers.add(Objects.requireNonNull(
                     consumer, "consumer"));
@@ -2214,6 +2286,27 @@ public final class DefaultCoordinationEngine
 
         private void completeManagedEpochFairnessRound() {
             deferredManagedConsumers.clear();
+        }
+
+        private void isolateManagedEpochConsumer(DocumentId consumer) {
+            isolatedManagedConsumers.add(Objects.requireNonNull(
+                    consumer, "consumer"));
+        }
+
+        private void completeManagedEpochIsolation(DocumentId consumer) {
+            isolatedManagedConsumers.remove(Objects.requireNonNull(
+                    consumer, "consumer"));
+        }
+
+        private void completeManagedEpochIsolationSweep() {
+            isolatedManagedConsumers.clear();
+        }
+
+        private void restoreManagedEpochIsolation(
+                Set<DocumentId> consumers) {
+            isolatedManagedConsumers.clear();
+            isolatedManagedConsumers.addAll(Set.copyOf(
+                    Objects.requireNonNull(consumers, "consumers")));
         }
     }
 
