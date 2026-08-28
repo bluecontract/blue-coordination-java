@@ -152,7 +152,9 @@ final class SdkDrainResultMapper {
                         .toList(),
                 retained.publicationFailure().map(failure ->
                         new ManagedEpochApplicationAttempt.PublicationFailure(
-                                failure.code(),
+                                ManagedEpochApplicationAttempt
+                                        .PublicationFailureCode.valueOf(
+                                                failure.code().name()),
                                 failure.message(),
                                 failure.details())));
     }

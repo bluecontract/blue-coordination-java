@@ -1,6 +1,5 @@
 package blue.coordination.sdk;
 
-import blue.coordination.api.CoordinationErrorCode;
 import blue.coordination.api.DocumentId;
 
 import java.util.LinkedHashMap;
@@ -189,7 +188,7 @@ public record ManagedEpochApplicationAttempt(
 
     /** Stable owning-layer failure after Contracts completed but before commit. */
     public record PublicationFailure(
-            CoordinationErrorCode code,
+            PublicationFailureCode code,
             String message,
             Map<String, String> details) {
 
@@ -205,6 +204,12 @@ public record ManagedEpochApplicationAttempt(
                 text(value, "detail value");
             });
         }
+    }
+
+    /** Closed SDK-owned managed-application publication failure vocabulary. */
+    public enum PublicationFailureCode {
+        /** Retained processing attempted to author a nested document lineage. */
+        UNSUPPORTED_NESTED_NEW_LINEAGE
     }
 
     /** Closed reason why automatic resolution returned a suspended attempt. */

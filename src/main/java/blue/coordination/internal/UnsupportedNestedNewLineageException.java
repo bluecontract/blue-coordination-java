@@ -27,14 +27,6 @@ final class UnsupportedNestedNewLineageException
         this.newDocumentId = newDocumentId;
     }
 
-    ManagedEpochApplicationWork work() {
-        return work;
-    }
-
-    DocumentId newDocumentId() {
-        return newDocumentId;
-    }
-
     Map<String, String> details() {
         return Map.of(
                 "workIdentity", work.workIdentity(),

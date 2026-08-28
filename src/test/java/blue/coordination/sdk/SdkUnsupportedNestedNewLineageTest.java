@@ -116,7 +116,8 @@ final class SdkUnsupportedNestedNewLineageTest {
                     applicationAttempt.publicationFailure().orElseThrow();
 
             assertEquals(
-                    CoordinationErrorCode.UNSUPPORTED_NESTED_NEW_LINEAGE,
+                    ManagedEpochApplicationAttempt.PublicationFailureCode
+                            .UNSUPPORTED_NESTED_NEW_LINEAGE,
                     failure.code());
             assertEquals(CONSUMER.value(),
                     failure.details().get("consumerDocumentId"));
