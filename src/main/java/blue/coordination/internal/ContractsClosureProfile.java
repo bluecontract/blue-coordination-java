@@ -1,5 +1,6 @@
 package blue.coordination.internal;
 
+import blue.coordination.api.ContractsExecutionPolicy;
 import blue.coordination.api.DocumentId;
 import blue.language.processor.DocumentProcessor;
 import blue.language.processor.closure.ClosureEnvironment;
@@ -16,8 +17,6 @@ import java.util.TreeSet;
 
 /** Immutable host policy used to construct one Contracts 1.0 environment. */
 final class ContractsClosureProfile {
-    private static final long DEFAULT_SHARED_GAS_LIMIT = 100_000L;
-
     private final String blueLanguageSpecificationIdentity;
     private final String contractsSpecificationIdentity;
     private final String managedDocumentPolicyLabel;
@@ -76,6 +75,21 @@ final class ContractsClosureProfile {
             String blueLanguageSpecificationIdentity,
             String contractsSpecificationIdentity,
             Collection<DocumentId> publicRoots) {
+        return release10(
+                blueLanguageSpecificationIdentity,
+                contractsSpecificationIdentity,
+                ContractsExecutionPolicy.releaseDefault(),
+                publicRoots);
+    }
+
+    /** Constructs the release profile with one explicit host gas policy. */
+    static ContractsClosureProfile release10(
+            String blueLanguageSpecificationIdentity,
+            String contractsSpecificationIdentity,
+            ContractsExecutionPolicy executionPolicy,
+            Collection<DocumentId> publicRoots) {
+        ContractsExecutionPolicy selected = Objects.requireNonNull(
+                executionPolicy, "executionPolicy");
         return new ContractsClosureProfile(
                 blueLanguageSpecificationIdentity,
                 contractsSpecificationIdentity,
@@ -85,8 +99,8 @@ final class ContractsClosureProfile {
                 "canonical-source-order-v1",
                 "blue-contracts-1.0-portable-limits",
                 release10PortableLimits(),
-                DEFAULT_SHARED_GAS_LIMIT,
-                "release-default",
+                selected.sharedGasLimit(),
+                selected.label(),
                 publicRoots);
     }
 

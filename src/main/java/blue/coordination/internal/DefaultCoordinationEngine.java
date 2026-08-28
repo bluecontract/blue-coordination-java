@@ -20,6 +20,7 @@ import blue.coordination.api.CoordinationMetrics;
 import blue.coordination.api.Contracts10Configuration;
 import blue.coordination.api.ContractsClosureAdmissionReceipt;
 import blue.coordination.api.ContractsClosureDispatchAttempt;
+import blue.coordination.api.ContractsExecutionPolicy;
 import blue.coordination.api.ManagedCatchUpBarrier;
 import blue.coordination.api.ManagedDocumentReadiness;
 import blue.coordination.api.ManagedEpochApplicationAttempt;
@@ -165,12 +166,12 @@ public final class DefaultCoordinationEngine
     private boolean closed;
 
     private DefaultCoordinationEngine(
-            ContractsBootstrap contractsConfiguration) {
-        this(contractsConfiguration, null);
+            ContractsBootstrap contractsBootstrap) {
+        this(contractsBootstrap, null);
     }
 
     private DefaultCoordinationEngine(
-            ContractsBootstrap contractsConfiguration,
+            ContractsBootstrap contractsBootstrap,
             blue.coordination.sdk.ExactNodeProvider exactNodeProvider) {
         metrics = new EngineMetrics();
         objects = new WholeObjectStore(metrics);
@@ -202,7 +203,7 @@ public final class DefaultCoordinationEngine
                 metrics,
                 this::nextApplicationTimestamp,
                 this::inject);
-        if (contractsConfiguration == null) {
+        if (contractsBootstrap == null) {
             contractsClosureAdapter = null;
             contractsClosureAdmissionAdapter = null;
             contractsClosureProfile = null;
@@ -213,11 +214,12 @@ public final class DefaultCoordinationEngine
         } else {
             ContractsClosureProfile profile = ContractsClosureProfile
                     .release10(
-                            contractsConfiguration
+                            contractsBootstrap
                                     .blueLanguageSpecificationIdentity(),
-                            contractsConfiguration
+                            contractsBootstrap
                                     .contractsSpecificationIdentity(),
-                            contractsConfiguration.publicRootDocumentIds());
+                            contractsBootstrap.executionPolicy(),
+                            contractsBootstrap.publicRootDocumentIds());
             contractsClosureProfile = profile;
             contractsActiveSourceTimelines =
                     new ContractsActiveSourceTimelineIndex(
@@ -266,6 +268,7 @@ public final class DefaultCoordinationEngine
         return new DefaultCoordinationEngine(new ContractsBootstrap(
                 selected.blueLanguageSpecificationIdentity(),
                 selected.contractsSpecificationIdentity(),
+                ContractsExecutionPolicy.releaseDefault(),
                 selected.publicRootDocumentIds()));
     }
 
@@ -279,6 +282,7 @@ public final class DefaultCoordinationEngine
         return new DefaultCoordinationEngine(new ContractsBootstrap(
                 blueLanguageSpecificationIdentity,
                 contractsSpecificationIdentity,
+                ContractsExecutionPolicy.releaseDefault(),
                 Set.of()));
     }
 
@@ -294,6 +298,27 @@ public final class DefaultCoordinationEngine
                 new ContractsBootstrap(
                         blueLanguageSpecificationIdentity,
                         contractsSpecificationIdentity,
+                        ContractsExecutionPolicy.releaseDefault(),
+                        Set.of()),
+                Objects.requireNonNull(
+                        exactNodeProvider, "exactNodeProvider"));
+    }
+
+    /**
+     * Creates the SDK runtime with one verified provider and explicit exact
+     * Contracts closure execution policy.
+     */
+    public static DefaultCoordinationEngine createContracts10Sdk(
+            String blueLanguageSpecificationIdentity,
+            String contractsSpecificationIdentity,
+            blue.coordination.sdk.ExactNodeProvider exactNodeProvider,
+            ContractsExecutionPolicy executionPolicy) {
+        return new DefaultCoordinationEngine(
+                new ContractsBootstrap(
+                        blueLanguageSpecificationIdentity,
+                        contractsSpecificationIdentity,
+                        Objects.requireNonNull(
+                                executionPolicy, "executionPolicy"),
                         Set.of()),
                 Objects.requireNonNull(
                         exactNodeProvider, "exactNodeProvider"));
@@ -2135,6 +2160,7 @@ public final class DefaultCoordinationEngine
     private record ContractsBootstrap(
             String blueLanguageSpecificationIdentity,
             String contractsSpecificationIdentity,
+            ContractsExecutionPolicy executionPolicy,
             Set<DocumentId> publicRootDocumentIds) {
         private ContractsBootstrap {
             blueLanguageSpecificationIdentity = requireSha256Identity(
@@ -2143,6 +2169,8 @@ public final class DefaultCoordinationEngine
             contractsSpecificationIdentity = requireSha256Identity(
                     contractsSpecificationIdentity,
                     "contractsSpecificationIdentity");
+            executionPolicy = Objects.requireNonNull(
+                    executionPolicy, "executionPolicy");
             publicRootDocumentIds = Set.copyOf(Objects.requireNonNull(
                     publicRootDocumentIds, "publicRootDocumentIds"));
         }

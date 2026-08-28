@@ -1,6 +1,7 @@
 package blue.coordination.sdk;
 
 import blue.coordination.api.ContractsClosureAdmissionReceipt;
+import blue.coordination.api.ContractsExecutionPolicy;
 import blue.coordination.api.CoordinationEngine;
 import blue.coordination.api.CoordinationErrorCode;
 import blue.coordination.api.CoordinationException;
@@ -63,7 +64,8 @@ final class SdkCoordinationRuntime implements AutoCloseable {
             String languageIdentity,
             String contractsIdentity,
             ExactNodeProvider exactNodeProvider,
-            boolean contentDerivedDocumentIds) {
+            boolean contentDerivedDocumentIds,
+            ContractsExecutionPolicy contractsExecutionPolicy) {
         this.owner = Objects.requireNonNull(owner, "owner");
         this.exactNodeProvider = new ScopedExactNodeProvider(
                 Objects.requireNonNull(
@@ -81,7 +83,12 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         contractsSpecificationIdentity = contracts;
         bundledRelease = languageIdentity == null;
         engine = DefaultCoordinationEngine.createContracts10Sdk(
-                language, contracts, this.exactNodeProvider);
+                language,
+                contracts,
+                this.exactNodeProvider,
+                Objects.requireNonNull(
+                        contractsExecutionPolicy,
+                        "contractsExecutionPolicy"));
         compiler = new Contracts10AuthoredClosureCompiler(engine);
         staticCompiler = new Contracts10StaticEmbeddedAdmissionCompiler(engine);
         mapper = new SdkDrainResultMapper(this, engine);
@@ -93,12 +100,29 @@ final class SdkCoordinationRuntime implements AutoCloseable {
             String contractsIdentity,
             ExactNodeProvider exactNodeProvider,
             boolean contentDerivedDocumentIds) {
+        return create(
+                owner,
+                languageIdentity,
+                contractsIdentity,
+                exactNodeProvider,
+                contentDerivedDocumentIds,
+                ContractsExecutionPolicy.releaseDefault());
+    }
+
+    static SdkCoordinationRuntime create(
+            Object owner,
+            String languageIdentity,
+            String contractsIdentity,
+            ExactNodeProvider exactNodeProvider,
+            boolean contentDerivedDocumentIds,
+            ContractsExecutionPolicy contractsExecutionPolicy) {
         return new SdkCoordinationRuntime(
                 owner,
                 languageIdentity,
                 contractsIdentity,
                 exactNodeProvider,
-                contentDerivedDocumentIds);
+                contentDerivedDocumentIds,
+                contractsExecutionPolicy);
     }
 
     synchronized CoordinationEngine engine() {
