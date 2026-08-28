@@ -546,6 +546,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                 : selected.resolvedExactNodes()) {
             ExactValue retained = objects.putVerifiedProviderEvidence(
                     exact.exactValue(),
+                    exact.providerBody(),
                     exact.cyclicProof(),
                     "automatic-admission-retry-resource");
             if (!retained.sameExactValue(exact.exactValue())) {
@@ -671,17 +672,18 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
             boolean publicRoot = profile.isPublicRoot(document.documentId());
             long componentGeneration = requireComponentGeneration(
                     generations, id);
+            Node invocationBody = invocationDocument(document.current());
             ManagedDocumentSnapshot snapshot = new ManagedDocumentSnapshot(
                     id,
                     document.head().blueId(),
-                    document.current().copyNode(),
+                    invocationBody,
                     document.initialized(),
                     document.terminated(),
                     publicRoot,
                     document.head().epoch(),
                     componentGeneration);
             members.add(id);
-            bodies.put(id, document.current().copyNode());
+            bodies.put(id, invocationBody.clone());
             durableDocuments.put(id, snapshot);
             if (publicRoot) {
                 publicRoots.add(id);
@@ -985,6 +987,13 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
         }
     }
 
+    private Node invocationDocument(ExactValue current) {
+        ExactValue selected = Objects.requireNonNull(current, "current");
+        return selected.isCyclicMember()
+                ? objects.requireProviderDocument(selected)
+                : selected.copyNode();
+    }
+
     private static blue.language.processor.closure.DocumentId closureId(
             DocumentId documentId) {
         return new blue.language.processor.closure.DocumentId(
@@ -1240,6 +1249,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                         layout.routingSurface(),
                         activeSubscriptions));
             }
+            objects.retainVerifiedClosureComponentEvidence(result);
             CatchUpPlanStore beforeCatchUpPlans =
                     documents.catchUpPlansSnapshot();
             ManagedCatchUpPlanner.PlanningResult catchUp =

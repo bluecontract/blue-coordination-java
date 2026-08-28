@@ -734,9 +734,14 @@ final class ManagedOccurrenceResolverTest {
             assertTrue(resolved.cyclicProof() != null);
             assertEquals("resolver-cycle-a",
                     resolved.exactValue().copyNode().getName());
+            Node detachedProviderBody = resolved.providerBody();
+            detachedProviderBody.name("mutated-copy");
+            assertEquals("resolver-cycle-a",
+                    resolved.providerBody().getName());
 
             engine.objects().putVerifiedProviderEvidence(
                     resolved.exactValue(),
+                    resolved.providerBody(),
                     resolved.cyclicProof(),
                     "resolver-cyclic-test");
             assertEquals(NodeProviderOutcome.FOUND,

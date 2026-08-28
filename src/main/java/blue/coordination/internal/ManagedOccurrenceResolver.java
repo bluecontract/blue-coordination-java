@@ -81,6 +81,7 @@ final class ManagedOccurrenceResolver {
                     exactNodes.add(new ResolvedExactNode(
                             exact,
                             evidence.toExactValue(exact.blueId()),
+                            evidence.body(),
                             evidence.cyclicProof()));
                 }
                 continue;
@@ -766,16 +767,19 @@ final class ManagedOccurrenceResolver {
     record ResolvedExactNode(
             ExactNodeDemand demand,
             ExactValue exactValue,
+            Node providerBody,
             CyclicSetProof cyclicProof) {
         ResolvedExactNode(
                 ExactNodeDemand demand,
                 ExactValue exactValue) {
-            this(demand, exactValue, null);
+            this(demand, exactValue, exactValue.copyNode(), null);
         }
 
         ResolvedExactNode {
             demand = Objects.requireNonNull(demand, "demand");
             exactValue = Objects.requireNonNull(exactValue, "exactValue");
+            providerBody = Objects.requireNonNull(
+                    providerBody, "providerBody").clone();
             if (!demand.blueId().equals(exactValue.blueId())) {
                 throw new IllegalArgumentException(
                         "Resolved exact-node evidence has the wrong BlueId");
@@ -787,6 +791,20 @@ final class ManagedOccurrenceResolver {
                 throw new IllegalArgumentException(
                         "Resolved exact-node cyclic evidence is incomplete");
             }
+            ExactValue authenticated = cyclic
+                    ? ExactValue.fromVerifiedProviderEvidence(
+                            demand.blueId(), providerBody, cyclicProof)
+                    : ExactValue.verified(demand.blueId(), providerBody);
+            if (!authenticated.sameExactValue(exactValue)) {
+                throw new IllegalArgumentException(
+                        "Resolved exact-node provider body changed after "
+                                + "verification");
+            }
+        }
+
+        @Override
+        public Node providerBody() {
+            return providerBody.clone();
         }
     }
 

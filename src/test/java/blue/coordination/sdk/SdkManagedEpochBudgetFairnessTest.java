@@ -77,6 +77,7 @@ final class SdkManagedEpochBudgetFairnessTest {
 
     @Test
     void hostAvailabilityJoinsFairSelectionWithoutCreatingJournalWork() {
+        // given
         String poisonASecondWork;
         try (Scenario reference = scenario()) {
             poisonASecondWork = null;
@@ -96,9 +97,12 @@ final class SdkManagedEpochBudgetFairnessTest {
         }
         String retainedPoisonASecondWork = poisonASecondWork;
 
+        // when
         try (Scenario subject = scenario(false)) {
             ProcessingSelection first = subject.coordination().advanced()
                     .auditNextProcessingSelection();
+
+            // then
             assertManagedSelection(first, POISON_A, 1L);
             CoordinationException journalMismatch = assertThrows(
                     CoordinationException.class,

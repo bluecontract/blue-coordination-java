@@ -1,8 +1,8 @@
 package blue.coordination.internal;
 
-import blue.coordination.api.Timeline;
-
+import blue.coordination.api.DocumentId;
 import blue.coordination.api.ExactValue;
+import blue.coordination.api.Timeline;
 
 import blue.language.identity.BlueIds;
 import blue.language.merge.ResolvedSnapshot;
@@ -10,6 +10,7 @@ import blue.language.model.Node;
 import blue.language.processor.closure.ClosureProcessResult;
 import blue.language.processor.closure.ComponentKind;
 import blue.language.processor.closure.ComponentSnapshot;
+import blue.language.processor.closure.ResultingDocument;
 import blue.language.provider.CyclicAwareNodeProvider;
 import blue.language.provider.CyclicSetProof;
 import blue.language.provider.CyclicSetProofResult;
@@ -40,6 +41,8 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
     private final Map<String, ExactValue> canonicalByBlueId =
             new LinkedHashMap<>();
     private final Map<String, ExactValue> providerByBlueId =
+            new LinkedHashMap<>();
+    private final Map<String, Node> cyclicProviderBodyByBlueId =
             new LinkedHashMap<>();
     private final Map<String, String> purposeByBlueId = new LinkedHashMap<>();
     private final Map<String, CyclicSetProof> cyclicProofByMasterBlueId =
@@ -115,32 +118,53 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
      */
     synchronized ExactValue putVerifiedProviderEvidence(
             ExactValue value,
+            Node providerBody,
             CyclicSetProof cyclicProof,
             String purpose) {
         ExactValue selected = Objects.requireNonNull(value, "value");
+        Node rawProviderBody = Objects.requireNonNull(
+                providerBody, "providerBody").clone();
         if (!selected.isCyclicMember()) {
             if (cyclicProof != null) {
                 throw new IllegalArgumentException(
                         "Ordinary provider evidence cannot carry cyclic proof");
             }
+            ExactValue authenticated = ExactValue.verified(
+                    selected.blueId(), rawProviderBody);
+            if (!authenticated.sameExactValue(selected)) {
+                throw new IllegalArgumentException(
+                        "Provider evidence changed after verification");
+            }
             return put(selected, purpose);
         }
+        CyclicSetProof retainedProof = CyclicSetProof
+                .fromDeclaredPlaceholderSet(Objects.requireNonNull(
+                        cyclicProof, "cyclicProof")
+                        .declaredPlaceholderSet());
         ExactValue authenticated = ExactValue.fromVerifiedProviderEvidence(
                 selected.blueId(),
-                selected.copyNode(),
-                Objects.requireNonNull(cyclicProof, "cyclicProof"));
+                rawProviderBody,
+                retainedProof);
         if (!authenticated.sameExactValue(selected)) {
             throw new IllegalArgumentException(
                     "Cyclic retry evidence changed after proof verification");
         }
-        ExactValue retained = put(authenticated, purpose);
         String masterBlueId = BlueIds.cyclicSetMasterBlueId(
                 selected.blueId());
+        requireCompatibleRetainedCyclicBodies(
+                masterBlueId,
+                selected.blueId(),
+                rawProviderBody,
+                retainedProof);
+        ExactValue retained = put(authenticated, purpose);
+        recordBeforeMutation(selected.blueId());
+        providerByBlueId.put(selected.blueId(), authenticated);
+        cyclicProviderBodyByBlueId.put(
+                selected.blueId(), rawProviderBody);
+        purposeByBlueId.put(selected.blueId(), sanitize(purpose));
         recordProofBeforeMutation(masterBlueId);
         cyclicProofByMasterBlueId.put(
-                masterBlueId,
-                CyclicSetProof.fromDeclaredPlaceholderSet(
-                        cyclicProof.declaredPlaceholderSet()));
+                masterBlueId, retainedProof);
         metrics.increment("wholeObjectStore.cyclicProviderProofsRetained");
         return retained;
     }
@@ -207,30 +231,149 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
     }
 
     /**
-     * Retains the complete cyclic proof already authenticated by one committed
-     * Contracts result. The proof shares the surrounding object-store
-     * savepoint, so a failed Coordination publication cannot leak provider
-     * evidence for an unpublished component state.
+     * Retains every verified result body and one proof per cyclic component.
+     * The trusted immutable Contracts result already verified every body;
+     * Coordination preflights all store invariants before mutating state.
      */
-    synchronized void retainVerifiedClosureProofs(
+    synchronized void retainVerifiedClosureComponentEvidence(
             ClosureProcessResult result) {
         ClosureProcessResult verified = Objects.requireNonNull(
                 result, "result");
         if (!verified.commits()) {
             throw new IllegalArgumentException(
-                    "Only a committed closure result can retain cyclic proof");
+                    "Only a committed closure result can retain provider "
+                            + "representations");
         }
+        Map<String, ComponentSnapshot> componentsByIdentity =
+                new LinkedHashMap<>();
+        Map<String, CyclicSetProof> proofsByMasterBlueId =
+                new LinkedHashMap<>();
+        Map<String, java.util.Set<Integer>> memberIndexesByComponent =
+                new LinkedHashMap<>();
+        List<ExactValue> ordinaryEvidence = new ArrayList<>();
         for (ComponentSnapshot component : verified.resultingComponents()) {
+            ComponentSnapshot duplicate = componentsByIdentity.put(
+                    component.componentIdentity(), component);
+            if (duplicate != null) {
+                throw new IllegalStateException(
+                        "Duplicate verified component lineage "
+                                + component.componentIdentity());
+            }
             if (component.kind() != ComponentKind.CYCLIC) {
                 continue;
             }
+            if (component.orderedMemberDocumentIds().size()
+                    != component.orderedMemberBlueIds().size()) {
+                throw new IllegalStateException(
+                        "Cyclic component member inventories disagree "
+                                + component.componentIdentity());
+            }
             String masterBlueId = component.masterBlueId();
-            CyclicSetProof proof = CyclicSetProof.fromDeclaredPlaceholderSet(
-                    component.completeCyclicProof()
-                            .declaredPlaceholderSet());
+            CyclicSetProof proof = CyclicSetProof
+                    .fromDeclaredPlaceholderSet(
+                            component.completeCyclicProof()
+                                    .declaredPlaceholderSet());
+            if (proofsByMasterBlueId.put(masterBlueId, proof) != null) {
+                throw new IllegalStateException(
+                        "Duplicate verified cyclic master " + masterBlueId);
+            }
+            memberIndexesByComponent.put(
+                    component.componentIdentity(), new LinkedHashSet<>());
+        }
+        List<VerifiedClosureCyclicEvidence> evidence = new ArrayList<>();
+        for (ResultingDocument document : verified.resultingDocuments()) {
+            if (document.memberIndex() == null) {
+                ordinaryEvidence.add(ExactValue.fromVerifiedClosureResult(
+                        verified,
+                        DocumentId.of(document.documentId().value())));
+                continue;
+            }
+            ComponentSnapshot component = componentsByIdentity.get(
+                    document.componentIdentity());
+            int memberIndex = component == null
+                    ? -1
+                    : component.orderedMemberDocumentIds().indexOf(
+                            document.documentId());
+            if (component == null
+                    || component.kind() != ComponentKind.CYCLIC
+                    || memberIndex < 0
+                    || !component.orderedMemberBlueIds().get(memberIndex)
+                            .equals(document.afterBlueId())
+                    || component.componentGeneration()
+                            != document.componentGeneration()
+                    || !component.componentStateIdentity().equals(
+                            document.componentStateIdentity())) {
+                throw new IllegalStateException(
+                        "Cyclic result document disagrees with its verified "
+                                + "component " + document.documentId());
+            }
+            String blueId = document.afterBlueId();
+            String masterBlueId = BlueIds.cyclicSetMasterBlueId(blueId);
+            ExactValue retained = canonicalByBlueId.get(blueId);
+            if (!masterBlueId.equals(component.masterBlueId())
+                    || retained == null
+                    || !retained.isCyclicMember()
+                    || !memberIndexesByComponent
+                            .get(component.componentIdentity())
+                            .add(memberIndex)) {
+                throw new IllegalStateException(
+                        "Cyclic result document has no matching retained "
+                                + "component member " + blueId);
+            }
+            evidence.add(new VerifiedClosureCyclicEvidence(
+                    blueId, document.document()));
+        }
+        for (ComponentSnapshot component : componentsByIdentity.values()) {
+            if (component.kind() != ComponentKind.CYCLIC) {
+                continue;
+            }
+            java.util.Set<Integer> retainedIndexes = memberIndexesByComponent
+                    .get(component.componentIdentity());
+            if (retainedIndexes == null
+                    || retainedIndexes.size()
+                            != component.orderedMemberDocumentIds().size()) {
+                throw new IllegalStateException(
+                        "Cyclic result omits a verified component member "
+                                + component.componentIdentity());
+            }
+        }
+        for (ExactValue member : ordinaryEvidence) {
+            retainOrdinaryClosureMember(member);
+        }
+        for (Map.Entry<String, CyclicSetProof> proof
+                : proofsByMasterBlueId.entrySet()) {
+            String masterBlueId = proof.getKey();
             recordProofBeforeMutation(masterBlueId);
-            cyclicProofByMasterBlueId.put(masterBlueId, proof);
+            cyclicProofByMasterBlueId.put(masterBlueId, proof.getValue());
             metrics.increment("wholeObjectStore.cyclicProofsRetained");
+        }
+        for (VerifiedClosureCyclicEvidence member : evidence) {
+            recordBeforeMutation(member.blueId());
+            cyclicProviderBodyByBlueId.put(
+                    member.blueId(), member.providerBody());
+            purposeByBlueId.put(
+                    member.blueId(),
+                    "verified-closure-cyclic-provider");
+            metrics.increment(
+                    "wholeObjectStore.cyclicProviderRepresentationsRetained");
+        }
+    }
+
+    /** Retains a passive ordinary result member omitted by layout rebuilding. */
+    private void retainOrdinaryClosureMember(ExactValue member) {
+        String blueId = member.blueId();
+        ExactValue canonical = canonicalByBlueId.get(blueId);
+        if (canonical == null || canonical.frozen().isReferenceOnly()) {
+            put(member, "verified-closure-component-member");
+            return;
+        }
+        ExactValue provider = providerByBlueId.get(blueId);
+        if (provider == null || provider.frozen().isReferenceOnly()) {
+            recordBeforeMutation(blueId);
+            providerByBlueId.put(blueId, member);
+            purposeByBlueId.put(
+                    blueId, "verified-closure-component-member");
+            metrics.increment("wholeObjectStore.providerBodiesUpgraded");
         }
     }
 
@@ -267,19 +410,29 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
                 && provider.blueId().equals(provider.frozen().blueId());
     }
 
-    /** Returns the retained provider body under its authoritative identity. */
-    synchronized ExactValue requireProviderRepresentation(
+    /** Returns the detached retained provider body under its identity. */
+    synchronized Node requireProviderDocument(
             ExactValue authoritative) {
         ExactValue selected = Objects.requireNonNull(
                 authoritative, "authoritative");
+        if (selected.isCyclicMember()) {
+            return requireCyclicProviderDocument(selected);
+        }
         ExactValue provider = providerByBlueId.get(selected.blueId());
         if (provider == null || provider.frozen().isReferenceOnly()) {
             throw new IllegalStateException(
                     "No complete provider representation for "
                             + selected.blueId());
         }
-        if (!selected.isCyclicMember()) {
-            return provider;
+        return provider.copyNode();
+    }
+
+    private Node requireCyclicProviderDocument(ExactValue selected) {
+        Node providerBody = cyclicProviderBodyByBlueId.get(selected.blueId());
+        if (providerBody == null) {
+            throw new IllegalStateException(
+                    "No wire-preserving cyclic provider representation for "
+                            + selected.blueId());
         }
         CyclicSetProof proof = cyclicProofByMasterBlueId.get(
                 BlueIds.cyclicSetMasterBlueId(selected.blueId()));
@@ -289,13 +442,42 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
                             + selected.blueId());
         }
         try {
-            return ExactValue.fromVerifiedProviderEvidence(
-                    selected.blueId(), provider.copyNode(), proof);
+            ExactValue.fromVerifiedProviderEvidence(
+                    selected.blueId(), providerBody, proof);
+            return providerBody.clone();
         } catch (IllegalArgumentException invalid) {
             throw new IllegalStateException(
                     "Retained provider representation is inconsistent with "
-                            + selected.blueId(),
+                            + selected.blueId() + " (purpose="
+                            + purposeByBlueId.get(selected.blueId()) + ")",
                     invalid);
+        }
+    }
+
+    private void requireCompatibleRetainedCyclicBodies(
+            String masterBlueId,
+            String selectedBlueId,
+            Node selectedProviderBody,
+            CyclicSetProof candidateProof) {
+        for (Map.Entry<String, Node> entry
+                : cyclicProviderBodyByBlueId.entrySet()) {
+            String retainedBlueId = entry.getKey();
+            if (!masterBlueId.equals(
+                    BlueIds.cyclicSetMasterBlueId(retainedBlueId))) {
+                continue;
+            }
+            Node retainedBody = retainedBlueId.equals(selectedBlueId)
+                    ? selectedProviderBody
+                    : entry.getValue();
+            try {
+                ExactValue.fromVerifiedProviderEvidence(
+                        retainedBlueId, retainedBody, candidateProof);
+            } catch (IllegalArgumentException incompatible) {
+                throw new IllegalArgumentException(
+                        "Cyclic retry proof is incompatible with retained "
+                                + "sibling provider body " + retainedBlueId,
+                        incompatible);
+            }
         }
     }
 
@@ -341,6 +523,8 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
                     change.getValue().canonical());
             restore(providerByBlueId, change.getKey(),
                     change.getValue().provider());
+            restore(cyclicProviderBodyByBlueId, change.getKey(),
+                    change.getValue().cyclicProviderBody());
             restore(purposeByBlueId, change.getKey(),
                     change.getValue().purpose());
         }
@@ -360,6 +544,16 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
 
     @Override
     public synchronized List<Node> fetchByBlueId(String blueId) {
+        Node cyclicProvider = cyclicProviderBodyByBlueId.get(blueId);
+        if (cyclicProvider != null) {
+            metrics.increment("wholeObjectStore.providerReads");
+            String purpose = purposeByBlueId.getOrDefault(blueId, "unknown");
+            metrics.increment("wholeObjectStore.providerReads." + purpose);
+            return Collections.singletonList(cyclicProvider.clone());
+        }
+        if (BlueIds.hasCyclicMemberSeparator(blueId)) {
+            return Collections.emptyList();
+        }
         ExactValue value = providerByBlueId.get(blueId);
         if (value == null) {
             return Collections.emptyList();
@@ -384,17 +578,20 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
     @Override
     public synchronized boolean hasVerifiedContentForBlueId(String blueId) {
         String selected = Objects.requireNonNull(blueId, "blueId");
+        if (unavailableProviderBlueIds.contains(selected)) {
+            return false;
+        }
+        if (BlueIds.hasCyclicMemberSeparator(selected)) {
+            return cyclicProviderBodyByBlueId.containsKey(selected)
+                    && cyclicProofByMasterBlueId.containsKey(
+                            BlueIds.cyclicSetMasterBlueId(selected));
+        }
         ExactValue provider = providerByBlueId.get(selected);
-        if (unavailableProviderBlueIds.contains(selected)
-                || provider == null
+        if (provider == null
                 || provider.frozen().isReferenceOnly()) {
             return false;
         }
-        if (!BlueIds.hasCyclicMemberSeparator(selected)) {
-            return true;
-        }
-        return cyclicProofByMasterBlueId.containsKey(
-                        BlueIds.cyclicSetMasterBlueId(selected));
+        return true;
     }
 
     @Override
@@ -410,16 +607,17 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
         if (proof == null) {
             return CyclicSetProofResult.notFound();
         }
-        ExactValue provider = providerByBlueId.get(selected);
-        if (provider != null && !provider.frozen().isReferenceOnly()) {
-            try {
-                ExactValue.fromVerifiedProviderEvidence(
-                        selected, provider.copyNode(), proof);
-            } catch (IllegalArgumentException invalid) {
-                return CyclicSetProofResult.invalidEvidence(
-                        "Retained cyclic proof is inconsistent with "
-                                + selected + ": " + invalid.getMessage());
-            }
+        Node provider = cyclicProviderBodyByBlueId.get(selected);
+        if (provider == null) {
+            return CyclicSetProofResult.notFound();
+        }
+        try {
+            ExactValue.fromVerifiedProviderEvidence(
+                    selected, provider, proof);
+        } catch (IllegalArgumentException invalid) {
+            return CyclicSetProofResult.invalidEvidence(
+                    "Retained cyclic proof is inconsistent with "
+                            + selected + ": " + invalid.getMessage());
         }
         metrics.increment("wholeObjectStore.cyclicProofReads");
         return CyclicSetProofResult.found(
@@ -442,6 +640,7 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
         PriorState prior = new PriorState(
                 prior(canonicalByBlueId, blueId),
                 prior(providerByBlueId, blueId),
+                prior(cyclicProviderBodyByBlueId, blueId),
                 prior(purposeByBlueId, blueId));
         for (Mark mark : activeMarks) {
             mark.record(blueId, prior);
@@ -525,6 +724,12 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
     private record PriorState(
             Prior<ExactValue> canonical,
             Prior<ExactValue> provider,
+            Prior<Node> cyclicProviderBody,
             Prior<String> purpose) {
+    }
+
+    private record VerifiedClosureCyclicEvidence(
+            String blueId,
+            Node providerBody) {
     }
 }

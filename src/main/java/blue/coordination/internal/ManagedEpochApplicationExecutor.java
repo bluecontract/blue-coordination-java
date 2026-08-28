@@ -396,10 +396,19 @@ final class ManagedEpochApplicationExecutor {
                                 before,
                                 after,
                                 transition);
+                boolean checkpointSettlementChange =
+                        !componentRepresentationRebind
+                                && ContractsClosureAdapter
+                                        .isVerifiedCheckpointSettlementChange(
+                                                result,
+                                                entry.getKey(),
+                                                before.head(),
+                                                after,
+                                                transition);
                 boolean changed = componentRepresentationRebind
                         || ContractsClosureAdapter
                                 .requiresDocumentPublication(
-                                        before, after, transition);
+                                        result, before, after, transition);
                 if (changed
                         && entry.getKey().equals(work.sourceDocumentId())
                         && !componentRepresentationRebind) {
@@ -435,17 +444,20 @@ final class ManagedEpochApplicationExecutor {
                                 entry.getKey()));
                 List<SubscriptionDelta.Entry> activeSubscriptionsAfter;
                 if (stateChanged && !componentRepresentationRebind) {
+                    long projectionEpoch = checkpointSettlementChange
+                            ? Math.addExact(before.head().epoch(), 1L)
+                            : after.epoch();
                     SubscriptionDelta routeDelta =
                             ContractsClosureAdapter.routeDelta(
                                     before.activeSubscriptions(),
                                     projected.externalSubscriptions(),
-                                    after.epoch(),
+                                    projectionEpoch,
                                     causalOrder);
                     activeSubscriptionsAfter = DocumentTransitionProcessor
                             .applyManagedRootSubscriptionDelta(
                                     before.activeSubscriptions(),
                                     routeDelta,
-                                    after.epoch(),
+                                    projectionEpoch,
                                     causalOrder,
                                     runtime.metrics());
                 } else {
@@ -612,6 +624,7 @@ final class ManagedEpochApplicationExecutor {
                 committedEpochReceipts.put(
                         work.consumerDocumentId(), consumerRevision);
             }
+            objects.retainVerifiedClosureComponentEvidence(result);
             ManagedEpochApplicationReceipt application =
                     ManagedEpochApplicationReceipt.identified(
                             work.workIdentity(),

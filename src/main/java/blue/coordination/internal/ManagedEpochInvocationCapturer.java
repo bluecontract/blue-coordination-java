@@ -292,7 +292,7 @@ final class ManagedEpochInvocationCapturer {
         if (exact.isCyclicMember()) {
             // Re-projecting one cyclic member would discard its set-wide
             // representation context; the retained proof authenticates it.
-            return objects.requireProviderRepresentation(exact).copyNode();
+            return objects.requireProviderDocument(exact);
         }
         FrozenNode original = exact.frozen();
         FrozenNode projected = original;

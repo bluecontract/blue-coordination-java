@@ -37,6 +37,7 @@ final class SdkUnsupportedNestedNewLineageTest {
             "sdk/unsupported-nested/source";
     @Test
     void retainedApplicationCreatingNewNestedLineageIsTyped() {
+        // given
         try (BlueCoordination coordination = BlueCoordination.inMemory()) {
             CoordinationTestControl control = CoordinationTestControl.attach(
                     coordination.advanced().rawEngine());
@@ -91,8 +92,12 @@ final class SdkUnsupportedNestedNewLineageTest {
             var sourceBefore = coordination.advanced().auditDocument(SOURCE);
             int consumerHistoryBefore = consumer.history().size();
             int sourceHistoryBefore = source.history().size();
+
+            // when
             DrainResult blocked = coordination.processing()
                     .drainManagedEpochApplication(work.workIdentity());
+
+            // then
             assertTrue(blocked.managedEpochApplications().isEmpty());
             assertTrue(blocked.managedEpochEvidenceFailures().isEmpty());
             assertEquals(1,

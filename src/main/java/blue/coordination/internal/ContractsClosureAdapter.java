@@ -21,6 +21,8 @@ import blue.language.processor.ManagedRootChannelOccurrence;
 import blue.language.processor.ManagedRootSubscriptionSurface;
 import blue.language.processor.closure.AffectedClosureSnapshot;
 import blue.language.processor.closure.BlueClosureContracts;
+import blue.language.processor.closure.CheckpointDomainValue;
+import blue.language.processor.closure.CheckpointWrite;
 import blue.language.processor.closure.ClosureAttemptResult;
 import blue.language.processor.closure.ClosureCommitCompanion;
 import blue.language.processor.closure.ClosureEnvironment;
@@ -34,12 +36,14 @@ import blue.language.processor.closure.ComponentFinalizationKernel;
 import blue.language.processor.closure.ComponentFinalizationResult;
 import blue.language.processor.closure.ComponentSnapshot;
 import blue.language.processor.closure.DirectLogicalDelivery;
+import blue.language.processor.closure.DocumentTransitionEvidence;
 import blue.language.processor.closure.ExternalEventCause;
 import blue.language.processor.closure.GasTraceEntry;
 import blue.language.processor.closure.ManagedDocumentSnapshot;
 import blue.language.processor.closure.ManagedDocumentTransitionReceipt;
 import blue.language.processor.closure.ManagedDocumentGraph;
 import blue.language.processor.closure.ManagedOccurrenceBinding;
+import blue.language.processor.closure.ManagedScopeKey;
 import blue.language.processor.closure.PublicEventOccurrence;
 import blue.language.processor.closure.ResultingDocument;
 import blue.language.processor.closure.ScopeAddress;
@@ -1119,7 +1123,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
             managedDocuments.add(new ManagedDocumentSnapshot(
                     closureDocumentId,
                     document.head().blueId(),
-                    document.current().copyNode(),
+                    invocationDocument(document.current()),
                     document.initialized(),
                     document.terminated(),
                     publicRoot,
@@ -1199,6 +1203,15 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 captured,
                 null,
                 dormantReservations);
+    }
+
+    /** Returns the proof-verified provider shell required for cyclic calls. */
+    private Node invocationDocument(ExactValue current) {
+        ExactValue selected = Objects.requireNonNull(current, "current");
+        if (!selected.isCyclicMember()) {
+            return selected.copyNode();
+        }
+        return objects.requireProviderDocument(selected);
     }
 
     private List<CohortInvocation> applyManagedDraftPlan(
@@ -1492,6 +1505,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 : selected.resolvedExactNodes()) {
             ExactValue retained = objects.putVerifiedProviderEvidence(
                     exact.exactValue(),
+                    exact.providerBody(),
                     exact.cyclicProof(),
                     "automatic-occurrence-retry-resource");
             if (!retained.sameExactValue(exact.exactValue())) {
@@ -1658,7 +1672,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     .managedDocument(documentId);
             Node invocationBody;
             if (priorInvocationDocument == null) {
-                invocationBody = document.current().copyNode();
+                invocationBody = invocationDocument(document.current());
             } else {
                 if (!priorInvocationDocument.blueId().equals(
                                 document.head().blueId())
@@ -2338,9 +2352,17 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 boolean componentRepresentationRebind =
                         isIndirectComponentRepresentationRebind(
                                 invocation, entry.getKey(), before, after);
+                boolean checkpointSettlementChange =
+                        !componentRepresentationRebind
+                                && isVerifiedCheckpointSettlementChange(
+                                        result,
+                                        entry.getKey(),
+                                        before.head(),
+                                        after,
+                                        transition);
                 boolean changed = componentRepresentationRebind
                         || requiresDocumentPublication(
-                                before, after, transition);
+                                result, before, after, transition);
                 boolean stateChanged = !before.head().blueId().equals(
                         after.afterBlueId());
                 ManagedRootSubscriptionSurface projected = contracts
@@ -2367,16 +2389,19 @@ final class ContractsClosureAdapter implements AutoCloseable {
                                 entry.getKey()));
                 List<SubscriptionDelta.Entry> activeSubscriptionsAfter;
                 if (stateChanged && !componentRepresentationRebind) {
+                    long projectionEpoch = checkpointSettlementChange
+                            ? Math.addExact(before.head().epoch(), 1L)
+                            : after.epoch();
                     SubscriptionDelta routeDelta = routeDelta(
                             before.activeSubscriptions(),
                             projected.externalSubscriptions(),
-                            after.epoch(),
+                            projectionEpoch,
                             batch.entry().sourceOrderKey());
                     activeSubscriptionsAfter = DocumentTransitionProcessor
                             .applyManagedRootSubscriptionDelta(
                                     before.activeSubscriptions(),
                                     routeDelta,
-                                    after.epoch(),
+                                    projectionEpoch,
                                     batch.entry().sourceOrderKey(),
                                     runtime.metrics());
                 } else {
@@ -2476,6 +2501,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 committedEpochReceipts.put(
                         entry.getKey(), epochReceipt);
             }
+            objects.retainVerifiedClosureComponentEvidence(result);
             CatchUpPlanStore beforeCatchUpPlans =
                     documents.catchUpPlansSnapshot();
             ManagedCatchUpPlanner.PlanningResult catchUp =
@@ -3104,9 +3130,11 @@ final class ContractsClosureAdapter implements AutoCloseable {
     }
 
     static boolean requiresDocumentPublication(
+            ClosureProcessResult result,
             CapturedDocument before,
             ResultingDocument after,
             ManagedDocumentTransitionReceipt transition) {
+        Objects.requireNonNull(result, "result");
         if (!after.beforeBlueId().equals(before.head().blueId())) {
             throw new IllegalStateException(
                     "Result predecessor disagrees with captured head for "
@@ -3125,6 +3153,14 @@ final class ContractsClosureAdapter implements AutoCloseable {
         }
         if (after.epoch() == before.head().epoch()) {
             if (!after.afterBlueId().equals(before.head().blueId())) {
+                if (isVerifiedCheckpointSettlementChange(
+                        result,
+                        before.documentId(),
+                        before.head(),
+                        after,
+                        transition)) {
+                    return true;
+                }
                 throw new ProjectionUnavailableException(
                         "Changed document retained its durable epoch for "
                                 + before.documentId()
@@ -3151,6 +3187,78 @@ final class ContractsClosureAdapter implements AutoCloseable {
                             + "receipt for " + before.documentId());
         }
         return true;
+    }
+
+    /** Recognizes an exact Root checkpoint settlement at a retained work epoch. */
+    static boolean isVerifiedCheckpointSettlementChange(
+            ClosureProcessResult result,
+            DocumentId documentId,
+            InMemoryDocumentStore.DocumentHead before,
+            ResultingDocument after,
+            ManagedDocumentTransitionReceipt transition) {
+        if (!result.commits()
+                || transition == null
+                || after.epoch() != before.epoch()
+                || !after.beforeBlueId().equals(before.blueId())
+                || after.afterBlueId().equals(before.blueId())
+                || !transition.documentId().value().equals(documentId.value())
+                || !transition.sourceInvocationIdentity().equals(
+                        result.invocationIdentity())
+                || !transition.beforeBlueId().equals(before.blueId())
+                || !transition.afterBlueId().equals(after.afterBlueId())
+                || result.checkpointWrites().stream().noneMatch(
+                        write -> checkpointTargets(write, documentId))) {
+            return false;
+        }
+        List<DocumentTransitionEvidence> boundaries = result
+                .documentTransitionEvidence()
+                .stream()
+                .filter(evidence -> evidence.documentId().value().equals(
+                        documentId.value()))
+                .toList();
+        return !boundaries.isEmpty()
+                && boundaries.stream().allMatch(evidence ->
+                        evidence.beforeDocumentBlueId().equals(before.blueId())
+                                && evidence.afterDocumentBlueId().equals(
+                                        before.blueId()));
+    }
+
+    private static boolean checkpointTargets(
+            CheckpointWrite write,
+            DocumentId documentId) {
+        try {
+            new CheckpointWrite(
+                    write.checkpointWriteOrdinal(),
+                    ManagedScopeKey.root(
+                            new blue.language.processor.closure.DocumentId(
+                                    documentId.value())),
+                    write.targetManagedScopeIdentity(),
+                    write.rawChannelKey(),
+                    checkpointState(
+                            write.beforePresent(),
+                            write.beforeDomainBlueId(),
+                            write.beforeDomainValue(),
+                            write.beforeSubjectBlueId()),
+                    checkpointState(
+                            write.afterPresent(),
+                            write.afterDomainBlueId(),
+                            write.afterDomainValue(),
+                            write.afterSubjectBlueId()));
+            return true;
+        } catch (IllegalArgumentException mismatch) {
+            return false;
+        }
+    }
+
+    private static CheckpointWrite.State checkpointState(
+            boolean present,
+            String domainBlueId,
+            CheckpointDomainValue domainValue,
+            String subjectBlueId) {
+        return present
+                ? new CheckpointWrite.State(
+                        domainBlueId, domainValue, subjectBlueId)
+                : null;
     }
 
     /**

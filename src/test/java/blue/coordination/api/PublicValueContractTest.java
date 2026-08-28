@@ -214,12 +214,17 @@ final class PublicValueContractTest {
 
     @Test
     void processingAvailabilityFactoriesExposeOnlyHostAdmission() {
-        assertFalse(ProcessingAvailability.none()
-                .journalAdmissionAvailable());
-        assertFalse(ProcessingAvailability.of(false)
-                .journalAdmissionAvailable());
-        assertTrue(ProcessingAvailability.of(true)
-                .journalAdmissionAvailable());
+        // given
+        ProcessingAvailability none = ProcessingAvailability.none();
+
+        // when
+        ProcessingAvailability unavailable = ProcessingAvailability.of(false);
+        ProcessingAvailability available = ProcessingAvailability.of(true);
+
+        // then
+        assertFalse(none.journalAdmissionAvailable());
+        assertFalse(unavailable.journalAdmissionAvailable());
+        assertTrue(available.journalAdmissionAvailable());
     }
 
     @Test

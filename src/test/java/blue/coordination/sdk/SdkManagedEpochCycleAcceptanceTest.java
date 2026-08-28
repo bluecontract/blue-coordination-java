@@ -114,6 +114,99 @@ final class SdkManagedEpochCycleAcceptanceTest {
         }
     }
 
+    @Test
+    void completedRetainedLineageCanLaterMergeIntoCycleAndProcessAgain() {
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            // given
+            DocumentId aId = DocumentId.of(
+                    "sdk-managed-epoch-post-catch-up-cycle-a");
+            DocumentId bId = DocumentId.of(
+                    "sdk-managed-epoch-post-catch-up-cycle-b");
+            String aTimelineId =
+                    "sdk/managed-epoch-post-catch-up-cycle/a";
+            String bTimelineId =
+                    "sdk/managed-epoch-post-catch-up-cycle/b";
+            TimelineHandle aTimeline = coordination.timelines().register(
+                    aTimelineId, ACTOR);
+            TimelineHandle bTimeline = coordination.timelines().register(
+                    bTimelineId, ACTOR);
+            String authoredBYaml = sourceYaml(bId, bTimelineId);
+            ExactBlueValue authoredB = coordination.values().yaml(
+                    authoredBYaml);
+            DocumentHandle a = coordination.documents().admit(
+                    ManagedDocument.yaml(
+                                    aId,
+                                    dynamicConsumerYaml(aId, aTimelineId))
+                            .publicRoot()
+                            .fromNow());
+            DocumentHandle b = coordination.documents().admit(
+                    ManagedDocument.yaml(bId, authoredBYaml)
+                            .publicRoot()
+                            .fromNow());
+
+            assertApplied(operation(
+                    coordination, b, bTimeline, "touch").execute());
+            EntryHandle attachment = coordination.operations()
+                    .on(a)
+                    .from(aTimeline)
+                    .call("attachChild")
+                    .through("ownerChannel")
+                    .request(request -> request.exact("child", authoredB))
+                    .selectManagedEpoch(ManagedEpochSelector.exact(
+                            bId, -1L, authoredB.blueId(), "/child"))
+                    .submit();
+            assertApplied(coordination.processing().drain(
+                    new DrainBudget(1L, 1L)), attachment);
+            for (int attempt = 0; attempt < 32
+                    && !coordination.advanced()
+                            .auditManagedDocumentReadiness(aId)
+                            .orElseThrow().ready(); attempt++) {
+                DrainResult progress = coordination.processing().drain(
+                        new DrainBudget(1L, 1L));
+                assertFalse(progress.blocked(),
+                        progress.diagnostic().toString());
+            }
+            assertTrue(coordination.advanced()
+                    .auditManagedDocumentReadiness(aId)
+                    .orElseThrow().ready(),
+                    "bounded catch-up must reach a ready head");
+            ManagedOccurrenceCatchUpPlan completed = coordination.advanced()
+                    .auditManagedCatchUpPlans(aId).get(0);
+            assertEquals(ManagedCatchUpStatus.COMPLETE, completed.status());
+            String retainedSourceReceipt = coordination.advanced()
+                    .auditManagedEpoch(bId, 1L)
+                    .orElseThrow().receiptIdentity();
+
+            // when
+            assertApplied(coordination.operations()
+                    .on(b)
+                    .from(bTimeline)
+                    .call("connectParent")
+                    .through("ownerChannel")
+                    .request(request -> request.exact("parent", a.exact()))
+                    .execute());
+            assertTrue(a.exact().cyclicMember());
+            assertTrue(b.exact().cyclicMember());
+
+            EntryResult finite = operation(
+                    coordination, a, aTimeline, "startFinite").execute();
+            ManagedOccurrenceCatchUpPlan remainedComplete = coordination
+                    .advanced().auditManagedCatchUpPlans(aId).get(0);
+
+            // then
+            assertApplied(finite);
+            assertEquals(1L, a.snapshot().longAt("/finiteReactions"));
+            assertEquals(completed.snapshotIdentity(),
+                    remainedComplete.snapshotIdentity(),
+                    "later cyclic processing must not replay completed "
+                            + "retained catch-up");
+            assertEquals(retainedSourceReceipt, coordination.advanced()
+                    .auditManagedEpoch(bId, 1L)
+                    .orElseThrow().receiptIdentity(),
+                    "the retained source receipt remains immutable");
+        }
+    }
+
     private static CycleScenario prepared(
             String label,
             String sourceOperation) {
@@ -188,6 +281,19 @@ final class SdkManagedEpochCycleAcceptanceTest {
             TimelineHandle timeline,
             String operation) {
         return scenario.coordination().operations()
+                .on(target)
+                .from(timeline)
+                .call(operation)
+                .through("ownerChannel")
+                .request(request -> { });
+    }
+
+    private static OperationCall operation(
+            BlueCoordination coordination,
+            DocumentHandle target,
+            TimelineHandle timeline,
+            String operation) {
+        return coordination.operations()
                 .on(target)
                 .from(timeline)
                 .call(operation)
@@ -311,6 +417,7 @@ final class SdkManagedEpochCycleAcceptanceTest {
         return """
                 documentId: %s
                 finiteReactions: 0
+                counter: 0
                 contracts:
                   embedded:
                     type: Process Embedded
@@ -346,6 +453,21 @@ final class SdkManagedEpochCycleAcceptanceTest {
                         do:
                           - $appendChange: {op: remove, path: /child}
                           - $return: true
+                  startFinite:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: replace
+                              path: /counter
+                              val: {$add: [{$document: /counter}, 1]}
+                          - $appendEvent:
+                              type: Coordination/Event
+                              kind: Cycle/Finite
+                          - $return: true
                   fromFinite:
                     type: Embedded Node Channel
                     sourcePath: /child
@@ -376,11 +498,82 @@ final class SdkManagedEpochCycleAcceptanceTest {
                 """.formatted(documentId.value(), timelineId, ACTOR);
     }
 
+    private static String dynamicConsumerYaml(
+            DocumentId documentId,
+            String timelineId) {
+        return """
+                documentId: %s
+                finiteReactions: 0
+                counter: 0
+                contracts:
+                  ownerChannel:
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: %s
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: %s
+                  attachChild:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request:
+                      child: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: add
+                              path: /child
+                              val: {$binding: event/message/request/child}
+                          - $appendChange:
+                              op: add
+                              path: /contracts/embedded
+                              val:
+                                type: Process Embedded
+                                paths:
+                                  - /child
+                          - $return: true
+                  startFinite:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: replace
+                              path: /counter
+                              val: {$add: [{$document: /counter}, 1]}
+                          - $appendEvent:
+                              type: Coordination/Event
+                              kind: Cycle/Finite
+                          - $return: true
+                  fromFinite:
+                    type: Embedded Node Channel
+                    sourcePath: /child
+                    event: {type: Coordination/Event, kind: Cycle/Finite}
+                  settleFinite:
+                    type: Coordination/Sequential Workflow
+                    channel: fromFinite
+                    event: {type: Coordination/Event, kind: Cycle/Finite}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: replace
+                              path: /finiteReactions
+                              val: {$add: [{$document: /finiteReactions}, 1]}
+                          - $return: true
+                """.formatted(documentId.value(), timelineId, ACTOR);
+    }
+
     private static String sourceYaml(
             DocumentId documentId,
             String timelineId) {
         return """
                 documentId: %s
+                counter: 0
                 contracts:
                   embedded:
                     type: Process Embedded
@@ -424,6 +617,31 @@ final class SdkManagedEpochCycleAcceptanceTest {
                               val: {$binding: event/message/request/parent}
                           - $appendEvent: {type: Coordination/Event, kind: LOOP}
                           - $return: true
+                  touch:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: replace
+                              path: /counter
+                              val: {$add: [{$document: /counter}, 1]}
+                          - $return: true
+                  connectParent:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request:
+                      parent: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: add
+                              path: /parent
+                              val: {$binding: event/message/request/parent}
+                          - $return: true
                   detachParent:
                     type: Coordination/Sequential Workflow Operation
                     channel: ownerChannel
@@ -432,6 +650,21 @@ final class SdkManagedEpochCycleAcceptanceTest {
                       - type: Coordination/Compute
                         do:
                           - $appendChange: {op: remove, path: /parent}
+                          - $return: true
+                  fromFinite:
+                    type: Embedded Node Channel
+                    sourcePath: /parent
+                    event: {type: Coordination/Event, kind: Cycle/Finite}
+                  relayFinite:
+                    type: Coordination/Sequential Workflow
+                    channel: fromFinite
+                    event: {type: Coordination/Event, kind: Cycle/Finite}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendEvent:
+                              type: Coordination/Event
+                              kind: Cycle/Finite
                           - $return: true
                   fromLoop:
                     type: Embedded Node Channel

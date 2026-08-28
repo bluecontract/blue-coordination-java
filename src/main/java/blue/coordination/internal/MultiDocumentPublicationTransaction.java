@@ -1476,12 +1476,19 @@ final class MultiDocumentPublicationTransaction {
                     && resultUnchanged
                     && stagesReceiptBackedSameStateAdvance(
                             result, entry.getKey(), before);
+            boolean checkpointSettlementAdvanced = result.commits()
+                    && after.epoch() == before.epoch()
+                    && !after.afterBlueId().equals(before.blueId())
+                    && stagesVerifiedCheckpointSettlementAdvance(
+                            result, entry.getKey(), before, after);
             boolean unchanged = resultUnchanged && !sameStateAdvanced;
-            boolean advanced = sameStateAdvanced || after.epoch()
-                    == Math.addExact(before.epoch(), 1L)
-                    && documentUpdates.containsKey(entry.getKey())
-                    && documentUpdates.get(entry.getKey()).revision().after()
-                            .blueId().equals(after.afterBlueId());
+            boolean advanced = sameStateAdvanced
+                    || checkpointSettlementAdvanced
+                    || after.epoch() == Math.addExact(before.epoch(), 1L)
+                            && documentUpdates.containsKey(entry.getKey())
+                            && documentUpdates.get(entry.getKey())
+                                    .revision().after().blueId().equals(
+                                            after.afterBlueId());
             if (result.commits()
                     ? !unchanged && !representationRebound && !advanced
                     : !unchanged) {
@@ -1540,6 +1547,41 @@ final class MultiDocumentPublicationTransaction {
             throw new IllegalStateException(
                     "A non-committing process receipt must be receipt-only");
         }
+    }
+
+    private boolean stagesVerifiedCheckpointSettlementAdvance(
+            ClosureProcessResult result,
+            DocumentId documentId,
+            InMemoryDocumentStore.DocumentHead before,
+            ResultingDocument after) {
+        DocumentUpdate update = documentUpdates.get(documentId);
+        boolean supportedKind = update != null
+                && (update.revision().kind()
+                            == DocumentRevision.Kind.TIMELINE_ENTRY
+                        || update.revision().kind()
+                            == DocumentRevision.Kind
+                                    .EMBEDDED_REVISION_APPLICATION);
+        if (!supportedKind
+                || update.revision().epoch()
+                        != Math.addExact(before.epoch(), 1L)
+                || !update.revision().before().map(value -> value.blueId()
+                        .equals(before.blueId())).orElse(false)
+                || !update.revision().after().blueId().equals(
+                        after.afterBlueId())) {
+            return false;
+        }
+        return stagedManagedEpochReceipts.stream().anyMatch(stage ->
+                stage.transitionReceipt() != null
+                        && stage.receipt().documentId().equals(documentId)
+                        && stage.receipt().kind()
+                                == update.revision().kind()
+                        && ContractsClosureAdapter
+                                .isVerifiedCheckpointSettlementChange(
+                                        result,
+                                        documentId,
+                                        before,
+                                        after,
+                                        stage.transitionReceipt()));
     }
 
     /**

@@ -233,7 +233,13 @@ final class SdkManagedEpochSourceTerminationTest {
 
             // then
             assertEquals(List.of(1L), sourceEpochs(
-                    coordination, termination));
+                    coordination, termination), () -> "attempts="
+                    + termination.managedEpochApplicationAttempts()
+                    + ", evidenceFailures="
+                    + termination.managedEpochEvidenceFailures()
+                    + ", diagnostic=" + termination.diagnostic()
+                    + ", paused=" + termination.paused()
+                    + ", quiescent=" + termination.quiescent());
             assertEquals(1, termination.managedEpochApplications().size());
             ManagedEpochApplicationReceipt terminatingApplication =
                     termination.managedEpochApplications().get(0);
