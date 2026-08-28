@@ -126,9 +126,9 @@ final class AutomaticOccurrenceResolutionCoordinator<I> {
             I expanded =
                     expansions.expand(current, resolution, storeState);
             ProgressIdentity progress = new ProgressIdentity(
-                    inputs.input(current).invocationIdentity(),
+                    inputs.invocationIdentity(current),
                     demandVector,
-                    inputs.input(expanded).invocationIdentity());
+                    inputs.invocationIdentity(expanded));
             if (!attemptedProgress.add(progress)) {
                 metrics.increment(REPEATED_DEMAND_STOPS);
                 return RunResult.stopped(
@@ -178,6 +178,10 @@ final class AutomaticOccurrenceResolutionCoordinator<I> {
     interface InputView<I> {
         blue.language.processor.closure.ClosureInvocationInput input(
                 I invocation);
+
+        default String invocationIdentity(I invocation) {
+            return input(invocation).invocationIdentity();
+        }
     }
 
     @FunctionalInterface

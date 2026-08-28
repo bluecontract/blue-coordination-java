@@ -2,9 +2,12 @@ package blue.coordination.sdk;
 
 import blue.coordination.api.CoordinationMetrics;
 import blue.coordination.api.DocumentId;
+import blue.coordination.api.ManagedCatchUpBarrierStatus;
 import blue.coordination.api.ManagedCatchUpStatus;
 import blue.coordination.api.ManagedOccurrenceCatchUpPlan;
+import blue.coordination.api.ProcessingSelection;
 import blue.coordination.api.SessionStatus;
+import blue.coordination.internal.CoordinationTestControl;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -183,6 +186,8 @@ final class SdkManagedEpochPromotionAndRetargetTest {
     @Test
     void detachReaddAndRetargetOwnDistinctPlansAndCursors() {
         try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            CoordinationTestControl control = CoordinationTestControl.attach(
+                    coordination.advanced().rawEngine());
             // given
             TimelineHandle consumerTimeline = coordination.timelines()
                     .register(REPLACEMENT_CONSUMER_TIMELINE, ACTOR);
@@ -193,7 +198,7 @@ final class SdkManagedEpochPromotionAndRetargetTest {
             DocumentHandle consumer = coordination.documents().admit(
                     ManagedDocument.yaml(
                                     REPLACEMENT_CONSUMER,
-                                    replacementConsumerYaml())
+                                    countedReplacementConsumerYaml())
                             .publicRoot()
                             .fromNow());
             DocumentHandle b = coordination.documents().admit(
@@ -213,7 +218,6 @@ final class SdkManagedEpochPromotionAndRetargetTest {
                             .publicRoot()
                             .fromNow());
             ExactBlueValue bZero = b.history().get(0).after();
-            ExactBlueValue cZero = c.history().get(0).after();
             assertApplied(sourceOperation(
                     coordination,
                     b,
@@ -222,6 +226,11 @@ final class SdkManagedEpochPromotionAndRetargetTest {
             ExactBlueValue bOne = b.history().get(1).after();
             assertApplied(sourceOperation(
                     coordination, b, bTimeline, "change").execute());
+            assertApplied(sourceOperation(
+                    coordination, c, cTimeline, "change").execute());
+            ExactBlueValue cOne = c.history().get(1).after();
+            assertApplied(sourceOperation(
+                    coordination, c, cTimeline, "change").execute());
             assertApplied(sourceOperation(
                     coordination, c, cTimeline, "change").execute());
             List<String> bHistory = historyEvidence(b);
@@ -340,35 +349,20 @@ final class SdkManagedEpochPromotionAndRetargetTest {
                     "/observedChanges"));
             String completedBSnapshotIdentity = completedB
                     .snapshotIdentity();
-
-            EntryResult retiredB = coordination.operations()
-                    .on(consumer)
-                    .from(consumerTimeline)
-                    .call("clearChild")
-                    .through("ownerChannel")
-                    .request(request -> { })
-                    .execute();
-            assertApplied(retiredB);
-            ManagedOccurrenceAudit retiredBeforeRetarget = coordination
-                    .advanced()
-                    .auditManagedOccurrence(
-                            REPLACEMENT_CONSUMER, "/child")
-                    .orElseThrow();
-            assertEquals(REPLACEMENT_B,
-                    retiredBeforeRetarget.targetDocumentId());
-            assertEquals(3L,
-                    retiredBeforeRetarget.activationGeneration());
-            assertFalse(retiredBeforeRetarget.active());
+            int beforeRetargetRevisionCount = coordination.advanced()
+                    .auditManagedEpochs(REPLACEMENT_CONSUMER).size();
+            long beforeRetargetEpoch = consumer.snapshot().epoch();
+            assertEquals(2L, consumer.snapshot().longAt("/setChildCount"));
 
             EntryHandle retarget = setChild(
                     coordination,
                     consumer,
                     consumerTimeline,
-                    cZero)
+                    cOne)
                     .selectManagedEpoch(ManagedEpochSelector.exact(
                             REPLACEMENT_C,
-                            0L,
-                            cZero.blueId(),
+                            1L,
+                            cOne.blueId(),
                             "/child"))
                     .submit();
             DrainResult retargetAdmitted = coordination.processing().drain(
@@ -376,6 +370,18 @@ final class SdkManagedEpochPromotionAndRetargetTest {
             assertEquals(EntryDisposition.APPLIED,
                     retargetAdmitted.entry(retarget).disposition(),
                     retargetAdmitted.entry(retarget).diagnostic().toString());
+            assertTrue(retargetAdmitted.entry(retarget).closures().stream()
+                    .anyMatch(closure -> closure.automaticRetryCount() > 0L));
+            assertEquals(beforeRetargetRevisionCount + 1, coordination.advanced()
+                    .auditManagedEpochs(REPLACEMENT_CONSUMER).size());
+            assertEquals(beforeRetargetEpoch + 1L, coordination.advanced()
+                    .auditDocument(REPLACEMENT_CONSUMER).epoch());
+            assertEquals(3L, ((Number) ExactBlueValue.wrap(coordination.advanced()
+                    .auditDocument(REPLACEMENT_CONSUMER).current())
+                    .scalarAt("/setChildCount")).longValue());
+            assertEquals(List.of(REPLACEMENT_CONSUMER.value()), control
+                    .lastClosureProcessEvidence().orElseThrow().documentStepTrace()
+                    .stream().map(step -> step.targetDocumentId().value()).toList());
             assertEquals(completedBSnapshotIdentity,
                     planByIdentity(coordination, secondPlan.planIdentity())
                             .snapshotIdentity(),
@@ -384,9 +390,10 @@ final class SdkManagedEpochPromotionAndRetargetTest {
                     coordination);
             assertEquals(REPLACEMENT_C, cPlan.sourceDocumentId());
             assertEquals(3L, cPlan.activationGeneration());
-            assertEquals(0L, cPlan.admittedSourceEpoch());
-            assertEquals(1L, cPlan.nextSourceEpoch());
-            assertEquals(1L, cPlan.requiredThroughSourceEpoch());
+            assertEquals(1L, cPlan.admittedSourceEpoch());
+            assertEquals(cOne.blueId(), cPlan.admittedSourceBlueId());
+            assertEquals(2L, cPlan.nextSourceEpoch());
+            assertEquals(3L, cPlan.requiredThroughSourceEpoch());
             assertNotEquals(secondPlan.planIdentity(), cPlan.planIdentity());
             assertNotEquals(secondPlan.barrierIdentity(),
                     cPlan.barrierIdentity());
@@ -400,17 +407,22 @@ final class SdkManagedEpochPromotionAndRetargetTest {
             assertEquals(3L, pendingC.activationGeneration());
             assertFalse(pendingC.active());
             assertCatchingUp(coordination);
+            control.restartFromStores();
+            assertEquals(cPlan.snapshotIdentity(), planByIdentity(
+                    coordination, cPlan.planIdentity()).snapshotIdentity());
 
-            DrainResult cCatchUp = coordination.processing().drain(
-                    new DrainBudget(1L, 1L));
-            assertEquals(List.of(receiptIdentity(
-                            coordination, REPLACEMENT_C, 1L)),
+            DrainResult cCatchUp = coordination.processing().drain();
+            assertEquals(List.of(
+                            receiptIdentity(
+                                    coordination, REPLACEMENT_C, 2L),
+                            receiptIdentity(
+                                    coordination, REPLACEMENT_C, 3L)),
                     applicationSourceReceipts(cCatchUp));
             ManagedOccurrenceCatchUpPlan completedC = planByIdentity(
                     coordination, cPlan.planIdentity());
             assertEquals(ManagedCatchUpStatus.COMPLETE,
                     completedC.status());
-            assertEquals(2L, completedC.nextSourceEpoch());
+            assertEquals(4L, completedC.nextSourceEpoch());
             assertTrue(coordination.advanced()
                     .auditManagedDocumentReadiness(REPLACEMENT_CONSUMER)
                     .orElseThrow().ready());
@@ -425,12 +437,256 @@ final class SdkManagedEpochPromotionAndRetargetTest {
             assertTrue(activeC.active());
             assertEquals(c.snapshot().blueId(), consumer.snapshot()
                     .valueAt("/child").blueId());
-            assertEquals(2L, consumer.snapshot().longAt(
+            assertEquals(3L, consumer.snapshot().longAt(
                     "/observedChanges"));
+            assertEquals(3L, consumer.snapshot().longAt("/setChildCount"));
             assertEquals(1L, consumer.snapshot().longAt("/detachCount"));
             assertEquals(bHistory, historyEvidence(b));
             assertEquals(cHistory, historyEvidence(c));
         }
+    }
+
+    @Test
+    void pendingPlanRetiresDuringHistoricalRetargetEvent() {
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            CoordinationTestControl control = CoordinationTestControl.attach(
+                    coordination.advanced().rawEngine());
+            TimelineHandle consumerTimeline = coordination.timelines()
+                    .register(REPLACEMENT_CONSUMER_TIMELINE, ACTOR);
+            TimelineHandle bTimeline = coordination.timelines().register(
+                    REPLACEMENT_B_TIMELINE, ACTOR);
+            TimelineHandle cTimeline = coordination.timelines().register(
+                    REPLACEMENT_C_TIMELINE, ACTOR);
+            DocumentHandle b = coordination.documents().admit(
+                    ManagedDocument.yaml(REPLACEMENT_B, eventRetargetSourceYaml())
+                            .publicRoot().fromNow());
+            DocumentHandle c = coordination.documents().admit(
+                    ManagedDocument.yaml(REPLACEMENT_C, replacementSourceYaml(
+                                    REPLACEMENT_C, REPLACEMENT_C_TIMELINE))
+                            .publicRoot().fromNow());
+            ExactBlueValue bZero = b.history().get(0).after();
+            for (int epoch = 1; epoch <= 3; epoch++) {
+                assertApplied(sourceOperation(
+                        coordination, c, cTimeline, "change").execute());
+            }
+            ExactBlueValue cOne = c.history().get(1).after();
+            assertApplied(sourceOperation(
+                    coordination, b, bTimeline, "retarget").execute());
+            for (int epoch = 2; epoch <= 3; epoch++) {
+                assertApplied(sourceOperation(
+                        coordination, b, bTimeline, "change").execute());
+            }
+            DocumentHandle consumer = coordination.documents().admit(
+                    ManagedDocument.yaml(REPLACEMENT_CONSUMER,
+                                    eventRetargetConsumerYaml(cOne))
+                            .publicRoot().fromNow());
+            List<String> bHistory = historyEvidence(b);
+            List<String> cHistory = historyEvidence(c);
+            String bHead = b.snapshot().blueId();
+            String cHead = c.snapshot().blueId();
+            CoordinationMetrics before = coordination.advanced().rawEngine().metrics();
+
+            EntryHandle attachment = setChild(coordination, consumer,
+                    consumerTimeline, bZero).submit();
+            DrainResult admitted = coordination.processing().drainJournal(
+                    new DrainBudget(1L, 1L));
+            assertEquals(EntryDisposition.APPLIED,
+                    admitted.entry(attachment).disposition());
+            ManagedOccurrenceCatchUpPlan admittedB = onlyActivePlan(coordination);
+            assertEquals(REPLACEMENT_B, admittedB.sourceDocumentId());
+            assertEquals(1L, admittedB.activationGeneration());
+            assertEquals(1L, admittedB.nextSourceEpoch());
+            assertEquals(3L, admittedB.requiredThroughSourceEpoch());
+
+            // A is not READY: an external A operation is deliberately gated.
+            // B1's immutable Root event legally retargets A during catch-up.
+            long consumerEpoch = coordination.advanced()
+                    .auditDocument(REPLACEMENT_CONSUMER).epoch();
+            int consumerRevisionCount = coordination.advanced()
+                    .auditManagedEpochs(REPLACEMENT_CONSUMER).size();
+            ProcessingSelection selectedB = coordination.advanced()
+                    .auditNextProcessingSelection();
+            assertEquals(ProcessingSelection.Kind.MANAGED_EPOCH_APPLICATION,
+                    selectedB.kind());
+            DrainResult firstB = coordination.processing()
+                    .drainManagedEpochApplication(selectedB
+                            .managedEpochApplicationWork().orElseThrow()
+                            .workIdentity());
+            assertEquals(1, firstB.managedEpochApplicationAttempts().size());
+            ManagedEpochApplicationAttempt retargetAttempt = firstB
+                    .managedEpochApplicationAttempts().get(0);
+            assertTrue(retargetAttempt.published(),
+                    () -> "retarget completion=" + retargetAttempt.attempt().isComplete()
+                            + ", diagnostic=" + (retargetAttempt.attempt().isComplete()
+                                    ? retargetAttempt.attempt().processResult().diagnostic()
+                                    : retargetAttempt.attempt().resourceDemands())
+                            + ", publication=" + retargetAttempt.publicationFailure()
+                            + ", stop=" + retargetAttempt.automaticResolutionStopReason());
+            assertEquals(List.of(receiptIdentity(
+                    coordination, REPLACEMENT_B, 1L)),
+                    applicationSourceReceipts(firstB));
+            assertTrue(retargetAttempt.automaticRetryCount() > 0L,
+                    "the missing exact managed-occurrence evidence must be retried");
+            assertEquals(consumerRevisionCount + 1, coordination.advanced()
+                    .auditManagedEpochs(REPLACEMENT_CONSUMER).size(),
+                    "all tentative evidence retries publish one event revision");
+            assertEquals(consumerEpoch + 1L, coordination.advanced()
+                    .auditDocument(REPLACEMENT_CONSUMER).epoch());
+            assertEquals(1L, ((Number) ExactBlueValue.wrap(coordination.advanced()
+                    .auditDocument(REPLACEMENT_CONSUMER).current())
+                    .scalarAt("/retargetCount")).longValue());
+            assertTrue(retargetAttempt.attempt().processResult().gasTrace().stream()
+                    .filter(charge -> charge.workOccurrenceIdentity() != null)
+                    .filter(charge -> charge.documentId() != null)
+                    .allMatch(charge -> REPLACEMENT_CONSUMER.equals(charge.documentId())),
+                    "neither retained source is initialized or processed by retarget");
+
+            ManagedOccurrenceCatchUpPlan cancelledB = planByIdentity(
+                    coordination, admittedB.planIdentity());
+            assertEquals(ManagedCatchUpStatus.CANCELLED_OCCURRENCE_RETIRED,
+                    cancelledB.status());
+            assertEquals(2L, cancelledB.nextSourceEpoch());
+            assertEquals(admittedB.requiredThroughSourceEpoch(),
+                    cancelledB.requiredThroughSourceEpoch());
+            assertEquals(admittedB.activationGeneration(),
+                    cancelledB.activationGeneration());
+            ManagedOccurrenceCatchUpPlan pendingC = onlyActivePlan(coordination);
+            assertEquals(REPLACEMENT_C, pendingC.sourceDocumentId());
+            assertEquals(2L, pendingC.activationGeneration());
+            assertEquals(1L, pendingC.admittedSourceEpoch());
+            assertEquals(cOne.blueId(), pendingC.admittedSourceBlueId());
+            assertEquals(2L, pendingC.nextSourceEpoch());
+            assertEquals(3L, pendingC.requiredThroughSourceEpoch());
+            assertNotEquals(admittedB.planIdentity(), pendingC.planIdentity());
+            assertEquals(admittedB.barrierIdentity(), pendingC.barrierIdentity(),
+                    "receipt-event replacement remains owned by the original "
+                            + "unfinished attachment cause barrier");
+            assertNotEquals(admittedB.targetOccurrenceIdentity(),
+                    pendingC.targetOccurrenceIdentity());
+            assertEquals(new ManagedOccurrenceAudit(REPLACEMENT_C, 2L, false),
+                    coordination.advanced().auditManagedOccurrence(
+                            REPLACEMENT_CONSUMER, "/child").orElseThrow());
+            assertEquals(cOne.blueId(), coordination.advanced()
+                    .auditDocument(REPLACEMENT_CONSUMER).valueAt("/child").blueId());
+            assertCatchingUp(coordination);
+            var pendingBarrier = coordination.advanced()
+                    .auditManagedCatchUpBarrier(admittedB.barrierIdentity())
+                    .orElseThrow();
+            assertEquals(ManagedCatchUpBarrierStatus.OPEN, pendingBarrier.status());
+            assertEquals(Set.of(cancelledB.planIdentity(), pendingC.planIdentity()),
+                    Set.copyOf(pendingBarrier.planIdentities()));
+            assertEquals(bHistory, historyEvidence(b));
+            assertEquals(cHistory, historyEvidence(c));
+            assertEquals(bHead, b.snapshot().blueId());
+            assertEquals(cHead, c.snapshot().blueId());
+
+            control.restartFromStores();
+            assertEquals(cancelledB.snapshotIdentity(), planByIdentity(
+                    coordination, admittedB.planIdentity()).snapshotIdentity());
+            assertEquals(pendingC.snapshotIdentity(), planByIdentity(
+                    coordination, pendingC.planIdentity()).snapshotIdentity());
+            DrainResult caughtUp = coordination.processing().drain();
+            assertEquals(List.of(receiptIdentity(coordination, REPLACEMENT_C, 2L),
+                            receiptIdentity(coordination, REPLACEMENT_C, 3L)),
+                    applicationSourceReceipts(caughtUp),
+                    "only C's remaining receipt sequence can advance the new slot");
+            ManagedOccurrenceCatchUpPlan completedC = planByIdentity(
+                    coordination, pendingC.planIdentity());
+            assertEquals(ManagedCatchUpStatus.COMPLETE, completedC.status());
+            assertEquals(4L, completedC.nextSourceEpoch());
+            assertEquals(ManagedCatchUpBarrierStatus.COMPLETE,
+                    coordination.advanced().auditManagedCatchUpBarrier(
+                            admittedB.barrierIdentity()).orElseThrow().status());
+            assertEquals(SessionStatus.READY,
+                    coordination.advanced().auditManagedDocumentReadiness(
+                            REPLACEMENT_CONSUMER).orElseThrow().status());
+            assertEquals(new ManagedOccurrenceAudit(REPLACEMENT_C, 2L, true),
+                    coordination.advanced().auditManagedOccurrence(
+                            REPLACEMENT_CONSUMER, "/child").orElseThrow());
+            assertEquals(1L, consumer.snapshot().longAt("/setChildCount"));
+            assertEquals(1L, consumer.snapshot().longAt("/retargetCount"));
+            assertEquals(2L, consumer.snapshot().longAt("/observedChanges"));
+            assertEquals(cHead, consumer.snapshot().valueAt("/child").blueId());
+            assertEquals(bHistory, historyEvidence(b));
+            assertEquals(cHistory, historyEvidence(c));
+            assertEquals(1L, b.snapshot().longAt("/initializationCount"));
+            assertEquals(1L, c.snapshot().longAt("/initializationCount"));
+            assertEquals(0L, counterDelta(before, coordination.advanced().rawEngine().metrics(),
+                    CoordinationMetrics.Counter.DOCUMENT_INITIALIZATIONS));
+            List<String> consumerHistory = historyEvidence(consumer);
+            control.restartFromStores();
+            assertTrue(coordination.processing().drain()
+                    .managedEpochApplicationAttempts().isEmpty());
+            assertEquals(consumerHistory, historyEvidence(consumer));
+            assertEquals(cancelledB.snapshotIdentity(), planByIdentity(
+                    coordination, admittedB.planIdentity()).snapshotIdentity());
+            assertEquals(completedC.snapshotIdentity(), planByIdentity(
+                    coordination, pendingC.planIdentity()).snapshotIdentity());
+        }
+    }
+
+    private static String eventRetargetConsumerYaml(ExactBlueValue candidate) {
+        return "candidateC: " + candidate.json() + "\n"
+                + countedReplacementConsumerYaml()
+                .replace("setChildCount: 0\n", "setChildCount: 0\nretargetCount: 0\n")
+                + """
+                  fromRetarget:
+                    type: Embedded Node Channel
+                    sourcePath: /child
+                    event:
+                      type: Coordination/Event
+                      kind: Replacement/Retarget
+                  onRetarget:
+                    type: Coordination/Sequential Workflow
+                    channel: fromRetarget
+                    event:
+                      type: Coordination/Event
+                      kind: Replacement/Retarget
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: replace
+                              path: /retargetCount
+                              val: {$add: [{$document: /retargetCount}, 1]}
+                          - $appendChange:
+                              op: add
+                              path: /child
+                              val: {$document: /candidateC}
+                          - $return: true
+                """;
+    }
+
+    private static String eventRetargetSourceYaml() {
+        return replacementSourceYaml(REPLACEMENT_B, REPLACEMENT_B_TIMELINE)
+                + """
+                  retarget:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: replace
+                              path: /changes
+                              val: {$add: [{$document: /changes}, 1]}
+                          - $appendEvent:
+                              type: Coordination/Event
+                              kind: Replacement/Retarget
+                          - $return: true
+                """;
+    }
+
+    private static String countedReplacementConsumerYaml() {
+        return replacementConsumerYaml()
+                .replace("detachCount: 0\n", "detachCount: 0\nsetChildCount: 0\n")
+                .replace("              op: add\n              path: /child\n",
+                        "              op: replace\n"
+                                + "              path: /setChildCount\n"
+                                + "              val: {$add: [{$document: /setChildCount}, 1]}\n"
+                                + "          - $appendChange:\n"
+                                + "              op: add\n              path: /child\n");
     }
 
     private static OperationCall increment(

@@ -11,6 +11,7 @@ import blue.language.processor.closure.ClosureResourceDemand;
 import blue.language.processor.closure.ExactNodeDemand;
 import blue.language.processor.closure.ManagedOccurrenceBinding;
 import blue.language.processor.closure.ManagedOccurrenceEvidenceDemand;
+import blue.language.processor.closure.ManagedRevisionCause;
 import blue.language.processor.util.ProcessorContractConstants;
 import blue.language.provider.CyclicAwareNodeProvider;
 import blue.language.provider.CyclicSetProof;
@@ -105,6 +106,7 @@ final class ManagedOccurrenceResolver {
                     exactBody,
                     pendingDrafts,
                     selected.selectionPlan(),
+                    selected.managedRevisionCause(),
                     resolvedSelectorPaths).fold(
                             occurrences::add, unresolved::add);
         }
@@ -181,6 +183,42 @@ final class ManagedOccurrenceResolver {
                 proof);
     }
 
+    /**
+     * Only an authenticated receipt-event target may discover a replacement
+     * lineage while its input occurrence is still catching up. The original
+     * row remains the authority until Contracts reconciles the successful
+     * event; ordinary predecessor and installed-successor values stay on the
+     * stable lineage lane.
+     */
+    static boolean isVerifiedPendingReceiptEventReplacement(
+            ManagedRevisionCause revision,
+            ManagedOccurrenceBinding retained,
+            String suppliedBlueId,
+            ManagedLineageIndex index) {
+        if (revision == null || retained == null || retained.active()
+                || retained.pendingHistoricalEpoch() == null
+                || revision.sourceTransitionReceipt().isEmpty()
+                || revision.sourceTransitionReceipt().orElseThrow()
+                        .emittedRootEvents().isEmpty()
+                || !retained.occurrenceIdentity().equals(
+                        revision.targetOccurrenceIdentity())
+                || !retained.targetDocumentId().equals(
+                        revision.childDocumentId())
+                || retained.pendingHistoricalEpoch().longValue()
+                        != revision.fromEpoch()
+                || !retained.expectedTargetBlueId().equals(
+                        revision.beforeBlueId())
+                || suppliedBlueId.equals(revision.beforeBlueId())
+                || suppliedBlueId.equals(revision.afterBlueId())) {
+            return false;
+        }
+        ManagedLineageIndex.Lineage child = index.byDocumentId(
+                DocumentId.of(revision.childDocumentId().value()));
+        return child != null && revision.toEpoch() <= child.currentEpoch()
+                && (revision.toEpoch() != child.currentEpoch()
+                        || !suppliedBlueId.equals(child.currentBlueId()));
+    }
+
     private FoldedResolution resolveOccurrence(
             InMemoryDocumentStore.OccurrenceResolutionSnapshot storeState,
             ManagedOccurrenceEvidenceDemand demand,
@@ -188,6 +226,7 @@ final class ManagedOccurrenceResolver {
             Map<String, ContractsManagedDraftPlan.ManagedDraft>
                     pendingDrafts,
             ContractsManagedEpochSelectionPlan selectionPlan,
+            ManagedRevisionCause managedRevisionCause,
             Set<String> resolvedSelectorPaths) {
         ManagedLineageIndex index = storeState.lineageIndex();
         metrics.increment(INDEX_LOOKUPS);
@@ -210,7 +249,9 @@ final class ManagedOccurrenceResolver {
                 .find(DocumentId.of(demand.sourceDocumentId().value()),
                         demand.sourcePath())
                 .orElse(null);
-        if (retained != null && (!retained.active()
+        if (retained != null && ((!retained.active()
+                && !isVerifiedPendingReceiptEventReplacement(
+                        managedRevisionCause, retained, suppliedBlueId, index))
                 || retained.expectedTargetBlueId().equals(suppliedBlueId))) {
             ManagedLineageIndex.Lineage stable = index.byDocumentId(
                     DocumentId.of(retained.targetDocumentId().value()));
@@ -590,7 +631,8 @@ final class ManagedOccurrenceResolver {
             Set<DocumentId> inputMembers,
             List<ClosureResourceDemand> demands,
             InMemoryDocumentStore.OccurrenceResolutionSnapshot storeState,
-            ContractsManagedEpochSelectionPlan selectionPlan) {
+            ContractsManagedEpochSelectionPlan selectionPlan,
+            ManagedRevisionCause managedRevisionCause) {
         ResolutionRequest(
                 String logicalCauseIdentity,
                 String inputClosureIdentity,
@@ -606,7 +648,21 @@ final class ManagedOccurrenceResolver {
                     inputMembers,
                     demands,
                     storeState,
+                    null,
                     null);
+        }
+
+        ResolutionRequest(
+                String logicalCauseIdentity,
+                String inputClosureIdentity,
+                long inputGraphGeneration,
+                Set<DocumentId> inputMembers,
+                List<ClosureResourceDemand> demands,
+                InMemoryDocumentStore.OccurrenceResolutionSnapshot storeState,
+                ContractsManagedEpochSelectionPlan selectionPlan) {
+            this(logicalCauseIdentity, inputClosureIdentity,
+                    inputGraphGeneration, inputMembers, demands, storeState,
+                    selectionPlan, null);
         }
 
         ResolutionRequest {
@@ -624,6 +680,16 @@ final class ManagedOccurrenceResolver {
             }
             demands = canonicalDemands(demands);
             storeState = Objects.requireNonNull(storeState, "storeState");
+            if (managedRevisionCause != null
+                    && (!managedRevisionCause.causeIdentity().equals(
+                            logicalCauseIdentity)
+                        || !inputMembers.contains(DocumentId.of(
+                                managedRevisionCause.childDocumentId()
+                                        .value())))) {
+                throw new IllegalArgumentException(
+                        "Managed revision evidence escaped its frozen cause "
+                                + "or source member");
+            }
             for (ClosureResourceDemand demand : demands) {
                 if (demand instanceof ManagedOccurrenceEvidenceDemand
                         occurrence) {
@@ -670,7 +736,9 @@ final class ManagedOccurrenceResolver {
                                     LinkedHashSet::new)),
                     List.copyOf(Objects.requireNonNull(demands, "demands")),
                     storeState,
-                    selectionPlan);
+                    selectionPlan,
+                    selected.cause() instanceof ManagedRevisionCause revision
+                            ? revision : null);
         }
 
         private static List<ClosureResourceDemand> canonicalDemands(

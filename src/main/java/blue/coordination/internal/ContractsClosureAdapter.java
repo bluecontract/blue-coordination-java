@@ -29,6 +29,7 @@ import blue.language.processor.closure.ClosureEnvironment;
 import blue.language.processor.closure.ClosureEvidenceFactory;
 import blue.language.processor.closure.ClosureImplementationEvidence;
 import blue.language.processor.closure.ClosureInvocationInput;
+import blue.language.processor.closure.ClosureProcessRetryInput;
 import blue.language.processor.closure.ClosureProcessResult;
 import blue.language.processor.closure.ComponentKind;
 import blue.language.processor.closure.ComponentFinalizationInput;
@@ -43,6 +44,8 @@ import blue.language.processor.closure.ManagedDocumentSnapshot;
 import blue.language.processor.closure.ManagedDocumentTransitionReceipt;
 import blue.language.processor.closure.ManagedDocumentGraph;
 import blue.language.processor.closure.ManagedOccurrenceBinding;
+import blue.language.processor.closure.ManagedOccurrenceEvidenceResolution;
+import blue.language.processor.closure.ManagedRevisionCause;
 import blue.language.processor.closure.ManagedScopeKey;
 import blue.language.processor.closure.PublicEventOccurrence;
 import blue.language.processor.closure.ResultingDocument;
@@ -187,7 +190,21 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         CohortInvocation>(
                         occurrenceResolver,
                         runtime.metrics(),
-                        CohortInvocation::input,
+                        new AutomaticOccurrenceResolutionCoordinator
+                                .InputView<CohortInvocation>() {
+                            @Override
+                            public ClosureInvocationInput input(
+                                    CohortInvocation invocation) {
+                                return invocation.input();
+                            }
+
+                            @Override
+                            public String invocationIdentity(
+                                    CohortInvocation invocation) {
+                                return invocation
+                                        .executionInvocationIdentity();
+                            }
+                        },
                         invocation -> {
                             executionObserver.beginAttempt(
                                     invocation.members().stream()
@@ -195,8 +212,11 @@ final class ContractsClosureAdapter implements AutoCloseable {
                                             .toList());
                             return runtime.metrics().timed(
                                     PROCESSOR_PHASE,
-                                    () -> contracts.processClosure(
-                                            invocation.input()));
+                                    () -> invocation.retryInput() == null
+                                            ? contracts.processClosure(
+                                                    invocation.input())
+                                            : contracts.processClosureRetry(
+                                                    invocation.retryInput()));
                         },
                         new AutomaticOccurrenceResolutionCoordinator
                                 .ExpansionBuilder<CohortInvocation>() {
@@ -753,7 +773,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
             CohortInvocation invocation,
             ClosureProcessResult result) {
         if (!result.invocationIdentity().equals(
-                invocation.input().invocationIdentity())
+                invocation.executionInvocationIdentity())
                 || !result.inputClosureIdentity().equals(
                         invocation.input().snapshot().closureIdentity())) {
             throw new IllegalStateException(
@@ -1255,6 +1275,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     List.copyOf(replayMembers.keySet()),
                     base.directDeliveries(),
                     base.input(),
+                    base.retryInput(),
                     base.documents(),
                     plan,
                     null,
@@ -1469,6 +1490,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 coordinationIds(graph.documentIds()),
                 base.directDeliveries(),
                 expanded,
+                null,
                 base.documents(),
                 plan,
                 null,
@@ -1572,6 +1594,16 @@ final class ContractsClosureAdapter implements AutoCloseable {
 
         LinkedHashMap<String, ManagedOccurrenceBinding> rows =
                 new LinkedHashMap<>();
+        LinkedHashMap<String, ManagedOccurrenceEvidenceResolution>
+                retryResolutions = new LinkedHashMap<>();
+        if (current.retryInput() != null) {
+            for (ManagedOccurrenceEvidenceResolution resolutionEvidence
+                    : current.retryInput().resolutions()) {
+                retryResolutions.put(
+                        resolutionEvidence.demand().demandIdentity(),
+                        resolutionEvidence);
+            }
+        }
         for (DocumentId source : existingMembers) {
             List<ManagedOccurrenceBinding> sourceRows =
                     indexed.occurrenceInventory().rowsFrom(source);
@@ -1599,7 +1631,44 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     occurrence.demand().sourcePath());
             ManagedOccurrenceBinding retained = rows.get(key);
             if (retained != null) {
-                if (retained.active()) {
+                if (retained.active()
+                        || ManagedOccurrenceResolver
+                                .isVerifiedPendingReceiptEventReplacement(
+                                        current.input().cause()
+                                                instanceof ManagedRevisionCause
+                                                        revision
+                                                ? revision : null,
+                                        retained,
+                                        occurrence.demand()
+                                                .suppliedValueBlueId(),
+                                        indexed.lineageIndex())) {
+                    Long historicalEpoch =
+                            occurrence.pendingHistoricalEpoch();
+                    blue.language.processor.closure.DocumentId target =
+                            closureId(occurrence.targetDocumentId());
+                    if (historicalEpoch != null
+                            && !retained.targetDocumentId().equals(target)
+                            && current.input().snapshot()
+                                    .managedDocument(target) != null) {
+                        ManagedOccurrenceEvidenceResolution exact =
+                                ManagedOccurrenceEvidenceResolution.derived(
+                                        occurrence.demand(),
+                                        target,
+                                        historicalEpoch.longValue());
+                        ManagedOccurrenceEvidenceResolution priorResolution =
+                                retryResolutions.putIfAbsent(
+                                        occurrence.demand().demandIdentity(),
+                                        exact);
+                        if (priorResolution != null
+                                && !priorResolution.resolutionIdentity()
+                                        .equals(exact
+                                                .resolutionIdentity())) {
+                            throw new IllegalStateException(
+                                    "Automatic retry changed an exact "
+                                            + "managed-occurrence resolution "
+                                            + key);
+                        }
+                    }
                     continue;
                 }
                 ManagedOccurrenceBinding replacement =
@@ -1782,10 +1851,16 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         original.directDeliveries(),
                         original.executionPolicy(),
                         original.environment());
+        ClosureProcessRetryInput retryInput = retryResolutions.isEmpty()
+                ? null
+                : ClosureProcessRetryInput.derived(
+                        expanded,
+                        new ArrayList<>(retryResolutions.values()));
         return new CohortInvocation(
                 coordinationIds(graph.documentIds()),
                 current.directDeliveries(),
                 expanded,
+                retryInput,
                 captured,
                 current.managedDraftPlan(),
                 accumulated,
@@ -2593,7 +2668,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     "Only a committing result can be published");
         }
         if (!result.invocationIdentity().equals(
-                invocation.input().invocationIdentity())
+                invocation.executionInvocationIdentity())
                 || !result.inputClosureIdentity().equals(
                 invocation.input().snapshot().closureIdentity())) {
             throw new IllegalStateException(
@@ -3635,6 +3710,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
             List<DocumentId> members,
             List<DirectLogicalDelivery> directDeliveries,
             ClosureInvocationInput input,
+            ClosureProcessRetryInput retryInput,
             Map<DocumentId, CapturedDocument> documents,
             ContractsManagedDraftPlan managedDraftPlan,
             AutomaticManagedOccurrenceExpansion automaticExpansion,
@@ -3650,6 +3726,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     members,
                     directDeliveries,
                     input,
+                    null,
                     documents,
                     managedDraftPlan,
                     null,
@@ -3669,6 +3746,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     members,
                     directDeliveries,
                     input,
+                    null,
                     documents,
                     managedDraftPlan,
                     automaticExpansion,
@@ -3683,6 +3761,13 @@ final class ContractsClosureAdapter implements AutoCloseable {
             directDeliveries = List.copyOf(Objects.requireNonNull(
                     directDeliveries, "directDeliveries"));
             input = Objects.requireNonNull(input, "input");
+            if (retryInput != null
+                    && !retryInput.baseInvocation().invocationIdentity()
+                            .equals(input.invocationIdentity())) {
+                throw new IllegalArgumentException(
+                        "Process retry does not reconstruct this cohort "
+                                + "input");
+            }
             documents = Collections.unmodifiableMap(
                     new LinkedHashMap<>(Objects.requireNonNull(
                             documents, "documents")));
@@ -3704,6 +3789,12 @@ final class ContractsClosureAdapter implements AutoCloseable {
         Set<DocumentId> memberSet() {
             return Collections.unmodifiableSet(
                     new LinkedHashSet<>(members));
+        }
+
+        String executionInvocationIdentity() {
+            return retryInput == null
+                    ? input.invocationIdentity()
+                    : retryInput.retryInvocationIdentity();
         }
 
         Set<DocumentId> existingMemberSet() {

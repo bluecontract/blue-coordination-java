@@ -268,6 +268,7 @@ final class ManagedEpochInvocationCapturer {
                         canonicalMembers,
                         List.of(),
                         input,
+                        null,
                         captured,
                         null,
                         null,
