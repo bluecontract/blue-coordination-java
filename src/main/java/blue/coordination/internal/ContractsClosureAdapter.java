@@ -2349,17 +2349,20 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 }
                 ManagedDocumentTransitionReceipt transition =
                         transitionReceipts.get(entry.getKey());
-                boolean componentRepresentationRebind =
-                        isIndirectComponentRepresentationRebind(
-                                invocation, entry.getKey(), before, after);
                 boolean checkpointSettlementChange =
-                        !componentRepresentationRebind
-                                && isVerifiedCheckpointSettlementChange(
-                                        result,
+                        isVerifiedCheckpointSettlementChange(
+                                result,
+                                entry.getKey(),
+                                before.head(),
+                                after,
+                                transition);
+                boolean componentRepresentationRebind =
+                        !checkpointSettlementChange
+                                && isIndirectComponentRepresentationRebind(
+                                        invocation,
                                         entry.getKey(),
-                                        before.head(),
-                                        after,
-                                        transition);
+                                        before,
+                                        after);
                 boolean changed = componentRepresentationRebind
                         || requiresDocumentPublication(
                                 result, before, after, transition);
@@ -3196,6 +3199,11 @@ final class ContractsClosureAdapter implements AutoCloseable {
             InMemoryDocumentStore.DocumentHead before,
             ResultingDocument after,
             ManagedDocumentTransitionReceipt transition) {
+        boolean settlementEvidence = transition != null
+                && (!transition.emittedRootEvents().isEmpty()
+                        || result.checkpointWrites().stream().anyMatch(
+                                write -> checkpointTargets(
+                                        write, documentId)));
         if (!result.commits()
                 || transition == null
                 || after.epoch() != before.epoch()
@@ -3206,8 +3214,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         result.invocationIdentity())
                 || !transition.beforeBlueId().equals(before.blueId())
                 || !transition.afterBlueId().equals(after.afterBlueId())
-                || result.checkpointWrites().stream().noneMatch(
-                        write -> checkpointTargets(write, documentId))) {
+                || !settlementEvidence) {
             return false;
         }
         List<DocumentTransitionEvidence> boundaries = result
