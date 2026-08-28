@@ -34,7 +34,25 @@ if (!versionMatches.find()) {
     throw new GradleException('Missing version in .cz.toml')
 }
 def declaredProjectVersion = versionMatches.group(1)
-version = declaredProjectVersion
+def developmentProjectVersion = providers.gradleProperty(
+        'blueDevelopmentVersion').orNull
+if (developmentProjectVersion != null
+        && (!immutableDevelopmentContracts
+        || !(developmentProjectVersion
+        ==~ /3\.0\.0-dev\.(?:tree\.)?[0-9a-f]{40}/))) {
+    throw new GradleException(
+            'blueDevelopmentVersion requires immutable-development-contracts '
+                    + 'and an exact commit-bound or tree-bound DEVELOPMENT version')
+}
+version = developmentProjectVersion ?: declaredProjectVersion
+if (immutableDevelopmentContracts
+        && immutableStagedLanguageVersion != '3.1.0-rc.23'
+        && !(immutableStagedLanguageVersion
+        ==~ /3\.1\.0-dev\.(?:tree\.)?[0-9a-f]{40}/)) {
+    throw new GradleException(
+            'blueContractsVersion must be the legacy pin or an exact '
+                    + 'commit-bound or tree-bound DEVELOPMENT version')
+}
 
 def publishedBlueCoordinates = [
         'blue.language:blue-language-model': publishedLanguageVersion,
@@ -148,12 +166,47 @@ configurations {
     scenarioTestRuntimeOnly.extendsFrom testSupportRuntimeOnly
 }
 
+def selectedDependencyLockFile = layout.projectDirectory.file(
+        immutableContractsRepository
+                ? 'gradle/immutable-staged-contracts.lockfile'
+                : 'gradle/published-artifact.lockfile')
+if (immutableDevelopmentContracts
+        && immutableStagedLanguageVersion != '3.1.0-rc.23') {
+    // Keep every external dependency locked. The immutable manifest supplies
+    // only the six exact Language coordinates; a generated overlay avoids a
+    // source commit containing its own commit-bound dependency version.
+    int replacedCoordinates = 0
+    String developmentLock = selectedDependencyLockFile.asFile
+            .getText('UTF-8').split('\n', -1).collect { line ->
+        if (line.startsWith('blue.language:')) {
+            def match = line =~ /^(blue\.language:[^:]+:)3\.1\.0-rc\.23(=.*)$/
+            if (!match.matches()) {
+                throw new GradleException(
+                        'Unexpected Language coordinate in the DEVELOPMENT lock template')
+            }
+            replacedCoordinates++
+            return match.group(1) + immutableStagedLanguageVersion + match.group(2)
+        }
+        line
+    }.join('\n')
+    if (replacedCoordinates != developmentContractsArtifacts.size()) {
+        throw new GradleException(
+                'The DEVELOPMENT lock template must contain exactly six Language coordinates')
+    }
+    selectedDependencyLockFile = layout.projectDirectory.file(
+            '.gradle/immutable-development-locks/'
+                    + immutableStagedLanguageVersion + '.lockfile')
+    File generatedLock = selectedDependencyLockFile.asFile
+    generatedLock.parentFile.mkdirs()
+    if (!generatedLock.isFile()
+            || generatedLock.getText('UTF-8') != developmentLock) {
+        generatedLock.setText(developmentLock, 'UTF-8')
+    }
+}
+
 dependencyLocking {
     lockAllConfigurations()
-    lockFile = layout.projectDirectory.file(
-            immutableContractsRepository
-                    ? 'gradle/immutable-staged-contracts.lockfile'
-                    : 'gradle/published-artifact.lockfile')
+    lockFile = selectedDependencyLockFile
 }
 
 tasks.withType(JavaCompile).configureEach {
@@ -1096,7 +1149,9 @@ def inspectImmutableDevelopmentContractsRepository = {
     ] as Set
     def allowedManifestFields = requiredManifestFields + [
             'artifactRecordCount',
-            'repositoryFileCount'
+            'repositoryFileCount',
+            'sourceTree',
+            'sourceDirty'
     ] as Set
     def actualManifestFields = manifest instanceof Map
             ? manifest.keySet() as Set : [] as Set
@@ -1134,6 +1189,20 @@ def inspectImmutableDevelopmentContractsRepository = {
         failures << ('development manifest sourceCommit is '
                 + manifest.sourceCommit + '; expected '
                 + developmentContractsSourceCommit)
+    }
+    if (immutableStagedLanguageVersion != '3.1.0-rc.23') {
+        if (!(manifest.sourceTree instanceof String)
+                || !(manifest.sourceTree ==~ /[0-9a-f]{40}/)
+                || !(manifest.sourceDirty instanceof Boolean)) {
+            failures << 'DEVELOPMENT version requires exact sourceTree/sourceDirty provenance'
+        } else {
+            String expectedDevelopmentVersion = manifest.sourceDirty
+                    ? '3.1.0-dev.tree.' + manifest.sourceTree
+                    : '3.1.0-dev.' + manifest.sourceCommit
+            if (manifest.version != expectedDevelopmentVersion) {
+                failures << 'DEVELOPMENT version does not bind its exact source identity'
+            }
+        }
     }
     [
             'contractsSpecificationIdentity',

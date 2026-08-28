@@ -8,8 +8,9 @@ plugins {
     id 'java'
 }
 
-def coordinationVersion = providers.gradleProperty(
-        'coordinationVersion').get()
+def stagedVersions = gradle.extensions.extraProperties.get('stagedConsumerVersions')
+def coordinationVersion = stagedVersions.coordination
+def contractsVersion = stagedVersions.contracts
 def coordinationRepository = file(providers.gradleProperty(
         'coordinationRepository').get()).canonicalFile
 def contractsRepository = file(providers.gradleProperty(
@@ -137,12 +138,10 @@ def verifyStagedCoordinates = tasks.register('verifyStagedCoordinates') {
             [(coordinate): sha256Identity(artifact.file)]
         }
         Map<String, String> expected = [:]
-        actual.keySet().sort().each { coordinate ->
-            expected[coordinate] = coordinate.startsWith(
-                    'blue.coordination:')
-                    ? expectedCoordination[coordinate]
-                    : expectedContracts[coordinate]
-        }
+        expected.putAll(expectedCoordination)
+        expected.putAll(expectedContracts.findAll { coordinate, ignored ->
+            !coordinate.startsWith('blue.language:blue-conformance:')
+        })
         if (actual != expected || expected.values().any { it == null }) {
             throw new GradleException(
                     'resolved Blue bytes differ from immutable manifests')
@@ -155,6 +154,10 @@ def verifyStagedCoordinates = tasks.register('verifyStagedCoordinates') {
                 contractsManifestIdentity:
                         providers.gradleProperty(
                                 'contractsManifestSha256').get(),
+                coordinationVersion: coordinationVersion,
+                contractsVersion: contractsVersion,
+                sourceProvenance: gradle.extensions.extraProperties.get(
+                        'stagedConsumerSourceProvenance'),
                 selectedBlueCoordinates: blueComponents,
                 verifiedBlueArtifacts: actual.collect { coordinate, identity ->
                     [coordinate: coordinate, sha256: identity]
@@ -166,7 +169,7 @@ def verifyStagedCoordinates = tasks.register('verifyStagedCoordinates') {
 }
 
 tasks.named('test') {
-    dependsOn prepareStagedConsumerReceipt
+    dependsOn prepareStagedConsumerReceipt, verifyStagedCoordinates
 }
 
 tasks.register('stagedConsumerCheck') {

@@ -124,5 +124,26 @@ if (dependencyMode in [
                     'blueContractsSourceCommit does not match the '
                             + 'development Contracts manifest')
         }
+        String expectedVersion = providers.gradleProperty(
+                'blueContractsVersion').getOrElse('3.1.0-rc.23')
+        if (manifestDocument.version != expectedVersion) {
+            throw new GradleException(
+                    'blueContractsVersion does not match the development Contracts manifest')
+        }
+        if (expectedVersion != '3.1.0-rc.23') {
+            if (!(manifestDocument.sourceTree instanceof String)
+                    || !(manifestDocument.sourceTree ==~ /[0-9a-f]{40}/)
+                    || !(manifestDocument.sourceDirty instanceof Boolean)) {
+                throw new GradleException(
+                        'DEVELOPMENT Contracts version requires exact source-tree provenance')
+            }
+            String boundVersion = manifestDocument.sourceDirty
+                    ? '3.1.0-dev.tree.' + manifestDocument.sourceTree
+                    : '3.1.0-dev.' + manifestDocument.sourceCommit
+            if (expectedVersion != boundVersion) {
+                throw new GradleException(
+                        'DEVELOPMENT Contracts version does not bind its exact source identity')
+            }
+        }
     }
 }
