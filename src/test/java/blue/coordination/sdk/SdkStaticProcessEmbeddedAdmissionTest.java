@@ -415,9 +415,11 @@ final class SdkStaticProcessEmbeddedAdmissionTest {
         String rootYaml = "child:\n  blueId: " + expected.memberBlueId()
                 + "\n" + embeddedPath("/child");
 
-        // when / then
+        // when
         assertInvalidCyclicProof(rootYaml, expected.memberBlueId(),
                 expected.memberBody(), unrelated.proof());
+
+        // then
         assertInvalidCyclicProof(rootYaml, expected.memberBlueId(),
                 expected.memberBody(), stale.proof());
         assertInvalidCyclicProof(rootYaml, expected.memberBlueId(),
@@ -433,7 +435,7 @@ final class SdkStaticProcessEmbeddedAdmissionTest {
         String rootYaml = "child:\n  blueId: " + cycle.memberBlueId()
                 + "\n" + embeddedPath("/child");
 
-        // when / then
+        // when
         for (CoordinationErrorCode code : List.of(
                 CoordinationErrorCode.MISSING_EXACT_VALUE_PROOF,
                 CoordinationErrorCode.INVALID_EXACT_VALUE_PROOF)) {
@@ -453,6 +455,8 @@ final class SdkStaticProcessEmbeddedAdmissionTest {
                         CoordinationException.class,
                         () -> blue.documents()
                                 .admitStaticProcessEmbedded(rootYaml));
+
+                // then
                 assertEquals(code, observed.code());
                 assertEquals("application evidence failure",
                         observed.getMessage());

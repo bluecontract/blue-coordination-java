@@ -449,6 +449,7 @@ final class SdkManagedEpochPromotionAndRetargetTest {
     @Test
     void pendingPlanRetiresDuringHistoricalRetargetEvent() {
         try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            // given
             CoordinationTestControl control = CoordinationTestControl.attach(
                     coordination.advanced().rawEngine());
             TimelineHandle consumerTimeline = coordination.timelines()
@@ -486,6 +487,7 @@ final class SdkManagedEpochPromotionAndRetargetTest {
             String cHead = c.snapshot().blueId();
             CoordinationMetrics before = coordination.advanced().rawEngine().metrics();
 
+            // when
             EntryHandle attachment = setChild(coordination, consumer,
                     consumerTimeline, bZero).submit();
             DrainResult admitted = coordination.processing().drainJournal(
@@ -512,6 +514,8 @@ final class SdkManagedEpochPromotionAndRetargetTest {
                     .drainManagedEpochApplication(selectedB
                             .managedEpochApplicationWork().orElseThrow()
                             .workIdentity());
+
+            // then
             assertEquals(1, firstB.managedEpochApplicationAttempts().size());
             ManagedEpochApplicationAttempt retargetAttempt = firstB
                     .managedEpochApplicationAttempts().get(0);

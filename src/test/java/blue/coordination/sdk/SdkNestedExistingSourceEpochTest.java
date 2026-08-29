@@ -26,6 +26,7 @@ final class SdkNestedExistingSourceEpochTest {
     @Test
     void literalAuthoredNestedSourceRemainsExactWhileAnotherConsumerReplaysIt() throws IOException {
         try (BlueCoordination blue = BlueCoordination.builder().contentDerivedDocumentIds().build()) {
+            // given
             CoordinationTestControl control = CoordinationTestControl.attach(blue.advanced().rawEngine());
             TimelineHandle timeline = blue.timelines().register(
                     "labs/retained-managed-epoch/nested/alice", "alice");
@@ -55,9 +56,12 @@ final class SdkNestedExistingSourceEpochTest {
             assertEquals(3L, b.snapshot().epoch());
             assertEquals(bHead, blue.advanced().auditManagedEpoch(B, 3L).orElseThrow().afterBlueId());
 
+            // when
             DocumentId A = DocumentId.of(blue.values().yaml(labYaml("consumer-a")).blueId());
             DocumentHandle a = blue.documents().admit(ManagedDocument.yaml(A, labYaml("consumer-a"))
                     .publicRoot().fromNow());
+
+            // then
             assertEquals(bHead, blue.advanced().auditDocument(B).blueId(), "B must not change when A is admitted");
             EntryHandle attached = blue.operations().on(a).from(timeline).call("attachCandidate")
                     .through("ownerChannel").request(request -> request.exact("embeddedContract", bAuthored))
@@ -113,6 +117,7 @@ final class SdkNestedExistingSourceEpochTest {
     @Test
     void b3IntroducesRetainedCAndACatchesUpWithoutReprocessingEitherSource() {
         try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            // given
             CoordinationTestControl control = CoordinationTestControl.attach(
                     blue.advanced().rawEngine());
             TimelineHandle timeline = blue.timelines().register(TIMELINE, "alice");
@@ -131,9 +136,13 @@ final class SdkNestedExistingSourceEpochTest {
                 assertFalse(receipt.afterDocument().json().contains("\"child\""),
                         "B0..B2 must not already contain C");
             }
+
+            // when
             EntryHandle attachC = attach(blue, b, timeline, cZero).submit();
             DrainResult introduced = blue.processing().drainJournal(new DrainBudget(1L, 1L));
             applied(introduced.entry(attachC));
+
+            // then
             ManagedEpochReceipt bThree = blue.advanced().auditManagedEpoch(B, 3L).orElseThrow();
             assertEquals(cZero.blueId(), bThree.afterDocument().valueAt("/child").blueId(),
                     "B3 must carry C0, never C's newer current head");
