@@ -563,13 +563,14 @@ def publicBoundarySources = files(
 // recovery responsibilities plus the reviewed host-driven fair-selection and
 // unsupported nested-new publication boundary, cyclic proof retention, and
 // verified checkpoint-settlement projection, exact execution-policy surface,
-// and transitive managed catch-up readiness helper: currently 220 production
-// sources, 65,476 lines and 80 public api+sdk source types. These are not
+// transitive managed catch-up readiness helper, and the backward-compatible
+// exact-node evidence transport: currently 221 production sources, 65,740
+// lines and 81 public api+sdk source types. These are not
 // historical Round 13 counts and are not performance evidence.
 def currentProductionShapeLimits = [
-        classes: 220,
-        lines: 65_476L,
-        publicApiTypes: 80,
+        classes: 221,
+        lines: 65_740L,
+        publicApiTypes: 81,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]
 def retainedManagedEpochProductionSources = [
