@@ -398,7 +398,9 @@ final class SdkAcceptanceTest {
                     .execute();
 
             // then
-            assertEquals(EntryDisposition.APPLIED, result.disposition());
+            assertEquals(EntryDisposition.APPLIED, result.disposition(),
+                    "initialMaster=" + initialMaster + ", before=" + before
+                            + ", diagnostic=" + result.diagnostic());
             assertEquals(1, result.closures().size());
             assertEquals(List.of(a, c1, b1, a, c2, b2, a),
                     result.stats().documentStepOrder());
@@ -786,7 +788,8 @@ final class SdkAcceptanceTest {
                     .execute();
 
             assertEquals(EntryDisposition.APPLIED,
-                    readded.disposition());
+                    readded.disposition(), "before=" + beforeReadd
+                            + ", diagnostic=" + readded.diagnostic());
             assertSingleAppliedClosure(readded);
             assertEquals(List.of(scenario.b().id()),
                     readded.stats().documentStepOrder());
