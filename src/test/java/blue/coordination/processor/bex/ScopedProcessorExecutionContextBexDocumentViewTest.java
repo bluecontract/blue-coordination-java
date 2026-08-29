@@ -73,6 +73,30 @@ class ScopedProcessorExecutionContextBexDocumentViewTest {
     }
 
     @Test
+    void shouldExposeVerifiedCyclicMemberSemanticBody() {
+        // given
+        ExactValue body = exactObject("verified cyclic member");
+        String memberBlueId = body.blueId + "#0";
+        RecordingFrozenAccess access = new RecordingFrozenAccess();
+        access.workingCanonical = FrozenNode.fromNode(
+                new Node().blueId(memberBlueId));
+        access.workingResolved = body.resolved;
+        ScopedProcessorExecutionContextBexDocumentView view =
+                new ScopedProcessorExecutionContextBexDocumentView(
+                        access, null);
+
+        // when
+        BexValue read = view.resolvedAt("/counterValue");
+
+        // then
+        assertTrue(read.isExact());
+        assertEquals(memberBlueId, read.exactBlueId());
+        assertTrue(read.isObject());
+        assertEquals("verified cyclic member",
+                read.get("marker").asText());
+    }
+
+    @Test
     void shouldPairCanonicalAndResolvedWorkingRootsDuringFallback() {
         // given
         ExactValue exact = exactObject(
@@ -199,6 +223,25 @@ class ScopedProcessorExecutionContextBexDocumentViewTest {
         // then
         assertExactInteger(read, amount.blueId, 0);
         assertEquals(1, access.scopeResolvedReads);
+    }
+
+    @Test
+    void shouldFallBackWhenCollapsedExactParentCannotOpenChild() {
+        // given
+        ExactValue parent = exactObject("verified child");
+        CollapsedExactParentFrozenAccess access =
+                new CollapsedExactParentFrozenAccess(parent);
+        ScopedProcessorExecutionContextBexDocumentView view =
+                new ScopedProcessorExecutionContextBexDocumentView(
+                        access, null);
+
+        // when
+        BexValue child = view.resolvedAt("/counterValue")
+                .get("marker");
+
+        // then
+        assertEquals("verified child", child.asText());
+        assertEquals(1, access.materializedChildReads);
     }
 
     private static void assertExactInteger(
@@ -560,6 +603,66 @@ class ScopedProcessorExecutionContextBexDocumentViewTest {
             return LEAF.equals(absolutePointer)
                     ? amount.canonical
                     : null;
+        }
+
+        @Override
+        public FrozenNode workingCanonicalRoot() {
+            return null;
+        }
+
+        @Override
+        public FrozenNode workingResolvedRoot() {
+            return null;
+        }
+    }
+
+    private static final class CollapsedExactParentFrozenAccess
+            implements ScopedProcessorExecutionContextBexDocumentView
+                    .FrozenAccess {
+        private static final String PARENT = "/counterValue";
+        private static final String CHILD = "/counterValue/marker";
+
+        private final FrozenNode collapsed;
+        private final FrozenNode child;
+        private int materializedChildReads;
+
+        private CollapsedExactParentFrozenAccess(ExactValue parent) {
+            collapsed = parent.canonical;
+            child = parent.resolved.property("marker");
+        }
+
+        @Override
+        public String resolvePointer(String authoredPointer) {
+            return authoredPointer;
+        }
+
+        @Override
+        public String currentScopePath() {
+            return "/";
+        }
+
+        @Override
+        public FrozenNode workingCanonicalAt(String absolutePointer) {
+            return PARENT.equals(absolutePointer) ? collapsed : null;
+        }
+
+        @Override
+        public FrozenNode workingResolvedAt(String absolutePointer) {
+            return PARENT.equals(absolutePointer) ? collapsed : null;
+        }
+
+        @Override
+        public FrozenNode processorCanonicalAt(String absolutePointer) {
+            return PARENT.equals(absolutePointer) ? collapsed : null;
+        }
+
+        @Override
+        public FrozenNode processorResolvedAt(String absolutePointer) {
+            if (CHILD.equals(absolutePointer)) {
+                materializedChildReads++;
+                return child;
+            }
+            return PARENT.equals(absolutePointer) ? collapsed : null;
         }
 
         @Override

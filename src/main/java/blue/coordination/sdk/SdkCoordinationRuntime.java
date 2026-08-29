@@ -25,6 +25,7 @@ import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.ProcessorDiagnostic;
 import blue.language.processor.closure.ClosureProcessResult;
 import blue.language.processor.closure.ClosureResourceDemand;
+import blue.language.provider.ProviderUnavailableException;
 import blue.language.snapshot.FrozenNode;
 
 import java.math.BigInteger;
@@ -284,10 +285,14 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                         List.of(),
                         Set.of(selected.id()),
                         activationInputs(selected.activationPolicy()));
-        Contracts10AuthoredClosureCompiler.CompiledClosure compiled =
-                contentDerivedDocumentIds
-                        ? compiler.compileContentIdentified(request)
-                        : compiler.compile(request);
+        Contracts10AuthoredClosureCompiler.CompiledClosure compiled;
+        try {
+            compiled = contentDerivedDocumentIds
+                    ? compiler.compileContentIdentified(request)
+                    : compiler.compile(request);
+        } catch (ProviderUnavailableException unavailable) {
+            throw admissionNeedsResources(unavailable);
+        }
         admitCompiled(compiled, Set.of(selected.id()));
         return requireDocument(selected.id());
     }
@@ -805,6 +810,19 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                     details);
         }
         throw admissionRejected(receipt.attempt().processResult());
+    }
+
+    private static CoordinationException admissionNeedsResources(
+            ProviderUnavailableException unavailable) {
+        String blueId = unavailable.requiredExactBlueId().orElseThrow(
+                () -> unavailable);
+        LinkedHashMap<String, String> details = new LinkedHashMap<>();
+        details.put("blueId", blueId);
+        return new CoordinationException(
+                CoordinationErrorCode.NEEDS_RESOURCES,
+                "ADMISSION_NEEDS_RESOURCES: " + List.of(blueId),
+                unavailable,
+                details);
     }
 
     private static CoordinationException admissionRejected(

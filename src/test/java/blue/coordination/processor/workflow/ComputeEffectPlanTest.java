@@ -27,6 +27,7 @@ import blue.language.processor.ProcessorFailureException;
 import blue.language.processor.RuntimeWorkSession;
 import blue.language.processor.RuntimeWorkSessionTestSupport;
 import blue.language.processor.FrozenJsonPatch;
+import blue.language.provider.ProviderUnavailableException;
 import blue.language.snapshot.FrozenNode;
 import blue.repo.coordination.TerminateProcessing;
 
@@ -536,6 +537,24 @@ class ComputeEffectPlanTest {
 
         // then
         assertSame(invalidEvidence, recovered);
+    }
+
+    @Test
+    void shouldRecoverProviderUnavailabilityWrappedForExecutorHandling() {
+        // given
+        ProviderUnavailableException unavailable =
+                new ProviderUnavailableException(
+                        "82Q6zgP9wPptupHbAj51Ci4NL57JFsVGh5SJ6qLVefBe",
+                        "exact value is not available yet");
+        BexException wrapped = new BexException(
+                "BEX document read failed", unavailable);
+
+        // when
+        RuntimeException recovered =
+                ComputeStepExecutor.classifiedBoundaryFailure(wrapped);
+
+        // then
+        assertSame(unavailable, recovered);
     }
 
     @Test

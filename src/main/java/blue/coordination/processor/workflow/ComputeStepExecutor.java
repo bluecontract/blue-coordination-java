@@ -17,6 +17,7 @@ import blue.language.processor.PortableLimitExceededException;
 import blue.language.processor.ProcessorErrorCategory;
 import blue.language.processor.ProcessorFailureException;
 import blue.language.processor.ProcessorFatalException;
+import blue.language.provider.ProviderUnavailableException;
 import blue.language.snapshot.FrozenNode;
 import blue.language.runtime.BlueLanguage;
 import blue.repo.coordination.Compute;
@@ -230,6 +231,7 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute>,
                     instanceof InvalidExecutionEvidenceException
                     || current
                     instanceof PortableLimitExceededException
+                    || current instanceof ProviderUnavailableException
                     || current instanceof GasLimitExceededException) {
                 return (RuntimeException) current;
             }

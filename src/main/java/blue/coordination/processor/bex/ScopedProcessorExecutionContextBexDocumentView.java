@@ -3,6 +3,7 @@ package blue.coordination.processor.bex;
 import blue.bex.api.BexDocumentView;
 import blue.bex.value.BexValue;
 import blue.bex.value.BexValues;
+import blue.language.identity.BlueIds;
 import blue.language.model.Node;
 import blue.language.processor.ProcessorExecutionContext;
 import blue.language.snapshot.FrozenNode;
@@ -282,10 +283,128 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
         BexValue semantic =
                 BexValues.frozen(
                         resolved);
+        if (canonical != null
+                && canonical.isReferenceOnly()
+                && BlueIds.hasCyclicMemberSeparator(
+                        canonical.getReferenceBlueId())) {
+            /*
+             * The generic BEX exact constructor deliberately keeps a cyclic
+             * identity collapsed. Hosted PROCESS already verified this body
+             * and proof, so retain that identity while exposing only the
+             * invocation-owned semantic value.
+             */
+            return new VerifiedSemanticExactBexValue(
+                    canonical.getReferenceBlueId(),
+                    semantic);
+        }
         return BexValues.admittedExact(
                 resolved,
                 identity.blueId(),
                 semantic);
+    }
+
+    /** Exact cyclic identity paired only with its verified invocation body. */
+    private static final class VerifiedSemanticExactBexValue
+            implements BexValue {
+        private final String blueId;
+        private final BexValue semantic;
+
+        private VerifiedSemanticExactBexValue(
+                String blueId,
+                BexValue semantic) {
+            this.blueId = Objects.requireNonNull(blueId, "blueId");
+            this.semantic = Objects.requireNonNull(semantic, "semantic");
+        }
+
+        @Override
+        public boolean isExact() {
+            return true;
+        }
+
+        @Override
+        public String exactBlueId() {
+            return blueId;
+        }
+
+        @Override
+        public boolean isUndefined() {
+            return semantic.isUndefined();
+        }
+
+        @Override
+        public boolean isNull() {
+            return semantic.isNull();
+        }
+
+        @Override
+        public boolean isScalar() {
+            return semantic.isScalar();
+        }
+
+        @Override
+        public boolean isObject() {
+            return semantic.isObject();
+        }
+
+        @Override
+        public boolean isList() {
+            return semantic.isList();
+        }
+
+        @Override
+        public BexValue get(String key) {
+            return semantic.get(key);
+        }
+
+        @Override
+        public BexValue at(List<String> pointerSegments) {
+            return semantic.at(pointerSegments);
+        }
+
+        @Override
+        public BexValue at(String pointer) {
+            return semantic.at(pointer);
+        }
+
+        @Override
+        public String asText() {
+            return semantic.asText();
+        }
+
+        @Override
+        public BigInteger asInteger() {
+            return semantic.asInteger();
+        }
+
+        @Override
+        public BigDecimal asNumber() {
+            return semantic.asNumber();
+        }
+
+        @Override
+        public boolean asBoolean() {
+            return semantic.asBoolean();
+        }
+
+        @Override
+        public List<String> keys() {
+            return semantic.keys();
+        }
+
+        @Override
+        public int size() {
+            return semantic.size();
+        }
+
+        @Override
+        public Node toNode() {
+            return semantic.toNode();
+        }
+
+        @Override
+        public Object toSimple() {
+            return semantic.toSimple();
+        }
     }
 
     /**
@@ -344,7 +463,15 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
         public BexValue get(String key) {
             String childPointer = JsonPointer.append(
                     absolutePointer, key);
-            BexValue local = delegate.get(key);
+            BexValue local;
+            try {
+                local = delegate.get(key);
+            } catch (RuntimeException failure) {
+                if (!isUnavailableExactSemantic(failure)) {
+                    throw failure;
+                }
+                local = null;
+            }
             if (local != null
                     && !local.isUndefined()
                     && hasSemanticContent(local)) {

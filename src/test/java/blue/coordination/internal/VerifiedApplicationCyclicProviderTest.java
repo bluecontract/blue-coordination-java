@@ -22,6 +22,31 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Focused authentication coverage for application cyclic provider evidence. */
 final class VerifiedApplicationCyclicProviderTest {
     @Test
+    void emptyLegacyProviderIsUnavailableOnlyForOrdinaryResultLookup() {
+        // given
+        BasicNodeProvider identitySource = new BasicNodeProvider(
+                List.of(new Node().name("adapter-ordinary-missing")));
+        String ordinary = identitySource.getBlueIdByName(
+                "adapter-ordinary-missing");
+        String cyclic = ordinary + "#0";
+        NodeProvider verified = Contracts10StaticEmbeddedAdmissionCompiler
+                .verifiedProvider(ignored -> Optional.empty());
+
+        // when / then
+        assertEquals(List.of(), verified.fetchByBlueId(ordinary),
+                "the legacy list-only provider contract remains empty");
+        assertEquals(NodeProviderOutcome.UNAVAILABLE,
+                verified.fetchResultByBlueId(ordinary).outcome());
+        assertEquals(NodeProviderOutcome.NOT_FOUND,
+                verified.fetchResultByBlueId(cyclic).outcome(),
+                "cyclic body/proof absence keeps its existing outcome");
+        assertTrue(verified instanceof CyclicAwareNodeProvider);
+        assertEquals(NodeProviderOutcome.NOT_FOUND,
+                ((CyclicAwareNodeProvider) verified)
+                        .cyclicSetProofFor(cyclic).outcome());
+    }
+
+    @Test
     void verifiedAdapterPublishesBodyAndCompleteProofForEveryMember() {
         // given
         BasicNodeProvider source = new BasicNodeProvider(
@@ -57,6 +82,8 @@ final class VerifiedApplicationCyclicProviderTest {
         // then
         assertEquals("adapter-cycle-a", firstRead.get(0).getName());
         assertEquals("adapter-cycle-b", secondRead.get(0).getName());
+        assertEquals(NodeProviderOutcome.FOUND,
+                verified.fetchResultByBlueId(first).outcome());
         assertTrue(verified instanceof CyclicAwareNodeProvider);
         CyclicAwareNodeProvider cyclic = (CyclicAwareNodeProvider) verified;
         assertEquals(NodeProviderOutcome.FOUND,

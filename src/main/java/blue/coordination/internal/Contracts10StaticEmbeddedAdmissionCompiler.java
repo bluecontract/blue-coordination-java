@@ -19,6 +19,7 @@ import blue.language.provider.NodeProvider;
 import blue.language.provider.CyclicAwareNodeProvider;
 import blue.language.provider.CyclicSetProof;
 import blue.language.provider.CyclicSetProofResult;
+import blue.language.provider.NodeProviderResult;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -172,6 +173,23 @@ public final class Contracts10StaticEmbeddedAdmissionCompiler {
             return retained.isEmpty()
                     ? List.of()
                     : List.of(retained.orElseThrow().copyNode());
+        }
+
+        @Override
+        public synchronized NodeProviderResult fetchResultByBlueId(
+                String blueId) {
+            String selected = requireText(blueId, "blueId");
+            Optional<ExactValue> retained = resolve(selected);
+            if (retained.isPresent()) {
+                return NodeProviderResult.found(List.of(
+                        retained.orElseThrow().copyNode()));
+            }
+            if (BlueIds.hasCyclicMemberSeparator(selected)) {
+                return NodeProviderResult.notFound();
+            }
+            return NodeProviderResult.unavailable(
+                    "Application exact-node provider has not supplied "
+                            + selected);
         }
 
         @Override
