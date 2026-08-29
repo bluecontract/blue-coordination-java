@@ -814,8 +814,8 @@ final class SdkCoordinationRuntime implements AutoCloseable {
 
     private static CoordinationException admissionNeedsResources(
             ProviderUnavailableException unavailable) {
-        String blueId = unavailable.requiredExactBlueId().orElseThrow(
-                () -> unavailable);
+        String blueId = unavailable.requiredExactBlueId()
+                .orElseThrow(() -> unavailable);
         LinkedHashMap<String, String> details = new LinkedHashMap<>();
         details.put("blueId", blueId);
         return new CoordinationException(

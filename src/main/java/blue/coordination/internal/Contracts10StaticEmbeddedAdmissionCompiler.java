@@ -180,13 +180,11 @@ public final class Contracts10StaticEmbeddedAdmissionCompiler {
                 String blueId) {
             String selected = requireText(blueId, "blueId");
             Optional<ExactValue> retained = resolve(selected);
-            if (retained.isPresent()) {
+            if (retained.isPresent())
                 return NodeProviderResult.found(List.of(
                         retained.orElseThrow().copyNode()));
-            }
-            if (BlueIds.hasCyclicMemberSeparator(selected)) {
+            if (BlueIds.hasCyclicMemberSeparator(selected))
                 return NodeProviderResult.notFound();
-            }
             return NodeProviderResult.unavailable(
                     "Application exact-node provider has not supplied "
                             + selected);
