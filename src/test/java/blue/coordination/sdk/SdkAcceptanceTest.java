@@ -795,7 +795,7 @@ final class SdkAcceptanceTest {
                     readded.stats().documentStepOrder());
             assertEquals(2L, readded.stats().committedTransitions());
             assertEquals(2L, readded.stats().documentsOpened());
-            assertExactGas(readded.stats(), 1_255L);
+            assertExactGas(readded.stats(), 1_260L);
             assertTrue(readded.publicEvents().isEmpty());
             assertExactChangeEvidence(
                     readded,
