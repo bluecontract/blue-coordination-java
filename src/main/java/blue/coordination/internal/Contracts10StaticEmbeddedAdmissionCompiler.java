@@ -226,7 +226,8 @@ public final class Contracts10StaticEmbeddedAdmissionCompiler {
             }
             ExactValue exact;
             if (BlueIds.hasCyclicMemberSeparator(selected)) {
-                CyclicSetProof proof = evidence.cyclicSetProof().orElseThrow(
+                List<String> declaredPlaceholderSet = evidence
+                        .declaredPlaceholderSet().orElseThrow(
                         () -> proofFailure(
                                 CoordinationErrorCode
                                         .MISSING_EXACT_VALUE_PROOF,
@@ -235,6 +236,16 @@ public final class Contracts10StaticEmbeddedAdmissionCompiler {
                                         + "without its complete proof",
                                 null));
                 try {
+                    CyclicSetProof proof = CyclicSetProof
+                            .fromDeclaredPlaceholderSet(
+                                    declaredPlaceholderSet.stream()
+                                            .map(serialized ->
+                                                    UncheckedObjectMapper
+                                                            .YAML_MAPPER
+                                                            .readValue(
+                                                                    serialized,
+                                                                    Node.class))
+                                            .toList());
                     exact = ExactValue.fromVerifiedProviderEvidence(
                             selected, body, proof);
                 } catch (RuntimeException failure) {
@@ -246,7 +257,7 @@ public final class Contracts10StaticEmbeddedAdmissionCompiler {
                             failure);
                 }
             } else {
-                if (evidence.cyclicSetProof().isPresent()) {
+                if (evidence.declaredPlaceholderSet().isPresent()) {
                     throw proofFailure(
                             CoordinationErrorCode.INVALID_EXACT_VALUE_PROOF,
                             selected,

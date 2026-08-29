@@ -564,12 +564,12 @@ def publicBoundarySources = files(
 // unsupported nested-new publication boundary, cyclic proof retention, and
 // verified checkpoint-settlement projection, exact execution-policy surface,
 // transitive managed catch-up readiness helper, and the backward-compatible
-// exact-node evidence transport: currently 221 production sources, 65,740
+// exact-node evidence transport: currently 221 production sources, 65,769
 // lines and 81 public api+sdk source types. These are not
 // historical Round 13 counts and are not performance evidence.
 def currentProductionShapeLimits = [
         classes: 221,
-        lines: 65_740L,
+        lines: 65_769L,
         publicApiTypes: 81,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]
@@ -749,7 +749,7 @@ tasks.register('verifyPublicApiBoundary') {
 
 tasks.register('verifySdkPublicApiBoundary') {
     group = 'verification'
-    description = 'Allows only DocumentId from the compatibility API and rejects every implementation dependency in normal SDK signatures.'
+    description = 'Allows only DocumentId and the reviewed Builder ContractsExecutionPolicy compatibility surface; rejects every other implementation dependency in normal SDK signatures.'
     dependsOn tasks.named('compileJava')
     inputs.files(fileTree('src/main/java/blue/coordination/sdk') {
         include '**/*.java'
@@ -856,6 +856,12 @@ tasks.register('verifySdkPublicApiBoundary') {
                 }
                 String normalSignature = signature.replaceAll(
                         /blue\.coordination\.api\.DocumentId\b/, '')
+                if (className
+                        == 'blue.coordination.sdk.BlueCoordination$Builder') {
+                    normalSignature = normalSignature.replaceAll(
+                                /blue\.coordination\.api\.ContractsExecutionPolicy\b/,
+                                '')
+                }
                 forbiddenSignaturePrefixes.findAll {
                     normalSignature.contains(it)
                 }.each { forbidden ->

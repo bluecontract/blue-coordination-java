@@ -40,9 +40,11 @@ final class VerifiedApplicationCyclicProviderTest {
                 .proof().orElseThrow();
         Map<String, ExactNodeEvidence> evidence = Map.of(
                 first, ExactNodeEvidence.cyclic(
-                        json(source.fetchByBlueId(first).get(0)), proof),
+                        json(source.fetchByBlueId(first).get(0)),
+                        proofBodies(proof)),
                 second, ExactNodeEvidence.cyclic(
-                        json(source.fetchByBlueId(second).get(0)), proof));
+                        json(source.fetchByBlueId(second).get(0)),
+                        proofBodies(proof)));
         ExactNodeProvider application = ExactNodeProvider.withEvidence(
                 requested -> Optional.ofNullable(evidence.get(requested)));
 
@@ -68,6 +70,12 @@ final class VerifiedApplicationCyclicProviderTest {
 
     private static String json(Node node) {
         return UncheckedObjectMapper.JSON_MAPPER.writeValueAsString(node);
+    }
+
+    private static List<String> proofBodies(CyclicSetProof proof) {
+        return proof.declaredPlaceholderSet().stream()
+                .map(VerifiedApplicationCyclicProviderTest::json)
+                .toList();
     }
 
     private static Node processEmbedded(String path) {

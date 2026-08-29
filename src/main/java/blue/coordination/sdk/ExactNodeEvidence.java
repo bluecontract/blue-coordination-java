@@ -1,7 +1,6 @@
 package blue.coordination.sdk;
 
-import blue.language.provider.CyclicSetProof;
-
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -15,13 +14,24 @@ import java.util.Optional;
  */
 public final class ExactNodeEvidence {
     private final String exactContent;
-    private final CyclicSetProof cyclicSetProof;
+    private final List<String> declaredPlaceholderSet;
 
     private ExactNodeEvidence(
             String exactContent,
-            CyclicSetProof cyclicSetProof) {
+            List<String> declaredPlaceholderSet) {
         this.exactContent = requireText(exactContent, "exactContent");
-        this.cyclicSetProof = cyclicSetProof;
+        if (declaredPlaceholderSet == null) {
+            this.declaredPlaceholderSet = null;
+        } else {
+            if (declaredPlaceholderSet.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "completeDeclaredPlaceholderSet must not be empty");
+            }
+            this.declaredPlaceholderSet = declaredPlaceholderSet.stream()
+                    .map(value -> requireText(
+                            value, "declaredPlaceholderSet member"))
+                    .toList();
+        }
     }
 
     /** Creates ordinary acyclic provider evidence. */
@@ -32,10 +42,12 @@ public final class ExactNodeEvidence {
     /** Creates cyclic-member evidence carrying the complete placeholder set. */
     public static ExactNodeEvidence cyclic(
             String exactContent,
-            CyclicSetProof completeProof) {
+            List<String> completeDeclaredPlaceholderSet) {
         return new ExactNodeEvidence(
                 exactContent,
-                Objects.requireNonNull(completeProof, "completeProof"));
+                Objects.requireNonNull(
+                        completeDeclaredPlaceholderSet,
+                        "completeDeclaredPlaceholderSet"));
     }
 
     /** Returns the serialized exact body. */
@@ -43,9 +55,12 @@ public final class ExactNodeEvidence {
         return exactContent;
     }
 
-    /** Returns the claimed proof for re-verification, when cyclic. */
-    public Optional<CyclicSetProof> cyclicSetProof() {
-        return Optional.ofNullable(cyclicSetProof);
+    /**
+     * Returns the claimed complete placeholder-set bodies for
+     * re-verification, when cyclic.
+     */
+    public Optional<List<String>> declaredPlaceholderSet() {
+        return Optional.ofNullable(declaredPlaceholderSet);
     }
 
     private static String requireText(String value, String label) {

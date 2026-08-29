@@ -4,10 +4,8 @@ import blue.coordination.api.ExactValue;
 import blue.language.codec.jackson.UncheckedObjectMapper;
 import blue.language.model.Node;
 import blue.language.model.NodePathEditor;
-import blue.language.provider.CyclicSetProof;
 
 import java.util.Objects;
-import java.util.Optional;
 
 /** Immutable, content-addressed Blue value exposed by the developer SDK. */
 public final class ExactBlueValue {
@@ -35,15 +33,23 @@ public final class ExactBlueValue {
         return value.isCyclicMember();
     }
 
-    /** Returns complete proof retained at a verified cyclic boundary. */
-    public Optional<CyclicSetProof> cyclicSetProof() {
-        return value.cyclicSetProof();
-    }
-
     /** Returns the verified exact value as detached Blue JSON. */
     public String json() {
         return UncheckedObjectMapper.JSON_MAPPER.writeValueAsString(
                 value.copyNode());
+    }
+
+    /** Package-private provider transport from authenticated internal state. */
+    ExactNodeEvidence providerEvidence() {
+        String content = json();
+        return value.cyclicSetProof()
+                .map(proof -> ExactNodeEvidence.cyclic(
+                        content,
+                        proof.declaredPlaceholderSet().stream()
+                                .map(UncheckedObjectMapper.JSON_MAPPER::
+                                        writeValueAsString)
+                                .toList()))
+                .orElseGet(() -> ExactNodeEvidence.ordinary(content));
     }
 
     /** Package-private mutable copy used only by the SDK implementation. */

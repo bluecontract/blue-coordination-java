@@ -327,8 +327,16 @@ final class SdkStaticProcessEmbeddedAdmissionTest {
                             .map(ExactBlueValue::blueId)
                             .collect(java.util.stream.Collectors.toSet()));
             assertTrue(retained.cyclicMember());
-            assertTrue(retained.cyclicSetProof().isPresent());
-            assertTrue(retainedEvidence.cyclicSetProof().isPresent());
+            assertTrue(retainedEvidence.declaredPlaceholderSet().isPresent());
+            assertEquals(2, retainedEvidence.declaredPlaceholderSet()
+                    .orElseThrow().size());
+            assertThrows(UnsupportedOperationException.class,
+                    () -> retainedEvidence.declaredPlaceholderSet()
+                            .orElseThrow().add("{}"));
+            assertThrows(IllegalArgumentException.class,
+                    () -> ExactNodeEvidence.cyclic("{}", List.of()));
+            assertThrows(IllegalArgumentException.class,
+                    () -> ExactNodeEvidence.cyclic("{}", List.of(" ")));
         }
     }
 
@@ -574,7 +582,7 @@ final class SdkStaticProcessEmbeddedAdmissionTest {
             Node body,
             CyclicSetProof proof) {
         ExactNodeEvidence evidence = ExactNodeEvidence.cyclic(
-                json(body), proof);
+                json(body), proofBodies(proof));
         ExactNodeProvider provider = ExactNodeProvider.withEvidence(
                 requested -> memberBlueId.equals(requested)
                         ? Optional.of(evidence) : Optional.empty());
@@ -633,6 +641,12 @@ final class SdkStaticProcessEmbeddedAdmissionTest {
         return UncheckedObjectMapper.JSON_MAPPER.writeValueAsString(node);
     }
 
+    private static List<String> proofBodies(CyclicSetProof proof) {
+        return proof.declaredPlaceholderSet().stream()
+                .map(SdkStaticProcessEmbeddedAdmissionTest::json)
+                .toList();
+    }
+
     private static Node processEmbedded(String path) {
         return new Node()
                 .type(new Node().blueId(RuntimeBlueIds.PROCESS_EMBEDDED))
@@ -649,9 +663,11 @@ final class SdkStaticProcessEmbeddedAdmissionTest {
         private Map<String, ExactNodeEvidence> evidenceByBlueId() {
             return Map.of(
                     memberBlueId,
-                    ExactNodeEvidence.cyclic(json(memberBody), proof),
+                    ExactNodeEvidence.cyclic(
+                            json(memberBody), proofBodies(proof)),
                     peerBlueId,
-                    ExactNodeEvidence.cyclic(json(peerBody), proof));
+                    ExactNodeEvidence.cyclic(
+                            json(peerBody), proofBodies(proof)));
         }
 
         private ExactNodeProvider provider() {

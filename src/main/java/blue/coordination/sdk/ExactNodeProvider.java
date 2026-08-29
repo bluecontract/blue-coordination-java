@@ -54,10 +54,7 @@ public interface ExactNodeProvider {
     static ExactNodeProvider of(ExactBlueValue exactValue) {
         ExactBlueValue retained = Objects.requireNonNull(
                 exactValue, "exactValue");
-        ExactNodeEvidence evidence = retained.cyclicSetProof()
-                .map(proof -> ExactNodeEvidence.cyclic(
-                        retained.json(), proof))
-                .orElseGet(() -> ExactNodeEvidence.ordinary(retained.json()));
+        ExactNodeEvidence evidence = retained.providerEvidence();
         return withEvidence(requested -> retained.blueId().equals(
                 requireText(requested, "blueId"))
                 ? Optional.of(evidence) : Optional.empty());
