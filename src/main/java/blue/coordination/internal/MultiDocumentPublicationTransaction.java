@@ -883,7 +883,8 @@ final class MultiDocumentPublicationTransaction {
             Set<DocumentId> readinessDependents = ManagedCatchUpReadiness.dependents(
                     expectedHeads.keySet(), before.occurrenceInventory(), resultingInventory);
             for (DocumentId documentId : readinessDependents) {
-                if (documentUpdates.containsKey(documentId)
+                if (newSessions.containsKey(documentId)
+                        || documentUpdates.containsKey(documentId)
                         || componentRepresentationUpdates.containsKey(
                                 documentId)
                         || priorReadiness.blocked(documentId)

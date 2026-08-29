@@ -266,6 +266,29 @@ final class SdkStaticRetainedManagedEpochAdmissionTest {
                         readiness.activeBarrierIdentities());
             }
 
+            if (representation == Representation.INLINE) {
+                int rootHistorySize = closure.document("root").history().size();
+                List<String> planIdentities = plans.stream()
+                        .map(ManagedOccurrenceCatchUpPlan::planIdentity)
+                        .toList();
+
+                ClosureHandle replayed = coordination.documents()
+                        .admitStaticProcessEmbedded(rootYaml);
+
+                assertEquals(closure.id(), replayed.id());
+                assertEquals(root, replayed.document("root").id());
+                assertEquals(source.source().id(),
+                        replayed.document("embedded-0").id());
+                assertEquals(rootHistorySize,
+                        replayed.document("root").history().size(),
+                        "admission replay must not duplicate the new Root");
+                assertEquals(planIdentities, coordination.advanced()
+                        .auditManagedCatchUpPlans(root).stream()
+                        .map(ManagedOccurrenceCatchUpPlan::planIdentity)
+                        .toList(),
+                        "admission replay must not duplicate catch-up work");
+            }
+
             assertSourceUntouched(coordination, source);
             DrainResult drain = coordination.processing().drain();
             List<ManagedEpochApplicationReceipt> applications = drain
