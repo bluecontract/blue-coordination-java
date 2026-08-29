@@ -31,6 +31,19 @@ public final class AdvancedCoordination {
                 Objects.requireNonNull(id, "id"));
     }
 
+    /**
+     * Reads SDK-only provider evidence for the latest committed state,
+     * including a complete authenticated cyclic placeholder set when needed.
+     *
+     * <p>This deliberately follows {@link #auditDocument(DocumentId)} rather
+     * than the ordinary READY document view, so recovery tooling can retain a
+     * committed representation while catch-up readiness is still fenced.</p>
+     */
+    public Optional<ExactNodeEvidence> auditExactNodeEvidence(DocumentId id) {
+        return runtime.auditExactNodeEvidence(
+                Objects.requireNonNull(id, "id"));
+    }
+
     /** Reads retained lineage state for one managed source occurrence. */
     public Optional<ManagedOccurrenceAudit> auditManagedOccurrence(
             DocumentId sourceDocumentId,

@@ -16,6 +16,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** SDK acceptance for an extendable multi-child managed-epoch barrier. */
@@ -230,6 +231,20 @@ final class SdkManagedCatchUpBarrierAndLiveExtensionTest {
                                     + "ready topology while another plan holds "
                                     + "the barrier");
                     assertTrue(partial.embeddedChildren().isEmpty());
+                    blue.coordination.api.DocumentSnapshot committed =
+                            coordination.advanced().auditDocument(A);
+                    ExactNodeEvidence committedEvidence = coordination
+                            .advanced()
+                            .auditExactNodeEvidence(A)
+                            .orElseThrow();
+                    assertNotEquals(partial.blueId(), committed.blueId(),
+                            "committed catch-up state must differ from READY");
+                    assertEquals(ExactBlueValue.wrap(committed.current()).json(),
+                            committedEvidence.exactContent(),
+                            "evidence must follow committed audit current");
+                    assertTrue(committedEvidence.declaredPlaceholderSet()
+                                    .isEmpty(),
+                            "an acyclic barrier must not invent cyclic proof");
 
                     control.restartFromStores();
                     blue.coordination.api.DocumentSnapshot restarted =

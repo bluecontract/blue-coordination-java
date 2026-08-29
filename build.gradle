@@ -564,12 +564,13 @@ def publicBoundarySources = files(
 // unsupported nested-new publication boundary, cyclic proof retention, and
 // verified checkpoint-settlement projection, exact execution-policy surface,
 // transitive managed catch-up readiness helper, and the backward-compatible
-// exact-node evidence transport: currently 221 production sources, 65,769
+// exact-node evidence transport and committed-current evidence bridge:
+// currently 221 production sources, 65,793
 // lines and 81 public api+sdk source types. These are not
 // historical Round 13 counts and are not performance evidence.
 def currentProductionShapeLimits = [
         classes: 221,
-        lines: 65_769L,
+        lines: 65_793L,
         publicApiTypes: 81,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]

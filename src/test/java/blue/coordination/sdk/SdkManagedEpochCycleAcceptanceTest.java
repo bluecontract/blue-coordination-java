@@ -42,6 +42,11 @@ final class SdkManagedEpochCycleAcceptanceTest {
                     onlyPlan(scenario);
             boolean sourceStayedExact = sourceHistory.equals(
                     history(scenario.b()));
+            ExactNodeEvidence committedCycleEvidence = scenario.coordination()
+                    .advanced()
+                    .auditExactNodeEvidence(scenario.a().id())
+                    .orElseThrow();
+            String committedCycleJson = scenario.a().exact().json();
 
             EntryResult detachedParent = operation(
                     scenario, scenario.b(), scenario.bTimeline(),
@@ -73,6 +78,11 @@ final class SdkManagedEpochCycleAcceptanceTest {
             assertEquals(1L, finiteReactions);
             assertEquals(ManagedCatchUpStatus.COMPLETE,
                     completedBeforeDetach.status());
+            assertEquals(committedCycleJson,
+                    committedCycleEvidence.exactContent());
+            assertEquals(2, committedCycleEvidence.declaredPlaceholderSet()
+                    .orElseThrow().size(),
+                    "committed cyclic evidence must carry the complete set");
             assertTrue(sourceStayedExact,
                     "forming the cycle must not reprocess source B");
             assertApplied(detachedParent);

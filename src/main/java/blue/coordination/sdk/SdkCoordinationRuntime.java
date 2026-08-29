@@ -739,6 +739,17 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         return ExactBlueValue.wrap(engine.document(id).current());
     }
 
+    synchronized Optional<ExactNodeEvidence> auditExactNodeEvidence(
+            DocumentId id) {
+        ensureOpen();
+        DocumentId selected = Objects.requireNonNull(id, "id");
+        if (engine.auditManagedDocumentReadiness(selected).isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(ExactBlueValue.wrap(
+                engine.auditDocument(selected).current()).providerEvidence());
+    }
+
     @Override
     public synchronized void close() {
         if (!closed) {
