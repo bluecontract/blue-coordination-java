@@ -1311,7 +1311,7 @@ final class SdkCoordinationRuntime implements AutoCloseable {
     private static final class ScopedExactNodeProvider
             implements ExactNodeProvider {
         private final ExactNodeProvider delegate;
-        private Map<String, Optional<String>> lookupScope;
+        private Map<String, Optional<ExactNodeEvidence>> lookupScope;
 
         private ScopedExactNodeProvider(ExactNodeProvider delegate) {
             this.delegate = Objects.requireNonNull(delegate, "delegate");
@@ -1331,12 +1331,20 @@ final class SdkCoordinationRuntime implements AutoCloseable {
 
         @Override
         public synchronized Optional<String> findExactContent(String blueId) {
+            return findExactEvidence(blueId)
+                    .map(ExactNodeEvidence::exactContent);
+        }
+
+        @Override
+        public synchronized Optional<ExactNodeEvidence> findExactEvidence(
+                String blueId) {
             String selected = Objects.requireNonNull(blueId, "blueId");
             if (lookupScope != null && lookupScope.containsKey(selected)) {
                 return lookupScope.get(selected);
             }
-            Optional<String> result = Objects.requireNonNull(
-                    delegate.findExactContent(selected), "provider result");
+            Optional<ExactNodeEvidence> result = Objects.requireNonNull(
+                    delegate.findExactEvidence(selected),
+                    "provider evidence result");
             if (lookupScope != null) {
                 lookupScope.put(selected, result);
             }

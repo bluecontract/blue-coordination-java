@@ -1,6 +1,7 @@
 package blue.coordination.internal;
 
 import blue.coordination.api.DocumentId;
+import blue.coordination.api.CoordinationErrorCode;
 import blue.coordination.api.CoordinationException;
 import blue.coordination.api.ExactValue;
 import blue.language.api.NodeProviderOutcome;
@@ -92,8 +93,8 @@ final class ManagedOccurrenceResolver {
                 throw new IllegalArgumentException(
                         "Unsupported closed demand kind " + demand.kind());
             }
-            Node exactBody = suppliedBody(occurrence);
-            if (exactBody == null) {
+            FetchedExactEvidence exactEvidence = suppliedEvidence(occurrence);
+            if (exactEvidence == null) {
                 unresolved.add(new UnresolvedDemand(
                         occurrence,
                         ResolutionStatus.MISSING_EXACT_CONTENT,
@@ -103,7 +104,7 @@ final class ManagedOccurrenceResolver {
             resolveOccurrence(
                     selected.storeState(),
                     occurrence,
-                    exactBody,
+                    exactEvidence,
                     pendingDrafts,
                     selected.selectionPlan(),
                     selected.managedRevisionCause(),
@@ -118,18 +119,13 @@ final class ManagedOccurrenceResolver {
                 resolvedSelectorPaths);
     }
 
-    private Node suppliedBody(ManagedOccurrenceEvidenceDemand demand) {
+    private FetchedExactEvidence suppliedEvidence(
+            ManagedOccurrenceEvidenceDemand demand) {
         if (demand.suppliedExactValue().isPresent()) {
-            return demand.suppliedExactValue().orElseThrow();
+            return new FetchedExactEvidence(
+                    demand.suppliedExactValue().orElseThrow(), null);
         }
-        return exactBody(demand.suppliedValueBlueId(), demand);
-    }
-
-    private Node exactBody(
-            String blueId,
-            ClosureResourceDemand demand) {
-        FetchedExactEvidence evidence = exactEvidence(blueId, demand);
-        return evidence == null ? null : evidence.body();
+        return exactEvidence(demand.suppliedValueBlueId(), demand);
     }
 
     private FetchedExactEvidence exactEvidence(
@@ -157,9 +153,16 @@ final class ManagedOccurrenceResolver {
         if (result.outcome() != NodeProviderOutcome.FOUND
                 || result.nodes().size() != 1) {
             if (result.outcome() == NodeProviderOutcome.INVALID_EVIDENCE) {
-                throw new IllegalArgumentException(result.diagnostic()
-                        .orElse("Provider returned " + result.outcome()
-                                + " for exact evidence " + blueId));
+                String diagnostic = result.diagnostic().orElse(
+                        "Provider returned " + result.outcome()
+                                + " for exact evidence " + blueId);
+                if (!BlueIds.hasCyclicMemberSeparator(blueId)) {
+                    throw new IllegalArgumentException(diagnostic);
+                }
+                throw evidenceFailure(
+                        cyclicProofErrorCode(provider.proofResult(blueId)),
+                        demand,
+                        diagnostic);
             }
             return null;
         }
@@ -170,17 +173,50 @@ final class ManagedOccurrenceResolver {
         CyclicSetProofResult proofResult = provider.proofResult(blueId);
         if (proofResult == null
                 || proofResult.outcome() != NodeProviderOutcome.FOUND) {
-            throw new IllegalArgumentException(
+            throw evidenceFailure(
+                    proofResult == null
+                            || proofResult.outcome()
+                            == NodeProviderOutcome.NOT_FOUND
+                            ? CoordinationErrorCode.MISSING_EXACT_VALUE_PROOF
+                            : CoordinationErrorCode.INVALID_EXACT_VALUE_PROOF,
+                    demand,
                     "Verified cyclic provider result omitted its complete "
                             + "proof for " + blueId);
         }
         CyclicSetProof proof = proofResult.proof().orElseThrow(
-                () -> new IllegalArgumentException(
+                () -> evidenceFailure(
+                        CoordinationErrorCode.INVALID_EXACT_VALUE_PROOF,
+                        demand,
                         "Found cyclic proof result omitted proof for "
                                 + blueId));
         return new FetchedExactEvidence(
                 supplied,
                 proof);
+    }
+
+    private static CoordinationErrorCode cyclicProofErrorCode(
+            CyclicSetProofResult proofResult) {
+        return proofResult == null
+                || proofResult.outcome() == NodeProviderOutcome.NOT_FOUND
+                ? CoordinationErrorCode.MISSING_EXACT_VALUE_PROOF
+                : CoordinationErrorCode.INVALID_EXACT_VALUE_PROOF;
+    }
+
+    private static CoordinationException evidenceFailure(
+            CoordinationErrorCode code,
+            ClosureResourceDemand demand,
+            String diagnostic) {
+        return new CoordinationException(
+                code,
+                diagnostic,
+                null,
+                Map.of(
+                        "sourceDocumentId",
+                        demand.sourceDocumentId().value(),
+                        "sourcePath",
+                        demand.sourcePath(),
+                        "blueId",
+                        demand.suppliedValueBlueId()));
     }
 
     /**
@@ -222,7 +258,7 @@ final class ManagedOccurrenceResolver {
     private FoldedResolution resolveOccurrence(
             InMemoryDocumentStore.OccurrenceResolutionSnapshot storeState,
             ManagedOccurrenceEvidenceDemand demand,
-            Node suppliedBody,
+            FetchedExactEvidence suppliedEvidence,
             Map<String, ContractsManagedDraftPlan.ManagedDraft>
                     pendingDrafts,
             ContractsManagedEpochSelectionPlan selectionPlan,
@@ -231,6 +267,7 @@ final class ManagedOccurrenceResolver {
         ManagedLineageIndex index = storeState.lineageIndex();
         metrics.increment(INDEX_LOOKUPS);
         String suppliedBlueId = demand.suppliedValueBlueId();
+        Node suppliedBody = suppliedEvidence.body();
 
         ContractsManagedEpochSelectionPlan.Selection explicit =
                 selectionPlan == null
@@ -309,7 +346,7 @@ final class ManagedOccurrenceResolver {
         if (draft == null) {
             ExactValue authored;
             try {
-                authored = ExactValue.verified(suppliedBlueId, suppliedBody);
+                authored = suppliedEvidence.toExactValue(suppliedBlueId);
             } catch (IllegalArgumentException invalid) {
                 return FoldedResolution.unresolved(new UnresolvedDemand(
                         demand,

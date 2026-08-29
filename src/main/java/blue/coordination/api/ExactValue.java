@@ -36,23 +36,26 @@ public final class ExactValue {
     private final FrozenNode frozen;
     private final ResolvedSnapshot snapshot;
     private final boolean cyclicMember;
+    private final CyclicSetProof cyclicSetProof;
 
     private ExactValue(
             String blueId,
             FrozenNode frozen,
             ResolvedSnapshot snapshot) {
-        this(blueId, frozen, snapshot, false);
+        this(blueId, frozen, snapshot, false, null);
     }
 
     private ExactValue(
             String blueId,
             FrozenNode frozen,
             ResolvedSnapshot snapshot,
-            boolean cyclicMember) {
+            boolean cyclicMember,
+            CyclicSetProof cyclicSetProof) {
         this.blueId = requireText(blueId, "blueId");
         this.frozen = Objects.requireNonNull(frozen, "frozen");
         this.snapshot = snapshot;
         this.cyclicMember = cyclicMember;
+        this.cyclicSetProof = cyclicSetProof;
         if (!cyclicMember && !this.blueId.equals(this.frozen.blueId())) {
             throw new IllegalArgumentException(
                     "Frozen value does not match supplied BlueId");
@@ -60,6 +63,11 @@ public final class ExactValue {
         if (cyclicMember && !this.blueId.contains("#")) {
             throw new IllegalArgumentException(
                     "Cyclic member identity requires a numeric member suffix");
+        }
+        if (cyclicMember != (cyclicSetProof != null)) {
+            throw new IllegalArgumentException(
+                    "Cyclic member identity and complete proof must be "
+                            + "retained together");
         }
         if (cyclicMember && snapshot != null) {
             throw new IllegalArgumentException(
@@ -150,7 +158,8 @@ public final class ExactValue {
                 expected,
                 FrozenNode.fromNode(authenticated),
                 null,
-                true);
+                true,
+                complete);
     }
 
     /**
@@ -191,7 +200,20 @@ public final class ExactValue {
             }
             return new ExactValue(document.afterBlueId(), body, null);
         }
-        return new ExactValue(document.afterBlueId(), body, null, true);
+        ComponentSnapshot component = verified.resultingComponents().stream()
+                .filter(candidate -> candidate.componentIdentity().equals(
+                        document.componentIdentity())
+                        && candidate.componentGeneration()
+                        == document.componentGeneration())
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Closure result has no cyclic component for "
+                                + selected));
+        CyclicSetProof proof = Objects.requireNonNull(
+                component.completeCyclicProof(),
+                "verified cyclic component proof");
+        return new ExactValue(
+                document.afterBlueId(), body, null, true, proof);
     }
 
     /**
@@ -285,7 +307,12 @@ public final class ExactValue {
                     "Cyclic admission component does not authenticate "
                             + selected);
         }
-        return new ExactValue(document.blueId(), body, null, true);
+        return new ExactValue(
+                document.blueId(),
+                body,
+                null,
+                true,
+                component.completeCyclicProof());
     }
 
     /** Returns the content-addressed identity of the whole exact value. */
@@ -317,6 +344,14 @@ public final class ExactValue {
     /** Returns whether the authoritative identity is a cyclic member suffix. */
     public boolean isCyclicMember() {
         return cyclicMember;
+    }
+
+    /**
+     * Returns the complete cyclic proof retained at a verified provider,
+     * closure-result, or admission boundary.
+     */
+    public Optional<CyclicSetProof> cyclicSetProof() {
+        return Optional.ofNullable(cyclicSetProof);
     }
 
     /** Returns the retained resolver snapshot when one was available. */

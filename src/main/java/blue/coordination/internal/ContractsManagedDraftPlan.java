@@ -190,10 +190,11 @@ public final class ContractsManagedDraftPlan {
         public ManagedDraft {
             documentId = Objects.requireNonNull(documentId, "documentId");
             initial = Objects.requireNonNull(initial, "initial");
-            if (initial.isCyclicMember()) {
+            if (initial.isCyclicMember()
+                    && initial.cyclicSetProof().isEmpty()) {
                 throw new UnsupportedOperationException(
-                        "Managed PROCESS expansion requires a direct exact "
-                                + "draft input");
+                        "Managed PROCESS cyclic expansion requires complete "
+                                + "verified provider proof");
             }
             DocumentId exactIdentity = DocumentId.of(initial.blueId());
             DocumentId selectedIdentity = contentDerivedIdentity

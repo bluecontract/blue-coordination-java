@@ -2,6 +2,8 @@ package blue.coordination.internal;
 
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.DocumentRevision;
+import blue.coordination.api.CoordinationErrorCode;
+import blue.coordination.api.CoordinationException;
 import blue.coordination.api.ExactValue;
 import blue.language.api.NodeProviderOutcome;
 import blue.language.model.Node;
@@ -753,6 +755,41 @@ final class ManagedOccurrenceResolverTest {
     }
 
     @Test
+    void cyclicOccurrenceCreatesDraftOnlyFromAuthenticatedProviderEvidence() {
+        try (DefaultCoordinationEngine engine =
+                DefaultCoordinationEngine.create()) {
+            // given
+            CyclicFixture fixture = cyclicFixture();
+            ManagedOccurrenceEvidenceDemand demand =
+                    ManagedOccurrenceEvidenceDemand.derived(
+                            CAUSE,
+                            CLOSURE,
+                            0L,
+                            closureId(A),
+                            "/cyclic",
+                            DECLARATION,
+                            fixture.memberBlueId(),
+                            0L);
+
+            // when
+            ManagedOccurrenceResolver.Resolution result =
+                    new ManagedOccurrenceResolver(
+                            fixture.provider(), engine.engineMetrics())
+                            .resolve(request(
+                                    engine, Set.of(A), List.of(demand)));
+
+            // then
+            assertTrue(result.complete());
+            assertEquals(1, result.resolvedOccurrences().size());
+            ExactValue initial = result.newDrafts().values().iterator()
+                    .next().initial();
+            assertEquals(fixture.memberBlueId(), initial.blueId());
+            assertTrue(initial.isCyclicMember());
+            assertTrue(initial.cyclicSetProof().isPresent());
+        }
+    }
+
+    @Test
     void cyclicExactNodeRejectsMissingAndInvalidProofEvidence() {
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.create()) {
@@ -776,12 +813,20 @@ final class ManagedOccurrenceResolverTest {
                             request(engine, Set.of(A), List.of(demand)));
 
             // then
-            assertThrows(IllegalArgumentException.class,
+            CoordinationException missing = assertThrows(
+                    CoordinationException.class,
                     resolveMissing::run);
-            IllegalArgumentException invalid = assertThrows(
-                    IllegalArgumentException.class,
+            CoordinationException invalid = assertThrows(
+                    CoordinationException.class,
                     resolveInvalid::run);
+            assertEquals(CoordinationErrorCode.MISSING_EXACT_VALUE_PROOF,
+                    missing.code());
+            assertEquals(CoordinationErrorCode.INVALID_EXACT_VALUE_PROOF,
+                    invalid.code());
             assertTrue(invalid.getMessage().contains("invalid test proof"));
+            assertEquals(A.value(),
+                    invalid.details().get("sourceDocumentId"));
+            assertEquals("/cyclic", invalid.details().get("sourcePath"));
         }
     }
 
@@ -842,7 +887,10 @@ final class ManagedOccurrenceResolverTest {
                             request(engine, Set.of(A), List.of(demand)));
 
             // then
-            assertThrows(IllegalArgumentException.class, resolve::run);
+            CoordinationException invalid = assertThrows(
+                    CoordinationException.class, resolve::run);
+            assertEquals(CoordinationErrorCode.INVALID_EXACT_VALUE_PROOF,
+                    invalid.code());
         }
     }
 

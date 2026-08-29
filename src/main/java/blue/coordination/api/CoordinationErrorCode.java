@@ -12,6 +12,10 @@ public enum CoordinationErrorCode {
     INVALID_DOCUMENT_IDENTITY,
     /** Exact content required by a declared static occurrence is unavailable. */
     NEEDS_RESOURCES,
+    /** A cyclic exact member was supplied without its complete set proof. */
+    MISSING_EXACT_VALUE_PROOF,
+    /** A cyclic exact member body or supplied set proof failed verification. */
+    INVALID_EXACT_VALUE_PROOF,
     /** Host-supplied temporal policy evidence is missing or inconsistent. */
     INVALID_ACTIVATION_EVIDENCE,
     /** Frozen subscription evidence is inconsistent with the committed state. */

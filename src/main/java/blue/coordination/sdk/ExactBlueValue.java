@@ -4,8 +4,10 @@ import blue.coordination.api.ExactValue;
 import blue.language.codec.jackson.UncheckedObjectMapper;
 import blue.language.model.Node;
 import blue.language.model.NodePathEditor;
+import blue.language.provider.CyclicSetProof;
 
 import java.util.Objects;
+import java.util.Optional;
 
 /** Immutable, content-addressed Blue value exposed by the developer SDK. */
 public final class ExactBlueValue {
@@ -31,6 +33,11 @@ public final class ExactBlueValue {
     /** Returns whether this is a verified member identity of a cyclic set. */
     public boolean cyclicMember() {
         return value.isCyclicMember();
+    }
+
+    /** Returns complete proof retained at a verified cyclic boundary. */
+    public Optional<CyclicSetProof> cyclicSetProof() {
+        return value.cyclicSetProof();
     }
 
     /** Returns the verified exact value as detached Blue JSON. */

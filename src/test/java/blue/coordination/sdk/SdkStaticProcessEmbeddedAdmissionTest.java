@@ -3,6 +3,11 @@ package blue.coordination.sdk;
 import blue.coordination.api.CoordinationErrorCode;
 import blue.coordination.api.CoordinationException;
 import blue.coordination.api.DocumentId;
+import blue.coordination.api.ExactValue;
+import blue.language.codec.jackson.UncheckedObjectMapper;
+import blue.language.model.Node;
+import blue.language.preprocess.provider.BasicNodeProvider;
+import blue.language.provider.CyclicSetProof;
 import blue.language.processor.registry.RuntimeBlueIds;
 import org.junit.jupiter.api.Test;
 
@@ -295,6 +300,161 @@ final class SdkStaticProcessEmbeddedAdmissionTest {
     }
 
     @Test
+    void cyclicApplicationEvidenceAdmitsCompleteRecursiveComponent() {
+        // given
+        CyclicProviderFixture cycle = cyclicFixture("sdk-cycle-a", "sdk-cycle-b");
+        ExactValue exact = ExactValue.fromVerifiedProviderEvidence(
+                cycle.memberBlueId(), cycle.memberBody(), cycle.proof());
+        ExactBlueValue retained = ExactBlueValue.wrap(exact);
+        ExactNodeEvidence retainedEvidence = ExactNodeProvider.of(retained)
+                .findExactEvidence(retained.blueId())
+                .orElseThrow();
+        String rootYaml = "child:\n  blueId: " + cycle.memberBlueId()
+                + "\n" + embeddedPath("/child");
+
+        // when
+        try (BlueCoordination blue = BlueCoordination.builder()
+                .exactNodeProvider(cycle.provider())
+                .build()) {
+            ClosureHandle closure = blue.documents()
+                    .admitStaticProcessEmbedded(rootYaml);
+
+            // then
+            assertEquals(3, closure.documents().size());
+            assertEquals(Set.of(cycle.memberBlueId(), cycle.peerBlueId()),
+                    closure.authoredDocuments().values().stream()
+                            .filter(ExactBlueValue::cyclicMember)
+                            .map(ExactBlueValue::blueId)
+                            .collect(java.util.stream.Collectors.toSet()));
+            assertTrue(retained.cyclicMember());
+            assertTrue(retained.cyclicSetProof().isPresent());
+            assertTrue(retainedEvidence.cyclicSetProof().isPresent());
+        }
+    }
+
+    @Test
+    void laterInvocationRetriesCyclicEvidenceAfterEarlierProviderMiss() {
+        // given
+        CyclicProviderFixture cycle = cyclicFixture("resume-a", "resume-b");
+        Map<String, ExactNodeEvidence> available = new LinkedHashMap<>();
+        ExactNodeProvider provider = ExactNodeProvider.withEvidence(
+                requested -> Optional.ofNullable(available.get(requested)));
+        String rootYaml = "child:\n  blueId: " + cycle.memberBlueId()
+                + "\n" + embeddedPath("/child");
+
+        // when
+        try (BlueCoordination blue = BlueCoordination.builder()
+                .exactNodeProvider(provider)
+                .build()) {
+            CoordinationException missing = assertThrows(
+                    CoordinationException.class,
+                    () -> blue.documents()
+                            .admitStaticProcessEmbedded(rootYaml));
+            available.putAll(cycle.evidenceByBlueId());
+            ClosureHandle resumed = blue.documents()
+                    .admitStaticProcessEmbedded(rootYaml);
+
+            // then
+            assertEquals(CoordinationErrorCode.NEEDS_RESOURCES,
+                    missing.code());
+            assertEquals(3, resumed.documents().size());
+            assertEquals(Set.of(cycle.memberBlueId(), cycle.peerBlueId()),
+                    resumed.authoredDocuments().values().stream()
+                            .filter(ExactBlueValue::cyclicMember)
+                            .map(ExactBlueValue::blueId)
+                            .collect(java.util.stream.Collectors.toSet()));
+        }
+    }
+
+    @Test
+    void cyclicStringProviderWithoutProofFailsWithTypedMissingProof() {
+        // given
+        CyclicProviderFixture cycle = cyclicFixture("missing-a", "missing-b");
+        String serialized = json(cycle.memberBody());
+        String rootYaml = "child:\n  blueId: " + cycle.memberBlueId()
+                + "\n" + embeddedPath("/child");
+
+        // when
+        try (BlueCoordination blue = BlueCoordination.builder()
+                .exactNodeProvider(ExactNodeProvider.of(
+                        cycle.memberBlueId(), serialized))
+                .build()) {
+            CoordinationException failure = assertThrows(
+                    CoordinationException.class,
+                    () -> blue.documents()
+                            .admitStaticProcessEmbedded(rootYaml));
+
+            // then
+            assertEquals(CoordinationErrorCode.MISSING_EXACT_VALUE_PROOF,
+                    failure.code());
+            assertEquals(cycle.memberBlueId(),
+                    failure.details().get("blueId"));
+        }
+    }
+
+    @Test
+    void malformedStaleWrongOrTamperedCyclicEvidenceIsTypedInvalidProof() {
+        // given
+        CyclicProviderFixture expected = cyclicFixture("expected-a", "expected-b");
+        CyclicProviderFixture unrelated = cyclicFixture("unrelated-a", "unrelated-b");
+        CyclicProviderFixture stale = cyclicFixture(
+                "expected-a", "expected-b", "older-representation");
+        CyclicSetProof malformed = CyclicSetProof
+                .fromDeclaredPlaceholderSet(List.of(
+                        new Node().name("not-a-cyclic-placeholder-set")));
+        Node tampered = expected.memberBody().clone();
+        tampered.name("tampered-a");
+        String rootYaml = "child:\n  blueId: " + expected.memberBlueId()
+                + "\n" + embeddedPath("/child");
+
+        // when / then
+        assertInvalidCyclicProof(rootYaml, expected.memberBlueId(),
+                expected.memberBody(), unrelated.proof());
+        assertInvalidCyclicProof(rootYaml, expected.memberBlueId(),
+                expected.memberBody(), stale.proof());
+        assertInvalidCyclicProof(rootYaml, expected.memberBlueId(),
+                expected.memberBody(), malformed);
+        assertInvalidCyclicProof(rootYaml, expected.memberBlueId(),
+                tampered, expected.proof());
+    }
+
+    @Test
+    void typedProofProviderFailuresSurviveScopedAndStaticAdaptersUnchanged() {
+        // given
+        CyclicProviderFixture cycle = cyclicFixture("failure-a", "failure-b");
+        String rootYaml = "child:\n  blueId: " + cycle.memberBlueId()
+                + "\n" + embeddedPath("/child");
+
+        // when / then
+        for (CoordinationErrorCode code : List.of(
+                CoordinationErrorCode.MISSING_EXACT_VALUE_PROOF,
+                CoordinationErrorCode.INVALID_EXACT_VALUE_PROOF)) {
+            CoordinationException original = new CoordinationException(
+                    code,
+                    "application evidence failure",
+                    null,
+                    Map.of("blueId", cycle.memberBlueId()));
+            ExactNodeProvider provider = ExactNodeProvider.withEvidence(
+                    ignored -> {
+                        throw original;
+                    });
+            try (BlueCoordination blue = BlueCoordination.builder()
+                    .exactNodeProvider(provider)
+                    .build()) {
+                CoordinationException observed = assertThrows(
+                        CoordinationException.class,
+                        () -> blue.documents()
+                                .admitStaticProcessEmbedded(rootYaml));
+                assertEquals(code, observed.code());
+                assertEquals("application evidence failure",
+                        observed.getMessage());
+                assertEquals(cycle.memberBlueId(),
+                        observed.details().get("blueId"));
+            }
+        }
+    }
+
+    @Test
     void publicRootInitializationEventPublishesAndReactsLocally() {
         // given
         DocumentId rootId = DocumentId.of("sdk-init-event-full-lifecycle");
@@ -405,6 +565,99 @@ final class SdkStaticProcessEmbeddedAdmissionTest {
     private static ExactBlueValue exact(String yaml) {
         try (BlueCoordination verifier = BlueCoordination.inMemory()) {
             return verifier.values().yaml(yaml);
+        }
+    }
+
+    private static void assertInvalidCyclicProof(
+            String rootYaml,
+            String memberBlueId,
+            Node body,
+            CyclicSetProof proof) {
+        ExactNodeEvidence evidence = ExactNodeEvidence.cyclic(
+                json(body), proof);
+        ExactNodeProvider provider = ExactNodeProvider.withEvidence(
+                requested -> memberBlueId.equals(requested)
+                        ? Optional.of(evidence) : Optional.empty());
+        try (BlueCoordination blue = BlueCoordination.builder()
+                .exactNodeProvider(provider)
+                .build()) {
+            CoordinationException failure = assertThrows(
+                    CoordinationException.class,
+                    () -> blue.documents()
+                            .admitStaticProcessEmbedded(rootYaml));
+            assertEquals(CoordinationErrorCode.INVALID_EXACT_VALUE_PROOF,
+                    failure.code());
+            assertEquals(memberBlueId, failure.details().get("blueId"));
+        }
+    }
+
+    private static CyclicProviderFixture cyclicFixture(
+            String firstName,
+            String secondName) {
+        return cyclicFixture(firstName, secondName, null);
+    }
+
+    private static CyclicProviderFixture cyclicFixture(
+            String firstName,
+            String secondName,
+            String representation) {
+        Node first = new Node().name(firstName).properties(
+                "peer", new Node().blueId("this#1"))
+                .contracts(new Node().properties(
+                        "embedded", processEmbedded("/peer")));
+        Node second = new Node().name(secondName).properties(
+                "peer", new Node().blueId("this#0"))
+                .contracts(new Node().properties(
+                        "embedded", processEmbedded("/peer")));
+        if (representation != null) {
+            first.properties("representation", new Node().value(
+                    representation));
+            second.properties("representation", new Node().value(
+                    representation));
+        }
+        BasicNodeProvider source = new BasicNodeProvider(
+                new Node().items(List.of(first, second)));
+        String memberBlueId = source.getBlueIdByName(firstName);
+        String peerBlueId = source.getBlueIdByName(secondName);
+        CyclicSetProof proof = source.cyclicSetProofFor(memberBlueId)
+                .proof().orElseThrow();
+        return new CyclicProviderFixture(
+                memberBlueId,
+                source.fetchByBlueId(memberBlueId).get(0),
+                peerBlueId,
+                source.fetchByBlueId(peerBlueId).get(0),
+                proof);
+    }
+
+    private static String json(Node node) {
+        return UncheckedObjectMapper.JSON_MAPPER.writeValueAsString(node);
+    }
+
+    private static Node processEmbedded(String path) {
+        return new Node()
+                .type(new Node().blueId(RuntimeBlueIds.PROCESS_EMBEDDED))
+                .properties("paths", new Node().items(
+                        new Node().value(path)));
+    }
+
+    private record CyclicProviderFixture(
+            String memberBlueId,
+            Node memberBody,
+            String peerBlueId,
+            Node peerBody,
+            CyclicSetProof proof) {
+        private Map<String, ExactNodeEvidence> evidenceByBlueId() {
+            return Map.of(
+                    memberBlueId,
+                    ExactNodeEvidence.cyclic(json(memberBody), proof),
+                    peerBlueId,
+                    ExactNodeEvidence.cyclic(json(peerBody), proof));
+        }
+
+        private ExactNodeProvider provider() {
+            Map<String, ExactNodeEvidence> evidence = evidenceByBlueId();
+            return ExactNodeProvider.withEvidence(
+                    requested -> Optional.ofNullable(evidence.get(requested)));
         }
     }
 }
