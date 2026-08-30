@@ -18,6 +18,7 @@ final class RepositoryExactNodeProviderLocalityTest {
     @Test
     void nestedCoordinationLookupDoesNotOpenUnrelatedFinosDefinitions()
             throws Exception {
+        // given
         ClassLoader original = Thread.currentThread()
                 .getContextClassLoader();
         BlueRepository discovery = BlueRepository.current(original);
@@ -43,12 +44,14 @@ final class RepositoryExactNodeProviderLocalityTest {
 
             BlueRuntime.RepositoryNodeProviders providers =
                     BlueRuntime.repositoryNodeProviders(repository);
+            // when
             List<Node> definition = providers.repositoryProvider()
                     .fetchByBlueId(computeBlueId);
             assertNotNull(definition);
             List<Node> found = providers.exactNodes()
                     .fetchByBlueId(inlineBlueId);
 
+            // then
             assertNotNull(found);
             List<String> definitionReads = recording.opened().stream()
                     .filter(path -> path.startsWith(

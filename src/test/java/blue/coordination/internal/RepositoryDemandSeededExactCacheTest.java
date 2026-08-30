@@ -33,6 +33,7 @@ final class RepositoryDemandSeededExactCacheTest {
 
     @Test
     void repeatedNestedLookupUsesImmutableCacheWithoutAnotherOwnerRead() {
+        // given
         Node child = new Node().value("nested");
         String childBlueId = DirectBlueIdCalculator.calculateBlueId(child);
         Node root = new Node().properties("child", child);
@@ -43,6 +44,7 @@ final class RepositoryDemandSeededExactCacheTest {
         BlueRuntime.RepositoryNodeProviders providers =
                 BlueRuntime.repositoryNodeProviders(delegate);
 
+        // when
         providers.repositoryProvider().fetchByBlueId(rootBlueId);
         Node first = providers.exactNodes()
                 .fetchByBlueId(childBlueId).get(0);
@@ -50,12 +52,14 @@ final class RepositoryDemandSeededExactCacheTest {
         Node second = providers.exactNodes()
                 .fetchByBlueId(childBlueId).get(0);
 
+        // then
         assertEquals(1, delegate.reads());
         assertEquals("nested", second.getValue());
     }
 
     @Test
     void observerPreservesLegacyListsAndEveryTypedOutcomeExactly() {
+        // given
         Node foundNode = new Node().value("found");
         List<Node> legacy = new ArrayList<>(List.of(foundNode));
         NodeProviderResult found = NodeProviderResult.found(legacy);
@@ -68,8 +72,10 @@ final class RepositoryDemandSeededExactCacheTest {
                 legacy, found, notFound, unavailable, invalid);
         BlueRuntime.RepositoryNodeProviders providers =
                 BlueRuntime.repositoryNodeProviders(delegate);
+        // when
         NodeProvider observing = providers.repositoryProvider();
 
+        // then
         assertSame(legacy, observing.fetchByBlueId("legacy"));
         assertSame(found, observing.fetchResultByBlueId("found"));
         assertSame(notFound, observing.fetchResultByBlueId("not-found"));
@@ -83,6 +89,7 @@ final class RepositoryDemandSeededExactCacheTest {
 
     @Test
     void declaredIdentityCollisionRejectsWholeBatchAtomically() {
+        // given
         Node retained = new Node().value("retained");
         String retainedBlueId = DirectBlueIdCalculator.calculateBlueId(
                 retained);
@@ -98,8 +105,11 @@ final class RepositoryDemandSeededExactCacheTest {
                 .value("different-content")
                 .blueId(retainedBlueId);
 
+        // when
         assertThrows(IllegalStateException.class,
                 () -> cache.observe(List.of(validNew, malformed)));
+
+        // then
         assertEquals(before, cache.cachedBlueIds());
         assertNull(cache.fetchByBlueId(validNewBlueId));
         assertNotNull(cache.fetchByBlueId(retainedBlueId));
@@ -107,6 +117,7 @@ final class RepositoryDemandSeededExactCacheTest {
 
     @Test
     void publicationOrderIsCodePointDeterministic() {
+        // given
         Node alpha = new Node().value("alpha");
         Node omega = new Node().value("omega");
         BlueRuntime.RepositoryExactNodeCache forward =
@@ -114,9 +125,11 @@ final class RepositoryDemandSeededExactCacheTest {
         BlueRuntime.RepositoryExactNodeCache reverse =
                 new BlueRuntime.RepositoryExactNodeCache();
 
+        // when
         forward.observe(List.of(alpha, omega));
         reverse.observe(List.of(omega, alpha));
 
+        // then
         assertEquals(forward.cachedBlueIds(), reverse.cachedBlueIds());
         for (String blueId : forward.cachedBlueIds()) {
             assertEquals(
@@ -130,6 +143,7 @@ final class RepositoryDemandSeededExactCacheTest {
     @Test
     void concurrentPublicationsRetainEveryDemandedGraphAtomically()
             throws Exception {
+        // given
         BlueRuntime.RepositoryExactNodeCache cache =
                 new BlueRuntime.RepositoryExactNodeCache();
         List<Node> nodes = new ArrayList<>();
@@ -150,6 +164,7 @@ final class RepositoryDemandSeededExactCacheTest {
                     return null;
                 }));
             }
+            // when
             start.countDown();
             for (Future<?> future : futures) {
                 future.get();
@@ -158,6 +173,7 @@ final class RepositoryDemandSeededExactCacheTest {
             executor.shutdownNow();
         }
 
+        // then
         for (String blueId : blueIds) {
             assertNotNull(cache.fetchByBlueId(blueId));
         }
@@ -166,6 +182,7 @@ final class RepositoryDemandSeededExactCacheTest {
 
     @Test
     void observerIndexesReturnedGraphWithoutChasingReferences() {
+        // given
         Node target = new Node().value("must stay unread");
         String targetBlueId = DirectBlueIdCalculator.calculateBlueId(target);
         Node root = new Node().properties(
@@ -178,14 +195,17 @@ final class RepositoryDemandSeededExactCacheTest {
         BlueRuntime.RepositoryNodeProviders providers =
                 BlueRuntime.repositoryNodeProviders(delegate);
 
+        // when
         providers.repositoryProvider().fetchByBlueId(rootBlueId);
 
+        // then
         assertEquals(1, delegate.reads());
         assertNull(providers.exactNodes().fetchByBlueId(targetBlueId));
     }
 
     @Test
     void cyclicCapabilitiesDelegateWhileExactCacheStaysOrdinaryOnly() {
+        // given
         String memberBlueId = "cyclic-master#0";
         Node member = new Node()
                 .blueId(memberBlueId)
@@ -197,7 +217,10 @@ final class RepositoryDemandSeededExactCacheTest {
         BlueRuntime.RepositoryNodeProviders providers =
                 BlueRuntime.repositoryNodeProviders(delegate);
 
+        // when
         NodeProvider observing = providers.repositoryProvider();
+
+        // then
         assertInstanceOf(CyclicAwareNodeProvider.class, observing);
         CyclicAwareNodeProvider cyclic =
                 (CyclicAwareNodeProvider) observing;

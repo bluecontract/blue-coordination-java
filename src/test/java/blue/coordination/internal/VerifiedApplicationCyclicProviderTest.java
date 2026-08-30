@@ -32,9 +32,11 @@ final class VerifiedApplicationCyclicProviderTest {
         NodeProvider verified = Contracts10StaticEmbeddedAdmissionCompiler
                 .verifiedProvider(ignored -> Optional.empty());
 
-        // when / then
+        // when
         assertEquals(List.of(), verified.fetchByBlueId(ordinary),
                 "the legacy list-only provider contract remains empty");
+
+        // then
         assertEquals(NodeProviderOutcome.UNAVAILABLE,
                 verified.fetchResultByBlueId(ordinary).outcome());
         assertEquals(NodeProviderOutcome.NOT_FOUND,

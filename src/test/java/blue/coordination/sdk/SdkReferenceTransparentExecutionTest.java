@@ -30,9 +30,11 @@ final class SdkReferenceTransparentExecutionTest {
 
     @Test
     void missingCounterValueDemandsExactNodeAndSameEntryResumesAfterRestart() {
+        // given
         ExactBlueValue counterValue = providerValue("7");
         RecordingProvider provider = new RecordingProvider();
 
+        // when
         try (BlueCoordination blue = coordination(provider)) {
             CoordinationTestControl control = CoordinationTestControl.attach(
                     blue.advanced().rawEngine());
@@ -45,6 +47,7 @@ final class SdkReferenceTransparentExecutionTest {
 
             DrainResult blocked = blue.processing().drain();
 
+            // then
             EntryResult suspended = blocked.entry(retained);
             assertEquals(EntryDisposition.NEEDS_RESOURCES,
                     suspended.disposition(), suspended.toString());
@@ -89,14 +92,17 @@ final class SdkReferenceTransparentExecutionTest {
 
     @Test
     void verifiedCounterValueReferenceMatchesInlineResultAndGas() {
+        // given
         ExactBlueValue counterValue = providerValue("7");
         ExactBlueValue unusedValue = providerValue("payload: cold");
+        // when
         RunEvidence inline = runCounter(
                 "7", null, unusedValue, 4L);
         RunEvidence referenced = runCounter(
                 collapsed(counterValue.blueId()), counterValue,
                 unusedValue, 4L);
 
+        // then
         assertEquals(inline.result().disposition(),
                 referenced.result().disposition());
         assertEquals(EntryDisposition.APPLIED,
@@ -116,6 +122,7 @@ final class SdkReferenceTransparentExecutionTest {
 
     @Test
     void directContractsReferenceRemainsAdmissionBlocking() {
+        // given
         ExactBlueValue contracts = providerValue("""
                 ownerChannel:
                   type: Coordination/Timeline Channel
@@ -128,6 +135,7 @@ final class SdkReferenceTransparentExecutionTest {
                 """);
         RecordingProvider provider = new RecordingProvider();
 
+        // when
         try (BlueCoordination blue = coordination(provider)) {
             CoordinationException blocked = assertThrows(
                     CoordinationException.class,
@@ -142,6 +150,7 @@ final class SdkReferenceTransparentExecutionTest {
                             .publicRoot()
                             .fromNow()));
 
+            // then
             assertEquals(CoordinationErrorCode.NEEDS_RESOURCES,
                     blocked.code());
             assertTrue(provider.reads(contracts.blueId()) > 0);
@@ -152,9 +161,11 @@ final class SdkReferenceTransparentExecutionTest {
 
     @Test
     void unusedOrdinaryBusinessReferenceRemainsCold() {
+        // given
         ExactBlueValue unused = providerValue("payload: never-opened");
         RecordingProvider provider = new RecordingProvider().put(unused);
 
+        // when
         try (BlueCoordination blue = coordination(provider)) {
             TimelineHandle timeline = timeline(blue);
             DocumentHandle counter = admitCounter(
@@ -170,6 +181,7 @@ final class SdkReferenceTransparentExecutionTest {
                     .requestYaml("{}")
                     .execute();
 
+            // then
             assertEquals(EntryDisposition.APPLIED, touched.disposition(),
                     touched.diagnostic().toString());
             assertEquals("touched", counter.snapshot().textAt("/phase"));
@@ -179,10 +191,12 @@ final class SdkReferenceTransparentExecutionTest {
 
     @Test
     void cyclicProofSupportsReadWhilePatchBelowMemberRemainsGuarded() {
+        // given
         CyclicFixture cyclic = cyclicFixture();
         RecordingProvider readable = new RecordingProvider()
                 .put(cyclic.memberBlueId(), cyclic.memberEvidence());
 
+        // when
         try (BlueCoordination blue = coordination(readable)) {
             TimelineHandle timeline = timeline(blue);
             DocumentHandle counter = admitCyclic(
@@ -196,6 +210,7 @@ final class SdkReferenceTransparentExecutionTest {
                     .requestYaml("{}")
                     .execute();
 
+            // then
             assertEquals(EntryDisposition.APPLIED, read.disposition(),
                     read.diagnostic().toString());
             assertEquals("member-a",
