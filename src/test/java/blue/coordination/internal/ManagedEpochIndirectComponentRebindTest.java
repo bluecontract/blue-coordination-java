@@ -1,6 +1,7 @@
 package blue.coordination.internal;
 
 import blue.coordination.api.DocumentId;
+import blue.coordination.api.ExactValue;
 import blue.coordination.api.ManagedCatchUpStatus;
 import blue.coordination.api.ManagedEpochApplicationWork;
 import blue.coordination.api.ManagedEpochReceipt;
@@ -21,15 +22,23 @@ import blue.coordination.sdk.TimelineHandle;
 import blue.language.api.NodeProviderOutcome;
 import blue.language.identity.BlueIds;
 import blue.language.model.Node;
+import blue.language.model.NodePathEditor;
+import blue.language.processor.closure.ClosureInvocationInput;
+import blue.language.processor.closure.ManagedDocumentSnapshot;
+import blue.language.processor.closure.ManagedOccurrenceBinding;
+import blue.language.processor.closure.ManagedRevisionCause;
 import blue.language.provider.CyclicSetProof;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -47,6 +56,93 @@ final class ManagedEpochIndirectComponentRebindTest {
             "managed-indirect-rebind/a";
     private static final String B_TIMELINE =
             "managed-indirect-rebind/b";
+
+    @Test
+    void retainedInvocationCarriesExactHistoricalBodyBindingAndCyclicProof() {
+        try (Scenario scenario = prepared(true)) {
+            // given
+            // A attached B epoch 0 only after B reached epoch 2, so the first
+            // due source epoch is genuinely historical.
+            assertEquals(2L, scenario.b().snapshot().epoch());
+
+            DefaultCoordinationEngine engine = scenario.engine();
+            InMemoryDocumentStore documents = engine.documents();
+            ManagedEpochApplicationWork work = scenario.work();
+            assertEquals(1L, work.sourceEpoch());
+            assertEquals(work.workIdentity(), documents.nextCatchUpWork()
+                    .orElseThrow().workIdentity());
+            ManagedEpochReceipt historical = documents.managedEpochEvidence(
+                    work.sourceDocumentId(), work.sourceEpoch())
+                    .receipt();
+            assertNotEquals(scenario.b().snapshot().blueId(),
+                    historical.afterBlueId(),
+                    "the selected source epoch must precede the current head");
+
+            // when
+            // Capture the immutable input immediately before the executor
+            // passes it to BlueClosureContracts.processClosure.
+            ManagedEpochInvocationCapturer.Capture capture =
+                    invocationCapturer(engine.contractsClosureAdapter())
+                            .capture(work, Set.of());
+            ClosureInvocationInput input = capture.invocation().input();
+            ManagedRevisionCause cause = (ManagedRevisionCause) input.cause();
+
+            // then
+            // The cause carries and authenticates the exact retained epoch-1
+            // body, not B's current epoch-2 body.
+            assertEquals(work.targetOccurrenceIdentity(),
+                    cause.targetOccurrenceIdentity());
+            assertEquals(0L, cause.fromEpoch());
+            assertEquals(1L, cause.toEpoch());
+            assertEquals(historical.beforeBlueId().orElseThrow(),
+                    cause.beforeBlueId());
+            assertEquals(historical.afterBlueId(), cause.afterBlueId());
+            assertEquals(historical.receiptIdentity(),
+                    capture.sourceReceipt().receiptIdentity());
+            CyclicSetProof proof = cause.afterCyclicProof().orElseThrow();
+            ExactValue authenticated = ExactValue
+                    .fromVerifiedProviderEvidence(
+                            cause.afterBlueId(),
+                            cause.afterDocument(),
+                            proof);
+            assertTrue(historical.afterDocument()
+                    .sameExactValue(authenticated));
+
+            // The same input binds A's exact /child occurrence to the
+            // predecessor BlueId and to the retained B lineage.
+            ManagedOccurrenceBinding binding = input.snapshot().occurrences()
+                    .stream()
+                    .filter(row -> row.occurrenceIdentity().equals(
+                            work.targetOccurrenceIdentity()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals(ContractsClosureAdapter.closureId(A),
+                    binding.sourceDocumentId());
+            assertEquals(work.targetPath(), binding.sourcePath());
+            assertEquals(ContractsClosureAdapter.closureId(B),
+                    binding.targetDocumentId());
+            assertEquals(cause.beforeBlueId(),
+                    binding.expectedTargetBlueId());
+            assertEquals(work.activationGeneration(),
+                    binding.activationGeneration());
+            assertFalse(binding.active());
+            assertEquals(Long.valueOf(cause.fromEpoch()),
+                    binding.pendingHistoricalEpoch());
+
+            // The canonical consumer remains compact: the complete body and
+            // proof live in the managed-revision evidence, while /child is
+            // still the exact pure reference authenticated by the row.
+            ManagedDocumentSnapshot consumer = input.snapshot()
+                    .managedDocument(ContractsClosureAdapter.closureId(A));
+            assertNotNull(consumer);
+            Node child = NodePathEditor.getOrNull(
+                    consumer.document(), work.targetPath());
+            assertNotNull(child);
+            assertTrue(child.isReferenceOnly());
+            assertEquals(binding.expectedTargetBlueId(),
+                    child.getBlueId());
+        }
+    }
 
     @Test
     void missingRetainedCyclicSourceProofWaitsWithoutAdvancingCursor() {
@@ -334,6 +430,10 @@ final class ManagedEpochIndirectComponentRebindTest {
     }
 
     private static Scenario prepared() {
+        return prepared(false);
+    }
+
+    private static Scenario prepared(boolean advanceBeforeAttachment) {
         BlueCoordination coordination = BlueCoordination.inMemory();
         try {
             TimelineHandle aTimeline = coordination.timelines().register(
@@ -373,6 +473,18 @@ final class ManagedEpochIndirectComponentRebindTest {
                     sourceAdvanced.diagnostic().toString());
             assertEquals(1L, b.snapshot().epoch());
             assertFalse(a.exact().cyclicMember());
+            if (advanceBeforeAttachment) {
+                EntryResult later = coordination.operations()
+                        .on(b)
+                        .from(bTimeline)
+                        .call("advance")
+                        .through("ownerChannel")
+                        .requestYaml("{}")
+                        .execute();
+                assertEquals(EntryDisposition.APPLIED,
+                        later.disposition(), later.diagnostic().toString());
+                assertEquals(2L, b.snapshot().epoch());
+            }
 
             EntryHandle attachment = coordination.operations()
                     .on(a)
@@ -400,7 +512,8 @@ final class ManagedEpochIndirectComponentRebindTest {
             assertEquals(B, work.sourceDocumentId());
             assertEquals(1L, work.sourceEpoch());
             return new Scenario(
-                    coordination, engine, a, b, c, aTimeline, work);
+                    coordination, engine, a, b, c,
+                    aTimeline, bTimeline, work);
         } catch (RuntimeException | Error failure) {
             coordination.close();
             throw failure;
@@ -435,6 +548,27 @@ final class ManagedEpochIndirectComponentRebindTest {
             DefaultCoordinationEngine engine,
             String name) {
         return engine.metricsSnapshot().counters().getOrDefault(name, 0L);
+    }
+
+    private static ManagedEpochInvocationCapturer invocationCapturer(
+            ContractsClosureAdapter adapter) {
+        try {
+            Field executorField = ContractsClosureAdapter.class
+                    .getDeclaredField("managedEpochApplicationExecutor");
+            executorField.setAccessible(true);
+            ManagedEpochApplicationExecutor executor =
+                    (ManagedEpochApplicationExecutor) executorField.get(
+                            adapter);
+            Field capturerField = ManagedEpochApplicationExecutor.class
+                    .getDeclaredField("invocationCapturer");
+            capturerField.setAccessible(true);
+            return (ManagedEpochInvocationCapturer) capturerField.get(
+                    executor);
+        } catch (ReflectiveOperationException inaccessible) {
+            throw new AssertionError(
+                    "Cannot inspect retained invocation boundary",
+                    inaccessible);
+        }
     }
 
     private static String consumerYaml() {
@@ -498,6 +632,7 @@ final class ManagedEpochIndirectComponentRebindTest {
     private static String sourceYaml() {
         return """
                 documentId: %s
+                counter: 0
                 contracts:
                   embedded:
                     type: Process Embedded
@@ -528,6 +663,18 @@ final class ManagedEpochIndirectComponentRebindTest {
                               type: Coordination/Event
                               kind: Cycle/Finite
                           - $return: true
+                  advance:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: replace
+                              path: /counter
+                              val: {$add: [{$document: /counter}, 1]}
+                          - $return: true
                 """.formatted(B.value(), B_TIMELINE, ACTOR);
     }
 
@@ -549,6 +696,7 @@ final class ManagedEpochIndirectComponentRebindTest {
             DocumentHandle b,
             DocumentHandle c,
             TimelineHandle aTimeline,
+            TimelineHandle bTimeline,
             ManagedEpochApplicationWork work) implements AutoCloseable {
         @Override
         public void close() {
