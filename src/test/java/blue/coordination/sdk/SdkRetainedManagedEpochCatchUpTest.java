@@ -1,9 +1,13 @@
 package blue.coordination.sdk;
 
 import blue.coordination.api.DocumentId;
+import blue.coordination.api.ManagedCatchUpBarrierStatus;
+import blue.coordination.api.ManagedCatchUpStatus;
 import blue.coordination.api.ManagedDocumentReadiness;
 import blue.coordination.api.ManagedOccurrenceCatchUpPlan;
 import blue.coordination.api.SessionStatus;
+import blue.language.model.Node;
+import blue.language.model.NodePathEditor;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -29,8 +33,16 @@ final class SdkRetainedManagedEpochCatchUpTest {
             "sdk-retained-catch-up-current-consumer");
     private static final DocumentId DUPLICATE_CONSUMER = DocumentId.of(
             "sdk-retained-catch-up-duplicate-consumer");
+    private static final DocumentId READ_THROUGH_HOST = DocumentId.of(
+            "sdk-retained-read-through-host");
+    private static final DocumentId READ_THROUGH_SOURCE = DocumentId.of(
+            "sdk-retained-read-through-source");
     private static final String A_TIMELINE = "sdk/retained/a";
     private static final String B_TIMELINE = "sdk/retained/b";
+    private static final String READ_THROUGH_HOST_TIMELINE =
+            "sdk/retained/read-through/host";
+    private static final String READ_THROUGH_SOURCE_TIMELINE =
+            "sdk/retained/read-through/source";
 
     @Test
     void authoredInitialInlineValueAppliesInitializationAndLaterEpochs() {
@@ -367,6 +379,201 @@ final class SdkRetainedManagedEpochCatchUpTest {
         }
     }
 
+    @Test
+    void retainedReferenceReadsEachExactHistoricalCounterEpoch() {
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            // given
+            TimelineHandle hostTimeline = coordination.timelines().register(
+                    READ_THROUGH_HOST_TIMELINE, ACTOR);
+            TimelineHandle sourceTimeline = coordination.timelines().register(
+                    READ_THROUGH_SOURCE_TIMELINE, ACTOR);
+            ExactBlueValue authoredSource = coordination.values().yaml(
+                    readThroughSourceYaml());
+            DocumentHandle host = coordination.documents().admit(
+                    ManagedDocument.yaml(
+                                    READ_THROUGH_HOST,
+                                    readThroughHostYaml())
+                            .publicRoot()
+                            .fromNow());
+            DocumentHandle source = coordination.documents().admit(
+                    ManagedDocument.yaml(
+                                    READ_THROUGH_SOURCE,
+                                    readThroughSourceYaml())
+                            .publicRoot()
+                            .fromNow());
+            incrementByFour(coordination, source, sourceTimeline).execute();
+            incrementByFour(coordination, source, sourceTimeline).execute();
+            assertEquals(List.of(0L, 4L, 8L), source.history().stream()
+                    .map(revision -> ((Number) revision.after().scalarAt(
+                            "/counter")).longValue())
+                    .toList());
+            List<String> sourceHistory = source.history().stream()
+                    .map(revision -> revision.after().blueId())
+                    .toList();
+            List<String> sourceReceipts = coordination.advanced()
+                    .auditManagedEpochs(READ_THROUGH_SOURCE).stream()
+                    .map(ManagedEpochReceipt::receiptIdentity)
+                    .toList();
+            List<String> sourceEventOccurrences = coordination.advanced()
+                    .auditManagedEpochs(READ_THROUGH_SOURCE).stream()
+                    .flatMap(receipt -> receipt.emittedEvents().stream())
+                    .map(ManagedEventOccurrence::eventOccurrenceIdentity)
+                    .toList();
+            String sourceHead = source.snapshot().blueId();
+            long sourceEpoch = source.snapshot().epoch();
+
+            // when
+            EntryHandle attachment = coordination.operations()
+                    .on(host)
+                    .from(hostTimeline)
+                    .call("attachChild")
+                    .through("ownerChannel")
+                    .request(request -> request.exact(
+                            "child", authoredSource))
+                    .submit();
+            DrainResult admitted = coordination.processing().drain(
+                    new DrainBudget(1L, 1L));
+            assertEquals(EntryDisposition.APPLIED,
+                    admitted.entry(attachment).disposition(),
+                    admitted.entry(attachment).diagnostic().toString());
+            assertTrue(admitted.managedEpochApplications().isEmpty());
+            ManagedOccurrenceCatchUpPlan pending = coordination.advanced()
+                    .auditManagedCatchUpPlans(READ_THROUGH_HOST).get(0);
+            assertEquals(READ_THROUGH_HOST, pending.consumerDocumentId());
+            assertEquals(READ_THROUGH_SOURCE, pending.sourceDocumentId());
+            assertEquals("/child", pending.targetPath());
+            assertEquals(-1L, pending.admittedSourceEpoch());
+            assertEquals(0L, pending.nextSourceEpoch());
+            assertEquals(2L, pending.requiredThroughSourceEpoch());
+            assertEquals(ManagedCatchUpStatus.RUNNING, pending.status());
+            assertEquals(List.of(pending.planIdentity()), coordination
+                    .advanced()
+                    .auditManagedCatchUpBarrier(pending.barrierIdentity())
+                    .orElseThrow().planIdentities());
+            assertEquals(ManagedCatchUpBarrierStatus.OPEN, coordination
+                    .advanced()
+                    .auditManagedCatchUpBarrier(pending.barrierIdentity())
+                    .orElseThrow().status());
+            assertEquals(pending.activationGeneration(), coordination
+                    .advanced()
+                    .auditManagedOccurrence(READ_THROUGH_HOST, "/child")
+                    .orElseThrow().activationGeneration());
+            assertEquals(READ_THROUGH_SOURCE, coordination.advanced()
+                    .auditManagedOccurrence(READ_THROUGH_HOST, "/child")
+                    .orElseThrow().targetDocumentId());
+            assertEquals(SessionStatus.CATCHING_UP, coordination.advanced()
+                    .auditManagedDocumentReadiness(READ_THROUGH_HOST)
+                    .orElseThrow().status());
+            assertEquals(-1L, auditLongAt(
+                    coordination, READ_THROUGH_HOST, "/observedCounter"));
+
+            DrainResult initialized = coordination.processing().drain(
+                    new DrainBudget(1L, 1L));
+            assertEquals(List.of(1L), initialized
+                    .managedEpochApplications().stream()
+                    .map(ManagedEpochApplicationReceipt
+                            ::resultingSourceCursor)
+                    .toList());
+            assertEquals(-1L, auditLongAt(
+                    coordination, READ_THROUGH_HOST, "/observedCounter"));
+            assertEquals(1L, coordination.advanced()
+                    .auditManagedCatchUpPlan(pending.planIdentity())
+                    .orElseThrow().nextSourceEpoch());
+
+            DrainResult four = coordination.processing().drain(
+                    new DrainBudget(1L, 1L));
+            assertEquals(List.of(2L), four.managedEpochApplications().stream()
+                    .map(ManagedEpochApplicationReceipt
+                            ::resultingSourceCursor)
+                    .toList());
+            assertEquals(4L, auditLongAt(
+                    coordination, READ_THROUGH_HOST, "/observedCounter"));
+            assertEquals(2L, coordination.advanced()
+                    .auditManagedCatchUpPlan(pending.planIdentity())
+                    .orElseThrow().nextSourceEpoch());
+            assertFalse(coordination.advanced()
+                    .auditManagedDocumentReadiness(READ_THROUGH_HOST)
+                    .orElseThrow().ready());
+
+            DrainResult eight = coordination.processing().drain(
+                    new DrainBudget(1L, 1L));
+
+            // then
+            assertEquals(List.of(3L), eight.managedEpochApplications().stream()
+                    .map(ManagedEpochApplicationReceipt
+                            ::resultingSourceCursor)
+                    .toList());
+            List<ManagedEpochApplicationReceipt> applications = List.of(
+                    initialized.managedEpochApplications().get(0),
+                    four.managedEpochApplications().get(0),
+                    eight.managedEpochApplications().get(0));
+            assertEquals(List.of(0L, 1L, 2L), applications.stream()
+                    .map(receipt -> coordination.advanced()
+                            .auditManagedEpochReceipt(
+                                    receipt.sourceReceiptIdentity())
+                            .orElseThrow().epoch())
+                    .toList());
+            assertEquals(sourceReceipts, applications.stream()
+                    .map(ManagedEpochApplicationReceipt
+                            ::sourceReceiptIdentity)
+                    .toList());
+            assertEquals(List.of(0L, 4L, 8L), applications.stream()
+                    .map(receipt -> ((Number) coordination.advanced()
+                            .auditManagedEpochReceipt(
+                                    receipt.sourceReceiptIdentity())
+                            .orElseThrow().afterDocument().scalarAt(
+                                    "/counter")).longValue())
+                    .toList());
+            assertTrue(applications.stream().allMatch(receipt ->
+                    receipt.planIdentity().equals(pending.planIdentity())
+                            && receipt.consumerDocumentId().equals(
+                                    READ_THROUGH_HOST)));
+            ManagedOccurrenceCatchUpPlan complete = coordination.advanced()
+                    .auditManagedCatchUpPlan(pending.planIdentity())
+                    .orElseThrow();
+            assertEquals(pending.targetOccurrenceIdentity(),
+                    complete.targetOccurrenceIdentity());
+            assertEquals(pending.activationGeneration(),
+                    complete.activationGeneration());
+            assertEquals(3L, complete.nextSourceEpoch());
+            assertEquals(ManagedCatchUpStatus.COMPLETE, complete.status());
+            assertEquals(ManagedCatchUpBarrierStatus.COMPLETE, coordination
+                    .advanced()
+                    .auditManagedCatchUpBarrier(pending.barrierIdentity())
+                    .orElseThrow().status());
+            ManagedDocumentReadiness ready = coordination.advanced()
+                    .auditManagedDocumentReadiness(READ_THROUGH_HOST)
+                    .orElseThrow();
+            assertTrue(ready.ready());
+            assertEquals(ready.committedEpoch(),
+                    ready.readyEpoch().orElseThrow());
+            assertEquals(8L, host.snapshot().longAt("/observedCounter"));
+            Node child = NodePathEditor.getOrNull(
+                    host.snapshot().exact().copyNode(), "/child");
+            assertTrue(child.isReferenceOnly(),
+                    "the managed occurrence must remain a compact reference");
+            assertEquals(sourceHead, child.getBlueId());
+            assertEquals(sourceHistory, source.history().stream()
+                    .map(revision -> revision.after().blueId())
+                    .toList(), "catch-up must not append source revisions");
+            assertEquals(sourceReceipts, coordination.advanced()
+                    .auditManagedEpochs(READ_THROUGH_SOURCE).stream()
+                    .map(ManagedEpochReceipt::receiptIdentity)
+                    .toList(), "catch-up must reuse immutable source receipts");
+            assertEquals(sourceEventOccurrences, coordination.advanced()
+                    .auditManagedEpochs(READ_THROUGH_SOURCE).stream()
+                    .flatMap(receipt -> receipt.emittedEvents().stream())
+                    .map(ManagedEventOccurrence::eventOccurrenceIdentity)
+                    .toList(), "catch-up must preserve event occurrences");
+            assertEquals(sourceEpoch, source.snapshot().epoch());
+            assertEquals(sourceHead, source.snapshot().blueId());
+            assertEquals(1L, source.snapshot().longAt(
+                    "/initializationCount"),
+                    "catch-up must not reinitialize the source");
+            assertEquals(8L, source.snapshot().longAt("/counter"));
+        }
+    }
+
     private static OperationCall increment(
             BlueCoordination coordination,
             DocumentHandle source,
@@ -377,6 +584,27 @@ final class SdkRetainedManagedEpochCatchUpTest {
                 .call("increment")
                 .through("ownerChannel")
                 .request(request -> { });
+    }
+
+    private static OperationCall incrementByFour(
+            BlueCoordination coordination,
+            DocumentHandle source,
+            TimelineHandle timeline) {
+        return coordination.operations()
+                .on(source)
+                .from(timeline)
+                .call("increment")
+                .through("ownerChannel")
+                .requestYaml("amount: 4");
+    }
+
+    private static long auditLongAt(
+            BlueCoordination coordination,
+            DocumentId documentId,
+            String pointer) {
+        Object value = coordination.advanced().auditDocument(documentId)
+                .valueAt(pointer).copyNode().getValue();
+        return ((Number) value).longValue();
     }
 
     private static String consumerYaml() {
@@ -525,6 +753,123 @@ final class SdkRetainedManagedEpochCatchUpTest {
                 LIFECYCLE_CHANNEL_BLUE_ID,
                 LIFECYCLE_EVENT_BLUE_ID,
                 timelineId,
+                ACTOR);
+    }
+
+    private static String readThroughHostYaml() {
+        return """
+                documentId: %s
+                observedCounter: -1
+                contracts:
+                  embedded:
+                    type: Process Embedded
+                    paths:
+                      - /child
+                  ownerChannel:
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: %s
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: %s
+                  attachChild:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request:
+                      child: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: add
+                              path: /child
+                              val: {$binding: event/message/request/child}
+                          - $return: true
+                  fromChild:
+                    type: Embedded Node Channel
+                    sourcePath: /child
+                    event:
+                      type: Coordination/Event
+                      kind: CatchUp/Read Through Changed
+                  reflectChild:
+                    type: Coordination/Sequential Workflow
+                    channel: fromChild
+                    event:
+                      type: Coordination/Event
+                      kind: CatchUp/Read Through Changed
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: replace
+                              path: /observedCounter
+                              val: {$document: /child/counter}
+                          - $return: true
+                """.formatted(
+                READ_THROUGH_HOST.value(),
+                READ_THROUGH_HOST_TIMELINE,
+                ACTOR);
+    }
+
+    private static String readThroughSourceYaml() {
+        return """
+                documentId: %s
+                initializationCount: 0
+                counter: 0
+                contracts:
+                  lifecycleChannel:
+                    type:
+                      blueId: %s
+                    order: 0
+                    event:
+                      type:
+                        blueId: %s
+                  onProcessingInitiated:
+                    type: Coordination/Sequential Workflow
+                    channel: lifecycleChannel
+                    order: 0
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: replace
+                              path: /initializationCount
+                              val: {$add: [{$document: /initializationCount}, 1]}
+                          - $return: true
+                  ownerChannel:
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: %s
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: %s
+                  increment:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request:
+                      amount:
+                        type: Integer
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: replace
+                              path: /counter
+                              val:
+                                $add:
+                                  - $document: /counter
+                                  - $binding: event/message/request/amount
+                          - $appendEvent:
+                              type: Coordination/Event
+                              kind: CatchUp/Read Through Changed
+                          - $return: true
+                """.formatted(
+                READ_THROUGH_SOURCE.value(),
+                LIFECYCLE_CHANNEL_BLUE_ID,
+                LIFECYCLE_EVENT_BLUE_ID,
+                READ_THROUGH_SOURCE_TIMELINE,
                 ACTOR);
     }
 
