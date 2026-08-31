@@ -4311,7 +4311,8 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
         requiredCapabilityTests.each { source ->
             File testSource = file(source)
             if (!testSource.isFile()
-                    || !(testSource.getText('UTF-8') =~ /(?m)^\s*@Test\b/).find()) {
+                    || !(testSource.getText('UTF-8') =~
+                            /(?m)^\s*@(Test|ParameterizedTest)\b/).find()) {
                 failures << "required rc.5 capability evidence is missing ${source}"
             }
         }
