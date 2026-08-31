@@ -3,10 +3,21 @@
 This project follows Semantic Versioning. Release candidates may still refine
 the new 3.x API before the first stable 3.0.0 release.
 
-## 3.0.0-rc.6 - host-driven retained processing candidate
+## 3.0.0-rc.5 - retained execution and catch-up candidate
 
 ### Added
 
+- Complete managed-epoch receipts, duplicate-preserving event occurrences,
+  occurrence-specific catch-up plans, extendable barriers,
+  committed-versus-ready heads, and bounded application/audit SDK surfaces.
+- Historical matching for an existing authored initial, initialized epoch
+  zero, current state, and unique retained epochs, with explicit selection for
+  ambiguous history.
+- Durable application receipts, exact failed-attempt evidence, response-loss
+  reconciliation, restart-safe route rebuilding, and indexed locality
+  metrics.
+- Proof-aware exact-node resolution and lazy reference-transparent SDK
+  execution for ordinary and cyclic exact references.
 - A read-only exact fair-lane selection and targeted one-selection journal or
   managed-epoch processing calls for durable host lease orchestration.
 - An immutable `ProcessingAvailability` audit hint lets a durable host expose
@@ -17,6 +28,12 @@ the new 3.x API before the first stable 3.0.0 release.
 
 ### Changed
 
+- Published-artifact mode now owns the complete published
+  `blue.language` `3.1.0-rc.23` graph. Maven Local and source-composite
+  substitution remain forbidden.
+- The drain scheduler fences later consumer work behind active barriers while
+  allowing unrelated source and sibling-parent lanes to continue and extend
+  catch-up frontiers.
 - Journal-only slices select at most one ordinary entry and never fall through
   to managed work. Exact managed slices revalidate the retained fair turn and
   selected work identity before processing.
@@ -33,38 +50,9 @@ the new 3.x API before the first stable 3.0.0 release.
 - Creating a genuinely new authored nested lineage during retained catch-up
   remains unsupported and now durably blocks only its exact occurrence plan.
 - Timeline-provider completeness, Mandates, cross-process durability, and
-  multi-node scheduling remain outside this unpublished candidate.
-
-## 3.0.0-rc.5 - retained managed-epoch catch-up candidate
-
-### Added
-
-- Complete Coordination managed-epoch receipts, duplicate-preserving event
-  occurrences, occurrence-specific catch-up plans, extendable barriers,
-  committed-versus-ready heads, and bounded application/audit SDK surfaces.
-- Historical matching for an existing authored initial, initialized epoch
-  zero, and unique retained epochs, with current-state precedence and explicit
-  selector support for ambiguous history.
-- Durable application receipts, exact failed-attempt evidence, response-loss
-  reconciliation, restart-safe route rebuilding, and indexed locality metrics.
-
-### Changed
-
-- The candidate build consumes the invocation-owned immutable
-  `blue.language` `3.1.0-rc.23` stage derived from published rc.22 sources and
-  the additive Contracts transition-receipt change. Published-artifact mode
-  remains pinned to `3.1.0-rc.22`; Maven Local and composite builds remain
-  forbidden.
-- The drain scheduler fences later consumer work behind active barriers while
-  allowing unrelated source and sibling-parent lanes to continue and extend
-  catch-up frontiers.
-
-### Known limitations
-
-- Timeline-provider completeness, Mandates, MyOS persistence/UI integration,
-  and production multi-node durability are outside this candidate. The
-  release remains unpublished, in-memory, sequential, and not
-  production-ready.
+  multi-node scheduling remain outside this release candidate.
+- MyOS persistence/UI integration is a downstream concern; Coordination
+  remains in-memory, sequential, and not production-ready.
 
 ## 3.0.0-rc.4 - dynamic contract and occurrence evolution candidate
 

@@ -1,7 +1,7 @@
 # Failure and retry model
 
-This page distinguishes the published Contracts 1.0 SDK, the unpublished rc.6
-retained managed-epoch source profile, and the earlier low-level temporal
+This page distinguishes the rc.5 Contracts 1.0 SDK retained managed-epoch
+profile and the earlier low-level temporal
 compatibility profile. None of the in-memory profiles is a fresh-process
 durability claim.
 
@@ -66,12 +66,10 @@ After append, processing state is represented by `EntryResult`,
 `NEEDS_RESOURCES` and `BLOCKED` report that the lane has not reached a terminal
 result. Branch on diagnostic code, not message text.
 
-## Retained managed-epoch source profile (rc.6)
+## Retained managed-epoch profile (rc.5)
 
-This profile is present in `3.0.0-rc.6` source only. It is staged,
-unpublished, non-production, and depends on the verified immutable
-Language/Contracts rc.23 stage. The published rc.4 JAR does not expose these
-semantics.
+This profile is present in `3.0.0-rc.5`, remains non-production, and depends
+on the published Language/Contracts rc.23 graph.
 
 An operation that installs a proven historical managed value commits its graph
 change before catch-up. The consumer therefore has separate committed and READY
@@ -177,7 +175,7 @@ for matching, plan, ordering, receipt, and audit details.
 The paragraphs below describe the earlier document-local temporal coordinator
 using `EmbeddingBinding` and `EmbeddedEpochCursor`. They are relevant only to
 an explicit low-level compatibility or migration integration, not the normal
-`BlueCoordination.inMemory()` Contracts publication model or the rc.6 managed
+`BlueCoordination.inMemory()` Contracts publication model or the rc.5 managed
 receipt/plan/barrier profile.
 
 Child and parent synchronization are intentionally separate commits. If a

@@ -5,10 +5,9 @@ The documentation is organized by task so application guidance, API reference,
 semantic explanation, contributor internals, and historical release evidence do
 not compete as different starting points.
 
-Maven Central `3.0.0-rc.4` remains the latest published bounded-pilot artifact.
-The repository version `3.0.0-rc.6` is an unpublished, staged, non-production
-source profile; sections explicitly marked rc.6 describe source behavior, not
-the rc.4 JAR or an authorized release.
+`3.0.0-rc.5` is the current bounded-pilot release candidate. It remains
+non-production and consumes the complete published Blue Language
+`3.1.0-rc.23` graph.
 
 ## Start here
 
@@ -17,13 +16,12 @@ the rc.4 JAR or an authorized release.
    provider entries, targeted operations, several Timelines, operation-created
    managed documents, ordering, diagnostics, history, atomicity, testing, and
    production boundaries.
-2. Keep the published rc.4 [public API reference](reference/public-api.md)
-   nearby while writing shared code; use the retained-epoch page below for
-   rc.6-only additions.
+2. Keep the rc.5 [public API reference](reference/public-api.md) nearby while
+   writing shared code; use the retained-epoch page below for catch-up details.
 3. Read [Managed Process Embedded documents](semantics/process-embedded-documents.md)
    before designing shared lineages, repeated occurrences, or cycles.
-4. Check published rc.4 [Known limitations](limitations.md) and the rc.6
-   retained-epoch non-goals before selecting an operational deployment profile.
+4. Check rc.5 [Known limitations](limitations.md) before selecting an
+   operational deployment profile.
 
 For a five-minute path, use the repository [Start here](../START-HERE.md) and
 [README quickstart](../README.md).
@@ -47,10 +45,10 @@ Executable public-SDK examples live in:
 - [`SdkManagedDraftAcceptanceTest`](../src/test/java/blue/coordination/sdk/SdkManagedDraftAcceptanceTest.java)
   for new managed lineages, repeated occurrences, validation, and rollback;
 - [`SdkRetainedManagedEpochCatchUpTest`](../src/test/java/blue/coordination/sdk/SdkRetainedManagedEpochCatchUpTest.java)
-  for rc.6 authored-initial, retained, current, and duplicate-occurrence
+  for rc.5 authored-initial, retained, current, and duplicate-occurrence
   catch-up behavior;
 - [`SdkManagedEpochSelectorAcceptanceTest`](../src/test/java/blue/coordination/sdk/SdkManagedEpochSelectorAcceptanceTest.java)
-  for rc.6 explicit selection of a repeated historical BlueId;
+  for rc.5 explicit selection of a repeated historical BlueId;
 - [`SdkDeveloperGuideTest`](../src/consumerTest/java/blue/coordination/consumer/SdkDeveloperGuideTest.java)
   for both canonical application use cases compiled against the production JAR;
 - [`SdkBuiltJarConsumerTest`](../src/consumerTest/java/blue/coordination/consumer/SdkBuiltJarConsumerTest.java)
@@ -60,7 +58,7 @@ Executable public-SDK examples live in:
 
 | Document | Scope |
 | --- | --- |
-| [Public API](reference/public-api.md) | Published rc.4 and shared SDK owners, catalogs, calls, immutable results, snapshots, and advanced boundary. |
+| [Public API](reference/public-api.md) | Rc.5 SDK owners, catalogs, calls, immutable results, snapshots, and advanced boundary. |
 | [SDK migration and ownership](reference/sdk-migration-and-ownership.md) | Package stability, low-level-to-SDK migration, and semantic ownership. |
 | [Contracts authored admission](reference/contracts-authored-admission.md) | High-level authored closure compilation versus the expert low-level admission seam. |
 | [Metrics](reference/metrics.md) | Advanced raw-engine structural and processing counters. |
@@ -74,7 +72,7 @@ Executable public-SDK examples live in:
 | [Identity and revisions](semantics/identity-and-revisions.md) | `DocumentId`, BlueId, epochs, revisions, and occurrence generations. |
 | [Retained managed-epoch catch-up](semantics/retained-managed-epoch-catch-up.md) | Rc.5 exact matching, complete receipts/events, occurrence plans, barriers, ordering, readiness, retry, and audit. |
 | [MyOS retained managed-epoch integration guide](../MYOS_RETAINED_MANAGED_EPOCH_INTEGRATION_GUIDE.md) | Read-only downstream source map, additive persistence, exact-content wake-up, restart transactions, REST/UI projections, and immutable-stage adoption. |
-| [Historical catch-up](semantics/historical-catch-up.md) | Published rc.4 Timeline-import boundary versus the earlier low-level temporal coordinator. |
+| [Historical catch-up](semantics/historical-catch-up.md) | Rc.5 retained managed-epoch boundary versus authoritative Timeline-provider completeness. |
 | [Initialization causality](semantics/initialization-causality.md) | Why initialization is not a fabricated external entry. |
 | [Failure and retry model](operations/failure-model.md) | Commit boundaries, receipts, stale work, retry, and process-crash non-claims. |
 
@@ -91,11 +89,10 @@ Executable public-SDK examples live in:
 
 ## Release status and historical evidence
 
-The current published application claim remains the bounded external-pilot
-[`3.0.0-rc.4` decision](releases/3.0.0-rc.4.md). It is not a stable or
-production-readiness claim. The rc.6 source profile has no publication or
-production authority, and its build/test gates must be evaluated separately;
-documentation of a required gate is not a claim that it passed.
+The current release authority is the bounded external-pilot
+[`3.0.0-rc.5` decision](releases/3.0.0-rc.5.md). It is not a stable or
+production-readiness claim. Documentation of a required gate is not a claim
+that it passed.
 
 Documents named `3.0.0-rc.1`, Round 11, Round 12, or Round 13 are immutable or
 retained historical release evidence. They explain earlier campaigns and must

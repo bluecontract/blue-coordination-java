@@ -16,7 +16,7 @@ def immutableDevelopmentContracts =
         dependencyMode == 'immutable-development-contracts'
 def immutableContractsRepository =
         immutableStagedContracts || immutableDevelopmentContracts
-def publishedLanguageVersion = '3.1.0-rc.22'
+def publishedLanguageVersion = '3.1.0-rc.23'
 def immutableStagedLanguageVersion = providers.gradleProperty(
         'blueContractsVersion').getOrElse('3.1.0-rc.23')
 def activeLanguageVersion = immutableContractsRepository
@@ -1643,6 +1643,7 @@ tasks.register('verifyReleaseMetadata') {
                 'docs/development/build-and-test.md',
                 'docs/development/test-strategy.md',
                 'docs/development/releasing.md',
+                'docs/releases/3.0.0-rc.5.md',
                 'docs/releases/3.0.0-rc.4.md',
                 'docs/releases/3.0.0-rc.3.md',
                 'docs/releases/3.0.0-rc.1-test-report.md',
@@ -4251,8 +4252,7 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
     description = 'Runs the published-dependency gate for the bounded external-pilot RC.'
     inputs.files('.cz.toml', 'settings.gradle', 'build.gradle',
             'gradle/published-artifact.lockfile',
-            'dynamic-evolution-coordination-handoff-receipt.json',
-            'docs/releases/3.0.0-rc.4.md')
+            'docs/releases/3.0.0-rc.5.md')
     def rcTestSources = files(
             fileTree('src/test/java') { include '**/*Test.java' },
             fileTree('src/testSupport/java') { include '**/*.java' },
@@ -4270,12 +4270,12 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
     dependsOn 'releaseCheck', 'dependencyPreflight',
             'jar', 'sourcesJar', 'javadocJar', 'testFixturesJar'
     def readinessReport = layout.buildDirectory.file(
-            'reports/release/3.0.0-rc.4-readiness.json')
+            'reports/release/3.0.0-rc.5-readiness.json')
     outputs.file(readinessReport)
     doLast {
         def failures = []
-        if (version.toString() != '3.0.0-rc.4') {
-            failures << "release version is ${version}; expected 3.0.0-rc.4"
+        if (version.toString() != '3.0.0-rc.5') {
+            failures << "release version is ${version}; expected 3.0.0-rc.5"
         }
         if (dependencyMode != 'published-artifact') {
             failures << 'published-artifact is not the active dependency mode'
@@ -4293,65 +4293,36 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
             }
         }
 
-        def semanticReceipt = new groovy.json.JsonSlurper().parse(
-                file('dynamic-evolution-coordination-handoff-receipt.json'))
-        def requiredCapabilities = [
-                'automaticManagedOccurrenceResolutionSupported',
-                'automaticCurrentExactStateResolutionSupported',
-                'automaticNewAuthoredInitialDocumentResolutionSupported',
-                'typedResourceDemandRetrySupported',
-                'suspensionIsNonPublishing',
-                'atomicManagedPublicationSupported',
-                'activePathRebindSupported',
-                'dynamicCycleFormationAndDissolutionSupported',
-                'runtimeGeneralizationSupported',
-                'typedDocumentTransitionEvidenceSupported',
-                'typedOperationRouteDeltaEvidenceSupported'
+        def requiredCapabilityTests = [
+                'src/test/java/blue/coordination/internal/ContractsCheckpointSettlementPublicationTest.java',
+                'src/test/java/blue/coordination/internal/ManagedEpochApplicationAtomicRollbackTest.java',
+                'src/test/java/blue/coordination/internal/ManagedEpochApplicationResponseLossTest.java',
+                'src/test/java/blue/coordination/internal/ManagedEpochIndirectComponentRebindTest.java',
+                'src/test/java/blue/coordination/internal/RepositoryExactNodeProviderLocalityTest.java',
+                'src/test/java/blue/coordination/internal/VerifiedApplicationCyclicProviderTest.java',
+                'src/test/java/blue/coordination/sdk/SdkManagedEpochCycleAcceptanceTest.java',
+                'src/test/java/blue/coordination/sdk/SdkPendingNestedSourceReadinessTest.java',
+                'src/test/java/blue/coordination/sdk/SdkReferenceTransparentExecutionTest.java',
+                'src/test/java/blue/coordination/sdk/SdkRetainedManagedEpochCatchUpTest.java'
         ]
-        def retainedLimitations = [
-                'existingSessionAuthoredInitialAttachmentSupported',
-                'historicalRetainedEpochCatchUpSupported',
-                'timelineImportAndCompletenessSupported',
-                'mandatesSupported',
-                'multiNodeDurabilitySupported',
-                'productionReady',
-                'published',
-                'deployed'
-        ]
-        def java17 = semanticReceipt.verification?.java17
-        def java21 = semanticReceipt.verification?.java21
-        if (semanticReceipt.schema
-                != 'blue.coordination/dynamic-evolution-handoff-receipt/v1'
-                || semanticReceipt.status != 'PASS'
-                || semanticReceipt.sourceBinding
-                        ?.semanticSourceUnderTestCommit
-                        != '612f864ec7101bcac5a0cc596ad6b6f11cd10c98'
-                || requiredCapabilities.any {
-                    (semanticReceipt.capabilities ?: [:])[it] != true
-                }
-                || retainedLimitations.any {
-                    (semanticReceipt.capabilities ?: [:])[it] != false
-                }
-                || [java17, java21].any { lane ->
-                    lane?.status != 'PASS'
-                            || lane?.failures != 0
-                            || lane?.errors != 0
-                            || lane?.skipped != 0
-                }
-                || semanticReceipt.immutableStage?.published != false) {
-            failures << 'retained dynamic-evolution evidence does not authorize the bounded pilot tier'
+        requiredCapabilityTests.each { source ->
+            File testSource = file(source)
+            if (!testSource.isFile()
+                    || !(testSource.getText('UTF-8') =~ /(?m)^\s*@Test\b/).find()) {
+                failures << "required rc.5 capability evidence is missing ${source}"
+            }
         }
-        String releaseNotes = file('docs/releases/3.0.0-rc.4.md')
+        String releaseNotes = file('docs/releases/3.0.0-rc.5.md')
                 .getText('UTF-8')
         if (!releaseNotes.contains(
-                'RC4_RELEASE_TIER: BOUNDED_EXTERNAL_PILOT')
+                'RC5_RELEASE_TIER: BOUNDED_EXTERNAL_PILOT')
                 || !releaseNotes.contains(
-                'RC4_DEPENDENCY_MODE: PUBLISHED_ARTIFACTS_ONLY')
+                'RC5_DEPENDENCY_MODE: PUBLISHED_ARTIFACTS_ONLY')
                 || !releaseNotes.contains(
-                'RC4_PUBLIC_ARTIFACT_READY: true')
+                'RC5_PUBLIC_ARTIFACT_READY: true')
                 || !releaseNotes.contains(
-                'RC4_PRODUCTION_READY: false')) {
-            failures << 'rc.4 release notes do not state the exact release tier'
+                'RC5_PRODUCTION_READY: false')) {
+            failures << 'rc.5 release notes do not state the exact release tier'
         }
 
         if (System.getenv('CI') != null) {
@@ -4398,8 +4369,8 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
                         dependencyMode: dependencyMode,
                         dependencies: publishedBlueCoordinates,
                         testMethods: testMethods,
-                        semanticEvidence:
-                                'dynamic-evolution-coordination-handoff-receipt.json',
+                        semanticEvidence: 'complete current releaseCheck plus '
+                                + 'the rc.5 capability test inventory',
                         publicArtifactReady: true,
                         productionReady: false,
                         stableLatencySlaClaimed: false,
@@ -4416,7 +4387,7 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
 tasks.register('stageRelease') {
     group = 'publishing'
     description = 'Builds the verified Maven Central staging repository.'
-    dependsOn(version.toString() == '3.0.0-rc.4'
+    dependsOn(version.toString() == '3.0.0-rc.5'
             ? rcReadiness
             : tasks.named('releaseCheck'))
     dependsOn 'dependencyPreflight',
@@ -4431,7 +4402,7 @@ tasks.register('stageRelease') {
 }
 
 tasks.named('publishMavenJavaPublicationToStagingRepository') {
-    dependsOn(version.toString() == '3.0.0-rc.4'
+    dependsOn(version.toString() == '3.0.0-rc.5'
             ? rcReadiness
             : tasks.named('releaseCheck'))
     dependsOn 'dependencyPreflight'

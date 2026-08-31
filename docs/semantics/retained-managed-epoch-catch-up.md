@@ -1,15 +1,13 @@
 # Retained managed-epoch catch-up
 
-This page specifies the retained managed-epoch profile implemented by the
-`3.0.0-rc.6` Coordination source. The profile is staged, unpublished, and
-non-production. It is not part of the published `3.0.0-rc.4` Maven Central
-artifact and this page is not release evidence.
+This page specifies the retained managed-epoch profile implemented by
+Coordination `3.0.0-rc.5`. The profile is a bounded external-pilot surface and
+is not production-ready. The rc.5 release decision, rather than this semantic
+page, owns publication authority.
 
-The source profile consumes an invocation-owned immutable Maven stage of Blue
-Language/Contracts `3.1.0-rc.23`. That stage is the exact published
-`3.1.0-rc.22` baseline plus the additive managed-transition receipt surface
-needed here. Coordination does not use Maven Local, a sibling composite, or a
-mutable checkout at execution time.
+The release consumes published Blue Language/Contracts `3.1.0-rc.23`.
+Coordination does not use Maven Local, a sibling composite, or a mutable
+checkout at execution time.
 
 ## What is retained
 
@@ -358,7 +356,7 @@ made eligible.
 
 ## Audit surface
 
-The rc.6 source profile exposes these read-only SDK diagnostics through
+Rc.5 exposes these read-only SDK diagnostics through
 `AdvancedCoordination`:
 
 - `auditManagedOccurrence(sourceDocumentId, sourcePath)`;
@@ -380,12 +378,12 @@ commands.
 
 ## Explicit non-goals
 
-This source profile does not claim:
+This profile does not claim:
 
-- a published `3.0.0-rc.6` coordinate, stable API, production readiness, or
-  authority to publish the staged candidate;
-- Maven Local, composite substitution, a mutable sibling checkout, or remote
-  fallback for staged `blue.language` artifacts;
+- a stable API, production readiness, or authority beyond the bounded rc.5
+  release decision;
+- Maven Local, composite substitution, or a mutable sibling checkout as a
+  release dependency source;
 - re-execution of source INITIALIZE or source Timeline entries;
 - inference of a unique fork when a retained state is ambiguous;
 - collapsing repeated occurrences, event-only epochs, or equal event values;
@@ -395,28 +393,22 @@ This source profile does not claim:
 - changing Blue Language model/core/mapping, BlueId, BEX, or Repository
   semantics.
 
-## Build the rc.6 source profile
+## Build and verify rc.5
 
-Use a closed immutable Contracts Maven repository outside this source tree and
-pin its manifest on every invocation:
+Use the published-artifact lane for release verification:
 
 ```bash
 ./gradlew --no-daemon --no-build-cache clean releaseCheck \
   -PtestJavaVersion=17 \
-  -PblueDependencyMode=immutable-staged-contracts \
-  -PblueContractsVersion=3.1.0-rc.23 \
-  -PblueContractsRepository=/absolute/path/to/invocation-owned/contracts-repository \
-  -PblueContractsManifestSha256=sha256:<64-lowercase-hex>
+  -PblueDependencyMode=published-artifact
 ```
 
-The stage manifest must use `blue-staged-dependency-repository/1.0`, bind its
-exact source commit and artifacts, and pass the build's checksum validation.
 The command above is the required verification shape, not a statement that the
-gate has been run for a particular checkout. Do not publish or deploy an rc.6
-artifact without separate release authority.
+gate has been run for a particular checkout. Publication still requires the
+rc.5 release decision and the complete automated workflow.
 
 After the required gates actually pass on a clean committed source tree, an
-invocation may export the rc.6 JAR, POM, sources, Javadocs, checksums, and bound
+invocation may export a development JAR, POM, sources, Javadocs, checksums, and bound
 manifest to a different immutable Maven repository:
 
 ```bash

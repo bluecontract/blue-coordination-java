@@ -33,23 +33,23 @@ test('advances an RC after the current tag exists', () => {
 });
 
 test('reads the release bound by the current authority', () => {
-  assert.equal(authorityRelease('RC4_VERSION: 3.0.0-rc.4\n'), '3.0.0-rc.4');
+  assert.equal(authorityRelease('RC5_VERSION: 3.0.0-rc.5\n'), '3.0.0-rc.5');
   assert.throws(
     () => authorityRelease('# missing marker\n'),
-    /Release authority is missing RC4_VERSION/,
+    /Release authority is missing RC version/,
   );
 });
 
 test('rejects a prepared RC that differs from its authority', () => {
   assert.doesNotThrow(() => assertAuthorityRelease(
-    '3.0.0-rc.4',
-    'RC4_VERSION: 3.0.0-rc.4\n',
+    '3.0.0-rc.5',
+    'RC5_VERSION: 3.0.0-rc.5\n',
   ));
   assert.throws(
     () => assertAuthorityRelease(
-      '3.0.0-rc.5',
-      'RC4_VERSION: 3.0.0-rc.4\n',
+      '3.0.0-rc.6',
+      'RC5_VERSION: 3.0.0-rc.5\n',
     ),
-    /Prepared RC 3\.0\.0-rc\.5 does not match authorized release 3\.0\.0-rc\.4/,
+    /Prepared RC 3\.0\.0-rc\.6 does not match authorized release 3\.0\.0-rc\.5/,
   );
 });

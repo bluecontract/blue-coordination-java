@@ -1,12 +1,10 @@
 # Blue Coordination SDK developer guide
 
-This is the canonical application-development guide for the published
-`blue.coordination:blue-coordination-java:3.0.0-rc.4` artifact and the
-unpublished `3.0.0-rc.6` source profile. It starts with authored Blue documents
+This is the canonical application-development guide for
+`blue.coordination:blue-coordination-java:3.0.0-rc.5`. It starts with authored Blue documents
 and follows them through admission, exact Timeline processing, managed embedded
 documents, cycles, later operations, topology expansion, retained managed-epoch
-catch-up, results, and failure handling. Sections marked rc.6 do not describe
-the Maven Central rc.4 JAR.
+catch-up, results, and failure handling.
 
 Use the application-facing `blue.coordination.sdk` package. The older
 `blue.coordination.api.CoordinationEngine` surface is an advanced host and
@@ -24,17 +22,17 @@ acyclic semantics.
 - atomic publication of one connected affected closure; and
 - a compact, local runtime for development or a bounded external pilot.
 
-It is not a database or a production service host. Both candidate profiles are
-one JVM, in-memory, and sequential. A process crash loses their stores. Durable
+It is not a database or a production service host. The candidate is one JVM,
+in-memory, and sequential. A process crash loses its stores. Durable
 recovery, provider completeness, production authorization and tenant isolation,
 parallel/distributed scheduling, durable outbox recovery, and a stable latency
 SLA remain outside this candidate. The [Known limitations](../limitations.md)
-page owns the published rc.4 boundary; the retained-epoch semantic page lists
-the rc.6 source profile's explicit non-goals.
+page owns the rc.5 boundary; the retained-epoch semantic page lists its
+explicit non-goals.
 
 ## Install and own the runtime
 
-Use Java 17 or newer. For the published rc.4 artifact, resolve only from Maven
+Use Java 17 or newer. Resolve the rc.5 artifact only from Maven
 Central:
 
 ```groovy
@@ -43,34 +41,27 @@ repositories {
 }
 
 dependencies {
-    implementation 'blue.coordination:blue-coordination-java:3.0.0-rc.4'
+    implementation 'blue.coordination:blue-coordination-java:3.0.0-rc.5'
 }
 ```
 
-The retained managed-epoch work exists only in the `3.0.0-rc.6` source. That
-source is staged, unpublished, non-production, and has no Maven Central install
-coordinate. Build it against the invocation-owned immutable Language/Contracts
-`3.1.0-rc.23` stage (the published rc.22 baseline plus the additive transition
-receipt surface):
+Rc.5 includes retained managed-epoch behavior and consumes published
+Language/Contracts `3.1.0-rc.23`. Release builds use the default
+`published-artifact` lane:
 
 ```bash
 ./gradlew --no-daemon --no-build-cache clean releaseCheck \
   -PtestJavaVersion=17 \
-  -PblueDependencyMode=immutable-staged-contracts \
-  -PblueContractsVersion=3.1.0-rc.23 \
-  -PblueContractsRepository=/absolute/path/to/invocation-owned/contracts-repository \
-  -PblueContractsManifestSha256=sha256:<64-lowercase-hex>
+  -PblueDependencyMode=published-artifact
 ```
 
-The repository must be closed, immutable, outside the Coordination source tree,
-and authenticated by its exact manifest. Maven Local, composite substitution,
-a mutable sibling checkout, and remote fallback for `blue.language` are not
-valid rc.6 inputs. This command documents the required gate shape; it does not
-claim that a gate has run or authorize publication.
+Maven Local, composite substitution, and a mutable sibling checkout are not
+valid release inputs. This command documents the required gate shape; it does
+not claim that a gate has run or authorize publication.
 
 For a clean, verified, committed checkout, the
 [immutable Coordination handoff](../development/immutable-staged-coordination.md)
-exports the rc.6 JAR and metadata to a separate invocation-owned repository and
+can export a development JAR and metadata to a separate invocation-owned repository and
 runs its isolated staged consumer. That handoff remains unpublished evidence,
 not a Maven Central installation.
 
@@ -126,7 +117,7 @@ Three rules prevent most integration mistakes:
 | Logical operation and intended current document | existing admission | `operations().on(...)` |
 | Complete provider-authored Timeline Entry | existing admission | `events().exact(...)` |
 | New managed child created by an operation | existing admission plus `ManagedDocumentDraft` | `request.managed(...)` and `expectOccurrence(...)` |
-| Existing current or retained managed state installed by an operation (rc.6 source) | existing managed lineage and exact occurrence value | automatic exact matching; `selectManagedEpoch(...)` only for ambiguity |
+| Existing current or retained managed state installed by an operation | existing managed lineage and exact occurrence value | automatic exact matching; `selectManagedEpoch(...)` only for ambiguity |
 | Existing source history that must be replayed | top-level admission with an import policy | `importFullHistory()` or `importFromFrontier(...)` |
 
 If all managed members already exist, admit all of them in the initial closure.
@@ -597,9 +588,9 @@ private static void requireApplied(EntryResult result) {
 }
 ```
 
-Operation-produced draft admission in published rc.4 supports only a genuinely
+Operation-produced draft admission in rc.5 supports only a genuinely
 new `FROM_NOW` lineage. `draft.atEpoch(...)` and full-history, frontier,
-attach-current, or passive draft activation fail closed. The rc.6 retained
+attach-current, or passive draft activation fail closed. The retained
 profile does not weaken that draft rule; it adds a different path for an exact
 value already proven in managed lineage history. If a new group must already be
 cyclic at birth, include the complete group in the initial `ManagedClosure`;
@@ -631,14 +622,14 @@ requireApplied(blue.operations()
 This is reactivation of an already known lineage, not draft creation. Existing
 cycle detach and later re-add are supported and receive freshly authenticated
 cyclic identities. Same-invocation remove-then-re-add remains unsupported in
-the published rc.4 profile. In the rc.6 source profile, a later occurrence
+the draft profile. In rc.5, a later occurrence
 generation may be reattached or retargeted to another proven managed lineage;
 its catch-up plan and cursor remain distinct from the retired generation.
 Operational tooling can inspect target lineage, activation generation, and
 active status through
 `blue.advanced().auditManagedOccurrence(sourceId, path)`.
 
-### Attach an existing managed epoch (rc.6 source profile)
+### Attach an existing managed epoch
 
 Pass the exact existing state through the ordinary operation request. Do not
 construct a `ManagedDocumentDraft` and do not push a hand-built event list into
@@ -755,12 +746,12 @@ Choose temporal semantics explicitly:
 | Policy | Meaning | Top-level admission | Operation-created draft |
 | --- | --- | --- | --- |
 | `fromNow()` | Begin at admission/attachment; do not replay earlier entries. | supported | supported and required |
-| `importFullHistory()` | Start eligibility at the retained full-history frontier; a later drain processes eligible retained entries. | supported | unsupported in rc.4 |
-| `importFromFrontier(evidence)` | Start eligibility strictly after verified exact frontier evidence; a later drain processes eligible retained entries. | supported | unsupported in rc.4 |
+| `importFullHistory()` | Start eligibility at the retained full-history frontier; a later drain processes eligible retained entries. | supported | unsupported in rc.5 |
+| `importFromFrontier(evidence)` | Start eligibility strictly after verified exact frontier evidence; a later drain processes eligible retained entries. | supported | unsupported in rc.5 |
 | `attachCurrentState()` | Attach a lineage proven current through the cutoff. | rejected at current high-level admission boundary | unsupported |
 | `passiveSnapshot()` | Retain exact evidence without a live process. | rejected at current high-level admission boundary | unsupported |
 
-This table describes document/closure and new-draft admission policy. The rc.6
+This table describes document/closure and new-draft admission policy. The rc.5
 operation path for an existing exact managed state is position-based catch-up,
 not a new `ActivationPolicy` and not Timeline-history replay.
 
@@ -851,7 +842,7 @@ A suspended ordinary closure exposes all exact resources through
 when one closure needs several BlueIds; do not treat the first satisfied value
 as permission to publish a partial result.
 
-In the rc.6 source profile, `DrainResult.managedEpochApplications()` contains
+In rc.5, `DrainResult.managedEpochApplications()` contains
 the exact application receipts newly committed by that drain.
 `managedEpochApplicationAttempts()` also exposes non-committing atomic attempts
 and response-loss replays, with their exact work and Contracts attempt result.
@@ -867,7 +858,7 @@ Use:
 - `values().yaml(...)` for immutable exact request or entry values; and
 - `advanced()` only when explicit host diagnostics are required.
 
-During rc.6 retained catch-up, `snapshot()` continues to return the last READY
+During retained catch-up, `snapshot()` continues to return the last READY
 head. Use `advanced().auditDocument(id)` to inspect a newer committed head and
 `auditManagedDocumentReadiness(id)` to compare committed and ready epochs,
 status, waiting diagnostics, and active barrier identities. The remaining
@@ -910,7 +901,7 @@ entry. This is not an application-level idempotency key for a newly built
 targeted call: rebuilding `operations().on(...)` creates another Timeline Entry
 with another timestamp and can apply the business operation again.
 
-For rc.6 managed catch-up, one successful application transaction publishes the
+For rc.5 managed catch-up, one successful application transaction publishes the
 consumer revision, complete receipt, occurrence cursor, plan/barrier state, and
 `ManagedEpochApplicationReceipt` together. A non-committing processor result
 publishes none of them and leaves the same work retryable. Missing source epoch
@@ -978,7 +969,7 @@ For each workflow, test through `blue.coordination.sdk`:
 6. exact external entry success and terminal `NO_MATCH`;
 7. `submit()` state-before-drain and `execute()` parity where batching matters;
 8. dynamic draft success plus missing/extra/wrong-path rollback cases;
-9. for rc.6 retained attachment, authored-initial/epoch-zero/retained/current
+9. for retained attachment, authored-initial/epoch-zero/retained/current
    selection, repeated-BlueId selector ambiguity, plan/barrier progression,
    committed-versus-ready reads, live extension, and duplicate event
    occurrences;
@@ -1009,15 +1000,14 @@ The bundled in-memory runtime does not answer those production-host questions.
 
 ## Continue reading
 
-- [Public API reference](../reference/public-api.md) for the published rc.4 and
-  shared signatures/result vocabulary; the retained-epoch page lists the rc.6
-  additions.
+- [Public API reference](../reference/public-api.md) for rc.5 signatures and
+  result vocabulary.
 - [Managed Process Embedded documents](../semantics/process-embedded-documents.md)
   for lineage, occurrence, cycle, and publication semantics.
 - [Historical catch-up](../semantics/historical-catch-up.md) for frontier and
   replay rules.
 - [Retained managed-epoch catch-up](../semantics/retained-managed-epoch-catch-up.md)
-  for rc.6 operation-triggered source-epoch plans, receipts, and readiness.
+  for operation-triggered source-epoch plans, receipts, and readiness.
 - [Identity and revisions](../semantics/identity-and-revisions.md) for
   `DocumentId`, BlueId, epochs, and revision history.
 - [Failure and retry model](../operations/failure-model.md) for commit and
@@ -1026,7 +1016,7 @@ The bundled in-memory runtime does not answer those production-host questions.
   internal data flow without application-only details.
 - [SDK migration and ownership ledger](../reference/sdk-migration-and-ownership.md)
   when replacing a low-level or 2.x integration.
-- [Known limitations](../limitations.md) for the exact rc.4 non-claims.
+- [Known limitations](../limitations.md) for the exact rc.5 non-claims.
 
 The two principal walkthroughs in this guide are executable as the built-JAR-only
 [`SdkDeveloperGuideTest`](../../src/consumerTest/java/blue/coordination/consumer/SdkDeveloperGuideTest.java).

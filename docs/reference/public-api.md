@@ -5,14 +5,10 @@ The normal application boundary is `blue.coordination.sdk`.
 Contracts 1.0 environment pinned to the release manifest bundled in the JAR.
 Full signatures are in the generated Javadocs.
 
-This reference covers two explicitly different profiles. The Maven Central
-artifact is the published `3.0.0-rc.4` bounded external-pilot candidate. The
-repository version is the staged, unpublished, non-production
-`3.0.0-rc.6` source profile. Sections marked rc.6 describe source APIs that are
-not available from the rc.4 coordinate. The rc.6 source must be built against
-an invocation-owned immutable Blue Language/Contracts `3.1.0-rc.23` stage;
-that candidate starts at the exact published `3.1.0-rc.22` baseline and adds
-the managed-transition receipt surface.
+This reference covers the `3.0.0-rc.5` bounded external-pilot candidate. The
+artifact consumes the complete published Blue Language/Contracts
+`3.1.0-rc.23` graph and includes the retained managed-epoch and
+reference-transparent SDK surfaces described below.
 
 For a task-oriented walkthrough from authored documents through several
 Timelines and operation-created managed members, read the
@@ -293,7 +289,7 @@ one call can declare edges between drafts. All new heads and topology changes
 publish atomically with the parent result; a terminal failure leaves no partial
 expansion.
 
-The published rc.4 candidate and staged rc.6 source both restrict this draft
+The rc.5 candidate restricts this draft
 lane to new `FROM_NOW` lineages. Imported-state evidence created with
 `draft.atEpoch(...)` and historical, frontier, attach-current, or passive
 operation-result activation fail closed. The SDK never emulates this lane
@@ -307,9 +303,9 @@ an independently processable, non-cyclic operation target whose effective
 `Process Embedded` catalog does not cross a cyclic-set member. Either condition
 is rejected before append.
 
-## Existing managed-epoch attachment (rc.6 source only)
+## Existing managed-epoch attachment
 
-The staged rc.6 profile adds a distinct path for attaching an exact value
+Rc.5 adds a distinct path for attaching an exact value
 already proven in managed lineage history. Put the exact value in the ordinary
 request with `RequestBuilder.exact(...)`; do not construct a
 `ManagedDocumentDraft` and do not supply a reconstructed event list.
@@ -399,7 +395,7 @@ for intentional append batching or independent provider entries. Across
 Timelines, the environment's canonical source order wins; Java submission order
 is not a workflow scheduler.
 
-The staged rc.6 SDK also accepts
+The rc.5 SDK also accepts
 `processing().drain(new DrainBudget(maxCommittedProcessTransitions,
 maxSelectedEntries))`. The budget can pause only between selected entries or
 committed PROCESS transitions. It does not preempt one frozen PROCESS or
@@ -471,7 +467,7 @@ closed `ManagedResolutionStatus`; the diagnostic is operator text. This lets an
 `EntryResult` persist several unresolved BlueIds without interpreting an
 exception message or publishing a partial closure.
 
-In the staged rc.6 profile, `DrainResult.managedEpochApplications()` contains
+In rc.5, `DrainResult.managedEpochApplications()` contains
 only the `ManagedEpochApplicationReceipt` values newly committed by that drain.
 `managedEpochApplicationAttempts()` contains SDK-owned typed attempt evidence
 for committed, rolled-back, suspended, and reconciled work, including processor
@@ -504,7 +500,7 @@ DocumentId, epoch, BlueId, exact content, and public events. `history()` returns
 immutable application-safe revisions. Physical objects, topology generations,
 proofs, and storage layout are not part of the normal snapshot.
 
-For rc.6 catch-up, a graph-changing consumer revision may be committed before
+For retained catch-up, a graph-changing consumer revision may be committed before
 its historical suffix is READY. `snapshot()` and ordinary `document()` reads
 continue to return the last READY head. Advanced diagnostics can inspect the
 newer committed head, active barrier identities, waiting/blocked evidence, and
@@ -529,7 +525,7 @@ target `DocumentId`, positive activation generation, and active/inactive flag;
 it intentionally omits component snapshots, proof values, and mutable
 inventory internals.
 
-The staged rc.6 profile adds these read-only retained-epoch diagnostics:
+Rc.5 adds these read-only retained-epoch diagnostics:
 
 - `auditManagedEpoch(documentId, epoch)`,
   `auditManagedEpochs(documentId)`, and
@@ -575,17 +571,16 @@ policies are not permitted in normal SDK signatures.
 
 ## Dependency and package surface
 
-The published rc.4 POM exposes its exact Maven Central Contracts/Language
-`3.1.0-rc.22` and BEX `1.1.0-rc.4` graph where advanced API and processor
+The rc.5 POM exposes its exact Maven Central Contracts/Language
+`3.1.0-rc.23` and BEX `1.1.0-rc.4` graph where advanced API and processor
 signatures require those types. Repository `3.0.0-rc.21` and Bouncy Castle
 remain runtime implementation dependencies. Every coordinate is exact and
 dependency-locked.
 
-The staged rc.6 source instead resolves every `blue.language` artifact at
-`3.1.0-rc.23` exclusively from a manifest-pinned, invocation-owned immutable
-Maven repository outside this checkout. Maven Local, composite substitution,
-mutable checkout input, and remote fallback for that protected group are not
-permitted. This build lane is integration evidence, not a publication claim.
+The release build resolves every `blue.language` artifact at `3.1.0-rc.23`
+from Maven Central. Maven Local, composite substitution, and mutable checkout
+input are not permitted. A separate manifest-pinned immutable repository lane
+remains available for development candidates but is not release evidence.
 
 `blue.coordination.processor` is an advanced semantic-integration surface.
 `blue.coordination.internal` is not application API and may change between

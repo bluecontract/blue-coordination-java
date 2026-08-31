@@ -22,13 +22,13 @@ even when their current BlueIds are equal. Existing cycles belong in the same
 initial closure; callers provide finite member/path lineage evidence, never
 SCCs or cyclic proofs.
 
-The published rc.4 operation lane may add a genuinely new `FROM_NOW` lineage
+The rc.5 operation lane may add a genuinely new `FROM_NOW` lineage
 with one exact `ManagedDocumentDraft`, matching `request.managed(...)`
 evidence, and every effective `expectOccurrence(...)` path. Its operation
 target must be independently processable and non-cyclic, and its effective
 catalog cannot cross a cyclic-set member.
 
-The unpublished rc.6 source profile also accepts an exact value belonging to
+Rc.5 also accepts an exact value belonging to
 an existing managed lineage. The indexed resolver distinguishes current,
 authored-initial, initialized epoch-zero, and retained-epoch states. A current
 match activates immediately. A historical match opens an occurrence-specific
@@ -88,10 +88,10 @@ fit directly; a containing document is not the durability owner of an embedded
 document.
 
 Activation policy is admission metadata, not another field on the canonical
-`Process Embedded` contract. At the published rc.4 SDK boundary, top-level
+`Process Embedded` contract. At the rc.5 SDK boundary, top-level
 document/closure admission supports `FROM_NOW`, full-history, and exact-frontier
 policies, while an operation-created occurrence supports only a new `FROM_NOW`
-lineage. In the rc.6 source profile, an operation may instead install an exact
+lineage. In rc.5, an operation may instead install an exact
 existing managed state; its position in retained lineage history, rather than a
 new activation-policy value, determines the suffix. Attach-current and
 passive-snapshot remain vocabulary for broader host/temporal profiles and are
@@ -105,7 +105,7 @@ successor has fresh Contracts-derived occurrence and binding identities and is
 output-only for the removing invocation. A later invocation may reactivate the
 committed successor with the retained lineage's current exact state without
 another generation or occurrence-identity change. Same-invocation
-remove-then-re-add remains unsupported in the published rc.4 profile. The rc.6
+remove-then-re-add remains unsupported in the rc.5 draft profile. The retained
 source profile may reattach or retarget a later occurrence generation to exact
 current or historical evidence; each generation owns a distinct plan and
 cursor. Ambiguous history requires the typed occurrence-specific selector and
@@ -120,5 +120,5 @@ with `EmbeddingBinding`, per-occurrence `EmbeddedEpochCursor` values, and a
 private parent/path `EmbeddedEpochInput`. It commits a child and its parents as
 separate document-local transitions and rejects cycles. Those mechanisms remain
 available for compatibility, but they are not the Contracts 1.0 processing or
-publication model described above and are not the rc.6 retained managed-epoch
+publication model described above and are not the retained managed-epoch
 plan/barrier model.
