@@ -233,6 +233,10 @@ final class ManagedEpochInvocationCapturer {
                         occurrences,
                         publication.componentStates(),
                         publicRoots);
+        // One invocation must expose one deterministic wire representation
+        // for each exact BlueId, including a same-state historical source.
+        Node invocationSourceAfter = providerBackedInvocationDocument(
+                sourceReceipt.afterDocument(), lineageIndex);
         ManagedRevisionCause cause = sourceTransition == null
                 ? ClosureEvidenceFactory.managedRevisionCause(
                         work.targetOccurrenceIdentity(),
@@ -246,14 +250,14 @@ final class ManagedEpochInvocationCapturer {
                                                 + "epoch requires before "
                                                 + "state")),
                         sourceReceipt.afterBlueId(),
-                        sourceReceipt.afterDocument().copyNode(),
+                        invocationSourceAfter,
                         sourceReceipt.originalCauseIdentity(),
                         afterCyclicProof)
                 : ClosureEvidenceFactory.managedRevisionCause(
                         work.targetOccurrenceIdentity(),
                         fromEpoch,
                         work.sourceEpoch(),
-                        sourceReceipt.afterDocument().copyNode(),
+                        invocationSourceAfter,
                         sourceTransition,
                         afterCyclicProof);
         ClosureInvocationInput input = ClosureEvidenceFactory.processClosure(

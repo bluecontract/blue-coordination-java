@@ -4298,6 +4298,7 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
                 'src/test/java/blue/coordination/internal/ManagedEpochApplicationAtomicRollbackTest.java',
                 'src/test/java/blue/coordination/internal/ManagedEpochApplicationResponseLossTest.java',
                 'src/test/java/blue/coordination/internal/ManagedEpochIndirectComponentRebindTest.java',
+                'src/test/java/blue/coordination/internal/ManagedSameStateEpochPublicationTest.java',
                 'src/test/java/blue/coordination/internal/RepositoryExactNodeProviderLocalityTest.java',
                 'src/test/java/blue/coordination/internal/VerifiedApplicationCyclicProviderTest.java',
                 'src/test/java/blue/coordination/sdk/SdkManagedEpochCycleAcceptanceTest.java',

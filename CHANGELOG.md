@@ -44,6 +44,9 @@ the new 3.x API before the first stable 3.0.0 release.
 - Managed application attempts now distinguish a complete committing Contracts
   result that failed at Coordination publication from processor rollback or
   suspension, and expose that evidence through both public API layers.
+- Retained source receipts now use the same verified invocation-local provider
+  representation as current closure snapshots, including eventless epochs
+  whose exact BlueId is unchanged.
 
 ### Known limitations
 
