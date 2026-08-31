@@ -565,12 +565,13 @@ def publicBoundarySources = files(
 // verified checkpoint-settlement projection, exact execution-policy surface,
 // transitive managed catch-up readiness helper, and the backward-compatible
 // exact-node evidence transport and committed-current evidence bridge:
-// currently 221 production sources, 65,793
+// retained-source provider-shell normalization: currently 221 production
+// sources, 65,797
 // lines and 81 public api+sdk source types. These are not
 // historical Round 13 counts and are not performance evidence.
 def currentProductionShapeLimits = [
         classes: 221,
-        lines: 65_793L,
+        lines: 65_797L,
         publicApiTypes: 81,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]
@@ -4302,6 +4303,7 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
                 'src/test/java/blue/coordination/internal/RepositoryExactNodeProviderLocalityTest.java',
                 'src/test/java/blue/coordination/internal/VerifiedApplicationCyclicProviderTest.java',
                 'src/test/java/blue/coordination/sdk/SdkManagedEpochCycleAcceptanceTest.java',
+                'src/test/java/blue/coordination/sdk/SdkNestedExistingSourceEpochTest.java',
                 'src/test/java/blue/coordination/sdk/SdkPendingNestedSourceReadinessTest.java',
                 'src/test/java/blue/coordination/sdk/SdkReferenceTransparentExecutionTest.java',
                 'src/test/java/blue/coordination/sdk/SdkRetainedManagedEpochCatchUpTest.java'

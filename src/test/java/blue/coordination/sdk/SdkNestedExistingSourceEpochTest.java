@@ -5,6 +5,10 @@ import blue.coordination.api.DocumentId;
 import blue.coordination.api.ManagedCatchUpStatus;
 import blue.coordination.api.ManagedOccurrenceCatchUpPlan;
 import blue.coordination.internal.CoordinationTestControl;
+import blue.coordination.internal.DefaultCoordinationEngine;
+import blue.coordination.internal.ManagedSameStateEpochPublicationTest;
+import blue.language.model.Node;
+import blue.language.model.NodePathEditor;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -219,8 +223,137 @@ final class SdkNestedExistingSourceEpochTest {
         }
     }
 
+    @Test
+    void sameStateNestedSourceReplayReadsThroughHistoricalChildReference() {
+        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            // given
+            CoordinationTestControl control = CoordinationTestControl.attach(
+                    blue.advanced().rawEngine());
+            TimelineHandle timeline = blue.timelines().register(
+                    TIMELINE, "alice");
+            DocumentHandle c = admit(blue, C);
+            ExactBlueValue cZero = c.history().get(0).after();
+            assertEquals(0L, ((Number) cZero.scalarAt("/counter"))
+                    .longValue());
+            applied(increment(blue, c, timeline).execute());
+            applied(increment(blue, c, timeline).execute());
+            assertEquals(2L, c.snapshot().longAt("/counter"));
+
+            DocumentHandle b = admit(blue, B);
+            ExactBlueValue bZero = b.history().get(0).after();
+            applied(increment(blue, b, timeline).execute());
+            applied(increment(blue, b, timeline).execute());
+            EntryHandle attachC = attach(
+                    blue, b, timeline, cZero).submit();
+            DrainResult introduced = blue.processing().drainJournal(
+                    new DrainBudget(1L, 1L));
+            applied(introduced.entry(attachC));
+            ManagedEpochReceipt bThree = blue.advanced()
+                    .auditManagedEpoch(B, 3L).orElseThrow();
+            assertEquals(cZero.blueId(), bThree.afterDocument()
+                    .valueAt("/child").blueId());
+            drainToReady(blue, B, new ArrayList<>());
+            assertEquals(5L, b.snapshot().epoch());
+
+            String beforeAnnouncementBlueId = b.snapshot().blueId();
+            appendSyntheticEventOnlyEpoch(blue, B);
+            ManagedEpochReceipt bSix = blue.advanced()
+                    .auditManagedEpoch(B, 6L).orElseThrow();
+            assertEquals(beforeAnnouncementBlueId,
+                    bSix.beforeBlueId().orElseThrow());
+            assertEquals(beforeAnnouncementBlueId, bSix.afterBlueId());
+            assertEquals(1, bSix.emittedEvents().size());
+            assertEquals("CatchUp/Source Event",
+                    bSix.emittedEvents().get(0).exactEvent()
+                            .scalarAt("/kind"));
+
+            List<String> bHistory = historyBlueIds(b);
+            List<String> bReceipts = receiptIdentities(blue, B);
+            String bHead = b.snapshot().blueId();
+            List<String> cHistory = historyBlueIds(c);
+            List<String> cReceipts = receiptIdentities(blue, C);
+            String cHead = c.snapshot().blueId();
+
+            DocumentHandle a = admit(blue, A, nestedReaderYaml(A));
+            EntryHandle attachB = attach(
+                    blue, a, timeline, bZero).submit();
+            DrainResult attached = blue.processing().drainJournal(
+                    new DrainBudget(1L, 1L));
+            applied(attached.entry(attachB));
+            List<ManagedOccurrenceCatchUpPlan> plans = blue.advanced()
+                    .auditManagedCatchUpPlans(A);
+            assertEquals(1, plans.size());
+            ManagedOccurrenceCatchUpPlan plan = plans.get(0);
+            assertEquals(B, plan.sourceDocumentId());
+            assertEquals(0L, plan.admittedSourceEpoch());
+            assertEquals(6L, plan.requiredThroughSourceEpoch());
+            assertEquals(B, blue.advanced()
+                    .auditManagedOccurrence(A, "/child")
+                    .orElseThrow().targetDocumentId());
+            List<Long> appliedEpochs = new ArrayList<>();
+
+            // when
+            drainToReady(blue, A, appliedEpochs);
+
+            // then
+            assertEquals(List.of(1L, 2L, 3L, 4L, 5L, 6L),
+                    appliedEpochs);
+            assertEquals(2L, a.snapshot().longAt(
+                    "/observedNestedCounter"));
+            assertEquals(1L, a.snapshot().longAt("/nestedReadCount"));
+            ManagedOccurrenceCatchUpPlan completed = blue.advanced()
+                    .auditManagedCatchUpPlans(A).get(0);
+            assertEquals(plan.planIdentity(), completed.planIdentity());
+            assertEquals(ManagedCatchUpStatus.COMPLETE, completed.status());
+            assertEquals(7L, completed.nextSourceEpoch());
+            assertEquals(6L, completed.requiredThroughSourceEpoch());
+            assertEquals(1, blue.advanced()
+                    .auditManagedCatchUpPlans(A).size(),
+                    "A must own only its direct A-to-B plan");
+            assertFalse(blue.advanced().auditManagedCatchUpPlans(A).stream()
+                    .anyMatch(candidate -> candidate.sourceDocumentId()
+                            .equals(C)),
+                    "A must not acquire a transitive A-to-C plan");
+            assertCompactReference(a, "/child", bHead);
+            assertCompactReference(b, "/child", cHead);
+            assertSourceUnchanged(
+                    blue, b, B, bHistory, bReceipts, bHead);
+            assertSourceUnchanged(
+                    blue, c, C, cHistory, cReceipts, cHead);
+
+            long aEpoch = a.snapshot().epoch();
+            String aHead = a.snapshot().blueId();
+            control.restartFromStores();
+            assertEquals(aEpoch, a.snapshot().epoch());
+            assertEquals(aHead, a.snapshot().blueId());
+            assertEquals(2L, a.snapshot().longAt(
+                    "/observedNestedCounter"));
+            assertEquals(1L, a.snapshot().longAt("/nestedReadCount"));
+            ManagedOccurrenceCatchUpPlan restarted = blue.advanced()
+                    .auditManagedCatchUpPlans(A).get(0);
+            assertEquals(completed.planIdentity(), restarted.planIdentity());
+            assertEquals(completed.status(), restarted.status());
+            assertEquals(completed.nextSourceEpoch(),
+                    restarted.nextSourceEpoch());
+            assertCompactReference(a, "/child", bHead);
+            assertCompactReference(b, "/child", cHead);
+            assertSourceUnchanged(
+                    blue, b, B, bHistory, bReceipts, bHead);
+            assertSourceUnchanged(
+                    blue, c, C, cHistory, cReceipts, cHead);
+        }
+    }
+
     private static DocumentHandle admit(BlueCoordination blue, DocumentId id) {
-        return blue.documents().admit(ManagedDocument.yaml(id, yaml(id)).publicRoot().fromNow());
+        return admit(blue, id, yaml(id));
+    }
+
+    private static DocumentHandle admit(
+            BlueCoordination blue,
+            DocumentId id,
+            String source) {
+        return blue.documents().admit(
+                ManagedDocument.yaml(id, source).publicRoot().fromNow());
     }
 
     private static OperationCall increment(BlueCoordination blue, DocumentHandle document, TimelineHandle timeline) {
@@ -242,6 +375,36 @@ final class SdkNestedExistingSourceEpochTest {
         return blue.advanced().auditManagedEpochs(id).stream().map(ManagedEpochReceipt::receiptIdentity).toList();
     }
 
+    private static List<String> historyBlueIds(DocumentHandle document) {
+        return document.history().stream()
+                .map(revision -> revision.after().blueId())
+                .toList();
+    }
+
+    private static void assertCompactReference(
+            DocumentHandle document,
+            String path,
+            String expectedBlueId) {
+        Node reference = NodePathEditor.getOrNull(
+                document.snapshot().exact().copyNode(), path);
+        assertTrue(reference != null && reference.isReferenceOnly(),
+                "Expected compact managed reference at " + path);
+        assertEquals(expectedBlueId, reference.getBlueId());
+    }
+
+    private static void assertSourceUnchanged(
+            BlueCoordination blue,
+            DocumentHandle document,
+            DocumentId documentId,
+            List<String> expectedHistory,
+            List<String> expectedReceipts,
+            String expectedHead) {
+        assertEquals(expectedHistory, historyBlueIds(document));
+        assertEquals(expectedReceipts,
+                receiptIdentities(blue, documentId));
+        assertEquals(expectedHead, document.snapshot().blueId());
+    }
+
     private static void drainToReady(BlueCoordination blue, DocumentId id, List<Long> epochs) {
         for (int step = 0; step < 16 && !blue.advanced().auditManagedDocumentReadiness(id).orElseThrow().ready(); step++) {
             var work = blue.advanced().auditNextProcessingSelection().managedEpochApplicationWork().orElseThrow();
@@ -253,14 +416,61 @@ final class SdkNestedExistingSourceEpochTest {
     }
 
     private static String yaml(DocumentId id) {
+        return yaml(id, "", "");
+    }
+
+    private static String nestedReaderYaml(DocumentId id) {
+        return yaml(id, """
+                observedNestedCounter: -1
+                nestedReadCount: 0
+                """, """
+                  fromNestedSnapshot:
+                    type: Embedded Node Channel
+                    sourcePath: /child
+                    event:
+                      type: Coordination/Event
+                      kind: CatchUp/Source Event
+                  readNestedSnapshot:
+                    type: Coordination/Sequential Workflow
+                    channel: fromNestedSnapshot
+                    event:
+                      type: Coordination/Event
+                      kind: CatchUp/Source Event
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: replace
+                              path: /observedNestedCounter
+                              val: {$document: /child/child/counter}
+                          - $appendChange:
+                              op: replace
+                              path: /nestedReadCount
+                              val: {$add: [{$document: /nestedReadCount}, 1]}
+                          - $return: true
+                """);
+    }
+
+    private static void appendSyntheticEventOnlyEpoch(
+            BlueCoordination blue,
+            DocumentId documentId) {
+        ManagedSameStateEpochPublicationTest.appendSyntheticEventOnlyEpoch(
+                (DefaultCoordinationEngine) blue.advanced().rawEngine(),
+                documentId);
+    }
+
+    private static String yaml(
+            DocumentId id,
+            String additionalRootFields,
+            String additionalContracts) {
         return """
                 documentId: %s
                 counter: 0
-                contracts:
+                %scontracts:
                   embedded:
                     type: Process Embedded
                     paths: [/child]
-                  ownerChannel:
+                %s  ownerChannel:
                     type: Coordination/Timeline Channel
                     timeline:
                       type: MyOS/MyOS Timeline
@@ -293,6 +503,10 @@ final class SdkNestedExistingSourceEpochTest {
                               path: /child
                               val: {$binding: event/message/request/embeddedContract}
                           - $return: true
-                """.formatted(id.value(), TIMELINE);
+                """.formatted(
+                        id.value(),
+                        additionalRootFields,
+                        additionalContracts,
+                        TIMELINE);
     }
 }

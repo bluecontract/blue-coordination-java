@@ -43,7 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Same-state source and consumer epoch regressions at the Contracts boundary. */
-final class ManagedSameStateEpochPublicationTest {
+public final class ManagedSameStateEpochPublicationTest {
     private static final String ACTOR = "alice";
     private static final DocumentId SOURCE = DocumentId.of(
             "same-state-managed-source");
@@ -660,7 +660,7 @@ final class ManagedSameStateEpochPublicationTest {
         }
     }
 
-    private static void appendSyntheticEventOnlyEpoch(
+    public static void appendSyntheticEventOnlyEpoch(
             DefaultCoordinationEngine engine,
             DocumentId documentId) {
         InMemoryDocumentStore store = engine.documents();
