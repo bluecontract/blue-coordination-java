@@ -89,6 +89,9 @@ jobs:
       - name: Verify release-version selection
         run: node --test .github/scripts/prepare-rc-release.test.js
 
+      - name: Prepare RC version for verification
+        run: node .github/scripts/prepare-rc-release.js
+
       - name: Verify published dependency availability
         run: >-
           ./gradlew --no-daemon dependencyPreflight
