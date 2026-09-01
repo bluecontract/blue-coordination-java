@@ -57,9 +57,29 @@ final class ComponentStateInventory {
     }
 
     ComponentSnapshot forDocument(DocumentId documentId) {
-        String lineage = lineageByDocument.get(Objects.requireNonNull(
-                documentId, "documentId"));
-        return lineage == null ? null : byLineage.get(lineage);
+        return forDocumentRead(documentId).component();
+    }
+
+    /** Opens one exact document-to-lineage row and its component proof row. */
+    ComponentStateRead forDocumentRead(DocumentId documentId) {
+        PersistentOrderedMap.ReadResult<String> lineageRead = lineageByDocument
+                .read(Objects.requireNonNull(documentId, "documentId"));
+        if (!lineageRead.found()) {
+            return new ComponentStateRead(
+                    null, lineageRead.comparisons(), 0, 0);
+        }
+        PersistentOrderedMap.ReadResult<ComponentSnapshot> stateRead =
+                byLineage.read(lineageRead.value());
+        if (!stateRead.found()) {
+            throw new IllegalStateException(
+                    "Component document index points to a missing lineage");
+        }
+        return new ComponentStateRead(
+                stateRead.value(),
+                Math.addExact(
+                        lineageRead.comparisons(), stateRead.comparisons()),
+                1,
+                0);
     }
 
     ComponentStateInventory replaceAffected(
@@ -144,6 +164,24 @@ final class ComponentStateInventory {
         DocumentId key = Objects.requireNonNull(document, "document");
         ComponentSnapshot current = forDocument(key);
         return current != null && current == selected.forDocument(key);
+    }
+
+    record ComponentStateRead(
+            ComponentSnapshot component,
+            int indexComparisons,
+            int componentRowsRead,
+            int unrelatedDocumentReads) {
+        ComponentStateRead {
+            if (indexComparisons < 0 || componentRowsRead < 0
+                    || unrelatedDocumentReads < 0) {
+                throw new IllegalArgumentException(
+                        "Component-state read counters must be non-negative");
+            }
+        }
+
+        boolean found() {
+            return component != null;
+        }
     }
 
     private ComponentStateInventory add(ComponentSnapshot component) {

@@ -14,6 +14,12 @@ public final class DrainResult {
     private final boolean quiescent;
     private final boolean paused;
     private final Diagnostic diagnostic;
+    private final List<ManagedEpochApplicationReceipt>
+            managedEpochApplications;
+    private final List<ManagedEpochApplicationAttempt>
+            managedEpochApplicationAttempts;
+    private final List<ManagedEpochEvidenceFailure>
+            managedEpochEvidenceFailures;
 
     /** Creates a complete drain result in canonical entry order. */
     public DrainResult(
@@ -22,6 +28,58 @@ public final class DrainResult {
             boolean quiescent,
             boolean paused,
             Diagnostic diagnostic) {
+        this(entries, stats, quiescent, paused, diagnostic, List.of(),
+                List.of());
+    }
+
+    /** Creates a drain result with typed retained catch-up evidence. */
+    public DrainResult(
+            List<EntryResult> entries,
+            ProcessingStats stats,
+            boolean quiescent,
+            boolean paused,
+            Diagnostic diagnostic,
+            List<ManagedEpochApplicationReceipt>
+                    managedEpochApplications) {
+        this(entries, stats, quiescent, paused, diagnostic,
+                managedEpochApplications, List.of());
+    }
+
+    /** Creates a drain result with committed and attempted catch-up evidence. */
+    public DrainResult(
+            List<EntryResult> entries,
+            ProcessingStats stats,
+            boolean quiescent,
+            boolean paused,
+            Diagnostic diagnostic,
+            List<ManagedEpochApplicationReceipt>
+                    managedEpochApplications,
+            List<ManagedEpochApplicationAttempt>
+                    managedEpochApplicationAttempts) {
+        this(
+                entries,
+                stats,
+                quiescent,
+                paused,
+                diagnostic,
+                managedEpochApplications,
+                managedEpochApplicationAttempts,
+                List.of());
+    }
+
+    /** Creates a result including typed pre-PROCESS source-evidence failures. */
+    public DrainResult(
+            List<EntryResult> entries,
+            ProcessingStats stats,
+            boolean quiescent,
+            boolean paused,
+            Diagnostic diagnostic,
+            List<ManagedEpochApplicationReceipt>
+                    managedEpochApplications,
+            List<ManagedEpochApplicationAttempt>
+                    managedEpochApplicationAttempts,
+            List<ManagedEpochEvidenceFailure>
+                    managedEpochEvidenceFailures) {
         this.entries = List.copyOf(Objects.requireNonNull(entries, "entries"));
         Map<EntryHandle, EntryResult> indexed = new LinkedHashMap<>();
         for (EntryResult result : this.entries) {
@@ -39,6 +97,16 @@ public final class DrainResult {
         this.quiescent = quiescent;
         this.paused = paused;
         this.diagnostic = Objects.requireNonNull(diagnostic, "diagnostic");
+        this.managedEpochApplications = List.copyOf(Objects.requireNonNull(
+                managedEpochApplications, "managedEpochApplications"));
+        this.managedEpochApplicationAttempts = List.copyOf(
+                Objects.requireNonNull(
+                        managedEpochApplicationAttempts,
+                        "managedEpochApplicationAttempts"));
+        this.managedEpochEvidenceFailures = List.copyOf(
+                Objects.requireNonNull(
+                        managedEpochEvidenceFailures,
+                        "managedEpochEvidenceFailures"));
         if (quiescent && paused) {
             throw new IllegalArgumentException(
                     "A drain cannot be quiescent and paused");
@@ -90,5 +158,21 @@ public final class DrainResult {
     /** Drain-wide precise diagnostic, or {@link Diagnostic#none()}. */
     public Diagnostic diagnostic() {
         return diagnostic;
+    }
+
+    /** Exact occurrence-specific managed epochs committed in this drain. */
+    public List<ManagedEpochApplicationReceipt> managedEpochApplications() {
+        return managedEpochApplications;
+    }
+
+    /** Exact managed processor attempts, including atomic rollbacks. */
+    public List<ManagedEpochApplicationAttempt>
+            managedEpochApplicationAttempts() {
+        return managedEpochApplicationAttempts;
+    }
+
+    /** Exact immutable-evidence failures selected before Contracts PROCESS. */
+    public List<ManagedEpochEvidenceFailure> managedEpochEvidenceFailures() {
+        return managedEpochEvidenceFailures;
     }
 }

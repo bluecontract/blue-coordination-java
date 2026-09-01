@@ -8,28 +8,24 @@ Java 21.
 
 ## Dependency graph
 
-The normal default is `blueDependencyMode=published-artifact`; the property may
-be omitted. Dynamic Contracts evidence uses the separate explicit
-`immutable-staged-contracts` lane. Sibling composite builds, Maven Local,
-unverified file repositories, and remote fallback for `blue.language` are
-rejected in both lanes.
+`blueDependencyMode=published-artifact` is the rc.5 build and release default.
+It resolves exact Maven Central artifacts and rejects sibling composites,
+Maven Local, flat/unverified repositories, and mutable checkout substitution.
 
-| Modules | Version |
+| Modules | Rc.5 release lane |
 | --- | --- |
-| `blue.language:*` | `3.1.0-rc.22` |
-| `blue.bex:blue-bex-core`, `blue-bex-contracts` | `1.1.0-rc.4` |
-| `blue.repo:blue-repo-java` | `3.0.0-rc.21` |
+| `blue.language:*` | Maven Central `3.1.0-rc.23` |
+| `blue.bex:blue-bex-core`, `blue-bex-contracts` | Maven Central `1.1.0-rc.4` |
+| `blue.repo:blue-repo-java` | Maven Central `3.0.0-rc.21` |
 
-Repository rc.21 advertises `blue-language-java:3.1.0-rc.20`. The project
-excludes that one stale transitive edge and directly owns Language rc.22. The
-same exclusion is published in the Coordination POM. The exact graph is locked
-in `gradle/published-artifact.lockfile`.
+Repository rc.21 advertises `blue-language-java:3.1.0-rc.20`. Coordination
+excludes that stale transitive edge, directly owns Language rc.23, records the
+same exclusion in its published POM, and locks the exact graph in
+`gradle/published-artifact.lockfile`.
 
-The retained `immutable-staged-contracts` evidence lane remains bound to
-Language `3.1.0-rc.21` and uses its own
-`gradle/immutable-staged-contracts.lockfile`. It preserves the exact staged
-repository recorded by the dynamic-evolution handoff; it is not the public
-rc.4 dependency graph.
+The `immutable-staged-contracts` and `immutable-development-contracts` lanes
+remain available only for non-published upstream handoffs. They are not
+release evidence once rc.23 is published.
 
 The staged lane accepts only the non-overwriting repository exported by the
 Contracts release gate. Its absolute path and exact manifest identity are both
@@ -38,6 +34,7 @@ required:
 ```bash
 ./gradlew --no-daemon verifyActiveDependencyLane dependencyPreflight \
   -PblueDependencyMode=immutable-staged-contracts \
+  -PblueContractsVersion=3.1.0-rc.23 \
   -PblueContractsRepository=/absolute/path/to/contracts-maven-repository \
   -PblueContractsManifestSha256=sha256:<64-lowercase-hex>
 ```
@@ -46,33 +43,39 @@ required:
 `blue-staged-dependency-repository/1.0` and bind the exact source commit,
 Contracts specification, fixture package, release identity, seven
 `blue.language` modules, all artifact bytes, and every checksum companion. The
-manifest SHA-256 property is the invocation pin. The repository must be outside
-this source tree. It is read-only input: this build never invokes the Contracts
-build or copies its source.
+manifest SHA-256 property is the invocation pin. The non-overwriting repository
+must be created for this invocation, outside this source tree, and treated as
+read-only input. This build never invokes the Contracts build, reads a live
+Contracts checkout, or copies its source.
 
 In staged mode, Gradle uses repository-exclusive content routing for the
 `blue.language` group. Maven Central remains available only for BEX, Repository,
 Gradle plugins, and third-party dependencies. There is no fallback if a staged
 Language artifact is absent or different.
 
-Verify fresh remote availability and the conflict-free graph with:
+For rc.5, verify fresh remote availability and the
+conflict-free Maven Central graph with:
 
 ```bash
 ./gradlew --no-daemon dependencyPreflight --refresh-dependencies
 ./gradlew --no-daemon verifyPublishedDependencyIsolation
 ```
 
+For a non-published development handoff, use the manifest-pinned command above;
+do not reuse a warmed dependency cache as substitute evidence.
+
 ## Verification
 
-The complete local release gate is:
+Rc.5 uses the Maven-Central-only release gate:
 
 ```bash
 ./gradlew --no-daemon --no-build-cache clean releaseCheck \
   -PtestJavaVersion=17
 ```
 
-Repeat with `-PtestJavaVersion=21` before release. The suites remain separate
-because each protects a different boundary:
+Repeat the command with `-PtestJavaVersion=21`. Passing these gates is required
+evidence, but does not itself publish rc.5 or make it production-ready.
+The suites remain separate because each protects a different boundary:
 
 | Task | Boundary | Execution policy |
 | --- | --- | --- |
@@ -81,14 +84,15 @@ because each protects a different boundary:
 | `consumerTest` | Compilation and execution against the built production JAR | `check` and `releaseCheck` |
 | `scenarioTest` | Slow complete-lifecycle, convergence, and scale scenarios | `releaseCheck` |
 
-Run the standard development gate with:
+The standard development gate is:
 
 ```bash
 ./gradlew --no-daemon check
 ```
 
-It deliberately omits the slow scenario lane. `releaseCheck` always adds that
-lane, so a release never relies only on the shorter development gate.
+The development gate deliberately omits the slow scenario lane.
+`releaseCheck` always adds that lane, so release evidence never relies only on
+the shorter gate.
 
 `consumerTest` is intentionally small and must remain separate: its compile
 classpath contains the built JAR and excludes compiled main-source output and
@@ -111,17 +115,19 @@ isolation, source-archive hygiene, and an extracted source-archive build.
 
 ## RC readiness
 
-For the current bounded external-pilot candidate, run:
+`verifyRcReadiness` is the rc.5 release-readiness gate:
 
 ```bash
 ./gradlew --no-daemon --no-build-cache verifyRcReadiness \
   -PtestJavaVersion=17
 ```
 
-This task includes `releaseCheck` and `dependencyPreflight`, validates the
-rc.4 release authority and explicit non-claims, then records the freshly built
-artifact hashes in
-`build/reports/release/3.0.0-rc.4-readiness.json`.
+The task includes `releaseCheck` and `dependencyPreflight`, validates the rc.5
+release authority and explicit non-claims, then records the
+fresh artifact hashes in
+`build/reports/release/3.0.0-rc.5-readiness.json`. It validates version
+`3.0.0-rc.5`, the published-artifact lane, and the focused rc.5 capability
+inventory in addition to the complete current suite.
 
 The source distribution and checksum can be built independently with:
 
@@ -131,12 +137,45 @@ The source distribution and checksum can be built independently with:
 ```
 
 The extracted archive resolves the same Maven Central graph and never reaches
-an adjacent checkout.
+an adjacent checkout or Maven Local.
+
+For a downstream development handoff after the rc.5 gates pass on a clean
+committed source tree, export a separate
+invocation-owned immutable Coordination repository with:
+
+```bash
+./gradlew --no-daemon dynamicEvolutionCoordinationHandoff \
+  -PblueDependencyMode=immutable-staged-contracts \
+  -PblueContractsVersion=3.1.0-rc.23 \
+  -PblueContractsRepository=/absolute/path/to/invocation-owned/contracts-repository \
+  -PblueContractsManifestSha256=sha256:<64-lowercase-hex> \
+  -PcoordinationSourceCommit=<exact-clean-coordination-head> \
+  -PcoordinationStagedRepository=/absolute/path/to/invocation-owned/coordination-repository
+```
+
+The target is non-overwriting and outside the source tree. The handoff binds
+the clean source commit, resolved dependency identities, artifact bytes, and
+the upstream Contracts manifest, then runs an isolated staged consumer. See
+[Immutable Coordination handoff](immutable-staged-coordination.md). It is a
+downstream integration stage, not a Maven Central publication.
+
+The staged consumer is a mandatory two-runtime gate. The aggregate
+`stagedCoordinationConsumer` task runs
+`stagedCoordinationConsumerJava17` and
+`stagedCoordinationConsumerJava21`; both compile consumer sources with
+`--release 17`, launch tests on the requested Java runtime, and assert the
+actual runtime feature version. Before either lane runs, stale lane and
+aggregate receipts are deleted. Successful lanes write
+`build/reports/dynamic-evolution/staged-consumer-java17.json` and
+`staged-consumer-java21.json`; the aggregate writes
+`build/reports/dynamic-evolution/staged-consumers.json`. A handoff is not
+accepted if either runtime lane or its fresh receipt is missing.
 
 ## Focused development
 
-Use focused Gradle test filters while iterating, but finish with
-`releaseCheck`. Tests compiled against the built JAR must not import
+Use focused Gradle test filters while iterating, always with the active lane's
+required properties, but finish with `releaseCheck`. Tests compiled against the
+built JAR must not import
 `blue.coordination.internal`, processor implementations, integration
 fixtures, Language, or BEX types.
 
@@ -145,4 +184,4 @@ is not read by the build and is not release evidence.
 
 See [Test strategy](test-strategy.md),
 [Releasing](releasing.md), and the
-[3.0.0-rc.4 decision](../releases/3.0.0-rc.4.md).
+[3.0.0-rc.5 decision](../releases/3.0.0-rc.5.md).

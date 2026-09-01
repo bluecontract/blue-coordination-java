@@ -89,6 +89,21 @@ jobs:
       - name: Verify release-version selection
         run: node --test .github/scripts/prepare-rc-release.test.js
 
+      - name: Prepare RC version for verification
+        run: node .github/scripts/prepare-rc-release.js
+
+      - name: Seal prepared RC verification worktree
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git diff --quiet -- .cz.toml; then
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git config user.name "github-actions[bot]"
+            git add .cz.toml
+            git commit -m "chore: prepare RC verification"
+          fi
+          test -z "$(git status --porcelain)"
+
       - name: Verify published dependency availability
         run: >-
           ./gradlew --no-daemon dependencyPreflight

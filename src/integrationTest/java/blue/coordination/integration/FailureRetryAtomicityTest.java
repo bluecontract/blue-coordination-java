@@ -55,7 +55,8 @@ final class FailureRetryAtomicityTest {
             assertEquals(SessionStatus.CATCHING_UP, engine.session(
                     "embedded-state-parent").status(),
                     "a committed parent with an unpublished graph is not READY");
-            assertNotReady(engine, "embedded-state-parent");
+            assertCommittedAndReadyHeads(
+                    engine, "embedded-state-parent", 1L, 0L);
             assertEquals(1, engine.documentCount(),
                     "the staged child is not a committed managed document");
             assertEquals(routeRowsBefore, engine.routeRowCount(),
@@ -82,7 +83,8 @@ final class FailureRetryAtomicityTest {
             assertTrue(engine.catchUpPlans().isEmpty());
             assertEquals(SessionStatus.CATCHING_UP, engine.session(
                     "embedded-state-parent").status());
-            assertNotReady(engine, "embedded-state-parent");
+            assertCommittedAndReadyHeads(
+                    engine, "embedded-state-parent", 1L, 0L);
             assertEquals(objectsAfterFirstFailure, engine.wholeObjectCount(),
                     "repeated terminal reconciliation has exact object rollback");
             assertEquals(1L, engine.history("embedded-state-parent").stream()
@@ -155,7 +157,8 @@ final class FailureRetryAtomicityTest {
             assertEquals(SessionStatus.CATCHING_UP, engine.session(
                     "embedded-state-parent").status(),
                     "a parent becomes non-ready as soon as its child commits");
-            assertNotReady(engine, "embedded-state-parent");
+            assertCommittedAndReadyHeads(
+                    engine, "embedded-state-parent", 2L, 2L);
 
             engine.failOnceAt(TestEngine.FailurePoint
                     .AFTER_FROZEN_BEFORE_STAGE);
@@ -171,7 +174,8 @@ final class FailureRetryAtomicityTest {
                     .link().appliedChildEpoch());
             assertEquals(SessionStatus.CATCHING_UP, engine.session(
                     "embedded-state-parent").status());
-            assertNotReady(engine, "embedded-state-parent");
+            assertCommittedAndReadyHeads(
+                    engine, "embedded-state-parent", 2L, 2L);
 
             engine.clearFailureInjection();
             EngineMetrics.MetricsSnapshot beforeRetry =
@@ -263,7 +267,8 @@ final class FailureRetryAtomicityTest {
                     "restart must normalize stale READY evidence");
             assertEquals(1L, restart.counter(
                     "temporal.recoveredReadinessRepairs"));
-            assertNotReady(engine, "embedded-state-parent");
+            assertCommittedAndReadyHeads(
+                    engine, "embedded-state-parent", 2L, 2L);
             EngineMetrics.MetricsSnapshot beforeResume =
                     engine.metricsSnapshot();
             engine.dispatch(childEntry);
@@ -478,6 +483,33 @@ final class FailureRetryAtomicityTest {
                 () -> engine.readyDocument(documentId));
         assertEquals(CoordinationErrorCode.DOCUMENT_NOT_READY,
                 failure.code());
+    }
+
+    private static void assertCommittedAndReadyHeads(
+            TestEngine engine,
+            String documentId,
+            long expectedCommittedEpoch,
+            long expectedReadyEpoch) {
+        TestEngine.DocumentView committed = engine.session(documentId);
+        TestEngine.DocumentView ready = engine.readyDocument(documentId);
+        assertEquals(SessionStatus.CATCHING_UP, committed.status());
+        assertEquals(expectedCommittedEpoch, committed.epoch());
+        assertEquals(SessionStatus.CATCHING_UP, ready.status());
+        assertEquals(expectedReadyEpoch, ready.epoch());
+        assertEquals(
+                engine.history(documentId)
+                        .get(Math.toIntExact(expectedCommittedEpoch))
+                        .after()
+                        .blueId(),
+                committed.current().blueId(),
+                "audit state must expose the exact committed revision");
+        assertEquals(
+                engine.history(documentId)
+                        .get(Math.toIntExact(expectedReadyEpoch))
+                        .after()
+                        .blueId(),
+                ready.current().blueId(),
+                "normal reads must remain fenced to the exact ready state");
     }
 
 }

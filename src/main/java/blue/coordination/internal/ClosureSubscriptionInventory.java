@@ -91,8 +91,42 @@ final class ClosureSubscriptionInventory {
             throw new IllegalArgumentException(
                     "Non-success closure result cannot change subscriptions");
         }
+        LinkedHashMap<DocumentId, Long> uniform = new LinkedHashMap<>();
+        long expectedGeneration = verified.platformCommitCompanion()
+                .expectedInputGraphGeneration();
+        verified.platformCommitCompanion().expectedInputDocuments()
+                .forEach(document -> uniform.put(
+                        DocumentId.of(document.documentId().value()),
+                        expectedGeneration));
+        return apply(verified, uniform);
+    }
+
+    /**
+     * Applies a result whose single Contracts graph generation may merge
+     * independently retained Coordination cohorts. A lower durable
+     * subscription generation is accepted only when its exact per-document
+     * graph fence is supplied and every other closed before-state field is
+     * identical.
+     */
+    ClosureSubscriptionInventory apply(
+            ClosureProcessResult result,
+            Map<DocumentId, Long> expectedGraphGenerations) {
+        ClosureProcessResult verified = Objects.requireNonNull(result, "result");
+        if (!verified.commits()) {
+            throw new IllegalArgumentException(
+                    "Non-success closure result cannot change subscriptions");
+        }
+        Map<DocumentId, Long> exactGraphGenerations = Map.copyOf(
+                Objects.requireNonNull(
+                        expectedGraphGenerations,
+                        "expectedGraphGenerations"));
         Map<String, String> expectedHeads = expectedInputHeads(
                 verified.platformCommitCompanion());
+        if (!expectedHeads.keySet().containsAll(exactGraphGenerations.keySet()
+                .stream().map(DocumentId::value).toList())) {
+            throw new IllegalArgumentException(
+                    "Graph-generation fences escape the closure result");
+        }
         Map<String, ResultingDocument> resultingDocuments =
                 resultingDocuments(verified.resultingDocuments());
         Indexes next = new Indexes(
@@ -133,9 +167,13 @@ final class ClosureSubscriptionInventory {
                 }
                 if (!current.subscriptionIdentity().equals(
                         exactBefore.subscriptionIdentity())) {
-                    throw new IllegalStateException(
-                            "Closure subscription before-state CAS mismatch at "
-                                    + slot);
+                    requireDeterministicGraphMerge(
+                            slot,
+                            current,
+                            exactBefore,
+                            exactGraphGenerations,
+                            verified.platformCommitCompanion()
+                                    .expectedInputGraphGeneration());
                 }
                 if (delta.operation() == SubscriptionDelta.Operation.REMOVE) {
                     if (present) {
@@ -151,13 +189,46 @@ final class ClosureSubscriptionInventory {
                 }
             }
         }
-        requireResultingStates(
+        next = rebaseAndRequireResultingStates(
                 next,
                 resultingDocuments,
                 verified.graphGeneration(),
+                exactGraphGenerations,
                 work);
         return new ClosureSubscriptionInventory(
                 next, embeddedDemandsByDocument, work);
+    }
+
+    private static void requireDeterministicGraphMerge(
+            Slot slot,
+            SubscriptionState current,
+            SubscriptionState expectedBefore,
+            Map<DocumentId, Long> exactGraphGenerations,
+            long contractsGraphGeneration) {
+        DocumentId documentId = DocumentId.of(slot.documentId());
+        Long exactGeneration = exactGraphGenerations.get(documentId);
+        boolean sameClosedState = current.channelOccurrence()
+                        .channelOccurrenceIdentity().equals(
+                                expectedBefore.channelOccurrence()
+                                        .channelOccurrenceIdentity())
+                && current.documentBlueId().equals(
+                        expectedBefore.documentBlueId())
+                && current.componentGeneration()
+                        == expectedBefore.componentGeneration();
+        if (exactGeneration == null
+                || current.graphGeneration()
+                        != exactGeneration.longValue()
+                || expectedBefore.graphGeneration()
+                        != contractsGraphGeneration
+                || current.graphGeneration() >= contractsGraphGeneration
+                || !sameClosedState) {
+            throw new IllegalStateException(
+                    "Closure subscription before-state CAS mismatch at "
+                            + slot + ": expected "
+                            + expectedBefore.subscriptionIdentity()
+                            + " but found "
+                            + current.subscriptionIdentity());
+        }
     }
 
     ClosureSubscriptionInventory retainingDocuments(
@@ -336,16 +407,18 @@ final class ClosureSubscriptionInventory {
         return PersistentOrderedMap.empty(EmbeddingBinding.DOCUMENT_ORDER);
     }
 
-    private static void requireResultingStates(
+    private static Indexes rebaseAndRequireResultingStates(
             Indexes indexes,
             Map<String, ResultingDocument> resultingDocuments,
             long graphGeneration,
+            Map<DocumentId, Long> exactGraphGenerations,
             Work work) {
+        Indexes next = indexes;
         for (Map.Entry<String, ResultingDocument> entry
                 : resultingDocuments.entrySet()) {
             PersistentOrderedMap.ReadResult<PersistentOrderedMap<String,
                     SubscriptionState>> bucketRead =
-                    indexes.byDocument().read(entry.getKey());
+                    next.byDocument().read(entry.getKey());
             work.read(bucketRead);
             if (!bucketRead.found()) {
                 continue;
@@ -353,18 +426,44 @@ final class ClosureSubscriptionInventory {
             ResultingDocument resulting = entry.getValue();
             work.visitedRows(bucketRead.value().size());
             for (SubscriptionState state : bucketRead.value().values()) {
-                if (!state.documentBlueId().equals(resulting.afterBlueId())
-                        || state.graphGeneration() != graphGeneration
-                        || state.componentGeneration()
-                        != resulting.componentGeneration()) {
-                    throw new IllegalStateException(
-                            "Closure subscription state is stale after "
-                                    + "publication " + entry.getKey() + "/"
-                                    + state.channelOccurrence()
-                                            .rawChannelKey());
+                if (state.documentBlueId().equals(resulting.afterBlueId())
+                        && state.graphGeneration() == graphGeneration
+                        && state.componentGeneration()
+                        == resulting.componentGeneration()) {
+                    continue;
                 }
+                DocumentId documentId = DocumentId.of(entry.getKey());
+                Long exactGeneration = exactGraphGenerations.get(documentId);
+                boolean deterministicGraphMerge = exactGeneration != null
+                        && state.graphGeneration()
+                        == exactGeneration.longValue()
+                        && state.graphGeneration() < graphGeneration
+                        && state.documentBlueId().equals(
+                                resulting.afterBlueId())
+                        && state.componentGeneration()
+                        == resulting.componentGeneration();
+                if (!deterministicGraphMerge) {
+                    throw staleResultingState(entry.getKey(), state);
+                }
+                SubscriptionState rebased = SubscriptionState.identified(
+                        state.channelOccurrence(),
+                        state.documentBlueId(),
+                        graphGeneration,
+                        state.componentGeneration());
+                Slot slot = Slot.from(state);
+                next = replacePresent(next, slot, state, rebased, work);
             }
         }
+        return next;
+    }
+
+    private static IllegalStateException staleResultingState(
+            String documentId,
+            SubscriptionState state) {
+        return new IllegalStateException(
+                "Closure subscription state is stale after publication "
+                        + documentId + "/"
+                        + state.channelOccurrence().rawChannelKey());
     }
 
     private static Indexes insertAbsent(

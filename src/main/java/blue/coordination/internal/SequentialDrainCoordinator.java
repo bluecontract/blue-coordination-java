@@ -427,6 +427,11 @@ final class SequentialDrainCoordinator {
         return graph;
     }
 
+    synchronized boolean hasPendingTopLevelAdmission(DocumentId documentId) {
+        return pendingTopLevelAdmissions.containsKey(Objects.requireNonNull(
+                documentId, "documentId"));
+    }
+
     synchronized String applicationReadinessFailure(DocumentSession session) {
         Objects.requireNonNull(session, "session");
         if (!session.isLocallyReady()) {
@@ -441,6 +446,9 @@ final class SequentialDrainCoordinator {
 
     private String synchronizationFailure(DocumentSession session) {
         DocumentId documentId = session.documentId();
+        if (!documents.activeCatchUpBarrierIdentities(documentId).isEmpty()) {
+            return "a managed source catch-up barrier remains open";
+        }
         if (openBarrierByParent.containsKey(documentId)) {
             return "an embedded catch-up barrier remains open";
         }
@@ -1967,7 +1975,7 @@ final class SequentialDrainCoordinator {
             }
             String actualChild = documents.require(
                     barrier.parentDocumentId())
-                    .currentRevision().after().canonicalBlueIdAt(
+                    .currentRepresentation().canonicalBlueIdAt(
                             binding.absolutePath());
             String expectedChild = child.revision(
                     cursor.appliedChildEpoch()).after().blueId();
@@ -2039,7 +2047,7 @@ final class SequentialDrainCoordinator {
                     routes.generation(),
                     entryGraph.generation(),
                     () -> "top-level|" + session.documentId() + "|"
-                            + session.currentRevision().after().blueId());
+                            + session.currentRepresentation().blueId());
             if (step instanceof HistoricalStep.Complete
                     || step instanceof HistoricalStep.CompleteEmpty) {
                 return;

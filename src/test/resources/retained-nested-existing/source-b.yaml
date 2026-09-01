@@ -1,0 +1,107 @@
+name: Lab 13 source B
+phase: authored
+nestedCandidate:
+  name: Lab 13 source C
+  phase: authored
+  counter: 0
+  contracts:
+    lifecycleChannel:
+      type:
+        blueId: 2ukJitzzDKQWHJ5EVUtn3t4FXieGmNA1NdwFSqG8qcfo
+      order: 0
+      event:
+        type:
+          blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
+    onProcessingInitiated:
+      type: Coordination/Sequential Workflow
+      channel: lifecycleChannel
+      order: 0
+      steps:
+        - type: Coordination/Compute
+          do:
+            - $appendChange:
+                op: replace
+                path: /phase
+                val: initialized
+            - $return: true
+    ownerChannel:
+      type: Coordination/Timeline Channel
+      timeline:
+        type: MyOS/MyOS Timeline
+        timelineId: labs/retained-managed-epoch/nested/alice
+      actor:
+        type: MyOS/Principal Actor
+        accountId: alice
+    advance:
+      type: Coordination/Sequential Workflow Operation
+      channel: ownerChannel
+      request: {}
+      steps:
+        - type: Coordination/Compute
+          do:
+            - $appendChange:
+                op: replace
+                path: /phase
+                val: advanced
+            - $appendChange:
+                op: replace
+                path: /counter
+                val:
+                  $add:
+                    - $document: /counter
+                    - 1
+            - $return: true
+contracts:
+  lifecycleChannel:
+    type:
+      blueId: 2ukJitzzDKQWHJ5EVUtn3t4FXieGmNA1NdwFSqG8qcfo
+    order: 0
+    event:
+      type:
+        blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
+  onProcessingInitiated:
+    type: Coordination/Sequential Workflow
+    channel: lifecycleChannel
+    order: 0
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /phase
+              val: initialized
+          - $return: true
+  ownerChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: labs/retained-managed-epoch/nested/alice
+    actor:
+      type: MyOS/Principal Actor
+      accountId: alice
+  activateNested:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request:
+      embeddedContract: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /embeddedCandidates
+              val:
+                selected:
+                  $binding: event/message/request/embeddedContract
+          - $appendChange:
+              op: add
+              path: /contracts/embedded
+              val:
+                type: Process Embedded
+                collectionPaths:
+                  - /embeddedCandidates
+          - $appendChange:
+              op: replace
+              path: /phase
+              val: nested-active
+          - $return: true

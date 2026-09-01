@@ -2,7 +2,6 @@ package blue.coordination.integration;
 
 import blue.coordination.api.ActivationMode;
 import blue.coordination.api.CoordinationEngine;
-import blue.coordination.api.CoordinationErrorCode;
 import blue.coordination.api.CoordinationException;
 import blue.coordination.api.ExactValue;
 import blue.coordination.api.Operation;
@@ -222,16 +221,37 @@ final class TemporalAdmissionPolicyIntegrationTest {
             TimelineEntry attachment = attachAtEpoch(
                     engine, "retry-plan", childId, child, null,
                     T0 + 2_000L, false);
+            TestEngine.DocumentView readyBeforeFailure =
+                    engine.readyDocument("parent-retry-plan");
+            assertEquals(SessionStatus.READY, readyBeforeFailure.status());
             engine.failOnceAt(TestEngine.FailurePoint.AFTER_STAGING_CHILD_SESSION);
             assertThrows(TestEngine.InjectedFailureException.class,
                     () -> engine.dispatch(attachment));
+            TestEngine.DocumentView committedAfterFailure =
+                    engine.session("parent-retry-plan");
             assertEquals(SessionStatus.CATCHING_UP,
-                    engine.session("parent-retry-plan").status());
-            CoordinationException notReady = assertThrows(
-                    CoordinationException.class,
-                    () -> engine.readyDocument("parent-retry-plan"));
-            assertEquals(CoordinationErrorCode.DOCUMENT_NOT_READY,
-                    notReady.code());
+                    committedAfterFailure.status());
+            long expectedCommittedEpoch = Math.addExact(
+                    readyBeforeFailure.epoch(), 1L);
+            assertEquals(expectedCommittedEpoch,
+                    committedAfterFailure.epoch(),
+                    "the admitted parent transition remains committed while "
+                            + "publication recovers");
+            assertEquals(engine.history("parent-retry-plan")
+                            .get(Math.toIntExact(expectedCommittedEpoch))
+                            .after()
+                            .blueId(),
+                    committedAfterFailure.current().blueId(),
+                    "audit reads must expose the exact committed revision");
+            TestEngine.DocumentView readyAfterFailure =
+                    engine.readyDocument("parent-retry-plan");
+            assertEquals(SessionStatus.CATCHING_UP,
+                    readyAfterFailure.status());
+            assertEquals(readyBeforeFailure.epoch(),
+                    readyAfterFailure.epoch());
+            assertEquals(readyBeforeFailure.current().blueId(),
+                    readyAfterFailure.current().blueId(),
+                    "recoverable staging must retain the prior ready head");
             engine.clearFailureInjection();
 
             // when

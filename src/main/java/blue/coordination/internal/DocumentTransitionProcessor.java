@@ -205,7 +205,7 @@ final class DocumentTransitionProcessor {
 
         long expectedEpoch = session.epoch();
         EmbeddedOnlyLayout beforeLayout = session.layout();
-        ExactValue before = session.currentRevision().after();
+        ExactValue before = session.currentRepresentation();
         failureInjector.accept(
                 DefaultCoordinationEngine.FailurePoint.BEFORE_FROZEN_PROCESS);
         metrics.increment("process.concreteOwnershipRootInputs");
@@ -818,7 +818,7 @@ final class DocumentTransitionProcessor {
                             + input.inputId());
         }
         EmbeddedOnlyLayout beforeLayout = parent.layout();
-        ExactValue before = parent.currentRevision().after();
+        ExactValue before = parent.currentRepresentation();
         String actualBefore = before.canonicalBlueIdAt(
                 input.binding().absolutePath());
         if (!input.beforeChildBlueId().equals(actualBefore)) {

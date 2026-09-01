@@ -39,6 +39,19 @@ public final class ExactBlueValue {
                 value.copyNode());
     }
 
+    /** Package-private provider transport from authenticated internal state. */
+    ExactNodeEvidence providerEvidence() {
+        String content = json();
+        return value.cyclicSetProof()
+                .map(proof -> ExactNodeEvidence.cyclic(
+                        content,
+                        proof.declaredPlaceholderSet().stream()
+                                .map(UncheckedObjectMapper.JSON_MAPPER::
+                                        writeValueAsString)
+                                .toList()))
+                .orElseGet(() -> ExactNodeEvidence.ordinary(content));
+    }
+
     /** Package-private mutable copy used only by the SDK implementation. */
     Node copyNode() {
         return value.copyNode();

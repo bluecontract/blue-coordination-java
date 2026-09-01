@@ -18,6 +18,7 @@ import blue.language.processor.closure.GasTraceEntry;
 import blue.language.processor.closure.GraphChange;
 import blue.language.processor.closure.ManagedOccurrenceBinding;
 import blue.language.processor.closure.PublicEventOccurrence;
+import blue.language.processor.closure.RejectedCharge;
 import blue.language.processor.closure.SubscriptionDelta;
 import blue.language.processor.closure.SubscriptionState;
 
@@ -85,7 +86,224 @@ final class SdkDrainResultMapper {
                 stats,
                 drained.quiescent(),
                 drained.paused(),
-                diagnostic);
+                diagnostic,
+                drained.managedEpochApplications().stream()
+                        .map(SdkDrainResultMapper
+                                ::managedEpochApplicationReceipt)
+                        .toList(),
+                drained.managedEpochApplicationAttempts().stream()
+                        .map(SdkDrainResultMapper
+                                ::managedEpochApplicationAttempt)
+                        .toList(),
+                drained.managedEpochEvidenceFailures().stream()
+                        .map(SdkDrainResultMapper
+                                ::managedEpochEvidenceFailure)
+                        .toList());
+    }
+
+    private static ManagedEpochEvidenceFailure managedEpochEvidenceFailure(
+            blue.coordination.api.ManagedEpochEvidenceFailure retained) {
+        return new ManagedEpochEvidenceFailure(
+                managedEpochApplicationWork(retained.work()),
+                ManagedEpochEvidenceFailure.Status.valueOf(
+                        retained.status().name()),
+                retained.code(),
+                retained.diagnostic());
+    }
+
+    private static ManagedEpochApplicationAttempt
+            managedEpochApplicationAttempt(
+                    blue.coordination.api.ManagedEpochApplicationAttempt
+                            retained) {
+        ClosureAttemptResult attempt = retained.attempt();
+        ManagedEpochApplicationAttempt.ProcessorAttempt projected;
+        if (attempt.isComplete()) {
+            ClosureProcessResult result = attempt.processResult();
+            projected = new ManagedEpochApplicationAttempt.ProcessorAttempt(
+                    true,
+                    managedEpochProcessResult(result),
+                    List.of(),
+                    List.of());
+        } else {
+            projected = new ManagedEpochApplicationAttempt.ProcessorAttempt(
+                    false,
+                    null,
+                    attempt.resourceDemands().stream()
+                            .map(SdkDrainResultMapper
+                                    ::managedEpochResourceDemand)
+                            .toList(),
+                    attempt.requiredExactBlueIds());
+        }
+        return new ManagedEpochApplicationAttempt(
+                managedEpochApplicationWork(retained.work()),
+                projected,
+                retained.published(),
+                retained.replayed(),
+                retained.receipt().map(SdkDrainResultMapper
+                        ::managedEpochApplicationReceipt),
+                retained.automaticRetryCount(),
+                retained.automaticResolutionStopReason()
+                        .map(reason -> ManagedEpochApplicationAttempt
+                                .AutomaticResolutionStopReason.valueOf(
+                                        reason.name())),
+                retained.managedOccurrenceResolutionIssues().stream()
+                        .map(SdkDrainResultMapper
+                                ::managedEpochResolutionIssue)
+                        .toList(),
+                retained.publicationFailure().map(failure ->
+                        new ManagedEpochApplicationAttempt.PublicationFailure(
+                                ManagedEpochApplicationAttempt
+                                        .PublicationFailureCode.valueOf(
+                                                failure.code().name()),
+                                failure.message(),
+                                failure.details())));
+    }
+
+    private static ManagedEpochApplicationAttempt
+            .ManagedOccurrenceResolutionIssue managedEpochResolutionIssue(
+                    blue.coordination.api.ManagedEpochApplicationAttempt
+                            .ManagedOccurrenceResolutionIssue issue) {
+        return new ManagedEpochApplicationAttempt
+                .ManagedOccurrenceResolutionIssue(
+                issue.demandIdentity(),
+                ManagedEpochApplicationAttempt.ResolutionStatus.valueOf(
+                        issue.status().name()),
+                issue.diagnostic());
+    }
+
+    private static ManagedEpochApplicationAttempt.ProcessResult
+            managedEpochProcessResult(ClosureProcessResult result) {
+        return new ManagedEpochApplicationAttempt.ProcessResult(
+                ManagedEpochApplicationAttempt.Status.valueOf(
+                        result.status().name()),
+                result.commits(),
+                result.atomic(),
+                result.rollbackToInput(),
+                result.invocationIdentity(),
+                result.inputClosureIdentity(),
+                result.outputClosureIdentity(),
+                result.graphGeneration(),
+                result.totalGas(),
+                result.gasTrace().stream()
+                        .map(SdkDrainResultMapper::managedEpochGasCharge)
+                        .toList(),
+                result.gasTraceIdentity(),
+                result.rejectedWorkOccurrence() == null
+                        ? null
+                        : managedEpochRejectedWork(
+                                result.rejectedWorkOccurrence()),
+                result.rejectedCharge() == null
+                        ? null
+                        : managedEpochRejectedCharge(
+                                result.rejectedCharge()),
+                publicEvents(result),
+                diagnostic(result));
+    }
+
+    private static ManagedEpochApplicationAttempt.GasCharge
+            managedEpochGasCharge(GasTraceEntry charge) {
+        return new ManagedEpochApplicationAttempt.GasCharge(
+                charge.sequence(),
+                charge.namespace().wireValue(),
+                charge.counter(),
+                charge.quantity(),
+                charge.weight(),
+                charge.subtotal(),
+                charge.documentId() == null
+                        ? null
+                        : DocumentId.of(charge.documentId().value()),
+                charge.scopePath(),
+                charge.activationGeneration(),
+                charge.componentGeneration(),
+                charge.contractKey(),
+                charge.logicalPath(),
+                charge.workOccurrenceId(),
+                charge.reason());
+    }
+
+    private static ManagedEpochApplicationAttempt.RejectedWorkOccurrence
+            managedEpochRejectedWork(
+                    blue.language.processor.closure.ClosureWorkOccurrence
+                            work) {
+        return new ManagedEpochApplicationAttempt.RejectedWorkOccurrence(
+                work.ordinal(),
+                work.kind().name(),
+                DocumentId.of(work.targetDocumentId().value()),
+                work.channelKey(),
+                work.eventBlueId(),
+                work.occurrenceOrdinal(),
+                work.targetManagedScopeIdentity(),
+                work.sourceOccurrenceIdentity(),
+                work.workIdentity());
+    }
+
+    private static ManagedEpochApplicationAttempt.RejectedCharge
+            managedEpochRejectedCharge(RejectedCharge charge) {
+        return new ManagedEpochApplicationAttempt.RejectedCharge(
+                charge.rejectedChargeIdentity(),
+                charge.namespace().wireValue(),
+                charge.counter(),
+                charge.quantity(),
+                charge.weight(),
+                charge.subtotal(),
+                charge.applicableCap().kind().name(),
+                charge.applicableCap().documentId() == null
+                        ? null
+                        : DocumentId.of(
+                                charge.applicableCap().documentId().value()),
+                charge.remainingBeforeCharge(),
+                charge.owner().kind().name(),
+                charge.owner().workOccurrenceIdentity(),
+                charge.owner().finalizationOrdinal(),
+                charge.owner().componentIdentity(),
+                charge.owner().componentGeneration());
+    }
+
+    private static ManagedEpochApplicationAttempt.ResourceDemand
+            managedEpochResourceDemand(ClosureResourceDemand demand) {
+        return new ManagedEpochApplicationAttempt.ResourceDemand(
+                demand.kind().name(),
+                demand.demandIdentity(),
+                DocumentId.of(demand.sourceDocumentId().value()),
+                demand.sourcePath(),
+                demand.suppliedValueBlueId());
+    }
+
+    private static ManagedEpochApplicationWork managedEpochApplicationWork(
+            blue.coordination.api.ManagedEpochApplicationWork work) {
+        return new ManagedEpochApplicationWork(
+                work.workIdentity(),
+                work.planIdentity(),
+                work.barrierIdentity(),
+                work.sourceReceiptIdentity(),
+                work.sourceDocumentId(),
+                work.sourceEpoch(),
+                work.consumerDocumentId(),
+                work.targetOccurrenceIdentity(),
+                work.targetPath(),
+                work.activationGeneration(),
+                work.expectedConsumerCommittedEpoch(),
+                work.expectedConsumerCommittedBlueId(),
+                work.expectedGraphGeneration());
+    }
+
+    private static ManagedEpochApplicationReceipt
+            managedEpochApplicationReceipt(
+                    blue.coordination.api.ManagedEpochApplicationReceipt
+                            receipt) {
+        return new ManagedEpochApplicationReceipt(
+                receipt.applicationReceiptIdentity(),
+                receipt.workIdentity(),
+                receipt.planIdentity(),
+                receipt.sourceReceiptIdentity(),
+                receipt.contractsInvocationIdentity(),
+                receipt.contractsResultIdentity(),
+                receipt.commitCompanionIdentity(),
+                receipt.consumerDocumentId(),
+                receipt.consumerRevisionEpoch(),
+                receipt.consumerRevisionReceiptIdentity(),
+                receipt.consumerCommittedBlueId(),
+                receipt.resultingSourceCursor());
     }
 
     private EntryResult mapEntry(
@@ -143,7 +361,9 @@ final class SdkDrainResultMapper {
                     List.of(),
                     ProcessingStats.zero(),
                     diagnostic,
-                    resourceDemands(attempt.resourceDemands()),
+                    resourceDemands(
+                            attempt.resourceDemands(),
+                            retained.managedOccurrenceResolutionIssues()),
                     processorAttemptCount(retained),
                     ManagedSurfaceEvidence.empty());
         }
@@ -171,15 +391,47 @@ final class SdkDrainResultMapper {
     }
 
     private static List<ClosureResult.ResourceDemand> resourceDemands(
-            List<ClosureResourceDemand> demands) {
+            List<ClosureResourceDemand> demands,
+            List<ContractsClosureDispatchAttempt
+                    .ManagedOccurrenceResolutionIssue> issues) {
+        Map<String, ContractsClosureDispatchAttempt
+                .ManagedOccurrenceResolutionIssue> issuesByDemand =
+                new LinkedHashMap<>();
+        for (ContractsClosureDispatchAttempt
+                .ManagedOccurrenceResolutionIssue issue
+                : Objects.requireNonNull(issues, "issues")) {
+            ContractsClosureDispatchAttempt.ManagedOccurrenceResolutionIssue
+                    duplicate = issuesByDemand.put(
+                            issue.demandIdentity(), issue);
+            if (duplicate != null) {
+                throw new IllegalStateException(
+                        "Retained managed matching evidence repeats demand "
+                                + issue.demandIdentity());
+            }
+        }
         return Objects.requireNonNull(demands, "demands").stream()
-                .map(demand -> new ClosureResult.ResourceDemand(
-                        demand.kind().name(),
-                        demand.demandIdentity(),
-                        demand.suppliedValueBlueId(),
-                        DocumentId.of(demand.sourceDocumentId().value()),
-                        demand.sourcePath()))
+                .map(demand -> resourceDemand(
+                        demand, issuesByDemand.get(demand.demandIdentity())))
                 .toList();
+    }
+
+    private static ClosureResult.ResourceDemand resourceDemand(
+            ClosureResourceDemand demand,
+            ContractsClosureDispatchAttempt.ManagedOccurrenceResolutionIssue
+                    issue) {
+        return new ClosureResult.ResourceDemand(
+                demand.kind().name(),
+                demand.demandIdentity(),
+                demand.suppliedValueBlueId(),
+                DocumentId.of(demand.sourceDocumentId().value()),
+                demand.sourcePath(),
+                Optional.ofNullable(issue).map(selected ->
+                        ClosureResult.ManagedResolutionStatus.valueOf(
+                                selected.status().name())),
+                Optional.ofNullable(issue).map(
+                        ContractsClosureDispatchAttempt
+                                .ManagedOccurrenceResolutionIssue
+                                ::diagnostic));
     }
 
     private static ManagedSurfaceEvidence managedSurfaceEvidence(

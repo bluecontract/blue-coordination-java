@@ -4,10 +4,12 @@ import blue.coordination.api.ContractsClosureAdmissionReceipt;
 import blue.coordination.api.CoordinationEngine;
 import blue.coordination.api.CoordinationMetrics;
 import blue.coordination.api.DocumentId;
+import blue.coordination.api.ExactValue;
 import blue.coordination.api.Operation;
 import blue.coordination.api.ProcessingDrainReceipt;
 import blue.coordination.api.Timeline;
 import blue.coordination.api.TimelineEntry;
+import blue.language.api.NodeProviderOutcome;
 import blue.language.identity.BlueIds;
 import blue.language.identity.CircularSetIdentityCalculator;
 import blue.language.model.Node;
@@ -44,6 +46,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Public-engine acceptance for authored three-member Contracts cycles. */
@@ -88,7 +91,19 @@ final class ContractsPublicThreeMemberCycleTest {
                     A, List.of(B),
                     B, List.of(C),
                     C, List.of(A)), scenario.adjacency());
+            long admissionProofsBefore = counter(
+                    engine, "wholeObjectStore.cyclicProofsRetained");
+            long admissionBodiesBefore = counter(
+                    engine,
+                    "wholeObjectStore.cyclicProviderRepresentationsRetained");
             builder.admitTo(publicEngine);
+            assertEquals(1L, counter(
+                    engine, "wholeObjectStore.cyclicProofsRetained")
+                    - admissionProofsBefore);
+            assertEquals(3L, counter(
+                    engine,
+                    "wholeObjectStore.cyclicProviderRepresentationsRetained")
+                    - admissionBodiesBefore);
 
             Timeline timeline = publicEngine.registerTimeline(
                     "three-ring/literal", "alice");
@@ -96,6 +111,11 @@ final class ContractsPublicThreeMemberCycleTest {
                     timeline,
                     Operation.yaml("start", "aliceChannel", "{}"),
                     ENTRY_TIME);
+            long processProofsBefore = counter(
+                    engine, "wholeObjectStore.cyclicProofsRetained");
+            long processBodiesBefore = counter(
+                    engine,
+                    "wholeObjectStore.cyclicProviderRepresentationsRetained");
             ProcessingDrainReceipt drained = publicEngine.drain();
 
             assertTrue(drained.quiescent());
@@ -107,8 +127,51 @@ final class ContractsPublicThreeMemberCycleTest {
             assertEquals("done", property(publicEngine, A, "phase"));
             assertEquals("relayed-z", property(publicEngine, B, "phase"));
             assertEquals("relayed-y", property(publicEngine, C, "phase"));
+            assertEquals(1L, counter(
+                    engine, "wholeObjectStore.cyclicProofsRetained")
+                    - processProofsBefore);
+            assertEquals(3L, counter(
+                    engine,
+                    "wholeObjectStore.cyclicProviderRepresentationsRetained")
+                    - processBodiesBefore);
             assertVerifiedThreeMemberComponent(
                     result.resultingComponents().get(0));
+        }
+    }
+
+    @Test
+    void componentEvidencePreflightCannotLeakAPartialCyclicRefresh() {
+        // given
+        try (CoordinationEngine publicEngine = engine(Set.of(A))) {
+            DefaultCoordinationEngine engine =
+                    (DefaultCoordinationEngine) publicEngine;
+            ContractsClosureAdmissionReceipt admitted = literalFiniteScenario(
+                    engine).admitTo(publicEngine).admissionReceipt();
+            ClosureProcessResult result = admitted.attempt().processResult();
+            ComponentSnapshot component = result.resultingComponents().get(0);
+            WholeObjectStore isolated = new WholeObjectStore(
+                    new EngineMetrics());
+            for (int index = 0; index < MEMBERS.size() - 1; index++) {
+                DocumentId member = MEMBERS.get(index);
+                isolated.put(
+                        ExactValue.fromVerifiedClosureResult(result, member),
+                        "preflight-fixture");
+            }
+
+            // when
+            IllegalStateException rejected = assertThrows(
+                    IllegalStateException.class,
+                    () -> isolated.retainVerifiedClosureComponentEvidence(
+                            result));
+
+            // then
+            assertTrue(rejected.getMessage().contains(
+                    "no matching retained component member"));
+            for (String blueId : component.orderedMemberBlueIds()) {
+                assertEquals(NodeProviderOutcome.NOT_FOUND,
+                        isolated.cyclicSetProofFor(blueId).outcome());
+                assertTrue(isolated.fetchByBlueId(blueId).isEmpty());
+            }
         }
     }
 
@@ -708,6 +771,12 @@ final class ContractsPublicThreeMemberCycleTest {
         assertEquals(1, receipts.size());
         return receipts.values().iterator().next()
                 .attempt().processResult();
+    }
+
+    private static long counter(
+            DefaultCoordinationEngine engine,
+            String name) {
+        return engine.metricsSnapshot().counters().getOrDefault(name, 0L);
     }
 
     private static List<GasTraceEntry> dequeueEntries(

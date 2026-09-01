@@ -213,6 +213,21 @@ final class PublicValueContractTest {
     }
 
     @Test
+    void processingAvailabilityFactoriesExposeOnlyHostAdmission() {
+        // given
+        ProcessingAvailability none = ProcessingAvailability.none();
+
+        // when
+        ProcessingAvailability unavailable = ProcessingAvailability.of(false);
+        ProcessingAvailability available = ProcessingAvailability.of(true);
+
+        // then
+        assertFalse(none.journalAdmissionAvailable());
+        assertFalse(unavailable.journalAdmissionAvailable());
+        assertTrue(available.journalAdmissionAvailable());
+    }
+
+    @Test
     void appendProducesSelfContainedExactImmutableEvidence() {
         try (CoordinationEngine engine = CoordinationEngine.legacyInMemory()) {
             // given

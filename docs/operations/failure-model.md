@@ -1,8 +1,9 @@
 # Failure and retry model
 
-This page distinguishes the normal Contracts 1.0 SDK from the retained legacy
-temporal compatibility profile. Application code uses the first boundary unless
-it explicitly chooses the low-level legacy engine.
+This page distinguishes the rc.5 Contracts 1.0 SDK retained managed-epoch
+profile and the earlier low-level temporal
+compatibility profile. None of the in-memory profiles is a fresh-process
+durability claim.
 
 ## Contracts 1.0 SDK boundary
 
@@ -65,12 +66,117 @@ After append, processing state is represented by `EntryResult`,
 `NEEDS_RESOURCES` and `BLOCKED` report that the lane has not reached a terminal
 result. Branch on diagnostic code, not message text.
 
-## Legacy temporal compatibility boundary
+## Retained managed-epoch profile (rc.5)
 
-The paragraphs below describe the earlier document-local temporal coordinator,
-including child-then-parent catch-up and `DrainBudget`. They are relevant only
-to an explicit low-level compatibility or migration integration, not the
-normal `BlueCoordination.inMemory()` Contracts publication model.
+This profile is present in `3.0.0-rc.5`, remains non-production, and depends
+on the published Language/Contracts rc.23 graph.
+
+An operation that installs a proven historical managed value commits its graph
+change before catch-up. The consumer therefore has separate committed and READY
+heads while an occurrence-specific plan advances from the admitted position to
+the source frontier. Ordinary reads stay on the READY head; `auditDocument()`
+and `auditManagedDocumentReadiness()` expose the committed head and active
+barrier to operators. Later genuine source commits extend every active plan for
+that source before the consumer can become READY. A dependent direct consumer
+entry cannot overtake the barrier, while disconnected lanes may progress.
+
+Before every managed PROCESS call, Coordination opens the exact public source
+receipt and its typed Contracts transition receipt and cross-checks document,
+epoch, before/after BlueIds, original cause, complete duplicate-preserving event
+occurrences, admitted gas, and receipt identities. Failure is classified before
+PROCESS:
+
+- a missing source epoch produces a same-cursor `WAITING_FOR_HISTORY` plan and
+  barrier with `MANAGED_EPOCH_RECEIPT_MISSING`;
+- when the source after-state is a cyclic member, a separately retained complete
+  successor proof is mandatory. A definitive proof miss produces
+  `WAITING_FOR_HISTORY` with `MANAGED_EPOCH_CYCLIC_PROOF_MISSING`, and a
+  temporary provider failure produces `WAITING_FOR_HISTORY` with
+  `MANAGED_EPOCH_CYCLIC_PROOF_UNAVAILABLE`;
+- a cyclic proof that is present but does not authenticate the claimed member
+  identity and exact after-body produces `BLOCKED` with
+  `MANAGED_EPOCH_CYCLIC_PROOF_INVALID`;
+- a missing transition receipt, or mismatched source, epoch, before/after
+  state, cause, event, gas, or receipt identity, produces a same-cursor
+  `BLOCKED` plan and barrier with its typed evidence code; and
+- none of these evidence failures changes consumer heads or emits an
+  application receipt. The failed consumer is removed from due selection so
+  independent consumers can continue; same-consumer barrier siblings cannot
+  overtake it.
+
+A complete but non-committing Contracts attempt also leaves the consumer
+revision, plan cursor, barrier, and application receipt unchanged. The exact
+work remains retryable; the consumer is excluded only for the remainder of that
+drain. Cyclic affected closures use the ordinary Contracts cyclic processor and
+the same deterministic gas/convergence failures. Catch-up never retries source
+INITIALIZE, a source Timeline Entry, a source Operation/local handler, or source
+PROCESS/public-outbox work.
+
+A complete committing Contracts attempt can still fail Coordination's
+publication boundary. `ManagedEpochApplicationAttempt.publicationFailure()`
+distinguishes that outcome from processor rollback and resource suspension.
+The currently defined typed case is
+`UNSUPPORTED_NESTED_NEW_LINEAGE`: tentative consumer/new-lineage state is
+rolled back, the exact occurrence plan and barrier atomically become `BLOCKED`
+at the unchanged cursor, and the due row is removed. Its details bind the exact
+work, plan, barrier, source receipt, source epoch, occurrence/path, consumer,
+source, and rejected new-lineage identity. Persist the code and details as
+terminal per-attempt evidence; do not parse the display message.
+
+The complete cyclic proof is provider-completeness evidence alongside, not
+inside, `ManagedEpochReceipt`. This includes a cyclic same-state eventless
+application epoch later consumed as source. Missing, unavailable, and invalid
+proof outcomes are detected before the PROCESS counter advances; they preserve
+consumer history/receipts and the exact plan cursor through same-live
+`restartFromStores()` reconstruction.
+
+A suspended managed application can retain several exact resource demands.
+`ManagedEpochApplicationAttempt.automaticRetryCount()` records the bounded
+automatic expansion already consumed, and each
+`ManagedOccurrenceResolutionIssue` binds one demand identity to a closed
+matching status. Persist those typed values and treat diagnostic text as
+display-only. Missing exact content may be registered through the host's
+immutable exact-node provider before retrying the same work; ambiguity,
+unproven history, selector mismatch, and invalid authored content are not
+uploadable-content waits. Supplying content never authorizes a direct consumer
+patch or a replacement operation.
+
+The supported same-epoch source representation change is bounded to the
+eventless, finite two-member cycle formed by the managed application. The exact
+Contracts result and commit companion must authenticate the distinct source
+member's shared cyclic representation with unchanged source epoch and route
+surface. It rewrites no source revision, receipt, or event. A merge with an
+already cyclic multi-member source component fails closed if it would require a
+source epoch to advance or be reinterpreted. Direct targets, eventful changes,
+wrong invocation evidence, missing receipt proof, malformed component
+transitions, and larger unproven merges reject the whole publication and leave
+the prior representation authoritative.
+
+A successful managed application atomically writes its consumer revision,
+complete epoch evidence, plan cursor, barrier/readiness state, closure
+publication receipt, and `ManagedEpochApplicationReceipt`. If the state swap
+succeeds but route publication loses its response, the next attempt recognizes
+the committed work, reconstructs the routes, and reports a replayed application
+without calling PROCESS again. The same invariant holds across control-plane
+reconstruction in one live engine. It does not hold after losing the in-memory
+stores; a durable adapter must persist the complete record set atomically. For
+cyclic source successors, that record set includes the authenticated complete
+proof and exact member body, and startup must restore that provider evidence
+before making retained work runnable.
+
+`drain(DrainBudget)` pauses at deterministic selected-entry and committed-
+transition boundaries. A paused drain is not a failure and a later drain
+continues from the retained plan cursor. See
+[Retained managed-epoch catch-up](../semantics/retained-managed-epoch-catch-up.md)
+for matching, plan, ordering, receipt, and audit details.
+
+## Earlier low-level temporal compatibility boundary
+
+The paragraphs below describe the earlier document-local temporal coordinator
+using `EmbeddingBinding` and `EmbeddedEpochCursor`. They are relevant only to
+an explicit low-level compatibility or migration integration, not the normal
+`BlueCoordination.inMemory()` Contracts publication model or the rc.5 managed
+receipt/plan/barrier profile.
 
 Child and parent synchronization are intentionally separate commits. If a
 child epoch commits and parent application fails, the child remains committed,
@@ -115,8 +221,11 @@ not construct a fresh engine instance or reload serialized state.
 
 ## Shared process boundary
 
-A process crash still loses the bundled in-memory stores in either profile.
+A process crash still loses the bundled in-memory stores in every profile.
 This is therefore not a cross-process durability or exactly-once claim. A
 durable adapter must persist the same typed document, journal, graph, barrier,
 cursor, entry-frame, receipt, and commit-companion records and pass the
 restart/store gate before a host can treat the engine as a system of record.
+It must also persist and restore exact provider-completeness evidence, including
+each cyclic successor's complete proof; `restartFromStores()` does not exercise
+that fresh-process restoration boundary.

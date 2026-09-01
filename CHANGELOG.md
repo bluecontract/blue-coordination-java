@@ -3,6 +3,60 @@
 This project follows Semantic Versioning. Release candidates may still refine
 the new 3.x API before the first stable 3.0.0 release.
 
+## 3.0.0-rc.5 - retained execution and catch-up candidate
+
+### Added
+
+- Complete managed-epoch receipts, duplicate-preserving event occurrences,
+  occurrence-specific catch-up plans, extendable barriers,
+  committed-versus-ready heads, and bounded application/audit SDK surfaces.
+- Historical matching for an existing authored initial, initialized epoch
+  zero, current state, and unique retained epochs, with explicit selection for
+  ambiguous history.
+- Durable application receipts, exact failed-attempt evidence, response-loss
+  reconciliation, restart-safe route rebuilding, and indexed locality
+  metrics.
+- Proof-aware exact-node resolution and lazy reference-transparent SDK
+  execution for ordinary and cyclic exact references.
+- A read-only exact fair-lane selection and targeted one-selection journal or
+  managed-epoch processing calls for durable host lease orchestration.
+- An immutable `ProcessingAvailability` audit hint lets a durable host expose
+  a queued ordinary admission before appending it, without reserving or
+  manufacturing drainable journal work.
+- A stable `UNSUPPORTED_NESTED_NEW_LINEAGE` publication-failure outcome with
+  exact work details and an atomic blocked plan/barrier transition.
+
+### Changed
+
+- Published-artifact mode now owns the complete published
+  `blue.language` `3.1.0-rc.23` graph. Maven Local and source-composite
+  substitution remain forbidden.
+- The drain scheduler fences later consumer work behind active barriers while
+  allowing unrelated source and sibling-parent lanes to continue and extend
+  catch-up frontiers.
+- Journal-only slices select at most one ordinary entry and never fall through
+  to managed work. Exact managed slices revalidate the retained fair turn and
+  selected work identity before processing.
+- A retained managed turn wins over host availability; otherwise a real
+  pending journal entry or available host admission receives the journal turn
+  before managed fallback, preserving bounded progress under a continuous
+  source stream.
+- Managed application attempts now distinguish a complete committing Contracts
+  result that failed at Coordination publication from processor rollback or
+  suspension, and expose that evidence through both public API layers.
+- Retained source receipts now use the same verified invocation-local provider
+  representation as current closure snapshots, including eventless epochs
+  whose exact BlueId is unchanged.
+
+### Known limitations
+
+- Creating a genuinely new authored nested lineage during retained catch-up
+  remains unsupported and now durably blocks only its exact occurrence plan.
+- Timeline-provider completeness, Mandates, cross-process durability, and
+  multi-node scheduling remain outside this release candidate.
+- MyOS persistence/UI integration is a downstream concern; Coordination
+  remains in-memory, sequential, and not production-ready.
+
 ## 3.0.0-rc.4 - dynamic contract and occurrence evolution candidate
 
 ### Added

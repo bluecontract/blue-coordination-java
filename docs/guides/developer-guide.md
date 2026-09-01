@@ -1,10 +1,10 @@
 # Blue Coordination SDK developer guide
 
 This is the canonical application-development guide for
-`blue.coordination:blue-coordination-java:3.0.0-rc.4`. It starts with authored
-Blue documents and follows them through admission, exact Timeline processing,
-managed embedded documents, cycles, later operations, topology expansion,
-results, and failure handling.
+`blue.coordination:blue-coordination-java:3.0.0-rc.5`. It starts with authored Blue documents
+and follows them through admission, exact Timeline processing, managed embedded
+documents, cycles, later operations, topology expansion, retained managed-epoch
+catch-up, results, and failure handling.
 
 Use the application-facing `blue.coordination.sdk` package. The older
 `blue.coordination.api.CoordinationEngine` surface is an advanced host and
@@ -22,16 +22,18 @@ acyclic semantics.
 - atomic publication of one connected affected closure; and
 - a compact, local runtime for development or a bounded external pilot.
 
-It is not a database or a production service host. The rc.4 runtime is one JVM,
-in-memory, and sequential. A process crash loses its stores. Durable recovery,
-provider completeness, production authorization and tenant isolation,
+It is not a database or a production service host. The candidate is one JVM,
+in-memory, and sequential. A process crash loses its stores. Durable
+recovery, provider completeness, production authorization and tenant isolation,
 parallel/distributed scheduling, durable outbox recovery, and a stable latency
-SLA remain outside this candidate. See [Known limitations](../limitations.md)
-before selecting it as an operational dependency.
+SLA remain outside this candidate. The [Known limitations](../limitations.md)
+page owns the rc.5 boundary; the retained-epoch semantic page lists its
+explicit non-goals.
 
 ## Install and own the runtime
 
-Use Java 17 or newer and resolve the published artifact from Maven Central:
+Use Java 17 or newer. Resolve the rc.5 artifact only from Maven
+Central:
 
 ```groovy
 repositories {
@@ -39,9 +41,29 @@ repositories {
 }
 
 dependencies {
-    implementation 'blue.coordination:blue-coordination-java:3.0.0-rc.4'
+    implementation 'blue.coordination:blue-coordination-java:3.0.0-rc.5'
 }
 ```
+
+Rc.5 includes retained managed-epoch behavior and consumes published
+Language/Contracts `3.1.0-rc.23`. Release builds use the default
+`published-artifact` lane:
+
+```bash
+./gradlew --no-daemon --no-build-cache clean releaseCheck \
+  -PtestJavaVersion=17 \
+  -PblueDependencyMode=published-artifact
+```
+
+Maven Local, composite substitution, and a mutable sibling checkout are not
+valid release inputs. This command documents the required gate shape; it does
+not claim that a gate has run or authorize publication.
+
+For a clean, verified, committed checkout, the
+[immutable Coordination handoff](../development/immutable-staged-coordination.md)
+can export a development JAR and metadata to a separate invocation-owned repository and
+runs its isolated staged consumer. That handoff remains unpublished evidence,
+not a Maven Central installation.
 
 One `BlueCoordination` instance owns its Timelines, documents, drafts, entries,
 and results. Close it when the application scope ends:
@@ -95,6 +117,7 @@ Three rules prevent most integration mistakes:
 | Logical operation and intended current document | existing admission | `operations().on(...)` |
 | Complete provider-authored Timeline Entry | existing admission | `events().exact(...)` |
 | New managed child created by an operation | existing admission plus `ManagedDocumentDraft` | `request.managed(...)` and `expectOccurrence(...)` |
+| Existing current or retained managed state installed by an operation | existing managed lineage and exact occurrence value | automatic exact matching; `selectManagedEpoch(...)` only for ambiguity |
 | Existing source history that must be replayed | top-level admission with an import policy | `importFullHistory()` or `importFromFrontier(...)` |
 
 If all managed members already exist, admit all of them in the initial closure.
@@ -492,6 +515,10 @@ topology, first attach the new parent, wait for `APPLIED`, obtain its
 handle. Put a topology that must already contain several interdependent members
 or a cycle in the initial `ManagedClosure` instead.
 
+This authored-expansion limitation also applies inside retained catch-up:
+catch-up may resolve and propagate an already-existing managed lineage at a
+nested path, but it may not create a newly authored nested lineage.
+
 ```java
 DocumentHandle newParent = blue.documents().require(parentId);
 newParent = blue.documents().promotePublicRoot(parentId);
@@ -561,17 +588,19 @@ private static void requireApplied(EntryResult result) {
 }
 ```
 
-Operation-produced managed admission in rc.4 supports only a genuinely new
-`FROM_NOW` lineage. `draft.atEpoch(...)` and full-history, frontier,
-attach-current, or passive operation-result activation fail closed. If a new
-group must already be cyclic at birth, include the complete group in the
-initial `ManagedClosure`; the current draft API is not a general dynamic cyclic
-closure builder. Draft-path preflight also requires an independently
-processable, non-cyclic operation target whose own effective
-`Process Embedded` catalog does not cross a cyclic-set member. Create new
-members from a cycle-free owning member, as Payment does above. A cyclic-set
-target—or an otherwise acyclic target whose selected catalog crosses into the
-Shipment-Route cycle—is rejected before append.
+Operation-produced draft admission in rc.5 supports only a genuinely
+new `FROM_NOW` lineage. `draft.atEpoch(...)` and full-history, frontier,
+attach-current, or passive draft activation fail closed. The retained
+profile does not weaken that draft rule; it adds a different path for an exact
+value already proven in managed lineage history. If a new group must already be
+cyclic at birth, include the complete group in the initial `ManagedClosure`;
+the draft API is not a general dynamic cyclic closure builder. Draft-path
+preflight also requires an independently processable, non-cyclic operation
+target whose own effective `Process Embedded` catalog does not cross a
+cyclic-set member. Create new members from a cycle-free owning member, as
+Payment does above. A cyclic-set target—or an otherwise acyclic target whose
+selected catalog crosses into the Shipment-Route cycle—is rejected before
+append.
 
 ### Remove and reactivate an existing occurrence
 
@@ -592,10 +621,85 @@ requireApplied(blue.operations()
 
 This is reactivation of an already known lineage, not draft creation. Existing
 cycle detach and later re-add are supported and receive freshly authenticated
-cyclic identities. Same-invocation remove-then-re-add and retargeting the
-retained occurrence to another `DocumentId` remain unsupported. Operational
-tooling can inspect target lineage, activation generation, and active status
-through `blue.advanced().auditManagedOccurrence(sourceId, path)`.
+cyclic identities. Same-invocation remove-then-re-add remains unsupported in
+the draft profile. In rc.5, a later occurrence
+generation may be reattached or retargeted to another proven managed lineage;
+its catch-up plan and cursor remain distinct from the retired generation.
+Operational tooling can inspect target lineage, activation generation, and
+active status through
+`blue.advanced().auditManagedOccurrence(sourceId, path)`.
+
+### Attach an existing managed epoch
+
+Pass the exact existing state through the ordinary operation request. Do not
+construct a `ManagedDocumentDraft` and do not push a hand-built event list into
+the consumer:
+
+```java
+ExactBlueValue retained = source.history()
+        .get(Math.toIntExact(retainedEpoch)).after();
+
+EntryResult attached = blue.operations()
+        .on(consumer)
+        .from(ownerTimeline)
+        .call("attach")
+        .through("ownerChannel")
+        .request(request -> request.exact("child", retained))
+        .execute();
+```
+
+The automatic resolver compares the exact value with the indexed lineage
+history. A current match opens no plan. An authored-initial match starts at
+sentinel epoch `-1` and applies initialization plus every retained successor;
+an epoch-zero match applies epochs `1..frontier`; and a retained epoch `e`
+applies `e + 1..frontier`. The source's original initialization, Timeline
+processing, history, and receipts are read-only throughout.
+
+The authored `-1` value is only a selector/cursor position before the first
+source transition. It is never a durable `ManagedEpochReceipt` epoch: the first
+real receipt is epoch `0`, and receipt audit accepts only non-negative epochs.
+
+If the same BlueId occurs at several non-current source epochs, select the
+intended occurrence position explicitly:
+
+```java
+EntryResult attached = blue.operations()
+        .on(consumer)
+        .from(ownerTimeline)
+        .call("attach")
+        .through("ownerChannel")
+        .request(request -> request.exact("child", retained))
+        .selectManagedEpoch(
+                "/child", source.id(), retainedEpoch, retained.blueId())
+        .execute();
+```
+
+`ManagedEpochSelector` binds source `DocumentId`, epoch, expected BlueId, and
+target path to the captured operation target. It resolves ambiguity only; a
+missing lineage, wrong epoch/BlueId, unused path, or conflicting selector fails
+closed. Several BlueIds needed by one closure are resolved independently and
+produce one occurrence plan per path/generation. If complete referenced content
+is missing, retain every typed demand, register the verified immutable values
+through the exact-node provider, and retry the same work. Do not push events,
+occurrence bindings, or a parent document patch directly into the process.
+
+When `submit()` plus a bounded drain stops after the attachment transition, the
+entry may be `APPLIED` while the consumer is not yet READY. Its committed head
+retains the new graph, its previous ready head remains the ordinary read
+surface, and one barrier aggregates all plans introduced by that exact cause.
+Drain to quiescence, or continue with deterministic `DrainBudget` calls, before
+expecting `consumer.snapshot()` to expose the caught-up state. Source epochs
+committed while the barrier remains active extend its required frontier and
+cannot be overtaken by a later direct consumer entry.
+
+The existing scheduler retains a deterministic lane turn under repeated small
+budgets such as `DrainBudget(1, 1)`: continuing finite source work and its
+catch-up cursor both advance, direct consumer work still cannot overtake the
+barrier, and the consumer eventually becomes READY after the source stops. A
+source that never stops leaves the consumer truthfully CATCHING_UP.
+
+See [Retained managed-epoch catch-up](../semantics/retained-managed-epoch-catch-up.md)
+for the receipt, ordering, failure, cycle, and audit invariants.
 
 ## Ordering, `execute()`, and batching
 
@@ -642,10 +746,14 @@ Choose temporal semantics explicitly:
 | Policy | Meaning | Top-level admission | Operation-created draft |
 | --- | --- | --- | --- |
 | `fromNow()` | Begin at admission/attachment; do not replay earlier entries. | supported | supported and required |
-| `importFullHistory()` | Start eligibility at the retained full-history frontier; a later drain processes eligible retained entries. | supported | unsupported in rc.4 |
-| `importFromFrontier(evidence)` | Start eligibility strictly after verified exact frontier evidence; a later drain processes eligible retained entries. | supported | unsupported in rc.4 |
+| `importFullHistory()` | Start eligibility at the retained full-history frontier; a later drain processes eligible retained entries. | supported | unsupported in rc.5 |
+| `importFromFrontier(evidence)` | Start eligibility strictly after verified exact frontier evidence; a later drain processes eligible retained entries. | supported | unsupported in rc.5 |
 | `attachCurrentState()` | Attach a lineage proven current through the cutoff. | rejected at current high-level admission boundary | unsupported |
 | `passiveSnapshot()` | Retain exact evidence without a live process. | rejected at current high-level admission boundary | unsupported |
+
+This table describes document/closure and new-draft admission policy. The rc.5
+operation path for an existing exact managed state is position-based catch-up,
+not a new `ActivationPolicy` and not Timeline-history replay.
 
 One `ManagedClosure` selects one activation policy for every initially admitted
 member. `importFromFrontier(...)` accepts exact provider frontier evidence in
@@ -727,12 +835,49 @@ Current host elapsed time is populated on aggregate `DrainResult.stats()`;
 entry/closure elapsed fields remain zero and must not be treated as per-entry
 latency measurements.
 
+A suspended ordinary closure exposes all exact resources through
+`ClosureResult.resourceDemands()` and its bounded retry progress through
+`automaticRetryCount()`. Managed demands include the optional typed
+`managedResolutionStatus()` plus display-only diagnostic. Persist every demand
+when one closure needs several BlueIds; do not treat the first satisfied value
+as permission to publish a partial result.
+
+In rc.5, `DrainResult.managedEpochApplications()` contains
+the exact application receipts newly committed by that drain.
+`managedEpochApplicationAttempts()` also exposes non-committing atomic attempts
+and response-loss replays, with their exact work and Contracts attempt result.
+For a suspended automatic occurrence-resolution attempt, persist
+`automaticRetryCount()` plus every `managedOccurrenceResolutionIssues()` row.
+Join each issue to the processor resource demand by `demandIdentity()` and
+branch on its closed `ResolutionStatus`; `diagnostic()` is display text only.
+
 Use:
 
 - `snapshot()` for current READY application state;
 - `history()` for immutable revisions and their source/cause evidence;
 - `values().yaml(...)` for immutable exact request or entry values; and
 - `advanced()` only when explicit host diagnostics are required.
+
+During retained catch-up, `snapshot()` continues to return the last READY
+head. Use `advanced().auditDocument(id)` to inspect a newer committed head and
+`auditManagedDocumentReadiness(id)` to compare committed and ready epochs,
+status, waiting diagnostics, and active barrier identities. The remaining
+read-only methods inspect source receipts, occurrence plans, barriers, due work,
+and committed application receipts:
+
+```java
+var readiness = blue.advanced()
+        .auditManagedDocumentReadiness(consumer.id())
+        .orElseThrow();
+var plans = blue.advanced().auditManagedCatchUpPlans(consumer.id());
+var sourceReceipts = blue.advanced().auditManagedEpochs(source.id());
+```
+
+Use identity-specific `auditManagedEpochReceipt(...)`,
+`auditManagedCatchUpPlan(...)`, `auditManagedCatchUpBarrier(...)`,
+`auditManagedEpochApplicationWork(...)`, and
+`auditManagedEpochApplicationReceipt(...)` when correlating an operational
+trace. These calls do not mutate or repair state.
 
 `DocumentSnapshot.publicEvents()` contains the current/latest revision's public
 events, not a concatenation of every event in history. Read revision histories
@@ -755,6 +900,47 @@ committed delivery when it resumes or reconciles the same retained journal
 entry. This is not an application-level idempotency key for a newly built
 targeted call: rebuilding `operations().on(...)` creates another Timeline Entry
 with another timestamp and can apply the business operation again.
+
+For rc.5 managed catch-up, one successful application transaction publishes the
+consumer revision, complete receipt, occurrence cursor, plan/barrier state, and
+`ManagedEpochApplicationReceipt` together. A non-committing processor result
+publishes none of them and leaves the same work retryable. Missing source epoch
+evidence becomes `WAITING_FOR_HISTORY`; missing or mismatched typed transition
+evidence becomes `BLOCKED` before PROCESS. In both cases the cursor and heads
+stay unchanged and unrelated lanes may continue.
+
+A suspended processor attempt can carry several exact-content demands. Retain
+the complete typed set and bounded automatic retry count; resume the same work
+only after required exact values are available. Ambiguous lineage/epoch,
+unproven history, explicit-state mismatch, and invalid authored content are
+fail-closed statuses, not instructions to upload arbitrary bytes.
+
+A waiting or blocked sibling in the same consumer/barrier gates newly due work
+for that consumer so it cannot overtake the missing evidence; other consumers
+remain independently schedulable. When evidence is repaired, the exact
+registered-but-unapplied work identity is requeued by restoring both pending
+and due indexes without replacing its immutable audit record. Contradictory
+index state fails closed.
+
+Occurrence retirement cancels a non-complete (including blocked) plan for that
+generation. A completed plan snapshot is immutable audit evidence and remains
+unchanged.
+
+In the proven finite two-member cycle, the distinct source member may receive
+the shared cyclic representation at the same local epoch only when the
+eventless Contracts result and commit companion authenticate that exact update.
+This updates current component/continuation evidence without rewriting source
+revisions, receipts, or events. It is not authority over arbitrary indirect
+peers: a merge with an already cyclic multi-member source component fails
+closed when it would require a source epoch to advance or be reinterpreted. A
+direct target, eventful transition, missing/malformed proof, or larger unproven
+merge rejects the publication atomically.
+
+If the transaction commits immediately before route publication loses its
+response, the application and closure publication receipts are authoritative.
+Retry or same-engine control-plane reconstruction repairs the route projection
+without a second PROCESS call. This still does not survive destruction of the
+in-memory stores.
 
 Retry only after inspecting the disposition and diagnostic. For `STALE`,
 re-read the current handle/state and intentionally rebuild the operation if the
@@ -783,9 +969,13 @@ For each workflow, test through `blue.coordination.sdk`:
 6. exact external entry success and terminal `NO_MATCH`;
 7. `submit()` state-before-drain and `execute()` parity where batching matters;
 8. dynamic draft success plus missing/extra/wrong-path rollback cases;
-9. disposition, diagnostic code, changed documents, public events, and READY
+9. for retained attachment, authored-initial/epoch-zero/retained/current
+   selection, repeated-BlueId selector ambiguity, plan/barrier progression,
+   committed-versus-ready reads, live extension, and duplicate event
+   occurrences;
+10. disposition, diagnostic code, changed documents, public events, and READY
    snapshots; and
-10. shutdown/recreation assumptions, making the in-memory durability boundary
+11. shutdown/recreation assumptions, making the in-memory durability boundary
     explicit.
 
 When contributing tests to this repository, every `@Test` contains exactly one
@@ -810,12 +1000,14 @@ The bundled in-memory runtime does not answer those production-host questions.
 
 ## Continue reading
 
-- [Public API reference](../reference/public-api.md) for signatures and result
-  vocabulary.
+- [Public API reference](../reference/public-api.md) for rc.5 signatures and
+  result vocabulary.
 - [Managed Process Embedded documents](../semantics/process-embedded-documents.md)
   for lineage, occurrence, cycle, and publication semantics.
 - [Historical catch-up](../semantics/historical-catch-up.md) for frontier and
   replay rules.
+- [Retained managed-epoch catch-up](../semantics/retained-managed-epoch-catch-up.md)
+  for operation-triggered source-epoch plans, receipts, and readiness.
 - [Identity and revisions](../semantics/identity-and-revisions.md) for
   `DocumentId`, BlueId, epochs, and revision history.
 - [Failure and retry model](../operations/failure-model.md) for commit and
@@ -824,7 +1016,7 @@ The bundled in-memory runtime does not answer those production-host questions.
   internal data flow without application-only details.
 - [SDK migration and ownership ledger](../reference/sdk-migration-and-ownership.md)
   when replacing a low-level or 2.x integration.
-- [Known limitations](../limitations.md) for the exact rc.4 non-claims.
+- [Known limitations](../limitations.md) for the exact rc.5 non-claims.
 
 The two principal walkthroughs in this guide are executable as the built-JAR-only
 [`SdkDeveloperGuideTest`](../../src/consumerTest/java/blue/coordination/consumer/SdkDeveloperGuideTest.java).

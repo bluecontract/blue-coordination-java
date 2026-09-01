@@ -12,22 +12,47 @@ def dependencyMode = providers.gradleProperty('blueDependencyMode')
         .trim()
 def immutableStagedContracts =
         dependencyMode == 'immutable-staged-contracts'
-def publishedLanguageVersion = '3.1.0-rc.22'
-def immutableStagedLanguageVersion = '3.1.0-rc.21'
-def activeLanguageVersion = immutableStagedContracts
+def immutableDevelopmentContracts =
+        dependencyMode == 'immutable-development-contracts'
+def immutableContractsRepository =
+        immutableStagedContracts || immutableDevelopmentContracts
+def publishedLanguageVersion = '3.1.0-rc.23'
+def immutableStagedLanguageVersion = providers.gradleProperty(
+        'blueContractsVersion').getOrElse('3.1.0-rc.23')
+def activeLanguageVersion = immutableContractsRepository
         ? immutableStagedLanguageVersion
         : publishedLanguageVersion
 def stagedContractsRepositoryValue = providers.gradleProperty(
         'blueContractsRepository').orNull
 def stagedContractsManifestIdentity = providers.gradleProperty(
         'blueContractsManifestSha256').orNull
+def developmentContractsSourceCommit = providers.gradleProperty(
+        'blueContractsSourceCommit').orNull
 def versionMatches = file('.cz.toml').getText('UTF-8') =~
         /(?m)^version = "([^"]+)"$/
 if (!versionMatches.find()) {
     throw new GradleException('Missing version in .cz.toml')
 }
 def declaredProjectVersion = versionMatches.group(1)
-version = declaredProjectVersion
+def developmentProjectVersion = providers.gradleProperty(
+        'blueDevelopmentVersion').orNull
+if (developmentProjectVersion != null
+        && (!immutableDevelopmentContracts
+        || !(developmentProjectVersion
+        ==~ /3\.0\.0-dev\.(?:tree\.)?[0-9a-f]{40}/))) {
+    throw new GradleException(
+            'blueDevelopmentVersion requires immutable-development-contracts '
+                    + 'and an exact commit-bound or tree-bound DEVELOPMENT version')
+}
+version = developmentProjectVersion ?: declaredProjectVersion
+if (immutableDevelopmentContracts
+        && immutableStagedLanguageVersion != '3.1.0-rc.23'
+        && !(immutableStagedLanguageVersion
+        ==~ /3\.1\.0-dev\.(?:tree\.)?[0-9a-f]{40}/)) {
+    throw new GradleException(
+            'blueContractsVersion must be the legacy pin or an exact '
+                    + 'commit-bound or tree-bound DEVELOPMENT version')
+}
 
 def publishedBlueCoordinates = [
         'blue.language:blue-language-model': publishedLanguageVersion,
@@ -46,17 +71,19 @@ def immutableStagedBlueCoordinates = publishedBlueCoordinates.collectEntries {
                 ? immutableStagedLanguageVersion
                 : expectedVersion]
 }
-def activeBlueCoordinates = immutableStagedContracts
+def activeBlueCoordinates = immutableContractsRepository
         ? immutableStagedBlueCoordinates
         : publishedBlueCoordinates
 def acceptedDependencyModes = [
         'published-artifact',
-        'immutable-staged-contracts'
+        'immutable-staged-contracts',
+        'immutable-development-contracts'
 ] as Set
 if (!acceptedDependencyModes.contains(dependencyMode)) {
     throw new GradleException(
-            'blueDependencyMode must be published-artifact or '
-                    + 'immutable-staged-contracts')
+            'blueDependencyMode must be published-artifact, '
+                    + 'immutable-staged-contracts, or '
+                    + 'immutable-development-contracts')
 }
 
 def stagedContractsArtifacts = [
@@ -68,17 +95,29 @@ def stagedContractsArtifacts = [
         'blue-conformance',
         'blue-language-java'
 ] as Set
+def developmentContractsArtifacts = [
+        'blue-language-model',
+        'blue-language-core',
+        'blue-language-mapping',
+        'blue-language-ipfs',
+        'blue-contracts-core',
+        'blue-language-java'
+] as Set
 
 base {
     archivesName = 'blue-coordination-java'
 }
 
 repositories {
-    if (immutableStagedContracts) {
+    if (immutableContractsRepository) {
         exclusiveContent {
             forRepository {
                 maven {
-                    name = 'immutableStagedContracts'
+                    if (immutableDevelopmentContracts) {
+                        name = 'immutableDevelopmentContracts'
+                    } else {
+                        name = 'immutableStagedContracts'
+                    }
                     url = uri(file(stagedContractsRepositoryValue)
                             .canonicalFile)
                     metadataSources {
@@ -127,12 +166,47 @@ configurations {
     scenarioTestRuntimeOnly.extendsFrom testSupportRuntimeOnly
 }
 
+def selectedDependencyLockFile = layout.projectDirectory.file(
+        immutableContractsRepository
+                ? 'gradle/immutable-staged-contracts.lockfile'
+                : 'gradle/published-artifact.lockfile')
+if (immutableDevelopmentContracts
+        && immutableStagedLanguageVersion != '3.1.0-rc.23') {
+    // Keep every external dependency locked. The immutable manifest supplies
+    // only the six exact Language coordinates; a generated overlay avoids a
+    // source commit containing its own commit-bound dependency version.
+    int replacedCoordinates = 0
+    String developmentLock = selectedDependencyLockFile.asFile
+            .getText('UTF-8').split('\n', -1).collect { line ->
+        if (line.startsWith('blue.language:')) {
+            def match = line =~ /^(blue\.language:[^:]+:)3\.1\.0-rc\.23(=.*)$/
+            if (!match.matches()) {
+                throw new GradleException(
+                        'Unexpected Language coordinate in the DEVELOPMENT lock template')
+            }
+            replacedCoordinates++
+            return match.group(1) + immutableStagedLanguageVersion + match.group(2)
+        }
+        line
+    }.join('\n')
+    if (replacedCoordinates != developmentContractsArtifacts.size()) {
+        throw new GradleException(
+                'The DEVELOPMENT lock template must contain exactly six Language coordinates')
+    }
+    selectedDependencyLockFile = layout.projectDirectory.file(
+            '.gradle/immutable-development-locks/'
+                    + immutableStagedLanguageVersion + '.lockfile')
+    File generatedLock = selectedDependencyLockFile.asFile
+    generatedLock.parentFile.mkdirs()
+    if (!generatedLock.isFile()
+            || generatedLock.getText('UTF-8') != developmentLock) {
+        generatedLock.setText(developmentLock, 'UTF-8')
+    }
+}
+
 dependencyLocking {
     lockAllConfigurations()
-    lockFile = layout.projectDirectory.file(
-            immutableStagedContracts
-                    ? 'gradle/immutable-staged-contracts.lockfile'
-                    : 'gradle/published-artifact.lockfile')
+    lockFile = selectedDependencyLockFile
 }
 
 tasks.withType(JavaCompile).configureEach {
@@ -184,6 +258,7 @@ dependencies {
         exclude group: 'blue.language'
     }
     implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
+    implementation 'io.github.erdtman:java-json-canonicalization:1.1'
 
     testImplementation platform('org.junit:junit-bom:5.14.1')
     testImplementation 'org.junit.jupiter:junit-jupiter'
@@ -482,16 +557,61 @@ def publicBoundarySources = files(
         fileTree('src/main/java/blue/coordination/sdk') {
             include '**/*.java'
         })
-// Dynamic-evolution maintainability guardrails. These are deliberately bounded
-// caps over the frozen SDK baseline plus reviewed automatic occurrence
-// resolution, managed transition evidence, exact-provider and runtime
-// conformance and prepared route-delta evidence additions: currently 182
-// production sources, 50,119 lines and 57 public api+sdk source types. They
-// are not historical Round 13 counts and are not performance evidence.
+// Retained managed-epoch maintainability guardrails. These are deliberately
+// bounded caps over the frozen rc.4 SDK baseline plus the reviewed receipt,
+// matching, occurrence-plan, barrier, application, readiness, audit, and
+// recovery responsibilities plus the reviewed host-driven fair-selection and
+// unsupported nested-new publication boundary, cyclic proof retention, and
+// verified checkpoint-settlement projection, exact execution-policy surface,
+// transitive managed catch-up readiness helper, and the backward-compatible
+// exact-node evidence transport and committed-current evidence bridge:
+// retained-source provider-shell normalization: currently 221 production
+// sources, 65,797
+// lines and 81 public api+sdk source types. These are not
+// historical Round 13 counts and are not performance evidence.
 def currentProductionShapeLimits = [
-        classes: 184,
-        lines: 50_119L,
-        publicApiTypes: 58
+        classes: 221,
+        lines: 65_797L,
+        publicApiTypes: 81,
+        maxLinesPerRetainedManagedEpochSource: 1_166L
+]
+def retainedManagedEpochProductionSources = [
+        'src/main/java/blue/coordination/api/ManagedCatchUpBarrier.java',
+        'src/main/java/blue/coordination/api/ManagedCatchUpBarrierStatus.java',
+        'src/main/java/blue/coordination/api/ManagedCatchUpStatus.java',
+        'src/main/java/blue/coordination/api/ManagedDocumentReadiness.java',
+        'src/main/java/blue/coordination/api/ManagedEpochApplicationAttempt.java',
+        'src/main/java/blue/coordination/api/ManagedEpochApplicationReceipt.java',
+        'src/main/java/blue/coordination/api/ManagedEpochApplicationWork.java',
+        'src/main/java/blue/coordination/api/ManagedEpochEvidenceFailure.java',
+        'src/main/java/blue/coordination/api/ManagedEpochReceipt.java',
+        'src/main/java/blue/coordination/api/ManagedEventOccurrence.java',
+        'src/main/java/blue/coordination/api/ManagedIdentity.java',
+        'src/main/java/blue/coordination/api/ManagedOccurrenceCatchUpPlan.java',
+        'src/main/java/blue/coordination/api/ProcessingAvailability.java',
+        'src/main/java/blue/coordination/api/ProcessingSelection.java',
+        'src/main/java/blue/coordination/internal/CatchUpPlanStore.java',
+        'src/main/java/blue/coordination/internal/ContractsManagedEpochSelectionPlan.java',
+        'src/main/java/blue/coordination/internal/ManagedCatchUpPlanIndex.java',
+        'src/main/java/blue/coordination/internal/ManagedCatchUpPlanner.java',
+        'src/main/java/blue/coordination/internal/ManagedCatchUpWorkIndex.java',
+        'src/main/java/blue/coordination/internal/ManagedEpochApplicationExecutor.java',
+        'src/main/java/blue/coordination/internal/ManagedEpochEvidenceException.java',
+        'src/main/java/blue/coordination/internal/ManagedEpochInvocationCapturer.java',
+        'src/main/java/blue/coordination/internal/ManagedEpochReceiptMapper.java',
+        'src/main/java/blue/coordination/internal/ManagedEpochReceiptStore.java',
+        'src/main/java/blue/coordination/internal/ManagedEpochSourceEvidenceVerifier.java',
+        'src/main/java/blue/coordination/internal/UnsupportedNestedNewLineageException.java',
+        'src/main/java/blue/coordination/internal/PersistentMinimumMap.java',
+        'src/main/java/blue/coordination/sdk/DrainBudget.java',
+        'src/main/java/blue/coordination/sdk/ManagedEpochApplicationAttempt.java',
+        'src/main/java/blue/coordination/sdk/ManagedEpochApplicationReceipt.java',
+        'src/main/java/blue/coordination/sdk/ManagedEpochApplicationWork.java',
+        'src/main/java/blue/coordination/sdk/ManagedEpochEvidenceFailure.java',
+        'src/main/java/blue/coordination/sdk/ManagedEpochReceipt.java',
+        'src/main/java/blue/coordination/sdk/ManagedEpochSelector.java',
+        'src/main/java/blue/coordination/sdk/ManagedEventOccurrence.java',
+        'src/main/java/blue/coordination/sdk/SourceOrder.java'
 ]
 def forbiddenArchitectureTokens = [
         'AutonomousLink', 'TemporalWave', 'ConsistencyMode',
@@ -523,6 +643,24 @@ tasks.register('validateProductionShape') {
         if (apiSources.size() > currentProductionShapeLimits.publicApiTypes) {
             failures << ("public API types ${apiSources.size()} > "
                     + currentProductionShapeLimits.publicApiTypes)
+        }
+        long maximumRetainedManagedEpochSourceLines = 0L
+        retainedManagedEpochProductionSources.each { relative ->
+            File source = file(relative)
+            if (!source.isFile()) {
+                failures << "reviewed retained managed-epoch source is missing: ${relative}"
+                return
+            }
+            long sourceLines = source.readLines('UTF-8').size()
+            maximumRetainedManagedEpochSourceLines = Math.max(
+                    maximumRetainedManagedEpochSourceLines, sourceLines)
+            if (sourceLines > currentProductionShapeLimits
+                    .maxLinesPerRetainedManagedEpochSource) {
+                failures << ("retained managed-epoch source ${relative} has "
+                        + "${sourceLines} lines > "
+                        + currentProductionShapeLimits
+                                .maxLinesPerRetainedManagedEpochSource)
+            }
         }
         ['engine', 'fastpath'].each { legacy ->
             if (file("src/main/java/blue/coordination/${legacy}").exists()) {
@@ -560,7 +698,12 @@ tasks.register('validateProductionShape') {
         if (!failures.empty) throw new GradleException(failures.join('; '))
         logger.lifecycle(
                 "Production shape: ${classes} classes, ${lines} lines, "
-                        + "${apiSources.size()} public API types")
+                        + "${apiSources.size()} public API types; retained "
+                        + "managed-epoch max source "
+                        + "${maximumRetainedManagedEpochSourceLines}/"
+                        + currentProductionShapeLimits
+                                .maxLinesPerRetainedManagedEpochSource
+                        + " lines")
     }
 }
 
@@ -585,7 +728,8 @@ tasks.register('verifyPublicApiBoundary') {
                 'src/main/java/blue/coordination/internal/BundledContracts10Release.java',
                 'src/main/java/blue/coordination/internal/Contracts10AuthoredClosureCompiler.java',
                 'src/main/java/blue/coordination/internal/Contracts10StaticEmbeddedAdmissionCompiler.java',
-                'src/main/java/blue/coordination/internal/ContractsManagedDraftPlan.java'
+                'src/main/java/blue/coordination/internal/ContractsManagedDraftPlan.java',
+                'src/main/java/blue/coordination/internal/ContractsManagedEpochSelectionPlan.java'
         ] as Set
         fileTree('src/main/java/blue/coordination/internal') {
             include '**/*.java'
@@ -607,7 +751,7 @@ tasks.register('verifyPublicApiBoundary') {
 
 tasks.register('verifySdkPublicApiBoundary') {
     group = 'verification'
-    description = 'Allows only DocumentId from the compatibility API and rejects every implementation dependency in normal SDK signatures.'
+    description = 'Allows only DocumentId and the reviewed Builder ContractsExecutionPolicy compatibility surface; rejects every other implementation dependency in normal SDK signatures.'
     dependsOn tasks.named('compileJava')
     inputs.files(fileTree('src/main/java/blue/coordination/sdk') {
         include '**/*.java'
@@ -714,6 +858,12 @@ tasks.register('verifySdkPublicApiBoundary') {
                 }
                 String normalSignature = signature.replaceAll(
                         /blue\.coordination\.api\.DocumentId\b/, '')
+                if (className
+                        == 'blue.coordination.sdk.BlueCoordination$Builder') {
+                    normalSignature = normalSignature.replaceAll(
+                                /blue\.coordination\.api\.ContractsExecutionPolicy\b/,
+                                '')
+                }
                 forbiddenSignaturePrefixes.findAll {
                     normalSignature.contains(it)
                 }.each { forbidden ->
@@ -937,6 +1087,297 @@ def inspectImmutableStagedContractsRepository = {
     manifest
 }
 
+def inspectImmutableDevelopmentContractsRepository = {
+    if (!immutableDevelopmentContracts) {
+        throw new GradleException(
+                'Immutable development Contracts verification requires '
+                        + '-PblueDependencyMode=immutable-development-contracts')
+    }
+    if (developmentContractsSourceCommit == null
+            || !(developmentContractsSourceCommit
+            ==~ /[0-9a-f]{40}|[0-9a-f]{64}/)) {
+        throw new GradleException(
+                'Immutable development Contracts verification requires '
+                        + '-PblueContractsSourceCommit=<exact lowercase Git identity>')
+    }
+    File repository = file(stagedContractsRepositoryValue).canonicalFile
+    File manifestFile = new File(repository, 'artifact-manifest.json')
+    File manifestChecksum = new File(
+            repository, 'artifact-manifest.json.sha256')
+    def failures = []
+    def regularFile = { File candidate ->
+        java.nio.file.Files.isRegularFile(candidate.toPath(),
+                java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                && !java.nio.file.Files.isSymbolicLink(candidate.toPath())
+    }
+    if (!repository.isDirectory()) {
+        failures << "development repository is not a directory ${repository}"
+    }
+    if (repository.toPath().startsWith(rootDir.canonicalFile.toPath())) {
+        failures << 'development repository must be outside the Coordination source tree'
+    }
+    if (!regularFile(manifestFile) || !regularFile(manifestChecksum)) {
+        failures << 'regular artifact manifest and checksum companion are required'
+    }
+    if (!failures.empty) {
+        throw new GradleException(
+                'Immutable development Contracts repository failed:\n - '
+                        + failures.join('\n - '))
+    }
+
+    String actualManifestIdentity = sha256Identity(manifestFile)
+    if (actualManifestIdentity != stagedContractsManifestIdentity) {
+        failures << ('manifest identity is ' + actualManifestIdentity
+                + '; expected ' + stagedContractsManifestIdentity)
+    }
+    String expectedManifestChecksum = actualManifestIdentity.substring(
+            'sha256:'.length()) + '  artifact-manifest.json\n'
+    if (manifestChecksum.getText('UTF-8') != expectedManifestChecksum) {
+        failures << 'artifact manifest checksum companion differs'
+    }
+
+    def manifest
+    try {
+        manifest = new groovy.json.JsonSlurper().parse(manifestFile)
+    } catch (RuntimeException exception) {
+        throw new GradleException(
+                'Cannot parse immutable development Contracts manifest',
+                exception)
+    }
+    def requiredManifestFields = [
+            'schema',
+            'stagePurpose',
+            'releaseReadinessClaimed',
+            'builtWithJava',
+            'groupId',
+            'version',
+            'sourceCommit',
+            'contractsSpecificationIdentity',
+            'contractsFixturePackageIdentity',
+            'contractsReleaseIdentity',
+            'artifacts'
+    ] as Set
+    def allowedManifestFields = requiredManifestFields + [
+            'artifactRecordCount',
+            'repositoryFileCount',
+            'sourceTree',
+            'sourceDirty'
+    ] as Set
+    def actualManifestFields = manifest instanceof Map
+            ? manifest.keySet() as Set : [] as Set
+    if (!(manifest instanceof Map)
+            || !actualManifestFields.containsAll(requiredManifestFields)
+            || !(actualManifestFields - allowedManifestFields).empty) {
+        failures << ('development manifest fields differ; missing '
+                + (requiredManifestFields - actualManifestFields).toList().sort()
+                + ', unexpected '
+                + (actualManifestFields - allowedManifestFields).toList().sort())
+    }
+    if (manifest.schema != 'blue-development-maven-repository/1.0') {
+        failures << "unexpected manifest schema ${manifest.schema}"
+    }
+    if (manifest.stagePurpose != 'DEVELOPMENT') {
+        failures << "unexpected stagePurpose ${manifest.stagePurpose}"
+    }
+    if (manifest.releaseReadinessClaimed != false) {
+        failures << 'development manifest must set releaseReadinessClaimed to false'
+    }
+    if (!(manifest.builtWithJava instanceof Number)
+            || manifest.builtWithJava.toString() != '17') {
+        failures << "unexpected development build JDK ${manifest.builtWithJava}"
+    }
+    if (manifest.groupId != 'blue.language') {
+        failures << "unexpected development group ${manifest.groupId}"
+    }
+    if (manifest.version != immutableStagedLanguageVersion) {
+        failures << "unexpected development Contracts version ${manifest.version}"
+    }
+    if (!(manifest.sourceCommit instanceof String)
+            || !(manifest.sourceCommit ==~ /[0-9a-f]{40}|[0-9a-f]{64}/)) {
+        failures << 'development manifest sourceCommit is not an exact Git identity'
+    } else if (manifest.sourceCommit != developmentContractsSourceCommit) {
+        failures << ('development manifest sourceCommit is '
+                + manifest.sourceCommit + '; expected '
+                + developmentContractsSourceCommit)
+    }
+    if (immutableStagedLanguageVersion != '3.1.0-rc.23') {
+        if (!(manifest.sourceTree instanceof String)
+                || !(manifest.sourceTree ==~ /[0-9a-f]{40}/)
+                || !(manifest.sourceDirty instanceof Boolean)) {
+            failures << 'DEVELOPMENT version requires exact sourceTree/sourceDirty provenance'
+        } else {
+            String expectedDevelopmentVersion = manifest.sourceDirty
+                    ? '3.1.0-dev.tree.' + manifest.sourceTree
+                    : '3.1.0-dev.' + manifest.sourceCommit
+            if (manifest.version != expectedDevelopmentVersion) {
+                failures << 'DEVELOPMENT version does not bind its exact source identity'
+            }
+        }
+    }
+    [
+            'contractsSpecificationIdentity',
+            'contractsFixturePackageIdentity',
+            'contractsReleaseIdentity'
+    ].each { field ->
+        if (!(manifest[field] instanceof String)
+                || !(manifest[field] ==~ /sha256:[0-9a-f]{64}/)) {
+            failures << "manifest ${field} is not a SHA-256 identity"
+        }
+    }
+    if (!(manifest.artifacts instanceof List)) {
+        failures << 'manifest artifacts must be a list'
+    }
+
+    def kinds = [
+            pom: '.pom',
+            runtime: '.jar'
+    ]
+    def expectedRecords = []
+    developmentContractsArtifacts.toList().sort().each { artifact ->
+        kinds.keySet().toList().sort().each { kind ->
+            String base = 'blue/language/' + artifact + '/' +
+                    immutableStagedLanguageVersion + '/' + artifact + '-' +
+                    immutableStagedLanguageVersion
+            expectedRecords << [
+                    coordinate: 'blue.language:' + artifact + ':' +
+                            immutableStagedLanguageVersion,
+                    kind: kind,
+                    path: base + kinds[kind]
+            ]
+        }
+    }
+    def records = manifest.artifacts instanceof List
+            ? manifest.artifacts : []
+    def requiredRecordFields = [
+            'coordinate',
+            'kind',
+            'path',
+            'checksumPath',
+            'sha256',
+            'bytes'
+    ] as Set
+    records.eachWithIndex { record, index ->
+        def actualRecordFields = record instanceof Map
+                ? record.keySet() as Set : [] as Set
+        if (!(record instanceof Map)
+                || actualRecordFields != requiredRecordFields) {
+            failures << ('manifest artifact record ' + index
+                    + ' fields differ; expected '
+                    + requiredRecordFields.toList().sort())
+        }
+    }
+    def recordKeys = records.collect { record ->
+        String.valueOf(record.coordinate) + ':' +
+                String.valueOf(record.kind)
+    }
+    if (recordKeys != recordKeys.toList().sort()) {
+        failures << 'manifest artifact records are not canonically ordered'
+    }
+    if (recordKeys.toSet().size() != recordKeys.size()) {
+        failures << 'manifest contains duplicate artifact records'
+    }
+    def recordsByKey = records.collectEntries { record ->
+        [(String.valueOf(record.coordinate) + ':'
+                + String.valueOf(record.kind)): record]
+    }
+    def expectedFiles = [
+            'artifact-manifest.json',
+            'artifact-manifest.json.sha256'
+    ] as Set
+    expectedRecords.each { expected ->
+        String lookup = expected.coordinate + ':' + expected.kind
+        def record = recordsByKey[lookup]
+        if (record == null) {
+            failures << "missing manifest artifact record ${lookup}"
+            return
+        }
+        if (record.path != expected.path
+                || record.checksumPath != expected.path + '.sha256') {
+            failures << "noncanonical manifest paths for ${lookup}"
+            return
+        }
+        expectedFiles.add(expected.path)
+        expectedFiles.add(expected.path + '.sha256')
+        File payload = new File(repository, expected.path).canonicalFile
+        File checksum = new File(
+                repository, expected.path + '.sha256').canonicalFile
+        if (!payload.toPath().startsWith(repository.toPath())
+                || !checksum.toPath().startsWith(repository.toPath())) {
+            failures << "artifact path escapes repository for ${lookup}"
+            return
+        }
+        if (!regularFile(payload) || !regularFile(checksum)) {
+            failures << "missing regular payload/checksum for ${lookup}"
+            return
+        }
+        String payloadIdentity = sha256Identity(payload)
+        if (record.sha256 != payloadIdentity) {
+            failures << "payload identity differs for ${lookup}"
+        }
+        if (!(record.bytes instanceof Number)
+                || record.bytes.longValue() != payload.length()) {
+            failures << "payload byte count differs for ${lookup}"
+        }
+        String expectedChecksum = payloadIdentity.substring(
+                'sha256:'.length()) + '  ' + payload.name + '\n'
+        if (checksum.getText('UTF-8') != expectedChecksum) {
+            failures << "payload checksum companion differs for ${lookup}"
+        }
+    }
+    if (records.size() != 12 || records.size() != expectedRecords.size()) {
+        failures << ('manifest has ' + records.size()
+                + ' artifact records; expected 12')
+    }
+    if (manifest.containsKey('artifactRecordCount')
+            && (!(manifest.artifactRecordCount instanceof Number)
+            || manifest.artifactRecordCount.toString() != '12')) {
+        failures << 'artifactRecordCount must be 12 when present'
+    }
+    if (manifest.containsKey('repositoryFileCount')
+            && (!(manifest.repositoryFileCount instanceof Number)
+            || manifest.repositoryFileCount.toString() != '26')) {
+        failures << 'repositoryFileCount must be 26 when present'
+    }
+
+    def actualFiles = [] as Set
+    def stream = java.nio.file.Files.walk(repository.toPath())
+    try {
+        stream.forEach { path ->
+            if (path == repository.toPath()) {
+                return
+            }
+            if (java.nio.file.Files.isSymbolicLink(path)) {
+                failures << ('symbolic link in development repository '
+                        + repository.toPath().relativize(path))
+                return
+            }
+            if (java.nio.file.Files.isRegularFile(path,
+                    java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                actualFiles.add(repository.toPath().relativize(path)
+                        .toString().replace(File.separator, '/'))
+            }
+        }
+    } finally {
+        stream.close()
+    }
+    if (expectedFiles.size() != 26) {
+        failures << ('expected development repository closure has '
+                + expectedFiles.size() + ' files; expected 26')
+    }
+    if (actualFiles != expectedFiles) {
+        failures << ('development repository closure differs; missing '
+                + (expectedFiles - actualFiles).toList().sort()
+                + ', unexpected '
+                + (actualFiles - expectedFiles).toList().sort())
+    }
+    if (!failures.empty) {
+        throw new GradleException(
+                'Immutable development Contracts repository failed:\n - '
+                        + failures.join('\n - '))
+    }
+    manifest
+}
+
 def immutableStagedContractsRepository = tasks.register(
         'verifyImmutableStagedContractsRepository') {
     group = 'verification'
@@ -954,17 +1395,40 @@ def immutableStagedContractsRepository = tasks.register(
     }
 }
 
-if (immutableStagedContracts) {
+def immutableDevelopmentContractsRepository = tasks.register(
+        'verifyImmutableDevelopmentContractsRepository') {
+    group = 'verification'
+    description = 'Verifies the manifest-pinned, runtime-and-POM-only DEVELOPMENT Contracts repository before dependency resolution.'
+    if (immutableDevelopmentContracts) {
+        inputs.dir(file(stagedContractsRepositoryValue))
+        inputs.property('blueContractsManifestSha256',
+                stagedContractsManifestIdentity)
+        inputs.property('blueContractsSourceCommit',
+                developmentContractsSourceCommit)
+    }
+    doLast {
+        def manifest = inspectImmutableDevelopmentContractsRepository()
+        logger.lifecycle(
+                'Immutable development Contracts repository verified: {} from {}',
+                stagedContractsManifestIdentity, manifest.sourceCommit)
+    }
+}
+
+if (immutableContractsRepository) {
     tasks.named('compileJava') {
-        dependsOn immutableStagedContractsRepository
+        dependsOn immutableDevelopmentContracts
+                ? immutableDevelopmentContractsRepository
+                : immutableStagedContractsRepository
     }
 }
 
 tasks.register('dependencyPreflight') {
     group = 'verification'
     description = 'Resolves every release dependency from the selected isolated lane.'
-    if (immutableStagedContracts) {
-        dependsOn immutableStagedContractsRepository
+    if (immutableContractsRepository) {
+        dependsOn immutableDevelopmentContracts
+                ? immutableDevelopmentContractsRepository
+                : immutableStagedContractsRepository
     }
     doLast {
         def repositoryDependency = dependencies.create(
@@ -1180,6 +1644,7 @@ tasks.register('verifyReleaseMetadata') {
                 'docs/development/build-and-test.md',
                 'docs/development/test-strategy.md',
                 'docs/development/releasing.md',
+                'docs/releases/3.0.0-rc.5.md',
                 'docs/releases/3.0.0-rc.4.md',
                 'docs/releases/3.0.0-rc.3.md',
                 'docs/releases/3.0.0-rc.1-test-report.md',
@@ -3007,6 +3472,14 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
     def verificationReceipt = layout.buildDirectory.file(
             'reports/contracts10/source-archive-verification.json')
     outputs.file(verificationReceipt)
+    doFirst {
+        if (immutableDevelopmentContracts) {
+            throw new GradleException(
+                    'verifyExtractedSourceArchive is a release checkpoint and '
+                            + 'must not silently replace the selected '
+                            + 'immutable DEVELOPMENT Contracts lane')
+        }
+    }
     doLast {
         File sourceArchive = coordinationSourceArchive.get()
                 .archiveFile.get().asFile
@@ -3065,16 +3538,35 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
         List<String> command = windows
                 ? ['cmd', '/d', '/c', wrapper.absolutePath]
                 : [wrapper.absolutePath]
-        command.addAll([
-                '--no-daemon', '--max-workers=1', 'help',
-                '-PtestJavaVersion=' + providers.gradleProperty(
-                        'testJavaVersion').getOrElse('17'),
+        List<String> focusedTasks = [
+                'clean',
+                'test',
+                'verifyActiveDependencyLane',
+                'dependencyPreflight',
                 'verifyDependencyModeIsolation'
+        ]
+        List<String> focusedTests = [
+                'blue.coordination.sdk.SdkCanonicalRetainedManagedEpochScenarioTest',
+                'blue.coordination.internal.ManagedSameStateEpochPublicationTest',
+                'blue.coordination.sdk.SdkManagedDraftAcceptanceTest',
+                'blue.coordination.sdk.SdkManagedEpochCycleAcceptanceTest'
+        ]
+        command.addAll([
+                '--no-daemon', '--no-build-cache', '--max-workers=1'
         ])
+        command.addAll(['clean', 'test'])
+        focusedTests.each { focusedTest ->
+            command.addAll(['--tests', focusedTest])
+        }
+        command.addAll(focusedTasks.drop(2))
+        command.add(
+                '-PtestJavaVersion=' + providers.gradleProperty(
+                        'testJavaVersion').getOrElse('17'))
         if (immutableStagedContracts) {
             command.addAll([
-                    'verifyImmutableStagedContractsRepository',
                     '-PblueDependencyMode=immutable-staged-contracts',
+                    '-PblueContractsVersion=' +
+                            immutableStagedLanguageVersion,
                     '-PblueContractsRepository=' +
                             file(stagedContractsRepositoryValue).canonicalPath,
                     '-PblueContractsManifestSha256=' +
@@ -3082,7 +3574,6 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
             ])
         } else {
             command.addAll([
-                    'verifyPublishedDependencyIsolation',
                     '-PblueDependencyMode=published-artifact'
             ])
         }
@@ -3106,7 +3597,7 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
         File receipt = verificationReceipt.get().asFile
         receipt.parentFile.mkdirs()
         def receiptValue = [
-                schemaId: 'blue-coordination-contracts10-source-archive-verification-v1',
+                schemaId: 'blue-coordination-contracts10-source-archive-verification-v2',
                 archiveName: sourceArchive.name,
                 archiveSha256: archiveHash,
                 checksumMode: 'DETACHED_SHA256_SIDECAR',
@@ -3118,11 +3609,11 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
                 java: providers.gradleProperty(
                         'testJavaVersion').getOrElse('17'),
                 extractedConfiguration: 'PASS',
+                compileStatus: 'PASS',
                 dependencyIsolationStatus: 'PASS',
-                focusedTestsStatus: 'NOT_EXECUTED',
-                publishedArtifactCompatibility: 'PASS',
-                publishedArtifactCompatibilityReason: null,
-                focusedTasks: []
+                focusedTestsStatus: 'PASS',
+                focusedTasks: focusedTasks,
+                focusedTests: focusedTests
         ]
         receipt.setText(groovy.json.JsonOutput.prettyPrint(
                 groovy.json.JsonOutput.toJson(receiptValue)) + '\n',
@@ -3162,8 +3653,10 @@ tasks.register('verifyDependencyModeIsolation') {
         }
         def requiredStagedEvidence = [
                 "'immutable-staged-contracts'",
+                "'immutable-development-contracts'",
                 "'blueContractsRepository'",
                 "'blueContractsManifestSha256'",
+                "'blueContractsSourceCommit'",
                 "'artifact-manifest.json'",
                 "'artifact-manifest.json.sha256'"
         ]
@@ -3176,7 +3669,9 @@ tasks.register('verifyDependencyModeIsolation') {
         if (!buildScript.contains('exclusiveContent {')
                 || !buildScript.contains("includeGroup 'blue.language'")
                 || !buildScript.contains(
-                "name = 'immutableStagedContracts'")) {
+                "name = 'immutableStagedContracts'")
+                || !buildScript.contains(
+                "name = 'immutableDevelopmentContracts'")) {
             throw new GradleException(
                     'The staged blue.language group is not repository-exclusive')
         }
@@ -3335,10 +3830,172 @@ def immutableStagedContractsDependencies = tasks.register(
     }
 }
 
+def immutableDevelopmentContractsDependencies = tasks.register(
+        'verifyImmutableDevelopmentContractsDependencies') {
+    group = 'verification'
+    description = 'Compiles against the manifest-pinned DEVELOPMENT Contracts graph and verifies resolved runtime JAR bytes.'
+    if (immutableDevelopmentContracts) {
+        dependsOn immutableDevelopmentContractsRepository,
+                tasks.named('compileJava')
+    }
+    doLast {
+        if (!immutableDevelopmentContracts) {
+            throw new GradleException(
+                    'verifyImmutableDevelopmentContractsDependencies requires '
+                            + '-PblueDependencyMode=immutable-development-contracts')
+        }
+        def manifest = inspectImmutableDevelopmentContractsRepository()
+        def failures = []
+        def components = configurations.runtimeClasspath
+                .incoming.resolutionResult.allComponents
+        def leakedProjects = components.findAll { component ->
+            component.id instanceof
+                    org.gradle.api.artifacts.component.ProjectComponentIdentifier
+                    && component.id.displayName
+                    != "root project '${rootProject.name}'"
+        }.collect { component -> component.id.displayName }.sort()
+        if (!leakedProjects.empty || !gradle.includedBuilds.empty) {
+            failures << ('project/composite substitution leaked into '
+                    + 'development Contracts mode: ' + leakedProjects
+                    + gradle.includedBuilds.collect { it.name }.sort())
+        }
+        def selectedBlue = components.findAll { component ->
+            component.id instanceof
+                    org.gradle.api.artifacts.component.ModuleComponentIdentifier
+                    && ['blue.language', 'blue.bex', 'blue.repo'].contains(
+                    component.id.group)
+        }.collectEntries { component ->
+            [(component.id.group + ':' + component.id.module):
+                     component.id.version]
+        }
+        if (selectedBlue != immutableStagedBlueCoordinates) {
+            failures << ('selected Blue graph differs from exact pins: '
+                    + selectedBlue)
+        }
+        def manifestRuntimeIdentities = manifest.artifacts.findAll { record ->
+            record.kind == 'runtime'
+        }.collectEntries { record ->
+            [(record.coordinate): record.sha256]
+        }
+        def resolvedLanguageArtifacts = configurations.runtimeClasspath
+                .resolvedConfiguration.resolvedArtifacts.findAll { artifact ->
+            artifact.moduleVersion.id.group == 'blue.language'
+        }
+        def expectedLanguageCoordinates = immutableStagedBlueCoordinates.findAll {
+            coordinate, ignored -> coordinate.startsWith('blue.language:')
+        }.collectEntries { coordinate, expectedVersion ->
+            [(coordinate + ':' + expectedVersion):
+                     manifestRuntimeIdentities[
+                             coordinate + ':' + expectedVersion]]
+        }
+        def resolvedLanguageIdentities = resolvedLanguageArtifacts
+                .collectEntries { artifact ->
+            String coordinate = artifact.moduleVersion.id.group + ':' +
+                    artifact.name + ':' + artifact.moduleVersion.id.version
+            [(coordinate): sha256Identity(artifact.file)]
+        }
+        if (manifestRuntimeIdentities.size() != 6
+                || expectedLanguageCoordinates.any { coordinate, identity ->
+            identity == null
+        }) {
+            failures << 'development manifest does not bind all six selected Language runtimes'
+        }
+        if (resolvedLanguageIdentities != expectedLanguageCoordinates) {
+            failures << ('resolved Language artifact bytes differ from '
+                    + 'the development manifest: '
+                    + resolvedLanguageIdentities)
+        }
+        if (!failures.empty) {
+            throw new GradleException(
+                    'Immutable development Contracts dependency graph failed:\n - '
+                            + failures.join('\n - '))
+        }
+        logger.lifecycle(
+                'Manifest-pinned DEVELOPMENT Contracts dependencies resolved without fallback: {} from {}',
+                stagedContractsManifestIdentity,
+                developmentContractsSourceCommit)
+    }
+}
+
+def developmentResolvedDependencies = layout.buildDirectory.file(
+        'reports/development-stage/resolved-dependencies.json')
+tasks.register('writeDevelopmentResolvedDependencies') {
+    group = 'verification'
+    description = 'Writes the canonical resolved runtime graph for an invocation-owned DEVELOPMENT candidate stage.'
+    if (immutableDevelopmentContracts) {
+        dependsOn immutableDevelopmentContractsDependencies
+        inputs.property('blueContractsManifestSha256',
+                stagedContractsManifestIdentity)
+        inputs.property('blueContractsSourceCommit',
+                developmentContractsSourceCommit)
+        inputs.files(configurations.runtimeClasspath)
+    }
+    outputs.file(developmentResolvedDependencies)
+    doLast {
+        if (!immutableDevelopmentContracts) {
+            throw new GradleException(
+                    'writeDevelopmentResolvedDependencies requires '
+                            + '-PblueDependencyMode=immutable-development-contracts')
+        }
+        if (JavaVersion.current() != JavaVersion.VERSION_17) {
+            throw new GradleException(
+                    'writeDevelopmentResolvedDependencies requires JDK 17; '
+                            + 'current JVM is ' + JavaVersion.current())
+        }
+        def manifest = inspectImmutableDevelopmentContractsRepository()
+        def records = configurations.runtimeClasspath.resolvedConfiguration
+                .resolvedArtifacts.collect { artifact ->
+            def module = artifact.moduleVersion.id
+            [
+                    coordinate: module.group + ':' + module.name + ':'
+                            + module.version,
+                    classifier: artifact.classifier,
+                    extension: artifact.extension,
+                    fileName: artifact.file.name,
+                    bytes: artifact.file.length(),
+                    sha256: sha256Identity(artifact.file)
+            ]
+        }.sort { left, right ->
+            (left.coordinate <=> right.coordinate)
+                    ?: (String.valueOf(left.classifier)
+                    <=> String.valueOf(right.classifier))
+                    ?: (left.extension <=> right.extension)
+                    ?: (left.fileName <=> right.fileName)
+        }
+        def expectedLanguageIdentities = manifest.artifacts.findAll { record ->
+            record.kind == 'runtime'
+        }.collectEntries { record ->
+            [(record.coordinate): record.sha256]
+        }
+        def resolvedLanguageIdentities = records.findAll { record ->
+            record.coordinate.startsWith('blue.language:')
+        }.collectEntries { record ->
+            [(record.coordinate): record.sha256]
+        }
+        if (expectedLanguageIdentities.size() != 6
+                || resolvedLanguageIdentities
+                != expectedLanguageIdentities) {
+            throw new GradleException(
+                    'Resolved DEVELOPMENT Language runtime bytes differ '
+                            + 'from the Contracts manifest: '
+                            + resolvedLanguageIdentities)
+        }
+        File output = developmentResolvedDependencies.get().asFile
+        output.parentFile.mkdirs()
+        output.setText(groovy.json.JsonOutput.toJson(records) + '\n',
+                'UTF-8')
+        logger.lifecycle(
+                'Canonical DEVELOPMENT resolved dependency graph written: {} ({} artifacts)',
+                output, records.size())
+    }
+}
+
 def activeDependencyLane = tasks.register('verifyActiveDependencyLane') {
     group = 'verification'
     description = 'Verifies the dependency lane selected for this invocation.'
-    if (immutableStagedContracts) {
+    if (immutableDevelopmentContracts) {
+        dependsOn immutableDevelopmentContractsDependencies
+    } else if (immutableStagedContracts) {
         dependsOn immutableStagedContractsDependencies
     } else {
         dependsOn tasks.named('verifyPublishedArtifactDependencies')
@@ -3596,8 +4253,7 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
     description = 'Runs the published-dependency gate for the bounded external-pilot RC.'
     inputs.files('.cz.toml', 'settings.gradle', 'build.gradle',
             'gradle/published-artifact.lockfile',
-            'dynamic-evolution-coordination-handoff-receipt.json',
-            'docs/releases/3.0.0-rc.4.md')
+            'docs/releases/3.0.0-rc.5.md')
     def rcTestSources = files(
             fileTree('src/test/java') { include '**/*Test.java' },
             fileTree('src/testSupport/java') { include '**/*.java' },
@@ -3615,12 +4271,12 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
     dependsOn 'releaseCheck', 'dependencyPreflight',
             'jar', 'sourcesJar', 'javadocJar', 'testFixturesJar'
     def readinessReport = layout.buildDirectory.file(
-            'reports/release/3.0.0-rc.4-readiness.json')
+            'reports/release/3.0.0-rc.5-readiness.json')
     outputs.file(readinessReport)
     doLast {
         def failures = []
-        if (version.toString() != '3.0.0-rc.4') {
-            failures << "release version is ${version}; expected 3.0.0-rc.4"
+        if (version.toString() != '3.0.0-rc.5') {
+            failures << "release version is ${version}; expected 3.0.0-rc.5"
         }
         if (dependencyMode != 'published-artifact') {
             failures << 'published-artifact is not the active dependency mode'
@@ -3638,65 +4294,39 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
             }
         }
 
-        def semanticReceipt = new groovy.json.JsonSlurper().parse(
-                file('dynamic-evolution-coordination-handoff-receipt.json'))
-        def requiredCapabilities = [
-                'automaticManagedOccurrenceResolutionSupported',
-                'automaticCurrentExactStateResolutionSupported',
-                'automaticNewAuthoredInitialDocumentResolutionSupported',
-                'typedResourceDemandRetrySupported',
-                'suspensionIsNonPublishing',
-                'atomicManagedPublicationSupported',
-                'activePathRebindSupported',
-                'dynamicCycleFormationAndDissolutionSupported',
-                'runtimeGeneralizationSupported',
-                'typedDocumentTransitionEvidenceSupported',
-                'typedOperationRouteDeltaEvidenceSupported'
+        def requiredCapabilityTests = [
+                'src/test/java/blue/coordination/internal/ContractsCheckpointSettlementPublicationTest.java',
+                'src/test/java/blue/coordination/internal/ManagedEpochApplicationAtomicRollbackTest.java',
+                'src/test/java/blue/coordination/internal/ManagedEpochApplicationResponseLossTest.java',
+                'src/test/java/blue/coordination/internal/ManagedEpochIndirectComponentRebindTest.java',
+                'src/test/java/blue/coordination/internal/ManagedSameStateEpochPublicationTest.java',
+                'src/test/java/blue/coordination/internal/RepositoryExactNodeProviderLocalityTest.java',
+                'src/test/java/blue/coordination/internal/VerifiedApplicationCyclicProviderTest.java',
+                'src/test/java/blue/coordination/sdk/SdkManagedEpochCycleAcceptanceTest.java',
+                'src/test/java/blue/coordination/sdk/SdkNestedExistingSourceEpochTest.java',
+                'src/test/java/blue/coordination/sdk/SdkPendingNestedSourceReadinessTest.java',
+                'src/test/java/blue/coordination/sdk/SdkReferenceTransparentExecutionTest.java',
+                'src/test/java/blue/coordination/sdk/SdkRetainedManagedEpochCatchUpTest.java'
         ]
-        def retainedLimitations = [
-                'existingSessionAuthoredInitialAttachmentSupported',
-                'historicalRetainedEpochCatchUpSupported',
-                'timelineImportAndCompletenessSupported',
-                'mandatesSupported',
-                'multiNodeDurabilitySupported',
-                'productionReady',
-                'published',
-                'deployed'
-        ]
-        def java17 = semanticReceipt.verification?.java17
-        def java21 = semanticReceipt.verification?.java21
-        if (semanticReceipt.schema
-                != 'blue.coordination/dynamic-evolution-handoff-receipt/v1'
-                || semanticReceipt.status != 'PASS'
-                || semanticReceipt.sourceBinding
-                        ?.semanticSourceUnderTestCommit
-                        != '612f864ec7101bcac5a0cc596ad6b6f11cd10c98'
-                || requiredCapabilities.any {
-                    (semanticReceipt.capabilities ?: [:])[it] != true
-                }
-                || retainedLimitations.any {
-                    (semanticReceipt.capabilities ?: [:])[it] != false
-                }
-                || [java17, java21].any { lane ->
-                    lane?.status != 'PASS'
-                            || lane?.failures != 0
-                            || lane?.errors != 0
-                            || lane?.skipped != 0
-                }
-                || semanticReceipt.immutableStage?.published != false) {
-            failures << 'retained dynamic-evolution evidence does not authorize the bounded pilot tier'
+        requiredCapabilityTests.each { source ->
+            File testSource = file(source)
+            if (!testSource.isFile()
+                    || !(testSource.getText('UTF-8') =~
+                            /(?m)^\s*@(Test|ParameterizedTest)\b/).find()) {
+                failures << "required rc.5 capability evidence is missing ${source}"
+            }
         }
-        String releaseNotes = file('docs/releases/3.0.0-rc.4.md')
+        String releaseNotes = file('docs/releases/3.0.0-rc.5.md')
                 .getText('UTF-8')
         if (!releaseNotes.contains(
-                'RC4_RELEASE_TIER: BOUNDED_EXTERNAL_PILOT')
+                'RC5_RELEASE_TIER: BOUNDED_EXTERNAL_PILOT')
                 || !releaseNotes.contains(
-                'RC4_DEPENDENCY_MODE: PUBLISHED_ARTIFACTS_ONLY')
+                'RC5_DEPENDENCY_MODE: PUBLISHED_ARTIFACTS_ONLY')
                 || !releaseNotes.contains(
-                'RC4_PUBLIC_ARTIFACT_READY: true')
+                'RC5_PUBLIC_ARTIFACT_READY: true')
                 || !releaseNotes.contains(
-                'RC4_PRODUCTION_READY: false')) {
-            failures << 'rc.4 release notes do not state the exact release tier'
+                'RC5_PRODUCTION_READY: false')) {
+            failures << 'rc.5 release notes do not state the exact release tier'
         }
 
         if (System.getenv('CI') != null) {
@@ -3743,8 +4373,8 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
                         dependencyMode: dependencyMode,
                         dependencies: publishedBlueCoordinates,
                         testMethods: testMethods,
-                        semanticEvidence:
-                                'dynamic-evolution-coordination-handoff-receipt.json',
+                        semanticEvidence: 'complete current releaseCheck plus '
+                                + 'the rc.5 capability test inventory',
                         publicArtifactReady: true,
                         productionReady: false,
                         stableLatencySlaClaimed: false,
@@ -3761,7 +4391,7 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
 tasks.register('stageRelease') {
     group = 'publishing'
     description = 'Builds the verified Maven Central staging repository.'
-    dependsOn(version.toString() == '3.0.0-rc.4'
+    dependsOn(version.toString() == '3.0.0-rc.5'
             ? rcReadiness
             : tasks.named('releaseCheck'))
     dependsOn 'dependencyPreflight',
@@ -3776,7 +4406,7 @@ tasks.register('stageRelease') {
 }
 
 tasks.named('publishMavenJavaPublicationToStagingRepository') {
-    dependsOn(version.toString() == '3.0.0-rc.4'
+    dependsOn(version.toString() == '3.0.0-rc.5'
             ? rcReadiness
             : tasks.named('releaseCheck'))
     dependsOn 'dependencyPreflight'

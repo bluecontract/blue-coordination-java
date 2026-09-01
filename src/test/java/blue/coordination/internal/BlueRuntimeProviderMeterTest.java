@@ -27,8 +27,10 @@ final class BlueRuntimeProviderMeterTest {
         try (BlueRuntime runtime = BlueRuntime.create(objects, metrics)) {
 
             // then
-            assertEquals(SequentialNodeProvider.class,
-                    runtime.nodeProvider().getClass());
+            assertTrue(runtime.nodeProvider()
+                    instanceof SequentialNodeProvider);
+            assertTrue(runtime.nodeProvider()
+                    instanceof CyclicAwareNodeProvider);
             SequentialNodeProvider sequential =
                     (SequentialNodeProvider) runtime.nodeProvider();
             List<NodeProvider> leaves = sequential.getNodeProviders();
@@ -43,6 +45,12 @@ final class BlueRuntimeProviderMeterTest {
                     .filter(blueId -> blueId.indexOf('#') >= 0)
                     .findFirst()
                     .orElseThrow();
+
+            assertEquals(
+                    NodeProviderOutcome.FOUND,
+                    new VerifyingNodeProvider(runtime.nodeProvider())
+                            .fetchResultByBlueId(cyclicMemberBlueId)
+                            .outcome());
 
             long beforeVerified = exactReads(metrics);
             assertEquals(

@@ -1,18 +1,26 @@
 package blue.coordination.internal;
 
+import blue.coordination.api.ContractsClosureAdmissionReceipt;
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.DocumentRevision;
-import blue.coordination.api.ContractsClosureAdmissionReceipt;
+import blue.coordination.api.ExactValue;
+import blue.coordination.api.ManagedEpochApplicationWork;
+import blue.coordination.api.ManagedEpochReceipt;
 import blue.language.identity.BlueIds;
 import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.SubscriptionDelta;
 import blue.language.processor.closure.CheckpointWrite;
+import blue.language.processor.closure.ClosureEvidenceFactory;
 import blue.language.processor.closure.ClosureInvocationInput;
 import blue.language.processor.closure.ClosureProcessResult;
 import blue.language.processor.closure.ComponentKind;
 import blue.language.processor.closure.ComponentSnapshot;
+import blue.language.processor.closure.ManagedDocumentTransitionReceipt;
 import blue.language.processor.closure.ManagedOccurrenceBinding;
+import blue.language.processor.closure.ManagedRevisionCause;
 import blue.language.processor.closure.PublicEventOccurrence;
+import blue.language.processor.closure.ResultingDocument;
+import blue.language.provider.CyclicSetProof;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -33,7 +41,9 @@ import java.util.function.Consumer;
  * every document lineage whose exact head they depend on. Touched sessions are
  * copied and committed off-store, while bindings, component state, outbox, and
  * checkpoint evidence remain staged in replacement collections. Only the
- * enclosing store performs the final reference swap.</p>
+ * enclosing store performs the final reference swap. Readiness-only parents
+ * outside the processing cohort are derived from that same immutable store
+ * image under the commit lock; they receive no document or graph revision.</p>
  */
 final class MultiDocumentPublicationTransaction {
     static final long MAX_SAFE_INTEGER = 9_007_199_254_740_991L;
@@ -51,10 +61,15 @@ final class MultiDocumentPublicationTransaction {
     private final long expectedComponentIndexGeneration;
     private final Map<DocumentId, InMemoryDocumentStore.DocumentHead>
             expectedHeads = new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
+    private final Map<DocumentId, Long> expectedGraphGenerations =
+            new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
     private final Set<DocumentId> expectedAbsent = new java.util.TreeSet<>(
             EmbeddingBinding.DOCUMENT_ORDER);
     private final Map<DocumentId, DocumentUpdate> documentUpdates =
             new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
+    private final Map<DocumentId, ComponentRepresentationUpdate>
+            componentRepresentationUpdates = new TreeMap<>(
+                    EmbeddingBinding.DOCUMENT_ORDER);
     private final Map<DocumentId, DocumentSession> newSessions =
             new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
     private final Map<String, String> expectedComponentStates =
@@ -79,6 +94,10 @@ final class MultiDocumentPublicationTransaction {
     private ClosureInvocationInput stagedManagedExpansionInput;
     private ContractsClosureAdmissionReceipt stagedAdmissionReceipt;
     private ContractsClosurePublicationReceipt stagedClosurePublicationReceipt;
+    private final List<ManagedReceiptStage> stagedManagedEpochReceipts =
+            new ArrayList<>();
+    private CatchUpPlanStore expectedCatchUpPlans;
+    private CatchUpPlanStore stagedCatchUpPlans;
     private Consumer<FailurePoint> failureInjector = ignored -> { };
     private boolean attempted;
 
@@ -123,6 +142,27 @@ final class MultiDocumentPublicationTransaction {
         return this;
     }
 
+    /** Adds one exact per-lineage graph-generation CAS fence. */
+    synchronized MultiDocumentPublicationTransaction expectGraphGeneration(
+            DocumentId documentId,
+            long expectedGeneration) {
+        ensureOpen();
+        DocumentId selected = Objects.requireNonNull(
+                documentId, "documentId");
+        if (expectedAbsent.contains(selected)) {
+            throw new IllegalArgumentException(
+                    "Document already has an expected-absent fence "
+                            + selected);
+        }
+        long exact = requireSafeInteger(
+                expectedGeneration, "expectedGraphGeneration");
+        if (expectedGraphGenerations.putIfAbsent(selected, exact) != null) {
+            throw new IllegalArgumentException(
+                    "Duplicate graph-generation fence " + selected);
+        }
+        return this;
+    }
+
     /** Adds an exact CAS fence requiring one lineage to remain absent. */
     synchronized MultiDocumentPublicationTransaction expectAbsent(
             DocumentId documentId) {
@@ -130,6 +170,7 @@ final class MultiDocumentPublicationTransaction {
         DocumentId selected = Objects.requireNonNull(
                 documentId, "documentId");
         if (expectedHeads.containsKey(selected)
+                || expectedGraphGenerations.containsKey(selected)
                 || !expectedAbsent.add(selected)) {
             throw new IllegalArgumentException(
                     "Duplicate or conflicting expected-absent fence "
@@ -161,18 +202,131 @@ final class MultiDocumentPublicationTransaction {
             ExternalOrderKey committedFrontier,
             List<SubscriptionDelta.Entry> resultingSubscriptions,
             String transitionReceipt) {
+        return stageDocument(
+                revision,
+                resultingLayout,
+                committedFrontier,
+                resultingSubscriptions,
+                false,
+                transitionReceipt);
+    }
+
+    /** Stages a revision and its verified processor terminal disposition. */
+    synchronized MultiDocumentPublicationTransaction stageDocument(
+            DocumentRevision revision,
+            EmbeddedOnlyLayout resultingLayout,
+            ExternalOrderKey committedFrontier,
+            List<SubscriptionDelta.Entry> resultingSubscriptions,
+            boolean terminated,
+            String transitionReceipt) {
         ensureOpen();
         DocumentUpdate update = new DocumentUpdate(
                 revision,
                 resultingLayout,
                 committedFrontier,
                 resultingSubscriptions,
+                terminated,
                 transitionReceipt);
-        if (documentUpdates.putIfAbsent(
+        if (componentRepresentationUpdates.containsKey(
+                        update.revision().documentId())
+                || documentUpdates.putIfAbsent(
                 update.revision().documentId(), update) != null) {
             throw new IllegalArgumentException(
                     "Duplicate staged document revision "
                             + update.revision().documentId());
+        }
+        return this;
+    }
+
+    /**
+     * Stages one managed-application-only same-epoch component representation.
+     * The exact Contracts result remains the authority for all proof fields.
+     */
+    synchronized MultiDocumentPublicationTransaction
+            stageComponentRepresentationRebind(
+                    ManagedEpochApplicationWork work,
+                    ResultingDocument resultingDocument,
+                    EmbeddedOnlyLayout resultingLayout,
+                    List<SubscriptionDelta.Entry> resultingSubscriptions,
+                    ManagedDocumentTransitionReceipt transitionReceipt) {
+        ensureOpen();
+        ComponentRepresentationUpdate update =
+                ComponentRepresentationUpdate.forManagedApplication(
+                        Objects.requireNonNull(work, "work"),
+                        Objects.requireNonNull(
+                                resultingDocument, "resultingDocument"),
+                        Objects.requireNonNull(
+                                resultingLayout, "resultingLayout"),
+                        resultingSubscriptions,
+                        Objects.requireNonNull(
+                                transitionReceipt, "transitionReceipt"));
+        DocumentId documentId = DocumentId.of(
+                update.resultingDocument().documentId().value());
+        if (!documentId.equals(update.work().sourceDocumentId())
+                || update.work().sourceDocumentId().equals(
+                        update.work().consumerDocumentId())) {
+            throw new IllegalArgumentException(
+                    "A component representation rebind must be the distinct "
+                            + "managed-application source lineage");
+        }
+        if (!update.resultingLayout().rootBlueId().equals(
+                update.resultingDocument().afterBlueId())) {
+            throw new IllegalArgumentException(
+                    "Component representation layout does not identify its "
+                            + "Contracts result");
+        }
+        if (documentUpdates.containsKey(documentId)
+                || newSessions.containsKey(documentId)
+                || componentRepresentationUpdates.putIfAbsent(
+                        documentId, update) != null) {
+            throw new IllegalArgumentException(
+                    "Duplicate staged component representation " + documentId);
+        }
+        return this;
+    }
+
+    /**
+     * Stages an eventless same-epoch representation finalized indirectly by
+     * an ordinary closure invocation. Directly delivered Roots are excluded:
+     * their changes remain ordinary source revisions.
+     */
+    synchronized MultiDocumentPublicationTransaction
+            stageIndirectComponentRepresentationRebind(
+                    Collection<DocumentId> directTargetDocumentIds,
+                    ResultingDocument resultingDocument,
+                    EmbeddedOnlyLayout resultingLayout,
+                    List<SubscriptionDelta.Entry> resultingSubscriptions,
+                    ManagedDocumentTransitionReceipt transitionReceipt) {
+        ensureOpen();
+        ComponentRepresentationUpdate update =
+                ComponentRepresentationUpdate.forIndirectClosureMember(
+                        directTargetDocumentIds,
+                        Objects.requireNonNull(
+                                resultingDocument, "resultingDocument"),
+                        Objects.requireNonNull(
+                                resultingLayout, "resultingLayout"),
+                        resultingSubscriptions,
+                        Objects.requireNonNull(
+                                transitionReceipt, "transitionReceipt"));
+        DocumentId documentId = DocumentId.of(
+                update.resultingDocument().documentId().value());
+        if (update.directTargetDocumentIds().contains(documentId)) {
+            throw new IllegalArgumentException(
+                    "A directly delivered Root cannot use a component "
+                            + "representation rebind");
+        }
+        if (!update.resultingLayout().rootBlueId().equals(
+                update.resultingDocument().afterBlueId())) {
+            throw new IllegalArgumentException(
+                    "Component representation layout does not identify its "
+                            + "Contracts result");
+        }
+        if (documentUpdates.containsKey(documentId)
+                || newSessions.containsKey(documentId)
+                || componentRepresentationUpdates.putIfAbsent(
+                        documentId, update) != null) {
+            throw new IllegalArgumentException(
+                    "Duplicate staged component representation " + documentId);
         }
         return this;
     }
@@ -184,6 +338,7 @@ final class MultiDocumentPublicationTransaction {
         DocumentSession selected = Objects.requireNonNull(session, "session");
         DocumentId documentId = selected.documentId();
         if (documentUpdates.containsKey(documentId)
+                || componentRepresentationUpdates.containsKey(documentId)
                 || newSessions.putIfAbsent(documentId, selected) != null) {
             throw new IllegalArgumentException(
                     "Duplicate staged new session " + documentId);
@@ -468,6 +623,74 @@ final class MultiDocumentPublicationTransaction {
         return this;
     }
 
+    /**
+     * Stages one complete Coordination epoch receipt and its authenticated
+     * Contracts transition input in the same copy-on-write publication.
+     */
+    synchronized MultiDocumentPublicationTransaction stageManagedEpochReceipt(
+            ManagedEpochReceipt receipt,
+            ManagedDocumentTransitionReceipt transitionReceipt) {
+        ensureOpen();
+        ManagedReceiptStage selected = new ManagedReceiptStage(
+                Objects.requireNonNull(receipt, "receipt"),
+                Objects.requireNonNull(
+                        transitionReceipt, "transitionReceipt"),
+                null);
+        stageManagedReceipt(selected);
+        return this;
+    }
+
+    /**
+     * Stages the consumer epoch required by one successful application whose
+     * exact Contracts result contains no consumer transition. Contracts does
+     * not manufacture a transition receipt for an unchanged, eventless Root;
+     * the Coordination receipt is instead fenced to the exact application
+     * work and verified committing result.
+     */
+    synchronized MultiDocumentPublicationTransaction
+            stageManagedEpochApplicationReceipt(
+                    ManagedEpochReceipt receipt,
+                    ManagedEpochApplicationWork work) {
+        ensureOpen();
+        ManagedReceiptStage selected = new ManagedReceiptStage(
+                Objects.requireNonNull(receipt, "receipt"),
+                null,
+                Objects.requireNonNull(work, "work"));
+        stageManagedReceipt(selected);
+        return this;
+    }
+
+    private void stageManagedReceipt(ManagedReceiptStage selected) {
+        boolean duplicate = stagedManagedEpochReceipts.stream().anyMatch(
+                existing -> existing.receipt().receiptIdentity().equals(
+                        selected.receipt().receiptIdentity())
+                        || existing.receipt().documentId().equals(
+                                selected.receipt().documentId())
+                        && existing.receipt().epoch()
+                                == selected.receipt().epoch());
+        if (duplicate) {
+            throw new IllegalArgumentException(
+                    "Duplicate staged managed epoch receipt "
+                            + selected.receipt().receiptIdentity());
+        }
+        stagedManagedEpochReceipts.add(selected);
+    }
+
+    /** Stages one exact immutable catch-up-index replacement behind a CAS. */
+    synchronized MultiDocumentPublicationTransaction stageCatchUpPlans(
+            CatchUpPlanStore expected,
+            CatchUpPlanStore replacement) {
+        ensureOpen();
+        if (expectedCatchUpPlans != null) {
+            throw new IllegalStateException(
+                    "Catch-up plan state is already staged");
+        }
+        expectedCatchUpPlans = Objects.requireNonNull(expected, "expected");
+        stagedCatchUpPlans = Objects.requireNonNull(
+                replacement, "replacement");
+        return this;
+    }
+
     /** Test/persistence-adapter hook; failures occur strictly before swap. */
     synchronized MultiDocumentPublicationTransaction onFailurePoint(
             Consumer<FailurePoint> injector) {
@@ -499,21 +722,45 @@ final class MultiDocumentPublicationTransaction {
         }
         requireAdmissionShape();
         requireGenerationFences(before);
+        requireGraphGenerationFences(before);
         requireHeadFences(before);
         requireAbsentFences(before);
         requireComponentStateFences(before);
         requireClosurePublicationShape();
+        if (expectedCatchUpPlans != null
+                && before.catchUpPlans() != expectedCatchUpPlans) {
+            throw new AtomicPublicationCasException(
+                    "Catch-up plan state changed during publication");
+        }
         if (before.hasPublicationReceipt(publicationIdentity)) {
             throw new IllegalStateException(
                     "Duplicate publication receipt " + publicationIdentity);
         }
         failureInjector.accept(FailurePoint.AFTER_CAS_CHECKS);
 
+        CatchUpPlanStore publicationCatchUpPlans = stagedCatchUpPlans == null
+                ? before.catchUpPlans() : stagedCatchUpPlans;
+        ManagedOccurrenceInventory resultingInventory =
+                stagedOccurrenceInventory == null
+                        ? before.occurrenceInventory()
+                        : stagedOccurrenceInventory;
+        long resultingInventoryGeneration =
+                stagedOccurrenceInventory == null
+                        ? before.occurrenceInventoryGeneration()
+                        : this.resultingOccurrenceInventoryGeneration;
+
+        ManagedCatchUpReadiness resultingReadiness = new ManagedCatchUpReadiness(
+                publicationCatchUpPlans, resultingInventory);
+        ManagedCatchUpReadiness priorReadiness = new ManagedCatchUpReadiness(
+                before.catchUpPlans(), before.occurrenceInventory());
+
         PersistentOrderedMap<DocumentId, DocumentSession> resultingSessionIndex =
                 before.sessionIndex();
         long sessionIndexComparisons = 0L;
         long sessionIndexNodesCopied = 0L;
         ManagedLineageIndex resultingLineages = before.lineageIndex();
+        ManagedEpochReceiptStore resultingManagedEpochReceipts =
+                before.managedEpochReceipts();
         for (Map.Entry<DocumentId, DocumentSession> entry
                 : newSessions.entrySet()) {
             if (!expectedAbsent.contains(entry.getKey())) {
@@ -523,6 +770,11 @@ final class MultiDocumentPublicationTransaction {
             }
             DocumentSession replacement =
                     entry.getValue().copyForAtomicPublication();
+            replacement.restoreReadyEmbeddedChildren(
+                    activeChildren(resultingInventory, entry.getKey()));
+            if (resultingReadiness.blocked(entry.getKey())) {
+                replacement.markCatchingUp();
+            }
             PersistentOrderedMap.Mutation<DocumentId, DocumentSession>
                     mutation = resultingSessionIndex.put(
                             entry.getKey(), replacement);
@@ -553,7 +805,14 @@ final class MultiDocumentPublicationTransaction {
             if (stagedClosurePublicationReceipt != null
                     && stagedClosurePublicationReceipt.commits()) {
                 replacement.markGraphPublished();
-                replacement.markReady(update.committedFrontier());
+                if (update.terminated()) {
+                    replacement.markTerminated(activeChildren(
+                            resultingInventory, documentId));
+                } else if (!resultingReadiness.blocked(documentId)) {
+                    replacement.markReady(
+                            update.committedFrontier(),
+                            activeChildren(resultingInventory, documentId));
+                }
             }
             PersistentOrderedMap.Mutation<DocumentId, DocumentSession>
                     mutation = resultingSessionIndex.put(
@@ -566,20 +825,109 @@ final class MultiDocumentPublicationTransaction {
             resultingLineages = resultingLineages.withAdvancedRevision(
                     replacement);
         }
+        for (Map.Entry<DocumentId, ComponentRepresentationUpdate> entry
+                : componentRepresentationUpdates.entrySet()) {
+            DocumentId documentId = entry.getKey();
+            ComponentRepresentationUpdate update = entry.getValue();
+            if (!expectedHeads.containsKey(documentId)) {
+                throw new IllegalStateException(
+                        "Staged component representation has no exact head "
+                                + "fence " + documentId);
+            }
+            DocumentSession current = requireSession(before, documentId);
+            if (!current.activeSubscriptions().equals(
+                    update.resultingSubscriptions())) {
+                throw new IllegalStateException(
+                        "A component representation rebind changed the managed "
+                                + "Root route surface for " + documentId);
+            }
+            DocumentSession replacement =
+                    current.copyForAtomicPublication();
+            replacement.rebindComponentRepresentation(
+                    update.resultingDocument().epoch(),
+                    update.resultingLayout(),
+                    update.resultingSubscriptions(),
+                    update.transitionReceipt().transitionReceiptIdentity());
+            replacement.markGraphPublished();
+            if (!resultingReadiness.blocked(documentId)) {
+                replacement.markReady(
+                        current.readyThrough(),
+                        activeChildren(resultingInventory, documentId));
+            }
+            PersistentOrderedMap.Mutation<DocumentId, DocumentSession>
+                    mutation = resultingSessionIndex.put(
+                            documentId, replacement);
+            resultingSessionIndex = mutation.map();
+            sessionIndexComparisons = Math.addExact(
+                    sessionIndexComparisons, mutation.comparisons());
+            sessionIndexNodesCopied = Math.addExact(
+                    sessionIndexNodesCopied, mutation.copiedNodes());
+            resultingLineages = resultingLineages
+                    .withComponentRepresentationRebound(replacement);
+            resultingManagedEpochReceipts = resultingManagedEpochReceipts
+                    .withComponentRepresentationRebind(
+                            documentId,
+                            update.resultingDocument().epoch(),
+                            update.resultingDocument().beforeBlueId(),
+                            update.resultingDocument().afterBlueId(),
+                            update.transitionReceipt());
+        }
+        if (expectedCatchUpPlans != null
+                && (before.catchUpPlans().hasActiveBarriers()
+                        || publicationCatchUpPlans.hasActiveBarriers())) {
+            // This is status-only dependency publication, not additional Root
+            // processing. Parents without typed demands are outside the
+            // Contracts cohort; derive their replacement from the current
+            // immutable store image under its atomic commit lock. The exact
+            // inventory generation is already fenced above.
+            Set<DocumentId> readinessDependents = ManagedCatchUpReadiness.dependents(
+                    expectedHeads.keySet(), before.occurrenceInventory(), resultingInventory);
+            for (DocumentId documentId : readinessDependents) {
+                if (newSessions.containsKey(documentId)
+                        || documentUpdates.containsKey(documentId)
+                        || componentRepresentationUpdates.containsKey(
+                                documentId)
+                        || priorReadiness.blocked(documentId)
+                                == resultingReadiness.blocked(documentId)) {
+                    continue;
+                }
+                DocumentSession current = requireSession(before, documentId);
+                if (current.status() == blue.coordination.api.SessionStatus.BLOCKED
+                        || current.status() == blue.coordination.api.SessionStatus.TERMINATED
+                        || current.status() == blue.coordination.api.SessionStatus.PENDING_INITIALIZATION) {
+                    continue;
+                }
+                if (!resultingReadiness.blocked(documentId) && current.status()
+                        != blue.coordination.api.SessionStatus.CATCHING_UP) {
+                    throw new IllegalStateException(
+                            "A completed catch-up barrier belongs to a "
+                                    + "non-catching-up session " + documentId);
+                }
+                DocumentSession replacement =
+                        current.copyForAtomicPublication();
+                if (resultingReadiness.blocked(documentId)) {
+                    replacement.markCatchingUp();
+                } else {
+                    replacement.markReady(
+                            current.readyThrough(),
+                            activeChildren(resultingInventory, documentId));
+                }
+                PersistentOrderedMap.Mutation<DocumentId, DocumentSession>
+                        mutation = resultingSessionIndex.put(
+                                documentId, replacement);
+                resultingSessionIndex = mutation.map();
+                sessionIndexComparisons = Math.addExact(
+                        sessionIndexComparisons, mutation.comparisons());
+                sessionIndexNodesCopied = Math.addExact(
+                        sessionIndexNodesCopied, mutation.copiedNodes());
+            }
+        }
         metrics.add("store.sessionIndexComparisons", sessionIndexComparisons);
         metrics.add("store.sessionIndexNodesCopied", sessionIndexNodesCopied);
         Map<DocumentId, DocumentSession> resultingSessions =
                 new PersistentMapView<>(resultingSessionIndex);
         failureInjector.accept(FailurePoint.AFTER_DOCUMENTS_STAGED);
 
-        ManagedOccurrenceInventory resultingInventory =
-                stagedOccurrenceInventory == null
-                        ? before.occurrenceInventory()
-                        : stagedOccurrenceInventory;
-        long resultingInventoryGeneration =
-                stagedOccurrenceInventory == null
-                        ? before.occurrenceInventoryGeneration()
-                        : this.resultingOccurrenceInventoryGeneration;
         Set<DocumentId> affectedDocuments = affectedDocuments();
         ProcessEmbeddedComponentIndex resultingIndex =
                 stagedOccurrenceInventory == null
@@ -610,16 +958,18 @@ final class MultiDocumentPublicationTransaction {
                                 && !expectedHeads.isEmpty()
                                 ? before.graphGenerations().applyExpansion(
                                         stagedGraphGeneration,
-                                        expectedHeads.keySet(),
+                                        expectedGraphGenerations,
                                         expectedAbsent)
                                 : before.graphGenerations().admit(
                                         stagedGraphGeneration, expectedAbsent)
                         : stagedManagedExpansionInput != null
                         ? before.graphGenerations().applyExpansion(
                                 stagedGraphGeneration,
-                                expectedHeads.keySet(),
+                                expectedGraphGenerations,
                                 expectedAbsent)
-                        : before.graphGenerations().apply(stagedGraphGeneration);
+                        : before.graphGenerations().apply(
+                                stagedGraphGeneration,
+                                expectedGraphGenerations);
         ClosureSubscriptionInventory resultingClosureSubscriptions =
                 applyClosureSubscriptions(before);
         requireContiguousPublicEventOrdinals(stagedOutbox);
@@ -666,6 +1016,13 @@ final class MultiDocumentPublicationTransaction {
         }
         metrics.add("store.receiptIndexComparisons", receiptComparisons);
         metrics.add("store.receiptIndexNodesCopied", receiptNodesCopied);
+        for (ManagedReceiptStage stage : stagedManagedEpochReceipts) {
+            resultingManagedEpochReceipts = resultingManagedEpochReceipts
+                    .withReceipt(stage.receipt(), stage.transitionReceipt());
+        }
+        requireManagedEpochReceiptPublication(
+                resultingSessions, resultingManagedEpochReceipts);
+        CatchUpPlanStore resultingCatchUpPlans = publicationCatchUpPlans;
         requireClosurePublicationResult(
                 resultingSessions,
                 resultingInventory,
@@ -697,9 +1054,39 @@ final class MultiDocumentPublicationTransaction {
                         resultingCheckpoints,
                         resultingReceipts,
                         resultingAdmissionReceipts,
-                        resultingClosurePublicationReceipts);
+                        resultingClosurePublicationReceipts,
+                        resultingManagedEpochReceipts,
+                        resultingCatchUpPlans);
         failureInjector.accept(FailurePoint.BEFORE_SWAP);
         return replacement;
+    }
+
+    private void requireManagedEpochReceiptPublication(
+            Map<DocumentId, DocumentSession> resultingSessions,
+            ManagedEpochReceiptStore resultingReceipts) {
+        for (ManagedReceiptStage stage : stagedManagedEpochReceipts) {
+            ManagedEpochReceipt receipt = stage.receipt();
+            DocumentSession session = resultingSessions.get(
+                    receipt.documentId());
+            if (session == null) {
+                throw new IllegalStateException(
+                        "Managed epoch receipt belongs to an absent document "
+                                + receipt.documentId());
+            }
+            DocumentRevision revision = session.revision(receipt.epoch());
+            if (!revision.managedEpochReceipt()
+                            .map(ManagedEpochReceipt::receiptIdentity)
+                            .filter(receipt.receiptIdentity()::equals)
+                            .isPresent()
+                    || !resultingReceipts.exact(
+                                    receipt.documentId(), receipt.epoch())
+                            .found()) {
+                throw new IllegalStateException(
+                        "Managed epoch receipt and revision were not published "
+                                + "atomically for " + receipt.documentId()
+                                + " epoch " + receipt.epoch());
+            }
+        }
     }
 
     private ClosureSubscriptionInventory applyClosureSubscriptions(
@@ -708,7 +1095,8 @@ final class MultiDocumentPublicationTransaction {
                 stagedClosureSubscriptions == null
                         ? before.closureSubscriptions()
                         : before.closureSubscriptions().apply(
-                                stagedClosureSubscriptions);
+                                stagedClosureSubscriptions,
+                                expectedGraphGenerations);
         for (Map.Entry<DocumentId,
                 List<ClosureSubscriptionInventory.EmbeddedDemand>> entry
                 : stagedEmbeddedDemands.entrySet()) {
@@ -738,6 +1126,33 @@ final class MultiDocumentPublicationTransaction {
         }
     }
 
+    private void requireGraphGenerationFences(
+            InMemoryDocumentStore.StoreState before) {
+        if (!expectedHeads.keySet().containsAll(
+                expectedGraphGenerations.keySet())) {
+            throw new IllegalStateException(
+                    "Every graph-generation fence requires an exact head "
+                            + "fence");
+        }
+        if (stagedGraphGeneration != null
+                && !expectedHeads.keySet().equals(
+                        expectedGraphGenerations.keySet())) {
+            throw new IllegalStateException(
+                    "A closure publication must fence every existing member's "
+                            + "exact graph generation");
+        }
+        for (Map.Entry<DocumentId, Long> entry
+                : expectedGraphGenerations.entrySet()) {
+            long actual = before.graphGenerations().require(entry.getKey());
+            if (actual != entry.getValue().longValue()) {
+                throw new AtomicPublicationCasException(
+                        "Stale graph generation for " + entry.getKey()
+                                + ": expected " + entry.getValue()
+                                + " but found " + actual);
+            }
+        }
+    }
+
     private void requireHeadFences(
             InMemoryDocumentStore.StoreState before) {
         for (Map.Entry<DocumentId, InMemoryDocumentStore.DocumentHead> entry
@@ -746,7 +1161,7 @@ final class MultiDocumentPublicationTransaction {
             InMemoryDocumentStore.DocumentHead actual =
                     new InMemoryDocumentStore.DocumentHead(
                             session.epoch(),
-                            session.currentRevision().after().blueId());
+                            session.currentRepresentation().blueId());
             if (!actual.equals(entry.getValue())) {
                 throw new AtomicPublicationCasException(
                         "Stale document head " + entry.getKey()
@@ -786,9 +1201,10 @@ final class MultiDocumentPublicationTransaction {
             throw new IllegalStateException(
                     "Admission and process receipts cannot share a transaction");
         }
-        if (!documentUpdates.isEmpty()) {
+        if (!documentUpdates.isEmpty()
+                || !componentRepresentationUpdates.isEmpty()) {
             throw new IllegalStateException(
-                    "Static admission cannot advance existing document heads");
+                    "Static admission cannot change existing document heads");
         }
         if (expectedAbsent.isEmpty()
                 || !newSessions.keySet().equals(expectedAbsent)) {
@@ -1013,6 +1429,11 @@ final class MultiDocumentPublicationTransaction {
         ContractsClosurePublicationReceipt receipt =
                 stagedClosurePublicationReceipt;
         if (receipt == null) {
+            if (!componentRepresentationUpdates.isEmpty()) {
+                throw new IllegalStateException(
+                        "A component representation rebind requires one exact "
+                                + "Contracts process receipt");
+            }
             return;
         }
         if (stagedAdmissionResult || stagedAdmissionReceipt != null) {
@@ -1065,22 +1486,55 @@ final class MultiDocumentPublicationTransaction {
                         "Process receipt result predecessor differs from its "
                                 + "exact head fence for " + entry.getKey());
             }
-            boolean unchanged = after.epoch() == before.epoch()
+            boolean representationRebound = result.commits()
+                    && after.epoch() == before.epoch()
+                    && !after.afterBlueId().equals(before.blueId())
+                    && stagesVerifiedComponentRepresentationRebind(
+                            result, entry.getKey(), before, after);
+            boolean resultUnchanged = after.epoch() == before.epoch()
                     && after.afterBlueId().equals(before.blueId());
-            boolean advanced = after.epoch()
-                    == Math.addExact(before.epoch(), 1L)
-                    && documentUpdates.containsKey(entry.getKey())
-                    && documentUpdates.get(entry.getKey()).revision().after()
-                            .blueId().equals(after.afterBlueId());
-            if (result.commits() ? !unchanged && !advanced : !unchanged) {
+            boolean sameStateAdvanced = result.commits()
+                    && resultUnchanged
+                    && stagesReceiptBackedSameStateAdvance(
+                            result, entry.getKey(), before);
+            boolean checkpointSettlementAdvanced = result.commits()
+                    && after.epoch() == before.epoch()
+                    && !after.afterBlueId().equals(before.blueId())
+                    && stagesVerifiedCheckpointSettlementAdvance(
+                            result, entry.getKey(), before, after);
+            boolean unchanged = resultUnchanged && !sameStateAdvanced;
+            boolean advanced = sameStateAdvanced
+                    || checkpointSettlementAdvanced
+                    || after.epoch() == Math.addExact(before.epoch(), 1L)
+                            && documentUpdates.containsKey(entry.getKey())
+                            && documentUpdates.get(entry.getKey())
+                                    .revision().after().blueId().equals(
+                                            after.afterBlueId());
+            if (result.commits()
+                    ? !unchanged && !representationRebound && !advanced
+                    : !unchanged) {
                 throw new IllegalStateException(
                         "Process receipt result epoch/head transition is not "
                                 + "fully staged for " + entry.getKey());
             }
-            if (unchanged && documentUpdates.containsKey(entry.getKey())) {
+            if (unchanged && (documentUpdates.containsKey(entry.getKey())
+                    || componentRepresentationUpdates.containsKey(
+                            entry.getKey()))) {
                 throw new IllegalStateException(
-                        "An unchanged process result staged a document revision "
+                        "An unchanged process result staged a document change "
                                 + entry.getKey());
+            }
+            if (representationRebound
+                    && documentUpdates.containsKey(entry.getKey())) {
+                throw new IllegalStateException(
+                        "A component representation rebind staged a source "
+                                + "revision " + entry.getKey());
+            }
+            if (advanced && documentUpdates.get(entry.getKey()).terminated()
+                    != after.terminated()) {
+                throw new IllegalStateException(
+                        "Process receipt terminal state differs from its "
+                                + "staged document revision " + entry.getKey());
             }
         }
         if (result.commits()) {
@@ -1104,6 +1558,7 @@ final class MultiDocumentPublicationTransaction {
             return;
         }
         if (!documentUpdates.isEmpty()
+                || !componentRepresentationUpdates.isEmpty()
                 || stagedOccurrenceInventory != null
                 || !stagedComponentStates.isEmpty()
                 || stagedGraphGeneration != null
@@ -1113,6 +1568,256 @@ final class MultiDocumentPublicationTransaction {
             throw new IllegalStateException(
                     "A non-committing process receipt must be receipt-only");
         }
+    }
+
+    private boolean stagesVerifiedCheckpointSettlementAdvance(
+            ClosureProcessResult result,
+            DocumentId documentId,
+            InMemoryDocumentStore.DocumentHead before,
+            ResultingDocument after) {
+        DocumentUpdate update = documentUpdates.get(documentId);
+        boolean supportedKind = update != null
+                && (update.revision().kind()
+                            == DocumentRevision.Kind.TIMELINE_ENTRY
+                        || update.revision().kind()
+                            == DocumentRevision.Kind
+                                    .EMBEDDED_REVISION_APPLICATION);
+        if (!supportedKind
+                || update.revision().epoch()
+                        != Math.addExact(before.epoch(), 1L)
+                || !update.revision().before().map(value -> value.blueId()
+                        .equals(before.blueId())).orElse(false)
+                || !update.revision().after().blueId().equals(
+                        after.afterBlueId())) {
+            return false;
+        }
+        return stagedManagedEpochReceipts.stream().anyMatch(stage ->
+                stage.transitionReceipt() != null
+                        && stage.receipt().documentId().equals(documentId)
+                        && stage.receipt().kind()
+                                == update.revision().kind()
+                        && ContractsClosureAdapter
+                                .isVerifiedCheckpointSettlementChange(
+                                        result,
+                                        documentId,
+                                        before,
+                                        after,
+                                        stage.transitionReceipt()));
+    }
+
+    /**
+     * Recognizes the sole Contracts exception which may change a durable head
+     * identity without advancing the document's own source epoch. The source
+     * Root is not executed here: Contracts only finalizes its representation
+     * as a member of the resulting component.
+     */
+    private boolean stagesVerifiedComponentRepresentationRebind(
+            ClosureProcessResult result,
+            DocumentId documentId,
+            InMemoryDocumentStore.DocumentHead before,
+            ResultingDocument after) {
+        ComponentRepresentationUpdate update =
+                componentRepresentationUpdates.get(documentId);
+        boolean managedApplication = update != null
+                && update.work() != null
+                && publicationIdentity.equals(update.work().workIdentity())
+                && documentId.equals(update.work().sourceDocumentId())
+                && !update.work().sourceDocumentId().equals(
+                        update.work().consumerDocumentId())
+                && update.work().sourceEpoch() == before.epoch()
+                && after.epoch() == update.work().sourceEpoch();
+        boolean indirectClosureMember = update != null
+                && update.work() == null
+                && !update.directTargetDocumentIds().isEmpty()
+                && expectedHeads.keySet().containsAll(
+                        update.directTargetDocumentIds())
+                && !update.directTargetDocumentIds().contains(documentId)
+                && after.epoch() == before.epoch();
+        if (update == null
+                || !managedApplication && !indirectClosureMember
+                || !after.initialized()
+                || after.terminated()
+                || !sameResultingDocument(
+                        update.resultingDocument(), after)
+                || !update.resultingLayout().semanticRoot().sameExactValue(
+                        ExactValue.fromVerifiedClosureResult(
+                                result, documentId))) {
+            return false;
+        }
+
+        ManagedDocumentTransitionReceipt transition =
+                update.transitionReceipt();
+        if (!transition.documentId().value().equals(documentId.value())
+                || !transition.sourceInvocationIdentity().equals(
+                        result.invocationIdentity())
+                || !transition.beforeBlueId().equals(before.blueId())
+                || !transition.afterBlueId().equals(after.afterBlueId())
+                || !transition.emittedRootEvents().isEmpty()
+                || result.platformCommitCompanion() == null
+                || !result.platformCommitCompanion()
+                        .bindsManagedTransitionReceipts()
+                || result.managedTransitionReceipts().stream().noneMatch(
+                        candidate -> candidate.transitionReceiptIdentity()
+                                .equals(transition
+                                        .transitionReceiptIdentity()))) {
+            return false;
+        }
+
+        List<ComponentSnapshot> components = result.resultingComponents()
+                .stream()
+                .filter(component -> component.orderedMemberDocumentIds()
+                        .stream().anyMatch(member -> member.value().equals(
+                                documentId.value())))
+                .toList();
+        if (components.size() != 1) {
+            return false;
+        }
+        ComponentSnapshot component = components.get(0);
+        int memberIndex = -1;
+        for (int index = 0;
+                index < component.orderedMemberDocumentIds().size(); index++) {
+            if (component.orderedMemberDocumentIds().get(index).value().equals(
+                    documentId.value())) {
+                memberIndex = index;
+                break;
+            }
+        }
+        return memberIndex >= 0
+                && component.componentGeneration()
+                        == after.componentGeneration()
+                && component.componentIdentity().equals(
+                        after.componentIdentity())
+                && component.componentStateIdentity().equals(
+                        after.componentStateIdentity())
+                && component.orderedMemberBlueIds().get(memberIndex).equals(
+                        after.afterBlueId());
+    }
+
+    private static boolean sameResultingDocument(
+            ResultingDocument left,
+            ResultingDocument right) {
+        return left.documentId().equals(right.documentId())
+                && left.beforeBlueId().equals(right.beforeBlueId())
+                && left.afterBlueId().equals(right.afterBlueId())
+                && left.initialized() == right.initialized()
+                && left.terminated() == right.terminated()
+                && left.publicRoot() == right.publicRoot()
+                && left.epoch() == right.epoch()
+                && left.componentGeneration() == right.componentGeneration()
+                && left.componentIdentity().equals(right.componentIdentity())
+                && left.componentStateIdentity().equals(
+                        right.componentStateIdentity())
+                && Objects.equals(left.memberIndex(), right.memberIndex());
+    }
+
+    /**
+     * Contracts keeps its state epoch stable when a Root emits events without
+     * changing its exact value. Coordination still records one contiguous
+     * receipt-backed epoch: EVENT_ONLY for direct processing or
+     * EMBEDDED_REVISION_APPLICATION for retained catch-up.
+     */
+    private boolean stagesReceiptBackedSameStateAdvance(
+            ClosureProcessResult result,
+            DocumentId documentId,
+            InMemoryDocumentStore.DocumentHead before) {
+        DocumentUpdate update = documentUpdates.get(documentId);
+        if (update == null) {
+            return false;
+        }
+        DocumentRevision revision = update.revision();
+        boolean supportedKind = revision.kind()
+                == DocumentRevision.Kind.EVENT_ONLY
+                || revision.kind()
+                        == DocumentRevision.Kind.EMBEDDED_REVISION_APPLICATION;
+        if (!supportedKind
+                || revision.epoch() != Math.addExact(before.epoch(), 1L)
+                || !revision.before().map(value -> value.blueId()
+                        .equals(before.blueId())).orElse(false)
+                || !revision.after().blueId().equals(before.blueId())) {
+            return false;
+        }
+        String retainedIdentity = revision.managedEpochReceipt()
+                .map(ManagedEpochReceipt::receiptIdentity)
+                .orElse(null);
+        if (retainedIdentity == null) {
+            return false;
+        }
+        return stagedManagedEpochReceipts.stream().anyMatch(stage -> {
+            ManagedEpochReceipt receipt = stage.receipt();
+            if (!receipt.documentId().equals(documentId)
+                    || receipt.kind() != revision.kind()
+                    || !receipt.receiptIdentity().equals(retainedIdentity)) {
+                return false;
+            }
+            ManagedDocumentTransitionReceipt transition =
+                    stage.transitionReceipt();
+            if (transition != null) {
+                return transition.beforeBlueId().equals(before.blueId())
+                        && transition.afterBlueId().equals(before.blueId());
+            }
+            return stagesVerifiedEventlessApplicationAdvance(
+                    result, documentId, before, revision, receipt, stage.work());
+        });
+    }
+
+    /** Reflection-only compatibility seam retained for focused validators. */
+    @SuppressWarnings("unused")
+    private boolean stagesReceiptBackedSameStateAdvance(
+            DocumentId documentId,
+            InMemoryDocumentStore.DocumentHead before) {
+        return stagesReceiptBackedSameStateAdvance(null, documentId, before);
+    }
+
+    private boolean stagesVerifiedEventlessApplicationAdvance(
+            ClosureProcessResult result,
+            DocumentId documentId,
+            InMemoryDocumentStore.DocumentHead before,
+            DocumentRevision revision,
+            ManagedEpochReceipt receipt,
+            ManagedEpochApplicationWork work) {
+        if (work == null
+                || result == null
+                || !publicationIdentity.equals(work.workIdentity())
+                || !documentId.equals(work.consumerDocumentId())
+                || work.expectedConsumerCommittedEpoch() != before.epoch()
+                || !work.expectedConsumerCommittedBlueId().equals(
+                        before.blueId())
+                || !receipt.originalCauseIdentity().equals(
+                        work.workIdentity())
+                || !receipt.beforeBlueId().filter(
+                        before.blueId()::equals).isPresent()
+                || !receipt.afterBlueId().equals(before.blueId())
+                || !receipt.emittedEvents().isEmpty()
+                || !revision.emittedEvents().isEmpty()
+                || receipt.processingGas() != result.totalGas()
+                || result.platformCommitCompanion() == null
+                || !receipt.commitCompanionIdentity().equals(
+                        result.platformCommitCompanion()
+                                .companionIdentity())
+                || !receipt.afterBlueId().equals(
+                        ExactValue.fromVerifiedClosureResult(
+                                result, documentId).blueId())) {
+            return false;
+        }
+        CyclicSetProof afterCyclicProof = ManagedEpochReceiptMapper
+                .resultingCyclicProof(
+                        result, documentId, receipt.afterBlueId());
+        ManagedRevisionCause sourceEvidence = ClosureEvidenceFactory
+                .managedRevisionCause(
+                        work.targetOccurrenceIdentity(),
+                        ContractsClosureAdapter.closureId(documentId),
+                        before.epoch(),
+                        revision.epoch(),
+                        before.blueId(),
+                        before.blueId(),
+                        receipt.afterDocument().copyNode(),
+                        work.workIdentity(),
+                        afterCyclicProof);
+        return receipt.contractsTransitionReceiptIdentity().equals(
+                sourceEvidence.sourceRevisionReceiptIdentity())
+                && result.managedTransitionReceipts().stream().noneMatch(
+                        transition -> transition.documentId().value().equals(
+                                documentId.value()));
     }
 
     private void requireClosurePublicationResult(
@@ -1187,13 +1892,25 @@ final class MultiDocumentPublicationTransaction {
         List<OccurrenceRow> expectedRows = result.occurrenceBindings().stream()
                 .map(OccurrenceRow::from)
                 .toList();
-        List<OccurrenceRow> actualRows = members.stream()
+        List<OccurrenceRow> durableRows = members.stream()
                 .sorted(EmbeddingBinding.DOCUMENT_ORDER)
                 .flatMap(member -> resultingInventory.rowsFrom(member).stream())
                 .sorted()
                 .map(OccurrenceRow::from)
                 .toList();
-        if (!expectedRows.equals(actualRows)) {
+        // Coordination retains an inactive, non-pending source/path
+        // reservation after Contracts stops projecting that absent path. It
+        // is immutable cursor evidence, not an active Contracts result row.
+        // Every result row must still match exactly, and no active or pending
+        // durable row may exist outside the authenticated result.
+        List<OccurrenceRow> actualRows = durableRows.stream()
+                .filter(expectedRows::contains)
+                .toList();
+        boolean invalidExtra = durableRows.stream()
+                .filter(row -> !expectedRows.contains(row))
+                .anyMatch(row -> row.active()
+                        || row.pendingHistoricalEpoch() != null);
+        if (invalidExtra || !expectedRows.equals(actualRows)) {
             throw new IllegalStateException(
                     label + " occurrence state is not the exact result");
         }
@@ -1268,7 +1985,7 @@ final class MultiDocumentPublicationTransaction {
         InMemoryDocumentStore.DocumentHead expected =
                 new InMemoryDocumentStore.DocumentHead(
                         current.epoch(),
-                        current.currentRevision().after().blueId());
+                        current.currentRepresentation().blueId());
         String beforeBlueId = revision.before()
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Atomic publication revision requires before state"))
@@ -1383,6 +2100,13 @@ final class MultiDocumentPublicationTransaction {
                                 + updated);
             }
         }
+        for (DocumentId rebound : componentRepresentationUpdates.keySet()) {
+            if (!stagedDocuments.contains(rebound)) {
+                throw new IllegalStateException(
+                        "Rebound component representation has no staged "
+                                + "component state " + rebound);
+            }
+        }
         for (DocumentId admitted : newSessions.keySet()) {
             if (!stagedDocuments.contains(admitted)) {
                 throw new IllegalStateException(
@@ -1426,7 +2150,7 @@ final class MultiDocumentPublicationTransaction {
                         "Component state names an unmanaged document "
                                 + members.get(indexPosition));
             }
-            String actualBlueId = session.currentRevision().after().blueId();
+            String actualBlueId = session.currentRepresentation().blueId();
             if (!actualBlueId.equals(component.orderedMemberBlueIds().get(
                     indexPosition))) {
                 throw new IllegalArgumentException(
@@ -1459,6 +2183,25 @@ final class MultiDocumentPublicationTransaction {
     private static List<OccurrenceRow> occurrenceRows(
             Collection<ManagedOccurrenceBinding> rows) {
         return rows.stream().map(OccurrenceRow::from).toList();
+    }
+
+    private static Map<String, DocumentId> activeChildren(
+            ManagedOccurrenceInventory inventory,
+            DocumentId parent) {
+        LinkedHashMap<String, DocumentId> children = new LinkedHashMap<>();
+        for (ManagedOccurrenceBinding row : Objects.requireNonNull(
+                inventory, "inventory").activeRowsFrom(
+                        Objects.requireNonNull(parent, "parent"))) {
+            DocumentId child = DocumentId.of(row.targetDocumentId().value());
+            DocumentId duplicate = children.putIfAbsent(
+                    row.sourcePath(), child);
+            if (duplicate != null && !duplicate.equals(child)) {
+                throw new IllegalStateException(
+                        "Active closure occurrences disagree at "
+                                + parent + row.sourcePath());
+            }
+        }
+        return children;
     }
 
     private static List<ActiveEdge> activeEdges(
@@ -1515,6 +2258,7 @@ final class MultiDocumentPublicationTransaction {
             EmbeddedOnlyLayout resultingLayout,
             ExternalOrderKey committedFrontier,
             List<SubscriptionDelta.Entry> resultingSubscriptions,
+            boolean terminated,
             String transitionReceipt) {
         private DocumentUpdate {
             revision = Objects.requireNonNull(revision, "revision");
@@ -1524,6 +2268,89 @@ final class MultiDocumentPublicationTransaction {
                     resultingSubscriptions, "resultingSubscriptions"));
             transitionReceipt = requireText(
                     transitionReceipt, "transitionReceipt");
+        }
+    }
+
+    private record ComponentRepresentationUpdate(
+            ManagedEpochApplicationWork work,
+            List<DocumentId> directTargetDocumentIds,
+            ResultingDocument resultingDocument,
+            EmbeddedOnlyLayout resultingLayout,
+            List<SubscriptionDelta.Entry> resultingSubscriptions,
+            ManagedDocumentTransitionReceipt transitionReceipt) {
+        private ComponentRepresentationUpdate {
+            directTargetDocumentIds = List.copyOf(Objects.requireNonNull(
+                    directTargetDocumentIds, "directTargetDocumentIds"));
+            if ((work == null) == directTargetDocumentIds.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "A component representation rebind requires exactly "
+                                + "one managed or indirect authority");
+            }
+            resultingDocument = Objects.requireNonNull(
+                    resultingDocument, "resultingDocument");
+            resultingLayout = Objects.requireNonNull(
+                    resultingLayout, "resultingLayout");
+            resultingSubscriptions = List.copyOf(Objects.requireNonNull(
+                    resultingSubscriptions, "resultingSubscriptions"));
+            transitionReceipt = Objects.requireNonNull(
+                    transitionReceipt, "transitionReceipt");
+        }
+
+        private static ComponentRepresentationUpdate forManagedApplication(
+                ManagedEpochApplicationWork work,
+                ResultingDocument resultingDocument,
+                EmbeddedOnlyLayout resultingLayout,
+                List<SubscriptionDelta.Entry> resultingSubscriptions,
+                ManagedDocumentTransitionReceipt transitionReceipt) {
+            return new ComponentRepresentationUpdate(
+                    Objects.requireNonNull(work, "work"),
+                    List.of(),
+                    resultingDocument,
+                    resultingLayout,
+                    resultingSubscriptions,
+                    transitionReceipt);
+        }
+
+        private static ComponentRepresentationUpdate forIndirectClosureMember(
+                Collection<DocumentId> directTargetDocumentIds,
+                ResultingDocument resultingDocument,
+                EmbeddedOnlyLayout resultingLayout,
+                List<SubscriptionDelta.Entry> resultingSubscriptions,
+                ManagedDocumentTransitionReceipt transitionReceipt) {
+            TreeMap<DocumentId, Boolean> canonical = new TreeMap<>(
+                    EmbeddingBinding.DOCUMENT_ORDER);
+            for (DocumentId documentId : Objects.requireNonNull(
+                    directTargetDocumentIds, "directTargetDocumentIds")) {
+                canonical.put(
+                        Objects.requireNonNull(documentId, "directTarget"),
+                        Boolean.TRUE);
+            }
+            if (canonical.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "An indirect component representation rebind requires "
+                                + "at least one direct Root");
+            }
+            return new ComponentRepresentationUpdate(
+                    null,
+                    List.copyOf(canonical.keySet()),
+                    resultingDocument,
+                    resultingLayout,
+                    resultingSubscriptions,
+                    transitionReceipt);
+        }
+    }
+
+    private record ManagedReceiptStage(
+            ManagedEpochReceipt receipt,
+            ManagedDocumentTransitionReceipt transitionReceipt,
+            ManagedEpochApplicationWork work) {
+        private ManagedReceiptStage {
+            receipt = Objects.requireNonNull(receipt, "receipt");
+            if ((transitionReceipt == null) == (work == null)) {
+                throw new IllegalArgumentException(
+                        "Managed receipt requires exactly one Contracts "
+                                + "transition or application work binding");
+            }
         }
     }
 

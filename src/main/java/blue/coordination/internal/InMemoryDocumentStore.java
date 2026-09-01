@@ -2,6 +2,15 @@ package blue.coordination.internal;
 
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.ContractsClosureAdmissionReceipt;
+import blue.coordination.api.ManagedEpochReceipt;
+import blue.coordination.api.ManagedCatchUpBarrier;
+import blue.coordination.api.ManagedCatchUpBarrierStatus;
+import blue.coordination.api.ManagedDocumentReadiness;
+import blue.coordination.api.ManagedEpochApplicationReceipt;
+import blue.coordination.api.ManagedEpochApplicationWork;
+import blue.coordination.api.ManagedOccurrenceCatchUpPlan;
+import blue.language.processor.closure.ManagedDocumentTransitionReceipt;
+import blue.language.processor.closure.ManagedOccurrenceBinding;
 import blue.language.processor.closure.CheckpointWrite;
 import blue.language.processor.closure.ComponentSnapshot;
 import blue.language.processor.closure.PublicEventOccurrence;
@@ -36,6 +45,16 @@ final class InMemoryDocumentStore {
             "contracts.closure.headsCaptured";
     static final String CLOSURE_COMPONENT_STATES_CAPTURED =
             "contracts.closure.componentStatesCaptured";
+    static final String MANAGED_RECEIPT_ROWS_OPENED =
+            "managedEpoch.store.receiptRowsOpened";
+    static final String MANAGED_PLAN_ROWS_OPENED =
+            "managedEpoch.store.planRowsOpened";
+    static final String MANAGED_BARRIER_ROWS_OPENED =
+            "managedEpoch.store.barrierRowsOpened";
+    static final String MANAGED_APPLICATION_RECEIPT_ROWS_OPENED =
+            "managedEpoch.store.applicationReceiptRowsOpened";
+    private static final String UNRELATED_DOCUMENT_READS =
+            "temporal.unrelatedDocumentReads";
 
     private final EngineMetrics metrics;
     private StoreState state;
@@ -46,6 +65,7 @@ final class InMemoryDocumentStore {
 
     InMemoryDocumentStore(EngineMetrics metrics) {
         this.metrics = Objects.requireNonNull(metrics, "metrics");
+        registerExactReadCounters();
         state = StoreState.empty();
     }
 
@@ -116,6 +136,11 @@ final class InMemoryDocumentStore {
         return state.lineageIndex();
     }
 
+    /** Exact immutable catch-up indexes for one transaction attempt. */
+    synchronized CatchUpPlanStore catchUpPlansSnapshot() {
+        return state.catchUpPlans();
+    }
+
     /**
      * Captures the exact immutable indexes used by one occurrence-resolution
      * attempt without opening or scanning document sessions.
@@ -160,6 +185,51 @@ final class InMemoryDocumentStore {
                 state.occurrenceInventory(),
                 state.componentIndex(),
                 state.closureSubscriptions());
+    }
+
+    /** Opens one exact durable head, graph generation, and component proof. */
+    synchronized ManagedReadSnapshot managedReadSnapshot(
+            DocumentId documentId) {
+        DocumentId selected = Objects.requireNonNull(
+                documentId, "documentId");
+        PersistentOrderedMap.ReadResult<DocumentSession> sessionRead =
+                state.sessionIndex().read(selected);
+        metrics.add(
+                ContractsClosureAdapter.DOCUMENT_OPENS,
+                sessionRead.found() ? 1L : 0L);
+        if (!sessionRead.found()) {
+            throw new IllegalArgumentException("Unknown document " + selected);
+        }
+        ComponentStateInventory.ComponentStateRead componentRead =
+                state.componentStateInventory().forDocumentRead(selected);
+        metrics.add(
+                ContractsClosureAdapter.COMPONENT_STATES_READ,
+                componentRead.componentRowsRead());
+        metrics.add(
+                UNRELATED_DOCUMENT_READS,
+                componentRead.unrelatedDocumentReads());
+        DocumentSession session = sessionRead.value();
+        return new ManagedReadSnapshot(
+                new DocumentHead(
+                        session.epoch(),
+                        session.currentRepresentation().blueId()),
+                state.graphGenerations().require(selected),
+                componentRead.component());
+    }
+
+    /** Opens only the exact parent's active occurrence bucket. */
+    synchronized List<ManagedOccurrenceBinding> activeOccurrencesFrom(
+            DocumentId sourceDocumentId) {
+        ManagedOccurrenceInventory.RowsRead read = state.occurrenceInventory()
+                .activeRowsFromRead(Objects.requireNonNull(
+                        sourceDocumentId, "sourceDocumentId"));
+        metrics.add(
+                ContractsClosureAdapter.OCCURRENCE_ROWS_EXAMINED,
+                read.occurrenceRowsRead());
+        metrics.add(
+                UNRELATED_DOCUMENT_READS,
+                read.unrelatedDocumentReads());
+        return read.rows();
     }
 
     /** Captures only the durable heads and component states in one cohort. */
@@ -207,7 +277,7 @@ final class InMemoryDocumentStore {
             }
             heads.put(documentId, new DocumentHead(
                     session.epoch(),
-                    session.currentRevision().after().blueId()));
+                    session.currentRepresentation().blueId()));
         }
         if (requireMember && heads.isEmpty()) {
             throw new IllegalArgumentException(
@@ -267,6 +337,291 @@ final class InMemoryDocumentStore {
                 publicationIdentity, "publicationIdentity"));
     }
 
+    /** Reads one complete source receipt without opening a document session. */
+    synchronized Optional<ManagedEpochReceipt> managedEpochReceipt(
+            DocumentId documentId, long epoch) {
+        ManagedEpochReceiptStore.ReceiptRead read = state.managedEpochReceipts()
+                .exact(Objects.requireNonNull(documentId, "documentId"), epoch);
+        recordExactRows(
+                MANAGED_RECEIPT_ROWS_OPENED,
+                read.receiptRowsRead(),
+                read.unrelatedDocumentReads());
+        return Optional.ofNullable(read.receipt());
+    }
+
+    /** Reads source receipts for exactly one lineage in contiguous order. */
+    synchronized List<ManagedEpochReceipt> managedEpochReceipts(
+            DocumentId documentId) {
+        ManagedEpochReceiptStore.ReceiptAudit read = state
+                .managedEpochReceipts()
+                .audit(Objects.requireNonNull(documentId, "documentId"));
+        recordExactRows(
+                MANAGED_RECEIPT_ROWS_OPENED,
+                read.receiptRowsRead(),
+                read.unrelatedDocumentReads());
+        return read.receipts();
+    }
+
+    /** Reads one public source receipt by its canonical identity. */
+    synchronized Optional<ManagedEpochReceipt> managedEpochReceipt(
+            String receiptIdentity) {
+        ManagedEpochReceiptStore.ReceiptRead read = state.managedEpochReceipts()
+                .byIdentity(Objects.requireNonNull(
+                        receiptIdentity, "receiptIdentity"));
+        recordExactRows(
+                MANAGED_RECEIPT_ROWS_OPENED,
+                read.receiptRowsRead(),
+                read.unrelatedDocumentReads());
+        return Optional.ofNullable(read.receipt());
+    }
+
+    /** Reads the original typed Contracts transition for one source epoch. */
+    synchronized Optional<ManagedDocumentTransitionReceipt>
+            managedTransitionReceipt(DocumentId documentId, long epoch) {
+        ManagedEpochReceiptStore.TransitionReceiptRead read = state
+                .managedEpochReceipts().exactTransition(
+                        Objects.requireNonNull(documentId, "documentId"), epoch);
+        recordExactRows(
+                MANAGED_RECEIPT_ROWS_OPENED,
+                read.receiptRowsRead(),
+                read.unrelatedDocumentReads());
+        return Optional.ofNullable(read.transitionReceipt());
+    }
+
+    /** Opens one exact row containing both public and Contracts evidence. */
+    synchronized ManagedEpochEvidence managedEpochEvidence(
+            DocumentId documentId, long epoch) {
+        ManagedEpochReceiptStore.EvidenceRead read = state
+                .managedEpochReceipts().exactEvidence(
+                        Objects.requireNonNull(documentId, "documentId"), epoch);
+        recordExactRows(
+                MANAGED_RECEIPT_ROWS_OPENED,
+                read.receiptRowsRead(),
+                read.unrelatedDocumentReads());
+        return new ManagedEpochEvidence(
+                read.receipt(), read.transitionReceipt());
+    }
+
+    /** Installs one immutable path-copied corruption fixture for tests only. */
+    synchronized void replaceManagedEpochEvidenceForTesting(
+            DocumentId documentId,
+            long epoch,
+            ManagedEpochReceipt publicReceipt,
+            ManagedDocumentTransitionReceipt transitionReceipt) {
+        ManagedEpochReceiptStore replacement = state.managedEpochReceipts()
+                .withUnverifiedEvidenceForTesting(
+                        Objects.requireNonNull(documentId, "documentId"),
+                        epoch,
+                        publicReceipt,
+                        transitionReceipt);
+        state = state.withManagedEpochReceipts(replacement);
+    }
+
+    /** Seeds an authenticated public receipt in legacy fixture setup only. */
+    synchronized void retainManagedEpochReceiptForTesting(
+            ManagedEpochReceipt receipt) {
+        ManagedEpochReceiptStore replacement = state.managedEpochReceipts()
+                .withReceipt(Objects.requireNonNull(receipt, "receipt"));
+        state = state.withManagedEpochReceipts(replacement);
+    }
+
+    synchronized Optional<ManagedOccurrenceCatchUpPlan> catchUpPlan(
+            String planIdentity) {
+        ManagedCatchUpPlanIndex.PlanRead read = state.catchUpPlans()
+                .plan(Objects.requireNonNull(planIdentity, "planIdentity"));
+        recordExactRows(
+                MANAGED_PLAN_ROWS_OPENED,
+                read.planRowsRead(),
+                read.unrelatedPlanReads());
+        return Optional.ofNullable(read.plan());
+    }
+
+    synchronized List<ManagedOccurrenceCatchUpPlan> catchUpPlans(
+            DocumentId consumerDocumentId) {
+        ManagedCatchUpPlanIndex.PlanAudit read = state.catchUpPlans()
+                .plansForConsumer(Objects.requireNonNull(
+                        consumerDocumentId, "consumerDocumentId"));
+        recordExactRows(
+                MANAGED_PLAN_ROWS_OPENED,
+                read.planRowsRead(),
+                read.unrelatedPlanReads());
+        return read.plans();
+    }
+
+    synchronized Optional<ManagedCatchUpBarrier> catchUpBarrier(
+            String barrierIdentity) {
+        CatchUpPlanStore.BarrierRead read = state.catchUpPlans()
+                .barrier(Objects.requireNonNull(
+                        barrierIdentity, "barrierIdentity"));
+        recordExactRows(
+                MANAGED_BARRIER_ROWS_OPENED,
+                read.barrierRowsRead(),
+                read.unrelatedPlanReads());
+        return Optional.ofNullable(read.barrier());
+    }
+
+    synchronized Optional<ManagedEpochApplicationWork> catchUpWork(
+            String workIdentity) {
+        return Optional.ofNullable(state.catchUpPlans()
+                .work(Objects.requireNonNull(workIdentity, "workIdentity"))
+                .work());
+    }
+
+    /** Selects one canonical due work item without scanning plan rows. */
+    synchronized Optional<ManagedEpochApplicationWork> nextCatchUpWork() {
+        return Optional.ofNullable(state.catchUpPlans()
+                .nextDueWork().work());
+    }
+
+    /** Selects canonical due work outside failed consumers without a scan. */
+    synchronized Optional<ManagedEpochApplicationWork>
+            nextCatchUpWorkExcluding(Set<DocumentId> excludedConsumers) {
+        return Optional.ofNullable(state.catchUpPlans()
+                .nextDueWorkExcluding(Objects.requireNonNull(
+                        excludedConsumers, "excludedConsumers"))
+                .work());
+    }
+
+    /**
+     * Atomically records a pre-PROCESS immutable-evidence failure. Document
+     * sessions, committed/ready heads, occurrence cursors, and receipt history
+     * remain the exact same immutable state objects.
+     */
+    synchronized void recordManagedEpochEvidenceFailure(
+            ManagedEpochEvidenceException failure) {
+        ManagedEpochEvidenceException selected = Objects.requireNonNull(
+                failure, "failure");
+        CatchUpPlanStore changed = state.catchUpPlans()
+                .withEvidenceFailure(selected);
+        state = state.withCatchUpPlans(changed);
+    }
+
+    /**
+     * Atomically blocks one complete PROCESS result rejected by the managed
+     * application publication boundary, without changing document state.
+     */
+    synchronized void recordManagedEpochApplicationFailure(
+            ManagedEpochApplicationWork work,
+            String code,
+            String message) {
+        CatchUpPlanStore changed = state.catchUpPlans()
+                .withApplicationFailure(work, code, message);
+        state = state.withCatchUpPlans(changed);
+    }
+
+    synchronized boolean hasActiveCatchUp() {
+        return state.catchUpPlans().hasActiveBarriers();
+    }
+
+    synchronized boolean hasActiveCatchUpFrom(DocumentId sourceDocumentId) {
+        return state.catchUpPlans().hasActivePlanForSource(
+                Objects.requireNonNull(
+                        sourceDocumentId, "sourceDocumentId"));
+    }
+
+    /** Reads one document's exact durable Contracts graph generation. */
+    synchronized long graphGeneration(DocumentId documentId) {
+        return state.graphGenerations().require(Objects.requireNonNull(
+                documentId, "documentId"));
+    }
+
+    /** Reads owned and transitive source barriers still holding this Root ready. */
+    synchronized List<String> activeCatchUpBarrierIdentities(
+            DocumentId consumerDocumentId) {
+        CatchUpPlanStore.ActiveBarriersRead read = new ManagedCatchUpReadiness(
+                state.catchUpPlans(), state.occurrenceInventory()).read(
+                        Objects.requireNonNull(consumerDocumentId, "consumerDocumentId"));
+        recordActiveBarrierRead(read);
+        return read.barrierIdentities();
+    }
+
+    /** Builds one exact committed-versus-ready view from targeted indexes. */
+    synchronized ManagedDocumentReadiness managedReadiness(
+            DocumentId documentId) {
+        DocumentSession session = require(Objects.requireNonNull(
+                documentId, "documentId"));
+        CatchUpPlanStore.ActiveBarriersRead activeRead = new ManagedCatchUpReadiness(
+                state.catchUpPlans(), state.occurrenceInventory()).read(documentId);
+        recordActiveBarrierRead(activeRead);
+        List<String> active = activeRead.barrierIdentities();
+        String waitingCode = null;
+        String waitingMessage = null;
+        for (ManagedCatchUpBarrier barrier : activeRead.barriers()) {
+            if (barrier.status() == ManagedCatchUpBarrierStatus.BLOCKED) {
+                waitingCode = barrier.waitingCode().orElseThrow();
+                waitingMessage = barrier.waitingMessage().orElse(null);
+                break;
+            }
+            if (barrier.status()
+                            == ManagedCatchUpBarrierStatus.WAITING_FOR_HISTORY
+                    && waitingCode == null) {
+                waitingCode = barrier.waitingCode().orElseThrow();
+                waitingMessage = barrier.waitingMessage().orElse(null);
+            }
+        }
+        return ManagedDocumentReadiness.identified(
+                documentId,
+                session.epoch(),
+                session.currentRepresentation().blueId(),
+                Long.valueOf(session.readyEpoch()),
+                session.readyRepresentation().blueId(),
+                session.status(),
+                waitingCode,
+                waitingMessage,
+                active);
+    }
+
+    synchronized Optional<ManagedEpochApplicationReceipt>
+            catchUpApplication(String applicationReceiptIdentity) {
+        ManagedCatchUpWorkIndex.ApplicationRead read = state.catchUpPlans()
+                .application(Objects.requireNonNull(
+                        applicationReceiptIdentity,
+                        "applicationReceiptIdentity"));
+        recordExactRows(
+                MANAGED_APPLICATION_RECEIPT_ROWS_OPENED,
+                read.applicationRowsRead(),
+                read.unrelatedPlanReads());
+        return Optional.ofNullable(read.receipt());
+    }
+
+    /** Reads an already committed application by its idempotent work key. */
+    synchronized Optional<ManagedEpochApplicationReceipt>
+            catchUpApplicationByWork(String workIdentity) {
+        ManagedCatchUpWorkIndex.ApplicationRead read = state.catchUpPlans()
+                .applicationByWork(Objects.requireNonNull(
+                        workIdentity, "workIdentity"));
+        recordExactRows(
+                MANAGED_APPLICATION_RECEIPT_ROWS_OPENED,
+                read.applicationRowsRead(),
+                read.unrelatedPlanReads());
+        return Optional.ofNullable(read.receipt());
+    }
+
+    private void registerExactReadCounters() {
+        metrics.add(MANAGED_RECEIPT_ROWS_OPENED, 0L);
+        metrics.add(MANAGED_PLAN_ROWS_OPENED, 0L);
+        metrics.add(MANAGED_BARRIER_ROWS_OPENED, 0L);
+        metrics.add(MANAGED_APPLICATION_RECEIPT_ROWS_OPENED, 0L);
+    }
+
+    private void recordActiveBarrierRead(
+            CatchUpPlanStore.ActiveBarriersRead read) {
+        recordExactRows(
+                MANAGED_PLAN_ROWS_OPENED,
+                read.planRowsRead(),
+                read.unrelatedPlanReads());
+        recordExactRows(
+                MANAGED_BARRIER_ROWS_OPENED,
+                read.barrierRowsRead(),
+                0);
+    }
+
+    private void recordExactRows(
+            String counter, int rowsRead, int unrelatedDocumentReads) {
+        metrics.add(counter, rowsRead);
+        metrics.add(UNRELATED_DOCUMENT_READS, unrelatedDocumentReads);
+    }
+
     synchronized void commit(MultiDocumentPublicationTransaction transaction) {
         MultiDocumentPublicationTransaction selected = Objects.requireNonNull(
                 transaction, "transaction");
@@ -311,6 +666,28 @@ final class InMemoryDocumentStore {
             MultiDocumentPublicationTransaction.requireSafeInteger(
                     componentIndexGeneration,
                     "componentIndexGeneration");
+        }
+    }
+
+    record ManagedReadSnapshot(
+            DocumentHead head,
+            long graphGeneration,
+            ComponentSnapshot componentState) {
+        ManagedReadSnapshot {
+            head = Objects.requireNonNull(head, "head");
+            MultiDocumentPublicationTransaction.requireSafeInteger(
+                    graphGeneration, "graphGeneration");
+        }
+    }
+
+    record ManagedEpochEvidence(
+            ManagedEpochReceipt receipt,
+            ManagedDocumentTransitionReceipt transitionReceipt) {
+        ManagedEpochEvidence {
+            if (receipt == null && transitionReceipt != null) {
+                throw new IllegalArgumentException(
+                        "Contracts evidence requires a public epoch receipt");
+            }
         }
     }
 
@@ -417,6 +794,8 @@ final class InMemoryDocumentStore {
                 closurePublicationReceiptIndex;
         private final Map<String, ContractsClosurePublicationReceipt>
                 closurePublicationReceipts;
+        private final ManagedEpochReceiptStore managedEpochReceipts;
+        private final CatchUpPlanStore catchUpPlans;
 
         StoreState(
                 Map<DocumentId, DocumentSession> sessions,
@@ -434,7 +813,9 @@ final class InMemoryDocumentStore {
                 Map<String, ContractsClosureAdmissionReceipt>
                         admissionReceipts,
                 Map<String, ContractsClosurePublicationReceipt>
-                        closurePublicationReceipts) {
+                        closurePublicationReceipts,
+                ManagedEpochReceiptStore managedEpochReceipts,
+                CatchUpPlanStore catchUpPlans) {
             this.sessionIndex = sessionIndex(sessions);
             this.sessions = new PersistentMapView<>(sessionIndex);
             this.lineageIndex = Objects.requireNonNull(
@@ -517,7 +898,7 @@ final class InMemoryDocumentStore {
                             "Closure subscription belongs to an absent document "
                                     + owner);
                 }
-                if (!session.currentRevision().after().blueId()
+                if (!session.currentRepresentation().blueId()
                         .equals(state.documentBlueId())) {
                     throw new IllegalArgumentException(
                             "Closure subscription does not identify the durable "
@@ -632,6 +1013,10 @@ final class InMemoryDocumentStore {
                     closurePublicationReceiptIndex(processReceipts);
             this.closurePublicationReceipts = new PersistentMapView<>(
                     closurePublicationReceiptIndex);
+            this.managedEpochReceipts = Objects.requireNonNull(
+                    managedEpochReceipts, "managedEpochReceipts");
+            this.catchUpPlans = Objects.requireNonNull(
+                    catchUpPlans, "catchUpPlans");
         }
 
         private StoreState(
@@ -651,7 +1036,9 @@ final class InMemoryDocumentStore {
                         admissionReceiptIndex,
                 PersistentOrderedMap<String,
                         ContractsClosurePublicationReceipt>
-                        closurePublicationReceiptIndex) {
+                        closurePublicationReceiptIndex,
+                ManagedEpochReceiptStore managedEpochReceipts,
+                CatchUpPlanStore catchUpPlans) {
             this.sessionIndex = Objects.requireNonNull(
                     sessionIndex, "sessionIndex");
             this.sessions = new PersistentMapView<>(sessionIndex);
@@ -692,6 +1079,10 @@ final class InMemoryDocumentStore {
                     "closurePublicationReceiptIndex");
             this.closurePublicationReceipts = new PersistentMapView<>(
                     closurePublicationReceiptIndex);
+            this.managedEpochReceipts = Objects.requireNonNull(
+                    managedEpochReceipts, "managedEpochReceipts");
+            this.catchUpPlans = Objects.requireNonNull(
+                    catchUpPlans, "catchUpPlans");
         }
 
         static StoreState trustedTransition(
@@ -711,7 +1102,9 @@ final class InMemoryDocumentStore {
                         admissionReceipts,
                 PersistentOrderedMap<String,
                         ContractsClosurePublicationReceipt>
-                        closurePublicationReceipts) {
+                        closurePublicationReceipts,
+                ManagedEpochReceiptStore managedEpochReceipts,
+                CatchUpPlanStore catchUpPlans) {
             return new StoreState(
                     sessions,
                     lineageIndex,
@@ -726,7 +1119,9 @@ final class InMemoryDocumentStore {
                     checkpointEvidence,
                     publicationReceipts,
                     admissionReceipts,
-                    closurePublicationReceipts);
+                    closurePublicationReceipts,
+                    managedEpochReceipts,
+                    catchUpPlans);
         }
 
         static StoreState empty() {
@@ -747,7 +1142,9 @@ final class InMemoryDocumentStore {
                     List.of(),
                     Set.of(),
                     Map.of(),
-                    Map.of());
+                    Map.of(),
+                    ManagedEpochReceiptStore.empty(),
+                    CatchUpPlanStore.empty());
         }
 
         StoreState withSessions(
@@ -778,7 +1175,9 @@ final class InMemoryDocumentStore {
                     checkpointEvidence.values(),
                     publicationReceipts,
                     admissionReceipts,
-                    closurePublicationReceipts);
+                    closurePublicationReceipts,
+                    managedEpochReceipts,
+                    catchUpPlans);
         }
 
         PersistentOrderedMap<DocumentId, DocumentSession> sessionIndex() {
@@ -880,6 +1279,56 @@ final class InMemoryDocumentStore {
         Map<String, ContractsClosurePublicationReceipt>
                 closurePublicationReceipts() {
             return closurePublicationReceipts;
+        }
+
+        ManagedEpochReceiptStore managedEpochReceipts() {
+            return managedEpochReceipts;
+        }
+
+        StoreState withManagedEpochReceipts(
+                ManagedEpochReceiptStore replacement) {
+            return trustedTransition(
+                    sessionIndex,
+                    lineageIndex,
+                    occurrenceInventory,
+                    occurrenceInventoryGeneration,
+                    componentIndex,
+                    componentIndexGeneration,
+                    graphGenerations,
+                    componentStates,
+                    closureSubscriptions,
+                    outbox,
+                    checkpointEvidence,
+                    publicationReceiptIndex,
+                    admissionReceiptIndex,
+                    closurePublicationReceiptIndex,
+                    Objects.requireNonNull(
+                            replacement, "managedEpochReceipts"),
+                    catchUpPlans);
+        }
+
+        CatchUpPlanStore catchUpPlans() {
+            return catchUpPlans;
+        }
+
+        StoreState withCatchUpPlans(CatchUpPlanStore replacement) {
+            return trustedTransition(
+                    sessionIndex,
+                    lineageIndex,
+                    occurrenceInventory,
+                    occurrenceInventoryGeneration,
+                    componentIndex,
+                    componentIndexGeneration,
+                    graphGenerations,
+                    componentStates,
+                    closureSubscriptions,
+                    outbox,
+                    checkpointEvidence,
+                    publicationReceiptIndex,
+                    admissionReceiptIndex,
+                    closurePublicationReceiptIndex,
+                    managedEpochReceipts,
+                    Objects.requireNonNull(replacement, "catchUpPlans"));
         }
 
         private static PersistentOrderedMap<DocumentId, DocumentSession>
@@ -1006,7 +1455,9 @@ final class InMemoryDocumentStore {
                 retainedDocument = true;
                 if (exact.epoch() > session.epoch()
                         || !session.revision(exact.epoch()).after().blueId()
-                                .equals(exact.afterBlueId())) {
+                                .equals(exact.afterBlueId())
+                        && !retainsAuthenticatedComponentRepresentation(
+                                result, exact, session)) {
                     throw new IllegalArgumentException(
                             label + " result head is absent from durable "
                                     + "history for " + entry.getKey());
@@ -1016,6 +1467,63 @@ final class InMemoryDocumentStore {
                 throw new IllegalArgumentException(
                         label + " has no retained document");
             }
+        }
+
+        private static boolean retainsAuthenticatedComponentRepresentation(
+                blue.language.processor.closure.ClosureProcessResult result,
+                ResultingDocument document,
+                DocumentSession session) {
+            if (!result.commits()
+                    || result.platformCommitCompanion() == null
+                    || !result.platformCommitCompanion()
+                            .bindsManagedTransitionReceipts()
+                    || !document.initialized()
+                    || document.terminated()
+                    || document.beforeBlueId().equals(
+                            document.afterBlueId())) {
+                return false;
+            }
+            ManagedDocumentTransitionReceipt transition = result
+                    .managedTransitionReceipts().stream()
+                    .filter(candidate -> candidate.documentId().equals(
+                            document.documentId()))
+                    .findFirst()
+                    .orElse(null);
+            if (transition == null
+                    || !transition.sourceInvocationIdentity().equals(
+                            result.invocationIdentity())
+                    || !transition.beforeBlueId().equals(
+                            document.beforeBlueId())
+                    || !transition.afterBlueId().equals(
+                            document.afterBlueId())
+                    || !transition.emittedRootEvents().isEmpty()
+                    || !session.hasComponentRepresentationTransition(
+                            document.epoch(),
+                            document.beforeBlueId(),
+                            document.afterBlueId(),
+                            transition.transitionReceiptIdentity())) {
+                return false;
+            }
+            List<ComponentSnapshot> components = result.resultingComponents()
+                    .stream()
+                    .filter(component -> component.orderedMemberDocumentIds()
+                            .contains(document.documentId()))
+                    .toList();
+            if (components.size() != 1) {
+                return false;
+            }
+            ComponentSnapshot component = components.get(0);
+            int memberIndex = component.orderedMemberDocumentIds().indexOf(
+                    document.documentId());
+            return memberIndex >= 0
+                    && component.componentGeneration()
+                            == document.componentGeneration()
+                    && component.componentIdentity().equals(
+                            document.componentIdentity())
+                    && component.componentStateIdentity().equals(
+                            document.componentStateIdentity())
+                    && component.orderedMemberBlueIds().get(memberIndex)
+                            .equals(document.afterBlueId());
         }
 
         private static void requireCondensationOrder(
@@ -1173,7 +1681,7 @@ final class InMemoryDocumentStore {
                     documentId,
                     new DocumentHead(
                             session.epoch(),
-                            session.currentRevision().after().blueId())));
+                            session.currentRepresentation().blueId())));
             return new PublicationSnapshot(
                     canonicalHeads,
                     state.occurrenceInventoryGeneration(),

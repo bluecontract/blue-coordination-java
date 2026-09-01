@@ -57,6 +57,56 @@ if (coordinationManifest.groupId != 'blue.coordination'
             'staged Coordination and Contracts manifests are not bound')
 }
 
+def checkedVersion = { Map manifest, String propertyName, String base ->
+    String requested = providers.gradleProperty(propertyName)
+            .getOrElse(String.valueOf(manifest.version))
+    if (requested != manifest.version) {
+        throw new GradleException(
+                "${propertyName} differs from its immutable manifest")
+    }
+    if (requested.contains('-dev.')) {
+        if (manifest.stagePurpose != 'DEVELOPMENT'
+                || manifest.releaseReadinessClaimed != false
+                || !(manifest.builtWithJava instanceof Number)
+                || manifest.builtWithJava.toString() != '17'
+                || !(manifest.sourceCommit instanceof String)
+                || !(manifest.sourceCommit ==~ /[0-9a-f]{40}/)
+                || !(manifest.sourceTree instanceof String)
+                || !(manifest.sourceTree ==~ /[0-9a-f]{40}/)
+                || !(manifest.sourceDirty instanceof Boolean)) {
+            throw new GradleException(
+                    'DEVELOPMENT consumer requires exact source-tree provenance')
+        }
+        String boundVersion = manifest.sourceDirty
+                ? base + '-dev.tree.' + manifest.sourceTree
+                : base + '-dev.' + manifest.sourceCommit
+        if (requested != boundVersion) {
+            throw new GradleException(
+                    'DEVELOPMENT consumer version does not bind its exact source identity')
+        }
+    }
+    requested
+}
+String selectedCoordinationVersion = checkedVersion(
+        coordinationManifest, 'coordinationVersion', '3.0.0')
+String selectedContractsVersion = checkedVersion(
+        contractsManifest, 'contractsVersion', '3.1.0')
+if (coordinationManifest.contracts.sourceCommit != contractsManifest.sourceCommit) {
+    throw new GradleException('staged consumer Contracts source identities differ')
+}
+gradle.extensions.extraProperties.set('stagedConsumerVersions', [
+        coordination: selectedCoordinationVersion,
+        contracts: selectedContractsVersion
+])
+gradle.extensions.extraProperties.set('stagedConsumerSourceProvenance', [
+        coordinationSourceCommit: coordinationManifest.sourceCommit,
+        coordinationSourceTree: coordinationManifest.sourceTree,
+        coordinationSourceDirty: coordinationManifest.sourceDirty,
+        contractsSourceCommit: contractsManifest.sourceCommit,
+        contractsSourceTree: contractsManifest.sourceTree,
+        contractsSourceDirty: contractsManifest.sourceDirty
+])
+
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {

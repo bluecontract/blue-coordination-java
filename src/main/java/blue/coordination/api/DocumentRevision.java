@@ -24,6 +24,7 @@ public final class DocumentRevision {
     private final CatchUpCause catchUpCause;
     private final List<Node> emittedEvents;
     private final long processingGas;
+    private final ManagedEpochReceipt managedEpochReceipt;
 
     /** Creates one immutable committed transition record. */
     public DocumentRevision(
@@ -49,7 +50,37 @@ public final class DocumentRevision {
                 sourceEntry == null ? null : sourceEntry.blueId(),
                 catchUpCause,
                 emittedEvents,
-                processingGas);
+                processingGas,
+                null);
+    }
+
+    /** Creates a committed transition with complete managed-epoch evidence. */
+    public DocumentRevision(
+            DocumentId documentId,
+            long epoch,
+            long rootApplicationOrder,
+            DocumentRevision.Kind kind,
+            ExactValue before,
+            ExactValue after,
+            TimelineEntry sourceEntry,
+            CatchUpCause catchUpCause,
+            List<Node> emittedEvents,
+            long processingGas,
+            ManagedEpochReceipt managedEpochReceipt) {
+        this(
+                documentId,
+                epoch,
+                rootApplicationOrder,
+                kind,
+                before,
+                after,
+                sourceEntry,
+                sourceEntry == null ? null : sourceEntry.sourceOrderKey(),
+                sourceEntry == null ? null : sourceEntry.blueId(),
+                catchUpCause,
+                emittedEvents,
+                processingGas,
+                managedEpochReceipt);
     }
 
     /** Creates one revision with explicit causal order for processor-owned work. */
@@ -66,6 +97,37 @@ public final class DocumentRevision {
             CatchUpCause catchUpCause,
             List<Node> emittedEvents,
             long processingGas) {
+        this(
+                documentId,
+                epoch,
+                rootApplicationOrder,
+                kind,
+                before,
+                after,
+                sourceEntry,
+                causalOrder,
+                causalEntryBlueId,
+                catchUpCause,
+                emittedEvents,
+                processingGas,
+                null);
+    }
+
+    /** Creates a processor-owned revision with complete managed-epoch evidence. */
+    public DocumentRevision(
+            DocumentId documentId,
+            long epoch,
+            long rootApplicationOrder,
+            DocumentRevision.Kind kind,
+            ExactValue before,
+            ExactValue after,
+            TimelineEntry sourceEntry,
+            ExternalOrderKey causalOrder,
+            String causalEntryBlueId,
+            CatchUpCause catchUpCause,
+            List<Node> emittedEvents,
+            long processingGas,
+            ManagedEpochReceipt managedEpochReceipt) {
         this.documentId = Objects.requireNonNull(documentId, "documentId");
         if (epoch < 0L) {
             throw new IllegalArgumentException("epoch must be non-negative");
@@ -100,6 +162,7 @@ public final class DocumentRevision {
         }
         this.emittedEvents = Collections.unmodifiableList(events);
         this.processingGas = processingGas;
+        this.managedEpochReceipt = managedEpochReceipt;
         if (kind == DocumentRevision.Kind.INITIALIZATION
                 && (sourceEntry != null || causalOrder == null
                 || causalEntryBlueId == null)) {
@@ -110,6 +173,7 @@ public final class DocumentRevision {
             throw new IllegalArgumentException(
                     "Timeline revision requires a source entry");
         }
+        requireManagedEpochReceipt();
     }
 
     /** Returns the document whose state was committed. */
@@ -174,6 +238,11 @@ public final class DocumentRevision {
         return processingGas;
     }
 
+    /** Returns complete source-epoch evidence when this revision retained it. */
+    public Optional<ManagedEpochReceipt> managedEpochReceipt() {
+        return Optional.ofNullable(managedEpochReceipt);
+    }
+
     /** Semantic cause of one exact committed document state. */
     public enum Kind {
         /** Initial exact authored state. */
@@ -183,7 +252,9 @@ public final class DocumentRevision {
         /** Parent state advanced through one managed child epoch. */
         EMBEDDED_REVISION_APPLICATION,
         /** Readiness marker after historical work reaches its frontier. */
-        CATCH_UP_COMPLETED
+        CATCH_UP_COMPLETED,
+        /** Successful Root-event transition whose exact state did not change. */
+        EVENT_ONLY
     }
 
     /** Exact attachment transition that made historical work relevant. */
@@ -212,5 +283,29 @@ public final class DocumentRevision {
             throw new IllegalArgumentException(label + " must not be blank");
         }
         return checked;
+    }
+
+    private void requireManagedEpochReceipt() {
+        if (kind == Kind.EVENT_ONLY && managedEpochReceipt == null) {
+            throw new IllegalArgumentException(
+                    "EVENT_ONLY requires a complete managed epoch receipt");
+        }
+        if (managedEpochReceipt == null) {
+            return;
+        }
+        if (!managedEpochReceipt.documentId().equals(documentId)
+                || managedEpochReceipt.epoch() != epoch
+                || managedEpochReceipt.kind() != kind
+                || !managedEpochReceipt.afterBlueId().equals(after.blueId())
+                || managedEpochReceipt.processingGas() != processingGas) {
+            throw new IllegalArgumentException(
+                    "Managed epoch receipt disagrees with its document revision");
+        }
+        if (before != null && managedEpochReceipt.beforeBlueId().isPresent()
+                && !managedEpochReceipt.beforeBlueId().orElseThrow()
+                        .equals(before.blueId())) {
+            throw new IllegalArgumentException(
+                    "Managed epoch receipt disagrees with prior state");
+        }
     }
 }

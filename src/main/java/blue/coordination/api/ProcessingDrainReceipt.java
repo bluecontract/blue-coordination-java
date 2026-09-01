@@ -16,6 +16,12 @@ public final class ProcessingDrainReceipt {
     private final Map<String, List<DocumentDispatchOutcome>> outcomesByEntry;
     private final Map<String, List<ContractsClosureDispatchAttempt>>
             contractsAttemptsByEntry;
+    private final List<ManagedEpochApplicationReceipt>
+            managedEpochApplications;
+    private final List<ManagedEpochApplicationAttempt>
+            managedEpochApplicationAttempts;
+    private final List<ManagedEpochEvidenceFailure>
+            managedEpochEvidenceFailures;
     private final ExternalOrderKey processedThrough;
     private final boolean quiescent;
     private final boolean paused;
@@ -32,7 +38,8 @@ public final class ProcessingDrainReceipt {
             long committedProcessTransitions,
             long elapsedNanos) {
         this(processedEntries, outcomesByEntry, Map.of(), processedThrough,
-                quiescent, paused, committedProcessTransitions, elapsedNanos);
+                quiescent, paused, committedProcessTransitions, elapsedNanos,
+                List.of(), List.of());
     }
 
     /**
@@ -48,6 +55,98 @@ public final class ProcessingDrainReceipt {
             boolean paused,
             long committedProcessTransitions,
             long elapsedNanos) {
+        this(
+                processedEntries,
+                outcomesByEntry,
+                contractsAttemptsByEntry,
+                processedThrough,
+                quiescent,
+                paused,
+                committedProcessTransitions,
+                elapsedNanos,
+                List.of(), List.of());
+    }
+
+    /**
+     * Creates bounded-drain evidence including committed managed applications.
+     */
+    public ProcessingDrainReceipt(
+            List<TimelineEntry> processedEntries,
+            Map<String, List<DocumentDispatchOutcome>> outcomesByEntry,
+            Map<String, List<ContractsClosureDispatchAttempt>>
+                    contractsAttemptsByEntry,
+            ExternalOrderKey processedThrough,
+            boolean quiescent,
+            boolean paused,
+            long committedProcessTransitions,
+            long elapsedNanos,
+            List<ManagedEpochApplicationReceipt>
+                    managedEpochApplications) {
+        this(
+                processedEntries,
+                outcomesByEntry,
+                contractsAttemptsByEntry,
+                processedThrough,
+                quiescent,
+                paused,
+                committedProcessTransitions,
+                elapsedNanos,
+                managedEpochApplications,
+                List.of());
+    }
+
+    /**
+     * Creates bounded-drain evidence including every managed processor
+     * attempt, whether it committed or rolled back.
+     */
+    public ProcessingDrainReceipt(
+            List<TimelineEntry> processedEntries,
+            Map<String, List<DocumentDispatchOutcome>> outcomesByEntry,
+            Map<String, List<ContractsClosureDispatchAttempt>>
+                    contractsAttemptsByEntry,
+            ExternalOrderKey processedThrough,
+            boolean quiescent,
+            boolean paused,
+            long committedProcessTransitions,
+            long elapsedNanos,
+            List<ManagedEpochApplicationReceipt>
+                    managedEpochApplications,
+            List<ManagedEpochApplicationAttempt>
+                    managedEpochApplicationAttempts) {
+        this(
+                processedEntries,
+                outcomesByEntry,
+                contractsAttemptsByEntry,
+                processedThrough,
+                quiescent,
+                paused,
+                committedProcessTransitions,
+                elapsedNanos,
+                managedEpochApplications,
+                managedEpochApplicationAttempts,
+                List.of());
+    }
+
+    /**
+     * Creates bounded-drain evidence including pre-PROCESS immutable-evidence
+     * failures with their exact selected work.
+     */
+    public ProcessingDrainReceipt(
+            List<TimelineEntry> processedEntries,
+            Map<String, List<DocumentDispatchOutcome>> outcomesByEntry,
+            Map<String, List<ContractsClosureDispatchAttempt>>
+                    contractsAttemptsByEntry,
+            ExternalOrderKey processedThrough,
+            boolean quiescent,
+            boolean paused,
+            long committedProcessTransitions,
+            long elapsedNanos,
+            List<ManagedEpochApplicationReceipt>
+                    managedEpochApplications,
+            List<ManagedEpochApplicationAttempt>
+                    managedEpochApplicationAttempts,
+            List<ManagedEpochEvidenceFailure>
+                    managedEpochEvidenceFailures) {
         this.processedEntries = List.copyOf(Objects.requireNonNull(
                 processedEntries, "processedEntries"));
         Map<String, List<DocumentDispatchOutcome>> copied =
@@ -67,6 +166,16 @@ public final class ProcessingDrainReceipt {
                         List.copyOf(Objects.requireNonNull(
                                 values, "contractsAttempts"))));
         this.contractsAttemptsByEntry = Collections.unmodifiableMap(attempts);
+        this.managedEpochApplications = List.copyOf(Objects.requireNonNull(
+                managedEpochApplications, "managedEpochApplications"));
+        this.managedEpochApplicationAttempts = List.copyOf(
+                Objects.requireNonNull(
+                        managedEpochApplicationAttempts,
+                        "managedEpochApplicationAttempts"));
+        this.managedEpochEvidenceFailures = List.copyOf(
+                Objects.requireNonNull(
+                        managedEpochEvidenceFailures,
+                        "managedEpochEvidenceFailures"));
         this.processedThrough = processedThrough;
         this.quiescent = quiescent;
         this.paused = paused;
@@ -127,6 +236,22 @@ public final class ProcessingDrainReceipt {
     public Map<String, List<ContractsClosureDispatchAttempt>>
             contractsAttemptsByEntry() {
         return contractsAttemptsByEntry;
+    }
+
+    /** Occurrence-specific source epochs committed by this drain call. */
+    public List<ManagedEpochApplicationReceipt> managedEpochApplications() {
+        return managedEpochApplications;
+    }
+
+    /** Exact processor attempts, including deterministic rollback evidence. */
+    public List<ManagedEpochApplicationAttempt>
+            managedEpochApplicationAttempts() {
+        return managedEpochApplicationAttempts;
+    }
+
+    /** Immutable source-evidence failures selected before Contracts PROCESS. */
+    public List<ManagedEpochEvidenceFailure> managedEpochEvidenceFailures() {
+        return managedEpochEvidenceFailures;
     }
 
     /** Highest canonical external order completed by this environment. */

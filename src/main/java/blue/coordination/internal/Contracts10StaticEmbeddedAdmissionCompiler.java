@@ -4,7 +4,9 @@ import blue.coordination.api.CoordinationErrorCode;
 import blue.coordination.api.CoordinationException;
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.ExactValue;
+import blue.coordination.sdk.ExactNodeEvidence;
 import blue.coordination.sdk.ExactNodeProvider;
+import blue.language.identity.BlueIds;
 import blue.language.codec.jackson.UncheckedObjectMapper;
 import blue.language.model.Node;
 import blue.language.processor.closure.AdmissionKind;
@@ -14,6 +16,10 @@ import blue.language.processor.closure.ClosureInvocationInput;
 import blue.language.processor.closure.ComponentSnapshot;
 import blue.language.processor.closure.ManagedDocumentSnapshot;
 import blue.language.provider.NodeProvider;
+import blue.language.provider.CyclicAwareNodeProvider;
+import blue.language.provider.CyclicSetProof;
+import blue.language.provider.CyclicSetProofResult;
+import blue.language.provider.NodeProviderResult;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -151,9 +157,10 @@ public final class Contracts10StaticEmbeddedAdmissionCompiler {
     }
 
     private static final class VerifiedExactNodeProvider
-            implements NodeProvider {
+            implements NodeProvider, CyclicAwareNodeProvider {
         private final ExactNodeProvider delegate;
-        private final Map<String, Node> verified = new LinkedHashMap<>();
+        private final Map<String, Optional<ExactValue>> verified =
+                new LinkedHashMap<>();
 
         private VerifiedExactNodeProvider(ExactNodeProvider delegate) {
             this.delegate = Objects.requireNonNull(delegate, "delegate");
@@ -162,14 +169,50 @@ public final class Contracts10StaticEmbeddedAdmissionCompiler {
         @Override
         public synchronized List<Node> fetchByBlueId(String blueId) {
             String selected = requireText(blueId, "blueId");
-            Node retained = verified.get(selected);
-            if (retained != null) {
-                return List.of(retained.clone());
+            Optional<ExactValue> retained = resolve(selected);
+            return retained.isEmpty()
+                    ? List.of()
+                    : List.of(retained.orElseThrow().copyNode());
+        }
+
+        @Override
+        public synchronized NodeProviderResult fetchResultByBlueId(
+                String blueId) {
+            String selected = requireText(blueId, "blueId");
+            Optional<ExactValue> retained = resolve(selected);
+            if (retained.isPresent())
+                return NodeProviderResult.found(List.of(
+                        retained.orElseThrow().copyNode()));
+            if (BlueIds.hasCyclicMemberSeparator(selected))
+                return NodeProviderResult.notFound();
+            return NodeProviderResult.unavailable(
+                    "Application exact-node provider has not supplied "
+                            + selected);
+        }
+
+        @Override
+        public synchronized CyclicSetProofResult cyclicSetProofFor(
+                String blueId) {
+            Optional<ExactValue> retained = resolve(requireText(
+                    blueId, "blueId"));
+            if (retained.isEmpty()) {
+                return CyclicSetProofResult.notFound();
             }
-            Optional<String> supplied;
+            return retained.orElseThrow().cyclicSetProof()
+                    .map(CyclicSetProofResult::found)
+                    .orElseGet(CyclicSetProofResult::notFound);
+        }
+
+        private Optional<ExactValue> resolve(String selected) {
+            Optional<ExactValue> retained = verified.get(selected);
+            if (retained != null) {
+                return retained;
+            }
+            Optional<ExactNodeEvidence> supplied;
             try {
                 supplied = Objects.requireNonNull(
-                        delegate.findExactContent(selected), "provider result");
+                        delegate.findExactEvidence(selected),
+                        "provider evidence result");
             } catch (CoordinationException failure) {
                 throw failure;
             } catch (RuntimeException failure) {
@@ -178,13 +221,14 @@ public final class Contracts10StaticEmbeddedAdmissionCompiler {
                         failure);
             }
             if (supplied.isEmpty()) {
-                return List.of();
+                return Optional.empty();
             }
+            ExactNodeEvidence evidence = Objects.requireNonNull(
+                    supplied.orElseThrow(), "provider exact evidence");
             Node body;
             try {
                 body = UncheckedObjectMapper.YAML_MAPPER.readValue(
-                        Objects.requireNonNull(supplied.orElseThrow(),
-                                "provider exact content"),
+                        evidence.exactContent(),
                         Node.class);
             } catch (RuntimeException failure) {
                 throw invalid(selected, null,
@@ -196,15 +240,58 @@ public final class Contracts10StaticEmbeddedAdmissionCompiler {
                         "Exact-node provider returned another pure reference",
                         null);
             }
-            ExactValue exact = ExactValue.verified(body);
-            if (!selected.equals(exact.blueId())) {
-                throw invalid(selected, exact.blueId(),
-                        "Exact-node provider returned content with a different "
-                                + "BlueId",
-                        null);
+            ExactValue exact;
+            if (BlueIds.hasCyclicMemberSeparator(selected)) {
+                List<String> declaredPlaceholderSet = evidence
+                        .declaredPlaceholderSet().orElseThrow(
+                        () -> proofFailure(
+                                CoordinationErrorCode
+                                        .MISSING_EXACT_VALUE_PROOF,
+                                selected,
+                                "Exact-node provider returned a cyclic member "
+                                        + "without its complete proof",
+                                null));
+                try {
+                    CyclicSetProof proof = CyclicSetProof
+                            .fromDeclaredPlaceholderSet(
+                                    declaredPlaceholderSet.stream()
+                                            .map(serialized ->
+                                                    UncheckedObjectMapper
+                                                            .YAML_MAPPER
+                                                            .readValue(
+                                                                    serialized,
+                                                                    Node.class))
+                                            .toList());
+                    exact = ExactValue.fromVerifiedProviderEvidence(
+                            selected, body, proof);
+                } catch (RuntimeException failure) {
+                    throw proofFailure(
+                            CoordinationErrorCode.INVALID_EXACT_VALUE_PROOF,
+                            selected,
+                            "Exact-node provider cyclic evidence failed "
+                                    + "complete-set verification",
+                            failure);
+                }
+            } else {
+                if (evidence.declaredPlaceholderSet().isPresent()) {
+                    throw proofFailure(
+                            CoordinationErrorCode.INVALID_EXACT_VALUE_PROOF,
+                            selected,
+                            "Exact-node provider attached a cyclic proof to "
+                                    + "an ordinary BlueId",
+                            null);
+                }
+                exact = ExactValue.verified(body);
+                if (!selected.equals(exact.blueId())) {
+                    throw invalid(selected, exact.blueId(),
+                            "Exact-node provider returned content with a "
+                                    + "different BlueId",
+                            null);
+                }
             }
-            verified.put(selected, exact.copyNode());
-            return List.of(exact.copyNode());
+            Optional<ExactValue> authenticated = Optional.of(exact);
+            verified.put(selected, authenticated);
+            return authenticated;
         }
 
         private static CoordinationException invalid(
@@ -222,6 +309,18 @@ public final class Contracts10StaticEmbeddedAdmissionCompiler {
                     diagnostic + " for " + expectedBlueId,
                     cause,
                     details);
+        }
+
+        private static CoordinationException proofFailure(
+                CoordinationErrorCode code,
+                String expectedBlueId,
+                String diagnostic,
+                Throwable cause) {
+            return new CoordinationException(
+                    code,
+                    diagnostic + " for " + expectedBlueId,
+                    cause,
+                    Map.of("blueId", expectedBlueId));
         }
     }
 }

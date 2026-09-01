@@ -41172,11 +41172,11 @@ This mixed evidence artifact is generated from real public Coordination admissio
     "publicEventsIdentity": "sha256:d8fd7e401fed8157e318c9576078d8c7f865aacd3f394479c3460f05117569c0",
     "publicEvents": [],
     "gas": {
-      "gasTraceIdentity": "sha256:c8c09aee4fbd11501dfdc4772efba12d7587a76128ee6ec909333732035e5441",
-      "totalGas": 1616,
+      "gasTraceIdentity": "sha256:f81984200cf5b5e77b3a0c0af6762f5c2f8bd74cc66e9fe282589ae917f8e2d7",
+      "totalGas": 1625,
       "entryCount": 562,
       "admittedGasByWorkIdentity": {
-        "sha256:fc764285e76e6790a1bf83812e8a9c4eda5f7568e13f06022a0517b3b7c116fd": 1110
+        "sha256:fc764285e76e6790a1bf83812e8a9c4eda5f7568e13f06022a0517b3b7c116fd": 1119
       },
       "rejectedWorkAdmittedCounters": []
     },

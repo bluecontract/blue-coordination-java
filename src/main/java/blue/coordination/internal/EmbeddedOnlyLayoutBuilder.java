@@ -8,7 +8,6 @@ import blue.language.merge.ResolvedSnapshot;
 import blue.language.processor.EffectiveFragmentationCatalog;
 import blue.language.processor.EmbeddedScopePlanView;
 import blue.language.processor.closure.ClosureProcessResult;
-import blue.language.processor.closure.ResultingDocument;
 import blue.language.processor.util.PointerUtils;
 import blue.language.processor.registry.RuntimeBlueIds;
 import blue.language.snapshot.FrozenNode;
@@ -76,14 +75,6 @@ final class EmbeddedOnlyLayoutBuilder {
      * contract plan may be reused only while its exact declarations still
      * match the resulting body.</p>
      */
-    EmbeddedOnlyLayout retainVerifiedClosureRoot(
-            ClosureProcessResult result,
-            DocumentId documentId,
-            EmbeddedOnlyLayout previous) {
-        Objects.requireNonNull(previous, "previous");
-        return retainVerifiedClosureRoot(result, documentId);
-    }
-
     /** Retains one verified existing Root with an exact non-recursive routing
      * surface projected by the managed-document processor. */
     EmbeddedOnlyLayout retainVerifiedClosureRoot(
@@ -93,28 +84,6 @@ final class EmbeddedOnlyLayoutBuilder {
             RoutingSurface routingSurface) {
         Objects.requireNonNull(previous, "previous");
         return retainVerifiedClosureRoot(result, documentId, routingSurface);
-    }
-
-    /** Retains one new independently managed Root after verified admission. */
-    EmbeddedOnlyLayout retainVerifiedClosureRoot(
-            ClosureProcessResult result,
-            DocumentId documentId) {
-        ClosureProcessResult verified = Objects.requireNonNull(
-                result, "result");
-        DocumentId selected = Objects.requireNonNull(documentId, "documentId");
-        Map<DocumentId, ExactValue> retained = retainClosureMembers(verified);
-        ExactValue exactRoot = retained.get(selected);
-        if (exactRoot == null) {
-            throw new IllegalArgumentException(
-                    "Closure result has no document " + selected);
-        }
-        EffectiveFragmentationCatalog catalog =
-                runtime.effectiveFragmentationCatalog(exactRoot.blueId());
-        EmbeddedLayoutPlan plan = EmbeddedLayoutPlan.compile(
-                exactRoot,
-                catalog,
-                path -> exactScopeAt(exactRoot, path));
-        return verifiedRootLayout(exactRoot, plan);
     }
 
     /** Retains one new independently managed Root after verified admission,
@@ -127,29 +96,12 @@ final class EmbeddedOnlyLayoutBuilder {
         ClosureProcessResult verified = Objects.requireNonNull(
                 result, "result");
         DocumentId selected = Objects.requireNonNull(documentId, "documentId");
-        Map<DocumentId, ExactValue> retained = retainClosureMembers(verified);
-        ExactValue exactRoot = retained.get(selected);
-        if (exactRoot == null) {
-            throw new IllegalArgumentException(
-                    "Closure result has no document " + selected);
-        }
+        ExactValue exactRoot = objects.put(
+                ExactValue.fromVerifiedClosureResult(verified, selected),
+                "verified-closure-component-member");
         return verifiedRootLayout(
                 exactRoot,
                 EmbeddedLayoutPlan.managedRoot(routingSurface));
-    }
-
-    private Map<DocumentId, ExactValue> retainClosureMembers(
-            ClosureProcessResult result) {
-        Map<DocumentId, ExactValue> retained = new LinkedHashMap<>();
-        for (ResultingDocument document : result.resultingDocuments()) {
-            DocumentId member = DocumentId.of(document.documentId().value());
-            ExactValue exact = ExactValue.fromVerifiedClosureResult(
-                    result, member);
-            retained.put(
-                    member,
-                    objects.put(exact, "verified-closure-component-member"));
-        }
-        return retained;
     }
 
     private EmbeddedOnlyLayout verifiedRootLayout(

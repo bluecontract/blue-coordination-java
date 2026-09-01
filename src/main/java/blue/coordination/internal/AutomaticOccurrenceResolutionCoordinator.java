@@ -47,6 +47,20 @@ final class AutomaticOccurrenceResolutionCoordinator<I> {
             long maximumExpansions,
             ReplayLookup<I, R> replays,
             RetryFence<I> retryFence) {
+        return run(
+                initial,
+                maximumExpansions,
+                replays,
+                retryFence,
+                null);
+    }
+
+    <R> RunResult<I, R> run(
+            I initial,
+            long maximumExpansions,
+            ReplayLookup<I, R> replays,
+            RetryFence<I> retryFence,
+            ContractsManagedEpochSelectionPlan selectionPlan) {
         I current = Objects.requireNonNull(initial, "initial");
         ReplayLookup<I, R> replayLookup = Objects.requireNonNull(
                 replays, "replays");
@@ -59,6 +73,7 @@ final class AutomaticOccurrenceResolutionCoordinator<I> {
                     "maximumExpansions must be positive");
         }
         Set<ProgressIdentity> attemptedProgress = new LinkedHashSet<>();
+        Set<String> resolvedSelectorPaths = new LinkedHashSet<>();
         long expansionCount = 0L;
         while (true) {
             Optional<R> replay = Objects.requireNonNull(
@@ -70,6 +85,10 @@ final class AutomaticOccurrenceResolutionCoordinator<I> {
             metrics.increment(ATTEMPTS);
             ClosureAttemptResult attempt = attempts.run(current);
             if (attempt.isComplete()) {
+                if (selectionPlan != null) {
+                    selectionPlan.requireEveryPathResolved(
+                            resolvedSelectorPaths);
+                }
                 return RunResult.executed(
                         current, attempt, expansionCount);
             }
@@ -78,8 +97,12 @@ final class AutomaticOccurrenceResolutionCoordinator<I> {
                     attempt.resourceDemands());
             if (expansionCount >= maximumExpansions) {
                 metrics.increment(LIMIT_STOPS);
-                return RunResult.executed(
-                        current, attempt, expansionCount);
+                return RunResult.stopped(
+                        current,
+                        attempt,
+                        expansionCount,
+                        StopReason.EXPANSION_LIMIT,
+                        List.of());
             }
 
             InMemoryDocumentStore.OccurrenceResolutionSnapshot storeState =
@@ -88,21 +111,32 @@ final class AutomaticOccurrenceResolutionCoordinator<I> {
                     ManagedOccurrenceResolver.ResolutionRequest.from(
                             inputs.input(current),
                             attempt.resourceDemands(),
-                            storeState));
+                            storeState,
+                            selectionPlan));
+            resolvedSelectorPaths.addAll(
+                    resolution.resolvedSelectorPaths());
             if (!resolution.complete()) {
-                return RunResult.executed(
-                        current, attempt, expansionCount);
+                return RunResult.stopped(
+                        current,
+                        attempt,
+                        expansionCount,
+                        StopReason.UNRESOLVED_DEMANDS,
+                        resolution.unresolvedDemands());
             }
             I expanded =
                     expansions.expand(current, resolution, storeState);
             ProgressIdentity progress = new ProgressIdentity(
-                    inputs.input(current).invocationIdentity(),
+                    inputs.invocationIdentity(current),
                     demandVector,
-                    inputs.input(expanded).invocationIdentity());
+                    inputs.invocationIdentity(expanded));
             if (!attemptedProgress.add(progress)) {
                 metrics.increment(REPEATED_DEMAND_STOPS);
-                return RunResult.executed(
-                        current, attempt, expansionCount);
+                return RunResult.stopped(
+                        current,
+                        attempt,
+                        expansionCount,
+                        StopReason.REPEATED_PROGRESS,
+                        List.of());
             }
             selectedFence.verify(current, expanded, storeState);
             current = expanded;
@@ -144,6 +178,10 @@ final class AutomaticOccurrenceResolutionCoordinator<I> {
     interface InputView<I> {
         blue.language.processor.closure.ClosureInvocationInput input(
                 I invocation);
+
+        default String invocationIdentity(I invocation) {
+            return input(invocation).invocationIdentity();
+        }
     }
 
     @FunctionalInterface
@@ -173,11 +211,24 @@ final class AutomaticOccurrenceResolutionCoordinator<I> {
                 InMemoryDocumentStore.OccurrenceResolutionSnapshot storeState);
     }
 
+    /** Closed reason why automatic resolution returned a suspended attempt. */
+    enum StopReason {
+        /** One or more demands could not be matched to exact managed evidence. */
+        UNRESOLVED_DEMANDS,
+        /** The admitted portable expansion bound was reached. */
+        EXPANSION_LIMIT,
+        /** The same complete resolution progress identity repeated. */
+        REPEATED_PROGRESS
+    }
+
     record RunResult<I, R>(
             I invocation,
             ClosureAttemptResult attempt,
             R replay,
-            long expansionCount) {
+            long expansionCount,
+            Optional<StopReason> automaticResolutionStopReason,
+            List<ManagedOccurrenceResolver.UnresolvedDemand>
+                    unresolvedDemands) {
         RunResult {
             invocation = Objects.requireNonNull(invocation, "invocation");
             if ((attempt == null) == (replay == null)) {
@@ -186,6 +237,36 @@ final class AutomaticOccurrenceResolutionCoordinator<I> {
             }
             MultiDocumentPublicationTransaction.requireSafeInteger(
                     expansionCount, "expansionCount");
+            automaticResolutionStopReason = Objects.requireNonNull(
+                    automaticResolutionStopReason,
+                    "automaticResolutionStopReason");
+            unresolvedDemands = List.copyOf(Objects.requireNonNull(
+                    unresolvedDemands, "unresolvedDemands"));
+            if ((attempt == null || attempt.isComplete())
+                    && !unresolvedDemands.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "Only a suspended execution may expose unresolved "
+                                + "managed occurrence evidence");
+            }
+            if (attempt == null || attempt.isComplete()) {
+                if (automaticResolutionStopReason.isPresent()) {
+                    throw new IllegalArgumentException(
+                            "Only a suspended execution may expose an "
+                                    + "automatic resolution stop reason");
+                }
+            } else if (automaticResolutionStopReason.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "A suspended execution requires an automatic "
+                                + "resolution stop reason");
+            }
+            boolean unresolvedStop = automaticResolutionStopReason
+                    .filter(reason -> reason == StopReason.UNRESOLVED_DEMANDS)
+                    .isPresent();
+            if (unresolvedStop != !unresolvedDemands.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "UNRESOLVED_DEMANDS must identify at least one exact "
+                                + "managed occurrence issue");
+            }
         }
 
         static <I, R> RunResult<I, R> executed(
@@ -196,7 +277,26 @@ final class AutomaticOccurrenceResolutionCoordinator<I> {
                     invocation,
                     Objects.requireNonNull(attempt, "attempt"),
                     null,
-                    expansionCount);
+                    expansionCount,
+                    Optional.empty(),
+                    List.of());
+        }
+
+        static <I, R> RunResult<I, R> stopped(
+                I invocation,
+                ClosureAttemptResult attempt,
+                long expansionCount,
+                StopReason stopReason,
+                List<ManagedOccurrenceResolver.UnresolvedDemand>
+                        unresolvedDemands) {
+            return new RunResult<>(
+                    invocation,
+                    Objects.requireNonNull(attempt, "attempt"),
+                    null,
+                    expansionCount,
+                    Optional.of(Objects.requireNonNull(
+                            stopReason, "stopReason")),
+                    unresolvedDemands);
         }
 
         static <I, R> RunResult<I, R> replayed(
@@ -207,7 +307,9 @@ final class AutomaticOccurrenceResolutionCoordinator<I> {
                     invocation,
                     null,
                     Objects.requireNonNull(replay, "replay"),
-                    expansionCount);
+                    expansionCount,
+                    Optional.empty(),
+                    List.of());
         }
 
         boolean replayed() {

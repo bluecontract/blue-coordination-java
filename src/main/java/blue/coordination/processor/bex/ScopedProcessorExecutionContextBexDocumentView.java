@@ -3,6 +3,7 @@ package blue.coordination.processor.bex;
 import blue.bex.api.BexDocumentView;
 import blue.bex.value.BexValue;
 import blue.bex.value.BexValues;
+import blue.language.identity.BlueIds;
 import blue.language.model.Node;
 import blue.language.processor.ProcessorExecutionContext;
 import blue.language.snapshot.FrozenNode;
@@ -282,12 +283,47 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
         BexValue semantic =
                 BexValues.frozen(
                         resolved);
+        if (canonical != null
+                && canonical.isReferenceOnly()
+                && BlueIds.hasCyclicMemberSeparator(
+                        canonical.getReferenceBlueId())) {
+            return new VerifiedSemanticExactBexValue(
+                    canonical.getReferenceBlueId(),
+                    semantic);
+        }
         return BexValues.admittedExact(
                 resolved,
                 identity.blueId(),
                 semantic);
     }
-
+    private static final class VerifiedSemanticExactBexValue
+            implements BexValue {
+        private final String blueId;
+        private final BexValue semantic;
+        private VerifiedSemanticExactBexValue(String blueId,
+                BexValue semantic) {
+            this.blueId = Objects.requireNonNull(blueId, "blueId");
+            this.semantic = Objects.requireNonNull(semantic, "semantic");
+        }
+        @Override public boolean isExact() { return true; }
+        @Override public String exactBlueId() { return blueId; }
+        @Override public boolean isUndefined() { return semantic.isUndefined(); }
+        @Override public boolean isNull() { return semantic.isNull(); }
+        @Override public boolean isScalar() { return semantic.isScalar(); }
+        @Override public boolean isObject() { return semantic.isObject(); }
+        @Override public boolean isList() { return semantic.isList(); }
+        @Override public BexValue get(String key) { return semantic.get(key); }
+        @Override public BexValue at(List<String> segments) { return semantic.at(segments); }
+        @Override public BexValue at(String pointer) { return semantic.at(pointer); }
+        @Override public String asText() { return semantic.asText(); }
+        @Override public BigInteger asInteger() { return semantic.asInteger(); }
+        @Override public BigDecimal asNumber() { return semantic.asNumber(); }
+        @Override public boolean asBoolean() { return semantic.asBoolean(); }
+        @Override public List<String> keys() { return semantic.keys(); }
+        @Override public int size() { return semantic.size(); }
+        @Override public Node toNode() { return semantic.toNode(); }
+        @Override public Object toSimple() { return semantic.toSimple(); }
+    }
     /**
      * Keeps BEX pointer traversal on the invocation-owned processor view.
      * A fragmented descendant is therefore demanded through the strict
@@ -296,125 +332,58 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
     private final class ProcessorDocumentCursor implements BexValue {
         private final String absolutePointer;
         private final BexValue delegate;
-
-        private ProcessorDocumentCursor(
-                String absolutePointer,
+        private ProcessorDocumentCursor(String absolutePointer,
                 BexValue delegate) {
             this.absolutePointer = Objects.requireNonNull(
                     absolutePointer, "absolutePointer");
             this.delegate = Objects.requireNonNull(delegate, "delegate");
         }
-
-        @Override
-        public boolean isExact() {
-            return delegate.isExact();
-        }
-
-        @Override
-        public String exactBlueId() {
-            return delegate.exactBlueId();
-        }
-
-        @Override
-        public boolean isUndefined() {
-            return delegate.isUndefined();
-        }
-
-        @Override
-        public boolean isNull() {
-            return delegate.isNull();
-        }
-
-        @Override
-        public boolean isScalar() {
-            return delegate.isScalar();
-        }
-
-        @Override
-        public boolean isObject() {
-            return delegate.isObject();
-        }
-
-        @Override
-        public boolean isList() {
-            return delegate.isList();
-        }
+        @Override public boolean isExact() { return delegate.isExact(); }
+        @Override public String exactBlueId() { return delegate.exactBlueId(); }
+        @Override public boolean isUndefined() { return delegate.isUndefined(); }
+        @Override public boolean isNull() { return delegate.isNull(); }
+        @Override public boolean isScalar() { return delegate.isScalar(); }
+        @Override public boolean isObject() { return delegate.isObject(); }
+        @Override public boolean isList() { return delegate.isList(); }
 
         @Override
         public BexValue get(String key) {
-            String childPointer = JsonPointer.append(
-                    absolutePointer, key);
-            BexValue local = delegate.get(key);
+            String childPointer = JsonPointer.append(absolutePointer, key);
+            BexValue local;
+            try {
+                local = delegate.get(key);
+            } catch (RuntimeException failure) {
+                if (!isUnavailableExactSemantic(failure)) throw failure;
+                local = null;
+            }
             if (local != null
                     && !local.isUndefined()
-                    && hasSemanticContent(local)) {
+                    && hasSemanticContent(local))
                 return cursorFor(childPointer, local);
-            }
             return cursorAt(childPointer);
         }
-
-        private boolean hasSemanticContent(
-                BexValue value) {
+        private boolean hasSemanticContent(BexValue value) {
             return ScopedProcessorExecutionContextBexDocumentView.this
                     .hasSemanticContent(value);
         }
-
-        @Override
-        public BexValue at(List<String> pointerSegments) {
+        @Override public BexValue at(List<String> pointerSegments) {
             BexValue current = this;
             for (String segment : pointerSegments) {
                 current = current.get(segment);
-                if (current.isUndefined()) {
-                    return current;
-                }
+                if (current.isUndefined()) return current;
             }
             return current;
         }
-
-        @Override
-        public BexValue at(String pointer) {
-            return at(JsonPointer.split(pointer));
-        }
-
-        @Override
-        public String asText() {
-            return delegate.asText();
-        }
-
-        @Override
-        public BigInteger asInteger() {
-            return delegate.asInteger();
-        }
-
-        @Override
-        public BigDecimal asNumber() {
-            return delegate.asNumber();
-        }
-
-        @Override
-        public boolean asBoolean() {
-            return delegate.asBoolean();
-        }
-
-        @Override
-        public List<String> keys() {
-            return delegate.keys();
-        }
-
-        @Override
-        public int size() {
-            return delegate.size();
-        }
-
-        @Override
-        public Node toNode() {
-            return delegate.toNode();
-        }
-
-        @Override
-        public Object toSimple() {
-            return delegate.toSimple();
-        }
+        @Override public BexValue at(String pointer) {
+            return at(JsonPointer.split(pointer)); }
+        @Override public String asText() { return delegate.asText(); }
+        @Override public BigInteger asInteger() { return delegate.asInteger(); }
+        @Override public BigDecimal asNumber() { return delegate.asNumber(); }
+        @Override public boolean asBoolean() { return delegate.asBoolean(); }
+        @Override public List<String> keys() { return delegate.keys(); }
+        @Override public int size() { return delegate.size(); }
+        @Override public Node toNode() { return delegate.toNode(); }
+        @Override public Object toSimple() { return delegate.toSimple(); }
     }
 
     interface FrozenAccess {

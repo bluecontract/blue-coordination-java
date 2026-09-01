@@ -1,5 +1,6 @@
 package blue.coordination.processor;
 
+import blue.coordination.internal.RepositoryNodeProviderTestBridge;
 import blue.language.api.BlueCachePolicy;
 import blue.language.codec.BlueFormat;
 import blue.language.mapping.BlueMapper;
@@ -41,6 +42,7 @@ public final class CoordinationTestRuntime implements AutoCloseable {
 
     private final BlueRepository repository;
     private final BlueCachePolicy cachePolicy;
+    private final NodeProvider currentRepositoryNodes;
     private final NodeProvider currentRepositoryExactNodes;
     private final List<NodeProvider> additionalProviders =
             new ArrayList<NodeProvider>();
@@ -68,8 +70,12 @@ public final class CoordinationTestRuntime implements AutoCloseable {
             BlueCachePolicy cachePolicy) {
         this.repository = Objects.requireNonNull(repository, "repository");
         this.cachePolicy = Objects.requireNonNull(cachePolicy, "cachePolicy");
+        RepositoryNodeProviderTestBridge.Providers repositoryProviders =
+                RepositoryNodeProviderTestBridge.create(repository);
+        this.currentRepositoryNodes =
+                repositoryProviders.repositoryProvider();
         this.currentRepositoryExactNodes =
-                new CurrentRepositoryExactNodeProvider(repository);
+                repositoryProviders.exactNodes();
         this.additionalProviders.addAll(Objects.requireNonNull(
                 initialProviders, "initialProviders"));
         rebuild();
@@ -331,7 +337,7 @@ public final class CoordinationTestRuntime implements AutoCloseable {
         providers.addAll(additionalProviders);
         providers.add(BlueRuntimeTypeRegistry.getDefault()
                 .asProcessorSnapshotProvider());
-        providers.add(repository.nodeProvider());
+        providers.add(currentRepositoryNodes);
         providers.add(currentRepositoryExactNodes);
         NodeProvider nextProvider = new SequentialNodeProvider(providers);
 
@@ -497,4 +503,3 @@ public final class CoordinationTestRuntime implements AutoCloseable {
         }
     }
 }
-

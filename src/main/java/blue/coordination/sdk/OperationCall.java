@@ -17,6 +17,8 @@ public final class OperationCall {
     private String requestYaml;
     private RequestBuilder request;
     private final List<OccurrenceExpectation> expectations = new ArrayList<>();
+    private final List<ManagedEpochSelector> managedEpochSelectors =
+            new ArrayList<>();
     private ActivationPolicy activation = ActivationPolicy.fromNow();
     private boolean consumed;
 
@@ -95,6 +97,38 @@ public final class OperationCall {
         return this;
     }
 
+    /**
+     * Selects one exact retained source epoch for an otherwise ambiguous target
+     * occurrence. Ordinary unambiguous managed values need no selector.
+     */
+    public OperationCall selectManagedEpoch(ManagedEpochSelector selector) {
+        requireMutable();
+        ManagedEpochSelector selected = Objects.requireNonNull(
+                selector, "selector");
+        if (managedEpochSelectors.stream().anyMatch(existing ->
+                existing.targetOccurrencePath().equals(
+                        selected.targetOccurrencePath()))) {
+            throw new IllegalArgumentException(
+                    "A managed epoch selector already exists for "
+                            + selected.targetOccurrencePath());
+        }
+        managedEpochSelectors.add(selected);
+        return this;
+    }
+
+    /** Convenience overload for one exact managed epoch selector. */
+    public OperationCall selectManagedEpoch(
+            String targetOccurrencePath,
+            blue.coordination.api.DocumentId sourceDocumentId,
+            long sourceEpoch,
+            String expectedSourceBlueId) {
+        return selectManagedEpoch(new ManagedEpochSelector(
+                sourceDocumentId,
+                sourceEpoch,
+                expectedSourceBlueId,
+                targetOccurrencePath));
+    }
+
     /** Appends the call without processing it. */
     public EntryHandle submit() {
         requireReady();
@@ -122,6 +156,10 @@ public final class OperationCall {
     RequestBuilder request() { return request; }
 
     List<OccurrenceExpectation> expectations() { return List.copyOf(expectations); }
+
+    List<ManagedEpochSelector> managedEpochSelectors() {
+        return List.copyOf(managedEpochSelectors);
+    }
 
     ActivationPolicy activation() { return activation; }
 

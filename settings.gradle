@@ -12,12 +12,14 @@ def dependencyMode = providers.gradleProperty('blueDependencyMode')
         .trim()
 def acceptedDependencyModes = [
         'published-artifact',
-        'immutable-staged-contracts'
+        'immutable-staged-contracts',
+        'immutable-development-contracts'
 ] as Set
 if (!acceptedDependencyModes.contains(dependencyMode)) {
     throw new GradleException(
-            'blueDependencyMode must be published-artifact or '
-                    + 'immutable-staged-contracts')
+            'blueDependencyMode must be published-artifact, '
+                    + 'immutable-staged-contracts, or '
+                    + 'immutable-development-contracts')
 }
 
 def forbiddenDependencyProperties = [
@@ -36,7 +38,10 @@ if (!suppliedForbiddenProperties.empty) {
                     + suppliedForbiddenProperties.sort())
 }
 
-if (dependencyMode == 'immutable-staged-contracts') {
+if (dependencyMode in [
+        'immutable-staged-contracts',
+        'immutable-development-contracts'
+]) {
     String repositoryValue = providers.gradleProperty(
             'blueContractsRepository').orNull
     String manifestIdentity = providers.gradleProperty(
@@ -86,5 +91,59 @@ if (dependencyMode == 'immutable-staged-contracts') {
         throw new GradleException(
                 'artifact-manifest.json.sha256 does not identify the '
                         + 'staged Contracts manifest')
+    }
+    if (dependencyMode == 'immutable-development-contracts') {
+        String expectedSourceCommit = providers.gradleProperty(
+                'blueContractsSourceCommit').orNull
+        if (expectedSourceCommit == null
+                || !(expectedSourceCommit ==~ /[0-9a-f]{40}|[0-9a-f]{64}/)) {
+            throw new GradleException(
+                    'immutable-development-contracts mode requires '
+                            + '-PblueContractsSourceCommit=<exact lowercase Git identity>')
+        }
+        def manifestDocument
+        try {
+            manifestDocument = new groovy.json.JsonSlurper().parse(manifest)
+        } catch (RuntimeException exception) {
+            throw new GradleException(
+                    'Cannot parse immutable development Contracts manifest',
+                    exception)
+        }
+        if (manifestDocument.schema
+                != 'blue-development-maven-repository/1.0'
+                || manifestDocument.stagePurpose != 'DEVELOPMENT'
+                || manifestDocument.releaseReadinessClaimed != false
+                || !(manifestDocument.builtWithJava instanceof Number)
+                || manifestDocument.builtWithJava.toString() != '17') {
+            throw new GradleException(
+                    'blueContractsRepository is not a JDK 17 DEVELOPMENT '
+                            + 'Contracts repository')
+        }
+        if (manifestDocument.sourceCommit != expectedSourceCommit) {
+            throw new GradleException(
+                    'blueContractsSourceCommit does not match the '
+                            + 'development Contracts manifest')
+        }
+        String expectedVersion = providers.gradleProperty(
+                'blueContractsVersion').getOrElse('3.1.0-rc.23')
+        if (manifestDocument.version != expectedVersion) {
+            throw new GradleException(
+                    'blueContractsVersion does not match the development Contracts manifest')
+        }
+        if (expectedVersion != '3.1.0-rc.23') {
+            if (!(manifestDocument.sourceTree instanceof String)
+                    || !(manifestDocument.sourceTree ==~ /[0-9a-f]{40}/)
+                    || !(manifestDocument.sourceDirty instanceof Boolean)) {
+                throw new GradleException(
+                        'DEVELOPMENT Contracts version requires exact source-tree provenance')
+            }
+            String boundVersion = manifestDocument.sourceDirty
+                    ? '3.1.0-dev.tree.' + manifestDocument.sourceTree
+                    : '3.1.0-dev.' + manifestDocument.sourceCommit
+            if (expectedVersion != boundVersion) {
+                throw new GradleException(
+                        'DEVELOPMENT Contracts version does not bind its exact source identity')
+            }
+        }
     }
 }

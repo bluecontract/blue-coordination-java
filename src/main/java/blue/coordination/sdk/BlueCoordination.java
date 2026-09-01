@@ -1,5 +1,7 @@
 package blue.coordination.sdk;
 
+import blue.coordination.api.ContractsExecutionPolicy;
+
 import java.util.Objects;
 
 /** Stable application-facing owner of one in-memory Coordination runtime. */
@@ -17,13 +19,15 @@ public final class BlueCoordination implements AutoCloseable {
             String languageIdentity,
             String contractsIdentity,
             ExactNodeProvider exactNodeProvider,
-            boolean contentDerivedDocumentIds) {
+            boolean contentDerivedDocumentIds,
+            ContractsExecutionPolicy contractsExecutionPolicy) {
         runtime = SdkCoordinationRuntime.create(
                 this,
                 languageIdentity,
                 contractsIdentity,
                 exactNodeProvider,
-                contentDerivedDocumentIds);
+                contentDerivedDocumentIds,
+                contractsExecutionPolicy);
         timelines = new TimelineCatalog(runtime);
         documents = new DocumentCatalog(runtime);
         operations = new OperationGateway(runtime);
@@ -68,6 +72,8 @@ public final class BlueCoordination implements AutoCloseable {
         private String contractsIdentity;
         private ExactNodeProvider exactNodeProvider = ExactNodeProvider.empty();
         private boolean contentDerivedDocumentIds;
+        private ContractsExecutionPolicy contractsExecutionPolicy =
+                ContractsExecutionPolicy.releaseDefault();
 
         /** Selects an explicit exact Contracts release identity pair. */
         public Builder release(
@@ -112,6 +118,20 @@ public final class BlueCoordination implements AutoCloseable {
             return this;
         }
 
+        /**
+         * Selects an explicit exact Contracts closure execution policy.
+         *
+         * <p>Ordinary callers retain the 100,000-gas release default. This
+         * advanced host option is intended for bounded interactive
+         * diagnostics and acceptance labs.</p>
+         */
+        public Builder contractsExecutionPolicy(
+                ContractsExecutionPolicy executionPolicy) {
+            contractsExecutionPolicy = Objects.requireNonNull(
+                    executionPolicy, "executionPolicy");
+            return this;
+        }
+
         /** Builds an in-memory runtime, using the bundled release by default. */
         public BlueCoordination build() {
             if ((languageIdentity == null) != (contractsIdentity == null)) {
@@ -122,7 +142,8 @@ public final class BlueCoordination implements AutoCloseable {
                     languageIdentity,
                     contractsIdentity,
                     exactNodeProvider,
-                    contentDerivedDocumentIds);
+                    contentDerivedDocumentIds,
+                    contractsExecutionPolicy);
         }
 
         private static String requireIdentity(String value, String label) {

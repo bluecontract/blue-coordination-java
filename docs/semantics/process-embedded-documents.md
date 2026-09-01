@@ -22,13 +22,26 @@ even when their current BlueIds are equal. Existing cycles belong in the same
 initial closure; callers provide finite member/path lineage evidence, never
 SCCs or cyclic proofs.
 
-An operation may add a genuinely new `FROM_NOW` lineage with one exact
-`ManagedDocumentDraft`, matching `request.managed(...)` evidence, and every
-effective `expectOccurrence(...)` path. That rc.3 lane is not general imported
-history or dynamic multi-member cyclic admission. Its operation target must be
-independently processable and non-cyclic, and its effective catalog cannot cross
-a cyclic-set member. See the
-[SDK developer guide](../guides/developer-guide.md) for the complete workflow.
+The rc.5 operation lane may add a genuinely new `FROM_NOW` lineage
+with one exact `ManagedDocumentDraft`, matching `request.managed(...)`
+evidence, and every effective `expectOccurrence(...)` path. Its operation
+target must be independently processable and non-cyclic, and its effective
+catalog cannot cross a cyclic-set member.
+
+Rc.5 also accepts an exact value belonging to
+an existing managed lineage. The indexed resolver distinguishes current,
+authored-initial, initialized epoch-zero, and retained-epoch states. A current
+match activates immediately. A historical match opens an occurrence-specific
+plan and applies the immutable source suffix; it never initializes or
+reprocesses the source. See
+[Retained managed-epoch catch-up](retained-managed-epoch-catch-up.md) for the
+exact matching, selector, receipt, barrier, and readiness rules.
+
+Several effective paths may require several BlueIds in one affected closure.
+Each demand remains occurrence-specific, and missing exact content is resolved
+through the verified exact-node provider before retrying the same ordinary
+closure work. The host does not author a second relationship graph or push a
+partial parent document into processing.
 
 The draft's exact initial value must contain `/documentId` equal to the draft's
 stable `DocumentId`. Every expectation in one call is sourced by the current
@@ -75,13 +88,16 @@ fit directly; a containing document is not the durability owner of an embedded
 document.
 
 Activation policy is admission metadata, not another field on the canonical
-`Process Embedded` contract. At the normal rc.3 SDK boundary, top-level
+`Process Embedded` contract. At the rc.5 SDK boundary, top-level
 document/closure admission supports `FROM_NOW`, full-history, and exact-frontier
 policies, while an operation-created occurrence supports only a new `FROM_NOW`
-lineage. Attach-current and passive-snapshot remain vocabulary for broader
-host/temporal profiles and are rejected by current high-level admission. A
-document with no effective contracts and no processable descendants remains
-ordinary content unless explicitly admitted as a managed process.
+lineage. In rc.5, an operation may instead install an exact
+existing managed state; its position in retained lineage history, rather than a
+new activation-policy value, determines the suffix. Attach-current and
+passive-snapshot remain vocabulary for broader host/temporal profiles and are
+rejected by high-level admission. A document with no effective contracts and
+no processable descendants remains ordinary content unless explicitly admitted
+as a managed process.
 
 Removing an active occurrence preserves history and atomically replaces its row
 with one inactive same-lineage successor at exactly generation plus one. That
@@ -89,17 +105,20 @@ successor has fresh Contracts-derived occurrence and binding identities and is
 output-only for the removing invocation. A later invocation may reactivate the
 committed successor with the retained lineage's current exact state without
 another generation or occurrence-identity change. Same-invocation
-remove-then-re-add and different-lineage retarget remain unsupported. Broader
-known-historical-state catch-up and divergent fork selection belong to the
-legacy temporal compatibility model below, not the rc.3 managed-draft lane. The
-inventory's active projection supports SCCs without changing the ordinary
-per-document processing contract.
+remove-then-re-add remains unsupported in the rc.5 draft profile. The retained
+source profile may reattach or retarget a later occurrence generation to exact
+current or historical evidence; each generation owns a distinct plan and
+cursor. Ambiguous history requires the typed occurrence-specific selector and
+never permits host-chosen divergent fork inference. The inventory's active
+projection supports SCCs without changing the ordinary per-document processing
+contract.
 
-## Legacy compatibility profile
+## Earlier low-level compatibility profile
 
 The earlier `DefaultCoordinationEngine.create()` profile represents containment
 with `EmbeddingBinding`, per-occurrence `EmbeddedEpochCursor` values, and a
 private parent/path `EmbeddedEpochInput`. It commits a child and its parents as
 separate document-local transitions and rejects cycles. Those mechanisms remain
 available for compatibility, but they are not the Contracts 1.0 processing or
-publication model described above.
+publication model described above and are not the retained managed-epoch
+plan/barrier model.

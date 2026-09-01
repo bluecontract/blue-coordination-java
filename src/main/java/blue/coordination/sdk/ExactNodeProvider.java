@@ -2,6 +2,7 @@ package blue.coordination.sdk;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
 
 /**
  * Read-only application source of serialized whole exact Blue values and type
@@ -23,6 +24,17 @@ public interface ExactNodeProvider {
     /** Returns one whole direct exact Blue JSON or YAML value, when available. */
     Optional<String> findExactContent(String blueId);
 
+    /**
+     * Returns complete provider evidence for one exact value.
+     *
+     * <p>The default preserves the original serialized-content provider
+     * contract. Proof-aware providers should be created with
+     * {@link #withEvidence(Function)}.</p>
+     */
+    default Optional<ExactNodeEvidence> findExactEvidence(String blueId) {
+        return findExactContent(blueId).map(ExactNodeEvidence::ordinary);
+    }
+
     /** Returns a provider which contains no application exact nodes. */
     static ExactNodeProvider empty() {
         return ignored -> Optional.empty();
@@ -42,7 +54,34 @@ public interface ExactNodeProvider {
     static ExactNodeProvider of(ExactBlueValue exactValue) {
         ExactBlueValue retained = Objects.requireNonNull(
                 exactValue, "exactValue");
-        return of(retained.blueId(), retained.json());
+        ExactNodeEvidence evidence = retained.providerEvidence();
+        return withEvidence(requested -> retained.blueId().equals(
+                requireText(requested, "blueId"))
+                ? Optional.of(evidence) : Optional.empty());
+    }
+
+    /**
+     * Creates a proof-aware provider while retaining the legacy functional
+     * string-provider surface for ordinary callers.
+     */
+    static ExactNodeProvider withEvidence(
+            Function<String, Optional<ExactNodeEvidence>> lookup) {
+        Function<String, Optional<ExactNodeEvidence>> selected =
+                Objects.requireNonNull(lookup, "lookup");
+        return new ExactNodeProvider() {
+            @Override
+            public Optional<String> findExactContent(String blueId) {
+                return findExactEvidence(blueId)
+                        .map(ExactNodeEvidence::exactContent);
+            }
+
+            @Override
+            public Optional<ExactNodeEvidence> findExactEvidence(
+                    String blueId) {
+                return Objects.requireNonNull(selected.apply(requireText(
+                        blueId, "blueId")), "provider evidence result");
+            }
+        };
     }
 
     private static String requireText(String value, String label) {

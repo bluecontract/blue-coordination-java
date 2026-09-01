@@ -1,7 +1,10 @@
 package blue.coordination.internal;
 
 import blue.coordination.api.ExactValue;
+import blue.language.api.NodeProviderOutcome;
 import blue.language.model.Node;
+import blue.language.preprocess.provider.BasicNodeProvider;
+import blue.language.provider.CyclicSetProof;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -72,6 +75,43 @@ final class WholeObjectStoreTest {
         assertEquals(0, store.size());
         assertFalse(store.contains(retained.blueId()));
         assertTrue(store.fetchByBlueId(retained.blueId()).isEmpty());
+    }
+
+    @Test
+    void cyclicProviderBodyAndProofShareTheSameSavepoint() {
+        // given
+        WholeObjectStore store = new WholeObjectStore(new EngineMetrics());
+        BasicNodeProvider source = cyclicProvider();
+        String blueId = source.getBlueIdByName("store-cycle-a");
+        Node providerBody = source.fetchByBlueId(blueId).get(0);
+        CyclicSetProof proof = source.cyclicSetProofFor(blueId)
+                .proof().orElseThrow();
+        ExactValue verified = ExactValue.fromVerifiedProviderEvidence(
+                blueId, providerBody, proof);
+        store.put(verified, "normalized-only");
+
+        // when
+        boolean normalizedBodyWasHidden = store.fetchByBlueId(blueId)
+                .isEmpty();
+        WholeObjectStore.Mark beforeEvidence = store.mark();
+        store.putVerifiedProviderEvidence(
+                verified, providerBody, proof, "cyclic-evidence");
+        boolean evidenceWasReadable = store.hasVerifiedContentForBlueId(
+                blueId);
+        Node detachedRead = store.fetchByBlueId(blueId).get(0);
+        detachedRead.name("mutated-copy");
+        String retainedName = store.fetchByBlueId(blueId).get(0).getName();
+        store.rollbackTo(beforeEvidence);
+
+        // then
+        assertTrue(normalizedBodyWasHidden,
+                "a cyclic ExactValue is not a wire-preserving provider body");
+        assertTrue(evidenceWasReadable);
+        assertEquals("store-cycle-a", retainedName);
+        assertTrue(store.fetchByBlueId(blueId).isEmpty());
+        assertFalse(store.hasVerifiedContentForBlueId(blueId));
+        assertEquals(NodeProviderOutcome.NOT_FOUND,
+                store.cyclicSetProofFor(blueId).outcome());
     }
 
     @Test
@@ -178,5 +218,13 @@ final class WholeObjectStoreTest {
                 .getProperties().get("child").getBlueId());
         assertEquals(1L, metrics.counter(
                 "wholeObjectStore.canonicalRepresentationsPreferred"));
+    }
+
+    private static BasicNodeProvider cyclicProvider() {
+        return new BasicNodeProvider(new Node().items(List.of(
+                new Node().name("store-cycle-a").properties(
+                        "peer", new Node().blueId("this#1")),
+                new Node().name("store-cycle-b").properties(
+                        "peer", new Node().blueId("this#0")))));
     }
 }

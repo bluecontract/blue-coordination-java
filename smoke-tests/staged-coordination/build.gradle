@@ -8,16 +8,29 @@ plugins {
     id 'java'
 }
 
-def coordinationVersion = providers.gradleProperty(
-        'coordinationVersion').get()
+def stagedVersions = gradle.extensions.extraProperties.get('stagedConsumerVersions')
+def coordinationVersion = stagedVersions.coordination
+def contractsVersion = stagedVersions.contracts
 def coordinationRepository = file(providers.gradleProperty(
         'coordinationRepository').get()).canonicalFile
 def contractsRepository = file(providers.gradleProperty(
         'contractsRepository').get()).canonicalFile
 def smokeReport = file(providers.gradleProperty('smokeReport').get())
+def testJavaVersion = providers.gradleProperty('testJavaVersion')
+        .map { Integer.parseInt(it) }.get()
+if (![17, 21].contains(testJavaVersion)) {
+    throw new GradleException(
+            'testJavaVersion must select the Java 17 or Java 21 lane')
+}
+layout.buildDirectory.set(file(providers.gradleProperty(
+        'consumerBuildDirectory').get()))
 
 java {
     toolchain { languageVersion = JavaLanguageVersion.of(17) }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
 }
 
 configurations.configureEach {
@@ -31,8 +44,15 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
+def testJavaLauncher = javaToolchains.launcherFor {
+    languageVersion = JavaLanguageVersion.of(testJavaVersion)
+}
+
 tasks.withType(Test).configureEach {
     useJUnitPlatform()
+    javaLauncher = testJavaLauncher
+    systemProperty 'blue.coordination.stagedConsumer.expectedJavaFeature',
+            String.valueOf(testJavaVersion)
 }
 
 def sha256Identity = { File input ->
@@ -51,8 +71,20 @@ def manifest = { File repository ->
             new File(repository, 'artifact-manifest.json'))
 }
 
+def prepareStagedConsumerReceipt = tasks.register(
+        'prepareStagedConsumerReceipt') {
+    group = 'verification'
+    outputs.upToDateWhen { false }
+    doLast {
+        delete smokeReport
+        project.extensions.extraProperties.set(
+                'stagedCoordinateEvidence', null)
+    }
+}
+
 def verifyStagedCoordinates = tasks.register('verifyStagedCoordinates') {
     group = 'verification'
+    dependsOn prepareStagedConsumerReceipt
     doLast {
         def coordinationManifest = manifest(coordinationRepository)
         def contractsManifest = manifest(contractsRepository)
@@ -106,37 +138,60 @@ def verifyStagedCoordinates = tasks.register('verifyStagedCoordinates') {
             [(coordinate): sha256Identity(artifact.file)]
         }
         Map<String, String> expected = [:]
-        actual.keySet().sort().each { coordinate ->
-            expected[coordinate] = coordinate.startsWith(
-                    'blue.coordination:')
-                    ? expectedCoordination[coordinate]
-                    : expectedContracts[coordinate]
-        }
+        expected.putAll(expectedCoordination)
+        expected.putAll(expectedContracts.findAll { coordinate, ignored ->
+            !coordinate.startsWith('blue.language:blue-conformance:')
+        })
         if (actual != expected || expected.values().any { it == null }) {
             throw new GradleException(
                     'resolved Blue bytes differ from immutable manifests')
         }
-        smokeReport.parentFile.mkdirs()
-        smokeReport.setText(JsonOutput.prettyPrint(JsonOutput.toJson([
-                schema: 'blue-coordination-staged-consumer/1.0',
-                status: 'PASS',
+        project.extensions.extraProperties.set(
+                'stagedCoordinateEvidence', [
                 coordinationManifestIdentity:
                         providers.gradleProperty(
                                 'coordinationManifestSha256').get(),
                 contractsManifestIdentity:
                         providers.gradleProperty(
                                 'contractsManifestSha256').get(),
+                coordinationVersion: coordinationVersion,
+                contractsVersion: contractsVersion,
+                sourceProvenance: gradle.extensions.extraProperties.get(
+                        'stagedConsumerSourceProvenance'),
                 selectedBlueCoordinates: blueComponents,
                 verifiedBlueArtifacts: actual.collect { coordinate, identity ->
                     [coordinate: coordinate, sha256: identity]
                 }.sort { left, right ->
                     left.coordinate <=> right.coordinate
                 }
-        ])) + '\n', 'UTF-8')
+        ])
     }
+}
+
+tasks.named('test') {
+    dependsOn prepareStagedConsumerReceipt, verifyStagedCoordinates
 }
 
 tasks.register('stagedConsumerCheck') {
     group = 'verification'
     dependsOn verifyStagedCoordinates, tasks.named('test')
+    doLast {
+        def extra = project.extensions.extraProperties
+        if (!extra.has('stagedCoordinateEvidence')
+                || extra.get('stagedCoordinateEvidence') == null) {
+            throw new GradleException(
+                    'staged coordinate evidence was not produced')
+        }
+        Map receipt = [
+                schema: 'blue-coordination-staged-consumer/2.0',
+                status: 'PASS',
+                requestedJavaVersion: testJavaVersion,
+                compileRelease: 17,
+                runtimeVersionAssertion: 'PASS'
+        ]
+        receipt.putAll(extra.get('stagedCoordinateEvidence') as Map)
+        smokeReport.parentFile.mkdirs()
+        smokeReport.setText(JsonOutput.prettyPrint(
+                JsonOutput.toJson(receipt)) + '\n', 'UTF-8')
+    }
 }

@@ -14,15 +14,22 @@ repositories {
 }
 
 dependencies {
-    implementation 'blue.coordination:blue-coordination-java:3.0.0-rc.4'
+    implementation 'blue.coordination:blue-coordination-java:3.0.0-rc.5'
 }
 ```
 
-`3.0.0-rc.4` is the bounded external-pilot candidate. It consumes Language
-`3.1.0-rc.22`, BEX `1.1.0-rc.4`, and Repository `3.0.0-rc.21` from Maven
+`3.0.0-rc.5` is the bounded external-pilot candidate. It consumes Language
+`3.1.0-rc.23`, BEX `1.1.0-rc.4`, and Repository `3.0.0-rc.21` from Maven
 Central and is compiled with `--release 17`. It is not a stable or production
 release. Version 3 is a breaking API reset; the removed 2.x planning,
 fragmentation, session-store, and fast-path APIs are not shimmed.
+
+Rc.5 adds retained managed-epoch catch-up, proof-aware exact-node resolution,
+reference-transparent SDK execution, authoritative fair-lane audit, a
+non-mutating host journal availability hint, and targeted one-selection
+processing for host-preleased durable execution. Unsupported nested authored
+lineage creation during retained catch-up returns a typed unpublished attempt
+and atomically blocks only its exact plan/barrier without partial publication.
 
 For application development, follow the
 [complete SDK developer guide](docs/guides/developer-guide.md). It covers both
@@ -126,9 +133,14 @@ effective occurrence with `expectOccurrence(...)`, and selects `fromNow`
 activation. One draft can bind several occurrences without duplicating the
 lineage. The runtime verifies the request fields, occurrence paths, exact
 values, and complete affected closure before one atomic publication; a
-terminal failure leaves no partial document or topology mutation. Imported
-state (`ManagedDocumentDraft.atEpoch(...)`) and historical occurrence
-activation remain unsupported and fail closed.
+terminal failure leaves no partial document or topology mutation. In rc.5,
+imported draft state (`ManagedDocumentDraft.atEpoch(...)`) remains unsupported
+and fails closed. A distinct retained path provides automatic exact matching
+for existing current, authored-initial,
+epoch-zero, and retained states. Historical matches apply immutable source
+receipts through occurrence-specific plans and barriers; repeated historical
+BlueIds require `OperationCall.selectManagedEpoch(...)`. See
+[Retained managed-epoch catch-up](docs/semantics/retained-managed-epoch-catch-up.md).
 
 Operational tooling can inspect a retained occurrence without exposing graph
 internals through
@@ -149,7 +161,7 @@ state to operational tooling.
 
 ## Build and verification
 
-The normal and release builds use Maven Central artifacts only:
+The rc.5 release is verified through the Maven-Central-only artifact lane:
 
 ```bash
 ./gradlew --no-daemon dependencyPreflight
@@ -169,13 +181,36 @@ lowercase `// given`, `// when`, `// then` sequence, enforced by
 `dependencyPreflight` resolves the exact conflict-free Blue graph from Maven
 Central. Repository rc.21 still advertises Language rc.20 transitively, so the
 build and published POM exclude that one edge and directly own Language
-rc.22. Local composites, Maven Local, and file-based staging repositories are
-retired from the live build.
+rc.23. Local composites and Maven Local are rejected.
 
-The release workflow runs the same gates, stages signed artifacts, publishes
-through JReleaser, and pushes the rc.4 tag only after publication succeeds. See
-the [release procedure](docs/development/releasing.md) and
-[rc.4 release decision](docs/releases/3.0.0-rc.4.md).
+The public rc.5 release lane uses the published-artifact mode by default. An
+invocation-owned immutable Contracts stage remains available only for
+development-candidate handoffs; when using it, pin its absolute repository and
+manifest identity explicitly:
+
+```bash
+./gradlew --no-daemon --no-build-cache clean releaseCheck \
+  -PtestJavaVersion=17 \
+  -PblueDependencyMode=immutable-staged-contracts \
+  -PblueContractsVersion=3.1.0-rc.23 \
+  -PblueContractsRepository=/absolute/path/to/invocation-owned/contracts-repository \
+  -PblueContractsManifestSha256=sha256:<64-lowercase-hex>
+```
+
+The stage must be outside this source tree and immutable. Exclusive repository
+routing prevents fallback for `blue.language`; Maven Local and composite
+substitution remain forbidden. This is the required invocation shape, not a
+substitute for the published-artifact release lane.
+
+Once those gates genuinely pass on a clean committed checkout, use the
+[immutable Coordination handoff](docs/development/immutable-staged-coordination.md)
+to export and consumer-test an invocation-owned development Maven stage. A staged
+handoff is not a public release.
+
+The rc.5 release workflow runs the same gates, stages signed artifacts,
+publishes through JReleaser, and pushes its tag only after publication
+succeeds. See the [release procedure](docs/development/releasing.md) and
+[rc.5 release decision](docs/releases/3.0.0-rc.5.md).
 
 `releaseCheck` does not read or execute `../blue-basic`. That sibling is
 retained only as a historical performance/metrics laboratory.
@@ -188,7 +223,7 @@ limitations.
 ## Historical release-candidate evidence
 
 The current release authority is the
-[3.0.0-rc.4 decision](docs/releases/3.0.0-rc.4.md). The documents below are
+[3.0.0-rc.5 decision](docs/releases/3.0.0-rc.5.md). The documents below are
 retained evidence for rc.1 and are not reused as current artifact hashes.
 
 The retained 3.0.0-rc.1 report covers the earlier Round 10.1 Process Embedded
@@ -216,9 +251,12 @@ Developer references:
 - [Build and test](docs/development/build-and-test.md)
 - [Test strategy](docs/development/test-strategy.md)
 - [Initialization causality](docs/semantics/initialization-causality.md)
+- [Retained managed-epoch catch-up](docs/semantics/retained-managed-epoch-catch-up.md)
+- [MyOS retained managed-epoch integration guide](MYOS_RETAINED_MANAGED_EPOCH_INTEGRATION_GUIDE.md)
 - [Shared NBA Game lifecycle](docs/examples/nba-shared-game-lifecycle.md)
 - [Five-occurrence Playground API example](docs/examples/playground-five-occurrence.md)
-- [3.0.0-rc.4 release decision](docs/releases/3.0.0-rc.4.md)
+- [3.0.0-rc.5 release decision](docs/releases/3.0.0-rc.5.md)
+- [3.0.0-rc.4 historical release decision](docs/releases/3.0.0-rc.4.md)
 - [Canonical RC evidence report](docs/releases/3.0.0-rc.1-test-report.md)
 - [Public API](docs/reference/public-api.md)
 - [SDK migration and ownership ledger](docs/reference/sdk-migration-and-ownership.md)

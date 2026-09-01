@@ -5,8 +5,8 @@ import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationProcessors;
 import blue.language.api.BlueCachePolicy;
 import blue.language.api.BlueCacheStats;
+import blue.language.api.NodeProviderOutcome;
 import blue.language.codec.BlueFormat;
-import blue.language.codec.jackson.UncheckedObjectMapper;
 import blue.language.conformance.ConformanceEngine;
 import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.merge.ResolvedSnapshot;
@@ -33,19 +33,18 @@ import blue.language.provider.SequentialNodeProvider;
 import blue.language.runtime.BlueLanguage;
 import blue.language.snapshot.FrozenNode;
 import blue.repo.BlueRepository;
-import blue.repo.RepositoryDefinition;
-
-import java.io.IOException;
-import java.io.InputStream;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
 
 /**
  * One immutable production composition of Language, Contracts, BEX, and the
@@ -102,13 +101,17 @@ final class BlueRuntime implements AutoCloseable {
                 metrics));
         providers.add(metered(BlueRuntimeTypeRegistry.getDefault()
                 .asProcessorSnapshotProvider(), metrics));
-        providers.add(metered(repository.nodeProvider(), metrics));
+        RepositoryNodeProviders repositoryProviders =
+                repositoryNodeProviders(repository);
         providers.add(metered(
-                new RepositoryExactNodeProvider(repository), metrics));
+                repositoryProviders.repositoryProvider(), metrics));
+        providers.add(metered(
+                repositoryProviders.exactNodes(), metrics));
         if (exactNodeProvider != null) {
             providers.add(metered(exactNodeProvider, metrics));
         }
-        NodeProvider nodeProvider = new SequentialNodeProvider(providers);
+        NodeProvider nodeProvider =
+                new CyclicAwareSequentialNodeProvider(providers);
 
         Map<String, String> imports = new LinkedHashMap<>();
         imports.putAll(RuntimeTypeAliases.AGGREGATE_NAME_TO_BLUE_ID);
@@ -362,6 +365,21 @@ final class BlueRuntime implements AutoCloseable {
                 : new MeteredNodeProvider(delegate, metrics);
     }
 
+    static RepositoryNodeProviders repositoryNodeProviders(BlueRepository repository) {
+        return repositoryNodeProviders(Objects.requireNonNull(
+                repository, "repository").nodeProvider());
+    }
+    static RepositoryNodeProviders repositoryNodeProviders(NodeProvider provider) {
+        Objects.requireNonNull(provider, "repositoryProvider");
+        RepositoryExactNodeCache cache = new RepositoryExactNodeCache();
+        return new RepositoryNodeProviders(observe(provider, cache), cache);
+    }
+    private static NodeProvider observe(NodeProvider delegate, RepositoryExactNodeCache cache) {
+        return delegate instanceof CyclicAwareNodeProvider cyclic
+                ? new ObservingCyclicRepositoryNodeProvider(delegate, cyclic, cache)
+                : new ObservingRepositoryNodeProvider(delegate, cache);
+    }
+
     /** Transparent leaf meter preserving the provider graph seen by Language. */
     private static class MeteredNodeProvider implements NodeProvider {
         private final NodeProvider delegate;
@@ -412,126 +430,145 @@ final class BlueRuntime implements AutoCloseable {
         }
     }
 
-    /** Lazy exact index for inherited inline Repository contributions. */
-    private static final class RepositoryExactNodeProvider
-            implements NodeProvider {
-        private final BlueRepository repository;
-        private final ClassLoader classLoader;
-        private volatile Map<String, Node> exactNodes;
+    /** Ordered provider chain that preserves complete cyclic-proof lookup. */
+    private static final class CyclicAwareSequentialNodeProvider
+            extends SequentialNodeProvider
+            implements CyclicAwareNodeProvider {
+        private final List<NodeProvider> orderedProviders;
 
-        private RepositoryExactNodeProvider(BlueRepository repository) {
-            this.repository = Objects.requireNonNull(repository, "repository");
-            ClassLoader context = Thread.currentThread()
-                    .getContextClassLoader();
-            classLoader = context == null
-                    ? BlueRuntime.class.getClassLoader()
-                    : context;
+        private CyclicAwareSequentialNodeProvider(
+                List<NodeProvider> providers) {
+            super(providers);
+            orderedProviders = Collections.unmodifiableList(
+                    new ArrayList<>(providers));
         }
 
         @Override
-        public List<Node> fetchByBlueId(String blueId) {
-            Node found = exactNodes().get(Objects.requireNonNull(
-                    blueId, "blueId"));
-            return found == null
-                    ? null
-                    : Collections.singletonList(found.clone());
-        }
-
-        private Map<String, Node> exactNodes() {
-            Map<String, Node> current = exactNodes;
-            if (current != null) {
-                return current;
-            }
-            synchronized (this) {
-                current = exactNodes;
-                if (current == null) {
-                    current = buildIndex();
-                    exactNodes = current;
+        public boolean hasVerifiedContentForBlueId(String blueId) {
+            for (NodeProvider provider : orderedProviders) {
+                if (provider instanceof CyclicAwareNodeProvider cyclic
+                        && cyclic.hasVerifiedContentForBlueId(blueId)) {
+                    return true;
                 }
-                return current;
             }
+            return false;
         }
 
-        private Map<String, Node> buildIndex() {
-            List<String> names = new ArrayList<>(repository.qualifiedNames());
-            names.sort(ExternalOrderKey::compareTextCodePoints);
-            Map<String, Node> indexed = new LinkedHashMap<>();
+        @Override
+        public CyclicSetProofResult cyclicSetProofFor(String blueId) {
+            for (NodeProvider provider : orderedProviders) {
+                if (!(provider instanceof CyclicAwareNodeProvider cyclic)) {
+                    continue;
+                }
+                CyclicSetProofResult result = cyclic.cyclicSetProofFor(
+                        blueId);
+                if (result.outcome() != NodeProviderOutcome.NOT_FOUND) {
+                    return result;
+                }
+            }
+            return CyclicSetProofResult.notFound();
+        }
+    }
+
+    record RepositoryNodeProviders(NodeProvider repositoryProvider, RepositoryExactNodeCache exactNodes) { }
+    private static class ObservingRepositoryNodeProvider implements NodeProvider {
+        private final NodeProvider delegate;
+        private final RepositoryExactNodeCache cache;
+        private ObservingRepositoryNodeProvider(NodeProvider delegate, RepositoryExactNodeCache cache) {
+            this.delegate = delegate;
+            this.cache = cache;
+        }
+        @Override public List<Node> fetchByBlueId(String blueId) {
+            List<Node> nodes = delegate.fetchByBlueId(blueId);
+            if (nodes != null && !nodes.isEmpty()) cache.observe(nodes);
+            return nodes;
+        }
+        @Override public NodeProviderResult fetchResultByBlueId(String blueId) {
+            NodeProviderResult result = delegate.fetchResultByBlueId(blueId);
+            if (result.outcome() == NodeProviderOutcome.FOUND) cache.observe(result.nodes());
+            return result;
+        }
+    }
+    private static final class ObservingCyclicRepositoryNodeProvider extends ObservingRepositoryNodeProvider
+            implements CyclicAwareNodeProvider {
+        private final CyclicAwareNodeProvider cyclic;
+        private ObservingCyclicRepositoryNodeProvider(NodeProvider delegate, CyclicAwareNodeProvider cyclic,
+                RepositoryExactNodeCache cache) {
+            super(delegate, cache);
+            this.cyclic = cyclic;
+        }
+        @Override public boolean hasVerifiedContentForBlueId(String id) { return cyclic.hasVerifiedContentForBlueId(id); }
+        @Override public CyclicSetProofResult cyclicSetProofFor(String id) { return cyclic.cyclicSetProofFor(id); }
+    }
+
+    static final class RepositoryExactNodeCache implements NodeProvider {
+        private volatile Map<String, Node> snapshot = Map.of();
+        @Override public List<Node> fetchByBlueId(String blueId) {
+            Node found = snapshot.get(Objects.requireNonNull(blueId));
+            return found == null ? null : Collections.singletonList(found.clone());
+        }
+        void observe(List<Node> nodes) {
+            Map<String, Node> additions = collect(Objects.requireNonNull(nodes, "returnedNodes"));
+            if (!additions.isEmpty()) publish(additions);
+        }
+        List<String> cachedBlueIds() { return List.copyOf(snapshot.keySet()); }
+        private static Map<String, Node> collect(List<Node> nodes) {
+            Map<String, Node> additions = sortedMap();
             IdentityHashMap<Node, Boolean> visited = new IdentityHashMap<>();
-            for (String name : names) {
-                RepositoryDefinition definition = repository.definition(name)
-                        .orElseThrow(() -> new IllegalStateException(
-                                "Repository manifest has no " + name));
-                Node node = definition.blueId().indexOf('#') >= 0
-                        ? repository.nodeByName(name).orElseThrow(() ->
-                                new IllegalStateException(
-                                        "Repository provider has no " + name))
-                        : readDefinition(definition);
-                index(node, indexed, visited);
+            Deque<Node> pending = new ArrayDeque<>();
+            for (Node node : nodes) if (node != null) pending.addLast(node.clone());
+            while (!pending.isEmpty()) {
+                Node node = pending.removeFirst();
+                if (node.isReferenceOnly() || visited.put(node, Boolean.TRUE) != null) continue;
+                index(node, additions);
+                enqueueChildren(node, pending);
             }
-            return Collections.unmodifiableMap(indexed);
+            return additions;
         }
-
-        private Node readDefinition(RepositoryDefinition definition) {
-            try (InputStream input = classLoader.getResourceAsStream(
-                    definition.resourcePath())) {
-                if (input == null) {
-                    throw new IllegalStateException(
-                            "Repository resource not found: "
-                                    + definition.resourcePath());
-                }
-                return UncheckedObjectMapper.JSON_MAPPER.readValue(
-                        input, Node.class);
-            } catch (IOException failure) {
-                throw new IllegalStateException(
-                        "Could not read Repository resource: "
-                                + definition.resourcePath(),
-                        failure);
-            }
-        }
-
-        private static void index(
-                Node node,
-                Map<String, Node> indexed,
-                IdentityHashMap<Node, Boolean> visited) {
-            if (node == null || node.isReferenceOnly()
-                    || visited.put(node, Boolean.TRUE) != null) {
-                return;
-            }
+        private static void index(Node node, Map<String, Node> additions) {
             Node exact = node.clone();
             String declared = exact.getBlueId();
-            boolean addressable = declared == null
-                    || declared.indexOf('#') < 0;
-            if (declared != null && addressable) {
-                exact.blueId(null);
+            if (declared != null && declared.indexOf('#') >= 0) return;
+            if (declared != null) exact.blueId(null);
+            String blueId;
+            try {
+                blueId = DirectBlueIdCalculator.calculateBlueId(exact);
+            } catch (IllegalArgumentException notDirect) {
+                if (declared != null) throw new IllegalStateException(
+                        "Repository subtree " + declared + " is not valid ordinary exact content", notDirect);
+                return;
             }
-            if (addressable) {
-                String blueId = DirectBlueIdCalculator.calculateBlueId(exact);
-                if (declared != null && !declared.equals(blueId)) {
-                    throw new IllegalStateException(
-                            "Repository subtree " + declared
-                                    + " calculates to " + blueId);
-                }
-                Node prior = indexed.putIfAbsent(blueId, exact);
-                if (prior != null && !NodeWireForm.get(prior).equals(
-                        NodeWireForm.get(exact))) {
-                    throw new IllegalStateException(
-                            "Conflicting Repository content for " + blueId);
-                }
-            }
-            index(node.getType(), indexed, visited);
-            index(node.getItemType(), indexed, visited);
-            index(node.getKeyType(), indexed, visited);
-            index(node.getValueType(), indexed, visited);
-            index(node.getBlue(), indexed, visited);
-            index(node.getContracts(), indexed, visited);
-            if (node.getProperties() != null) {
-                node.getProperties().values().forEach(
-                        child -> index(child, indexed, visited));
-            }
-            if (node.getItems() != null) {
-                node.getItems().forEach(
-                        child -> index(child, indexed, visited));
-            }
+            if (declared != null && !declared.equals(blueId)) throw new IllegalStateException(
+                    "Repository subtree " + declared + " calculates to " + blueId);
+            Node prior = additions.putIfAbsent(blueId, exact);
+            requireSame(blueId, prior, exact);
         }
+        private synchronized void publish(Map<String, Node> additions) {
+            Map<String, Node> merged = sortedMap();
+            merged.putAll(snapshot);
+            for (Map.Entry<String, Node> addition : additions.entrySet()) {
+                Node exact = addition.getValue().clone();
+                Node prior = merged.putIfAbsent(addition.getKey(), exact);
+                requireSame(addition.getKey(), prior, exact);
+            }
+            snapshot = Collections.unmodifiableMap(new LinkedHashMap<>(merged));
+        }
+        private static Map<String, Node> sortedMap() { return new TreeMap<>(ExternalOrderKey::compareTextCodePoints); }
+        private static void requireSame(String blueId, Node prior, Node exact) {
+            if (prior != null
+                    && !NodeWireForm.get(prior).equals(NodeWireForm.get(exact))) throw new IllegalStateException(
+                    "Conflicting Repository content for " + blueId);
+        }
+        private static void enqueueChildren(Node node, Deque<Node> pending) {
+            add(pending, node.getType());
+            add(pending, node.getItemType());
+            add(pending, node.getKeyType());
+            add(pending, node.getValueType());
+            add(pending, node.getBlue());
+            add(pending, node.getContracts());
+            if (node.getProperties() != null) node.getProperties().values().forEach(child -> add(pending, child));
+            if (node.getItems() != null) node.getItems().forEach(child -> add(pending, child));
+        }
+        private static void add(Deque<Node> pending, Node child) { if (child != null) pending.addLast(child); }
     }
 }

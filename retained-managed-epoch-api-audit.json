@@ -1,0 +1,305 @@
+{
+  "schemaVersion": 1,
+  "receiptType": "RETAINED_MANAGED_EPOCH_API_AUDIT",
+  "phase": "PHASE_0",
+  "status": "COMPLETE",
+  "completedAtUtc": "2026-08-26T16:57:57Z",
+  "completedBeforeCoordinationImplementation": true,
+  "documentationOnlyAtCheckpoint": true,
+  "myosModified": false,
+  "mavenLocalUsed": false,
+  "publishedCoordinatesOverwritten": false,
+  "baselines": {
+    "contracts": {
+      "coordinate": "blue.language:blue-contracts-core:3.1.0-rc.22",
+      "path": "/Users/piotr/data/blue-language-java",
+      "branch": "feat/dynamic-contract-evolution-milestone",
+      "head": "cf8f4242b41e25d67606a5dfd58a7e5ba61f39bf",
+      "semanticSourceCheckpoint": "5a57bb8",
+      "statusAtAudit": "clean",
+      "publishedSourcesMatchCheckout": true
+    },
+    "coordination": {
+      "coordinate": "blue.coordination:blue-coordination-java:3.0.0-rc.4",
+      "primaryPath": "/Users/piotr/data/blue-contract-java",
+      "worktreePath": "/private/tmp/blue-coordination-retained-catch-up-rc4",
+      "primaryBranch": "feat/dynamic-contract-evolution-rc4",
+      "implementationBranch": "feat/retained-managed-epoch-catch-up",
+      "head": "acf02f3ce7c141e4fc9eabb6f19dacde471e30f4",
+      "releasePreparationCommit": "7719eaac57a9c5729fa7257ed66a6dc7be01ce21",
+      "statusBeforeAuditArtifacts": "clean",
+      "rc4TagPresent": false,
+      "mainSourceResourceFilesCompared": 184,
+      "publishedSourcesMatchCheckout": true,
+      "headMainSourcesMatchReleasePreparationCommit": true
+    },
+    "myos": {
+      "primary": {
+        "path": "/Users/piotr/data/myos-simple",
+        "branch": "feat/dynamic-contract-evolution-milestone",
+        "head": "ebf65df6bb58495766dab4dbbb71984f204f2904",
+        "statusAtAudit": "pre-existing-untracked-files",
+        "modifiedByAudit": false,
+        "usedAsPublishedStackTarget": false
+      },
+      "publishedStackTarget": {
+        "path": "/private/tmp/myos-simple-exact-content-ux-ebf65df",
+        "branch": "feat/exact-content-ux",
+        "head": "420e552f075149bf459722124f953ce3c8c57669",
+        "statusAtAudit": "clean",
+        "blueLanguageVersion": "3.1.0-rc.22",
+        "blueCoordinationVersion": "3.0.0-rc.4",
+        "modifiedByAudit": false
+      }
+    }
+  },
+  "artifacts": {
+    "blueContractsCoreJar": {
+      "coordinate": "blue.language:blue-contracts-core:3.1.0-rc.22",
+      "sha256": "7c5abb3c87273f640dcc9754d43c1a6f5f1fcb85605ed496d35c2514304031d6"
+    },
+    "blueContractsCoreSources": {
+      "coordinate": "blue.language:blue-contracts-core:3.1.0-rc.22:sources",
+      "sha256": "d678b8f462933bc1358f8439c09bf756d3bea6bba2ba5fa9aa13b5b0394c5477"
+    },
+    "blueCoordinationJar": {
+      "coordinate": "blue.coordination:blue-coordination-java:3.0.0-rc.4",
+      "sha256": "a8dc99f5bcc62902496ee3bdb5e8f085b78d9781e7928ef20f5a83b65581cd34"
+    },
+    "blueCoordinationSources": {
+      "coordinate": "blue.coordination:blue-coordination-java:3.0.0-rc.4:sources",
+      "sha256": "4222b8a40196e7afe1e3eff13694ae253ca0d3b634b6a475e8e9c96f18da9600"
+    },
+    "blueCoordinationModule": {
+      "coordinate": "blue.coordination:blue-coordination-java:3.0.0-rc.4:module",
+      "sha256": "6d207a7482539b19dd241b37c8f60550d46db905ca00a7d85eaa6c7044712253"
+    },
+    "blueCoordinationPom": {
+      "coordinate": "blue.coordination:blue-coordination-java:3.0.0-rc.4:pom",
+      "sha256": "41d329a4527a3512d65fdb5b29515df64582bf2a9bc2f639b8b19253d912f461"
+    },
+    "blueLanguageRuntimeHashes": {
+      "blue-language-core": "8d7167254a39132e7a494561ed966748918c138c08f0967ccc3e841edba0b1f0",
+      "blue-language-ipfs": "bec7355f39a109c4fe6dfc5f9970232dc0a75cd8e5b4ab055abc311314d24c8e",
+      "blue-language-java": "0de1584be094515ddd27938819464dc024a993c7eb06e4145cac129ad5bbfed0",
+      "blue-language-mapping": "d9141d5c611bde7eb6a21bce3dc4bc0df7d8167f013eeaef2a365dd0a6af329b",
+      "blue-language-model": "ef55be8331147442b858474add4782489d993568effe30202a9c4a8b014d5bd8"
+    }
+  },
+  "contractsAudit": {
+    "expectedGapConfirmed": true,
+    "additiveBlueContractsCoreChangeRequired": true,
+    "publicEventSubsetExposed": true,
+    "completeOrderedRootOccurrencesPerManagedTransitionExposed": false,
+    "duplicateOccurrenceIdentitiesExposedForPublicSubset": true,
+    "nonPublicManagedRootOccurrencesExposed": false,
+    "authenticatedTransitionReceiptIdentityExposed": false,
+    "eventOnlyUnchangedBlueIdReceiptExposed": false,
+    "perTransitionGasExposed": false,
+    "completeReceiptAggregateIdentityExposed": false,
+    "commitCompanionBindsCompleteReceipts": false,
+    "managedRevisionCarriesCompleteSourceEvents": false,
+    "rollbackCompleteReceiptsExposed": false,
+    "evidence": [
+      {
+        "file": "blue-contracts-core/src/main/java/blue/language/processor/closure/ClosureProcessResult.java",
+        "lines": "15-42,190-220",
+        "finding": "Public events, closure gas, companion, and non-identity presentation evidence only."
+      },
+      {
+        "file": "blue-contracts-core/src/main/java/blue/language/processor/closure/DocumentTransitionEvidence.java",
+        "lines": "20-38",
+        "finding": "Explicitly non-authoritative and omits complete events, cause, per-transition gas, and receipt identity."
+      },
+      {
+        "file": "blue-contracts-core/src/main/java/blue/language/processor/closure/ClosureExecutionSession.java",
+        "lines": "1465-1501",
+        "finding": "All Root event occurrences are identified transiently; only public Root occurrences enter publicEvents."
+      },
+      {
+        "file": "blue-contracts-core/src/main/java/blue/language/processor/closure/ClosureCommitCompanion.java",
+        "lines": "23-40,152-200",
+        "finding": "Binds public events and aggregate gas trace, not complete managed transition receipts."
+      },
+      {
+        "file": "blue-contracts-core/src/main/java/blue/language/processor/closure/ClosureSuccessResultAssembler.java",
+        "lines": "58-137",
+        "finding": "Passes presentation evidence separately and advances built-in epoch only when document BlueId changes."
+      },
+      {
+        "file": "blue-contracts-core/src/main/java/blue/language/processor/closure/ManagedRevisionCause.java",
+        "lines": "10-18",
+        "finding": "Carries state-only revision evidence without exact source events."
+      },
+      {
+        "file": "blue-contracts-core/src/main/java/blue/language/processor/closure/ClosureExecutionSession.java",
+        "lines": "319-369",
+        "finding": "Managed revision replaces occurrence state without retained source-event delivery."
+      }
+    ],
+    "requiredChangeScope": [
+      "authenticated immutable per-document transition receipt",
+      "complete ordered duplicate-preserving Root event occurrence sequence",
+      "non-public managed Root event retention",
+      "event-only unchanged-BlueId transition receipt",
+      "per-transition gas and cause",
+      "aggregate and commit-companion binding",
+      "managed revision verification and exact event delivery",
+      "rollback returns no receipts"
+    ],
+    "forbiddenSemanticChangesRequired": false
+  },
+  "coordinationAudit": {
+    "managedEpochReceiptApiPresent": false,
+    "managedRevisionCauseConstructed": false,
+    "retainedResolverSuccessOutcomesPresent": false,
+    "currentAndNewAuthoredOutcomesPresent": true,
+    "authoredInitialIndexed": true,
+    "initializedEpochZeroIndexed": true,
+    "retainedEpochIndexed": true,
+    "currentHeadIndexed": true,
+    "pendingHistoricalEpochPresent": true,
+    "committedAndReadyCountersPresentInternally": true,
+    "normalReadUsesReadyRevisionSafelyDuringCatchUp": false,
+    "managedCatchUpDrainQueuePresent": false,
+    "atomicStoreSwapPresent": true,
+    "publicationResponseLossReceiptPatternPresent": true,
+    "advancedManagedEpochAuditPresent": false,
+    "publicOutboxContainsOnlyPublicSubset": true,
+    "eventOnlyCoordinationRevisionPresent": false,
+    "extensionPoints": [
+      {
+        "name": "revision-history",
+        "files": [
+          "src/main/java/blue/coordination/api/DocumentRevision.java",
+          "src/main/java/blue/coordination/internal/DocumentSession.java"
+        ],
+        "action": "add complete managed epoch receipt and preserve contiguous event-only revisions"
+      },
+      {
+        "name": "lineage-resolution",
+        "files": [
+          "src/main/java/blue/coordination/internal/ManagedLineageIndex.java",
+          "src/main/java/blue/coordination/internal/ManagedOccurrenceResolver.java"
+        ],
+        "action": "extend existing indexes with authored-initial, epoch-zero, and retained success outcomes"
+      },
+      {
+        "name": "occurrence-plan",
+        "files": [
+          "src/main/java/blue/coordination/internal/ManagedOccurrenceInventory.java"
+        ],
+        "action": "preserve occurrence identity/pending cursor and add immutable plan, barrier, required-through, wait, and application state"
+      },
+      {
+        "name": "managed-invocation",
+        "files": [
+          "src/main/java/blue/coordination/internal/ContractsClosureAdapter.java"
+        ],
+        "action": "construct ManagedRevisionCause and use ordinary closure/cyclic processing without direct external delivery"
+      },
+      {
+        "name": "atomic-publication",
+        "files": [
+          "src/main/java/blue/coordination/internal/MultiDocumentPublicationTransaction.java",
+          "src/main/java/blue/coordination/internal/InMemoryDocumentStore.java",
+          "src/main/java/blue/coordination/internal/ContractsClosurePublicationReceipt.java"
+        ],
+        "action": "commit consumer revision, cursor, application receipt, plan/barrier, and readiness in one state swap"
+      },
+      {
+        "name": "drain",
+        "files": [
+          "src/main/java/blue/coordination/internal/ContractsJournalDrainCoordinator.java",
+          "src/main/java/blue/coordination/api/CoordinationEngine.java"
+        ],
+        "action": "add canonical managed work while preserving budget and unrelated-lane progress"
+      },
+      {
+        "name": "advanced-audit",
+        "files": [
+          "src/main/java/blue/coordination/sdk/AdvancedCoordination.java"
+        ],
+        "action": "add immutable receipt, plan, cursor, barrier, application, readiness, and diagnostic audit"
+      }
+    ],
+    "legacyMechanismsToReuseConceptually": [
+      "CatchUpBarrier",
+      "EmbeddedEpochCursor",
+      "EmbeddedEpochInput",
+      "SequentialDrainCoordinator idempotency and response-loss recovery"
+    ],
+    "legacyTimelineHistoricalReplayAllowed": false
+  },
+  "myosCharacterization": {
+    "readOnly": true,
+    "publishedPinsVerified": true,
+    "publishedOnlyRepositoryRoutingVerified": true,
+    "managedStateIndexPresent": true,
+    "managedStateKinds": [
+      "AUTHORED_INITIAL",
+      "INITIALIZED_EPOCH_ZERO",
+      "RETAINED_EPOCH",
+      "CURRENT_HEAD"
+    ],
+    "managedEpochReceiptTablePresent": true,
+    "managedEpochEventTablePresent": true,
+    "duplicateEqualEventsRepresentable": true,
+    "authoritativeReceiptWriterPresent": false,
+    "completeEvidenceAvailable": false,
+    "completeEvidenceAvailabilityCode": "COMPLETE_MANAGED_EPOCH_EVIDENCE_UNAVAILABLE",
+    "legacyRowsReportedVerified": false,
+    "committedHeadPresent": true,
+    "readyHeadPresent": true,
+    "normalReadsUseReadyHead": true,
+    "operationsWithheldWhenReadyLagsCommitted": true,
+    "catchingUpStatusDeclared": true,
+    "catchingUpStatusImplemented": false,
+    "waitingForHistoryStatusDeclared": true,
+    "waitingForHistoryExecutorImplemented": false,
+    "applyManagedEpochWorkKindDeclared": true,
+    "applyManagedEpochExecutorImplemented": false,
+    "hostRunnerFailClosed": true,
+    "leaseRecoveryPresent": true,
+    "runtimeRebuildPresent": true,
+    "occurrenceSlotHasActivationGeneration": true,
+    "occurrencePlanCursorBarrierStoragePresent": false,
+    "requiredDownstreamSeams": [
+      "populate receipt and event rows only from typed verified Coordination SDK evidence",
+      "add Contracts transition receipt and commit companion fields",
+      "preserve contiguous event-only epochs",
+      "add separate occurrence plan, cursor, and barrier table",
+      "use committed versus ready heads for catch-up readiness",
+      "bind exact plan and source receipt into processing work",
+      "atomically commit consumer revision, cursor, work, barrier, and readiness",
+      "replace fail-closed host runner with bounded typed SDK application",
+      "reconcile response loss by audit before retry",
+      "resume exact cursor after restart without source reprocessing",
+      "expose verified receipt and catch-up audit while normal reads remain ready-only"
+    ]
+  },
+  "guardrails": {
+    "oneSourceSession": true,
+    "sourceReinitializationAllowed": false,
+    "sourceTimelineReprocessingAllowed": false,
+    "sourceOperationReprocessingAllowed": false,
+    "sourcePublicOutboxReplayAllowed": false,
+    "ordinaryClosureCyclicProcessingRequired": true,
+    "occurrenceSpecificCursorRequired": true,
+    "atomicConsumerRevisionCursorCommitRequired": true,
+    "publicEventSemanticsMustRemainUnchanged": true,
+    "modelCoreMappingChangesAllowed": false,
+    "blueIdSemanticChangesAllowed": false,
+    "bexSemanticChangesAllowed": false,
+    "repositorySemanticChangesAllowed": false,
+    "myosChangesAllowedThisRound": false,
+    "mavenLocalAllowed": false,
+    "immutableInvocationOwnedStagesRequired": true
+  },
+  "phaseDecision": {
+    "contractsGapRemains": true,
+    "proceedWithMinimalAdditiveContractsReceiptFoundation": true,
+    "coordinationImplementationMayStartAfterContractsStage": true,
+    "myosImplementationMayStartThisRound": false
+  }
+}

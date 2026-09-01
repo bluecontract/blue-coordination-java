@@ -64,6 +64,32 @@ final class ContractsPublicComponentMergeSplitTest {
     private static final DocumentId D = DocumentId.of("merge-split-d");
     private static final List<DocumentId> FOUR = List.of(A, B, C, D);
 
+    /** Genuine topology-changing result shared by exact inventory proofs. */
+    static ClosureProcessResult topologyChangingResultForInventoryTest() {
+        try (CoordinationEngine publicEngine = engine(Set.of(A))) {
+            DefaultCoordinationEngine engine =
+                    (DefaultCoordinationEngine) publicEngine;
+            ContractsClosureAdmissionReceipt admitted = publicEngine
+                    .admitContractsClosure(
+                            mergeAdmission(engine),
+                            CoordinationEngine.AdmissionPolicy.FROM_NOW,
+                            null);
+            assertEquals(
+                    ContractsClosureAdmissionReceipt.PublicationOutcome
+                            .PUBLISHED,
+                    admitted.publicationOutcome());
+            ExactValue request = publicEngine.referenceRequest(
+                    "c", publicEngine.document(C).current());
+            return invoke(
+                    publicEngine,
+                    engine,
+                    "merge-split/merge",
+                    Operation.exact(
+                            "merge", "controlChannel", request),
+                    ENTRY_TIME).result();
+        }
+    }
+
     @Test
     void twoTwoMemberCyclesMergeIntoOneFourMemberCycle() {
         // given
