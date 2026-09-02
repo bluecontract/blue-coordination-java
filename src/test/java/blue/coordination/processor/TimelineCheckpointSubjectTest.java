@@ -10,11 +10,47 @@ import org.junit.jupiter.api.Test;
 import java.math.BigInteger;
 import java.util.Collections;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TimelineCheckpointSubjectTest {
+
+    @Test
+    void absentAndEmptyRequestsKeepDistinctCheckpointIdentity() {
+        // given
+        Node absentEntry = timelineEntry(10, false);
+        Node emptyEntry = timelineEntry(11, true);
+        Node absentSubject = TimelineProviderSupport.timelineOrderSubject(
+                CoordinationEventNodes.timelineEntry(absentEntry));
+        Node emptySubject = TimelineProviderSupport.timelineOrderSubject(
+                CoordinationEventNodes.timelineEntry(emptyEntry));
+
+        // when
+        boolean newer = TimelineProviderSupport.isNewerOrSameTimelineEvent(
+                ChannelCheckpointContext.of(
+                        "/",
+                        "timeline",
+                        emptyEntry,
+                        TimelineProviderSupport.eventId(emptyEntry),
+                        emptySubject,
+                        absentSubject,
+                        TimelineProviderSupport.eventId(absentEntry),
+                        Collections.emptyMap()));
+
+        // then
+        assertNotEquals(
+                TimelineProviderSupport.eventId(absentEntry),
+                TimelineProviderSupport.eventId(emptyEntry));
+        assertEquals(TimelineProviderSupport.eventId(absentEntry),
+                absentSubject.getAsText("/entryBlueId"));
+        assertEquals(TimelineProviderSupport.eventId(emptyEntry),
+                emptySubject.getAsText("/entryBlueId"));
+        assertTrue(newer,
+                "the exact empty request must not be deduplicated as absent");
+    }
 
     @Test
     void shouldAcceptIncreasingTimestampForDirectTimeline() {
@@ -210,6 +246,26 @@ class TimelineCheckpointSubjectTest {
                 previous,
                 "previous-signature",
                 Collections.emptyMap());
+    }
+
+    private static Node timelineEntry(long timestamp,
+                                      boolean emptyRequest) {
+        Node message = new Node()
+                .properties("operation", new Node().value("touch"))
+                .properties("channel", new Node().value("ownerChannel"));
+        if (emptyRequest) {
+            message.properties("request", new Node());
+        }
+        return new Node()
+                .type(new Node().blueId(
+                        blue.repo.coordination.TimelineEntry.blueId()))
+                .properties("timeline", new Node().properties(
+                        "timelineId", new Node().value("timeline-a")))
+                .properties("timestamp", new Node().value(
+                        BigInteger.valueOf(timestamp)))
+                .properties("actor", new Node().properties(
+                        "accountId", new Node().value("alice")))
+                .properties("message", message);
     }
 
     private static Node directSubject(long timestamp,
