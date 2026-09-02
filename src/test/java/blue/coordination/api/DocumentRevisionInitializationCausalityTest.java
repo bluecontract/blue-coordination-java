@@ -61,7 +61,7 @@ final class DocumentRevisionInitializationCausalityTest {
         // given
         TimelineEntry entry = new TimelineEntry(
                 STATE,
-                STATE,
+                java.util.Optional.of(STATE),
                 ORDER,
                 ORDER,
                 new Timeline("timeline", "actor"),

@@ -92,6 +92,28 @@ final class ContractsRootSourceSurfaceTest {
         assertEquals(Set.of("timeline/other"), second.timelineIds());
     }
 
+    @Test
+    void prospectiveMemberUnderAbsentCollectionStaysOutsideActiveSurface() {
+        // given
+        ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(
+                List.of(inactive(
+                        ROOT, "/orders/order-1", INACTIVE)));
+
+        // when
+        ContractsRootSourceSurface.Surface surface =
+                ContractsRootSourceSurface.resolve(
+                        ContractsRootFeederWindow.LaneId.publicRoots(
+                                List.of(ROOT)),
+                        inventory,
+                        document -> document.equals(ROOT)
+                                ? Set.of("timeline/root")
+                                : Set.of("timeline/inactive"));
+
+        // then
+        assertEquals(List.of(ROOT), surface.managedDocuments());
+        assertEquals(Set.of("timeline/root"), surface.timelineIds());
+    }
+
     private static ManagedOccurrenceBinding active(
             DocumentId source,
             String path,

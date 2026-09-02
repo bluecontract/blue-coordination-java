@@ -584,7 +584,7 @@ final class OperationRouteIndexTest {
         ExactValue request = ExactValue.verified(new Node().value("request"));
         return new TimelineEntry(
                 event,
-                request,
+                java.util.Optional.of(request),
                 order,
                 order,
                 new Timeline(timeline, actor),

@@ -70,7 +70,6 @@ final class ContractsClosureAdapterTest {
               reject:
                 type: Coordination/Sequential Workflow Operation
                 channel: aliceChannel
-                request: {}
                 steps:
                   - type: Coordination/Compute
                     do:
@@ -513,7 +512,7 @@ final class ContractsClosureAdapterTest {
                 1L, timeline, event.blueId()));
         return new TimelineEntry(
                 event,
-                request,
+                java.util.Optional.of(request),
                 order,
                 order,
                 new Timeline(timeline, actor),

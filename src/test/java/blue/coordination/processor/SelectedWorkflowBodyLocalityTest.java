@@ -23,9 +23,53 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Release gate: one PROCESS opens only its selected exact workflow body. */
 final class SelectedWorkflowBodyLocalityTest {
+
+    @Test
+    void emptyRequestPatternRequiresPresenceWhileOmissionAddsNoConstraint() {
+        // given
+        try (CoordinationTestRuntime runtime = CoordinationTestRuntime.create(
+                BlueRepository.current())) {
+            DocumentProcessingResult initialized = runtime.initializeDocument(
+                    runtime.yamlToNode(requestPresenceDocument()));
+            ExternalOrderKey activation = ExternalOrderKey.of(List.of(0L));
+            SubscriptionDelta initial = runtime.contracts()
+                    .subscriptionSurfaceProjection().projectInitial(
+                            initialized.document(), 0L, activation);
+
+            // when
+            ExternalDeliveryPlan emptyOnlyAbsent = deliveryPlan(
+                    runtime,
+                    initialized,
+                    initial,
+                    requestPresenceEvent("emptyOnly", false));
+            ExternalDeliveryPlan emptyOnlyPresent = deliveryPlan(
+                    runtime,
+                    initialized,
+                    initial,
+                    requestPresenceEvent("emptyOnly", true));
+            ExternalDeliveryPlan unconstrainedAbsent = deliveryPlan(
+                    runtime,
+                    initialized,
+                    initial,
+                    requestPresenceEvent("acceptAny", false));
+            ExternalDeliveryPlan unconstrainedPresent = deliveryPlan(
+                    runtime,
+                    initialized,
+                    initial,
+                    requestPresenceEvent("acceptAny", true));
+
+            // then
+            assertEquals(ProcessorStatus.SUCCESS, initialized.status());
+            assertTrue(emptyOnlyAbsent.deliveries().isEmpty());
+            assertEquals(1, emptyOnlyPresent.deliveries().size());
+            assertEquals(1, unconstrainedAbsent.deliveries().size());
+            assertEquals(1, unconstrainedPresent.deliveries().size());
+        }
+    }
 
     @Test
     void processReadsOnlyTheSelectedWorkflowBodyByExactBlueId() {
@@ -140,6 +184,74 @@ final class SelectedWorkflowBodyLocalityTest {
                   channel: selectedChannel
                   request: {}
                 """;
+    }
+
+    private static ExternalDeliveryPlan deliveryPlan(
+            CoordinationTestRuntime runtime,
+            DocumentProcessingResult initialized,
+            SubscriptionDelta subscriptions,
+            String eventYaml) {
+        Node event = runtime.yamlToNode(eventYaml);
+        ExternalOrderKey eventOrder = ExternalOrderKey.of(List.of(
+                1_800_000_000_000_000L,
+                "request-presence",
+                DirectBlueIdCalculator.calculateBlueId(event)));
+        return runtime.contracts()
+                .currentRootDeliveryPlanDeriver(
+                        0L, eventOrder, subscriptions.added())
+                .derive(initialized.document(), event);
+    }
+
+    private static String requestPresenceDocument() {
+        return """
+                documentId: request-presence
+                contracts:
+                  ownerChannel:
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: request-presence
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: alice
+                  acceptAny:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $return: true
+                  emptyOnly:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $return: true
+                """;
+    }
+
+    private static String requestPresenceEvent(
+            String operation,
+            boolean requestPresent) {
+        return """
+                type: Coordination/Timeline Entry
+                timeline:
+                  type: MyOS/MyOS Timeline
+                  timelineId: request-presence
+                timestamp: 1800000000000000
+                actor:
+                  type: MyOS/Principal Actor
+                  accountId: alice
+                message:
+                  type: Coordination/Operation Request
+                  operation: %s
+                  channel: ownerChannel
+                %s
+                """.formatted(
+                operation,
+                requestPresent ? "  request: {}" : "");
     }
 
     private record ExactBody(String blueId, Node node) {

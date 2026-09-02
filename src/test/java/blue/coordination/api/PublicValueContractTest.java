@@ -54,19 +54,22 @@ final class PublicValueContractTest {
     }
 
     @Test
-    void operationsHaveExactlyOneNormalizedRequestRepresentation() {
+    void operationsDistinguishAbsentAndPresentRequestRepresentations() {
         // given
         ExactValue exact = ExactValue.verified(new Node().value("request"));
 
         // when
         Operation empty = Operation.yaml("touch", "owner", "  ");
         Operation reused = Operation.exact("touch", "owner", exact);
+        Operation absent = Operation.withoutRequest("touch", "owner");
 
         // then
         assertEquals("{}", empty.requestYaml().orElseThrow());
         assertTrue(empty.exactRequest().isEmpty());
         assertEquals(exact, reused.exactRequest().orElseThrow());
         assertTrue(reused.requestYaml().isEmpty());
+        assertTrue(absent.requestYaml().isEmpty());
+        assertTrue(absent.exactRequest().isEmpty());
         assertThrows(IllegalArgumentException.class,
                 () -> Operation.yaml(" ", "owner", "{}"));
         assertThrows(NullPointerException.class,

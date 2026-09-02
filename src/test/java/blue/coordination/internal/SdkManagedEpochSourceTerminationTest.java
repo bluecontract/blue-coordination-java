@@ -405,8 +405,8 @@ final class SdkManagedEpochSourceTerminationTest {
                 .sourceOrderKey().orElseThrow();
         TimelineEntry sourceEntry = new TimelineEntry(
                 event,
-                ExactValue.verified(new Node().value(
-                        "retained-terminal-fixture")),
+                java.util.Optional.of(ExactValue.verified(new Node().value(
+                        "retained-terminal-fixture"))),
                 sourceOrder,
                 sourceOrder,
                 new Timeline("synthetic/terminal/source", "fixture"),
