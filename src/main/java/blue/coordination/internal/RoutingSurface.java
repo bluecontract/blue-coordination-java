@@ -268,14 +268,38 @@ final class RoutingSurface {
                     sources);
             unique.putIfAbsent(definition, definition);
             if (isInvocableOperation(contract.effectiveTypeBlueId())) {
+                FrozenNode requestPattern = contract.headerFields().get(
+                        "request");
                 operations.putIfAbsent(definition, new OperationDefinition(
                         scopePath,
                         contract.key(),
                         channelKey,
-                        contract.headerFields().get("request"),
+                        isInheritedRequestMetadataOnly(requestPattern)
+                                ? null
+                                : requestPattern,
                         sources));
             }
         }
+    }
+
+    /** See OperationRequestMatcher's request-presence boundary. */
+    private static boolean isInheritedRequestMetadataOnly(
+            FrozenNode pattern) {
+        return pattern != null
+                && pattern.getType() == null
+                && pattern.getItemType() == null
+                && pattern.getKeyType() == null
+                && pattern.getValueType() == null
+                && pattern.getValue() == null
+                && pattern.getItems() == null
+                && pattern.getProperties() == null
+                && pattern.getContracts() == null
+                && pattern.getReferenceBlueId() == null
+                && pattern.getSchema() == null
+                && pattern.getMergePolicy() == null
+                && pattern.getPreviousBlueId() == null
+                && pattern.getPosition() == null
+                && pattern.getBlue() == null;
     }
 
     private static boolean isInvocableOperation(String effectiveTypeBlueId) {

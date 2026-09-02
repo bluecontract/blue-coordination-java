@@ -3,11 +3,12 @@ package blue.coordination.api;
 import blue.language.processor.ExternalOrderKey;
 
 import java.util.Objects;
+import java.util.Optional;
 
 /** One whole exact Timeline Entry retained once in the journal. */
 public record TimelineEntry(
         ExactValue exactEvent,
-        ExactValue exactRequest,
+        Optional<ExactValue> exactRequest,
         ExternalOrderKey journalOrderKey,
         ExternalOrderKey sourceOrderKey,
         Timeline timeline,

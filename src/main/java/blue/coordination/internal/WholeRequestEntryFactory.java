@@ -18,12 +18,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 
 /**
- * Builds one whole request object and one whole Timeline Entry object.
- * The entry contains one pure reference to the request; neither value is split.
+ * Builds one optional whole request object and one whole Timeline Entry object.
+ * A present request is retained behind one pure reference; an absent request
+ * contributes no {@code request} member at all.
  *
  * <p>Static event shape is resolved once per timeline/actor/operation/channel
  * shape. Later entries use {@link FrozenNode} structural sharing to replace
@@ -76,7 +78,7 @@ final class WholeRequestEntryFactory {
             throw new IllegalArgumentException("timestampMicros must be positive");
         }
 
-        ExactValue request = metrics.timed(
+        Optional<ExactValue> request = metrics.timed(
                 "append.request.retainWhole",
                 () -> exactRequest(operation));
         ExactValue event = metrics.timed(
@@ -129,9 +131,10 @@ final class WholeRequestEntryFactory {
                 "/message/operation").getValue();
         String channel = (String) root.at("/message/channel").getValue();
         FrozenNode requestNode = root.at("/message/request");
-        ExactValue request = requestNode.isReferenceOnly()
-                ? objects.require(requestNode.getReferenceBlueId())
-                : objects.put(requestNode, "timeline-request");
+        Optional<ExactValue> request = Optional.ofNullable(requestNode)
+                .map(node -> node.isReferenceOnly()
+                        ? objects.require(node.getReferenceBlueId())
+                        : objects.put(node, "timeline-request"));
         ExactValue retainedEvent = objects.put(
                 supplied, "timeline-entry");
         ExternalOrderKey order = ExternalOrderKey.of(List.of(
@@ -154,7 +157,7 @@ final class WholeRequestEntryFactory {
 
     public ExactValue parseExactRequest(String requestYaml) {
         return exactRequest(Operation.yaml(
-                "requestOnly", "requestOnly", requestYaml));
+                "requestOnly", "requestOnly", requestYaml)).orElseThrow();
     }
 
     ExactValue createProcessorOwnedEvent(
@@ -170,16 +173,20 @@ final class WholeRequestEntryFactory {
                         EmbeddedEpochInput.INTERNAL_CHANNEL,
                         request),
                 timestampMicros,
-                request,
+                Optional.of(request),
                 "process.embeddedInput");
     }
 
-    private ExactValue exactRequest(Operation operation) {
+    private Optional<ExactValue> exactRequest(Operation operation) {
         if (operation.exactRequest().isPresent()) {
             metrics.increment("append.exactRequestsReused");
-            return objects.put(
+            return Optional.of(objects.put(
                     operation.exactRequest().orElseThrow(),
-                    "timeline-request");
+                    "timeline-request"));
+        }
+        if (operation.requestYaml().isEmpty()) {
+            metrics.increment("append.absentRequests");
+            return Optional.empty();
         }
         metrics.increment(REQUEST_SOURCES_PARSED);
         Node source = runtime.parseSourceYaml(
@@ -187,7 +194,7 @@ final class WholeRequestEntryFactory {
         Node preprocessed = runtime.preprocess(source);
         ResolvedSnapshot snapshot = runtime.cache(
                 runtime.resolveToSnapshot(preprocessed));
-        return objects.put(snapshot, "timeline-request");
+        return Optional.of(objects.put(snapshot, "timeline-request"));
     }
 
     private ExactValue exactEvent(
@@ -195,7 +202,7 @@ final class WholeRequestEntryFactory {
             String previousEntryBlueId,
             Operation operation,
             long timestampMicros,
-            ExactValue request,
+            Optional<ExactValue> request,
             String metricPrefix) {
         EventShapeKey key = new EventShapeKey(
                 timeline.timelineId(),
@@ -204,6 +211,7 @@ final class WholeRequestEntryFactory {
                 operation.operation(),
                 operation.channel(),
                 previousEntryBlueId != null,
+                request.isPresent(),
                 operation.targetDocument().isPresent(),
                 operation.requireExactDocumentVersion());
         FrozenNode template;
@@ -223,8 +231,13 @@ final class WholeRequestEntryFactory {
             }
         }
 
-        FrozenNode message = requireChild(template, "message")
-                .withProperty("request", reference(request.blueId()));
+        FrozenNode message = requireChild(template, "message");
+        if (request.isPresent()) {
+            message = message.withProperty(
+                    "request", reference(request.orElseThrow().blueId()));
+        } else {
+            message = message.withProperty("request", null);
+        }
         if (operation.targetDocument().isPresent()) {
             ExactValue target = objects.put(
                     operation.targetDocument().orElseThrow(),
@@ -241,10 +254,13 @@ final class WholeRequestEntryFactory {
                                 ? null
                                 : reference(previousEntryBlueId));
         FrozenNode requestNode = event.at("/message/request");
-        if (requestNode == null
-                || !request.blueId().equals(requestNode.getReferenceBlueId())) {
+        if (request.isPresent()
+                ? requestNode == null
+                        || !request.orElseThrow().blueId().equals(
+                                requestNode.getReferenceBlueId())
+                : requestNode != null) {
             throw new IllegalStateException(
-                    "Timeline Entry request must remain one whole-object reference");
+                    "Timeline Entry request presence or whole-object reference changed");
         }
         return objects.put(event, "timeline-entry");
     }
@@ -254,7 +270,7 @@ final class WholeRequestEntryFactory {
             String previousEntryBlueId,
             Operation operation,
             long timestampMicros,
-            ExactValue request) {
+            Optional<ExactValue> request) {
         Node timelineNode = new Node()
                 .type("MyOS/MyOS Timeline")
                 .properties("timelineId", scalarNode(timeline.timelineId()));
@@ -265,8 +281,9 @@ final class WholeRequestEntryFactory {
                 .type("Coordination/Operation Request")
                 .properties(new LinkedHashMap<>(Map.of(
                         "operation", scalarNode(operation.operation()),
-                        "channel", scalarNode(operation.channel()),
-                        "request", request.referenceNode())));
+                        "channel", scalarNode(operation.channel()))));
+        request.ifPresent(exact -> messageNode.properties(
+                "request", exact.referenceNode()));
         operation.targetDocument().ifPresent(target -> {
             messageNode.properties("document", target.referenceNode());
             if (operation.requireExactDocumentVersion()) {
@@ -322,6 +339,7 @@ final class WholeRequestEntryFactory {
             String operation,
             String channel,
             boolean hasPreviousEntry,
+            boolean hasRequest,
             boolean hasDocumentTarget,
             boolean requireExactDocumentVersion) {
         private EventShapeKey {

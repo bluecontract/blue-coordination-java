@@ -1309,7 +1309,11 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     + plan.targetDocumentId());
         }
         result.set(selected, augmentWithManagedDrafts(
-                base, plan, entry.exactRequest()));
+                base,
+                plan,
+                entry.exactRequest().orElseThrow(() ->
+                        new IllegalArgumentException(
+                                "Managed expansion requires a present exact request"))));
         return List.copyOf(result);
     }
 

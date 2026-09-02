@@ -855,17 +855,18 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         ManagedDraftEvidence managed = managedDraftEvidence(call);
         ContractsManagedEpochSelectionPlan epochSelections =
                 managedEpochSelectionPlan(call);
-        ExactValue request;
+        ExactValue request = null;
         if (call.requestYaml() != null) {
             request = engine.exactValue(call.requestYaml());
         } else if (call.request() != null) {
             request = call.request().exactRequest(engine);
-        } else {
-            request = engine.exactValue("{}");
         }
         TargetSelection target = call.target();
-        Operation operation = Operation.exact(
-                call.operation(), call.channel(), request)
+        Operation operation = (request == null
+                ? Operation.withoutRequest(
+                        call.operation(), call.channel())
+                : Operation.exact(
+                        call.operation(), call.channel(), request))
                 .targeting(
                         target.exact().unwrap(),
                         target.requireExactDocumentVersion());

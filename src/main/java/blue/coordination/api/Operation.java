@@ -21,9 +21,9 @@ public final class Operation {
             boolean requireExactDocumentVersion) {
         this.operation = requireText(operation, "operation");
         this.channel = requireText(channel, "channel");
-        if ((requestYaml == null) == (exactRequest == null)) {
+        if (requestYaml != null && exactRequest != null) {
             throw new IllegalArgumentException(
-                    "Exactly one request representation is required");
+                    "At most one request representation is allowed");
         }
         this.requestYaml = requestYaml == null
                 ? null
@@ -58,6 +58,14 @@ public final class Operation {
                 Objects.requireNonNull(request, "request"),
                 null,
                 false);
+    }
+
+    /** Creates an operation whose exact request member is absent. */
+    public static Operation withoutRequest(
+            String operation,
+            String channel) {
+        return new Operation(
+                operation, channel, null, null, null, false);
     }
 
     /**

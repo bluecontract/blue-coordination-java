@@ -108,10 +108,6 @@ public final class TimelineProviderSupport {
                     "Invalid exact Timeline Entry envelope");
         }
         Node message = entry.message();
-        if (property(message, "request") == null) {
-            throw new IllegalArgumentException(
-                    "Timeline Entry Operation Request has no request");
-        }
         Node exactVersion = property(
                 message, "requireExactDocumentVersion");
         Object exactVersionValue = exactVersion == null
