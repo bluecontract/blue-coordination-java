@@ -118,11 +118,11 @@ public final class TimelineProviderSupport {
                     "requireExactDocumentVersion must be Boolean");
         }
         if (Boolean.TRUE.equals(exactVersionValue)
-                && !hasDocumentValue(property(message, "document"))) {
+                && property(message, "document") == null) {
             throw new IllegalArgumentException(
                     "Exact document version requires a document");
         }
-        if (hasRuntimeValue(property(exactEntry, "onBehalfOf"))) {
+        if (property(exactEntry, "onBehalfOf") != null) {
             throw new IllegalArgumentException(
                     "onBehalfOf requires a Mandate resolver");
         }
@@ -456,18 +456,6 @@ public final class TimelineProviderSupport {
             return null;
         }
         return node.getProperties().get(key);
-    }
-
-    private static boolean hasDocumentValue(Node node) {
-        return hasRuntimeValue(node) || node != null && node.getType() != null;
-    }
-
-    private static boolean hasRuntimeValue(Node node) {
-        return node != null && (node.getBlueId() != null
-                || node.getValue() != null
-                || node.getItems() != null && !node.getItems().isEmpty()
-                || node.getProperties() != null
-                && !node.getProperties().isEmpty());
     }
 
     public static String textProperty(Node node, String key) {

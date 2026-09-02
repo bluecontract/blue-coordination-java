@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Exact request-presence coverage at the retained Timeline Entry boundary. */
@@ -71,6 +72,38 @@ final class WholeRequestEntryFactoryPresenceTest {
             assertEquals(1L, metrics.counter("append.absentRequests"));
             assertFalse(absent.exactEvent().sameExactValue(
                     empty.exactEvent()));
+        }
+    }
+
+    @Test
+    void exactEmptyMandateConstraintIsPresentAndFailsClosed() {
+        // given
+        EngineMetrics metrics = new EngineMetrics();
+        WholeObjectStore objects = new WholeObjectStore(metrics);
+        Timeline timeline = new Timeline("mandate-presence", "alice");
+
+        try (BlueRuntime runtime = BlueRuntime.create(objects, metrics)) {
+            WholeRequestEntryFactory entries = new WholeRequestEntryFactory(
+                    runtime, objects, metrics);
+            TimelineEntry entry = entries.create(
+                    timeline,
+                    null,
+                    Operation.withoutRequest("touch", "ownerChannel"),
+                    1_800_000_000_000_000L,
+                    1L,
+                    1L);
+            Node constrained = entry.exactEvent().copyNode()
+                    .properties("onBehalfOf", new Node());
+
+            // when
+            IllegalArgumentException failure = assertThrows(
+                    IllegalArgumentException.class,
+                    () -> blue.coordination.processor
+                            .TimelineProviderSupport.validateExactEnvelope(
+                                    constrained));
+
+            // then
+            assertTrue(failure.getMessage().contains("Mandate resolver"));
         }
     }
 }
