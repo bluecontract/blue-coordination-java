@@ -25,7 +25,9 @@ same exclusion in its published POM, and locks the exact graph in
 
 The `immutable-staged-contracts` and `immutable-development-contracts` lanes
 remain available only for non-published upstream handoffs. They are not
-release evidence once rc.23 is published.
+release evidence once rc.23 is published. The development lane can bind
+separate, immutable Language/Contracts and BEX repositories; it never obtains
+either dependency from a sibling checkout or Maven Local.
 
 The staged lane accepts only the non-overwriting repository exported by the
 Contracts release gate. Its absolute path and exact manifest identity are both
@@ -63,6 +65,34 @@ conflict-free Maven Central graph with:
 
 For a non-published development handoff, use the manifest-pinned command above;
 do not reuse a warmed dependency cache as substitute evidence.
+
+For a coordinated Language/Contracts and BEX development handoff, bind both
+commit-addressed repositories explicitly:
+
+```bash
+./gradlew --no-daemon verifyActiveDependencyLane \
+  dependencyPreflight writeDevelopmentResolvedDependencies \
+  -PblueDependencyMode=immutable-development-contracts \
+  -PblueContractsVersion=3.1.0-dev.<40-lowercase-commit> \
+  -PblueContractsRepository=/absolute/path/to/contracts-development-repository \
+  -PblueContractsManifestSha256=sha256:<64-lowercase-hex> \
+  -PblueContractsSourceCommit=<40-lowercase-commit> \
+  -PblueBexVersion=1.1.0-dev.<40-lowercase-commit> \
+  -PblueBexRepository=/absolute/path/to/bex-development-repository \
+  -PblueBexManifestSha256=sha256:<64-lowercase-hex> \
+  -PblueBexSourceCommit=<40-lowercase-commit>
+```
+
+The BEX repository manifest must use
+`blue-bex-development-repository/1.0`, bind its version to its source commit,
+and bind the exact selected Language version, source commit, and repository
+manifest identity. It contains runtime, POM, sources, and Javadoc artifacts
+for `blue-bex-core`, `blue-bex-contracts`, and `blue-bex-java`, with a checksum
+companion for every payload and no unlisted files or symbolic links.
+Coordination resolves only `blue-bex-core` and `blue-bex-contracts`, then
+compares the resolved JAR bytes with the BEX manifest. The canonical resolved
+dependency report is written to
+`build/reports/development-stage/resolved-dependencies.json`.
 
 ## Verification
 
