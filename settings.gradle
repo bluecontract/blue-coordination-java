@@ -145,5 +145,120 @@ if (dependencyMode in [
                         'DEVELOPMENT Contracts version does not bind its exact source identity')
             }
         }
+
+        String expectedBexVersion = providers.gradleProperty(
+                'blueBexVersion').getOrElse('1.1.0-rc.4')
+        def bexProperties = [
+                repository: providers.gradleProperty(
+                        'blueBexRepository').orNull,
+                manifestIdentity: providers.gradleProperty(
+                        'blueBexManifestSha256').orNull,
+                sourceCommit: providers.gradleProperty(
+                        'blueBexSourceCommit').orNull
+        ]
+        if (expectedBexVersion == '1.1.0-rc.4') {
+            if (bexProperties.values().any { value ->
+                value != null && !value.isBlank()
+            }) {
+                throw new GradleException(
+                        'blueBexRepository/ManifestSha256/SourceCommit require '
+                                + 'a commit-bound blueBexVersion')
+            }
+        } else {
+            if (!(expectedBexVersion
+                    ==~ /1\.1\.0-dev\.[0-9a-f]{40}/)) {
+                throw new GradleException(
+                        'blueBexVersion must be 1.1.0-rc.4 or an exact '
+                                + 'commit-bound DEVELOPMENT version')
+            }
+            if (bexProperties.repository == null
+                    || bexProperties.repository.isBlank()) {
+                throw new GradleException(
+                        'commit-bound BEX mode requires '
+                                + '-PblueBexRepository=/absolute/path')
+            }
+            File bexRepositoryPath = new File(bexProperties.repository)
+            if (!bexRepositoryPath.isAbsolute()) {
+                throw new GradleException(
+                        'blueBexRepository must be an absolute path')
+            }
+            File bexRepository = bexRepositoryPath.canonicalFile
+            if (!bexRepository.isDirectory()) {
+                throw new GradleException(
+                        'blueBexRepository is not an immutable DEVELOPMENT '
+                                + 'BEX repository: ' + bexRepository)
+            }
+            if (bexProperties.manifestIdentity == null
+                    || !(bexProperties.manifestIdentity
+                    ==~ /sha256:[0-9a-f]{64}/)) {
+                throw new GradleException(
+                        'commit-bound BEX mode requires '
+                                + '-PblueBexManifestSha256=sha256:<64 lowercase hex>')
+            }
+            if (bexProperties.sourceCommit == null
+                    || !(bexProperties.sourceCommit ==~ /[0-9a-f]{40}/)) {
+                throw new GradleException(
+                        'commit-bound BEX mode requires '
+                                + '-PblueBexSourceCommit=<40 lowercase hex>')
+            }
+            File bexManifest = new File(
+                    bexRepository, 'artifact-manifest.json')
+            File bexSidecar = new File(
+                    bexRepository, 'artifact-manifest.json.sha256')
+            if (!bexManifest.isFile()
+                    || java.nio.file.Files.isSymbolicLink(
+                    bexManifest.toPath())
+                    || !bexSidecar.isFile()
+                    || java.nio.file.Files.isSymbolicLink(
+                    bexSidecar.toPath())) {
+                throw new GradleException(
+                        'blueBexRepository is missing the regular manifest '
+                                + 'and checksum companion')
+            }
+            String actualBexIdentity = 'sha256:'
+                    + java.security.MessageDigest.getInstance('SHA-256')
+                    .digest(bexManifest.bytes).encodeHex().toString()
+            if (actualBexIdentity != bexProperties.manifestIdentity) {
+                throw new GradleException(
+                        'blueBexManifestSha256 does not identify '
+                                + 'artifact-manifest.json')
+            }
+            String expectedBexSidecar = actualBexIdentity.substring(
+                    'sha256:'.length()) + '  artifact-manifest.json\n'
+            if (bexSidecar.getText('UTF-8') != expectedBexSidecar) {
+                throw new GradleException(
+                        'artifact-manifest.json.sha256 does not identify '
+                                + 'the DEVELOPMENT BEX manifest')
+            }
+            def bexManifestDocument
+            try {
+                bexManifestDocument = new groovy.json.JsonSlurper().parse(
+                        bexManifest)
+            } catch (RuntimeException exception) {
+                throw new GradleException(
+                        'Cannot parse immutable DEVELOPMENT BEX manifest',
+                        exception)
+            }
+            if (bexManifestDocument.schema
+                    != 'blue-bex-development-repository/1.0'
+                    || bexManifestDocument.groupId != 'blue.bex'
+                    || bexManifestDocument.version != expectedBexVersion
+                    || bexManifestDocument.sourceCommit
+                    != bexProperties.sourceCommit
+                    || !expectedBexVersion.endsWith(
+                    '.' + bexProperties.sourceCommit)) {
+                throw new GradleException(
+                        'BEX manifest does not match its exact version/source binding')
+            }
+            if (bexManifestDocument.languageVersion != expectedVersion
+                    || bexManifestDocument.languageSourceCommit
+                    != expectedSourceCommit
+                    || bexManifestDocument.languageRepositoryManifestIdentity
+                    != manifestIdentity) {
+                throw new GradleException(
+                        'BEX manifest does not bind the selected immutable '
+                                + 'Language/Contracts repository')
+            }
+        }
     }
 }

@@ -28,6 +28,20 @@ def stagedContractsManifestIdentity = providers.gradleProperty(
         'blueContractsManifestSha256').orNull
 def developmentContractsSourceCommit = providers.gradleProperty(
         'blueContractsSourceCommit').orNull
+def publishedBexVersion = '1.1.0-rc.4'
+def immutableDevelopmentBexVersion = providers.gradleProperty(
+        'blueBexVersion').getOrElse(publishedBexVersion)
+def immutableDevelopmentBex = immutableDevelopmentContracts
+        && immutableDevelopmentBexVersion != publishedBexVersion
+def activeBexVersion = immutableDevelopmentContracts
+        ? immutableDevelopmentBexVersion
+        : publishedBexVersion
+def developmentBexRepositoryValue = providers.gradleProperty(
+        'blueBexRepository').orNull
+def developmentBexManifestIdentity = providers.gradleProperty(
+        'blueBexManifestSha256').orNull
+def developmentBexSourceCommit = providers.gradleProperty(
+        'blueBexSourceCommit').orNull
 def versionMatches = file('.cz.toml').getText('UTF-8') =~
         /(?m)^version = "([^"]+)"$/
 if (!versionMatches.find()) {
@@ -53,6 +67,13 @@ if (immutableDevelopmentContracts
             'blueContractsVersion must be the legacy pin or an exact '
                     + 'commit-bound or tree-bound DEVELOPMENT version')
 }
+if (immutableDevelopmentBex
+        && !(immutableDevelopmentBexVersion
+        ==~ /1\.1\.0-dev\.[0-9a-f]{40}/)) {
+    throw new GradleException(
+            'blueBexVersion must be the legacy pin or an exact '
+                    + 'commit-bound DEVELOPMENT version')
+}
 
 def publishedBlueCoordinates = [
         'blue.language:blue-language-model': publishedLanguageVersion,
@@ -62,8 +83,8 @@ def publishedBlueCoordinates = [
         'blue.language:blue-language-java': publishedLanguageVersion,
         'blue.language:blue-contracts-core': publishedLanguageVersion,
         'blue.repo:blue-repo-java': '3.0.0-rc.21',
-        'blue.bex:blue-bex-core': '1.1.0-rc.4',
-        'blue.bex:blue-bex-contracts': '1.1.0-rc.4'
+        'blue.bex:blue-bex-core': publishedBexVersion,
+        'blue.bex:blue-bex-contracts': publishedBexVersion
 ]
 def immutableStagedBlueCoordinates = publishedBlueCoordinates.collectEntries {
     coordinate, expectedVersion ->
@@ -71,9 +92,18 @@ def immutableStagedBlueCoordinates = publishedBlueCoordinates.collectEntries {
                 ? immutableStagedLanguageVersion
                 : expectedVersion]
 }
-def activeBlueCoordinates = immutableContractsRepository
-        ? immutableStagedBlueCoordinates
-        : publishedBlueCoordinates
+def immutableDevelopmentBlueCoordinates =
+        immutableStagedBlueCoordinates.collectEntries {
+            coordinate, expectedVersion ->
+                [(coordinate): coordinate.startsWith('blue.bex:')
+                        ? immutableDevelopmentBexVersion
+                        : expectedVersion]
+        }
+def activeBlueCoordinates = immutableDevelopmentContracts
+        ? immutableDevelopmentBlueCoordinates
+        : immutableStagedContracts
+                ? immutableStagedBlueCoordinates
+                : publishedBlueCoordinates
 def acceptedDependencyModes = [
         'published-artifact',
         'immutable-staged-contracts',
@@ -103,6 +133,15 @@ def developmentContractsArtifacts = [
         'blue-contracts-core',
         'blue-language-java'
 ] as Set
+def developmentBexArtifacts = [
+        'blue-bex-contracts',
+        'blue-bex-core',
+        'blue-bex-java'
+] as Set
+def selectedDevelopmentBexArtifacts = [
+        'blue-bex-contracts',
+        'blue-bex-core'
+] as Set
 
 base {
     archivesName = 'blue-coordination-java'
@@ -128,6 +167,24 @@ repositories {
             }
             filter {
                 includeGroup 'blue.language'
+            }
+        }
+    }
+    if (immutableDevelopmentBex) {
+        exclusiveContent {
+            forRepository {
+                maven {
+                    name = 'immutableDevelopmentBex'
+                    url = uri(file(developmentBexRepositoryValue)
+                            .canonicalFile)
+                    metadataSources {
+                        mavenPom()
+                        artifact()
+                    }
+                }
+            }
+            filter {
+                includeGroup 'blue.bex'
             }
         }
     }
@@ -171,11 +228,13 @@ def selectedDependencyLockFile = layout.projectDirectory.file(
                 ? 'gradle/immutable-staged-contracts.lockfile'
                 : 'gradle/published-artifact.lockfile')
 if (immutableDevelopmentContracts
-        && immutableStagedLanguageVersion != '3.1.0-rc.23') {
+        && (immutableStagedLanguageVersion != publishedLanguageVersion
+        || immutableDevelopmentBexVersion != publishedBexVersion)) {
     // Keep every external dependency locked. The immutable manifest supplies
     // only the six exact Language coordinates; a generated overlay avoids a
     // source commit containing its own commit-bound dependency version.
-    int replacedCoordinates = 0
+    int replacedLanguageCoordinates = 0
+    int replacedBexCoordinates = 0
     String developmentLock = selectedDependencyLockFile.asFile
             .getText('UTF-8').split('\n', -1).collect { line ->
         if (line.startsWith('blue.language:')) {
@@ -184,18 +243,32 @@ if (immutableDevelopmentContracts
                 throw new GradleException(
                         'Unexpected Language coordinate in the DEVELOPMENT lock template')
             }
-            replacedCoordinates++
+            replacedLanguageCoordinates++
             return match.group(1) + immutableStagedLanguageVersion + match.group(2)
+        }
+        if (line.startsWith('blue.bex:')) {
+            def match = line =~ /^(blue\.bex:[^:]+:)1\.1\.0-rc\.4(=.*)$/
+            if (!match.matches()) {
+                throw new GradleException(
+                        'Unexpected BEX coordinate in the DEVELOPMENT lock template')
+            }
+            replacedBexCoordinates++
+            return match.group(1) + immutableDevelopmentBexVersion + match.group(2)
         }
         line
     }.join('\n')
-    if (replacedCoordinates != developmentContractsArtifacts.size()) {
+    if (replacedLanguageCoordinates != developmentContractsArtifacts.size()) {
         throw new GradleException(
                 'The DEVELOPMENT lock template must contain exactly six Language coordinates')
     }
+    if (replacedBexCoordinates != selectedDevelopmentBexArtifacts.size()) {
+        throw new GradleException(
+                'The DEVELOPMENT lock template must contain exactly two BEX coordinates')
+    }
     selectedDependencyLockFile = layout.projectDirectory.file(
             '.gradle/immutable-development-locks/'
-                    + immutableStagedLanguageVersion + '.lockfile')
+                    + immutableStagedLanguageVersion + '--'
+                    + immutableDevelopmentBexVersion + '.lockfile')
     File generatedLock = selectedDependencyLockFile.asFile
     generatedLock.parentFile.mkdirs()
     if (!generatedLock.isFile()
@@ -251,10 +324,10 @@ dependencies {
         // owns the active pinned Language runtime and excludes that stale edge.
         exclude group: 'blue.language', module: 'blue-language-java'
     }
-    api('blue.bex:blue-bex-core:1.1.0-rc.4') {
+    api("blue.bex:blue-bex-core:${activeBexVersion}") {
         exclude group: 'blue.language'
     }
-    api('blue.bex:blue-bex-contracts:1.1.0-rc.4') {
+    api("blue.bex:blue-bex-contracts:${activeBexVersion}") {
         exclude group: 'blue.language'
     }
     implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
@@ -1378,6 +1451,248 @@ def inspectImmutableDevelopmentContractsRepository = {
     manifest
 }
 
+def inspectImmutableDevelopmentBexRepository = {
+    if (!immutableDevelopmentBex) {
+        throw new GradleException(
+                'Immutable DEVELOPMENT BEX verification requires a '
+                        + 'commit-bound -PblueBexVersion')
+    }
+    if (developmentBexSourceCommit == null
+            || !(developmentBexSourceCommit ==~ /[0-9a-f]{40}/)) {
+        throw new GradleException(
+                'Immutable DEVELOPMENT BEX verification requires '
+                        + '-PblueBexSourceCommit=<40 lowercase hex>')
+    }
+    File repository = file(developmentBexRepositoryValue).canonicalFile
+    File manifestFile = new File(repository, 'artifact-manifest.json')
+    File manifestChecksum = new File(
+            repository, 'artifact-manifest.json.sha256')
+    def failures = []
+    def regularFile = { File candidate ->
+        java.nio.file.Files.isRegularFile(candidate.toPath(),
+                java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                && !java.nio.file.Files.isSymbolicLink(candidate.toPath())
+    }
+    if (!repository.isDirectory()) {
+        failures << "DEVELOPMENT BEX repository is not a directory ${repository}"
+    }
+    if (repository.toPath().startsWith(rootDir.canonicalFile.toPath())) {
+        failures << 'DEVELOPMENT BEX repository must be outside the Coordination source tree'
+    }
+    if (!regularFile(manifestFile) || !regularFile(manifestChecksum)) {
+        failures << 'regular BEX artifact manifest and checksum companion are required'
+    }
+    if (!failures.empty) {
+        throw new GradleException(
+                'Immutable DEVELOPMENT BEX repository failed:\n - '
+                        + failures.join('\n - '))
+    }
+
+    String actualManifestIdentity = sha256Identity(manifestFile)
+    if (actualManifestIdentity != developmentBexManifestIdentity) {
+        failures << ('BEX manifest identity is ' + actualManifestIdentity
+                + '; expected ' + developmentBexManifestIdentity)
+    }
+    String expectedManifestChecksum = actualManifestIdentity.substring(
+            'sha256:'.length()) + '  artifact-manifest.json\n'
+    if (manifestChecksum.getText('UTF-8') != expectedManifestChecksum) {
+        failures << 'BEX artifact manifest checksum companion differs'
+    }
+
+    def manifest
+    try {
+        manifest = new groovy.json.JsonSlurper().parse(manifestFile)
+    } catch (RuntimeException exception) {
+        throw new GradleException(
+                'Cannot parse immutable DEVELOPMENT BEX manifest',
+                exception)
+    }
+    def requiredManifestFields = [
+            'schema',
+            'groupId',
+            'version',
+            'sourceCommit',
+            'bexSpecificationIdentity',
+            'bexFixturePackageIdentity',
+            'bexRegistryPackageIdentity',
+            'bexGasPackageIdentity',
+            'languageVersion',
+            'languageSourceCommit',
+            'languageRepositoryManifestIdentity',
+            'artifacts'
+    ] as Set
+    def actualManifestFields = manifest instanceof Map
+            ? manifest.keySet() as Set : [] as Set
+    if (!(manifest instanceof Map)
+            || actualManifestFields != requiredManifestFields) {
+        failures << ('BEX manifest fields differ; missing '
+                + (requiredManifestFields - actualManifestFields)
+                .toList().sort()
+                + ', unexpected '
+                + (actualManifestFields - requiredManifestFields)
+                .toList().sort())
+    }
+    if (manifest.schema != 'blue-bex-development-repository/1.0') {
+        failures << "unexpected BEX manifest schema ${manifest.schema}"
+    }
+    if (manifest.groupId != 'blue.bex') {
+        failures << "unexpected DEVELOPMENT BEX group ${manifest.groupId}"
+    }
+    if (manifest.version != immutableDevelopmentBexVersion) {
+        failures << "unexpected DEVELOPMENT BEX version ${manifest.version}"
+    }
+    if (manifest.sourceCommit != developmentBexSourceCommit
+            || !immutableDevelopmentBexVersion.endsWith(
+            '.' + developmentBexSourceCommit)) {
+        failures << 'DEVELOPMENT BEX version/source commitment differs'
+    }
+    [
+            'bexSpecificationIdentity',
+            'bexFixturePackageIdentity',
+            'bexRegistryPackageIdentity',
+            'bexGasPackageIdentity',
+            'languageRepositoryManifestIdentity'
+    ].each { field ->
+        if (!(manifest[field] instanceof String)
+                || !(manifest[field] ==~ /sha256:[0-9a-f]{64}/)) {
+            failures << "BEX manifest ${field} is not a SHA-256 identity"
+        }
+    }
+    if (manifest.languageVersion != immutableStagedLanguageVersion
+            || manifest.languageSourceCommit
+            != developmentContractsSourceCommit
+            || manifest.languageRepositoryManifestIdentity
+            != stagedContractsManifestIdentity) {
+        failures << 'DEVELOPMENT BEX manifest does not bind the selected Language/Contracts candidate'
+    }
+    if (!(manifest.artifacts instanceof List)) {
+        failures << 'BEX manifest artifacts must be a list'
+    }
+
+    def kinds = [
+            javadoc: '-javadoc.jar',
+            pom: '.pom',
+            runtime: '.jar',
+            sources: '-sources.jar'
+    ]
+    def expectedRecords = []
+    developmentBexArtifacts.toList().sort().each { artifact ->
+        kinds.keySet().toList().sort().each { kind ->
+            String base = 'blue/bex/' + artifact + '/'
+                    + immutableDevelopmentBexVersion + '/' + artifact + '-'
+                    + immutableDevelopmentBexVersion
+            expectedRecords << [
+                    coordinate: 'blue.bex:' + artifact + ':'
+                            + immutableDevelopmentBexVersion,
+                    kind: kind,
+                    path: base + kinds[kind]
+            ]
+        }
+    }
+    def records = manifest.artifacts instanceof List
+            ? manifest.artifacts : []
+    def recordKeys = records.collect { record ->
+        String.valueOf(record.coordinate) + ':'
+                + String.valueOf(record.kind)
+    }
+    if (recordKeys != recordKeys.toList().sort()) {
+        failures << 'BEX manifest artifact records are not canonically ordered'
+    }
+    if (recordKeys.toSet().size() != recordKeys.size()) {
+        failures << 'BEX manifest contains duplicate artifact records'
+    }
+    def recordsByKey = records.collectEntries { record ->
+        [(String.valueOf(record.coordinate) + ':'
+                + String.valueOf(record.kind)): record]
+    }
+    def expectedFiles = [
+            'artifact-manifest.json',
+            'artifact-manifest.json.sha256'
+    ] as Set
+    expectedRecords.each { expected ->
+        String lookup = expected.coordinate + ':' + expected.kind
+        def record = recordsByKey[lookup]
+        if (record == null) {
+            failures << "missing BEX manifest artifact record ${lookup}"
+            return
+        }
+        if (record.path != expected.path
+                || record.checksumPath != expected.path + '.sha256') {
+            failures << "noncanonical BEX manifest paths for ${lookup}"
+            return
+        }
+        expectedFiles.add(expected.path)
+        expectedFiles.add(expected.path + '.sha256')
+        File payload = new File(repository, expected.path).canonicalFile
+        File checksum = new File(
+                repository, expected.path + '.sha256').canonicalFile
+        if (!payload.toPath().startsWith(repository.toPath())
+                || !checksum.toPath().startsWith(repository.toPath())) {
+            failures << "BEX artifact path escapes repository for ${lookup}"
+            return
+        }
+        if (!regularFile(payload) || !regularFile(checksum)) {
+            failures << "missing regular BEX payload/checksum for ${lookup}"
+            return
+        }
+        String payloadIdentity = sha256Identity(payload)
+        if (record.sha256 != payloadIdentity) {
+            failures << "BEX payload identity differs for ${lookup}"
+        }
+        if (!(record.bytes instanceof Number)
+                || record.bytes.longValue() != payload.length()) {
+            failures << "BEX payload byte count differs for ${lookup}"
+        }
+        String expectedChecksum = payloadIdentity.substring(
+                'sha256:'.length()) + '  ' + payload.name + '\n'
+        if (checksum.getText('UTF-8') != expectedChecksum) {
+            failures << "BEX payload checksum companion differs for ${lookup}"
+        }
+    }
+    if (records.size() != expectedRecords.size()) {
+        failures << ('BEX manifest has ' + records.size()
+                + ' artifact records; expected ' + expectedRecords.size())
+    }
+
+    def actualFiles = [] as Set
+    def stream = java.nio.file.Files.walk(repository.toPath())
+    try {
+        stream.forEach { path ->
+            if (path == repository.toPath()) {
+                return
+            }
+            if (java.nio.file.Files.isSymbolicLink(path)) {
+                failures << ('symbolic link in DEVELOPMENT BEX repository '
+                        + repository.toPath().relativize(path))
+                return
+            }
+            if (java.nio.file.Files.isRegularFile(path,
+                    java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                actualFiles.add(repository.toPath().relativize(path)
+                        .toString().replace(File.separator, '/'))
+            }
+        }
+    } finally {
+        stream.close()
+    }
+    if (expectedFiles.size() != 26) {
+        failures << ('expected DEVELOPMENT BEX repository closure has '
+                + expectedFiles.size() + ' files; expected 26')
+    }
+    if (actualFiles != expectedFiles) {
+        failures << ('DEVELOPMENT BEX repository closure differs; missing '
+                + (expectedFiles - actualFiles).toList().sort()
+                + ', unexpected '
+                + (actualFiles - expectedFiles).toList().sort())
+    }
+    if (!failures.empty) {
+        throw new GradleException(
+                'Immutable DEVELOPMENT BEX repository failed:\n - '
+                        + failures.join('\n - '))
+    }
+    manifest
+}
+
 def immutableStagedContractsRepository = tasks.register(
         'verifyImmutableStagedContractsRepository') {
     group = 'verification'
@@ -1414,11 +1729,39 @@ def immutableDevelopmentContractsRepository = tasks.register(
     }
 }
 
+def immutableDevelopmentBexRepository = tasks.register(
+        'verifyImmutableDevelopmentBexRepository') {
+    group = 'verification'
+    description = 'Verifies the manifest-pinned, closed DEVELOPMENT BEX repository before dependency resolution.'
+    if (immutableDevelopmentBex) {
+        inputs.dir(file(developmentBexRepositoryValue))
+        inputs.property('blueBexManifestSha256',
+                developmentBexManifestIdentity)
+        inputs.property('blueBexSourceCommit',
+                developmentBexSourceCommit)
+        inputs.property('blueContractsManifestSha256',
+                stagedContractsManifestIdentity)
+        inputs.property('blueContractsSourceCommit',
+                developmentContractsSourceCommit)
+    }
+    doLast {
+        def manifest = inspectImmutableDevelopmentBexRepository()
+        logger.lifecycle(
+                'Immutable DEVELOPMENT BEX repository verified: {} from {}',
+                developmentBexManifestIdentity, manifest.sourceCommit)
+    }
+}
+
 if (immutableContractsRepository) {
     tasks.named('compileJava') {
-        dependsOn immutableDevelopmentContracts
-                ? immutableDevelopmentContractsRepository
-                : immutableStagedContractsRepository
+        if (immutableDevelopmentContracts) {
+            dependsOn immutableDevelopmentContractsRepository
+            if (immutableDevelopmentBex) {
+                dependsOn immutableDevelopmentBexRepository
+            }
+        } else {
+            dependsOn immutableStagedContractsRepository
+        }
     }
 }
 
@@ -1426,9 +1769,14 @@ tasks.register('dependencyPreflight') {
     group = 'verification'
     description = 'Resolves every release dependency from the selected isolated lane.'
     if (immutableContractsRepository) {
-        dependsOn immutableDevelopmentContracts
-                ? immutableDevelopmentContractsRepository
-                : immutableStagedContractsRepository
+        if (immutableDevelopmentContracts) {
+            dependsOn immutableDevelopmentContractsRepository
+            if (immutableDevelopmentBex) {
+                dependsOn immutableDevelopmentBexRepository
+            }
+        } else {
+            dependsOn immutableStagedContractsRepository
+        }
     }
     doLast {
         def repositoryDependency = dependencies.create(
@@ -1436,10 +1784,10 @@ tasks.register('dependencyPreflight') {
         repositoryDependency.exclude(
                 group: 'blue.language', module: 'blue-language-java')
         def bexCoreDependency = dependencies.create(
-                'blue.bex:blue-bex-core:1.1.0-rc.4')
+                "blue.bex:blue-bex-core:${activeBexVersion}")
         bexCoreDependency.exclude(group: 'blue.language')
         def bexContractsDependency = dependencies.create(
-                'blue.bex:blue-bex-contracts:1.1.0-rc.4')
+                "blue.bex:blue-bex-contracts:${activeBexVersion}")
         bexContractsDependency.exclude(group: 'blue.language')
         def releaseDependencies = configurations.detachedConfiguration(
                 dependencies.create(
@@ -1559,8 +1907,8 @@ tasks.register('verifyPublicationPom') {
                 'blue.language:blue-contracts-core': activeLanguageVersion,
                 'blue.language:blue-language-java': activeLanguageVersion,
                 'blue.repo:blue-repo-java': '3.0.0-rc.21',
-                'blue.bex:blue-bex-core': '1.1.0-rc.4',
-                'blue.bex:blue-bex-contracts': '1.1.0-rc.4',
+                'blue.bex:blue-bex-core': activeBexVersion,
+                'blue.bex:blue-bex-contracts': activeBexVersion,
                 'org.bouncycastle:bcprov-jdk18on': '1.78.1'
         ]
         expectedVersions.each { coordinate, expectedVersion ->
@@ -3657,8 +4005,13 @@ tasks.register('verifyDependencyModeIsolation') {
                 "'blueContractsRepository'",
                 "'blueContractsManifestSha256'",
                 "'blueContractsSourceCommit'",
+                "'blueBexVersion'",
+                "'blueBexRepository'",
+                "'blueBexManifestSha256'",
+                "'blueBexSourceCommit'",
                 "'artifact-manifest.json'",
-                "'artifact-manifest.json.sha256'"
+                "'artifact-manifest.json.sha256'",
+                "'blue-bex-development-repository/1.0'"
         ]
         if (requiredStagedEvidence.any { token ->
             !settings.contains(token) || !buildScript.contains(token)
@@ -3671,9 +4024,13 @@ tasks.register('verifyDependencyModeIsolation') {
                 || !buildScript.contains(
                 "name = 'immutableStagedContracts'")
                 || !buildScript.contains(
-                "name = 'immutableDevelopmentContracts'")) {
+                "name = 'immutableDevelopmentContracts'")
+                || !buildScript.contains(
+                "name = 'immutableDevelopmentBex'")
+                || !buildScript.contains("includeGroup 'blue.bex'")) {
             throw new GradleException(
-                    'The staged blue.language group is not repository-exclusive')
+                    'The staged blue.language and DEVELOPMENT blue.bex '
+                            + 'groups are not repository-exclusive')
         }
         def legacyProperties = [
                 'blueLanguageCompositePath',
@@ -3837,6 +4194,9 @@ def immutableDevelopmentContractsDependencies = tasks.register(
     if (immutableDevelopmentContracts) {
         dependsOn immutableDevelopmentContractsRepository,
                 tasks.named('compileJava')
+        if (immutableDevelopmentBex) {
+            dependsOn immutableDevelopmentBexRepository
+        }
     }
     doLast {
         if (!immutableDevelopmentContracts) {
@@ -3845,6 +4205,9 @@ def immutableDevelopmentContractsDependencies = tasks.register(
                             + '-PblueDependencyMode=immutable-development-contracts')
         }
         def manifest = inspectImmutableDevelopmentContractsRepository()
+        def bexManifest = immutableDevelopmentBex
+                ? inspectImmutableDevelopmentBexRepository()
+                : null
         def failures = []
         def components = configurations.runtimeClasspath
                 .incoming.resolutionResult.allComponents
@@ -3868,7 +4231,7 @@ def immutableDevelopmentContractsDependencies = tasks.register(
             [(component.id.group + ':' + component.id.module):
                      component.id.version]
         }
-        if (selectedBlue != immutableStagedBlueCoordinates) {
+        if (selectedBlue != immutableDevelopmentBlueCoordinates) {
             failures << ('selected Blue graph differs from exact pins: '
                     + selectedBlue)
         }
@@ -3881,7 +4244,7 @@ def immutableDevelopmentContractsDependencies = tasks.register(
                 .resolvedConfiguration.resolvedArtifacts.findAll { artifact ->
             artifact.moduleVersion.id.group == 'blue.language'
         }
-        def expectedLanguageCoordinates = immutableStagedBlueCoordinates.findAll {
+        def expectedLanguageCoordinates = immutableDevelopmentBlueCoordinates.findAll {
             coordinate, ignored -> coordinate.startsWith('blue.language:')
         }.collectEntries { coordinate, expectedVersion ->
             [(coordinate + ':' + expectedVersion):
@@ -3905,15 +4268,55 @@ def immutableDevelopmentContractsDependencies = tasks.register(
                     + 'the development manifest: '
                     + resolvedLanguageIdentities)
         }
+        if (bexManifest != null) {
+            def bexRuntimeIdentities = bexManifest.artifacts.findAll { record ->
+                record.kind == 'runtime'
+            }.collectEntries { record ->
+                [(record.coordinate): record.sha256]
+            }
+            def expectedBexCoordinates = immutableDevelopmentBlueCoordinates
+                    .findAll { coordinate, ignored ->
+                        coordinate.startsWith('blue.bex:')
+                    }.collectEntries { coordinate, expectedVersion ->
+                [(coordinate + ':' + expectedVersion):
+                         bexRuntimeIdentities[
+                                 coordinate + ':' + expectedVersion]]
+            }
+            def resolvedBexIdentities = configurations.runtimeClasspath
+                    .resolvedConfiguration.resolvedArtifacts
+                    .findAll { artifact ->
+                        artifact.moduleVersion.id.group == 'blue.bex'
+                                && selectedDevelopmentBexArtifacts.contains(
+                                artifact.name)
+                    }.collectEntries { artifact ->
+                String coordinate = artifact.moduleVersion.id.group + ':'
+                        + artifact.name + ':'
+                        + artifact.moduleVersion.id.version
+                [(coordinate): sha256Identity(artifact.file)]
+            }
+            if (expectedBexCoordinates.any { coordinate, identity ->
+                identity == null
+            }) {
+                failures << 'DEVELOPMENT BEX manifest does not bind every selected BEX runtime'
+            }
+            if (resolvedBexIdentities != expectedBexCoordinates) {
+                failures << ('resolved BEX artifact bytes differ from '
+                        + 'the DEVELOPMENT BEX manifest: '
+                        + resolvedBexIdentities)
+            }
+        }
         if (!failures.empty) {
             throw new GradleException(
                     'Immutable development Contracts dependency graph failed:\n - '
                             + failures.join('\n - '))
         }
         logger.lifecycle(
-                'Manifest-pinned DEVELOPMENT Contracts dependencies resolved without fallback: {} from {}',
+                'Manifest-pinned DEVELOPMENT Contracts/BEX dependencies resolved without fallback: {} from {}, BEX {}',
                 stagedContractsManifestIdentity,
-                developmentContractsSourceCommit)
+                developmentContractsSourceCommit,
+                immutableDevelopmentBex
+                        ? developmentBexManifestIdentity
+                        : publishedBexVersion)
     }
 }
 
@@ -3928,6 +4331,12 @@ tasks.register('writeDevelopmentResolvedDependencies') {
                 stagedContractsManifestIdentity)
         inputs.property('blueContractsSourceCommit',
                 developmentContractsSourceCommit)
+        if (immutableDevelopmentBex) {
+            inputs.property('blueBexManifestSha256',
+                    developmentBexManifestIdentity)
+            inputs.property('blueBexSourceCommit',
+                    developmentBexSourceCommit)
+        }
         inputs.files(configurations.runtimeClasspath)
     }
     outputs.file(developmentResolvedDependencies)
@@ -3943,6 +4352,9 @@ tasks.register('writeDevelopmentResolvedDependencies') {
                             + 'current JVM is ' + JavaVersion.current())
         }
         def manifest = inspectImmutableDevelopmentContractsRepository()
+        def bexManifest = immutableDevelopmentBex
+                ? inspectImmutableDevelopmentBexRepository()
+                : null
         def records = configurations.runtimeClasspath.resolvedConfiguration
                 .resolvedArtifacts.collect { artifact ->
             def module = artifact.moduleVersion.id
@@ -3979,6 +4391,34 @@ tasks.register('writeDevelopmentResolvedDependencies') {
                     'Resolved DEVELOPMENT Language runtime bytes differ '
                             + 'from the Contracts manifest: '
                             + resolvedLanguageIdentities)
+        }
+        if (bexManifest != null) {
+            def expectedBexIdentities = bexManifest.artifacts.findAll {
+                record ->
+                    record.kind == 'runtime'
+                            && selectedDevelopmentBexArtifacts.any { artifact ->
+                                record.coordinate.startsWith(
+                                        'blue.bex:' + artifact + ':')
+                            }
+            }.collectEntries { record ->
+                [(record.coordinate): record.sha256]
+            }
+            def resolvedBexIdentities = records.findAll { record ->
+                selectedDevelopmentBexArtifacts.any { artifact ->
+                    record.coordinate.startsWith(
+                            'blue.bex:' + artifact + ':')
+                }
+            }.collectEntries { record ->
+                [(record.coordinate): record.sha256]
+            }
+            if (expectedBexIdentities.size()
+                    != selectedDevelopmentBexArtifacts.size()
+                    || resolvedBexIdentities != expectedBexIdentities) {
+                throw new GradleException(
+                        'Resolved DEVELOPMENT BEX runtime bytes differ '
+                                + 'from the BEX manifest: '
+                                + resolvedBexIdentities)
+            }
         }
         File output = developmentResolvedDependencies.get().asFile
         output.parentFile.mkdirs()
