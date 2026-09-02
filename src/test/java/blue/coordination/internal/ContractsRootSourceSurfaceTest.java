@@ -114,6 +114,46 @@ final class ContractsRootSourceSurfaceTest {
         assertEquals(Set.of("timeline/root"), surface.timelineIds());
     }
 
+    @Test
+    void committedActivationRecomputesTheRootSourceSurface() {
+        // given
+        ManagedOccurrenceInventory prospective =
+                ManagedOccurrenceInventory.of(List.of(inactive(
+                        ROOT, "/orders/order-1", CHILD)));
+        Map<DocumentId, Set<String>> timelines = Map.of(
+                ROOT, Set.of("timeline/root"),
+                CHILD, Set.of("timeline/order-1"));
+        ContractsRootFeederWindow.LaneId lane =
+                ContractsRootFeederWindow.LaneId.publicRoots(List.of(ROOT));
+        ContractsRootSourceSurface.Surface before =
+                ContractsRootSourceSurface.resolve(
+                        lane,
+                        prospective,
+                        document -> timelines.getOrDefault(
+                                document, Set.of()));
+
+        // when
+        ManagedOccurrenceInventory committed =
+                prospective.replaceSources(
+                        List.of(ROOT),
+                        List.of(active(
+                                ROOT, "/orders/order-1", CHILD)))
+                        .inventory();
+        ContractsRootSourceSurface.Surface after =
+                ContractsRootSourceSurface.resolve(
+                        lane,
+                        committed,
+                        document -> timelines.getOrDefault(
+                                document, Set.of()));
+
+        // then
+        assertEquals(List.of(ROOT), before.managedDocuments());
+        assertEquals(Set.of("timeline/root"), before.timelineIds());
+        assertEquals(List.of(CHILD, ROOT), after.managedDocuments());
+        assertEquals(Set.of("timeline/root", "timeline/order-1"),
+                after.timelineIds());
+    }
+
     private static ManagedOccurrenceBinding active(
             DocumentId source,
             String path,
