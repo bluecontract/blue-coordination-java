@@ -3,7 +3,6 @@ package blue.coordination.processor.workflow;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.model.Node;
 import blue.language.snapshot.FrozenNode;
-import blue.language.model.Nodes;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -19,7 +18,7 @@ import java.util.Map;
  */
 final class ComputeProgramNormalizer {
     private static final String NORMALIZATION_VERSION =
-            "compute-program-v6|exact-definition-identity|canonical-bex-source";
+            "compute-program-v7|exact-definition-identity|canonical-bex-source|strict-statements";
 
     private final BexProcessingMetrics metrics;
 
@@ -227,10 +226,9 @@ final class ComputeProgramNormalizer {
     }
 
     private Node normalizeStatement(Node statement) {
-        if (NodeUtil.isEmpty(statement)
-                || Nodes.isEmptyPlaceholder(statement)) {
-            return new Node().properties("$return", new Node());
-        }
+        // Empty statement objects are invalid BEX source. Preserve authored
+        // content so compilation rejects it; never turn it into executable
+        // behavior as a compatibility rewrite.
         return canonicalStaticSource(statement);
     }
 
