@@ -462,6 +462,9 @@ final class ClosureSubscriptionInventoryTest {
                                         .EmbeddedDemand(
                                                 "fromChild",
                                                 "/child",
+                                                ClosureSubscriptionInventory
+                                                        .EmbeddedDemandMode
+                                                        .EXACT,
                                                 "embedded-contribution")));
 
         // when
@@ -477,6 +480,89 @@ final class ClosureSubscriptionInventoryTest {
         assertTrue(retained.statesFor(A).isEmpty(),
                 "processor-only demand must not require an external "
                         + "subscription row");
+    }
+
+    @Test
+    void embeddedDemandModesMatchDecodedPointerSegments() {
+        // given
+        ClosureSubscriptionInventory.EmbeddedDemand exact = demand(
+                "exact", "/orders/o1",
+                ClosureSubscriptionInventory.EmbeddedDemandMode.EXACT);
+        ClosureSubscriptionInventory.EmbeddedDemand all = demand(
+                "all", "/",
+                ClosureSubscriptionInventory.EmbeddedDemandMode
+                        .ALL_DESCENDANTS);
+        ClosureSubscriptionInventory.EmbeddedDemand direct = demand(
+                "direct", "/teams/a~1b",
+                ClosureSubscriptionInventory.EmbeddedDemandMode
+                        .COLLECTION_DIRECT);
+        ClosureSubscriptionInventory.EmbeddedDemand descendants = demand(
+                "descendants", "/teams/a~0b",
+                ClosureSubscriptionInventory.EmbeddedDemandMode
+                        .COLLECTION_DESCENDANTS);
+
+        // then
+        assertTrue(exact.matches("/orders/o1"));
+        assertFalse(exact.matches("/orders/o1/payment"));
+        assertTrue(all.matches("/orders/o1/payment"));
+        assertFalse(all.matches("/"));
+        assertTrue(direct.matches("/teams/a~1b/member"));
+        assertFalse(direct.matches("/teams/a/b/member"));
+        assertFalse(direct.matches("/teams/a~1b/member/nested"));
+        assertTrue(descendants.matches("/teams/a~0b/member/nested"));
+        assertFalse(descendants.matches("/teams/a~0b"));
+        assertFalse(descendants.matches("/teams/a~0b-old/member"));
+    }
+
+    @Test
+    void sameCollectionPathRetainsEveryModeRegardlessOfInsertionOrder() {
+        // given
+        ClosureSubscriptionInventory.EmbeddedDemand direct = demand(
+                "direct", "/orders",
+                ClosureSubscriptionInventory.EmbeddedDemandMode
+                        .COLLECTION_DIRECT);
+        ClosureSubscriptionInventory.EmbeddedDemand descendants = demand(
+                "descendants", "/orders",
+                ClosureSubscriptionInventory.EmbeddedDemandMode
+                        .COLLECTION_DESCENDANTS);
+
+        // when
+        ClosureSubscriptionInventory forward =
+                ClosureSubscriptionInventory.empty()
+                        .replaceEmbeddedDemands(
+                                A, List.of(direct, descendants));
+        ClosureSubscriptionInventory reverse =
+                ClosureSubscriptionInventory.empty()
+                        .replaceEmbeddedDemands(
+                                A, List.of(descendants, direct));
+
+        // then
+        assertEquals(2, forward.embeddedDemandsFor(A).size());
+        assertEquals(2, reverse.embeddedDemandsFor(A).size());
+        assertTrue(forward.hasEmbeddedDemand(
+                A, "/orders/o1/payment"));
+        assertTrue(reverse.hasEmbeddedDemand(
+                A, "/orders/o1/payment"));
+        assertFalse(forward.hasEmbeddedDemand(A, "/orders-old/o1"));
+        assertFalse(reverse.hasEmbeddedDemand(A, "/orders-old/o1"));
+    }
+
+    @Test
+    void duplicateEmbeddedDemandChannelKeyFailsClosed() {
+        // given
+        ClosureSubscriptionInventory.EmbeddedDemand exact = demand(
+                "same", "/orders/o1",
+                ClosureSubscriptionInventory.EmbeddedDemandMode.EXACT);
+        ClosureSubscriptionInventory.EmbeddedDemand collection = demand(
+                "same", "/orders",
+                ClosureSubscriptionInventory.EmbeddedDemandMode
+                        .COLLECTION_DIRECT);
+
+        // then
+        assertThrows(IllegalArgumentException.class,
+                () -> ClosureSubscriptionInventory.empty()
+                        .replaceEmbeddedDemands(
+                                A, List.of(exact, collection)));
     }
 
     @Test
@@ -922,6 +1008,17 @@ final class ClosureSubscriptionInventoryTest {
                 entry.timestampMicros(),
                 entry.globalSequence(),
                 entry.timelineSequence());
+    }
+
+    private static ClosureSubscriptionInventory.EmbeddedDemand demand(
+            String rawChannelKey,
+            String selectorPath,
+            ClosureSubscriptionInventory.EmbeddedDemandMode mode) {
+        return new ClosureSubscriptionInventory.EmbeddedDemand(
+                rawChannelKey,
+                selectorPath,
+                mode,
+                "embedded-contribution-" + rawChannelKey);
     }
 
     private record Fixture(
