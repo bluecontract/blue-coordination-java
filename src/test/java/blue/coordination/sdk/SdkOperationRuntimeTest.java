@@ -142,6 +142,37 @@ final class SdkOperationRuntimeTest {
     }
 
     @Test
+    void timelineAuditDistinguishesAbsentAndExactEmptyRequests() {
+        // given
+        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            Timeline timeline = blue.advanced().rawEngine()
+                    .registerTimeline("request-audit", "alice");
+
+            // when
+            TimelineEntry absent = blue.advanced().rawEngine().append(
+                    timeline,
+                    Operation.withoutRequest("touch", "ownerChannel"));
+            TimelineEntry empty = blue.advanced().rawEngine().append(
+                    timeline,
+                    Operation.yaml("touch", "ownerChannel", "{}"));
+            TimelineEntrySnapshot absentAudit = blue.advanced()
+                    .auditTimelineEntry(absent.blueId())
+                    .orElseThrow();
+            TimelineEntrySnapshot emptyAudit = blue.advanced()
+                    .auditTimelineEntry(empty.blueId())
+                    .orElseThrow();
+
+            // then
+            assertTrue(absentAudit.request().isEmpty());
+            assertTrue(emptyAudit.request().isPresent());
+            assertEquals(
+                    "5ajuwjHoLj33yG5t5UFsJtUb3vnRaJQEMPqSLz6VyoHK",
+                    emptyAudit.request().orElseThrow().blueId());
+            assertFalse(absentAudit.blueId().equals(emptyAudit.blueId()));
+        }
+    }
+
+    @Test
     void missingTargetAndOperationReturnPreciseRejectedResults() {
         // given
         try (BlueCoordination blue = BlueCoordination.inMemory()) {

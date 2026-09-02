@@ -705,6 +705,7 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                         : previous.blueId();
         return new TimelineEntrySnapshot(
                 ExactBlueValue.wrap(entry.exactEvent()),
+                entry.exactRequest().map(ExactBlueValue::wrap),
                 timelineHandle(entry),
                 Optional.ofNullable(previousBlueId),
                 entry.operation(),

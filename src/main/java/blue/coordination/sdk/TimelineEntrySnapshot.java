@@ -6,6 +6,7 @@ import java.util.Optional;
 /** Immutable read-only audit view of one whole retained Timeline Entry. */
 public record TimelineEntrySnapshot(
         ExactBlueValue exact,
+        Optional<ExactBlueValue> request,
         TimelineHandle timeline,
         Optional<String> previousEntryBlueId,
         String operation,
@@ -16,6 +17,7 @@ public record TimelineEntrySnapshot(
     /** Validates exact entry evidence while retaining an immutable predecessor. */
     public TimelineEntrySnapshot {
         exact = Objects.requireNonNull(exact, "exact");
+        request = Objects.requireNonNull(request, "request");
         timeline = Objects.requireNonNull(timeline, "timeline");
         previousEntryBlueId = Objects.requireNonNull(
                 previousEntryBlueId, "previousEntryBlueId");
