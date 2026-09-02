@@ -486,7 +486,7 @@ final class EmbeddedOnlyLayoutBuilder {
             for (String childPath : rule.explicitAbsolutePaths()) {
                 FrozenNode selected = resolveThroughReferences(
                         exactRoot.frozen(), JsonPointer.split(childPath));
-                if (selected != null && !selected.isEmptyNode()) {
+                if (selected != null) {
                     result.add(new ConcreteBoundary(
                             rule.scopePath(),
                             childPath,

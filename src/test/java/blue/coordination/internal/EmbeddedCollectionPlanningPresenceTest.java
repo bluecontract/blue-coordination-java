@@ -125,6 +125,42 @@ final class EmbeddedCollectionPlanningPresenceTest {
         }
     }
 
+    @Test
+    void presentEmptyDirectChildIsValidatedInsteadOfTreatedAsAbsent() {
+        // given
+        EngineMetrics metrics = new EngineMetrics();
+        WholeObjectStore objects = new WholeObjectStore(metrics);
+        ExactValue emptyChild = objects.put(
+                emptyObject(), "present-empty-direct-child");
+        ExactValue initial = objects.put(
+                rootWithDirectChild(new Node().properties(
+                        "documentId", new Node().value("child"))),
+                "initial-direct-child-root");
+        ExactValue presentEmpty = objects.put(
+                rootWithDirectChild(new Node().blueId(
+                        emptyChild.blueId())),
+                "present-empty-direct-child-root");
+
+        try (BlueRuntime runtime = BlueRuntime.create(objects, metrics)) {
+            EmbeddedOnlyLayoutBuilder layouts =
+                    new EmbeddedOnlyLayoutBuilder(runtime, objects, metrics);
+            EmbeddedOnlyLayout initialLayout = layouts.build(initial);
+
+            // when
+            RuntimeException failure = assertThrows(
+                    RuntimeException.class,
+                    () -> layouts.rebuild(presentEmpty, initialLayout));
+
+            // then
+            assertTrue(failure.getMessage().contains(
+                            "Process Embedded materialization changed Root identity")
+                            || failure.getMessage().contains(
+                            "Every managed Root and Process Embedded document"),
+                    "present exact empty content must reach semantic or "
+                            + "managed-document validation");
+        }
+    }
+
     private static ExactValue root(String documentId, Node collection) {
         Node root = new Node()
                 .properties("documentId", new Node().value(documentId))
@@ -146,5 +182,22 @@ final class EmbeddedCollectionPlanningPresenceTest {
 
     private static Node emptyObject() {
         return new Node().properties(Collections.emptyMap());
+    }
+
+    private static ExactValue rootWithDirectChild(Node child) {
+        return ExactValue.verified(new Node()
+                .properties(
+                        "documentId", new Node().value("parent"),
+                        "child", child)
+                .contracts(new Node().properties(
+                        "embedded",
+                        new Node()
+                                .type(new Node().blueId(
+                                        RuntimeBlueIds.PROCESS_EMBEDDED))
+                                .properties(
+                                        "paths",
+                                        new Node().items(List.of(
+                                                new Node().value(
+                                                        "/child")))))));
     }
 }
