@@ -12,6 +12,7 @@ import blue.language.processor.closure.ResultingDocument;
 import blue.language.processor.closure.SubscriptionDelta;
 import blue.language.processor.closure.SubscriptionState;
 import blue.language.processor.registry.RuntimeBlueIds;
+import blue.language.processor.registry.RuntimeTypeKey;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -24,6 +25,8 @@ import java.util.TreeSet;
 
 /** Complete durable Contracts subscription state, independent of legacy rows. */
 final class ClosureSubscriptionInventory {
+    private static final String EMBEDDED_COLLECTION_EVENT_CHANNEL_BLUE_ID =
+            registeredRuntimeBlueId("EMBEDDED_COLLECTION_EVENT_CHANNEL");
     private static final Comparator<Slot> SLOT_ORDER = Comparator
             .comparing(Slot::documentId, EmbeddingBinding.TEXT_ORDER)
             .thenComparing(Slot::rawChannelKey, EmbeddingBinding.TEXT_ORDER);
@@ -517,8 +520,8 @@ final class ClosureSubscriptionInventory {
                 : projected.effectiveRootContracts()) {
             boolean embeddedNode = RuntimeBlueIds.EMBEDDED_NODE_CHANNEL.equals(
                     contract.effectiveTypeBlueId());
-            boolean embeddedCollection = contract.dispatchFields()
-                    .containsKey("collectionPath");
+            boolean embeddedCollection =
+                    isEmbeddedCollectionDemandContract(contract);
             if (!embeddedNode && !embeddedCollection) {
                 continue;
             }
@@ -570,6 +573,24 @@ final class ClosureSubscriptionInventory {
                     channel.effectiveRuntimeContributionBlueId()));
         }
         return List.copyOf(result);
+    }
+
+    static boolean isEmbeddedCollectionDemandContract(
+            EffectiveContractSnapshot contract) {
+        EffectiveContractSnapshot selected = Objects.requireNonNull(
+                contract, "contract");
+        return EMBEDDED_COLLECTION_EVENT_CHANNEL_BLUE_ID != null
+                && EMBEDDED_COLLECTION_EVENT_CHANNEL_BLUE_ID.equals(
+                        selected.effectiveTypeBlueId())
+                && selected.dispatchFields().containsKey("collectionPath");
+    }
+
+    private static String registeredRuntimeBlueId(String key) {
+        try {
+            return RuntimeBlueIds.blueId(RuntimeTypeKey.valueOf(key));
+        } catch (IllegalArgumentException absentFromBoundRuntime) {
+            return null;
+        }
     }
 
     private static PersistentOrderedMap<DocumentId,
