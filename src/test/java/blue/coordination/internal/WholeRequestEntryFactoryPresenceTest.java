@@ -1,12 +1,19 @@
 package blue.coordination.internal;
 
+import blue.coordination.api.ExactValue;
 import blue.coordination.api.Operation;
 import blue.coordination.api.Timeline;
 import blue.coordination.api.TimelineEntry;
 import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.model.Node;
 import blue.language.model.NodePathEditor;
+import blue.language.processor.ExecutionEvidenceUnavailableException;
+import blue.language.provider.NodeProvider;
+import blue.language.provider.NodeProviderResult;
+import blue.language.snapshot.FrozenNode;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -104,6 +111,126 @@ final class WholeRequestEntryFactoryPresenceTest {
 
             // then
             assertTrue(failure.getMessage().contains("Mandate resolver"));
+        }
+    }
+
+    @Test
+    void exactEmptyRequestBodyHasInlineAndVerifiedReferenceParity() {
+        // given
+        EngineMetrics sourceMetrics = new EngineMetrics();
+        WholeObjectStore sourceObjects = new WholeObjectStore(sourceMetrics);
+        Timeline timeline = new Timeline("request-reference", "alice");
+
+        try (BlueRuntime sourceRuntime = BlueRuntime.create(
+                sourceObjects, sourceMetrics)) {
+            WholeRequestEntryFactory sourceEntries =
+                    new WholeRequestEntryFactory(
+                            sourceRuntime, sourceObjects, sourceMetrics);
+            TimelineEntry source = sourceEntries.create(
+                    timeline,
+                    null,
+                    Operation.yaml("touch", "ownerChannel", "{}"),
+                    1_800_000_000_000_000L,
+                    1L,
+                    1L);
+            ExactValue exactRequest = source.exactRequest().orElseThrow();
+
+            EngineMetrics targetMetrics = new EngineMetrics();
+            WholeObjectStore targetObjects = new WholeObjectStore(
+                    targetMetrics);
+            NodeProvider provider = blueId -> exactRequest.blueId().equals(
+                    blueId)
+                    ? List.of(exactRequest.copyNode())
+                    : List.of();
+            try (BlueRuntime targetRuntime = BlueRuntime.create(
+                    targetObjects, targetMetrics, provider)) {
+                WholeRequestEntryFactory targetEntries =
+                        new WholeRequestEntryFactory(
+                                targetRuntime,
+                                targetObjects,
+                                targetMetrics);
+
+                // when
+                TimelineEntry referenced = targetEntries.createExact(
+                        timeline, source.exactEvent(), 1L, 1L);
+                ExactValue inline = targetEntries.retainExactRequest(
+                        FrozenNode.fromNode(exactRequest.copyNode()));
+
+                // then
+                assertEquals(EMPTY_OBJECT_BLUE_ID,
+                        referenced.exactRequest().orElseThrow().blueId());
+                assertEquals(EMPTY_OBJECT_BLUE_ID,
+                        inline.blueId());
+                assertTrue(referenced.exactRequest().orElseThrow()
+                        .sameExactValue(inline));
+            }
+        }
+    }
+
+    @Test
+    void unavailableReferencedRequestRemainsIncomplete() {
+        // given
+        EngineMetrics sourceMetrics = new EngineMetrics();
+        WholeObjectStore sourceObjects = new WholeObjectStore(sourceMetrics);
+        Timeline timeline = new Timeline("request-unavailable", "alice");
+
+        try (BlueRuntime sourceRuntime = BlueRuntime.create(
+                sourceObjects, sourceMetrics)) {
+            WholeRequestEntryFactory sourceEntries =
+                    new WholeRequestEntryFactory(
+                            sourceRuntime, sourceObjects, sourceMetrics);
+            TimelineEntry source = sourceEntries.create(
+                    timeline,
+                    null,
+                    Operation.yaml(
+                            "touch", "ownerChannel", "kind: provider-only"),
+                    1_800_000_000_000_000L,
+                    1L,
+                    1L);
+            String requestBlueId = source.exactRequest()
+                    .orElseThrow().blueId();
+            NodeProvider unavailable = new NodeProvider() {
+                @Override
+                public List<Node> fetchByBlueId(String blueId) {
+                    return List.of();
+                }
+
+                @Override
+                public NodeProviderResult fetchResultByBlueId(String blueId) {
+                    return requestBlueId.equals(blueId)
+                            ? NodeProviderResult.unavailable(
+                                    "request provider offline")
+                            : NodeProviderResult.notFound();
+                }
+            };
+            EngineMetrics targetMetrics = new EngineMetrics();
+            WholeObjectStore targetObjects = new WholeObjectStore(
+                    targetMetrics);
+            try (BlueRuntime targetRuntime = BlueRuntime.create(
+                    targetObjects, targetMetrics, unavailable)) {
+                WholeRequestEntryFactory targetEntries =
+                        new WholeRequestEntryFactory(
+                                targetRuntime,
+                                targetObjects,
+                                targetMetrics);
+
+                // when
+                RuntimeException failure = assertThrows(
+                        RuntimeException.class,
+                        () -> targetEntries.createExact(
+                                timeline, source.exactEvent(), 1L, 1L));
+
+                // then
+                ExecutionEvidenceUnavailableException incomplete =
+                        org.junit.jupiter.api.Assertions.assertInstanceOf(
+                                ExecutionEvidenceUnavailableException.class,
+                                failure);
+                assertEquals(List.of(requestBlueId),
+                        incomplete.requiredExactBlueIds());
+                assertTrue(incomplete.getMessage().contains(
+                        "request provider offline"));
+                assertFalse(targetObjects.contains(requestBlueId));
+            }
         }
     }
 }

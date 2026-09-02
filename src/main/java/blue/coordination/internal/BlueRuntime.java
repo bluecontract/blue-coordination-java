@@ -5,6 +5,8 @@ import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationProcessors;
 import blue.language.api.BlueCachePolicy;
 import blue.language.api.BlueCacheStats;
+import blue.language.api.BlueOperationOutcome;
+import blue.language.api.BlueOperationResult;
 import blue.language.api.NodeProviderOutcome;
 import blue.language.codec.BlueFormat;
 import blue.language.conformance.ConformanceEngine;
@@ -18,8 +20,10 @@ import blue.language.processor.ContractProcessorRegistryBuilder;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.DocumentProcessor;
 import blue.language.processor.EffectiveFragmentationCatalog;
+import blue.language.processor.ExecutionEvidenceUnavailableException;
 import blue.language.processor.ExternalDeliveryPlan;
 import blue.language.processor.ExternalOrderKey;
+import blue.language.processor.InvalidExecutionEvidenceException;
 import blue.language.processor.PlatformProcessInvocation;
 import blue.language.processor.PlatformProcessingResult;
 import blue.language.processor.SubscriptionDelta;
@@ -186,9 +190,20 @@ final class BlueRuntime implements AutoCloseable {
         ensureOpen();
         FrozenNode reference = FrozenNode.fromNode(new Node().blueId(
                 Objects.requireNonNull(blueId, "blueId")));
-        FrozenNode materialized = contracts.runtimeAccess()
-                .materializeVerifiedExactReference(reference)
-                .requireEstablished();
+        BlueOperationResult<FrozenNode> result = contracts.runtimeAccess()
+                .materializeVerifiedExactReference(reference);
+        BlueOperationOutcome outcome = result.outcome();
+        String reason = result.reason().orElse(
+                "Exact provider content could not be established for "
+                        + blueId);
+        if (outcome == BlueOperationOutcome.INCOMPLETE) {
+            throw new ExecutionEvidenceUnavailableException(
+                    reason, result.outstandingBlueIds());
+        }
+        if (outcome != BlueOperationOutcome.ESTABLISHED) {
+            throw new InvalidExecutionEvidenceException(reason);
+        }
+        FrozenNode materialized = result.requireEstablished();
         return contracts.runtimeAccess().resolveTransient(
                 materialized.toNode());
     }

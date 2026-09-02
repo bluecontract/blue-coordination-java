@@ -132,9 +132,7 @@ final class WholeRequestEntryFactory {
         String channel = (String) root.at("/message/channel").getValue();
         FrozenNode requestNode = root.at("/message/request");
         Optional<ExactValue> request = Optional.ofNullable(requestNode)
-                .map(node -> node.isReferenceOnly()
-                        ? objects.require(node.getReferenceBlueId())
-                        : objects.put(node, "timeline-request"));
+                .map(this::retainExactRequest);
         ExactValue retainedEvent = objects.put(
                 supplied, "timeline-entry");
         ExternalOrderKey order = ExternalOrderKey.of(List.of(
@@ -153,6 +151,34 @@ final class WholeRequestEntryFactory {
                 timestamp,
                 globalSequence,
                 timelineSequence);
+    }
+
+    /**
+     * Retains one exact request body from an accepted external envelope.
+     *
+     * <p>A pure reference is presence evidence, not an absent request. Resolve
+     * it through the same verified provider graph used by the frozen runtime;
+     * unavailable evidence therefore remains incomplete instead of becoming
+     * an unknown local object or an empty value.</p>
+     */
+    ExactValue retainExactRequest(FrozenNode requestNode) {
+        if (!requestNode.isReferenceOnly()) {
+            return objects.put(requestNode, "timeline-request");
+        }
+        String requestBlueId = requestNode.getReferenceBlueId();
+        if (objects.contains(requestBlueId)) {
+            ExactValue retained = objects.require(requestBlueId);
+            if (!retained.frozen().isReferenceOnly()) {
+                return retained;
+            }
+        }
+        ResolvedSnapshot resolved = runtime.loadExactSnapshot(requestBlueId);
+        ExactValue retained = objects.put(resolved, "timeline-request");
+        if (!requestBlueId.equals(retained.blueId())) {
+            throw new IllegalStateException(
+                    "Resolved Timeline Entry request changed exact identity");
+        }
+        return retained;
     }
 
     public ExactValue parseExactRequest(String requestYaml) {
