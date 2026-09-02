@@ -5,6 +5,8 @@ import blue.coordination.api.Operation;
 import blue.coordination.api.Timeline;
 import blue.coordination.api.TimelineEntry;
 import blue.language.model.Node;
+import blue.language.processor.EffectiveContractSnapshot;
+import blue.language.processor.EffectiveContractSnapshotConstants;
 import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.ProcessorStatus;
 import blue.language.processor.closure.ChannelOccurrence;
@@ -15,6 +17,7 @@ import blue.language.processor.closure.ManagedDocumentSnapshot;
 import blue.language.processor.closure.ResultingDocument;
 import blue.language.processor.closure.SubscriptionDelta;
 import blue.language.processor.closure.SubscriptionState;
+import blue.language.processor.registry.RuntimeBlueIds;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -563,6 +566,25 @@ final class ClosureSubscriptionInventoryTest {
                 () -> ClosureSubscriptionInventory.empty()
                         .replaceEmbeddedDemands(
                                 A, List.of(exact, collection)));
+    }
+
+    @Test
+    void processorChannelCannotSpoofCollectionDemandWithDispatchField() {
+        // given
+        EffectiveContractSnapshot unrelatedProcessor =
+                EffectiveContractSnapshot.builder("/", "spoof")
+                        .sourceContribution("spoof-contribution")
+                        .effectiveTypeBlueId(
+                                RuntimeBlueIds.DOCUMENT_UPDATE_CHANNEL)
+                        .role(EffectiveContractSnapshotConstants.Role
+                                .PROCESSOR_CHANNEL)
+                        .dispatchField("collectionPath", "/orders")
+                        .dispatchField("includeDescendants", true)
+                        .build();
+
+        // then
+        assertFalse(ClosureSubscriptionInventory
+                .isEmbeddedCollectionDemandContract(unrelatedProcessor));
     }
 
     @Test
