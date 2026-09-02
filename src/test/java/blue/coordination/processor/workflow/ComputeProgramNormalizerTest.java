@@ -11,6 +11,8 @@ import org.junit.jupiter.api.Test;
 import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -34,6 +36,35 @@ class ComputeProgramNormalizerTest {
         assertTrue(Nodes.isEmptyPlaceholder(statement.toNode()));
         assertFalse(hasReturn(statement));
         assertCompilerRejects(program);
+    }
+
+    @Test
+    void shouldProjectEmptyOptionalDefinitionWithoutCollapsingStepIdentity() {
+        FrozenNode absent = FrozenNode.fromResolvedNode(
+                new Node().properties("expr", new Node().value("value")));
+        FrozenNode empty = FrozenNode.fromResolvedNode(
+                new Node()
+                        .properties("expr", new Node().value("value"))
+                        .properties(
+                                "definition",
+                                new Node().properties(
+                                        Collections.<String, Node>emptyMap())));
+        ComputeProgramNormalizer normalizer = new ComputeProgramNormalizer();
+
+        assertNotEquals(absent.blueId(), empty.blueId());
+        assertNotEquals(
+                ComputeProgramPlanCache.Key.from(
+                        absent,
+                        null,
+                        null,
+                        normalizer.normalizationVersion()),
+                ComputeProgramPlanCache.Key.from(
+                        empty,
+                        null,
+                        null,
+                        normalizer.normalizationVersion()));
+        assertNull(new ComputeDefinitionResolver().resolve(empty, null));
+        assertNull(normalizer.program(empty).property("definition"));
     }
 
     private static FrozenNode normalizeStatement(Node statement) {
