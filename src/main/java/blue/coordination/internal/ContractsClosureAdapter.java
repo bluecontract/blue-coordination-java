@@ -74,6 +74,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * Package-internal Contracts 1.0 execution and atomic-publication boundary.
@@ -272,8 +273,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     topology.componentIndex(),
                     topology.occurrenceInventory(),
                     selection,
-                    row -> hasTypedIncomingDemand(
-                            topology.closureSubscriptions(), row),
+                    topology.closureSubscriptions()::embeddedDemandsFor,
                     runtime.metrics());
             LinkedHashSet<DocumentId> selectedMembers = new LinkedHashSet<>();
             selectedCohorts.forEach(cohort -> selectedMembers.addAll(
@@ -847,7 +847,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 componentIndex,
                 occurrenceInventory,
                 selection,
-                ignored -> false,
+                ignored -> List.of(),
                 null);
     }
 
@@ -860,7 +860,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 componentIndex,
                 occurrenceInventory,
                 selection,
-                ignored -> false,
+                ignored -> List.of(),
                 metrics);
     }
 
@@ -868,8 +868,9 @@ final class ContractsClosureAdapter implements AutoCloseable {
             ProcessEmbeddedComponentIndex componentIndex,
             ManagedOccurrenceInventory occurrenceInventory,
             OperationRouteIndex.FrozenDirectDeliverySelection selection,
-            java.util.function.Predicate<ManagedOccurrenceBinding>
-                    incomingDemand,
+            Function<DocumentId,
+                    List<ClosureSubscriptionInventory.EmbeddedDemand>>
+                    incomingDemands,
             EngineMetrics metrics) {
         ProcessEmbeddedComponentIndex index = Objects.requireNonNull(
                 componentIndex, "componentIndex");
@@ -888,7 +889,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 continue;
             }
             ConnectedSelection connected = connectedSelection(
-                    inventory, incomingDemand, directTarget);
+                    inventory, incomingDemands, directTarget);
             connected = mergeIntersecting(groups, connected);
             groups.add(connected);
             occurrenceRowsExamined = Math.addExact(
@@ -922,9 +923,13 @@ final class ContractsClosureAdapter implements AutoCloseable {
 
     private static ConnectedSelection connectedSelection(
             ManagedOccurrenceInventory inventory,
-            java.util.function.Predicate<ManagedOccurrenceBinding>
-                    incomingDemand,
+            Function<DocumentId,
+                    List<ClosureSubscriptionInventory.EmbeddedDemand>>
+                    incomingDemands,
             DocumentId start) {
+        Function<DocumentId,
+                List<ClosureSubscriptionInventory.EmbeddedDemand>> demands =
+                Objects.requireNonNull(incomingDemands, "incomingDemands");
         TreeMap<DocumentId, Boolean> discovered = new TreeMap<>(
                 EmbeddingBinding.DOCUMENT_ORDER);
         Deque<DocumentId> pending = new ArrayDeque<>();
@@ -933,37 +938,55 @@ final class ContractsClosureAdapter implements AutoCloseable {
         Map<String, ManagedOccurrenceBinding> occurrences =
                 new LinkedHashMap<>();
         long rowsExamined = 0L;
-        while (!pending.isEmpty()) {
-            DocumentId current = pending.removeFirst();
-            for (ManagedOccurrenceBinding row : inventory.rowsFrom(current)) {
-                if (occurrences.putIfAbsent(
-                        row.occurrenceIdentity(), row) != null) {
-                    continue;
-                }
-                rowsExamined = Math.addExact(rowsExamined, 1L);
-                DocumentId target = coordinationId(row.targetDocumentId());
-                if (discovered.putIfAbsent(target, Boolean.TRUE) == null) {
-                    pending.addLast(target);
+        while (true) {
+            while (!pending.isEmpty()) {
+                DocumentId current = pending.removeFirst();
+                for (ManagedOccurrenceBinding row
+                        : inventory.activeRowsFrom(current)) {
+                    if (occurrences.putIfAbsent(
+                            row.occurrenceIdentity(), row) != null) {
+                        continue;
+                    }
+                    rowsExamined = Math.addExact(rowsExamined, 1L);
+                    DocumentId target = coordinationId(
+                            row.targetDocumentId());
+                    if (discovered.putIfAbsent(
+                            target, Boolean.TRUE) == null) {
+                        pending.addLast(target);
+                    }
                 }
             }
-            for (ManagedOccurrenceBinding row
-                    : inventory.rowsTouching(current)) {
-                DocumentId target = coordinationId(row.targetDocumentId());
-                if (!target.equals(current)) {
+
+            TreeMap<DocumentId, Boolean> reverseReachable =
+                    reverseReachableThroughActiveOccurrences(
+                            inventory, discovered.keySet());
+            boolean addedSource = false;
+            for (DocumentId source : reverseReachable.keySet()) {
+                if (discovered.containsKey(source)) {
                     continue;
                 }
-                DocumentId source = coordinationId(row.sourceDocumentId());
-                if (source.equals(current)
-                        || !row.active()
-                        || !incomingDemand.test(row)
-                        || occurrences.putIfAbsent(
-                                row.occurrenceIdentity(), row) != null) {
-                    continue;
-                }
-                rowsExamined = Math.addExact(rowsExamined, 1L);
-                if (discovered.putIfAbsent(source, Boolean.TRUE) == null) {
+                List<ClosureSubscriptionInventory.EmbeddedDemand>
+                        sourceDemands = Objects.requireNonNull(
+                                demands.apply(source),
+                                "embedded demands for " + source);
+                for (ClosureSubscriptionInventory.EmbeddedDemand demand
+                        : sourceDemands) {
+                    if (!demandReachesSelectedMember(
+                            inventory,
+                            source,
+                            demand,
+                            discovered.keySet(),
+                            reverseReachable.keySet())) {
+                        continue;
+                    }
+                    discovered.put(source, Boolean.TRUE);
                     pending.addLast(source);
+                    addedSource = true;
+                    break;
                 }
+            }
+            if (!addedSource) {
+                break;
             }
         }
         ArrayList<ManagedOccurrenceBinding> canonicalOccurrences =
@@ -989,15 +1012,77 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 Objects.requireNonNull(subscriptions, "subscriptions");
         return connectedSelection(
                 inventory,
-                row -> hasTypedIncomingDemand(selectedSubscriptions, row),
+                selectedSubscriptions::embeddedDemandsFor,
                 start);
     }
 
-    private static boolean hasTypedIncomingDemand(
-            ClosureSubscriptionInventory subscriptions,
-            ManagedOccurrenceBinding row) {
-        DocumentId source = coordinationId(row.sourceDocumentId());
-        return subscriptions.hasEmbeddedDemand(source, row.sourcePath());
+    private static TreeMap<DocumentId, Boolean>
+            reverseReachableThroughActiveOccurrences(
+                    ManagedOccurrenceInventory inventory,
+                    Collection<DocumentId> selectedMembers) {
+        TreeMap<DocumentId, Boolean> result = new TreeMap<>(
+                EmbeddingBinding.DOCUMENT_ORDER);
+        Deque<DocumentId> pending = new ArrayDeque<>();
+        for (DocumentId selected : selectedMembers) {
+            result.put(selected, Boolean.TRUE);
+            pending.addLast(selected);
+        }
+        while (!pending.isEmpty()) {
+            DocumentId current = pending.removeFirst();
+            for (ManagedOccurrenceBinding row
+                    : inventory.rowsTouching(current)) {
+                if (!row.active()
+                        || !coordinationId(row.targetDocumentId())
+                                .equals(current)) {
+                    continue;
+                }
+                DocumentId source = coordinationId(row.sourceDocumentId());
+                if (result.putIfAbsent(source, Boolean.TRUE) == null) {
+                    pending.addLast(source);
+                }
+            }
+        }
+        return result;
+    }
+
+    private static boolean demandReachesSelectedMember(
+            ManagedOccurrenceInventory inventory,
+            DocumentId source,
+            ClosureSubscriptionInventory.EmbeddedDemand demand,
+            Set<DocumentId> selectedMembers,
+            Set<DocumentId> reverseReachable) {
+        Deque<DemandTraversal> pending = new ArrayDeque<>();
+        Set<DemandTraversal> visited = new LinkedHashSet<>();
+        DemandTraversal initial = new DemandTraversal(source, 0);
+        pending.addLast(initial);
+        visited.add(initial);
+        while (!pending.isEmpty()) {
+            DemandTraversal current = pending.removeFirst();
+            for (ManagedOccurrenceBinding row
+                    : inventory.activeRowsFrom(current.documentId())) {
+                DocumentId target = coordinationId(row.targetDocumentId());
+                if (!reverseReachable.contains(target)) {
+                    continue;
+                }
+                int nextCursor = demand.advance(
+                        current.cursor(), JsonPointer.split(row.sourcePath()));
+                if (nextCursor < 0) {
+                    continue;
+                }
+                if (selectedMembers.contains(target)
+                        && demand.accepts(nextCursor)) {
+                    return true;
+                }
+                if (demand.canContinue(nextCursor)) {
+                    DemandTraversal next = new DemandTraversal(
+                            target, nextCursor);
+                    if (visited.add(next)) {
+                        pending.addLast(next);
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     private static ConnectedSelection mergeIntersecting(
@@ -3706,6 +3791,16 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 throw new IllegalArgumentException(
                         "Connected selection must retain members and a "
                                 + "non-negative row count");
+            }
+        }
+    }
+
+    private record DemandTraversal(DocumentId documentId, int cursor) {
+        private DemandTraversal {
+            documentId = Objects.requireNonNull(documentId, "documentId");
+            if (cursor < 0) {
+                throw new IllegalArgumentException(
+                        "demand cursor must be non-negative");
             }
         }
     }
