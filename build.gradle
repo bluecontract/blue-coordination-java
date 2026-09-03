@@ -2149,6 +2149,10 @@ def verifyReleaseVersionPolicy = tasks.register(
     }
 }
 
+def coordinationSpecificationPath =
+        'specifications/blue-coordination-specification-1.0-candidate.md'
+def coordinationSpecificationFile = file(coordinationSpecificationPath)
+
 tasks.register('verifyReleaseMetadata') {
     group = 'verification'
     description = 'Validates version, legal metadata, docs, and release artifacts.'
@@ -2162,6 +2166,7 @@ tasks.register('verifyReleaseMetadata') {
                 'README.md',
                 'START-HERE.md',
                 'docs/README.md',
+                coordinationSpecificationPath,
                 'docs/guides/developer-guide.md',
                 'CHANGELOG.md',
                 'CONTRIBUTING.md',
@@ -2327,6 +2332,7 @@ tasks.register('verifyDocumentation') {
     inputs.files(fileTree('docs') { include '**/*.md' },
             'README.md', 'START-HERE.md', 'CHANGELOG.md',
             'CONTRIBUTING.md', 'SECURITY.md',
+            coordinationSpecificationFile,
             'docs/releases/3.0.0-rc.1-evidence.json',
             'docs/releases/round11-verification.schema.json',
             'docs/releases/round12-verification.schema.json',
@@ -2338,6 +2344,13 @@ tasks.register('verifyDocumentation') {
             productionSources)
     doLast {
         def failures = []
+        File documentationIndex = file('docs/README.md')
+        String specificationLink = '../' + coordinationSpecificationPath
+        if (!documentationIndex.isFile()
+                || !documentationIndex.getText('UTF-8').contains(
+                specificationLink)) {
+            failures << 'Documentation index does not link the canonical Coordination specification'
+        }
         File developerGuide = file('docs/guides/developer-guide.md')
         def requiredGuideSections = [
                 '## Mental model',
@@ -3895,7 +3908,8 @@ tasks.register('verifySourceArchiveHygiene') {
     group = 'verification'
     description = 'Protects the self-contained source-release boundary.'
     dependsOn verifyReleaseVersionPolicy
-    inputs.files('.cz.toml', '.gitattributes', 'build.gradle')
+    inputs.files('.cz.toml', '.gitattributes', 'build.gradle',
+            coordinationSpecificationFile)
     String configuredArchiveVersion = version.toString()
     doLast {
         String versionSource = file('.cz.toml').getText('UTF-8')
@@ -3911,6 +3925,16 @@ tasks.register('verifySourceArchiveHygiene') {
                 && developmentProjectVersion == null) {
             throw new GradleException(
                     'Configured source archive version does not match .cz.toml')
+        }
+        def specificationPath = coordinationSpecificationFile.toPath()
+        if (!java.nio.file.Files.isRegularFile(
+                specificationPath,
+                java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                || java.nio.file.Files.isSymbolicLink(specificationPath)
+                || java.nio.file.Files.size(specificationPath) == 0L) {
+            throw new GradleException(
+                    'Canonical Coordination specification must be a non-empty regular file: '
+                            + coordinationSpecificationPath)
         }
         String attributes = file('.gitattributes').getText('UTF-8')
         [
@@ -3935,7 +3959,8 @@ def sourceArchiveIncludes = [
         'CHANGELOG.md', 'CONTRIBUTING.md', 'LICENSE', 'README.md',
         'SECURITY.md', 'START-HERE.md', 'build.gradle', 'docs/**',
         'gradle/**', 'gradle.properties', 'gradlew',
-        'gradlew.bat', 'scripts/**', 'settings.gradle', 'smoke-tests/**', 'src/**',
+        'gradlew.bat', 'scripts/**', 'settings.gradle', 'smoke-tests/**',
+        'specifications/**', 'src/**',
         'stabilization/cyclic-topology-rc3-final/**'
 ]
 def sourceArchiveExcludes = [
@@ -4188,6 +4213,7 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
     dependsOn sourceArchiveChecksum,
             verifyExtractedSourceArchiveLanePolicyLogic
     inputs.file(coordinationSourceArchive.flatMap { it.archiveFile })
+    inputs.file(coordinationSpecificationFile)
     inputs.property('dependencyMode', dependencyMode)
     inputs.property('testJavaVersion', providers.gradleProperty(
             'testJavaVersion').getOrElse('17'))
@@ -4243,6 +4269,23 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
             throw new GradleException(
                     'Extracted source archive is missing .cz.toml')
         }
+        File extractedSpecification = new File(
+                extracted, coordinationSpecificationPath)
+        def extractedSpecificationPath = extractedSpecification.toPath()
+        if (!java.nio.file.Files.isRegularFile(
+                extractedSpecificationPath,
+                java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                || java.nio.file.Files.isSymbolicLink(
+                extractedSpecificationPath)) {
+            throw new GradleException(
+                    'Extracted source archive is missing the canonical Coordination specification')
+        }
+        if (java.nio.file.Files.mismatch(
+                coordinationSpecificationFile.toPath(),
+                extractedSpecificationPath) != -1L) {
+            throw new GradleException(
+                    'Extracted source archive Coordination specification differs from the canonical source file')
+        }
         def forbidden = fileTree(extracted) {
             include '**/*.zip', '**/__MACOSX/**', '**/._*',
                     '**/.DS_Store', '**/build/**'
@@ -4286,7 +4329,7 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
                 '-PtestJavaVersion=' + providers.gradleProperty(
                         'testJavaVersion').getOrElse('17'))
         extractedSourceArchiveProjectProperties.get().each { propertyName, value ->
-            command.add("-P${propertyName}=${value}")
+            command.add("-P${propertyName}=${value}".toString())
         }
         Process process = new ProcessBuilder(command)
                 .directory(extracted).redirectErrorStream(true).start()

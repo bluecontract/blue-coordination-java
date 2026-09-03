@@ -198,7 +198,11 @@ The source distribution and checksum can be built independently with:
 The extracted archive resolves the same selected isolated graph. In the
 published lane that is Maven Central; in staged or development mode it is the
 same exact manifest-pinned external repository set supplied to the parent
-build. It never reaches an adjacent checkout or Maven Local.
+build. It never reaches an adjacent checkout or Maven Local. The distribution
+also contains the canonical Coordination specification candidate under
+`specifications/`; extracted verification requires that copy to be a regular
+file and byte-identical to the canonical source file before the isolated build
+starts.
 
 For a downstream development handoff after the rc.5 gates pass on a clean
 committed source tree, export a separate

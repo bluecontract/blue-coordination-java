@@ -58,6 +58,7 @@ Executable public-SDK examples live in:
 
 | Document | Scope |
 | --- | --- |
+| [Coordination specification candidate](../specifications/blue-coordination-specification-1.0-candidate.md) | Canonical Coordination profile semantics distributed with this source revision. |
 | [Public API](reference/public-api.md) | Rc.5 SDK owners, catalogs, calls, immutable results, snapshots, and advanced boundary. |
 | [SDK migration and ownership](reference/sdk-migration-and-ownership.md) | Package stability, low-level-to-SDK migration, and semantic ownership. |
 | [Contracts authored admission](reference/contracts-authored-admission.md) | High-level authored closure compilation versus the expert low-level admission seam. |
