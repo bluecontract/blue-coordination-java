@@ -202,6 +202,14 @@ routing prevents fallback for `blue.language`; Maven Local and composite
 substitution remain forbidden. This is the required invocation shape, not a
 substitute for the published-artifact release lane.
 
+A coordinated unpublished candidate instead uses
+`immutable-development-contracts` with exact commit-bound Language, BEX, and
+Coordination versions plus both immutable repository manifest identities. The
+complete `releaseCheck` replays those same pins inside the extracted source
+archive; it never substitutes the published Language or BEX versions. This is
+candidate-verification evidence only. `verifyRcReadiness`, `stageRelease`, and
+JReleaser remain restricted to the published rc.5 lane.
+
 Once those gates genuinely pass on a clean committed checkout, use the
 [immutable Coordination handoff](docs/development/immutable-staged-coordination.md)
 to export and consumer-test an invocation-owned development Maven stage. A staged

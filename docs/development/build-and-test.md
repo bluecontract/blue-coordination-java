@@ -24,10 +24,12 @@ same exclusion in its published POM, and locks the exact graph in
 `gradle/published-artifact.lockfile`.
 
 The `immutable-staged-contracts` and `immutable-development-contracts` lanes
-remain available only for non-published upstream handoffs. They are not
-release evidence once rc.23 is published. The development lane can bind
-separate, immutable Language/Contracts and BEX repositories; it never obtains
-either dependency from a sibling checkout or Maven Local.
+remain available only for non-published upstream handoffs. They are not public
+release authority once rc.23 is published. The development lane is valid
+candidate-verification evidence when every input and the Coordination version
+are commit-bound. It can bind separate, immutable Language/Contracts and BEX
+repositories; it never obtains either dependency from a sibling checkout or
+Maven Local.
 
 The staged lane accepts only the non-overwriting repository exported by the
 Contracts release gate. Its absolute path and exact manifest identity are both
@@ -114,6 +116,33 @@ The suites remain separate because each protects a different boundary:
 | `consumerTest` | Compilation and execution against the built production JAR | `check` and `releaseCheck` |
 | `scenarioTest` | Slow complete-lifecycle, convergence, and scale scenarios | `releaseCheck` |
 
+For a clean commit-bound Coordination candidate against commit-bound Language
+and BEX artifacts, run the same complete gate with the exact development lane:
+
+```bash
+./gradlew --no-daemon --no-build-cache clean releaseCheck \
+  dependencyPreflight \
+  -PtestJavaVersion=17 \
+  -PblueDependencyMode=immutable-development-contracts \
+  -PblueContractsVersion=3.1.0-dev.<language-commit> \
+  -PblueContractsRepository=/absolute/path/to/contracts-development-repository \
+  -PblueContractsManifestSha256=sha256:<64-lowercase-hex> \
+  -PblueContractsSourceCommit=<language-commit> \
+  -PblueBexVersion=1.1.0-dev.<bex-commit> \
+  -PblueBexRepository=/absolute/path/to/bex-development-repository \
+  -PblueBexManifestSha256=sha256:<64-lowercase-hex> \
+  -PblueBexSourceCommit=<bex-commit> \
+  -PblueDevelopmentVersion=3.0.0-dev.<coordination-commit>
+```
+
+Repeat with `-PtestJavaVersion=21`. Generate the canonical resolved-dependency
+report once under JDK 17 with `writeDevelopmentResolvedDependencies`. The
+extracted-source smoke receives the same version, repositories, manifest
+identities, and source commits and therefore cannot fall back to the published
+Language or BEX artifacts. This validates a development candidate; it does not
+change either upstream manifest's `releaseReadinessClaimed: false`, authorize
+`stageRelease`, or create public-release evidence.
+
 The standard development gate is:
 
 ```bash
@@ -166,8 +195,10 @@ The source distribution and checksum can be built independently with:
 ./gradlew verifyExtractedSourceArchive
 ```
 
-The extracted archive resolves the same Maven Central graph and never reaches
-an adjacent checkout or Maven Local.
+The extracted archive resolves the same selected isolated graph. In the
+published lane that is Maven Central; in staged or development mode it is the
+same exact manifest-pinned external repository set supplied to the parent
+build. It never reaches an adjacent checkout or Maven Local.
 
 For a downstream development handoff after the rc.5 gates pass on a clean
 committed source tree, export a separate
