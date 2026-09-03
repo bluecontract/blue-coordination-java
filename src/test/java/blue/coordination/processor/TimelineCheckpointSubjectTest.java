@@ -19,7 +19,43 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class TimelineCheckpointSubjectTest {
 
     @Test
-    void absentAndEmptyRequestsKeepDistinctCheckpointIdentity() {
+    void absentAndEmptyRequestsKeepDistinctSubjectsAtSameTimelinePosition() {
+        // given
+        Node absentEntry = timelineEntry(10, false);
+        Node emptyEntry = timelineEntry(10, true);
+        Node absentSubject = TimelineProviderSupport.timelineOrderSubject(
+                CoordinationEventNodes.timelineEntry(absentEntry));
+        Node emptySubject = TimelineProviderSupport.timelineOrderSubject(
+                CoordinationEventNodes.timelineEntry(emptyEntry));
+
+        // when
+        boolean newerAtSamePosition =
+                TimelineProviderSupport.isNewerOrSameTimelineEvent(
+                ChannelCheckpointContext.of(
+                        "/",
+                        "timeline",
+                        emptyEntry,
+                        TimelineProviderSupport.eventId(emptyEntry),
+                        emptySubject,
+                        absentSubject,
+                        TimelineProviderSupport.eventId(absentEntry),
+                        Collections.emptyMap()));
+
+        // then
+        assertNotEquals(
+                TimelineProviderSupport.eventId(absentEntry),
+                TimelineProviderSupport.eventId(emptyEntry));
+        assertEquals(TimelineProviderSupport.eventId(absentEntry),
+                absentSubject.getAsText("/entryBlueId"));
+        assertEquals(TimelineProviderSupport.eventId(emptyEntry),
+                emptySubject.getAsText("/entryBlueId"));
+        assertFalse(newerAtSamePosition,
+                "exact identity remains distinct while direct Timeline "
+                        + "newness independently requires a greater timestamp");
+    }
+
+    @Test
+    void increasingEmptyRequestRemainsNewerThanAbsentRequest() {
         // given
         Node absentEntry = timelineEntry(10, false);
         Node emptyEntry = timelineEntry(11, true);
@@ -41,15 +77,7 @@ class TimelineCheckpointSubjectTest {
                         Collections.emptyMap()));
 
         // then
-        assertNotEquals(
-                TimelineProviderSupport.eventId(absentEntry),
-                TimelineProviderSupport.eventId(emptyEntry));
-        assertEquals(TimelineProviderSupport.eventId(absentEntry),
-                absentSubject.getAsText("/entryBlueId"));
-        assertEquals(TimelineProviderSupport.eventId(emptyEntry),
-                emptySubject.getAsText("/entryBlueId"));
-        assertTrue(newer,
-                "the exact empty request must not be deduplicated as absent");
+        assertTrue(newer);
     }
 
     @Test
