@@ -4676,6 +4676,125 @@ tasks.register('productionizationCheck') {
             'verifyTestArchitecture', extractedSourceArchive
 }
 
+def coordinationCoverageManifest = file(
+        'gradle/verification/coordination-empty-object-coverage.json')
+
+tasks.register('verifyCoordinationConformanceCoverage') {
+    group = 'verification'
+    description = 'Verifies exact executable coverage for Coordination empty-object and collection vectors.'
+    inputs.file(coordinationCoverageManifest)
+    inputs.files(
+            fileTree('src/test/java') { include '**/*Test.java' },
+            fileTree('src/integrationTest/java') { include '**/*Test.java' },
+            fileTree('src/consumerTest/java') { include '**/*Test.java' },
+            fileTree('src/scenarioTest/java') { include '**/*Test.java' })
+    doLast {
+        Set<String> expectedIds = [
+                'COORD-EMPTY-01',
+                'COORD-EMPTY-02',
+                'COORD-EMPTY-03',
+                'COORD-EMPTY-04',
+                'COORD-EMPTY-05',
+                'COORD-COLLECTION-01',
+                'COORD-COLLECTION-02',
+                'COORD-COLLECTION-03',
+                'COORD-COLLECTION-04',
+                'COORD-COLLECTION-05',
+                'COORD-COLLECTION-06'
+        ] as Set
+        Map<String, String> sourceRoots = [
+                test           : 'src/test/java',
+                integrationTest: 'src/integrationTest/java',
+                consumerTest   : 'src/consumerTest/java',
+                scenarioTest   : 'src/scenarioTest/java'
+        ]
+        Map manifest = new groovy.json.JsonSlurper()
+                .parse(coordinationCoverageManifest) as Map
+        Set<String> expectedTopLevel = [
+                'schema', 'contractsParityEvidence', 'cases'
+        ] as Set
+        if ((manifest.keySet() as Set) != expectedTopLevel) {
+            throw new GradleException(
+                    'Coordination coverage manifest fields must be exactly '
+                            + expectedTopLevel.sort())
+        }
+        if (manifest.schema
+                != 'blue-coordination-conformance-coverage/1.0') {
+            throw new GradleException(
+                    'Unexpected Coordination coverage manifest schema: '
+                            + manifest.schema)
+        }
+        if (manifest.contractsParityEvidence
+                != 'C-EVT-COLLECTION-07') {
+            throw new GradleException(
+                    'Coordination collection routing must bind Contracts '
+                            + 'C-EVT-COLLECTION-07 parity evidence')
+        }
+        if (!(manifest.cases instanceof List)) {
+            throw new GradleException(
+                    'Coordination coverage cases must be a list')
+        }
+        List<Map> cases = manifest.cases as List<Map>
+        Set<String> actualIds = cases.collect { String.valueOf(it.id) } as Set
+        if (cases.size() != actualIds.size()) {
+            throw new GradleException(
+                    'Coordination coverage manifest contains duplicate IDs')
+        }
+        if (actualIds != expectedIds) {
+            throw new GradleException(
+                    'Coordination coverage IDs differ; missing '
+                            + (expectedIds - actualIds).toList().sort()
+                            + ', unexpected '
+                            + (actualIds - expectedIds).toList().sort())
+        }
+        Set<String> expectedCaseFields = [
+                'id', 'sourceSet', 'className', 'method', 'status'
+        ] as Set
+        cases.each { Map entry ->
+            if ((entry.keySet() as Set) != expectedCaseFields) {
+                throw new GradleException(
+                        "Coverage entry ${entry.id} fields must be exactly "
+                                + expectedCaseFields.sort())
+            }
+            if (entry.status != 'active') {
+                throw new GradleException(
+                        "Coverage entry ${entry.id} is not active")
+            }
+            String root = sourceRoots[String.valueOf(entry.sourceSet)]
+            if (root == null) {
+                throw new GradleException(
+                        "Coverage entry ${entry.id} has unknown sourceSet "
+                                + entry.sourceSet)
+            }
+            String className = String.valueOf(entry.className)
+            String method = String.valueOf(entry.method)
+            File source = file(root + '/' + className.replace('.', '/')
+                    + '.java')
+            if (!source.isFile()) {
+                throw new GradleException(
+                        "Coverage entry ${entry.id} class source is missing: "
+                                + source)
+            }
+            String text = source.getText('UTF-8')
+            String simpleClass = className.substring(
+                    className.lastIndexOf('.') + 1)
+            def classMatcher = text =~ ('(?m)^\\s*(?:public\\s+)?(?:final\\s+)?class\\s+'
+                    + java.util.regex.Pattern.quote(simpleClass) + '\\b')
+            if (classMatcher.count != 1) {
+                throw new GradleException(
+                        "Coverage entry ${entry.id} class declaration is not exact")
+            }
+            def methodMatcher = text =~ ('(?m)^\\s*(?:public\\s+)?void\\s+'
+                    + java.util.regex.Pattern.quote(method) + '\\s*\\(')
+            if (methodMatcher.count != 1) {
+                throw new GradleException(
+                        "Coverage entry ${entry.id} method is missing or ambiguous: "
+                                + className + '#' + method)
+            }
+        }
+    }
+}
+
 tasks.register('releaseCheck') {
     group = 'verification'
     description = 'Runs the production, API, artifact, and publication gates.'
@@ -4685,7 +4804,8 @@ tasks.register('releaseCheck') {
             'verifyDependencyModeIsolation', 'verifyReleaseMetadata',
             'verifyDocumentation', 'verifySourceArchiveHygiene', 'test',
             'integrationTest', 'consumerTest', 'scenarioTest',
-            'verifyTestArchitecture', extractedSourceArchive
+            'verifyTestArchitecture', 'verifyCoordinationConformanceCoverage',
+            extractedSourceArchive
 }
 
 def rcReadiness = tasks.register('verifyRcReadiness') {

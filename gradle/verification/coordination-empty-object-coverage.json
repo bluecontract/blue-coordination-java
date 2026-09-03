@@ -1,0 +1,83 @@
+{
+  "schema": "blue-coordination-conformance-coverage/1.0",
+  "contractsParityEvidence": "C-EVT-COLLECTION-07",
+  "cases": [
+    {
+      "id": "COORD-EMPTY-01",
+      "sourceSet": "test",
+      "className": "blue.coordination.internal.WholeRequestEntryFactoryPresenceTest",
+      "method": "absentAndExactEmptyRequestsRemainDifferentExactEntries",
+      "status": "active"
+    },
+    {
+      "id": "COORD-EMPTY-02",
+      "sourceSet": "test",
+      "className": "blue.coordination.internal.WholeRequestEntryFactoryPresenceTest",
+      "method": "exactEmptyMandateConstraintIsPresentAndFailsClosed",
+      "status": "active"
+    },
+    {
+      "id": "COORD-EMPTY-03",
+      "sourceSet": "test",
+      "className": "blue.coordination.processor.TimelineCheckpointSubjectTest",
+      "method": "absentAndEmptyRequestsKeepDistinctCheckpointIdentity",
+      "status": "active"
+    },
+    {
+      "id": "COORD-EMPTY-04",
+      "sourceSet": "test",
+      "className": "blue.coordination.internal.WholeRequestEntryFactoryPresenceTest",
+      "method": "coordEmpty04And05KeepBexNullAndEmptyRequestDistinct",
+      "status": "active"
+    },
+    {
+      "id": "COORD-EMPTY-05",
+      "sourceSet": "test",
+      "className": "blue.coordination.internal.WholeRequestEntryFactoryPresenceTest",
+      "method": "coordEmpty04And05KeepBexNullAndEmptyRequestDistinct",
+      "status": "active"
+    },
+    {
+      "id": "COORD-COLLECTION-01",
+      "sourceSet": "test",
+      "className": "blue.coordination.internal.EmbeddedCollectionPlanningPresenceTest",
+      "method": "coordCollection01And02PreserveAbsentVersusEmptyAtSameLineage",
+      "status": "active"
+    },
+    {
+      "id": "COORD-COLLECTION-02",
+      "sourceSet": "test",
+      "className": "blue.coordination.internal.EmbeddedCollectionPlanningPresenceTest",
+      "method": "coordCollection01And02PreserveAbsentVersusEmptyAtSameLineage",
+      "status": "active"
+    },
+    {
+      "id": "COORD-COLLECTION-03",
+      "sourceSet": "test",
+      "className": "blue.coordination.internal.EmbeddedCollectionPlanningPresenceTest",
+      "method": "unavailableCollectionEvidenceBlocksInsteadOfPlanningZero",
+      "status": "active"
+    },
+    {
+      "id": "COORD-COLLECTION-04",
+      "sourceSet": "test",
+      "className": "blue.coordination.internal.ContractsClosureAdapterTest",
+      "method": "inactiveProspectiveRowCannotSelectOrExpandAClosure",
+      "status": "active"
+    },
+    {
+      "id": "COORD-COLLECTION-05",
+      "sourceSet": "test",
+      "className": "blue.coordination.internal.RoutingSurfaceInternalChannelTest",
+      "method": "coordCollection05RuntimeCatalogAuthenticatesMixedChannelRoles",
+      "status": "active"
+    },
+    {
+      "id": "COORD-COLLECTION-06",
+      "sourceSet": "test",
+      "className": "blue.coordination.sdk.SdkEmbeddedCollectionChannelAcceptanceTest",
+      "method": "coordCollection06RoutesDirectMembersAndDescendantsEndToEnd",
+      "status": "active"
+    }
+  ]
+}
