@@ -1,5 +1,12 @@
 package blue.coordination.internal;
 
+import blue.bex.gas.BexGasMeter;
+import blue.bex.gas.BexGasSchedule;
+import blue.bex.output.BexAdmittedValue;
+import blue.bex.output.BexOutputAdmission;
+import blue.bex.output.BexOutputKind;
+import blue.bex.value.BexValue;
+import blue.bex.value.BexValues;
 import blue.coordination.api.ExactValue;
 import blue.coordination.api.Operation;
 import blue.coordination.api.Timeline;
@@ -14,6 +21,7 @@ import blue.language.snapshot.FrozenNode;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -83,7 +91,7 @@ final class WholeRequestEntryFactoryPresenceTest {
     }
 
     @Test
-    void exactEmptyMandateConstraintIsPresentAndFailsClosed() {
+    void feederAcceptsAbsentMandateAndRejectsPresentEmptyWithoutResolver() {
         // given
         EngineMetrics metrics = new EngineMetrics();
         WholeObjectStore objects = new WholeObjectStore(metrics);
@@ -99,6 +107,12 @@ final class WholeRequestEntryFactoryPresenceTest {
                     1_800_000_000_000_000L,
                     1L,
                     1L);
+
+            assertDoesNotThrow(() -> blue.coordination.processor
+                    .TimelineProviderSupport.validateExactEnvelope(
+                            entry.exactEvent().copyNode()),
+                    "an omitted onBehalfOf field requires no authority "
+                            + "resolution");
             Node constrained = entry.exactEvent().copyNode()
                     .properties("onBehalfOf", new Node());
 
@@ -232,5 +246,79 @@ final class WholeRequestEntryFactoryPresenceTest {
                 assertFalse(targetObjects.contains(requestBlueId));
             }
         }
+    }
+
+    @Test
+    void coordEmpty04And05KeepBexNullAndEmptyRequestDistinct() {
+        // given
+        EngineMetrics metrics = new EngineMetrics();
+        WholeObjectStore objects = new WholeObjectStore(metrics);
+        Timeline timeline = new Timeline("bex-request-presence", "alice");
+
+        try (BlueRuntime runtime = BlueRuntime.create(objects, metrics)) {
+            WholeRequestEntryFactory entries = new WholeRequestEntryFactory(
+                    runtime, objects, metrics);
+            TimelineEntry template = entries.create(
+                    timeline,
+                    null,
+                    Operation.withoutRequest("touch", "ownerChannel"),
+                    1_800_000_000_000_000L,
+                    1L,
+                    1L);
+            BexValue event = BexValues.transientFrozen(
+                    template.exactEvent().frozen());
+            BexOutputAdmission admission = new BexOutputAdmission(
+                    new BexGasMeter(
+                            BexGasSchedule.defaults(), 1_000_000L),
+                    null);
+
+            // when
+            TimelineEntry absent = entries.createExact(
+                    timeline,
+                    exact(admission.admit(
+                            BexValues.pointerSet(
+                                    event,
+                                    List.of("message", "request"),
+                                    BexValues.nullValue(),
+                                    "set"),
+                            BexOutputKind.ROOT_RESULT)),
+                    2L,
+                    2L);
+            TimelineEntry empty = entries.createExact(
+                    timeline,
+                    exact(admission.admit(
+                            BexValues.pointerSet(
+                                    event,
+                                    List.of("message", "request"),
+                                    BexValues.fromSimple(Map.of()),
+                                    "set"),
+                            BexOutputKind.ROOT_RESULT)),
+                    3L,
+                    3L);
+
+            // then
+            assertTrue(absent.exactRequest().isEmpty());
+            assertNull(NodePathEditor.getOrNull(
+                    absent.exactEvent().copyNode(), "/message/request"));
+            assertEquals(template.blueId(), absent.blueId(),
+                    "BEX request:null must converge with request omission");
+            assertTrue(empty.exactRequest().isPresent());
+            assertEquals(EMPTY_OBJECT_BLUE_ID,
+                    empty.exactRequest().orElseThrow().blueId());
+            assertNotEquals(absent.blueId(), empty.blueId());
+            assertFalse(absent.exactEvent().sameExactValue(
+                    empty.exactEvent()));
+            assertDoesNotThrow(() -> blue.coordination.processor
+                    .TimelineProviderSupport.validateExactEnvelope(
+                            absent.exactEvent().copyNode()));
+            assertDoesNotThrow(() -> blue.coordination.processor
+                    .TimelineProviderSupport.validateExactEnvelope(
+                            empty.exactEvent().copyNode()));
+        }
+    }
+
+    private static ExactValue exact(BexAdmittedValue admitted) {
+        return ExactValue.verified(
+                admitted.nodeBlueId(), admitted.node());
     }
 }
