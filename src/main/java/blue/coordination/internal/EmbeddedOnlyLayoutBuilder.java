@@ -199,17 +199,28 @@ final class EmbeddedOnlyLayoutBuilder {
             return build(exactRoot);
         }
         metrics.increment("layout.plansReused");
-        List<ConcreteBoundary> concreteBoundaries = managedChildRevision
-                && previous.plan().hasCollections()
-                ? concreteFromOwnedCatalog(exactRoot, previous)
-                : previous.plan()
-                .hasCollections()
-                ? concreteFromCurrentCatalog(exactRoot)
-                : concreteFromFixedDeclarations(exactRoot, previous.plan(),
-                managedChildRevision ? previous.directOccurrences() : List.of());
+        if (previous.plan().hasCollections()) {
+            CollectionRefresh refresh = managedChildRevision
+                    ? collectionRefreshFromOwnedCatalog(exactRoot, previous)
+                    : collectionRefreshFromCurrentCatalog(exactRoot);
+            EmbeddedLayoutPlan refreshedPlan = previous.plan()
+                    .withCollectionAudits(
+                            refresh.catalog(),
+                            path -> exactScopeAt(exactRoot, path));
+            return buildWithPlan(
+                    exactRoot, refreshedPlan, refresh.concreteBoundaries());
+        }
+        List<ConcreteBoundary> concreteBoundaries =
+                concreteFromFixedDeclarations(
+                        exactRoot,
+                        previous.plan(),
+                        managedChildRevision
+                                ? previous.directOccurrences()
+                                : List.of());
         return buildWithPlan(exactRoot, previous.plan(), concreteBoundaries);
     }
-    private List<ConcreteBoundary> concreteFromOwnedCatalog(
+
+    private CollectionRefresh collectionRefreshFromOwnedCatalog(
             ExactValue exactRoot,
             EmbeddedOnlyLayout previous) {
         return metrics.timed("layout.refreshOwnedCatalog", () -> {
@@ -230,10 +241,11 @@ final class EmbeddedOnlyLayoutBuilder {
                     runtime.effectiveFragmentationCatalog(
                             validationRoot.blueId());
             metrics.increment("layout.catalogCompilations");
-            return concreteFromCatalog(catalog);
+            return new CollectionRefresh(catalog, concreteFromCatalog(catalog));
         });
     }
-    private List<ConcreteBoundary> concreteFromCurrentCatalog(
+
+    private CollectionRefresh collectionRefreshFromCurrentCatalog(
             ExactValue exactRoot) {
         return metrics.timed("layout.refreshCollectionCatalog", () -> {
             metrics.increment("layout.referenceOnlyCatalogInputs");
@@ -241,7 +253,7 @@ final class EmbeddedOnlyLayoutBuilder {
                     runtime.effectiveFragmentationCatalog(exactRoot.blueId());
             metrics.increment("layout.catalogCompilations");
             metrics.increment("layout.collectionCatalogRefreshes");
-            return concreteFromCatalog(catalog);
+            return new CollectionRefresh(catalog, concreteFromCatalog(catalog));
         });
     }
     public ExactValue restoreManagedChildren(
@@ -708,6 +720,17 @@ final class EmbeddedOnlyLayoutBuilder {
         result.sort(Comparator.comparing(
                 EmbeddedOccurrence::scopePath, EmbeddingBinding.TEXT_ORDER));
         return List.copyOf(result);
+    }
+
+    private record CollectionRefresh(
+            EffectiveFragmentationCatalog catalog,
+            List<ConcreteBoundary> concreteBoundaries) {
+        private CollectionRefresh {
+            catalog = Objects.requireNonNull(catalog, "catalog");
+            concreteBoundaries = Collections.unmodifiableList(
+                    new ArrayList<>(Objects.requireNonNull(
+                            concreteBoundaries, "concreteBoundaries")));
+        }
     }
 
     private record ConcreteBoundary(

@@ -71,8 +71,6 @@ final class EmbeddedLayoutPlan {
                     "Fragmentation catalog belongs to another Root");
         }
         Map<String, ScopeRule> rules = new LinkedHashMap<>();
-        List<EmbeddedCollectionPlanningAudit> collectionAudits =
-                new ArrayList<>();
         List<Map.Entry<String, EmbeddedScopePlanView>> scopePlans =
                 catalog.scopePlansByScope().entrySet().stream()
                         .sorted(Map.Entry.comparingByKey(
@@ -91,27 +89,6 @@ final class EmbeddedLayoutPlan {
                     .toList();
             rules.put(scopePath, new ScopeRule(
                     scopePath, explicit, collections));
-            List<String> declarations = new ArrayList<>(
-                    view.collectionDeclarationPaths());
-            declarations.sort(EmbeddingBinding.TEXT_ORDER);
-            for (String declaration : declarations) {
-                String absolutePath = PointerUtils.resolvePointer(
-                        scopePath, declaration);
-                List<String> memberKeys = view
-                        .collectionMemberKeysByDeclaration()
-                        .get(declaration);
-                if (memberKeys == null) {
-                    throw new IllegalStateException(
-                            "Authenticated collection plan has no member "
-                                    + "projection for " + absolutePath);
-                }
-                boolean present = exactScopeAt.apply(absolutePath) != null;
-                collectionAudits.add(
-                        EmbeddedCollectionPlanningAudit.completeObject(
-                                absolutePath,
-                                present,
-                                memberKeys.size()));
-            }
         }
         List<String> managed = managedBoundaries(catalog);
         Map<String, AuthoredScopeIdentity> identities = new LinkedHashMap<>();
@@ -130,7 +107,7 @@ final class EmbeddedLayoutPlan {
                 identities,
                 RoutingSurface.from(catalog, managedBoundaries(catalog)),
                 rules,
-                collectionAudits);
+                collectionAudits(catalog, exactScopeAt));
     }
 
     /**
@@ -165,6 +142,36 @@ final class EmbeddedLayoutPlan {
         return collectionAudits;
     }
 
+    /**
+     * Refreshes current member presence from a newly authenticated catalog
+     * while retaining the reusable contract and route plan.
+     */
+    EmbeddedLayoutPlan withCollectionAudits(
+            EffectiveFragmentationCatalog catalog,
+            Function<String, FrozenNode> exactScopeAt) {
+        List<EmbeddedCollectionPlanningAudit> refreshed = collectionAudits(
+                Objects.requireNonNull(catalog, "catalog"),
+                Objects.requireNonNull(exactScopeAt, "exactScopeAt"));
+        List<String> expected = collectionAudits.stream()
+                .map(EmbeddedCollectionPlanningAudit::collectionPath)
+                .sorted(EmbeddingBinding.TEXT_ORDER)
+                .toList();
+        List<String> actual = refreshed.stream()
+                .map(EmbeddedCollectionPlanningAudit::collectionPath)
+                .sorted(EmbeddingBinding.TEXT_ORDER)
+                .toList();
+        if (!expected.equals(actual)) {
+            throw new IllegalStateException(
+                    "Authenticated collection declarations changed while "
+                            + "reusing an embedded layout plan");
+        }
+        return new EmbeddedLayoutPlan(
+                identitiesByScope,
+                routingSurface,
+                rulesByScope,
+                refreshed);
+    }
+
     /** Checks only authored scopes owned by this processing Root. */
     public boolean reusableFor(Function<String, FrozenNode> exactScopeAt) {
         Objects.requireNonNull(exactScopeAt, "exactScopeAt");
@@ -190,6 +197,45 @@ final class EmbeddedLayoutPlan {
                 .distinct()
                 .sorted(EmbeddingBinding.TEXT_ORDER)
                 .toList();
+    }
+
+    private static List<EmbeddedCollectionPlanningAudit> collectionAudits(
+            EffectiveFragmentationCatalog catalog,
+            Function<String, FrozenNode> exactScopeAt) {
+        List<EmbeddedCollectionPlanningAudit> audits = new ArrayList<>();
+        List<String> managed = managedBoundaries(catalog);
+        List<Map.Entry<String, EmbeddedScopePlanView>> scopePlans =
+                catalog.scopePlansByScope().entrySet().stream()
+                        .sorted(Map.Entry.comparingByKey(
+                                EmbeddingBinding.TEXT_ORDER))
+                        .toList();
+        for (Map.Entry<String, EmbeddedScopePlanView> entry : scopePlans) {
+            String scopePath = entry.getKey();
+            if (!owned(scopePath, managed)) {
+                continue;
+            }
+            EmbeddedScopePlanView view = entry.getValue();
+            List<String> declarations = new ArrayList<>(
+                    view.collectionDeclarationPaths());
+            declarations.sort(EmbeddingBinding.TEXT_ORDER);
+            for (String declaration : declarations) {
+                String absolutePath = PointerUtils.resolvePointer(
+                        scopePath, declaration);
+                List<String> memberKeys = view
+                        .collectionMemberKeysByDeclaration()
+                        .get(declaration);
+                if (memberKeys == null) {
+                    throw new IllegalStateException(
+                            "Authenticated collection plan has no member "
+                                    + "projection for " + absolutePath);
+                }
+                audits.add(EmbeddedCollectionPlanningAudit.completeObject(
+                        absolutePath,
+                        exactScopeAt.apply(absolutePath) != null,
+                        memberKeys.size()));
+            }
+        }
+        return Collections.unmodifiableList(audits);
     }
 
     private static String identity(FrozenNode node) {

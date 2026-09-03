@@ -34,6 +34,12 @@ final class EmbeddedCollectionPlanningPresenceTest {
         ExactValue empty = objects.put(
                 root("same-document", emptyObject()),
                 "empty-collection-root");
+        ExactValue members = objects.put(
+                root("same-document", new Node().properties(
+                        "game-1", new Node().properties(
+                                "documentId",
+                                new Node().value("game-1")))),
+                "member-collection-root");
 
         try (BlueRuntime runtime = BlueRuntime.create(objects, metrics)) {
             EmbeddedOnlyLayoutBuilder layouts =
@@ -42,6 +48,12 @@ final class EmbeddedCollectionPlanningPresenceTest {
             // when
             EmbeddedOnlyLayout absentLayout = layouts.build(absent);
             EmbeddedOnlyLayout emptyLayout = layouts.build(empty);
+            EmbeddedOnlyLayout refreshedEmpty = layouts.rebuild(
+                    empty, absentLayout);
+            EmbeddedOnlyLayout refreshedAbsent = layouts.rebuild(
+                    absent, emptyLayout);
+            EmbeddedOnlyLayout refreshedMembers = layouts.rebuild(
+                    members, absentLayout);
 
             // then
             assertEquals(List.of(), absentLayout.boundaries());
@@ -61,6 +73,16 @@ final class EmbeddedCollectionPlanningPresenceTest {
             assertEquals(EmbeddedCollectionPlanningAudit.State.PRESENT_EMPTY,
                     emptyLayout.plan().collectionAudits().get(0).state());
             assertEquals(0, emptyLayout.plan().collectionAudits().get(0)
+                    .currentMemberCount());
+            assertEquals(EmbeddedCollectionPlanningAudit.State.PRESENT_EMPTY,
+                    refreshedEmpty.plan().collectionAudits().get(0).state(),
+                    "a reused contract plan must refresh current presence");
+            assertEquals(EmbeddedCollectionPlanningAudit.State.ABSENT,
+                    refreshedAbsent.plan().collectionAudits().get(0).state(),
+                    "a reused contract plan must not retain stale presence");
+            assertEquals(EmbeddedCollectionPlanningAudit.State.PRESENT_MEMBERS,
+                    refreshedMembers.plan().collectionAudits().get(0).state());
+            assertEquals(1, refreshedMembers.plan().collectionAudits().get(0)
                     .currentMemberCount());
         }
     }
