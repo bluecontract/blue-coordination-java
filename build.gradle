@@ -1966,18 +1966,132 @@ tasks.register('verifyPublicationPom') {
     }
 }
 
+def releaseVersionPolicyFailures = {
+    String candidate,
+    boolean immutableDevelopmentMode,
+    String headCommit,
+    boolean cleanWorktree ->
+    if (candidate ==~ /\d+\.\d+\.\d+(?:-rc\.\d+)?/) {
+        return []
+    }
+    def development = candidate =~ /3\.0\.0-dev\.([0-9a-f]{40})/
+    if (!development.matches()) {
+        return ["Version is not a release, RC, or commit-bound DEVELOPMENT version: ${candidate}"]
+    }
+    def failures = []
+    String versionCommit = development.group(1)
+    if (!immutableDevelopmentMode) {
+        failures << 'Commit-bound DEVELOPMENT version requires immutable-development-contracts mode'
+    }
+    if (headCommit == null || versionCommit != headCommit) {
+        failures << ("DEVELOPMENT version commit ${versionCommit} does not identify HEAD ${headCommit}")
+    }
+    if (!cleanWorktree) {
+        failures << 'Commit-bound DEVELOPMENT release requires a clean worktree'
+    }
+    failures
+}
+
+def verifyReleaseVersionPolicyLogic = tasks.register(
+        'verifyReleaseVersionPolicyLogic') {
+    group = 'verification'
+    description = 'Regression-tests release and commit-bound development version policy.'
+    doLast {
+        String commit = 'a' * 40
+        def accepted = [
+                ['3.0.0', false, null, false],
+                ['3.0.0-rc.5', false, null, false],
+                ["3.0.0-dev.${commit}", true, commit, true]
+        ]
+        accepted.each { vector ->
+            def failures = releaseVersionPolicyFailures(
+                    vector[0] as String,
+                    vector[1] as boolean,
+                    vector[2] as String,
+                    vector[3] as boolean)
+            if (!failures.empty) {
+                throw new GradleException(
+                        "Release version policy rejected valid vector ${vector[0]}: ${failures}")
+            }
+        }
+        def rejected = [
+                ["3.0.0-dev.${commit}", false, commit, true],
+                ["3.0.0-dev.${commit}", true, 'b' * 40, true],
+                ["3.0.0-dev.${commit}", true, commit, false],
+                ["3.0.0-dev.tree.${commit}", true, commit, true],
+                ['3.0.0-SNAPSHOT', true, commit, true]
+        ]
+        rejected.each { vector ->
+            def failures = releaseVersionPolicyFailures(
+                    vector[0] as String,
+                    vector[1] as boolean,
+                    vector[2] as String,
+                    vector[3] as boolean)
+            if (failures.empty) {
+                throw new GradleException(
+                        "Release version policy accepted invalid vector ${vector[0]}")
+            }
+        }
+    }
+}
+
+def verifyReleaseVersionPolicy = tasks.register(
+        'verifyReleaseVersionPolicy') {
+    group = 'verification'
+    description = 'Validates release/RC or exact clean-HEAD development version identity.'
+    dependsOn verifyReleaseVersionPolicyLogic
+    inputs.property('releaseVersion', version.toString())
+    inputs.property('dependencyMode', dependencyMode)
+    doLast {
+        String candidate = version.toString()
+        String headCommit = null
+        boolean cleanWorktree = false
+        if (candidate ==~ /3\.0\.0-dev\.[0-9a-f]{40}/) {
+            Process headProcess = new ProcessBuilder(
+                    'git', 'rev-parse', '--verify', 'HEAD^{commit}')
+                    .directory(rootDir)
+                    .redirectErrorStream(true)
+                    .start()
+            headCommit = headProcess.inputStream.getText('UTF-8').trim()
+            if (headProcess.waitFor() != 0) {
+                throw new GradleException(
+                        'Cannot establish HEAD for DEVELOPMENT release: '
+                                + headCommit)
+            }
+            Process statusProcess = new ProcessBuilder(
+                    'git', 'status', '--porcelain',
+                    '--untracked-files=normal')
+                    .directory(rootDir)
+                    .redirectErrorStream(true)
+                    .start()
+            String status = statusProcess.inputStream
+                    .getText('UTF-8').trim()
+            if (statusProcess.waitFor() != 0) {
+                throw new GradleException(
+                        'Cannot inspect worktree for DEVELOPMENT release: '
+                                + status)
+            }
+            cleanWorktree = status.isEmpty()
+        }
+        def failures = releaseVersionPolicyFailures(
+                candidate,
+                immutableDevelopmentContracts,
+                headCommit,
+                cleanWorktree)
+        if (!failures.empty) {
+            throw new GradleException(
+                    'Release version policy failed:\n - '
+                            + failures.join('\n - '))
+        }
+    }
+}
+
 tasks.register('verifyReleaseMetadata') {
     group = 'verification'
     description = 'Validates version, legal metadata, docs, and release artifacts.'
-    dependsOn 'jar', 'sourcesJar', 'javadocJar',
+    dependsOn verifyReleaseVersionPolicy, 'jar', 'sourcesJar', 'javadocJar',
             'generatePomFileForMavenJavaPublication'
-    String configuredReleaseVersion = version.toString()
     doLast {
-        String releaseVersion = configuredReleaseVersion
-        if (!(releaseVersion ==~ /\d+\.\d+\.\d+(?:-rc\.\d+)?/)) {
-            throw new GradleException(
-                    "Version is not a release or RC: ${releaseVersion}")
-        }
         if (!file('LICENSE').getText('UTF-8').startsWith('MIT License')) {
             throw new GradleException('LICENSE must contain the MIT License')
         }
@@ -3717,6 +3831,7 @@ tasks.register('verifyDocumentation') {
 tasks.register('verifySourceArchiveHygiene') {
     group = 'verification'
     description = 'Protects the self-contained source-release boundary.'
+    dependsOn verifyReleaseVersionPolicy
     inputs.files('.cz.toml', '.gitattributes', 'build.gradle')
     String configuredArchiveVersion = version.toString()
     doLast {
@@ -3729,7 +3844,8 @@ tasks.register('verifySourceArchiveHygiene') {
             throw new GradleException(
                     '.cz.toml must contain one authoritative project version')
         }
-        if (configuredArchiveVersion != declaredProjectVersion) {
+        if (configuredArchiveVersion != declaredProjectVersion
+                && developmentProjectVersion == null) {
             throw new GradleException(
                     'Configured source archive version does not match .cz.toml')
         }
