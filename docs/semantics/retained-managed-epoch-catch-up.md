@@ -413,15 +413,22 @@ manifest to a different immutable Maven repository:
 
 ```bash
 ./gradlew --no-daemon dynamicEvolutionCoordinationHandoff \
-  -PblueDependencyMode=immutable-staged-contracts \
-  -PblueContractsVersion=3.1.0-rc.23 \
-  -PblueContractsRepository=/absolute/path/to/invocation-owned/contracts-repository \
-  -PblueContractsManifestSha256=sha256:<64-lowercase-hex> \
+  -PblueDependencyMode=immutable-development-contracts \
+  -PblueContractsVersion=3.1.0-dev.<language-commit> \
+  -PblueContractsRepository=/absolute/path/to/language-development-repository \
+  -PblueContractsManifestSha256=sha256:<language-manifest> \
+  -PblueContractsSourceCommit=<language-commit> \
+  -PblueBexVersion=1.1.0-dev.<bex-commit> \
+  -PblueBexRepository=/absolute/path/to/bex-development-repository \
+  -PblueBexManifestSha256=sha256:<bex-manifest> \
+  -PblueBexSourceCommit=<bex-commit> \
+  -PblueDevelopmentVersion=3.0.0-dev.<exact-clean-coordination-head> \
   -PcoordinationSourceCommit=<exact-clean-coordination-head> \
   -PcoordinationStagedRepository=/absolute/path/to/invocation-owned/coordination-repository
 ```
 
-The handoff rejects a dirty or mismatched source commit and a mutable/conflicting
-target. Its isolated consumer resolves Coordination and Language exclusively
-from their pinned stages and does not use Maven Local. See
+The handoff rejects dirty or mismatched source provenance and a
+mutable/conflicting target. Its isolated consumer resolves Coordination,
+Language, and BEX exclusively from their manifest-bound repositories and does
+not use Maven Local. See
 [Immutable Coordination handoff](../development/immutable-staged-coordination.md).

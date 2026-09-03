@@ -82,13 +82,17 @@ commit-addressed repositories explicitly:
   -PblueBexVersion=1.1.0-dev.<40-lowercase-commit> \
   -PblueBexRepository=/absolute/path/to/bex-development-repository \
   -PblueBexManifestSha256=sha256:<64-lowercase-hex> \
-  -PblueBexSourceCommit=<40-lowercase-commit>
+  -PblueBexSourceCommit=<40-lowercase-commit> \
+  -PblueDevelopmentVersion=3.0.0-dev.<coordination-commit>
 ```
 
 The BEX repository manifest must use
 `blue-bex-development-repository/1.0`, bind its version to its source commit,
 and bind the exact selected Language version, source commit, and repository
-manifest identity. It contains runtime, POM, sources, and Javadoc artifacts
+manifest identity. Both development manifests record `DEVELOPMENT`,
+`releaseReadinessClaimed=false`, JDK 17, a 40-hex commit and tree, and a clean
+source state; dirty/tree-version aliases are not accepted by the handoff. BEX
+contains runtime, POM, sources, and Javadoc artifacts
 for `blue-bex-core`, `blue-bex-contracts`, and `blue-bex-java`, with a checksum
 companion for every payload and no unlisted files or symbolic links.
 Coordination resolves only `blue-bex-core` and `blue-bex-contracts`, then
@@ -137,6 +141,8 @@ and BEX artifacts, run the same complete gate with the exact development lane:
 
 Repeat with `-PtestJavaVersion=21`. Generate the canonical resolved-dependency
 report once under JDK 17 with `writeDevelopmentResolvedDependencies`. The
+`blueDevelopmentVersion=3.0.0-dev.<coordination-commit>` property is mandatory
+and must identify the clean Coordination `HEAD`; it has no default. The
 extracted-source smoke receives the same version, repositories, manifest
 identities, and source commits and therefore cannot fall back to the published
 Language or BEX artifacts. This validates a development candidate; it does not
@@ -210,19 +216,27 @@ invocation-owned immutable Coordination repository with:
 
 ```bash
 ./gradlew --no-daemon dynamicEvolutionCoordinationHandoff \
-  -PblueDependencyMode=immutable-staged-contracts \
-  -PblueContractsVersion=3.1.0-rc.23 \
-  -PblueContractsRepository=/absolute/path/to/invocation-owned/contracts-repository \
-  -PblueContractsManifestSha256=sha256:<64-lowercase-hex> \
+  -PblueDependencyMode=immutable-development-contracts \
+  -PblueContractsVersion=3.1.0-dev.<language-commit> \
+  -PblueContractsRepository=/absolute/path/to/language-development-repository \
+  -PblueContractsManifestSha256=sha256:<language-manifest> \
+  -PblueContractsSourceCommit=<language-commit> \
+  -PblueBexVersion=1.1.0-dev.<bex-commit> \
+  -PblueBexRepository=/absolute/path/to/bex-development-repository \
+  -PblueBexManifestSha256=sha256:<bex-manifest> \
+  -PblueBexSourceCommit=<bex-commit> \
+  -PblueDevelopmentVersion=3.0.0-dev.<exact-clean-coordination-head> \
   -PcoordinationSourceCommit=<exact-clean-coordination-head> \
   -PcoordinationStagedRepository=/absolute/path/to/invocation-owned/coordination-repository
 ```
 
 The target is non-overwriting and outside the source tree. The handoff binds
 the clean source commit, resolved dependency identities, artifact bytes, and
-the upstream Contracts manifest, then runs an isolated staged consumer. See
-[Immutable Coordination handoff](immutable-staged-coordination.md). It is a
-downstream integration stage, not a Maven Central publication.
+both exact upstream manifests, then runs an isolated staged consumer. The
+Language and BEX manifest identities are read from the invocation-owned
+repositories rather than frozen in this source tree. See [Immutable
+Coordination handoff](immutable-staged-coordination.md). It is a downstream
+integration stage, not a Maven Central publication.
 
 The staged consumer is a mandatory two-runtime gate. The aggregate
 `stagedCoordinationConsumer` task runs
