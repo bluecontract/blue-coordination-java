@@ -18,8 +18,8 @@ import java.util.Map;
  */
 final class ComputeProgramNormalizer {
     private static final String NORMALIZATION_VERSION =
-            "compute-program-v8|exact-definition-identity|canonical-bex-source"
-                    + "|strict-statements|exact-expr-presence";
+            "compute-program-v9|exact-definition-identity|canonical-bex-source"
+                    + "|strict-statements|exact-field-presence";
 
     private final BexProcessingMetrics metrics;
 
@@ -82,6 +82,11 @@ final class ComputeProgramNormalizer {
             throw new IllegalArgumentException(
                     "definitionNode must not be null");
         }
+        if (FrozenNodeUtil.rawScalar(definitionNode) != null
+                || definitionNode.getItems() != null) {
+            return FrozenNode.fromResolvedNode(
+                    canonicalStaticSource(definitionNode.toNode()));
+        }
         return FrozenNode.fromResolvedNode(
                 definitionSource(
                         frozenDefinitionInput(
@@ -93,14 +98,14 @@ final class ComputeProgramNormalizer {
         copyMetadata(program, stepNode);
         Map<String, Node> properties = new LinkedHashMap<String, Node>();
         putIfPresent(properties, "expr", NodeUtil.property(stepNode, "expr"));
-        putIfMeaningful(properties, "do", normalizeDo(NodeUtil.property(stepNode, "do")));
+        putIfPresent(properties, "do", normalizeDo(NodeUtil.property(stepNode, "do")));
         putIfMeaningful(properties, "definition", NodeUtil.property(stepNode, "definition"));
-        putIfMeaningful(properties, "entry", NodeUtil.property(stepNode, "entry"));
-        putIfMeaningful(properties, "constants", authoredMap(NodeUtil.property(stepNode, "constants")));
-        putIfMeaningful(properties, "functions", normalizeFunctions(NodeUtil.property(stepNode, "functions")));
-        putIfMeaningful(properties, "gasLimit", NodeUtil.property(stepNode, "gasLimit"));
-        putIfMeaningful(properties, "emitEvents", NodeUtil.property(stepNode, "emitEvents"));
-        putIfMeaningful(properties, "returnResult", NodeUtil.property(stepNode, "returnResult"));
+        putIfPresent(properties, "entry", NodeUtil.property(stepNode, "entry"));
+        putIfPresent(properties, "constants", authoredMap(NodeUtil.property(stepNode, "constants")));
+        putIfPresent(properties, "functions", normalizeFunctions(NodeUtil.property(stepNode, "functions")));
+        putIfPresent(properties, "gasLimit", NodeUtil.property(stepNode, "gasLimit"));
+        putIfPresent(properties, "emitEvents", NodeUtil.property(stepNode, "emitEvents"));
+        putIfPresent(properties, "returnResult", NodeUtil.property(stepNode, "returnResult"));
         if (!properties.isEmpty()) {
             program.properties(properties);
         }
@@ -115,6 +120,10 @@ final class ComputeProgramNormalizer {
         if (definitionNode == null) {
             throw new IllegalArgumentException(
                     "definitionNode must not be null");
+        }
+        if (definitionNode.getValue() != null
+                || definitionNode.getItems() != null) {
+            return canonicalStaticSource(definitionNode);
         }
         Node definition = new Node();
         copyMetadata(definition, definitionNode);
@@ -194,8 +203,11 @@ final class ComputeProgramNormalizer {
     }
 
     private Node normalizeFunctions(Node functions) {
-        if (functions == null || functions.getProperties() == null || functions.getProperties().isEmpty()) {
+        if (functions == null) {
             return null;
+        }
+        if (functions.getProperties() == null) {
+            return canonicalStaticSource(functions);
         }
         Map<String, Node> normalized = new LinkedHashMap<String, Node>();
         for (Map.Entry<String, Node> entry : functions.getProperties().entrySet()) {
@@ -209,15 +221,18 @@ final class ComputeProgramNormalizer {
             return function != null ? function.clone() : new Node();
         }
         Map<String, Node> properties = new LinkedHashMap<String, Node>();
-        putIfMeaningful(properties, "args", authoredMap(NodeUtil.property(function, "args")));
+        putIfPresent(properties, "args", authoredMap(NodeUtil.property(function, "args")));
         putIfPresent(properties, "expr", NodeUtil.property(function, "expr"));
-        putIfMeaningful(properties, "do", normalizeDo(NodeUtil.property(function, "do")));
+        putIfPresent(properties, "do", normalizeDo(NodeUtil.property(function, "do")));
         return new Node().properties(properties);
     }
 
     private Node normalizeDo(Node doNode) {
-        if (doNode == null || doNode.getItems() == null || doNode.getItems().isEmpty()) {
+        if (doNode == null) {
             return null;
+        }
+        if (doNode.getItems() == null) {
+            return canonicalStaticSource(doNode);
         }
         java.util.List<Node> items = new java.util.ArrayList<Node>();
         for (Node item : doNode.getItems()) {
@@ -234,8 +249,11 @@ final class ComputeProgramNormalizer {
     }
 
     private Node authoredMap(Node node) {
-        if (node == null || node.getProperties() == null || node.getProperties().isEmpty()) {
+        if (node == null) {
             return null;
+        }
+        if (node.getProperties() == null) {
+            return canonicalStaticSource(node);
         }
         Map<String, Node> properties = new LinkedHashMap<String, Node>();
         for (Map.Entry<String, Node> entry : node.getProperties().entrySet()) {

@@ -66,6 +66,54 @@ class NodeUtilTest {
                 () -> FrozenNodeUtil.integer(oversizedInteger));
     }
 
+    @Test
+    void shouldDefaultOnlyAbsentFrozenComputeControls() {
+        FrozenNode absent = FrozenNode.fromResolvedNode(new Node());
+        FrozenNode emptyControls = FrozenNode.fromResolvedNode(
+                new Node()
+                        .properties(
+                                "entry",
+                                new Node().properties(
+                                        Collections.<String, Node>emptyMap()))
+                        .properties(
+                                "gasLimit",
+                                new Node().properties(
+                                        Collections.<String, Node>emptyMap()))
+                        .properties(
+                                "emitEvents",
+                                new Node().properties(
+                                        Collections.<String, Node>emptyMap()))
+                        .properties(
+                                "returnResult",
+                                new Node().properties(
+                                        Collections.<String, Node>emptyMap())));
+
+        assertNull(FrozenNodeUtil.textProperty(absent, "entry"));
+        assertNull(FrozenNodeUtil.integer(
+                FrozenNodeUtil.property(absent, "gasLimit")));
+        assertTrue(FrozenNodeUtil.booleanProperty(
+                absent, "emitEvents", true));
+        assertFalse(FrozenNodeUtil.booleanProperty(
+                absent, "returnResult", false));
+        assertThrows(IllegalArgumentException.class,
+                () -> FrozenNodeUtil.textProperty(emptyControls, "entry"));
+        assertThrows(IllegalArgumentException.class,
+                () -> FrozenNodeUtil.integer(
+                        FrozenNodeUtil.property(
+                                emptyControls,
+                                "gasLimit")));
+        assertThrows(IllegalArgumentException.class,
+                () -> FrozenNodeUtil.booleanProperty(
+                        emptyControls,
+                        "emitEvents",
+                        true));
+        assertThrows(IllegalArgumentException.class,
+                () -> FrozenNodeUtil.booleanProperty(
+                        emptyControls,
+                        "returnResult",
+                        true));
+    }
+
     private static void assertRetained(Node node) {
         assertFalse(NodeUtil.isEmpty(node));
         assertFalse(FrozenNodeUtil.isEmpty(

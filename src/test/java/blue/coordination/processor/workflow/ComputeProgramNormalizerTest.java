@@ -9,8 +9,10 @@ import blue.language.snapshot.FrozenNode;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -104,6 +106,121 @@ class ComputeProgramNormalizerTest {
         assertNotNull(expression);
         assertTrue(NodeUtil.isEmpty(expression.toNode()));
         assertCompilerAccepts(program);
+    }
+
+    @Test
+    void shouldPreservePresentEmptyProgramContainers() {
+        Node program = new ComputeProgramNormalizer().program(
+                new Node()
+                        .properties("do", new Node().items(List.of()))
+                        .properties(
+                                "constants",
+                                new Node().properties(
+                                        Collections.<String, Node>emptyMap()))
+                        .properties(
+                                "functions",
+                                new Node().properties(
+                                        "empty",
+                                        new Node()
+                                                .properties(
+                                                        "args",
+                                                        new Node().properties(
+                                                                Collections.<String, Node>emptyMap()))
+                                                .properties(
+                                                        "do",
+                                                        new Node().items(List.of())))));
+
+        assertNotNull(NodeUtil.property(program, "do"));
+        assertTrue(NodeUtil.property(program, "do").getItems().isEmpty());
+        assertNotNull(NodeUtil.property(program, "constants"));
+        assertTrue(NodeUtil.isEmpty(NodeUtil.property(program, "constants")));
+        Node function = NodeUtil.property(
+                NodeUtil.property(program, "functions"),
+                "empty");
+        assertNotNull(NodeUtil.property(function, "args"));
+        assertTrue(NodeUtil.isEmpty(NodeUtil.property(function, "args")));
+        assertNotNull(NodeUtil.property(function, "do"));
+        assertTrue(NodeUtil.property(function, "do").getItems().isEmpty());
+    }
+
+    @Test
+    void shouldPreserveWrongKindBexFieldsForCompilerRejection() {
+        ComputeProgramNormalizer normalizer = new ComputeProgramNormalizer();
+
+        for (String field : List.of("do", "constants", "functions")) {
+            FrozenNode program = normalizer.program(
+                    FrozenNode.fromResolvedNode(
+                            new Node().properties(
+                                    field,
+                                    new Node().value("wrong-kind"))));
+
+            assertNotNull(program.property(field));
+            assertCompilerRejects(program);
+        }
+    }
+
+    @Test
+    void shouldPreserveWrongKindHostControlsForValidationRejection() {
+        ComputeProgramNormalizer normalizer = new ComputeProgramNormalizer();
+        FrozenNode program = normalizer.program(
+                FrozenNode.fromResolvedNode(
+                        new Node()
+                                .properties(
+                                        "entry",
+                                        new Node().properties(
+                                                Collections.<String, Node>emptyMap()))
+                                .properties(
+                                        "gasLimit",
+                                        new Node().properties(
+                                                Collections.<String, Node>emptyMap()))
+                                .properties(
+                                        "emitEvents",
+                                        new Node().properties(
+                                                Collections.<String, Node>emptyMap()))
+                                .properties(
+                                        "returnResult",
+                                        new Node().properties(
+                                                Collections.<String, Node>emptyMap()))));
+
+        assertNotNull(program.property("entry"));
+        assertNotNull(program.property("gasLimit"));
+        assertNotNull(program.property("emitEvents"));
+        assertNotNull(program.property("returnResult"));
+        assertThrows(IllegalArgumentException.class,
+                () -> FrozenNodeUtil.textProperty(program, "entry"));
+        assertThrows(IllegalArgumentException.class,
+                () -> FrozenNodeUtil.integer(program.property("gasLimit")));
+        assertThrows(IllegalArgumentException.class,
+                () -> FrozenNodeUtil.booleanProperty(
+                        program,
+                        "emitEvents",
+                        true));
+        assertThrows(IllegalArgumentException.class,
+                () -> FrozenNodeUtil.booleanProperty(
+                        program,
+                        "returnResult",
+                        true));
+    }
+
+    @Test
+    void shouldPreserveWrongKindDefinitionForCompilerRejection() {
+        ComputeProgramNormalizer normalizer = new ComputeProgramNormalizer();
+        FrozenNode program = normalizer.program(
+                FrozenNode.fromResolvedNode(new Node()));
+        FrozenNode definition = normalizer.definitionSource(
+                FrozenNode.fromResolvedNode(
+                        new Node().value("wrong-kind")));
+
+        assertEquals("wrong-kind", FrozenNodeUtil.rawScalar(definition));
+        try (BexEngine engine = BexEngine.builder().build()) {
+            assertThrows(
+                    BexException.class,
+                    () -> engine.compile(
+                            BexProgramSource.withDefinition(
+                                    program,
+                                    definition,
+                                    null)));
+        }
     }
 
     private static FrozenNode normalizeStatement(Node statement) {
