@@ -28,9 +28,16 @@ def acceptedCompatibilityJarSha256 =
         'a8dc99f5bcc62902496ee3bdb5e8f085b78d9781e7928ef20f5a83b65581cd34'
 def acceptedCompatibilitySourceCommit =
         'acf02f3ce7c141e4fc9eabb6f19dacde471e30f4'
-def coordinationUsesImmutableContracts = providers.gradleProperty(
-        'blueDependencyMode').getOrElse('published-artifact').trim()
-        == 'immutable-staged-contracts'
+def requiresImmutableCandidateCompatibility = { String dependencyMode ->
+    dependencyMode in [
+            'immutable-staged-contracts',
+            'immutable-development-contracts'
+    ]
+}
+def coordinationUsesImmutableContracts =
+        requiresImmutableCandidateCompatibility(
+                providers.gradleProperty('blueDependencyMode')
+                        .getOrElse('published-artifact').trim())
 
 configurations.runtimeClasspath.resolutionStrategy.failOnVersionConflict()
 
@@ -817,9 +824,31 @@ def verifyAcceptedBaseApiCompatibility = tasks.register(
     }
 }
 
+def verifyCoordinationStagingLanePolicyLogic = tasks.register(
+        'verifyCoordinationStagingLanePolicyLogic') {
+    group = 'verification'
+    description = 'Regression-tests compatibility coverage for immutable candidate lanes.'
+    doLast {
+        Map<String, Boolean> vectors = [
+                'published-artifact': false,
+                'immutable-staged-contracts': true,
+                'immutable-development-contracts': true,
+                'unsupported': false
+        ]
+        vectors.each { mode, expected ->
+            boolean actual = requiresImmutableCandidateCompatibility(mode)
+            if (actual != expected) {
+                throw new GradleException(
+                        "Immutable candidate compatibility policy differs for ${mode}")
+            }
+        }
+    }
+}
+
 tasks.register('verifyCoordinationStagingTooling') {
     group = 'verification'
     description = 'Protects the isolated, fail-closed staged-consumer boundary.'
+    dependsOn verifyCoordinationStagingLanePolicyLogic
     inputs.files('gradle/coordination-staging.gradle',
             fileTree('smoke-tests/staged-coordination'))
     doLast {
