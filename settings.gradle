@@ -42,6 +42,14 @@ if (dependencyMode in [
         'immutable-staged-contracts',
         'immutable-development-contracts'
 ]) {
+    String expectedContractsVersion = providers.gradleProperty(
+            'blueContractsVersion').orNull
+    if (expectedContractsVersion == null
+            || expectedContractsVersion.isBlank()) {
+        throw new GradleException(
+                'immutable Contracts modes require an explicit '
+                        + '-PblueContractsVersion=<exact manifest version>')
+    }
     String repositoryValue = providers.gradleProperty(
             'blueContractsRepository').orNull
     String manifestIdentity = providers.gradleProperty(
@@ -96,7 +104,7 @@ if (dependencyMode in [
         String expectedSourceCommit = providers.gradleProperty(
                 'blueContractsSourceCommit').orNull
         if (expectedSourceCommit == null
-                || !(expectedSourceCommit ==~ /[0-9a-f]{40}|[0-9a-f]{64}/)) {
+                || !(expectedSourceCommit ==~ /[0-9a-f]{40}/)) {
             throw new GradleException(
                     'immutable-development-contracts mode requires '
                             + '-PblueContractsSourceCommit=<exact lowercase Git identity>')
@@ -108,6 +116,19 @@ if (dependencyMode in [
             throw new GradleException(
                     'Cannot parse immutable development Contracts manifest',
                     exception)
+        }
+        Set<String> languageFields = [
+                'schema', 'stagePurpose', 'releaseReadinessClaimed',
+                'builtWithJava', 'groupId', 'version', 'sourceCommit',
+                'sourceTree', 'sourceDirty',
+                'contractsSpecificationIdentity',
+                'contractsFixturePackageIdentity',
+                'contractsReleaseIdentity', 'artifacts'
+        ] as Set
+        if (!(manifestDocument instanceof Map)
+                || (manifestDocument.keySet() as Set) != languageFields) {
+            throw new GradleException(
+                    'development Contracts manifest fields are not canonical')
         }
         if (manifestDocument.schema
                 != 'blue-development-maven-repository/1.0'
@@ -124,30 +145,22 @@ if (dependencyMode in [
                     'blueContractsSourceCommit does not match the '
                             + 'development Contracts manifest')
         }
-        String expectedVersion = providers.gradleProperty(
-                'blueContractsVersion').getOrElse('3.1.0-rc.23')
+        String expectedVersion = expectedContractsVersion
         if (manifestDocument.version != expectedVersion) {
             throw new GradleException(
                     'blueContractsVersion does not match the development Contracts manifest')
         }
-        if (expectedVersion != '3.1.0-rc.23') {
-            if (!(manifestDocument.sourceTree instanceof String)
-                    || !(manifestDocument.sourceTree ==~ /[0-9a-f]{40}/)
-                    || !(manifestDocument.sourceDirty instanceof Boolean)) {
-                throw new GradleException(
-                        'DEVELOPMENT Contracts version requires exact source-tree provenance')
-            }
-            String boundVersion = manifestDocument.sourceDirty
-                    ? '3.1.0-dev.tree.' + manifestDocument.sourceTree
-                    : '3.1.0-dev.' + manifestDocument.sourceCommit
-            if (expectedVersion != boundVersion) {
-                throw new GradleException(
-                        'DEVELOPMENT Contracts version does not bind its exact source identity')
-            }
+        if (!(expectedVersion ==~ /3\.1\.0-dev\.[0-9a-f]{40}/)
+                || manifestDocument.sourceTree == null
+                || !(manifestDocument.sourceTree ==~ /[0-9a-f]{40}/)
+                || manifestDocument.sourceDirty != false
+                || expectedVersion != '3.1.0-dev.' + expectedSourceCommit) {
+            throw new GradleException(
+                    'DEVELOPMENT Contracts version must bind a clean exact commit')
         }
 
         String expectedBexVersion = providers.gradleProperty(
-                'blueBexVersion').getOrElse('1.1.0-rc.4')
+                'blueBexVersion').orNull
         def bexProperties = [
                 repository: providers.gradleProperty(
                         'blueBexRepository').orNull,
@@ -156,21 +169,10 @@ if (dependencyMode in [
                 sourceCommit: providers.gradleProperty(
                         'blueBexSourceCommit').orNull
         ]
-        if (expectedBexVersion == '1.1.0-rc.4') {
-            if (bexProperties.values().any { value ->
-                value != null && !value.isBlank()
-            }) {
-                throw new GradleException(
-                        'blueBexRepository/ManifestSha256/SourceCommit require '
-                                + 'a commit-bound blueBexVersion')
-            }
-        } else {
-            if (!(expectedBexVersion
-                    ==~ /1\.1\.0-dev\.[0-9a-f]{40}/)) {
-                throw new GradleException(
-                        'blueBexVersion must be 1.1.0-rc.4 or an exact '
-                                + 'commit-bound DEVELOPMENT version')
-            }
+        if (!(expectedBexVersion ==~ /1\.1\.0-dev\.[0-9a-f]{40}/)) {
+            throw new GradleException(
+                    'blueBexVersion must be an exact commit-bound DEVELOPMENT version')
+        }
             if (bexProperties.repository == null
                     || bexProperties.repository.isBlank()) {
                 throw new GradleException(
@@ -239,12 +241,34 @@ if (dependencyMode in [
                         'Cannot parse immutable DEVELOPMENT BEX manifest',
                         exception)
             }
+            Set<String> bexFields = [
+                    'schema', 'stagePurpose', 'releaseReadinessClaimed',
+                    'builtWithJava', 'groupId', 'version', 'sourceCommit',
+                    'sourceTree', 'sourceDirty',
+                    'bexSpecificationIdentity', 'bexFixturePackageIdentity',
+                    'bexRegistryPackageIdentity', 'bexGasPackageIdentity',
+                    'languageVersion', 'languageSourceCommit',
+                    'languageRepositoryManifestIdentity', 'artifacts'
+            ] as Set
+            if (!(bexManifestDocument instanceof Map)
+                    || (bexManifestDocument.keySet() as Set) != bexFields) {
+                throw new GradleException(
+                        'DEVELOPMENT BEX manifest fields are not canonical')
+            }
             if (bexManifestDocument.schema
                     != 'blue-bex-development-repository/1.0'
+                    || bexManifestDocument.stagePurpose != 'DEVELOPMENT'
+                    || bexManifestDocument.releaseReadinessClaimed != false
+                    || !(bexManifestDocument.builtWithJava instanceof Number)
+                    || bexManifestDocument.builtWithJava.toString() != '17'
                     || bexManifestDocument.groupId != 'blue.bex'
                     || bexManifestDocument.version != expectedBexVersion
                     || bexManifestDocument.sourceCommit
                     != bexProperties.sourceCommit
+                    || !(bexManifestDocument.sourceTree instanceof String)
+                    || !(bexManifestDocument.sourceTree
+                    ==~ /[0-9a-f]{40}/)
+                    || bexManifestDocument.sourceDirty != false
                     || !expectedBexVersion.endsWith(
                     '.' + bexProperties.sourceCommit)) {
                 throw new GradleException(
@@ -259,6 +283,25 @@ if (dependencyMode in [
                         'BEX manifest does not bind the selected immutable '
                                 + 'Language/Contracts repository')
             }
+    } else {
+        def stagedManifestDocument
+        try {
+            stagedManifestDocument = new groovy.json.JsonSlurper().parse(
+                    manifest)
+        } catch (RuntimeException exception) {
+            throw new GradleException(
+                    'Cannot parse immutable staged Contracts manifest',
+                    exception)
+        }
+        if (!(stagedManifestDocument instanceof Map)
+                || stagedManifestDocument.schema
+                != 'blue-staged-dependency-repository/1.0'
+                || stagedManifestDocument.groupId != 'blue.language'
+                || stagedManifestDocument.version
+                != expectedContractsVersion) {
+            throw new GradleException(
+                    'blueContractsVersion does not match the immutable '
+                            + 'staged Contracts manifest')
         }
     }
 }

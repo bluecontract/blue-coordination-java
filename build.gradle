@@ -18,7 +18,13 @@ def immutableContractsRepository =
         immutableStagedContracts || immutableDevelopmentContracts
 def publishedLanguageVersion = '3.1.0-rc.23'
 def immutableStagedLanguageVersion = providers.gradleProperty(
-        'blueContractsVersion').getOrElse('3.1.0-rc.23')
+        'blueContractsVersion').orNull
+if (immutableContractsRepository
+        && (immutableStagedLanguageVersion == null
+        || immutableStagedLanguageVersion.isBlank())) {
+    throw new GradleException(
+            'Immutable Contracts modes require an explicit blueContractsVersion')
+}
 def activeLanguageVersion = immutableContractsRepository
         ? immutableStagedLanguageVersion
         : publishedLanguageVersion
@@ -30,9 +36,8 @@ def developmentContractsSourceCommit = providers.gradleProperty(
         'blueContractsSourceCommit').orNull
 def publishedBexVersion = '1.1.0-rc.4'
 def immutableDevelopmentBexVersion = providers.gradleProperty(
-        'blueBexVersion').getOrElse(publishedBexVersion)
+        'blueBexVersion').orNull
 def immutableDevelopmentBex = immutableDevelopmentContracts
-        && immutableDevelopmentBexVersion != publishedBexVersion
 def activeBexVersion = immutableDevelopmentContracts
         ? immutableDevelopmentBexVersion
         : publishedBexVersion
@@ -50,29 +55,30 @@ if (!versionMatches.find()) {
 def declaredProjectVersion = versionMatches.group(1)
 def developmentProjectVersion = providers.gradleProperty(
         'blueDevelopmentVersion').orNull
-if (developmentProjectVersion != null
-        && (!immutableDevelopmentContracts
+if (immutableDevelopmentContracts
+        && (developmentProjectVersion == null
         || !(developmentProjectVersion
-        ==~ /3\.0\.0-dev\.(?:tree\.)?[0-9a-f]{40}/))) {
+        ==~ /3\.0\.0-dev\.[0-9a-f]{40}/))) {
     throw new GradleException(
             'blueDevelopmentVersion requires immutable-development-contracts '
-                    + 'and an exact commit-bound or tree-bound DEVELOPMENT version')
+                    + 'and an exact commit-bound DEVELOPMENT version')
+}
+if (!immutableDevelopmentContracts && developmentProjectVersion != null) {
+    throw new GradleException(
+            'blueDevelopmentVersion is only valid with immutable-development-contracts')
 }
 version = developmentProjectVersion ?: declaredProjectVersion
 if (immutableDevelopmentContracts
-        && immutableStagedLanguageVersion != '3.1.0-rc.23'
         && !(immutableStagedLanguageVersion
-        ==~ /3\.1\.0-dev\.(?:tree\.)?[0-9a-f]{40}/)) {
+        ==~ /3\.1\.0-dev\.[0-9a-f]{40}/)) {
     throw new GradleException(
-            'blueContractsVersion must be the legacy pin or an exact '
-                    + 'commit-bound or tree-bound DEVELOPMENT version')
+            'blueContractsVersion must be an exact commit-bound DEVELOPMENT version')
 }
-if (immutableDevelopmentBex
+if (immutableDevelopmentContracts
         && !(immutableDevelopmentBexVersion
         ==~ /1\.1\.0-dev\.[0-9a-f]{40}/)) {
     throw new GradleException(
-            'blueBexVersion must be the legacy pin or an exact '
-                    + 'commit-bound DEVELOPMENT version')
+            'blueBexVersion must be an exact commit-bound DEVELOPMENT version')
 }
 
 def publishedBlueCoordinates = [
@@ -227,9 +233,7 @@ def selectedDependencyLockFile = layout.projectDirectory.file(
         immutableContractsRepository
                 ? 'gradle/immutable-staged-contracts.lockfile'
                 : 'gradle/published-artifact.lockfile')
-if (immutableDevelopmentContracts
-        && (immutableStagedLanguageVersion != publishedLanguageVersion
-        || immutableDevelopmentBexVersion != publishedBexVersion)) {
+if (immutableDevelopmentContracts) {
     // Keep every external dependency locked. The immutable manifest supplies
     // only the six exact Language coordinates; a generated overlay avoids a
     // source commit containing its own commit-bound dependency version.
@@ -1168,7 +1172,7 @@ def inspectImmutableDevelopmentContractsRepository = {
     }
     if (developmentContractsSourceCommit == null
             || !(developmentContractsSourceCommit
-            ==~ /[0-9a-f]{40}|[0-9a-f]{64}/)) {
+            ==~ /[0-9a-f]{40}/)) {
         throw new GradleException(
                 'Immutable development Contracts verification requires '
                         + '-PblueContractsSourceCommit=<exact lowercase Git identity>')
@@ -1225,26 +1229,21 @@ def inspectImmutableDevelopmentContractsRepository = {
             'groupId',
             'version',
             'sourceCommit',
+            'sourceTree',
+            'sourceDirty',
             'contractsSpecificationIdentity',
             'contractsFixturePackageIdentity',
             'contractsReleaseIdentity',
             'artifacts'
     ] as Set
-    def allowedManifestFields = requiredManifestFields + [
-            'artifactRecordCount',
-            'repositoryFileCount',
-            'sourceTree',
-            'sourceDirty'
-    ] as Set
     def actualManifestFields = manifest instanceof Map
             ? manifest.keySet() as Set : [] as Set
     if (!(manifest instanceof Map)
-            || !actualManifestFields.containsAll(requiredManifestFields)
-            || !(actualManifestFields - allowedManifestFields).empty) {
+            || actualManifestFields != requiredManifestFields) {
         failures << ('development manifest fields differ; missing '
                 + (requiredManifestFields - actualManifestFields).toList().sort()
                 + ', unexpected '
-                + (actualManifestFields - allowedManifestFields).toList().sort())
+                + (actualManifestFields - requiredManifestFields).toList().sort())
     }
     if (manifest.schema != 'blue-development-maven-repository/1.0') {
         failures << "unexpected manifest schema ${manifest.schema}"
@@ -1266,26 +1265,20 @@ def inspectImmutableDevelopmentContractsRepository = {
         failures << "unexpected development Contracts version ${manifest.version}"
     }
     if (!(manifest.sourceCommit instanceof String)
-            || !(manifest.sourceCommit ==~ /[0-9a-f]{40}|[0-9a-f]{64}/)) {
+            || !(manifest.sourceCommit ==~ /[0-9a-f]{40}/)) {
         failures << 'development manifest sourceCommit is not an exact Git identity'
     } else if (manifest.sourceCommit != developmentContractsSourceCommit) {
         failures << ('development manifest sourceCommit is '
                 + manifest.sourceCommit + '; expected '
                 + developmentContractsSourceCommit)
     }
-    if (immutableStagedLanguageVersion != '3.1.0-rc.23') {
-        if (!(manifest.sourceTree instanceof String)
-                || !(manifest.sourceTree ==~ /[0-9a-f]{40}/)
-                || !(manifest.sourceDirty instanceof Boolean)) {
-            failures << 'DEVELOPMENT version requires exact sourceTree/sourceDirty provenance'
-        } else {
-            String expectedDevelopmentVersion = manifest.sourceDirty
-                    ? '3.1.0-dev.tree.' + manifest.sourceTree
-                    : '3.1.0-dev.' + manifest.sourceCommit
-            if (manifest.version != expectedDevelopmentVersion) {
-                failures << 'DEVELOPMENT version does not bind its exact source identity'
-            }
-        }
+    if (!(manifest.sourceTree instanceof String)
+            || !(manifest.sourceTree ==~ /[0-9a-f]{40}/)
+            || manifest.sourceDirty != false) {
+        failures << 'DEVELOPMENT manifest requires a clean exact source tree'
+    }
+    if (manifest.version != '3.1.0-dev.' + manifest.sourceCommit) {
+        failures << 'DEVELOPMENT version does not bind its exact clean commit'
     }
     [
             'contractsSpecificationIdentity',
@@ -1401,17 +1394,6 @@ def inspectImmutableDevelopmentContractsRepository = {
         failures << ('manifest has ' + records.size()
                 + ' artifact records; expected 12')
     }
-    if (manifest.containsKey('artifactRecordCount')
-            && (!(manifest.artifactRecordCount instanceof Number)
-            || manifest.artifactRecordCount.toString() != '12')) {
-        failures << 'artifactRecordCount must be 12 when present'
-    }
-    if (manifest.containsKey('repositoryFileCount')
-            && (!(manifest.repositoryFileCount instanceof Number)
-            || manifest.repositoryFileCount.toString() != '26')) {
-        failures << 'repositoryFileCount must be 26 when present'
-    }
-
     def actualFiles = [] as Set
     def stream = java.nio.file.Files.walk(repository.toPath())
     try {
@@ -1533,9 +1515,14 @@ def inspectImmutableDevelopmentBexRepository = {
     }
     def requiredManifestFields = [
             'schema',
+            'stagePurpose',
+            'releaseReadinessClaimed',
+            'builtWithJava',
             'groupId',
             'version',
             'sourceCommit',
+            'sourceTree',
+            'sourceDirty',
             'bexSpecificationIdentity',
             'bexFixturePackageIdentity',
             'bexRegistryPackageIdentity',
@@ -1562,6 +1549,12 @@ def inspectImmutableDevelopmentBexRepository = {
     if (manifest.groupId != 'blue.bex') {
         failures << "unexpected DEVELOPMENT BEX group ${manifest.groupId}"
     }
+    if (manifest.stagePurpose != 'DEVELOPMENT'
+            || manifest.releaseReadinessClaimed != false
+            || !(manifest.builtWithJava instanceof Number)
+            || manifest.builtWithJava.toString() != '17') {
+        failures << 'BEX manifest is not a JDK 17 DEVELOPMENT handoff'
+    }
     if (manifest.version != immutableDevelopmentBexVersion) {
         failures << "unexpected DEVELOPMENT BEX version ${manifest.version}"
     }
@@ -1569,6 +1562,11 @@ def inspectImmutableDevelopmentBexRepository = {
             || !immutableDevelopmentBexVersion.endsWith(
             '.' + developmentBexSourceCommit)) {
         failures << 'DEVELOPMENT BEX version/source commitment differs'
+    }
+    if (!(manifest.sourceTree instanceof String)
+            || !(manifest.sourceTree ==~ /[0-9a-f]{40}/)
+            || manifest.sourceDirty != false) {
+        failures << 'DEVELOPMENT BEX manifest must bind a clean source tree'
     }
     [
             'bexSpecificationIdentity',
@@ -4047,31 +4045,27 @@ def extractedSourceArchivePropertiesFor = { Map<String, String> selection ->
             required('blueContractsSourceCommit')
     properties.blueDevelopmentVersion = required('blueDevelopmentVersion')
     if (!(properties.blueContractsSourceCommit
-            ==~ /[0-9a-f]{40}|[0-9a-f]{64}/)
+            ==~ /[0-9a-f]{40}/)
             || !(properties.blueDevelopmentVersion
             ==~ /3\.0\.0-dev\.[0-9a-f]{40}/)
-            || (properties.blueContractsVersion != publishedLanguageVersion
-            && properties.blueContractsVersion
-            != '3.1.0-dev.' + properties.blueContractsSourceCommit)) {
+            || properties.blueContractsVersion
+            != '3.1.0-dev.' + properties.blueContractsSourceCommit) {
         throw new GradleException(
                 'Extracted-source DEVELOPMENT source identity is invalid')
     }
     String selectedBexVersion = required('blueBexVersion')
     properties.blueBexVersion = selectedBexVersion
-    if (selectedBexVersion != publishedBexVersion) {
-        properties.blueBexRepository = required('blueBexRepository')
-        properties.blueBexManifestSha256 =
-                required('blueBexManifestSha256')
-        properties.blueBexSourceCommit = required('blueBexSourceCommit')
-        if (!(selectedBexVersion ==~ /1\.1\.0-dev\.[0-9a-f]{40}/)
-                || !(properties.blueBexManifestSha256
-                ==~ /sha256:[0-9a-f]{64}/)
-                || !(properties.blueBexSourceCommit ==~ /[0-9a-f]{40}/)
-                || !selectedBexVersion.endsWith(
-                '.' + properties.blueBexSourceCommit)) {
-            throw new GradleException(
-                    'Extracted-source DEVELOPMENT BEX binding is invalid')
-        }
+    properties.blueBexRepository = required('blueBexRepository')
+    properties.blueBexManifestSha256 = required('blueBexManifestSha256')
+    properties.blueBexSourceCommit = required('blueBexSourceCommit')
+    if (!(selectedBexVersion ==~ /1\.1\.0-dev\.[0-9a-f]{40}/)
+            || !(properties.blueBexManifestSha256
+            ==~ /sha256:[0-9a-f]{64}/)
+            || !(properties.blueBexSourceCommit ==~ /[0-9a-f]{40}/)
+            || !selectedBexVersion.endsWith(
+            '.' + properties.blueBexSourceCommit)) {
+        throw new GradleException(
+                'Extracted-source DEVELOPMENT BEX binding is invalid')
     }
     properties
 }
@@ -4090,12 +4084,12 @@ def extractedSourceArchiveSelection = {
                     ? developmentContractsSourceCommit : null,
             blueBexVersion: immutableDevelopmentContracts
                     ? immutableDevelopmentBexVersion : null,
-            blueBexRepository: immutableDevelopmentBex
+            blueBexRepository: immutableDevelopmentContracts
                     ? file(developmentBexRepositoryValue).canonicalPath
                     : null,
-            blueBexManifestSha256: immutableDevelopmentBex
+            blueBexManifestSha256: immutableDevelopmentContracts
                     ? developmentBexManifestIdentity : null,
-            blueBexSourceCommit: immutableDevelopmentBex
+            blueBexSourceCommit: immutableDevelopmentContracts
                     ? developmentBexSourceCommit : null,
             blueDevelopmentVersion: immutableDevelopmentContracts
                     ? developmentProjectVersion : null
@@ -4166,6 +4160,11 @@ def verifyExtractedSourceArchiveLanePolicyLogic = tasks.register(
         }
         def rejected = [
                 [blueDependencyMode: 'unknown'],
+                [
+                        blueDependencyMode: 'immutable-staged-contracts',
+                        blueContractsRepository: '/immutable/contracts',
+                        blueContractsManifestSha256: identity
+                ],
                 [
                         blueDependencyMode:
                                 'immutable-development-contracts',
@@ -4729,9 +4728,7 @@ def immutableDevelopmentContractsDependencies = tasks.register(
                 'Manifest-pinned DEVELOPMENT Contracts/BEX dependencies resolved without fallback: {} from {}, BEX {}',
                 stagedContractsManifestIdentity,
                 developmentContractsSourceCommit,
-                immutableDevelopmentBex
-                        ? developmentBexManifestIdentity
-                        : publishedBexVersion)
+                developmentBexManifestIdentity)
     }
 }
 
