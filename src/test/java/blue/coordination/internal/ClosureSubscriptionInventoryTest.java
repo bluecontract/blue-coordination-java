@@ -588,6 +588,26 @@ final class ClosureSubscriptionInventoryTest {
     }
 
     @Test
+    void registeredCollectionChannelCannotHideBehindMissingDispatchField() {
+        // given
+        EffectiveContractSnapshot malformedCollection =
+                EffectiveContractSnapshot.builder("/", "collection")
+                        .sourceContribution("collection-contribution")
+                        .effectiveTypeBlueId(
+                                RuntimeBlueIds
+                                        .EMBEDDED_COLLECTION_EVENT_CHANNEL)
+                        .role(EffectiveContractSnapshotConstants.Role
+                                .PROCESSOR_CHANNEL)
+                        .build();
+
+        // then
+        assertTrue(ClosureSubscriptionInventory
+                .isEmbeddedCollectionDemandContract(malformedCollection),
+                "the exact runtime type must be classified before its "
+                        + "required dispatch fields are validated");
+    }
+
+    @Test
     void randomizedSubscriptionRetentionMatchesCanonicalSlotProjection() {
         // given
         SubscriptionState template = delta(
