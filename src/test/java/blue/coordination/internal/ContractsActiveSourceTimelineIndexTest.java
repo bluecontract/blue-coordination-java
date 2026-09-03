@@ -17,7 +17,7 @@ final class ContractsActiveSourceTimelineIndexTest {
     private static final String POLICY =
             "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
     private static final String BLUE_ID =
-            "4ZMfXZbSNVnEaqHVwYyYFHSfJ4JYs6VbR2oLZNqNkScr";
+            "8M3d43KXskYr7rrdiaXPiPHmypFEjtU4uUyECtU7Tiyx";
     private static final DocumentId ROOT = DocumentId.of("root");
     private static final DocumentId COLLECTION_OWNER =
             DocumentId.of("collection-owner");

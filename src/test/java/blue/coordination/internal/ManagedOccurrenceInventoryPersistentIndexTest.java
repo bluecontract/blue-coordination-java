@@ -25,12 +25,12 @@ final class ManagedOccurrenceInventoryPersistentIndexTest {
     private static final String POLICY =
             "sha256:c1e8d880499cbafc595e1fb213ee73acc6ddb8d1d9850c7ddff2224c88a03d35";
     private static final String INPUT_MASTER =
-            "4ZMfXZbSNVnEaqHVwYyYFHSfJ4JYs6VbR2oLZNqNkScr";
+            "8M3d43KXskYr7rrdiaXPiPHmypFEjtU4uUyECtU7Tiyx";
     private static final String INPUT_B = INPUT_MASTER + "#1";
     private static final String AFTER_REMOVE_B =
-            "8JUt1dEDU1yTVwiNzmW84yecWT7sZsrovRknkrw1CDR5";
+            "9QHL8pTcMNzazZLUBfjjTU6tkqdzGrPQgoR5o1DWvMZN";
     private static final String AFTER_READD_B =
-            "9Sov32cJbfoBc2NvjLBtkkgPVrMV7sJ8sBksik5e8ps8#1";
+            "B9FqJVgNt86vcgxd4tdFdgWnGXmpeACguqvPuTWr9UNg#1";
     private static final DocumentId A = DocumentId.of("a");
     private static final DocumentId B = DocumentId.of("b");
 
