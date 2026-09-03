@@ -173,6 +173,85 @@ final class SdkOperationRuntimeTest {
     }
 
     @Test
+    void operationConstraintDistinguishesAbsentAndExactEmptyRequests() {
+        // given
+        DocumentId id = DocumentId.of("request-presence-operation");
+        String document = """
+                documentId: request-presence-operation
+                contracts:
+                  ownerChannel:
+                    type: Coordination/Timeline Channel
+                    timeline:
+                      type: MyOS/MyOS Timeline
+                      timelineId: request-presence-operation/alice
+                    actor:
+                      type: MyOS/Principal Actor
+                      accountId: alice
+                  acceptAny:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $return: true
+                  acceptEmpty:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: ownerChannel
+                    request: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $return: true
+                """;
+        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            TimelineHandle alice = blue.timelines().register(
+                    "request-presence-operation/alice", "alice");
+            DocumentHandle target = blue.documents().admit(
+                    ManagedDocument.yaml(id, document)
+                            .publicRoot()
+                            .fromNow());
+
+            // when
+            EntryResult unconstrainedAbsent = blue.operations()
+                    .on(target)
+                    .from(alice)
+                    .call("acceptAny")
+                    .through("ownerChannel")
+                    .execute();
+            EntryResult unconstrainedEmpty = blue.operations()
+                    .on(target)
+                    .from(alice)
+                    .call("acceptAny")
+                    .through("ownerChannel")
+                    .requestYaml("{}")
+                    .execute();
+            EntryResult constrainedAbsent = blue.operations()
+                    .on(target)
+                    .from(alice)
+                    .call("acceptEmpty")
+                    .through("ownerChannel")
+                    .execute();
+            EntryResult constrainedEmpty = blue.operations()
+                    .on(target)
+                    .from(alice)
+                    .call("acceptEmpty")
+                    .through("ownerChannel")
+                    .requestYaml("{}")
+                    .execute();
+
+            // then
+            assertEquals(EntryDisposition.APPLIED,
+                    unconstrainedAbsent.disposition());
+            assertEquals(EntryDisposition.APPLIED,
+                    unconstrainedEmpty.disposition());
+            assertEquals(EntryDisposition.NO_MATCH,
+                    constrainedAbsent.disposition());
+            assertEquals(EntryDisposition.APPLIED,
+                    constrainedEmpty.disposition());
+        }
+    }
+
+    @Test
     void missingTargetAndOperationReturnPreciseRejectedResults() {
         // given
         try (BlueCoordination blue = BlueCoordination.inMemory()) {
