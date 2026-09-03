@@ -1,5 +1,8 @@
 package blue.coordination.api;
 
+import blue.language.codec.jackson.UncheckedObjectMapper;
+import blue.language.model.Node;
+
 import java.util.Objects;
 import java.util.Optional;
 
@@ -119,7 +122,18 @@ public final class Operation {
 
     private static String normalizeYaml(String value) {
         String checked = Objects.requireNonNull(value, "requestYaml").strip();
-        return checked.isEmpty() ? "{}" : checked;
+        if (checked.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "requestYaml must contain a non-null YAML root");
+        }
+        try {
+            UncheckedObjectMapper.YAML_MAPPER.readValue(checked, Node.class);
+        } catch (RuntimeException failure) {
+            throw new IllegalArgumentException(
+                    "requestYaml must contain a non-null YAML root",
+                    failure);
+        }
+        return checked;
     }
 
     private static String requireText(String value, String label) {
