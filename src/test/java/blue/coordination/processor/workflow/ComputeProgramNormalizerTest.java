@@ -12,6 +12,7 @@ import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -67,6 +68,44 @@ class ComputeProgramNormalizerTest {
         assertNull(normalizer.program(empty).property("definition"));
     }
 
+    @Test
+    void shouldPreservePresentEmptyRootExpression() {
+        FrozenNode program = new ComputeProgramNormalizer().program(
+                FrozenNode.fromResolvedNode(
+                        new Node().properties(
+                                "expr",
+                                new Node().properties(
+                                        Collections.<String, Node>emptyMap()))));
+
+        FrozenNode expression = program.property("expr");
+        assertNotNull(expression);
+        assertTrue(NodeUtil.isEmpty(expression.toNode()));
+        assertCompilerAccepts(program);
+    }
+
+    @Test
+    void shouldPreservePresentEmptyFunctionExpression() {
+        FrozenNode program = new ComputeProgramNormalizer().program(
+                FrozenNode.fromResolvedNode(
+                        new Node()
+                                .properties("entry", new Node().value("empty"))
+                                .properties(
+                                        "functions",
+                                        new Node().properties(
+                                                "empty",
+                                                new Node().properties(
+                                                        "expr",
+                                                        new Node().properties(
+                                                                Collections.<String, Node>emptyMap()))))));
+
+        FrozenNode expression = program.property("functions")
+                .property("empty")
+                .property("expr");
+        assertNotNull(expression);
+        assertTrue(NodeUtil.isEmpty(expression.toNode()));
+        assertCompilerAccepts(program);
+    }
+
     private static FrozenNode normalizeStatement(Node statement) {
         return new ComputeProgramNormalizer().program(
                 FrozenNode.fromResolvedNode(
@@ -89,6 +128,12 @@ class ComputeProgramNormalizerTest {
             assertThrows(
                     BexException.class,
                     () -> engine.compile(BexProgramSource.inline(program)));
+        }
+    }
+
+    private static void assertCompilerAccepts(FrozenNode program) {
+        try (BexEngine engine = BexEngine.builder().build()) {
+            engine.compile(BexProgramSource.inline(program));
         }
     }
 }

@@ -18,7 +18,8 @@ import java.util.Map;
  */
 final class ComputeProgramNormalizer {
     private static final String NORMALIZATION_VERSION =
-            "compute-program-v7|exact-definition-identity|canonical-bex-source|strict-statements";
+            "compute-program-v8|exact-definition-identity|canonical-bex-source"
+                    + "|strict-statements|exact-expr-presence";
 
     private final BexProcessingMetrics metrics;
 
@@ -91,7 +92,7 @@ final class ComputeProgramNormalizer {
         Node program = new Node();
         copyMetadata(program, stepNode);
         Map<String, Node> properties = new LinkedHashMap<String, Node>();
-        putIfMeaningful(properties, "expr", NodeUtil.property(stepNode, "expr"));
+        putIfPresent(properties, "expr", NodeUtil.property(stepNode, "expr"));
         putIfMeaningful(properties, "do", normalizeDo(NodeUtil.property(stepNode, "do")));
         putIfMeaningful(properties, "definition", NodeUtil.property(stepNode, "definition"));
         putIfMeaningful(properties, "entry", NodeUtil.property(stepNode, "entry"));
@@ -209,7 +210,7 @@ final class ComputeProgramNormalizer {
         }
         Map<String, Node> properties = new LinkedHashMap<String, Node>();
         putIfMeaningful(properties, "args", authoredMap(NodeUtil.property(function, "args")));
-        putIfMeaningful(properties, "expr", NodeUtil.property(function, "expr"));
+        putIfPresent(properties, "expr", NodeUtil.property(function, "expr"));
         putIfMeaningful(properties, "do", normalizeDo(NodeUtil.property(function, "do")));
         return new Node().properties(properties);
     }
@@ -246,6 +247,17 @@ final class ComputeProgramNormalizer {
 
     private void putIfMeaningful(Map<String, Node> properties, String key, Node value) {
         if (hasAuthoredContent(value)) {
+            properties.put(key, canonicalStaticSource(value));
+        }
+    }
+
+    private void putIfPresent(Map<String, Node> properties,
+                              String key,
+                              Node value) {
+        // BEX selects expression bodies by field presence and accepts an
+        // ordinary empty object as a literal expression. Emptiness is not
+        // permission to substitute the default statement program.
+        if (value != null) {
             properties.put(key, canonicalStaticSource(value));
         }
     }
