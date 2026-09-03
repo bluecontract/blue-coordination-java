@@ -11,10 +11,24 @@ plugins {
 def stagedVersions = gradle.extensions.extraProperties.get('stagedConsumerVersions')
 def coordinationVersion = stagedVersions.coordination
 def contractsVersion = stagedVersions.contracts
+def bexVersion = stagedVersions.bex
+def dependencyMode = providers.gradleProperty('dependencyMode').get()
+def expectedProtectedGroups = dependencyMode == 'immutable-development-contracts'
+        ? ['blue.coordination', 'blue.language', 'blue.bex'] as Set
+        : ['blue.coordination', 'blue.language'] as Set
+def protectedGroups = providers.gradleProperty('protectedGroups').get()
+        .split(',').findAll { !it.isBlank() } as Set
+if (protectedGroups != expectedProtectedGroups) {
+    throw new GradleException(
+            "protectedGroups differs for ${dependencyMode}: ${protectedGroups}")
+}
 def coordinationRepository = file(providers.gradleProperty(
         'coordinationRepository').get()).canonicalFile
 def contractsRepository = file(providers.gradleProperty(
         'contractsRepository').get()).canonicalFile
+def bexRepository = dependencyMode == 'immutable-development-contracts'
+        ? file(providers.gradleProperty('bexRepository').get()).canonicalFile
+        : null
 def smokeReport = file(providers.gradleProperty('smokeReport').get())
 def testJavaVersion = providers.gradleProperty('testJavaVersion')
         .map { Integer.parseInt(it) }.get()
@@ -88,6 +102,8 @@ def verifyStagedCoordinates = tasks.register('verifyStagedCoordinates') {
     doLast {
         def coordinationManifest = manifest(coordinationRepository)
         def contractsManifest = manifest(contractsRepository)
+        def bexManifest = bexRepository == null
+                ? null : manifest(bexRepository)
         def resolution = configurations.testRuntimeClasspath
                 .incoming.resolutionResult
         def projectComponents = resolution.allComponents.findAll { component ->
@@ -101,7 +117,7 @@ def verifyStagedCoordinates = tasks.register('verifyStagedCoordinates') {
         }
         def blueComponents = resolution.allComponents.findAll { component ->
             component.id instanceof ModuleComponentIdentifier
-                    && ['blue.coordination', 'blue.language'].contains(
+                    && protectedGroups.contains(
                     component.id.group)
         }.collect { component ->
             component.id.group + ':' + component.id.module + ':' +
@@ -129,7 +145,7 @@ def verifyStagedCoordinates = tasks.register('verifyStagedCoordinates') {
                 }
         Map<String, String> actual = configurations.testRuntimeClasspath
                 .resolvedConfiguration.resolvedArtifacts.findAll { artifact ->
-            ['blue.coordination', 'blue.language'].contains(
+            protectedGroups.contains(
                     artifact.moduleVersion.id.group)
         }.collectEntries { artifact ->
             String coordinate = artifact.moduleVersion.id.group + ':' +
@@ -142,20 +158,43 @@ def verifyStagedCoordinates = tasks.register('verifyStagedCoordinates') {
         expected.putAll(expectedContracts.findAll { coordinate, ignored ->
             !coordinate.startsWith('blue.language:blue-conformance:')
         })
+        if (bexManifest != null) {
+            Map<String, String> expectedBex =
+                    bexManifest.artifacts.findAll { record ->
+                record.kind == 'runtime'
+                        && (record.coordinate.startsWith(
+                        'blue.bex:blue-bex-core:')
+                        || record.coordinate.startsWith(
+                        'blue.bex:blue-bex-contracts:'))
+            }.collectEntries { record ->
+                [(String.valueOf(record.coordinate)):
+                         String.valueOf(record.sha256)]
+            }
+            if (expectedBex.size() != 2) {
+                throw new GradleException(
+                        'BEX manifest does not bind both selected runtimes')
+            }
+            expected.putAll(expectedBex)
+        }
         if (actual != expected || expected.values().any { it == null }) {
             throw new GradleException(
                     'resolved Blue bytes differ from immutable manifests')
         }
         project.extensions.extraProperties.set(
                 'stagedCoordinateEvidence', [
+                dependencyMode: dependencyMode,
                 coordinationManifestIdentity:
                         providers.gradleProperty(
                                 'coordinationManifestSha256').get(),
                 contractsManifestIdentity:
                         providers.gradleProperty(
                                 'contractsManifestSha256').get(),
+                bexManifestIdentity: bexManifest == null
+                        ? null : providers.gradleProperty(
+                        'bexManifestSha256').get(),
                 coordinationVersion: coordinationVersion,
                 contractsVersion: contractsVersion,
+                bexVersion: bexVersion,
                 sourceProvenance: gradle.extensions.extraProperties.get(
                         'stagedConsumerSourceProvenance'),
                 selectedBlueCoordinates: blueComponents,
