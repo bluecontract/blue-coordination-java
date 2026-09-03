@@ -1678,8 +1678,6 @@ public final class DefaultCoordinationEngine
                 unavailable) {
             Map<String, String> details = new LinkedHashMap<>();
             details.put("documentId", documentId.value());
-            details.put("collectionPlanningState",
-                    EmbeddedCollectionPlanningAudit.State.INCOMPLETE.name());
             if (!unavailable.requiredExactBlueIds().isEmpty()) {
                 details.put("requiredExactBlueIds", String.join(",",
                         unavailable.requiredExactBlueIds()));

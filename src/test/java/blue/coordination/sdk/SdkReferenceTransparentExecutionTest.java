@@ -153,6 +153,10 @@ final class SdkReferenceTransparentExecutionTest {
             // then
             assertEquals(CoordinationErrorCode.NEEDS_RESOURCES,
                     blocked.code());
+            assertFalse(blocked.details().containsKey(
+                            "collectionPlanningState"),
+                    "generic provider unavailability must not be mislabeled "
+                            + "as collection planning");
             assertTrue(provider.reads(contracts.blueId()) > 0);
             assertThrows(CoordinationException.class,
                     () -> blue.documents().require(COUNTER));
