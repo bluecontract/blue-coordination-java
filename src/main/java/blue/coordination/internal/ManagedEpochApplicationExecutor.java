@@ -426,15 +426,12 @@ final class ManagedEpochApplicationExecutor {
                         entry.getKey(),
                         ClosureSubscriptionInventory.embeddedDemands(
                                 projected));
-                RoutingSurface routingSurface = RoutingSurface
-                        .fromManagedRootContracts(
-                                projected.effectiveRootContracts());
                 EmbeddedOnlyLayout layout = stateChanged
                         ? layoutBuilder.retainVerifiedClosureRoot(
                                 result,
                                 entry.getKey(),
                                 before.layout(),
-                                routingSurface)
+                                projected)
                         : before.layout();
                 ContractsClosureAdapter.requireExactRootSubscriptionSurface(
                         entry.getKey(),

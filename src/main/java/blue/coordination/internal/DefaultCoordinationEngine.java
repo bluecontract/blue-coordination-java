@@ -36,12 +36,16 @@ import blue.coordination.api.TimelineAppendReceipt;
 import blue.coordination.api.ActivationMode;
 import blue.coordination.api.DocumentDispatchOutcome;
 import blue.coordination.api.DocumentSnapshot;
+import blue.coordination.api.EmbeddedCollectionPlanningAudit;
 import blue.coordination.processor.TimelineProviderSupport;
 
 import blue.language.api.BlueCacheStats;
 import blue.language.model.Node;
 import blue.language.model.NodePathEditor;
+import blue.language.processor.ExecutionEvidenceUnavailableException;
 import blue.language.processor.ExternalOrderKey;
+import blue.language.processor.ProcessorErrorCategory;
+import blue.language.processor.SubscriptionSurfaceInvalidException;
 import blue.language.processor.closure.ClosureInvocationInput;
 
 import java.math.BigInteger;
@@ -1581,6 +1585,17 @@ public final class DefaultCoordinationEngine
                 .toList();
     }
 
+    @Override
+    public synchronized List<EmbeddedCollectionPlanningAudit>
+            auditEmbeddedCollections(DocumentId documentId) {
+        ensureOpen();
+        return requireDocument(Objects.requireNonNull(
+                        documentId, "documentId"))
+                .layout()
+                .plan()
+                .collectionAudits();
+    }
+
     private DocumentSession requireDocument(DocumentId documentId) {
         ensureOpen();
         try {
@@ -1659,6 +1674,37 @@ public final class DefaultCoordinationEngine
     private static CoordinationException translateStartFailure(
             DocumentId documentId,
             RuntimeException failure) {
+        if (failure instanceof ExecutionEvidenceUnavailableException
+                unavailable) {
+            Map<String, String> details = new LinkedHashMap<>();
+            details.put("documentId", documentId.value());
+            details.put("collectionPlanningState",
+                    EmbeddedCollectionPlanningAudit.State.INCOMPLETE.name());
+            if (!unavailable.requiredExactBlueIds().isEmpty()) {
+                details.put("requiredExactBlueIds", String.join(",",
+                        unavailable.requiredExactBlueIds()));
+            }
+            return new CoordinationException(
+                    CoordinationErrorCode.NEEDS_RESOURCES,
+                    unavailable.getMessage(),
+                    unavailable,
+                    details);
+        }
+        if (failure instanceof SubscriptionSurfaceInvalidException invalid
+                && invalid.diagnostic().category()
+                == ProcessorErrorCategory.EmbeddedCollectionMustBeObject) {
+            Map<String, String> details = new LinkedHashMap<>();
+            details.put("documentId", documentId.value());
+            details.put("collectionPlanningState",
+                    EmbeddedCollectionPlanningAudit.State.INVALID_KIND.name());
+            return new CoordinationException(
+                    CoordinationErrorCode.FROZEN_PROCESSING_FAILED,
+                    invalid.getMessage(),
+                    invalid,
+                    details,
+                    null,
+                    invalid.diagnostic());
+        }
         String message = failure.getMessage() == null
                 ? "Document admission failed"
                 : failure.getMessage();

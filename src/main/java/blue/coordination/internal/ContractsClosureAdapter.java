@@ -2422,14 +2422,11 @@ final class ContractsClosureAdapter implements AutoCloseable {
                             entry.getKey(),
                             ClosureSubscriptionInventory.embeddedDemands(
                                     projected));
-                    RoutingSurface routingSurface = RoutingSurface
-                            .fromManagedRootContracts(
-                                    projected.effectiveRootContracts());
                     EmbeddedOnlyLayout layout = layoutBuilder
                             .retainVerifiedClosureRoot(
                                     result,
                                     entry.getKey(),
-                                    routingSurface);
+                                    projected);
                     requireExactRootSubscriptionSurface(
                             entry.getKey(),
                             projected,
@@ -2538,15 +2535,12 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         entry.getKey(),
                         ClosureSubscriptionInventory.embeddedDemands(
                                 projected));
-                RoutingSurface routingSurface = RoutingSurface
-                        .fromManagedRootContracts(
-                                projected.effectiveRootContracts());
                 EmbeddedOnlyLayout layout = stateChanged
                         ? layoutBuilder.retainVerifiedClosureRoot(
                                 result,
                                 entry.getKey(),
                                 before.layout(),
-                                routingSurface)
+                                projected)
                         : before.layout();
                 requireExactRootSubscriptionSurface(
                         entry.getKey(),

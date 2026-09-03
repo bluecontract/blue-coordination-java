@@ -2,18 +2,24 @@ package blue.coordination.internal;
 
 import blue.coordination.api.ExactValue;
 import blue.coordination.api.DocumentId;
+import blue.coordination.api.EmbeddedCollectionPlanningAudit;
 import blue.language.model.Node;
 import blue.language.model.wire.JsonPointer;
 import blue.language.merge.ResolvedSnapshot;
 import blue.language.processor.EffectiveFragmentationCatalog;
+import blue.language.processor.EffectiveContractSnapshot;
+import blue.language.processor.EffectiveContractSnapshotConstants;
 import blue.language.processor.EmbeddedScopePlanView;
+import blue.language.processor.ManagedRootSubscriptionSurface;
 import blue.language.processor.closure.ClosureProcessResult;
+import blue.language.processor.util.ProcessorContractConstants;
 import blue.language.processor.util.PointerUtils;
 import blue.language.processor.registry.RuntimeBlueIds;
 import blue.language.snapshot.FrozenNode;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -81,9 +87,9 @@ final class EmbeddedOnlyLayoutBuilder {
             ClosureProcessResult result,
             DocumentId documentId,
             EmbeddedOnlyLayout previous,
-            RoutingSurface routingSurface) {
+            ManagedRootSubscriptionSurface rootSurface) {
         Objects.requireNonNull(previous, "previous");
-        return retainVerifiedClosureRoot(result, documentId, routingSurface);
+        return retainVerifiedClosureRoot(result, documentId, rootSurface);
     }
 
     /** Retains one new independently managed Root after verified admission,
@@ -92,16 +98,81 @@ final class EmbeddedOnlyLayoutBuilder {
     EmbeddedOnlyLayout retainVerifiedClosureRoot(
             ClosureProcessResult result,
             DocumentId documentId,
-            RoutingSurface routingSurface) {
+            ManagedRootSubscriptionSurface rootSurface) {
         ClosureProcessResult verified = Objects.requireNonNull(
                 result, "result");
         DocumentId selected = Objects.requireNonNull(documentId, "documentId");
+        ManagedRootSubscriptionSurface projected = Objects.requireNonNull(
+                rootSurface, "rootSurface");
         ExactValue exactRoot = objects.put(
                 ExactValue.fromVerifiedClosureResult(verified, selected),
                 "verified-closure-component-member");
+        RoutingSurface routingSurface = RoutingSurface
+                .fromManagedRootContracts(
+                        projected.effectiveRootContracts());
         return verifiedRootLayout(
                 exactRoot,
-                EmbeddedLayoutPlan.managedRoot(routingSurface));
+                EmbeddedLayoutPlan.managedRoot(
+                        routingSurface,
+                        managedRootCollectionAudits(
+                                exactRoot,
+                                projected.effectiveRootContracts())));
+    }
+
+    private List<EmbeddedCollectionPlanningAudit> managedRootCollectionAudits(
+            ExactValue exactRoot,
+            List<EffectiveContractSnapshot> effectiveContracts) {
+        Map<String, EmbeddedCollectionPlanningAudit> byPath =
+                new java.util.TreeMap<>(EmbeddingBinding.TEXT_ORDER);
+        for (EffectiveContractSnapshot contract : effectiveContracts) {
+            if (!RuntimeBlueIds.PROCESS_EMBEDDED.equals(
+                    contract.effectiveTypeBlueId())
+                    || !EffectiveContractSnapshotConstants.Role
+                    .PROCESS_EMBEDDED.equals(contract.role())) {
+                continue;
+            }
+            FrozenNode declaration = contract.headerFields().get(
+                    ProcessorContractConstants.KEY_COLLECTION_PATHS);
+            if (declaration == null) {
+                continue;
+            }
+            declaration = materializeReference(declaration);
+            if (declaration == null || declaration.getItems() == null) {
+                throw new IllegalStateException(
+                        "Authenticated Process Embedded collectionPaths is "
+                                + "not a list at " + contract.scopePath());
+            }
+            for (FrozenNode item : declaration.getItems()) {
+                Object value = item != null ? item.getValue() : null;
+                if (!(value instanceof String path) || path.isBlank()) {
+                    throw new IllegalStateException(
+                            "Authenticated Process Embedded collection path "
+                                    + "is not text at "
+                                    + contract.scopePath());
+                }
+                String absolutePath = PointerUtils.resolvePointer(
+                        contract.scopePath(), path);
+                FrozenNode collection = resolveThroughReferences(
+                        exactRoot.frozen(), JsonPointer.split(absolutePath));
+                int memberCount = collection == null
+                        || collection.getProperties() == null
+                        ? 0
+                        : collection.getProperties().size();
+                EmbeddedCollectionPlanningAudit previous = byPath.put(
+                        absolutePath,
+                        EmbeddedCollectionPlanningAudit.completeObject(
+                                absolutePath,
+                                collection != null,
+                                memberCount));
+                if (previous != null) {
+                    throw new IllegalStateException(
+                            "Duplicate authenticated embedded collection "
+                                    + absolutePath);
+                }
+            }
+        }
+        return Collections.unmodifiableList(
+                new ArrayList<>(byPath.values()));
     }
 
     private EmbeddedOnlyLayout verifiedRootLayout(

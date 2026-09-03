@@ -181,6 +181,19 @@ public interface CoordinationEngine extends AutoCloseable {
     /** Reads the latest committed state for audit and recovery tooling. */
     DocumentSnapshot auditDocument(DocumentId documentId);
 
+    /**
+     * Reads the authenticated collection-presence plan retained with the
+     * latest committed document state.
+     *
+     * <p>An absent collection and a present exact empty object both have zero
+     * active members but remain distinct audit states. Inputs whose exact
+     * evidence is unavailable or whose selected value has the wrong kind fail
+     * admission and therefore are reported by the typed admission failure,
+     * not as retained document state.</p>
+     */
+    List<EmbeddedCollectionPlanningAudit> auditEmbeddedCollections(
+            DocumentId documentId);
+
     /** Reads the immutable ordered revision stream of one document. */
     List<DocumentRevision> history(DocumentId documentId);
 

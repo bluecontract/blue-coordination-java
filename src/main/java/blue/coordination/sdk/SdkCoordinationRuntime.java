@@ -6,6 +6,7 @@ import blue.coordination.api.CoordinationEngine;
 import blue.coordination.api.CoordinationErrorCode;
 import blue.coordination.api.CoordinationException;
 import blue.coordination.api.DocumentId;
+import blue.coordination.api.EmbeddedCollectionPlanningAudit;
 import blue.coordination.api.ExactValue;
 import blue.coordination.api.Operation;
 import blue.coordination.api.ProcessingDrainReceipt;
@@ -188,6 +189,13 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                                         source.actorId()))
                                 .toList()))
                 .toList();
+    }
+
+    synchronized List<EmbeddedCollectionPlanningAudit>
+            auditEmbeddedCollections(DocumentId documentId) {
+        ensureOpen();
+        return engine.auditEmbeddedCollections(Objects.requireNonNull(
+                documentId, "documentId"));
     }
 
     String languageSpecificationIdentity() {

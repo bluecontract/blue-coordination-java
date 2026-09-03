@@ -1,8 +1,10 @@
 package blue.coordination.internal;
 
+import blue.coordination.api.EmbeddedCollectionPlanningAudit;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -30,6 +32,12 @@ final class EmbeddedCollectionPlanningAuditTest {
                         "currentMemberCount", 0,
                         "detail", "declared collection is present and empty"),
                 empty.reportFields());
+        assertEquals(List.of(
+                        "collectionPath",
+                        "state",
+                        "currentMemberCount",
+                        "detail"),
+                List.copyOf(empty.reportFields().keySet()));
         assertThrows(IllegalArgumentException.class,
                 () -> EmbeddedCollectionPlanningAudit.completeObject(
                         "/games", false, 1));

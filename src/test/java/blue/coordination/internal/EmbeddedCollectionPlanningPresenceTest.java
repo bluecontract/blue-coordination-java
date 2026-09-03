@@ -1,9 +1,12 @@
 package blue.coordination.internal;
 
 import blue.coordination.api.ExactValue;
+import blue.coordination.api.EmbeddedCollectionPlanningAudit;
 import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.model.Node;
 import blue.language.processor.ExecutionEvidenceUnavailableException;
+import blue.language.processor.ProcessorErrorCategory;
+import blue.language.processor.SubscriptionSurfaceInvalidException;
 import blue.language.processor.registry.RuntimeBlueIds;
 import blue.language.provider.NodeProvider;
 import blue.language.provider.NodeProviderResult;
@@ -22,14 +25,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class EmbeddedCollectionPlanningPresenceTest {
 
     @Test
-    void absentAndPresentEmptyCollectionsBothPlanZeroOccurrences() {
+    void coordCollection01And02PreserveAbsentVersusEmptyAtSameLineage() {
         // given
         EngineMetrics metrics = new EngineMetrics();
         WholeObjectStore objects = new WholeObjectStore(metrics);
         ExactValue absent = objects.put(
-                root("absent", null), "absent-collection-root");
+                root("same-document", null), "absent-collection-root");
         ExactValue empty = objects.put(
-                root("empty", emptyObject()), "empty-collection-root");
+                root("same-document", emptyObject()),
+                "empty-collection-root");
 
         try (BlueRuntime runtime = BlueRuntime.create(objects, metrics)) {
             EmbeddedOnlyLayoutBuilder layouts =
@@ -50,6 +54,14 @@ final class EmbeddedCollectionPlanningPresenceTest {
                     .rulesByScope().get("/").collectionAbsolutePaths());
             assertEquals(List.of("/games"), emptyLayout.plan()
                     .rulesByScope().get("/").collectionAbsolutePaths());
+            assertEquals(EmbeddedCollectionPlanningAudit.State.ABSENT,
+                    absentLayout.plan().collectionAudits().get(0).state());
+            assertEquals(0, absentLayout.plan().collectionAudits().get(0)
+                    .currentMemberCount());
+            assertEquals(EmbeddedCollectionPlanningAudit.State.PRESENT_EMPTY,
+                    emptyLayout.plan().collectionAudits().get(0).state());
+            assertEquals(0, emptyLayout.plan().collectionAudits().get(0)
+                    .currentMemberCount());
         }
     }
 
@@ -115,11 +127,14 @@ final class EmbeddedCollectionPlanningPresenceTest {
                     new EmbeddedOnlyLayoutBuilder(runtime, objects, metrics);
 
             // when
-            RuntimeException failure = assertThrows(
-                    RuntimeException.class,
+            SubscriptionSurfaceInvalidException failure = assertThrows(
+                    SubscriptionSurfaceInvalidException.class,
                     () -> layouts.build(scalar));
 
             // then
+            assertEquals(
+                    ProcessorErrorCategory.EmbeddedCollectionMustBeObject,
+                    failure.diagnostic().category());
             assertTrue(failure.getMessage().contains(
                     "Embedded collection must be an object"));
         }

@@ -2,6 +2,7 @@ package blue.coordination.sdk;
 
 import blue.coordination.api.CoordinationEngine;
 import blue.coordination.api.DocumentId;
+import blue.coordination.api.EmbeddedCollectionPlanningAudit;
 import blue.coordination.api.ManagedCatchUpBarrier;
 import blue.coordination.api.ManagedDocumentReadiness;
 import blue.coordination.api.ManagedOccurrenceCatchUpPlan;
@@ -141,6 +142,13 @@ public final class AdvancedCoordination {
     /** Reads the current processor-compiled external operation routes. */
     public List<OperationRouteSnapshot> auditOperationRoutes(DocumentId id) {
         return runtime.auditOperationRoutes(
+                Objects.requireNonNull(id, "id"));
+    }
+
+    /** Reads the exact collection-presence plan retained at the current head. */
+    public List<EmbeddedCollectionPlanningAudit> auditEmbeddedCollections(
+            DocumentId id) {
+        return runtime.auditEmbeddedCollections(
                 Objects.requireNonNull(id, "id"));
     }
 

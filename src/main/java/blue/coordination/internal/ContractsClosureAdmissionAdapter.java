@@ -1159,12 +1159,9 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                         documentId,
                         ClosureSubscriptionInventory.embeddedDemands(
                                 rootSurface));
-                RoutingSurface routingSurface = RoutingSurface
-                        .fromManagedRootContracts(
-                                rootSurface.effectiveRootContracts());
                 EmbeddedOnlyLayout layout = layoutBuilder
                         .retainVerifiedClosureRoot(
-                                result, documentId, routingSurface);
+                                result, documentId, rootSurface);
                 ExactValue initialized = objects.put(
                         layout.semanticRoot(),
                         "closure-admission-initialization-revision");
