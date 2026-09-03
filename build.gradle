@@ -1451,6 +1451,30 @@ def inspectImmutableDevelopmentContractsRepository = {
     manifest
 }
 
+def requiredDevelopmentBexArtifactFields = [
+        'coordinate',
+        'kind',
+        'path',
+        'checksumPath',
+        'bytes',
+        'sha256'
+] as Set
+
+def developmentBexArtifactFieldFailures = { Object record, int index ->
+    def actualFields = record instanceof Map
+            ? record.keySet() as Set : [] as Set
+    if (record instanceof Map
+            && actualFields == requiredDevelopmentBexArtifactFields) {
+        return []
+    }
+    [('BEX manifest artifact record ' + index + ' fields differ; missing '
+            + (requiredDevelopmentBexArtifactFields - actualFields)
+            .toList().sort()
+            + ', unexpected '
+            + (actualFields - requiredDevelopmentBexArtifactFields)
+            .toList().sort())]
+}
+
 def inspectImmutableDevelopmentBexRepository = {
     if (!immutableDevelopmentBex) {
         throw new GradleException(
@@ -1591,6 +1615,9 @@ def inspectImmutableDevelopmentBexRepository = {
     }
     def records = manifest.artifacts instanceof List
             ? manifest.artifacts : []
+    records.eachWithIndex { record, index ->
+        failures.addAll(developmentBexArtifactFieldFailures(record, index))
+    }
     def recordKeys = records.collect { record ->
         String.valueOf(record.coordinate) + ':'
                 + String.valueOf(record.kind)
@@ -1691,6 +1718,42 @@ def inspectImmutableDevelopmentBexRepository = {
                         + failures.join('\n - '))
     }
     manifest
+}
+
+tasks.register('verifyImmutableDevelopmentBexManifestPolicyLogic') {
+    group = 'verification'
+    description = 'Regression-tests the exact DEVELOPMENT BEX artifact-record schema.'
+    doLast {
+        def exact = [
+                coordinate: 'blue.bex:blue-bex-java:1.1.0-dev.' + ('a' * 40),
+                kind: 'runtime',
+                path: 'blue/bex/blue-bex-java/candidate.jar',
+                checksumPath: 'blue/bex/blue-bex-java/candidate.jar.sha256',
+                bytes: 1L,
+                sha256: 'sha256:' + ('b' * 64)
+        ]
+        if (!developmentBexArtifactFieldFailures(exact, 0).empty) {
+            throw new GradleException('exact BEX artifact record was rejected')
+        }
+        def missing = new LinkedHashMap(exact)
+        missing.remove('bytes')
+        if (developmentBexArtifactFieldFailures(missing, 0).size() != 1
+                || !developmentBexArtifactFieldFailures(missing, 0)[0]
+                .contains('missing [bytes]')) {
+            throw new GradleException('missing BEX artifact field was accepted')
+        }
+        def extra = new LinkedHashMap(exact)
+        extra.put('mutableAlias', true)
+        if (developmentBexArtifactFieldFailures(extra, 0).size() != 1
+                || !developmentBexArtifactFieldFailures(extra, 0)[0]
+                .contains('unexpected [mutableAlias]')) {
+            throw new GradleException('unexpected BEX artifact field was accepted')
+        }
+        if (developmentBexArtifactFieldFailures('not-an-object', 0).size()
+                != 1) {
+            throw new GradleException('non-object BEX artifact record was accepted')
+        }
+    }
 }
 
 def immutableStagedContractsRepository = tasks.register(
@@ -4921,6 +4984,7 @@ tasks.register('releaseCheck') {
             'verifyDocumentation', 'verifySourceArchiveHygiene', 'test',
             'integrationTest', 'consumerTest', 'scenarioTest',
             'verifyTestArchitecture', 'verifyCoordinationConformanceCoverage',
+            'verifyImmutableDevelopmentBexManifestPolicyLogic',
             extractedSourceArchive
 }
 
