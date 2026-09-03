@@ -13,7 +13,7 @@
       "id": "COORD-EMPTY-02",
       "sourceSet": "test",
       "className": "blue.coordination.internal.WholeRequestEntryFactoryPresenceTest",
-      "method": "exactEmptyMandateConstraintIsPresentAndFailsClosed",
+      "method": "feederAcceptsAbsentMandateAndRejectsPresentEmptyWithoutResolver",
       "status": "active"
     },
     {
