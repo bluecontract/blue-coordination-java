@@ -3982,31 +3982,227 @@ def sourceArchiveChecksum = tasks.register(
     }
 }
 
+def extractedSourceArchivePropertiesFor = { Map<String, String> selection ->
+    String selectedMode = selection.blueDependencyMode
+    if (!(selectedMode in [
+            'published-artifact',
+            'immutable-staged-contracts',
+            'immutable-development-contracts'
+    ])) {
+        throw new GradleException(
+                "Unsupported extracted-source dependency mode ${selectedMode}")
+    }
+    def required = { String propertyName ->
+        String value = selection[propertyName]
+        if (value == null || value.isBlank()) {
+            throw new GradleException(
+                    "Extracted-source ${selectedMode} mode requires ${propertyName}")
+        }
+        value
+    }
+    if (selectedMode == 'published-artifact') {
+        return [blueDependencyMode: selectedMode]
+    }
+    Map<String, String> properties = [
+            blueDependencyMode: selectedMode,
+            blueContractsVersion: required('blueContractsVersion'),
+            blueContractsRepository: required('blueContractsRepository'),
+            blueContractsManifestSha256:
+                    required('blueContractsManifestSha256')
+    ]
+    if (!(properties.blueContractsManifestSha256
+            ==~ /sha256:[0-9a-f]{64}/)) {
+        throw new GradleException(
+                'Extracted-source Contracts manifest identity is invalid')
+    }
+    if (selectedMode == 'immutable-staged-contracts') {
+        return properties
+    }
+    properties.blueContractsSourceCommit =
+            required('blueContractsSourceCommit')
+    properties.blueDevelopmentVersion = required('blueDevelopmentVersion')
+    if (!(properties.blueContractsSourceCommit
+            ==~ /[0-9a-f]{40}|[0-9a-f]{64}/)
+            || !(properties.blueDevelopmentVersion
+            ==~ /3\.0\.0-dev\.[0-9a-f]{40}/)
+            || (properties.blueContractsVersion != publishedLanguageVersion
+            && properties.blueContractsVersion
+            != '3.1.0-dev.' + properties.blueContractsSourceCommit)) {
+        throw new GradleException(
+                'Extracted-source DEVELOPMENT source identity is invalid')
+    }
+    String selectedBexVersion = required('blueBexVersion')
+    properties.blueBexVersion = selectedBexVersion
+    if (selectedBexVersion != publishedBexVersion) {
+        properties.blueBexRepository = required('blueBexRepository')
+        properties.blueBexManifestSha256 =
+                required('blueBexManifestSha256')
+        properties.blueBexSourceCommit = required('blueBexSourceCommit')
+        if (!(selectedBexVersion ==~ /1\.1\.0-dev\.[0-9a-f]{40}/)
+                || !(properties.blueBexManifestSha256
+                ==~ /sha256:[0-9a-f]{64}/)
+                || !(properties.blueBexSourceCommit ==~ /[0-9a-f]{40}/)
+                || !selectedBexVersion.endsWith(
+                '.' + properties.blueBexSourceCommit)) {
+            throw new GradleException(
+                    'Extracted-source DEVELOPMENT BEX binding is invalid')
+        }
+    }
+    properties
+}
+
+def extractedSourceArchiveSelection = {
+    [
+            blueDependencyMode: dependencyMode,
+            blueContractsVersion: immutableContractsRepository
+                    ? immutableStagedLanguageVersion : null,
+            blueContractsRepository: immutableContractsRepository
+                    ? file(stagedContractsRepositoryValue).canonicalPath
+                    : null,
+            blueContractsManifestSha256: immutableContractsRepository
+                    ? stagedContractsManifestIdentity : null,
+            blueContractsSourceCommit: immutableDevelopmentContracts
+                    ? developmentContractsSourceCommit : null,
+            blueBexVersion: immutableDevelopmentContracts
+                    ? immutableDevelopmentBexVersion : null,
+            blueBexRepository: immutableDevelopmentBex
+                    ? file(developmentBexRepositoryValue).canonicalPath
+                    : null,
+            blueBexManifestSha256: immutableDevelopmentBex
+                    ? developmentBexManifestIdentity : null,
+            blueBexSourceCommit: immutableDevelopmentBex
+                    ? developmentBexSourceCommit : null,
+            blueDevelopmentVersion: immutableDevelopmentContracts
+                    ? developmentProjectVersion : null
+    ]
+}
+def extractedSourceArchiveProjectProperties = providers.provider {
+    extractedSourceArchivePropertiesFor(extractedSourceArchiveSelection())
+}
+
+def verifyExtractedSourceArchiveLanePolicyLogic = tasks.register(
+        'verifyExtractedSourceArchiveLanePolicyLogic') {
+    group = 'verification'
+    description = 'Regression-tests exact extracted-source dependency-lane propagation.'
+    doLast {
+        String commit = 'a' * 40
+        String otherCommit = 'b' * 40
+        String identity = 'sha256:' + ('c' * 64)
+        Map<String, String> published = extractedSourceArchivePropertiesFor([
+                blueDependencyMode: 'published-artifact'
+        ])
+        if (published != [blueDependencyMode: 'published-artifact']) {
+            throw new GradleException(
+                    'Published extracted-source lane leaked candidate properties')
+        }
+        Map<String, String> staged = extractedSourceArchivePropertiesFor([
+                blueDependencyMode: 'immutable-staged-contracts',
+                blueContractsVersion: '3.1.0-rc.23',
+                blueContractsRepository: '/immutable/contracts',
+                blueContractsManifestSha256: identity
+        ])
+        if (staged != [
+                blueDependencyMode: 'immutable-staged-contracts',
+                blueContractsVersion: '3.1.0-rc.23',
+                blueContractsRepository: '/immutable/contracts',
+                blueContractsManifestSha256: identity
+        ]) {
+            throw new GradleException(
+                    'Staged extracted-source lane did not preserve exact properties')
+        }
+        Map<String, String> development =
+                extractedSourceArchivePropertiesFor([
+                        blueDependencyMode:
+                                'immutable-development-contracts',
+                        blueContractsVersion: '3.1.0-dev.' + commit,
+                        blueContractsRepository: '/immutable/contracts-dev',
+                        blueContractsManifestSha256: identity,
+                        blueContractsSourceCommit: commit,
+                        blueBexVersion: '1.1.0-dev.' + otherCommit,
+                        blueBexRepository: '/immutable/bex-dev',
+                        blueBexManifestSha256: identity,
+                        blueBexSourceCommit: otherCommit,
+                        blueDevelopmentVersion: '3.0.0-dev.' + commit
+                ])
+        if (development != [
+                blueDependencyMode: 'immutable-development-contracts',
+                blueContractsVersion: '3.1.0-dev.' + commit,
+                blueContractsRepository: '/immutable/contracts-dev',
+                blueContractsManifestSha256: identity,
+                blueContractsSourceCommit: commit,
+                blueDevelopmentVersion: '3.0.0-dev.' + commit,
+                blueBexVersion: '1.1.0-dev.' + otherCommit,
+                blueBexRepository: '/immutable/bex-dev',
+                blueBexManifestSha256: identity,
+                blueBexSourceCommit: otherCommit
+        ]) {
+            throw new GradleException(
+                    'DEVELOPMENT extracted-source lane lost an exact binding')
+        }
+        def rejected = [
+                [blueDependencyMode: 'unknown'],
+                [
+                        blueDependencyMode:
+                                'immutable-development-contracts',
+                        blueContractsVersion: '3.1.0-dev.' + commit,
+                        blueContractsRepository: '/immutable/contracts-dev',
+                        blueContractsManifestSha256: identity,
+                        blueBexVersion: '1.1.0-dev.' + otherCommit,
+                        blueBexRepository: '/immutable/bex-dev',
+                        blueBexManifestSha256: identity,
+                        blueBexSourceCommit: otherCommit,
+                        blueDevelopmentVersion: '3.0.0-dev.' + commit
+                ],
+                [
+                        blueDependencyMode:
+                                'immutable-development-contracts',
+                        blueContractsVersion: '3.1.0-dev.' + commit,
+                        blueContractsRepository: '/immutable/contracts-dev',
+                        blueContractsManifestSha256: identity,
+                        blueContractsSourceCommit: commit,
+                        blueBexVersion: '1.1.0-dev.' + otherCommit,
+                        blueBexRepository: '/immutable/bex-dev',
+                        blueBexManifestSha256: identity,
+                        blueBexSourceCommit: null,
+                        blueDevelopmentVersion: '3.0.0-dev.' + commit
+                ]
+        ]
+        rejected.each { vector ->
+            try {
+                extractedSourceArchivePropertiesFor(vector)
+                throw new GradleException(
+                        'Invalid extracted-source lane was accepted: ' + vector)
+            } catch (GradleException expected) {
+                if (expected.message.startsWith(
+                        'Invalid extracted-source lane was accepted:')) {
+                    throw expected
+                }
+            }
+        }
+    }
+}
+
 def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
     group = 'verification'
     description = 'Verifies the extracted archive against the selected isolated dependency lane.'
-    dependsOn sourceArchiveChecksum
+    dependsOn sourceArchiveChecksum,
+            verifyExtractedSourceArchiveLanePolicyLogic
     inputs.file(coordinationSourceArchive.flatMap { it.archiveFile })
     inputs.property('dependencyMode', dependencyMode)
     inputs.property('testJavaVersion', providers.gradleProperty(
             'testJavaVersion').getOrElse('17'))
-    if (immutableStagedContracts) {
+    inputs.property('extractedSourceArchiveProjectProperties',
+            extractedSourceArchiveProjectProperties)
+    if (immutableContractsRepository) {
         inputs.dir(file(stagedContractsRepositoryValue))
-        inputs.property('blueContractsManifestSha256',
-                stagedContractsManifestIdentity)
+        if (immutableDevelopmentBex) {
+            inputs.dir(file(developmentBexRepositoryValue))
+        }
     }
     outputs.dir(layout.buildDirectory.dir('source-archive-smoke'))
     def verificationReceipt = layout.buildDirectory.file(
             'reports/contracts10/source-archive-verification.json')
     outputs.file(verificationReceipt)
-    doFirst {
-        if (immutableDevelopmentContracts) {
-            throw new GradleException(
-                    'verifyExtractedSourceArchive is a release checkpoint and '
-                            + 'must not silently replace the selected '
-                            + 'immutable DEVELOPMENT Contracts lane')
-        }
-    }
     doLast {
         File sourceArchive = coordinationSourceArchive.get()
                 .archiveFile.get().asFile
@@ -4089,20 +4285,8 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
         command.add(
                 '-PtestJavaVersion=' + providers.gradleProperty(
                         'testJavaVersion').getOrElse('17'))
-        if (immutableStagedContracts) {
-            command.addAll([
-                    '-PblueDependencyMode=immutable-staged-contracts',
-                    '-PblueContractsVersion=' +
-                            immutableStagedLanguageVersion,
-                    '-PblueContractsRepository=' +
-                            file(stagedContractsRepositoryValue).canonicalPath,
-                    '-PblueContractsManifestSha256=' +
-                            stagedContractsManifestIdentity
-            ])
-        } else {
-            command.addAll([
-                    '-PblueDependencyMode=published-artifact'
-            ])
+        extractedSourceArchiveProjectProperties.get().each { propertyName, value ->
+            command.add("-P${propertyName}=${value}")
         }
         Process process = new ProcessBuilder(command)
                 .directory(extracted).redirectErrorStream(true).start()
@@ -4124,15 +4308,24 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
         File receipt = verificationReceipt.get().asFile
         receipt.parentFile.mkdirs()
         def receiptValue = [
-                schemaId: 'blue-coordination-contracts10-source-archive-verification-v2',
+                schemaId: 'blue-coordination-contracts10-source-archive-verification-v3',
                 archiveName: sourceArchive.name,
                 archiveSha256: archiveHash,
                 checksumMode: 'DETACHED_SHA256_SIDECAR',
                 checksumPath: rootDir.toPath().relativize(
                         sidecar.toPath()).toString().replace('\\', '/'),
+                coordinationVersion: version.toString(),
                 dependencyMode: dependencyMode,
-                contractsManifestSha256: immutableStagedContracts
+                contractsVersion: activeLanguageVersion,
+                contractsManifestSha256: immutableContractsRepository
                         ? stagedContractsManifestIdentity : null,
+                contractsSourceCommit: immutableDevelopmentContracts
+                        ? developmentContractsSourceCommit : null,
+                bexVersion: activeBexVersion,
+                bexManifestSha256: immutableDevelopmentBex
+                        ? developmentBexManifestIdentity : null,
+                bexSourceCommit: immutableDevelopmentBex
+                        ? developmentBexSourceCommit : null,
                 java: providers.gradleProperty(
                         'testJavaVersion').getOrElse('17'),
                 extractedConfiguration: 'PASS',
