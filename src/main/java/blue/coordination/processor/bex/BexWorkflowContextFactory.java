@@ -89,7 +89,9 @@ public final class BexWorkflowContextFactory {
         ProcessorExecutionContext processorContext = context.processorContext();
         FrozenNode exactHandlerEvent = processorContext.frozenEvent();
         BexValue event = exactHandlerEvent != null
-                ? BexValues.frozen(exactHandlerEvent)
+                ? BexHandlerEventBinding.bind(
+                        exactHandlerEvent,
+                        processorContext.exactOccurrenceEventIdentityEvidence())
                 : BexValues.nodeSnapshot(context.eventRef());
         BexValue currentContract = currentContractBinding(context);
         BexStepResults steps = stepResults(context.stepResults());
