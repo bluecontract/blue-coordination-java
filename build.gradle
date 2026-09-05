@@ -4703,9 +4703,9 @@ def immutableDevelopmentContractsDependencies = tasks.register(
                                 && selectedDevelopmentBexArtifacts.contains(
                                 artifact.name)
                     }.collectEntries { artifact ->
-                String coordinate = artifact.moduleVersion.id.group + ':'
+                String coordinate = (artifact.moduleVersion.id.group + ':'
                         + artifact.name + ':'
-                        + artifact.moduleVersion.id.version
+                        + artifact.moduleVersion.id.version)
                 [(coordinate): sha256Identity(artifact.file)]
             }
             if (expectedBexCoordinates.any { coordinate, identity ->

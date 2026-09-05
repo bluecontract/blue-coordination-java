@@ -223,8 +223,8 @@ def manifestEnvelope = {
         failures << ("${label} manifest identity is ${actualIdentity}; "
                 + "expected ${expectedIdentity}")
     }
-    String expectedSidecar = sha256Hex(manifestFile)
-            + '  artifact-manifest.json\n'
+    String expectedSidecar = (sha256Hex(manifestFile)
+            + '  artifact-manifest.json\n')
     if (sidecar.getText('UTF-8') != expectedSidecar) {
         failures << "${label} manifest checksum companion differs"
     }
@@ -255,8 +255,8 @@ def expectedRepositoryRecords = {
     List<Map<String, String>> result = []
     artifacts.toList().sort().each { artifact ->
         kinds.keySet().toList().sort().each { kind ->
-            String base = group.replace('.', '/') + '/' + artifact + '/'
-                    + version + '/' + artifact + '-' + version
+            String base = (group.replace('.', '/') + '/' + artifact + '/'
+                    + version + '/' + artifact + '-' + version)
             result << [
                     coordinate: group + ':' + artifact + ':' + version,
                     kind: kind,
@@ -328,8 +328,8 @@ def verifyClosedUpstreamRepository = {
                 || record.bytes.toString() != payload.length().toString()) {
             failures << "${label} artifact byte count differs at ${index}"
         }
-        String expectedChecksum = sha256Hex(payload)
-                + '  ' + payload.name + '\n'
+        String expectedChecksum = (sha256Hex(payload)
+                + '  ' + payload.name + '\n')
         if (checksum.getText('UTF-8') != expectedChecksum) {
             failures << "${label} artifact checksum differs at ${index}"
         }
@@ -1129,8 +1129,8 @@ def registerStagedCoordinationConsumer = {
         String taskName, int javaVersion ->
     tasks.register(taskName, GradleBuild) {
         group = 'verification'
-        description = 'Resolves and executes the isolated staged consumer on Java '
-                + javaVersion + '.'
+        description = ('Resolves and executes the isolated staged consumer on Java '
+                + javaVersion + '.')
         dependsOn verifyImmutableStagedCoordinationRepository,
                 purgeStagedConsumerReceipts
         dir = file('smoke-tests/staged-coordination')
