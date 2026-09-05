@@ -84,6 +84,8 @@ Executable public-SDK examples live in:
 | [Compact engine](architecture/compact-engine.md) | Host integrators and maintainers needing the runtime data flow. |
 | [Internal design guide](development/internals.md) | Repository contributors changing SDK or engine internals. |
 | [Build and test](development/build-and-test.md) | Contributors running verification. |
+| [Campaign F2](development/campaign-r2-coordination.md) | Collection routing, retained birth integration and exact upstream blockers. |
+| [Retained history provider](reference/retained-history-provider.md) | Development evidence transport and the C2 adapter contract. |
 | [Test strategy](development/test-strategy.md) | Contributors choosing the correct suite and evidence level. |
 | [Release process](development/releasing.md) | Maintainers preparing and publishing a candidate. |
 | [Migration from 2.x](migration-from-2.x.md) | Applications replacing removed 2.x surfaces with the SDK. |

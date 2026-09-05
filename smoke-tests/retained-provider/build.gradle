@@ -56,6 +56,12 @@ configurations.configureEach {
     resolutionStrategy.failOnVersionConflict()
 }
 
+// Operational cancellation bounds the lab runner; it is not semantic gas or
+// evidence that a frozen PROCESS call is preemptible.
+tasks.withType(Test).configureEach {
+    timeout = java.time.Duration.ofMinutes(10)
+}
+
 tasks.register('verifyPublishedProducer') {
     doLast {
         def rows = configurations.testRuntimeClasspath.resolvedConfiguration
