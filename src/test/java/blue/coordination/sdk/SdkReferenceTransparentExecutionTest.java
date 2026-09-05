@@ -29,6 +29,42 @@ final class SdkReferenceTransparentExecutionTest {
             "sdk/reference-transparent/alice";
 
     @Test
+    void missingAdmissionTypeIsTypedAndCanBeSuppliedForRetry() {
+        // given
+        ExactBlueValue definition = providerValue("name: Later SDK label\ntype: Text\n");
+        String source = "label:\n  type:\n    blueId: " + definition.blueId()
+                + "\n  value: ready\n";
+        for (String admission : List.of("document", "static", "closure")) {
+            RecordingProvider provider = new RecordingProvider();
+            try (BlueCoordination blue = coordination(provider)) {
+                // when
+                CoordinationException blocked = assertThrows(CoordinationException.class,
+                        () -> admitTypedLabel(blue, source, admission));
+                // then
+                assertEquals(CoordinationErrorCode.NEEDS_RESOURCES, blocked.code());
+                assertEquals(definition.blueId(), blocked.details().get("blueId"));
+                provider.put(definition);
+                DocumentHandle document = admitTypedLabel(blue, source, admission);
+                assertEquals(0L, document.snapshot().epoch());
+                assertEquals("ready", document.snapshot().textAt("/label"));
+                assertEquals(1, document.history().size());
+            }
+        }
+    }
+
+    private static DocumentHandle admitTypedLabel(BlueCoordination blue,
+                                                  String source, String admission) {
+        return switch (admission) {
+            case "static" -> blue.documents().admitStaticProcessEmbedded(source).document("root");
+            case "closure" -> blue.documents().admit(ManagedClosure.builder()
+                    .document("root", COUNTER, source).publicRoot("root").fromNow().build())
+                    .document("root");
+            default -> blue.documents().admit(ManagedDocument.yaml(COUNTER, source)
+                    .publicRoot().fromNow());
+        };
+    }
+
+    @Test
     void referencedCatalogMoneyRetainsTypeEvidenceDuringNestedPatch() throws Exception {
         // given
         ExactBlueValue money = providerValue(resource("01-finos-money-content.yaml"));

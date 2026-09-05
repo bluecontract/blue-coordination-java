@@ -23,6 +23,7 @@ import blue.coordination.internal.DefaultCoordinationEngine;
 import blue.language.model.Node;
 import blue.language.model.NodePathEditor;
 import blue.language.processor.ExternalOrderKey;
+import blue.language.processor.ExecutionEvidenceUnavailableException;
 import blue.language.processor.ProcessorDiagnostic;
 import blue.language.processor.closure.ClosureProcessResult;
 import blue.language.processor.closure.ClosureResourceDemand;
@@ -293,14 +294,10 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                         List.of(),
                         Set.of(selected.id()),
                         activationInputs(selected.activationPolicy()));
-        Contracts10AuthoredClosureCompiler.CompiledClosure compiled;
-        try {
-            compiled = contentDerivedDocumentIds
-                    ? compiler.compileContentIdentified(request)
-                    : compiler.compile(request);
-        } catch (ProviderUnavailableException unavailable) {
-            throw admissionNeedsResources(unavailable);
-        }
+        Contracts10AuthoredClosureCompiler.CompiledClosure compiled =
+                prepareAdmission(() -> contentDerivedDocumentIds
+                        ? compiler.compileContentIdentified(request)
+                        : compiler.compile(request));
         admitCompiled(compiled, Set.of(selected.id()));
         return requireDocument(selected.id());
     }
@@ -346,11 +343,11 @@ final class SdkCoordinationRuntime implements AutoCloseable {
             ActivationPolicy activationPolicy,
             List<ManagedEpochSelector> selectors) {
         Contracts10StaticEmbeddedAdmissionCompiler.CompiledStaticAdmission
-                selected = staticCompiler.compile(
+                selected = prepareAdmission(() -> staticCompiler.compile(
                         Objects.requireNonNull(authoredYaml, "authoredYaml"),
                         exactNodeProvider,
                         activationInputs(Objects.requireNonNull(
-                                activationPolicy, "activationPolicy")));
+                                activationPolicy, "activationPolicy"))));
         DocumentId rootId = selected.rootDocumentId();
         engine.authorizeContractsPublicRoots(Set.of(rootId));
         Contracts10AuthoredClosureCompiler.ActivationInputs activation =
@@ -505,9 +502,9 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                         roots,
                         activationInputs(selected.activationPolicy()));
         Contracts10AuthoredClosureCompiler.CompiledClosure compiled =
-                contentDerivedDocumentIds
+                prepareAdmission(() -> contentDerivedDocumentIds
                         ? compiler.compileContentIdentified(request)
-                        : compiler.compile(request);
+                        : compiler.compile(request));
         ContractsClosureAdmissionReceipt receipt = admitCompiled(
                 compiled, roots);
         LinkedHashMap<String, DocumentHandle> handles = new LinkedHashMap<>();
@@ -821,10 +818,21 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         throw admissionRejected(receipt.attempt().processResult());
     }
 
+    private static <T> T prepareAdmission(java.util.function.Supplier<T> preparation) {
+        try {
+            return preparation.get();
+        } catch (ProviderUnavailableException unavailable) {
+            throw admissionNeedsResources(unavailable.requiredExactBlueId()
+                    .orElseThrow(() -> unavailable), unavailable);
+        } catch (ExecutionEvidenceUnavailableException unavailable) {
+            if (unavailable.requiredExactBlueIds().isEmpty()) throw unavailable;
+            throw admissionNeedsResources(
+                    unavailable.requiredExactBlueIds().get(0), unavailable);
+        }
+    }
+
     private static CoordinationException admissionNeedsResources(
-            ProviderUnavailableException unavailable) {
-        String blueId = unavailable.requiredExactBlueId()
-                .orElseThrow(() -> unavailable);
+            String blueId, RuntimeException unavailable) {
         LinkedHashMap<String, String> details = new LinkedHashMap<>();
         details.put("blueId", blueId);
         return new CoordinationException(
