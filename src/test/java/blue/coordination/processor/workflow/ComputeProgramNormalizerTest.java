@@ -30,7 +30,7 @@ class ComputeProgramNormalizerTest {
         FrozenNode statement = statement(program);
 
         // then
-        assertTrue(NodeUtil.isEmpty(statement.toNode()));
+        assertEquals(Collections.emptyMap(), statement.toNode().getProperties());
         assertFalse(hasReturn(statement));
         assertCompilerRejects(program);
     }
@@ -79,8 +79,10 @@ class ComputeProgramNormalizerTest {
                         null,
                         null,
                         normalizer.normalizationVersion()));
-        assertNull(new ComputeDefinitionResolver().resolve(empty, null));
-        assertNull(normalized.property("definition"));
+        assertEquals(empty.property("definition").blueId(),
+                new ComputeDefinitionResolver().resolve(empty, null).blueId());
+        assertEquals(Collections.emptyMap(), normalized.property("definition").getProperties());
+        assertCompilerAccepts(normalized);
     }
 
     @Test
@@ -98,7 +100,7 @@ class ComputeProgramNormalizerTest {
 
         // then
         assertNotNull(expression);
-        assertTrue(NodeUtil.isEmpty(expression.toNode()));
+        assertEquals(Collections.emptyMap(), expression.toNode().getProperties());
         assertCompilerAccepts(program);
     }
 
@@ -125,7 +127,7 @@ class ComputeProgramNormalizerTest {
 
         // then
         assertNotNull(expression);
-        assertTrue(NodeUtil.isEmpty(expression.toNode()));
+        assertEquals(Collections.emptyMap(), expression.toNode().getProperties());
         assertCompilerAccepts(program);
     }
 
@@ -159,12 +161,12 @@ class ComputeProgramNormalizerTest {
         assertNotNull(statements);
         assertTrue(NodeUtil.property(program, "do").getItems().isEmpty());
         assertNotNull(NodeUtil.property(program, "constants"));
-        assertTrue(NodeUtil.isEmpty(NodeUtil.property(program, "constants")));
+        assertEquals(Collections.emptyMap(), NodeUtil.property(program, "constants").getProperties());
         Node function = NodeUtil.property(
                 NodeUtil.property(program, "functions"),
                 "empty");
         assertNotNull(NodeUtil.property(function, "args"));
-        assertTrue(NodeUtil.isEmpty(NodeUtil.property(function, "args")));
+        assertEquals(Collections.emptyMap(), NodeUtil.property(function, "args").getProperties());
         assertNotNull(NodeUtil.property(function, "do"));
         assertTrue(NodeUtil.property(function, "do").getItems().isEmpty());
     }
@@ -243,7 +245,7 @@ class ComputeProgramNormalizerTest {
 
         // when
         FrozenNode program = normalizer.program(
-                FrozenNode.fromResolvedNode(new Node()));
+                FrozenNode.fromResolvedNode(Nodes.emptyObject()));
         FrozenNode definition = normalizer.definitionSource(
                 FrozenNode.fromResolvedNode(
                         new Node().value("wrong-kind")));

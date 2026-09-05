@@ -137,6 +137,10 @@ final class EmbeddedOnlyLayoutBuilder {
                 continue;
             }
             declaration = materializeReference(declaration);
+            if (declaration != null && declaration.getItems() == null
+                    && isUnpopulatedCollectionDeclaration(declaration)) {
+                continue;
+            }
             if (declaration == null || declaration.getItems() == null) {
                 throw new IllegalStateException(
                         "Authenticated Process Embedded collectionPaths is "
@@ -173,6 +177,17 @@ final class EmbeddedOnlyLayoutBuilder {
         }
         return Collections.unmodifiableList(
                 new ArrayList<>(byPath.values()));
+    }
+
+    /** The authenticated optional List declaration has no instance payload. */
+    private static boolean isUnpopulatedCollectionDeclaration(FrozenNode node) {
+        return node.getValue() == null
+                && node.getProperties() == null
+                && node.getContracts() == null
+                && node.getReferenceBlueId() == null
+                && node.getBlue() == null
+                && node.getPreviousBlueId() == null
+                && node.getPosition() == null;
     }
 
     private EmbeddedOnlyLayout verifiedRootLayout(

@@ -19,10 +19,11 @@ class NodeUtilTest {
                     new Node().value("identity"));
 
     @Test
-    void shouldTreatOnlyAxisFreeMutableAndFrozenNodesAsEmpty() {
+    void shouldRetainExplicitContainersAndTreatOnlyAbsentBuildersAsEmpty() {
         // given
         Node empty = new Node();
-        FrozenNode frozenEmpty = FrozenNode.fromNode(new Node());
+        FrozenNode frozenEmpty = null;
+        assertThrows(IllegalArgumentException.class, () -> FrozenNode.fromNode(empty));
 
         // when
         boolean mutableEmpty = NodeUtil.isEmpty(empty);
@@ -31,6 +32,7 @@ class NodeUtilTest {
         // then
         assertTrue(mutableEmpty);
         assertTrue(immutableEmpty);
+        assertRetained(new Node().properties(Collections.emptyMap()));
         assertRetained(new Node().name("named"));
         assertRetained(new Node().type(
                 new Node().blueId(VALID_BLUE_ID)));
@@ -69,7 +71,7 @@ class NodeUtilTest {
     @Test
     void shouldDefaultOnlyAbsentFrozenComputeControls() {
         // given
-        FrozenNode absent = FrozenNode.fromResolvedNode(new Node());
+        FrozenNode absent = null;
         FrozenNode emptyControls = FrozenNode.fromResolvedNode(
                 new Node()
                         .properties(

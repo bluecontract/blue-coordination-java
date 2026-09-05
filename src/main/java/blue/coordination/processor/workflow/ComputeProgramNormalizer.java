@@ -18,7 +18,7 @@ import java.util.Map;
  */
 final class ComputeProgramNormalizer {
     private static final String NORMALIZATION_VERSION =
-            "compute-program-v9|exact-definition-identity|canonical-bex-source"
+            "compute-program-v10|exact-definition-identity|canonical-bex-source"
                     + "|strict-statements|exact-field-presence";
 
     private final BexProcessingMetrics metrics;
@@ -106,9 +106,7 @@ final class ComputeProgramNormalizer {
         putIfPresent(properties, "gasLimit", NodeUtil.property(stepNode, "gasLimit"));
         putIfPresent(properties, "emitEvents", NodeUtil.property(stepNode, "emitEvents"));
         putIfPresent(properties, "returnResult", NodeUtil.property(stepNode, "returnResult"));
-        if (!properties.isEmpty()) {
-            program.properties(properties);
-        }
+        program.properties(properties);
         return program;
     }
 
@@ -143,9 +141,7 @@ final class ComputeProgramNormalizer {
                         NodeUtil.property(
                                 definitionNode,
                                 "functions")));
-        if (!properties.isEmpty()) {
-            definition.properties(properties);
-        }
+        definition.properties(properties);
         return definition;
     }
 
@@ -162,9 +158,7 @@ final class ComputeProgramNormalizer {
         copyFrozenProperty(properties, source, "gasLimit");
         copyFrozenProperty(properties, source, "emitEvents");
         copyFrozenProperty(properties, source, "returnResult");
-        if (!properties.isEmpty()) {
-            input.properties(properties);
-        }
+        input.properties(properties);
         return input;
     }
 
@@ -175,9 +169,7 @@ final class ComputeProgramNormalizer {
                 new LinkedHashMap<String, Node>();
         copyFrozenProperty(properties, source, "constants");
         copyFrozenProperty(properties, source, "functions");
-        if (!properties.isEmpty()) {
-            input.properties(properties);
-        }
+        input.properties(properties);
         return input;
     }
 

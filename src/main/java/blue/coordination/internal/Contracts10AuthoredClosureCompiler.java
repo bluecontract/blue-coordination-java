@@ -120,7 +120,7 @@ public final class Contracts10AuthoredClosureCompiler {
         try (BlueRuntime verificationRuntime = BlueRuntime.create(
                 verificationObjects,
                 verificationMetrics,
-                engine.applicationExactNodeProvider())) {
+                engine.retainedExactNodeProvider())) {
             LinkedHashMap<DocumentId, Node> resolved = resolveDocuments(
                     input.documents(), verificationRuntime,
                     verificationObjects,

@@ -30,6 +30,7 @@ import blue.language.processor.SubscriptionDelta;
 import blue.language.processor.registry.BlueRuntimeTypeRegistry;
 import blue.language.processor.registry.RuntimeTypeAliases;
 import blue.language.provider.CyclicAwareNodeProvider;
+import blue.language.registry.BlueCoreTypeRegistry;
 import blue.language.provider.CyclicSetProofResult;
 import blue.language.provider.NodeProvider;
 import blue.language.provider.NodeProviderResult;
@@ -103,6 +104,7 @@ final class BlueRuntime implements AutoCloseable {
         providers.add(metered(
                 Objects.requireNonNull(wholeObjects, "wholeObjects"),
                 metrics));
+        providers.add(metered(BlueCoreTypeRegistry.INSTANCE.verifiedProvider(), metrics));
         providers.add(metered(BlueRuntimeTypeRegistry.getDefault()
                 .asProcessorSnapshotProvider(), metrics));
         RepositoryNodeProviders repositoryProviders =
@@ -311,6 +313,11 @@ final class BlueRuntime implements AutoCloseable {
                 cache(resolveToSnapshot(preprocessed)), purpose);
     }
 
+    ExactValue exactProcessingSource(String yaml, WholeObjectStore objects, String purpose) {
+        Node preprocessed = preprocess(parseSourceYaml(yaml));
+        return objects.put(contracts.canonicalizeProcessingSource(preprocessed), purpose);
+    }
+
     /**
      * Parses direct provider content under this runtime's preprocessing
      * aliases without resolving the declared type as an instance.
@@ -324,6 +331,12 @@ final class BlueRuntime implements AutoCloseable {
         }
         String blueId = DirectBlueIdCalculator.calculateBlueId(preprocessed);
         return ExactValue.verified(blueId, preprocessed);
+    }
+
+    static NodeProvider retainedExactProvider(
+            WholeObjectStore objects, NodeProvider applicationProvider) {
+        return new CyclicAwareSequentialNodeProvider(applicationProvider == null
+                ? List.of(objects) : List.of(objects, applicationProvider));
     }
 
     NodeProvider nodeProvider() {

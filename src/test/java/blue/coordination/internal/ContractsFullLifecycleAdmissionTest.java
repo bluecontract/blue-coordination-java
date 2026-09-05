@@ -370,9 +370,6 @@ final class ContractsFullLifecycleAdmissionTest {
                     type:
                       blueId: %s
                     order: 0
-                    event:
-                      type:
-                        blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
                   initializedEvent:
                     type:
                       blueId: %s
@@ -382,6 +379,9 @@ final class ContractsFullLifecycleAdmissionTest {
                   initialize:
                     type: Coordination/Sequential Workflow
                     channel: lifecycle
+                    event:
+                      type:
+                        blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
                     order: 0
                     steps:
                       - type: Coordination/Compute
@@ -446,12 +446,12 @@ final class ContractsFullLifecycleAdmissionTest {
                     type:
                       blueId: %s
                     order: 0
-                    event:
-                      type:
-                        blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
                   emit:
                     type: Coordination/Sequential Workflow
                     channel: lifecycle
+                    event:
+                      type:
+                        blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
                     order: 0
                     steps:
                       - type: Coordination/Compute
@@ -488,12 +488,12 @@ final class ContractsFullLifecycleAdmissionTest {
                     type:
                       blueId: %s
                     order: 0
-                    event:
-                      type:
-                        blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
                   initialize:
                     type: Coordination/Sequential Workflow
                     channel: lifecycle
+                    event:
+                      type:
+                        blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
                     order: 0
                     steps:
                       - type: Coordination/Compute
@@ -592,12 +592,12 @@ final class ContractsFullLifecycleAdmissionTest {
                     type:
                       blueId: %s
                     order: 0
-                    event:
-                      type:
-                        blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
                   initialize:
                     type: Coordination/Sequential Workflow
                     channel: lifecycle
+                    event:
+                      type:
+                        blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
                     order: 0
                     steps:
                       - type: Coordination/Compute

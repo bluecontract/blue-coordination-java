@@ -81,6 +81,9 @@ if (immutableDevelopmentContracts
             'blueBexVersion must be an exact commit-bound DEVELOPMENT version')
 }
 
+def developmentCatalog = immutableDevelopmentContracts ? gradle.ext.blueCatalogDevelopmentBinding : null
+def activeRepositoryVersion = developmentCatalog?.version ?: '3.0.0-rc.21'
+
 def publishedBlueCoordinates = [
         'blue.language:blue-language-model': publishedLanguageVersion,
         'blue.language:blue-language-core': publishedLanguageVersion,
@@ -103,7 +106,7 @@ def immutableDevelopmentBlueCoordinates =
             coordinate, expectedVersion ->
                 [(coordinate): coordinate.startsWith('blue.bex:')
                         ? immutableDevelopmentBexVersion
-                        : expectedVersion]
+                        : coordinate == 'blue.repo:blue-repo-java' ? activeRepositoryVersion : expectedVersion]
         }
 def activeBlueCoordinates = immutableDevelopmentContracts
         ? immutableDevelopmentBlueCoordinates
@@ -154,6 +157,18 @@ base {
 }
 
 repositories {
+    if (developmentCatalog != null) {
+        exclusiveContent {
+            forRepository {
+                maven {
+                    name = 'immutableDevelopmentCatalog'
+                    url = uri(developmentCatalog.repository)
+                    metadataSources { mavenPom(); artifact() }
+                }
+            }
+            filter { includeGroup 'blue.repo' }
+        }
+    }
     if (immutableContractsRepository) {
         exclusiveContent {
             forRepository {
@@ -239,6 +254,7 @@ if (immutableDevelopmentContracts) {
     // source commit containing its own commit-bound dependency version.
     int replacedLanguageCoordinates = 0
     int replacedBexCoordinates = 0
+    int replacedCatalogCoordinates = 0
     String developmentLock = selectedDependencyLockFile.asFile
             .getText('UTF-8').split('\n', -1).collect { line ->
         if (line.startsWith('blue.language:')) {
@@ -259,8 +275,16 @@ if (immutableDevelopmentContracts) {
             replacedBexCoordinates++
             return match.group(1) + immutableDevelopmentBexVersion + match.group(2)
         }
+        if (line.startsWith('blue.repo:')) {
+            if (!line.startsWith('blue.repo:blue-repo-java:3.0.0-rc.21='))
+                throw new GradleException('Unexpected catalog coordinate in DEVELOPMENT lock template')
+            replacedCatalogCoordinates++
+            return line.replace('blue.repo:blue-repo-java:3.0.0-rc.21=',
+                    'blue.repo:blue-repo-java:' + activeRepositoryVersion + '=')
+        }
         line
     }.join('\n')
+    if (replacedCatalogCoordinates != 1) throw new GradleException('Expected one catalog coordinate')
     if (replacedLanguageCoordinates != developmentContractsArtifacts.size()) {
         throw new GradleException(
                 'The DEVELOPMENT lock template must contain exactly six Language coordinates')
@@ -272,7 +296,7 @@ if (immutableDevelopmentContracts) {
     selectedDependencyLockFile = layout.projectDirectory.file(
             '.gradle/immutable-development-locks/'
                     + immutableStagedLanguageVersion + '--'
-                    + immutableDevelopmentBexVersion + '.lockfile')
+                    + immutableDevelopmentBexVersion + '--' + activeRepositoryVersion + '.lockfile')
     File generatedLock = selectedDependencyLockFile.asFile
     generatedLock.parentFile.mkdirs()
     if (!generatedLock.isFile()
@@ -323,7 +347,7 @@ tasks.withType(Jar).configureEach {
 dependencies {
     api "blue.language:blue-contracts-core:${activeLanguageVersion}"
     implementation "blue.language:blue-language-java:${activeLanguageVersion}"
-    implementation('blue.repo:blue-repo-java:3.0.0-rc.21') {
+    implementation("blue.repo:blue-repo-java:${activeRepositoryVersion}") {
         // Repository rc.21 was published against Language rc.20. Coordination
         // owns the active pinned Language runtime and excludes that stale edge.
         exclude group: 'blue.language', module: 'blue-language-java'
@@ -1846,7 +1870,7 @@ tasks.register('dependencyPreflight') {
     }
     doLast {
         def repositoryDependency = dependencies.create(
-                'blue.repo:blue-repo-java:3.0.0-rc.21')
+                "blue.repo:blue-repo-java:${activeRepositoryVersion}")
         repositoryDependency.exclude(
                 group: 'blue.language', module: 'blue-language-java')
         def bexCoreDependency = dependencies.create(
@@ -1972,7 +1996,7 @@ tasks.register('verifyPublicationPom') {
         def expectedVersions = [
                 'blue.language:blue-contracts-core': activeLanguageVersion,
                 'blue.language:blue-language-java': activeLanguageVersion,
-                'blue.repo:blue-repo-java': '3.0.0-rc.21',
+                'blue.repo:blue-repo-java': activeRepositoryVersion,
                 'blue.bex:blue-bex-core': activeBexVersion,
                 'blue.bex:blue-bex-contracts': activeBexVersion,
                 'org.bouncycastle:bcprov-jdk18on': '1.78.1'
@@ -4724,6 +4748,11 @@ def immutableDevelopmentContractsDependencies = tasks.register(
                         + resolvedBexIdentities)
             }
         }
+        def catalogArtifact = configurations.runtimeClasspath.resolvedConfiguration.resolvedArtifacts
+                .findAll { it.moduleVersion.id.group == 'blue.repo' }
+        def expectedCatalog = developmentCatalog.manifest.artifacts.find { it.kind == 'runtime' }
+        if (catalogArtifact.size() != 1 || sha256Identity(catalogArtifact[0].file) != expectedCatalog.sha256)
+            failures << 'Resolved catalog bytes differ from exact development manifest'
         if (!failures.empty) {
             throw new GradleException(
                     'Immutable development Contracts dependency graph failed:\n - '

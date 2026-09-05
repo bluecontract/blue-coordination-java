@@ -24,7 +24,7 @@ final class SdkCoreSeamsTest {
     private static final DocumentId B = DocumentId.of("sdk-core-b");
 
     @Test
-    void bundledReleaseCreatesExactContractsConfiguration() {
+    void bundledReleaseCreatesExactContractsConfiguration() throws Exception {
         // given
         BundledContracts10Release.Manifest manifest =
                 BundledContracts10Release.manifest();
@@ -40,26 +40,41 @@ final class SdkCoreSeamsTest {
                 configuration.contractsSpecificationIdentity());
         assertEquals(Set.of(A), configuration.publicRootDocumentIds());
         assertEquals(
-                "sha256:019a436c6266400710bca7f49905c2c53d62434762850236ca0f86d99dff1b37",
+                owningJarResourceIdentity(blue.language.runtime.BlueLanguage.class,
+                        "specifications/blue-language-specification-1.0.md"),
                 manifest.blueLanguageSpecification());
         assertEquals(
-                "sha256:62be2e671a88d231c151944a35030c0c56696cc6e4b073f86681f0c795c54bf9",
+                owningJarResourceIdentity(blue.language.processor.DocumentProcessor.class,
+                        "specifications/blue-contracts-and-processor-specification-1.0.md"),
                 manifest.contractsSpecification());
         assertEquals(
-                "sha256:ed634d06aa95153fd34ae991c901131714a2a303980c49dc12ba9ce498364c5c",
+                "sha256:e3594606cf7eb26743d2c8b4cd9beb0848e857b2faa8f1eac3716eca12544245",
                 manifest.contractsRelease());
         assertEquals(
-                "sha256:5c6c6ca1ae10cff5e3afa4ee3a816b9e9f1a0bca802c71662f06951001473783",
+                "sha256:5f3cd31a03febb9cf7f07b2eff503521fd6ec40558b2e09c92eb2dd16c40f7bf",
                 manifest.fixturePackage());
         assertEquals(
-                "sha256:03219c42eb3696ef8727fe8ae226c8a5eb4a6126859ba744f571d892c409626a",
+                blue.language.processor.GasSchedule.contracts10().packageIdentity(),
                 manifest.gasManifest());
         assertEquals(
-                "sha256:d71ec19247a32f7f40107f512e4eb567b4cb41ae8e73c16d2ebe10b0e8517c76",
+                blue.language.processor.ClosureRuntimeDescriptor.CYCLIC_FINALIZER_IDENTITY,
                 manifest.cyclicFinalizer());
         assertEquals(
-                "sha256:0768d22420c5bb01109861eb9e090b758aa66b25c2df7b4708dff36a969cefdd",
+                blue.language.processor.ClosureRuntimeDescriptor.CYCLIC_PROOF_VERIFIER_IDENTITY,
                 manifest.cyclicProofVerifier());
+    }
+
+    private static String owningJarResourceIdentity(Class<?> owner, String resource) throws Exception {
+        java.io.File file = java.nio.file.Path.of(owner.getProtectionDomain()
+                .getCodeSource().getLocation().toURI()).toFile();
+        try (java.util.jar.JarFile jar = new java.util.jar.JarFile(file)) {
+            java.util.jar.JarEntry entry = jar.getJarEntry(resource);
+            if (entry == null) throw new AssertionError("Missing owning-JAR resource: " + resource);
+            try (java.io.InputStream input = jar.getInputStream(entry)) {
+                return "sha256:" + java.util.HexFormat.of().formatHex(
+                        java.security.MessageDigest.getInstance("SHA-256").digest(input.readAllBytes()));
+            }
+        }
     }
 
     @Test

@@ -305,3 +305,7 @@ if (dependencyMode in [
         }
     }
 }
+
+if (dependencyMode == 'immutable-development-contracts') {
+    apply from: 'gradle/development-catalog.gradle'
+}

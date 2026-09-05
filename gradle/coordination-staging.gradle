@@ -714,7 +714,8 @@ def inspectDependencyBindings = {
         return [
                 mode: coordinationDependencyMode,
                 contracts: language,
-                bex: inspectDevelopmentBexBinding(language)
+                bex: inspectDevelopmentBexBinding(language),
+                catalog: gradle.ext.blueCatalogDevelopmentBinding
         ]
     }
     throw new GradleException(
@@ -791,6 +792,12 @@ def verifyResolvedUpstreamArtifacts = {
                 'Resolved Language bytes differ from the exact upstream manifest')
     }
     if (bindings.mode == 'immutable-development-contracts') {
+        def expectedCatalog = bindings.catalog.manifest.artifacts.findAll { it.kind == 'runtime' }
+                .collectEntries { [(it.coordinate): it.sha256] }
+        def actualCatalog = dependencies.findAll { it.coordinate.startsWith('blue.repo:') }
+                .collectEntries { [(it.coordinate): it.sha256] }
+        if (actualCatalog != expectedCatalog || expectedCatalog.size() != 1)
+            throw new GradleException('Resolved catalog bytes differ from exact development manifest')
         Map<String, String> expectedBex = bindings.bex.manifest.artifacts
                 .findAll { record ->
             record.kind == 'runtime'
@@ -871,6 +878,11 @@ def expectedStageManifest = {
                 sourceDirty: bindings.contracts.sourceDirty,
                 builtWithJava: bindings.contracts.builtWithJava
         ])
+        manifest.catalog = [manifestIdentity: bindings.catalog.manifestIdentity]
+        ['schema', 'version', 'sourceCommit', 'sourceTree', 'catalogManifestIdentity',
+         'repositoryVersionBlueId', 'providerBundleIdentity', 'registryPackageIdentities'].each { field ->
+            manifest.catalog[field] = bindings.catalog.manifest[field]
+        }
         manifest.bex = [
                 schema: bindings.bex.schema,
                 manifestIdentity: bindings.bex.manifestIdentity,

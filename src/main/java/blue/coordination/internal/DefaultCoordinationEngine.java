@@ -675,6 +675,11 @@ public final class DefaultCoordinationEngine
         return entryFactory.parseExactRequest(requestYaml);
     }
 
+    synchronized ExactValue exactProcessingSource(String sourceYaml) {
+        ensureOpen();
+        return runtime.exactProcessingSource(sourceYaml, objects, "static processing admission");
+    }
+
     @Override
     public synchronized ExactValue exactValue(String sourceYaml) {
         ensureOpen();
@@ -696,9 +701,10 @@ public final class DefaultCoordinationEngine
         return runtime.exactProviderSource(sourceYaml);
     }
 
-    /** Provider leaf shared with isolated authored-closure verification. */
-    blue.language.provider.NodeProvider applicationExactNodeProvider() {
-        return applicationExactNodeProvider;
+    /** Read-only exact content and cyclic proofs for isolated closure verification. */
+    blue.language.provider.NodeProvider retainedExactNodeProvider() {
+        ensureOpen();
+        return BlueRuntime.retainedExactProvider(objects, applicationExactNodeProvider);
     }
 
     synchronized ExactValue embeddedDocumentRequest(

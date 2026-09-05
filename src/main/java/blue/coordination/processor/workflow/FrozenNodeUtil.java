@@ -41,8 +41,7 @@ final class FrozenNodeUtil {
                 && node.getValueType() == null
                 && node.getValue() == null
                 && node.getItems() == null
-                && (node.getProperties() == null
-                || node.getProperties().isEmpty())
+                && node.getProperties() == null
                 && node.getContracts() == null
                 && node.getReferenceBlueId() == null
                 && node.getSchema() == null

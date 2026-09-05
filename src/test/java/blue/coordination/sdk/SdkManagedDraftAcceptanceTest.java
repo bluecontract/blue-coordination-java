@@ -1740,12 +1740,12 @@ final class SdkManagedDraftAcceptanceTest {
                         type:
                           blueId: %s
                         order: 0
-                        event:
-                          type:
-                            blueId: %s
                       onProcessingInitiated:
                         type: Coordination/Sequential Workflow
                         channel: lifecycleChannel
+                        event:
+                          type:
+                            blueId: %s
                         order: 0
                         steps:
                           - type: Coordination/Compute
@@ -1773,12 +1773,12 @@ final class SdkManagedDraftAcceptanceTest {
                     type:
                       blueId: %s
                     order: 0
-                    event:
-                      type:
-                        blueId: %s
                   onProcessingInitiated:
                     type: Coordination/Sequential Workflow
                     channel: lifecycleChannel
+                    event:
+                      type:
+                        blueId: %s
                     order: 0
                     steps:
                       - type: Coordination/Compute

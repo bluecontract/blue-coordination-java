@@ -147,12 +147,12 @@ final class ManagedEpochInvocationCapturer {
         runtime.metrics().add(
                 ContractsClosureAdapter.OCCURRENCE_ROWS_EXAMINED,
                 connected.rowsExamined());
-        Set<DocumentId> members = new LinkedHashSet<>(connected.members());
-        if (!members.contains(work.sourceDocumentId())) {
-            throw ContractsClosureAdapter.stale(
-                    "Managed application affected closure omits source "
-                            + work.sourceDocumentId());
-        }
+        // Catch-up owns a verified pending occurrence, which ordinary active
+        // selection deliberately excludes. Include its source and complete
+        // forward inventory without discovering unrelated reverse consumers.
+        Set<DocumentId> members = ContractsClosureAdapter.forwardExistingMembers(
+                connected.members(), List.of(work.sourceDocumentId()),
+                topology.occurrenceInventory(), runtime.metrics());
         InMemoryDocumentStore.ClosureSnapshot publication = documents
                 .closureSnapshot(members, topology);
         InMemoryDocumentStore.DocumentHead consumerHead = publication
@@ -225,7 +225,15 @@ final class ManagedEpochInvocationCapturer {
                 publicRoots.add(closureDocumentId);
             }
         }
-        List<ManagedOccurrenceBinding> occurrences = connected.occurrences();
+        List<ManagedOccurrenceBinding> occurrences = new ArrayList<>();
+        for (DocumentId member : members) {
+            List<ManagedOccurrenceBinding> rows = topology.occurrenceInventory()
+                    .rowsFrom(member);
+            runtime.metrics().add(
+                    ContractsClosureAdapter.OCCURRENCE_ROWS_EXAMINED, rows.size());
+            occurrences.addAll(rows);
+        }
+        occurrences.sort(java.util.Comparator.naturalOrder());
         AffectedClosureSnapshot snapshot = ClosureEvidenceFactory
                 .affectedClosure(
                         graphGeneration,
