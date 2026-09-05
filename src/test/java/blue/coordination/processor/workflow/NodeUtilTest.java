@@ -68,6 +68,7 @@ class NodeUtilTest {
 
     @Test
     void shouldDefaultOnlyAbsentFrozenComputeControls() {
+        // given
         FrozenNode absent = FrozenNode.fromResolvedNode(new Node());
         FrozenNode emptyControls = FrozenNode.fromResolvedNode(
                 new Node()
@@ -87,6 +88,9 @@ class NodeUtilTest {
                                 "returnResult",
                                 new Node().properties(
                                         Collections.<String, Node>emptyMap())));
+
+        // when
+        // then
 
         assertNull(FrozenNodeUtil.textProperty(absent, "entry"));
         assertNull(FrozenNodeUtil.integer(

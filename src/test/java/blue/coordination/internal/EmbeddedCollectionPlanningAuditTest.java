@@ -13,12 +13,16 @@ final class EmbeddedCollectionPlanningAuditTest {
 
     @Test
     void distinguishesAbsentAndPresentEmptyEvenThoughBothCountZero() {
+        // given
         EmbeddedCollectionPlanningAudit absent =
                 EmbeddedCollectionPlanningAudit.completeObject(
                         "/games", false, 0);
         EmbeddedCollectionPlanningAudit empty =
                 EmbeddedCollectionPlanningAudit.completeObject(
                         "/games", true, 0);
+
+        // when
+        // then
 
         assertEquals(EmbeddedCollectionPlanningAudit.State.ABSENT,
                 absent.state());
@@ -45,12 +49,16 @@ final class EmbeddedCollectionPlanningAuditTest {
 
     @Test
     void distinguishesIncompleteAndInvalidKindAsNonCountable() {
+        // given
         EmbeddedCollectionPlanningAudit incomplete =
                 EmbeddedCollectionPlanningAudit.incomplete(
                         "/games", "provider offline");
         EmbeddedCollectionPlanningAudit invalid =
                 EmbeddedCollectionPlanningAudit.invalidKind(
                         "/games", "present value is not an object");
+
+        // when
+        // then
 
         assertEquals(EmbeddedCollectionPlanningAudit.State.INCOMPLETE,
                 incomplete.state());

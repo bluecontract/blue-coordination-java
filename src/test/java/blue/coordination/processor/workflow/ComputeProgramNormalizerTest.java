@@ -22,10 +22,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ComputeProgramNormalizerTest {
     @Test
     void shouldPreserveEmptyObjectStatementForCompilerRejection() {
+        // given
         FrozenNode program = normalizeStatement(
                 new Node().properties(Collections.<String, Node>emptyMap()));
 
         FrozenNode statement = statement(program);
+
+        // when
+        // then
         assertTrue(NodeUtil.isEmpty(statement.toNode()));
         assertFalse(hasReturn(statement));
         assertCompilerRejects(program);
@@ -33,9 +37,13 @@ class ComputeProgramNormalizerTest {
 
     @Test
     void shouldPreserveEmptyPlaceholderStatementForCompilerRejection() {
+        // given
         FrozenNode program = normalizeStatement(Nodes.emptyPlaceholder());
 
         FrozenNode statement = statement(program);
+
+        // when
+        // then
         assertTrue(Nodes.isEmptyPlaceholder(statement.toNode()));
         assertFalse(hasReturn(statement));
         assertCompilerRejects(program);
@@ -43,6 +51,7 @@ class ComputeProgramNormalizerTest {
 
     @Test
     void shouldProjectEmptyOptionalDefinitionWithoutCollapsingStepIdentity() {
+        // given
         FrozenNode absent = FrozenNode.fromResolvedNode(
                 new Node().properties("expr", new Node().value("value")));
         FrozenNode empty = FrozenNode.fromResolvedNode(
@@ -53,6 +62,9 @@ class ComputeProgramNormalizerTest {
                                 new Node().properties(
                                         Collections.<String, Node>emptyMap())));
         ComputeProgramNormalizer normalizer = new ComputeProgramNormalizer();
+
+        // when
+        // then
 
         assertNotEquals(absent.blueId(), empty.blueId());
         assertNotEquals(
@@ -72,6 +84,7 @@ class ComputeProgramNormalizerTest {
 
     @Test
     void shouldPreservePresentEmptyRootExpression() {
+        // given
         FrozenNode program = new ComputeProgramNormalizer().program(
                 FrozenNode.fromResolvedNode(
                         new Node().properties(
@@ -80,6 +93,9 @@ class ComputeProgramNormalizerTest {
                                         Collections.<String, Node>emptyMap()))));
 
         FrozenNode expression = program.property("expr");
+
+        // when
+        // then
         assertNotNull(expression);
         assertTrue(NodeUtil.isEmpty(expression.toNode()));
         assertCompilerAccepts(program);
@@ -87,6 +103,7 @@ class ComputeProgramNormalizerTest {
 
     @Test
     void shouldPreservePresentEmptyFunctionExpression() {
+        // given
         FrozenNode program = new ComputeProgramNormalizer().program(
                 FrozenNode.fromResolvedNode(
                         new Node()
@@ -103,6 +120,9 @@ class ComputeProgramNormalizerTest {
         FrozenNode expression = program.property("functions")
                 .property("empty")
                 .property("expr");
+
+        // when
+        // then
         assertNotNull(expression);
         assertTrue(NodeUtil.isEmpty(expression.toNode()));
         assertCompilerAccepts(program);
@@ -110,6 +130,7 @@ class ComputeProgramNormalizerTest {
 
     @Test
     void shouldPreservePresentEmptyProgramContainers() {
+        // given
         Node program = new ComputeProgramNormalizer().program(
                 new Node()
                         .properties("do", new Node().items(List.of()))
@@ -130,6 +151,9 @@ class ComputeProgramNormalizerTest {
                                                         "do",
                                                         new Node().items(List.of())))));
 
+        // when
+        // then
+
         assertNotNull(NodeUtil.property(program, "do"));
         assertTrue(NodeUtil.property(program, "do").getItems().isEmpty());
         assertNotNull(NodeUtil.property(program, "constants"));
@@ -145,6 +169,7 @@ class ComputeProgramNormalizerTest {
 
     @Test
     void shouldPreserveWrongKindBexFieldsForCompilerRejection() {
+        // given
         ComputeProgramNormalizer normalizer = new ComputeProgramNormalizer();
 
         for (String field : List.of("do", "constants", "functions")) {
@@ -154,6 +179,9 @@ class ComputeProgramNormalizerTest {
                                     field,
                                     new Node().value("wrong-kind"))));
 
+            // when
+            // then
+
             assertNotNull(program.property(field));
             assertCompilerRejects(program);
         }
@@ -161,6 +189,7 @@ class ComputeProgramNormalizerTest {
 
     @Test
     void shouldPreserveWrongKindHostControlsForValidationRejection() {
+        // given
         ComputeProgramNormalizer normalizer = new ComputeProgramNormalizer();
         FrozenNode program = normalizer.program(
                 FrozenNode.fromResolvedNode(
@@ -181,6 +210,9 @@ class ComputeProgramNormalizerTest {
                                         "returnResult",
                                         new Node().properties(
                                                 Collections.<String, Node>emptyMap()))));
+
+        // when
+        // then
 
         assertNotNull(program.property("entry"));
         assertNotNull(program.property("gasLimit"));
@@ -204,12 +236,16 @@ class ComputeProgramNormalizerTest {
 
     @Test
     void shouldPreserveWrongKindDefinitionForCompilerRejection() {
+        // given
         ComputeProgramNormalizer normalizer = new ComputeProgramNormalizer();
         FrozenNode program = normalizer.program(
                 FrozenNode.fromResolvedNode(new Node()));
         FrozenNode definition = normalizer.definitionSource(
                 FrozenNode.fromResolvedNode(
                         new Node().value("wrong-kind")));
+
+        // when
+        // then
 
         assertEquals("wrong-kind", FrozenNodeUtil.rawScalar(definition));
         try (BexEngine engine = BexEngine.builder().build()) {

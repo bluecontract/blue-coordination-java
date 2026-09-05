@@ -19,6 +19,7 @@ final class SdkEmbeddedCollectionChannelAcceptanceTest {
 
     @Test
     void collectionAuditDistinguishesAbsenceAndEmptyRepresentationParity() {
+        // given
         // when
         CollectionAuditProbe absent = auditCollection(null, false);
         CollectionAuditProbe inlineEmpty = auditCollection("members: {}", false);

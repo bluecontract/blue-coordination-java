@@ -504,6 +504,7 @@ final class ClosureSubscriptionInventoryTest {
                 ClosureSubscriptionInventory.EmbeddedDemandMode
                         .COLLECTION_DESCENDANTS);
 
+        // when
         // then
         assertTrue(exact.matches("/orders/o1"));
         assertFalse(exact.matches("/orders/o1/payment"));
@@ -561,6 +562,7 @@ final class ClosureSubscriptionInventoryTest {
                 ClosureSubscriptionInventory.EmbeddedDemandMode
                         .COLLECTION_DIRECT);
 
+        // when
         // then
         assertThrows(IllegalArgumentException.class,
                 () -> ClosureSubscriptionInventory.empty()
@@ -582,6 +584,7 @@ final class ClosureSubscriptionInventoryTest {
                         .dispatchField("includeDescendants", true)
                         .build();
 
+        // when
         // then
         assertFalse(ClosureSubscriptionInventory
                 .isEmbeddedCollectionDemandContract(unrelatedProcessor));
@@ -600,6 +603,7 @@ final class ClosureSubscriptionInventoryTest {
                                 .PROCESSOR_CHANNEL)
                         .build();
 
+        // when
         // then
         assertTrue(ClosureSubscriptionInventory
                 .isEmbeddedCollectionDemandContract(malformedCollection),

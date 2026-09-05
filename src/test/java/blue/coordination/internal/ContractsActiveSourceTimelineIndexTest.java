@@ -45,7 +45,8 @@ final class ContractsActiveSourceTimelineIndexTest {
         assertEquals(Set.of("timeline/root", "timeline/owner-old"),
                 index.timelineIds());
 
-        // when: only the descendant joins the committed processing cohort
+        // when
+        // Only the descendant joins the committed processing cohort.
         timelines.put(COLLECTION_OWNER, Set.of("timeline/owner-new"));
         index.refresh(List.of(COLLECTION_OWNER), initial, timelines::get);
 
