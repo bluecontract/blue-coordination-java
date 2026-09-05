@@ -28,6 +28,7 @@ def coordinationStageArtifact = 'blue-coordination-java'
 def coordinationStageVersion = project.version.toString()
 def coordinationDependencyMode = providers.gradleProperty(
         'blueDependencyMode').getOrElse('published-artifact').trim()
+def localRc = coordinationDependencyMode == 'immutable-local-rc-contracts'
 def stagedLanguageArtifacts = [
         'blue-language-model',
         'blue-language-core',
@@ -63,15 +64,16 @@ def acceptedCompatibilitySourceCommit =
 def requiresImmutableCandidateCompatibility = { String dependencyMode ->
     dependencyMode in [
             'immutable-staged-contracts',
-            'immutable-development-contracts'
+            'immutable-development-contracts',
+            'immutable-local-rc-contracts'
     ]
 }
 def stagedConsumerProtectedGroupsFor = { String dependencyMode ->
     if (dependencyMode == 'immutable-staged-contracts') {
         return ['blue.coordination', 'blue.language'] as Set
     }
-    if (dependencyMode == 'immutable-development-contracts') {
-        return ['blue.coordination', 'blue.language', 'blue.bex'] as Set
+    if ((dependencyMode in ['immutable-development-contracts', 'immutable-local-rc-contracts'])) {
+        return ['blue.coordination', 'blue.language', 'blue.bex', 'blue.repo'] as Set
     }
     [] as Set
 }
@@ -386,15 +388,14 @@ def checkedSourceCommit = {
 def checkedCoordinationSourceProvenance = {
     String sourceCommit = checkedSourceCommit()
     Map<String, Object> provenance = [sourceCommit: sourceCommit]
-    if (coordinationDependencyMode == 'immutable-development-contracts') {
+    if ((coordinationDependencyMode in ['immutable-development-contracts', 'immutable-local-rc-contracts'])) {
         if (JavaVersion.current() != JavaVersion.VERSION_17) {
             throw new GradleException(
                     'Development Coordination staging requires JDK 17; current JVM is '
                             + JavaVersion.current())
         }
         if (!(sourceCommit ==~ /[0-9a-f]{40}/)
-                || coordinationStageVersion
-                != '3.0.0-dev.' + sourceCommit) {
+                || !(localRc ? coordinationStageVersion ==~ /3\.0\.0-rc\.[1-9][0-9]*/ : coordinationStageVersion == '3.0.0-dev.' + sourceCommit)) {
             throw new GradleException(
                     'Development Coordination version must bind the clean 40-hex HEAD')
         }
@@ -408,7 +409,7 @@ def checkedCoordinationSourceProvenance = {
                     'Cannot identify the exact Coordination source tree')
         }
         provenance.putAll([
-                stagePurpose: 'DEVELOPMENT',
+                stagePurpose: localRc ? 'LOCAL_RC' : 'DEVELOPMENT',
                 releaseReadinessClaimed: false,
                 builtWithJava: 17,
                 sourceTree: sourceTree,
@@ -487,7 +488,7 @@ def inspectStagedContractsBinding = {
     ]
 }
 def inspectDevelopmentLanguageBinding = {
-    if (coordinationDependencyMode != 'immutable-development-contracts') {
+    if (!(coordinationDependencyMode in ['immutable-development-contracts', 'immutable-local-rc-contracts'])) {
         throw new GradleException(
                 'Development Coordination staging requires '
                         + '-PblueDependencyMode=immutable-development-contracts')
@@ -524,8 +525,8 @@ def inspectDevelopmentLanguageBinding = {
                 + ', unexpected '
                 + (actualFields - expectedFields).toList().sort())
     }
-    if (manifest.schema != languageDevelopmentRepositorySchema
-            || manifest.stagePurpose != 'DEVELOPMENT'
+    if (manifest.schema != (localRc ? 'blue-local-rc-maven-repository/1.0' : languageDevelopmentRepositorySchema)
+            || manifest.stagePurpose != (localRc ? 'LOCAL_RC' : 'DEVELOPMENT')
             || manifest.releaseReadinessClaimed != false
             || !(manifest.builtWithJava instanceof Number)
             || manifest.builtWithJava.toString() != '17'
@@ -533,14 +534,14 @@ def inspectDevelopmentLanguageBinding = {
         failures << 'manifest is not the canonical JDK 17 DEVELOPMENT Language handoff'
     }
     if (expectedVersion == null
-            || !(expectedVersion ==~ /3\.1\.0-dev\.[0-9a-f]{40}/)
+            || !(localRc ? expectedVersion ==~ /3\.1\.0-rc\.[1-9][0-9]*/ : expectedVersion ==~ /3\.1\.0-dev\.[0-9a-f]{40}/)
             || manifest.version != expectedVersion) {
         failures << 'blueContractsVersion is not the exact Language development version'
     }
     if (expectedSourceCommit == null
             || !(expectedSourceCommit ==~ /[0-9a-f]{40}/)
             || manifest.sourceCommit != expectedSourceCommit
-            || expectedVersion != '3.1.0-dev.' + expectedSourceCommit) {
+            || (!localRc && expectedVersion != '3.1.0-dev.' + expectedSourceCommit)) {
         failures << 'Language version/sourceCommit binding differs'
     }
     if (!(manifest.sourceTree instanceof String)
@@ -568,9 +569,9 @@ def inspectDevelopmentLanguageBinding = {
             expectedRepositoryRecords(
                     'blue.language',
                     expectedVersion,
-                    developmentLanguageArtifacts,
-                    [pom: '.pom', runtime: '.jar']),
-            26,
+                    localRc ? stagedLanguageArtifacts : developmentLanguageArtifacts,
+                    localRc ? [pom: '.pom', runtime: '.jar', sources: '-sources.jar', javadoc: '-javadoc.jar'] : [pom: '.pom', runtime: '.jar']),
+            localRc ? 58 : 26,
             'Immutable development Language')
     [
             repository: envelope.repository,
@@ -624,8 +625,8 @@ def inspectDevelopmentBexBinding = { Map languageBinding ->
                 + ', unexpected '
                 + (actualFields - expectedFields).toList().sort())
     }
-    if (manifest.schema != bexDevelopmentRepositorySchema
-            || manifest.stagePurpose != 'DEVELOPMENT'
+    if (manifest.schema != (localRc ? 'blue-bex-local-rc-repository/1.0' : bexDevelopmentRepositorySchema)
+            || manifest.stagePurpose != (localRc ? 'LOCAL_RC' : 'DEVELOPMENT')
             || manifest.releaseReadinessClaimed != false
             || !(manifest.builtWithJava instanceof Number)
             || manifest.builtWithJava.toString() != '17'
@@ -633,14 +634,14 @@ def inspectDevelopmentBexBinding = { Map languageBinding ->
         failures << 'manifest is not the canonical JDK 17 DEVELOPMENT BEX handoff'
     }
     if (expectedVersion == null
-            || !(expectedVersion ==~ /1\.1\.0-dev\.[0-9a-f]{40}/)
+            || !(localRc ? expectedVersion ==~ /1\.1\.0-rc\.[1-9][0-9]*/ : expectedVersion ==~ /1\.1\.0-dev\.[0-9a-f]{40}/)
             || manifest.version != expectedVersion) {
         failures << 'blueBexVersion is not the exact BEX development version'
     }
     if (expectedSourceCommit == null
             || !(expectedSourceCommit ==~ /[0-9a-f]{40}/)
             || manifest.sourceCommit != expectedSourceCommit
-            || expectedVersion != '1.1.0-dev.' + expectedSourceCommit) {
+            || (!localRc && expectedVersion != '1.1.0-dev.' + expectedSourceCommit)) {
         failures << 'BEX version/sourceCommit binding differs'
     }
     if (!(manifest.sourceTree instanceof String)
@@ -709,7 +710,7 @@ def inspectDependencyBindings = {
                 bex: null
         ]
     }
-    if (coordinationDependencyMode == 'immutable-development-contracts') {
+    if ((coordinationDependencyMode in ['immutable-development-contracts', 'immutable-local-rc-contracts'])) {
         Map language = inspectDevelopmentLanguageBinding()
         return [
                 mode: coordinationDependencyMode,
@@ -791,7 +792,7 @@ def verifyResolvedUpstreamArtifacts = {
         throw new GradleException(
                 'Resolved Language bytes differ from the exact upstream manifest')
     }
-    if (bindings.mode == 'immutable-development-contracts') {
+    if ((bindings.mode in ['immutable-development-contracts', 'immutable-local-rc-contracts'])) {
         def expectedCatalog = bindings.catalog.manifest.artifacts.findAll { it.kind == 'runtime' }
                 .collectEntries { [(it.coordinate): it.sha256] }
         def actualCatalog = dependencies.findAll { it.coordinate.startsWith('blue.repo:') }
@@ -861,7 +862,7 @@ def expectedStageManifest = {
             dependencies: dependencies,
             artifacts: artifacts
     ]
-    if (bindings.mode == 'immutable-development-contracts') {
+    if ((bindings.mode in ['immutable-development-contracts', 'immutable-local-rc-contracts'])) {
         manifest.putAll([
                 stagePurpose: sourceProvenance.stagePurpose,
                 releaseReadinessClaimed:
@@ -1176,6 +1177,10 @@ def registerStagedCoordinationConsumer = {
                             .get().asFile.absolutePath,
                     smokeReport: report.absolutePath
             ]
+            if (bindings.catalog != null) {
+                properties.putAll([catalogRepository: bindings.catalog.repository.absolutePath,
+                    catalogManifestSha256: bindings.catalog.manifestIdentity])
+            }
             if (bindings.bex != null) {
                 properties.putAll([
                         bexRepository:
@@ -1423,6 +1428,7 @@ def verifyCoordinationStagingLanePolicyLogic = tasks.register(
                 'published-artifact': false,
                 'immutable-staged-contracts': true,
                 'immutable-development-contracts': true,
+                'immutable-local-rc-contracts': true,
                 'unsupported': false
         ]
         vectors.each { mode, expected ->
@@ -1436,7 +1442,9 @@ def verifyCoordinationStagingLanePolicyLogic = tasks.register(
                 'immutable-staged-contracts': [
                         'blue.coordination', 'blue.language'] as Set,
                 'immutable-development-contracts': [
-                        'blue.coordination', 'blue.language', 'blue.bex'] as Set,
+                        'blue.coordination', 'blue.language', 'blue.bex', 'blue.repo'] as Set,
+                'immutable-local-rc-contracts': [
+                        'blue.coordination', 'blue.language', 'blue.bex', 'blue.repo'] as Set,
                 'published-artifact': [] as Set,
                 'unsupported': [] as Set
         ]

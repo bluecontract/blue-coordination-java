@@ -14,11 +14,12 @@ def regular = { File file ->
     if (!Files.isRegularFile(file.toPath(), LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(file.toPath()))
         throw new GradleException("Expected regular catalog artifact: ${file}")
 }
+boolean localRc = providers.gradleProperty('blueDependencyMode').orNull == 'immutable-local-rc-contracts'
 String version = required('blueRepositoryVersion')
 String commit = required('blueRepositorySourceCommit')
 String identity = required('blueRepositoryManifestSha256')
 String location = required('blueRepositoryRepository')
-if (!(commit ==~ /[0-9a-f]{40}/) || version != '3.0.0-dev.' + commit
+if (!(commit ==~ /[0-9a-f]{40}/) || !(localRc ? version ==~ /3\.0\.0-rc\.[1-9][0-9]*/ : version == '3.0.0-dev.' + commit)
         || !(identity ==~ /sha256:[0-9a-f]{64}/) || !new File(location).isAbsolute())
     throw new GradleException('Invalid exact development catalog selection')
 File repository = new File(location)
@@ -31,10 +32,10 @@ regular(sidecar)
 if (digest(manifestFile) != identity || sidecar.getText('UTF-8') != identity.substring(7) + '  artifact-manifest.json\n')
     throw new GradleException('Development catalog manifest identity differs')
 def manifest = new JsonSlurper().parse(manifestFile)
-if (manifest.schema != 'blue-repository-development-repository/1.0'
+if (manifest.schema != (localRc ? 'blue-repository-local-rc-repository/1.0' : 'blue-repository-development-repository/1.0')
         || manifest.groupId != 'blue.repo' || manifest.version != version
         || manifest.sourceCommit != commit || !(manifest.sourceTree ==~ /[0-9a-f]{40}/)
-        || manifest.sourceDirty != false || manifest.stagePurpose != 'DEVELOPMENT'
+        || manifest.sourceDirty != false || manifest.stagePurpose != (localRc ? 'LOCAL_RC' : 'DEVELOPMENT')
         || manifest.releaseReadinessClaimed != false || manifest.builtWithJava != 17)
     throw new GradleException('Catalog manifest does not describe selected clean development source')
 File languageFile = new File(required('blueContractsRepository'), 'artifact-manifest.json')

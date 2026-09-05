@@ -12,8 +12,9 @@ def dependencyMode = providers.gradleProperty('blueDependencyMode')
         .trim()
 def immutableStagedContracts =
         dependencyMode == 'immutable-staged-contracts'
+def localRc = dependencyMode == 'immutable-local-rc-contracts'
 def immutableDevelopmentContracts =
-        dependencyMode == 'immutable-development-contracts'
+        localRc || dependencyMode == 'immutable-development-contracts'
 def immutableContractsRepository =
         immutableStagedContracts || immutableDevelopmentContracts
 def publishedLanguageVersion = '3.1.0-rc.23'
@@ -57,8 +58,8 @@ def developmentProjectVersion = providers.gradleProperty(
         'blueDevelopmentVersion').orNull
 if (immutableDevelopmentContracts
         && (developmentProjectVersion == null
-        || !(developmentProjectVersion
-        ==~ /3\.0\.0-dev\.[0-9a-f]{40}/))) {
+        || !((localRc ? developmentProjectVersion ==~ /3\.0\.0-rc\.[1-9][0-9]*/ : developmentProjectVersion
+        ==~ /3\.0\.0-dev\.[0-9a-f]{40}/)))) {
     throw new GradleException(
             'blueDevelopmentVersion requires immutable-development-contracts '
                     + 'and an exact commit-bound DEVELOPMENT version')
@@ -69,14 +70,14 @@ if (!immutableDevelopmentContracts && developmentProjectVersion != null) {
 }
 version = developmentProjectVersion ?: declaredProjectVersion
 if (immutableDevelopmentContracts
-        && !(immutableStagedLanguageVersion
-        ==~ /3\.1\.0-dev\.[0-9a-f]{40}/)) {
+        && !((localRc ? immutableStagedLanguageVersion ==~ /3\.1\.0-rc\.[1-9][0-9]*/ : immutableStagedLanguageVersion
+        ==~ /3\.1\.0-dev\.[0-9a-f]{40}/))) {
     throw new GradleException(
             'blueContractsVersion must be an exact commit-bound DEVELOPMENT version')
 }
 if (immutableDevelopmentContracts
-        && !(immutableDevelopmentBexVersion
-        ==~ /1\.1\.0-dev\.[0-9a-f]{40}/)) {
+        && !((localRc ? immutableDevelopmentBexVersion ==~ /1\.1\.0-rc\.[1-9][0-9]*/ : immutableDevelopmentBexVersion
+        ==~ /1\.1\.0-dev\.[0-9a-f]{40}/))) {
     throw new GradleException(
             'blueBexVersion must be an exact commit-bound DEVELOPMENT version')
 }
@@ -116,7 +117,8 @@ def activeBlueCoordinates = immutableDevelopmentContracts
 def acceptedDependencyModes = [
         'published-artifact',
         'immutable-staged-contracts',
-        'immutable-development-contracts'
+        'immutable-development-contracts',
+        'immutable-local-rc-contracts'
 ] as Set
 if (!acceptedDependencyModes.contains(dependencyMode)) {
     throw new GradleException(
@@ -1274,10 +1276,10 @@ def inspectImmutableDevelopmentContractsRepository = {
                 + ', unexpected '
                 + (actualManifestFields - requiredManifestFields).toList().sort())
     }
-    if (manifest.schema != 'blue-development-maven-repository/1.0') {
+    if (manifest.schema != (localRc ? 'blue-local-rc-maven-repository/1.0' : 'blue-development-maven-repository/1.0')) {
         failures << "unexpected manifest schema ${manifest.schema}"
     }
-    if (manifest.stagePurpose != 'DEVELOPMENT') {
+    if (manifest.stagePurpose != (localRc ? 'LOCAL_RC' : 'DEVELOPMENT')) {
         failures << "unexpected stagePurpose ${manifest.stagePurpose}"
     }
     if (manifest.releaseReadinessClaimed != false) {
@@ -1306,7 +1308,7 @@ def inspectImmutableDevelopmentContractsRepository = {
             || manifest.sourceDirty != false) {
         failures << 'DEVELOPMENT manifest requires a clean exact source tree'
     }
-    if (manifest.version != '3.1.0-dev.' + manifest.sourceCommit) {
+    if (!localRc && manifest.version != '3.1.0-dev.' + manifest.sourceCommit) {
         failures << 'DEVELOPMENT version does not bind its exact clean commit'
     }
     [
@@ -1328,7 +1330,8 @@ def inspectImmutableDevelopmentContractsRepository = {
             runtime: '.jar'
     ]
     def expectedRecords = []
-    developmentContractsArtifacts.toList().sort().each { artifact ->
+    if (localRc) kinds.putAll([sources: '-sources.jar', javadoc: '-javadoc.jar'])
+    (localRc ? stagedContractsArtifacts : developmentContractsArtifacts).toList().sort().each { artifact ->
         kinds.keySet().toList().sort().each { kind ->
             String base = 'blue/language/' + artifact + '/' +
                     immutableStagedLanguageVersion + '/' + artifact + '-' +
@@ -1444,9 +1447,9 @@ def inspectImmutableDevelopmentContractsRepository = {
     } finally {
         stream.close()
     }
-    if (expectedFiles.size() != 26) {
+    if (expectedFiles.size() != (localRc ? 58 : 26)) {
         failures << ('expected development repository closure has '
-                + expectedFiles.size() + ' files; expected 26')
+                + expectedFiles.size() + '; expected ' + (localRc ? 58 : 26))
     }
     if (actualFiles != expectedFiles) {
         failures << ('development repository closure differs; missing '
@@ -1572,13 +1575,13 @@ def inspectImmutableDevelopmentBexRepository = {
                 + (actualManifestFields - requiredManifestFields)
                 .toList().sort())
     }
-    if (manifest.schema != 'blue-bex-development-repository/1.0') {
+    if (manifest.schema != (localRc ? 'blue-bex-local-rc-repository/1.0' : 'blue-bex-development-repository/1.0')) {
         failures << "unexpected BEX manifest schema ${manifest.schema}"
     }
     if (manifest.groupId != 'blue.bex') {
         failures << "unexpected DEVELOPMENT BEX group ${manifest.groupId}"
     }
-    if (manifest.stagePurpose != 'DEVELOPMENT'
+    if (manifest.stagePurpose != (localRc ? 'LOCAL_RC' : 'DEVELOPMENT')
             || manifest.releaseReadinessClaimed != false
             || !(manifest.builtWithJava instanceof Number)
             || manifest.builtWithJava.toString() != '17') {
@@ -1588,8 +1591,8 @@ def inspectImmutableDevelopmentBexRepository = {
         failures << "unexpected DEVELOPMENT BEX version ${manifest.version}"
     }
     if (manifest.sourceCommit != developmentBexSourceCommit
-            || !immutableDevelopmentBexVersion.endsWith(
-            '.' + developmentBexSourceCommit)) {
+            || (!localRc && !immutableDevelopmentBexVersion.endsWith(
+            '.' + developmentBexSourceCommit))) {
         failures << 'DEVELOPMENT BEX version/source commitment differs'
     }
     if (!(manifest.sourceTree instanceof String)
@@ -2111,6 +2114,8 @@ def verifyReleaseVersionPolicyLogic = tasks.register(
                 ["3.0.0-dev.tree.${commit}", true, commit, true],
                 ['3.0.0-SNAPSHOT', true, commit, true]
         ]
+        rejected.add(new LinkedHashMap<>(rcSelection) + [blueRepositoryManifestSha256: null])
+        rejected.add(new LinkedHashMap<>(rcSelection) + [blueContractsVersion: '3.1.0-dev.' + commit])
         rejected.each { vector ->
             def failures = releaseVersionPolicyFailures(
                     vector[0] as String,
@@ -4036,10 +4041,12 @@ def sourceArchiveChecksum = tasks.register(
 
 def extractedSourceArchivePropertiesFor = { Map<String, String> selection ->
     String selectedMode = selection.blueDependencyMode
+    boolean selectedRc = selectedMode == 'immutable-local-rc-contracts'
     if (!(selectedMode in [
             'published-artifact',
             'immutable-staged-contracts',
-            'immutable-development-contracts'
+            'immutable-development-contracts',
+            'immutable-local-rc-contracts'
     ])) {
         throw new GradleException(
                 "Unsupported extracted-source dependency mode ${selectedMode}")
@@ -4075,10 +4082,8 @@ def extractedSourceArchivePropertiesFor = { Map<String, String> selection ->
     properties.blueDevelopmentVersion = required('blueDevelopmentVersion')
     if (!(properties.blueContractsSourceCommit
             ==~ /[0-9a-f]{40}/)
-            || !(properties.blueDevelopmentVersion
-            ==~ /3\.0\.0-dev\.[0-9a-f]{40}/)
-            || properties.blueContractsVersion
-            != '3.1.0-dev.' + properties.blueContractsSourceCommit) {
+            || !(selectedRc ? properties.blueDevelopmentVersion ==~ /3\.0\.0-rc\.[1-9][0-9]*/ : properties.blueDevelopmentVersion ==~ /3\.0\.0-dev\.[0-9a-f]{40}/)
+            || !(selectedRc ? properties.blueContractsVersion ==~ /3\.1\.0-rc\.[1-9][0-9]*/ : properties.blueContractsVersion == '3.1.0-dev.' + properties.blueContractsSourceCommit)) {
         throw new GradleException(
                 'Extracted-source DEVELOPMENT source identity is invalid')
     }
@@ -4087,14 +4092,22 @@ def extractedSourceArchivePropertiesFor = { Map<String, String> selection ->
     properties.blueBexRepository = required('blueBexRepository')
     properties.blueBexManifestSha256 = required('blueBexManifestSha256')
     properties.blueBexSourceCommit = required('blueBexSourceCommit')
-    if (!(selectedBexVersion ==~ /1\.1\.0-dev\.[0-9a-f]{40}/)
+    if (!(selectedRc ? selectedBexVersion ==~ /1\.1\.0-rc\.[1-9][0-9]*/ : selectedBexVersion ==~ /1\.1\.0-dev\.[0-9a-f]{40}/)
             || !(properties.blueBexManifestSha256
             ==~ /sha256:[0-9a-f]{64}/)
             || !(properties.blueBexSourceCommit ==~ /[0-9a-f]{40}/)
-            || !selectedBexVersion.endsWith(
-            '.' + properties.blueBexSourceCommit)) {
+            || (!selectedRc && !selectedBexVersion.endsWith(
+            '.' + properties.blueBexSourceCommit))) {
         throw new GradleException(
                 'Extracted-source DEVELOPMENT BEX binding is invalid')
+    }
+    ['Version', 'Repository', 'ManifestSha256', 'SourceCommit'].each { suffix ->
+        properties['blueRepository' + suffix] = required('blueRepository' + suffix)
+    }
+    if (!(properties.blueRepositorySourceCommit ==~ /[0-9a-f]{40}/)
+            || !(properties.blueRepositoryManifestSha256 ==~ /sha256:[0-9a-f]{64}/)
+            || !(selectedRc ? properties.blueRepositoryVersion ==~ /3\.0\.0-rc\.[1-9][0-9]*/ : properties.blueRepositoryVersion == '3.0.0-dev.' + properties.blueRepositorySourceCommit)) {
+        throw new GradleException('Extracted-source catalog binding is invalid')
     }
     properties
 }
@@ -4102,6 +4115,10 @@ def extractedSourceArchivePropertiesFor = { Map<String, String> selection ->
 def extractedSourceArchiveSelection = {
     [
             blueDependencyMode: dependencyMode,
+            blueRepositoryVersion: developmentCatalog?.version,
+            blueRepositoryRepository: developmentCatalog?.repository?.absolutePath,
+            blueRepositorySourceCommit: developmentCatalog?.sourceCommit,
+            blueRepositoryManifestSha256: developmentCatalog?.manifestIdentity,
             blueContractsVersion: immutableContractsRepository
                     ? immutableStagedLanguageVersion : null,
             blueContractsRepository: immutableContractsRepository
@@ -4169,6 +4186,10 @@ def verifyExtractedSourceArchiveLanePolicyLogic = tasks.register(
                         blueBexVersion: '1.1.0-dev.' + otherCommit,
                         blueBexRepository: '/immutable/bex-dev',
                         blueBexManifestSha256: identity,
+                        blueRepositoryVersion: '3.0.0-dev.' + commit,
+                        blueRepositoryRepository: '/immutable/catalog-dev',
+                        blueRepositoryManifestSha256: identity,
+                        blueRepositorySourceCommit: commit,
                         blueBexSourceCommit: otherCommit,
                         blueDevelopmentVersion: '3.0.0-dev.' + commit
                 ])
@@ -4182,10 +4203,21 @@ def verifyExtractedSourceArchiveLanePolicyLogic = tasks.register(
                 blueBexVersion: '1.1.0-dev.' + otherCommit,
                 blueBexRepository: '/immutable/bex-dev',
                 blueBexManifestSha256: identity,
-                blueBexSourceCommit: otherCommit
+                blueRepositoryVersion: '3.0.0-dev.' + commit,
+                        blueRepositoryRepository: '/immutable/catalog-dev',
+                        blueRepositoryManifestSha256: identity,
+                        blueRepositorySourceCommit: commit,
+                        blueBexSourceCommit: otherCommit
         ]) {
             throw new GradleException(
                     'DEVELOPMENT extracted-source lane lost an exact binding')
+        }
+        Map<String, String> rcSelection = new LinkedHashMap<>(development)
+        rcSelection.putAll([blueDependencyMode: 'immutable-local-rc-contracts',
+            blueContractsVersion: '3.1.0-rc.24', blueBexVersion: '1.1.0-rc.5',
+            blueDevelopmentVersion: '3.0.0-rc.6', blueRepositoryVersion: '3.0.0-rc.22'])
+        if (extractedSourceArchivePropertiesFor(rcSelection) != rcSelection) {
+            throw new GradleException('Local RC extracted-source lane lost an exact binding')
         }
         def rejected = [
                 [blueDependencyMode: 'unknown'],
@@ -4700,7 +4732,7 @@ def immutableDevelopmentContractsDependencies = tasks.register(
                     artifact.name + ':' + artifact.moduleVersion.id.version
             [(coordinate): sha256Identity(artifact.file)]
         }
-        if (manifestRuntimeIdentities.size() != 6
+        if (manifestRuntimeIdentities.size() != (localRc ? 7 : 6)
                 || expectedLanguageCoordinates.any { coordinate, identity ->
             identity == null
         }) {

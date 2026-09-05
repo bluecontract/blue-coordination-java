@@ -14,9 +14,11 @@ pluginManagement {
 rootProject.name = 'blue-coordination-staged-consumer'
 
 def dependencyMode = providers.gradleProperty('dependencyMode').orNull
+def localRc = dependencyMode == 'immutable-local-rc-contracts'
 if (!(dependencyMode in [
         'immutable-staged-contracts',
-        'immutable-development-contracts'
+        'immutable-development-contracts',
+        'immutable-local-rc-contracts'
 ])) {
     throw new GradleException(
             '-PdependencyMode must select an immutable Coordination handoff lane')
@@ -248,7 +250,9 @@ File bexRepository = null
 Map bexEnvelope = null
 Map bexManifest = null
 String selectedBexVersion = null
-if (dependencyMode == 'immutable-development-contracts') {
+File catalogRepository = null
+Map catalogManifest = null
+if ((dependencyMode in ['immutable-development-contracts', 'immutable-local-rc-contracts'])) {
     Set<String> languageFields = [
             'schema', 'stagePurpose', 'releaseReadinessClaimed',
             'builtWithJava', 'groupId', 'version', 'sourceCommit',
@@ -258,16 +262,14 @@ if (dependencyMode == 'immutable-development-contracts') {
     ] as Set
     if ((contractsManifest.keySet() as Set) != languageFields
             || contractsManifest.schema
-            != 'blue-development-maven-repository/1.0'
-            || contractsManifest.stagePurpose != 'DEVELOPMENT'
+            != (localRc ? 'blue-local-rc-maven-repository/1.0' : 'blue-development-maven-repository/1.0')
+            || contractsManifest.stagePurpose != (localRc ? 'LOCAL_RC' : 'DEVELOPMENT')
             || contractsManifest.releaseReadinessClaimed != false
             || !(contractsManifest.builtWithJava instanceof Number)
             || contractsManifest.builtWithJava.toString() != '17'
             || contractsManifest.groupId != 'blue.language'
-            || !(contractsManifest.version
-            ==~ /3\.1\.0-dev\.[0-9a-f]{40}/)
-            || contractsManifest.version
-            != '3.1.0-dev.' + contractsManifest.sourceCommit
+            || !(localRc ? contractsManifest.version ==~ /3\.1\.0-rc\.[1-9][0-9]*/ : contractsManifest.version ==~ /3\.1\.0-dev\.[0-9a-f]{40}/)
+            || (!localRc && contractsManifest.version != '3.1.0-dev.' + contractsManifest.sourceCommit)
             || !(contractsManifest.sourceCommit ==~ /[0-9a-f]{40}/)
             || !(contractsManifest.sourceTree ==~ /[0-9a-f]{40}/)
             || contractsManifest.sourceDirty != false) {
@@ -299,9 +301,9 @@ if (dependencyMode == 'immutable-development-contracts') {
                             'blue-language-ipfs',
                             'blue-contracts-core',
                             'blue-language-java'
-                    ] as Set,
-                    [pom: '.pom', runtime: '.jar']),
-            26,
+                    ].toSet() + (localRc ? ['blue-conformance'] : []),
+                    localRc ? [pom: '.pom', runtime: '.jar', sources: '-sources.jar', javadoc: '-javadoc.jar'] : [pom: '.pom', runtime: '.jar']),
+            localRc ? 58 : 26,
             'Language')
 
     bexRepository = checkedRepository('bexRepository')
@@ -319,15 +321,14 @@ if (dependencyMode == 'immutable-development-contracts') {
     ] as Set
     if ((bexManifest.keySet() as Set) != bexFields
             || bexManifest.schema
-            != 'blue-bex-development-repository/1.0'
-            || bexManifest.stagePurpose != 'DEVELOPMENT'
+            != (localRc ? 'blue-bex-local-rc-repository/1.0' : 'blue-bex-development-repository/1.0')
+            || bexManifest.stagePurpose != (localRc ? 'LOCAL_RC' : 'DEVELOPMENT')
             || bexManifest.releaseReadinessClaimed != false
             || !(bexManifest.builtWithJava instanceof Number)
             || bexManifest.builtWithJava.toString() != '17'
             || bexManifest.groupId != 'blue.bex'
-            || !(bexManifest.version
-            ==~ /1\.1\.0-dev\.[0-9a-f]{40}/)
-            || bexManifest.version != '1.1.0-dev.' + bexManifest.sourceCommit
+            || !(localRc ? bexManifest.version ==~ /1\.1\.0-rc\.[1-9][0-9]*/ : bexManifest.version ==~ /1\.1\.0-dev\.[0-9a-f]{40}/)
+            || (!localRc && bexManifest.version != '1.1.0-dev.' + bexManifest.sourceCommit)
             || !(bexManifest.sourceCommit ==~ /[0-9a-f]{40}/)
             || !(bexManifest.sourceTree ==~ /[0-9a-f]{40}/)
             || bexManifest.sourceDirty != false
@@ -372,11 +373,40 @@ if (dependencyMode == 'immutable-development-contracts') {
             26,
             'BEX')
 
+    catalogRepository = checkedRepository('catalogRepository')
+    Map catalogEnvelope = checkedManifest(catalogRepository, 'catalogManifestSha256', 'Catalog')
+    catalogManifest = catalogEnvelope.manifest
+    if (catalogManifest.schema != (localRc ? 'blue-repository-local-rc-repository/1.0' : 'blue-repository-development-repository/1.0')
+            || catalogManifest.groupId != 'blue.repo'
+            || catalogManifest.stagePurpose != (localRc ? 'LOCAL_RC' : 'DEVELOPMENT')
+            || catalogManifest.releaseReadinessClaimed != false || catalogManifest.sourceDirty != false
+            || catalogManifest.builtWithJava != 17
+            || !(catalogManifest.sourceCommit ==~ /[0-9a-f]{40}/)
+            || !(catalogManifest.sourceTree ==~ /[0-9a-f]{40}/)
+            || !(localRc ? catalogManifest.version ==~ /3\.0\.0-rc\.[1-9][0-9]*/ : catalogManifest.version == '3.0.0-dev.' + catalogManifest.sourceCommit)
+            || catalogManifest.languageVersion != contractsManifest.version
+            || catalogManifest.languageSourceCommit != contractsManifest.sourceCommit
+            || catalogManifest.languageSourceTree != contractsManifest.sourceTree
+            || catalogManifest.languageRepositoryManifestIdentity != contractsEnvelope.identity) {
+        throw new GradleException('Catalog is not bound to the selected clean Language source')
+    }
+    verifyRepositoryClosure(catalogRepository, catalogManifest,
+        expectedRecords('blue.repo', catalogManifest.version, ['blue-repo-java'] as Set,
+            [pom: '.pom', runtime: '.jar', sources: '-sources.jar', javadoc: '-javadoc.jar']), 10, 'Catalog')
+    Map expectedCatalogBinding = [manifestIdentity: catalogEnvelope.identity]
+    ['schema', 'version', 'sourceCommit', 'sourceTree', 'catalogManifestIdentity',
+     'repositoryVersionBlueId', 'providerBundleIdentity', 'registryPackageIdentities'].each { field ->
+        expectedCatalogBinding[field] = catalogManifest[field]
+    }
+    if (coordinationManifest.catalog != expectedCatalogBinding) {
+        throw new GradleException('Coordination does not bind the exact catalog manifest')
+    }
+
     Set<String> coordinationFields = [
             'schema', 'groupId', 'artifactId', 'version', 'sourceCommit',
             'sourceTree', 'sourceDirty', 'stagePurpose',
             'releaseReadinessClaimed', 'builtWithJava', 'dependencyMode',
-            'contracts', 'bex', 'dependencies', 'artifacts'
+            'contracts', 'bex', 'catalog', 'dependencies', 'artifacts'
     ] as Set
     if ((coordinationManifest.keySet() as Set) != coordinationFields
             || !(coordinationManifest.contracts instanceof Map)
@@ -394,15 +424,14 @@ if (dependencyMode == 'immutable-development-contracts') {
             'languageRepositoryManifestIdentity'
             ] as Set)
             || coordinationManifest.dependencyMode != dependencyMode
-            || coordinationManifest.stagePurpose != 'DEVELOPMENT'
+            || coordinationManifest.stagePurpose != (localRc ? 'LOCAL_RC' : 'DEVELOPMENT')
             || coordinationManifest.releaseReadinessClaimed != false
             || !(coordinationManifest.builtWithJava instanceof Number)
             || coordinationManifest.builtWithJava.toString() != '17'
             || !(coordinationManifest.sourceCommit ==~ /[0-9a-f]{40}/)
             || !(coordinationManifest.sourceTree ==~ /[0-9a-f]{40}/)
             || coordinationManifest.sourceDirty != false
-            || selectedCoordinationVersion
-            != '3.0.0-dev.' + coordinationManifest.sourceCommit) {
+            || !(localRc ? selectedCoordinationVersion ==~ /3\.0\.0-rc\.[1-9][0-9]*/ : selectedCoordinationVersion == '3.0.0-dev.' + coordinationManifest.sourceCommit)) {
         throw new GradleException(
                 'Development Coordination repository provenance is not canonical')
     }
@@ -557,7 +586,7 @@ dependencyResolutionManagement {
             }
             filter { includeGroup 'blue.language' }
         }
-        if (dependencyMode == 'immutable-development-contracts') {
+        if ((dependencyMode in ['immutable-development-contracts', 'immutable-local-rc-contracts'])) {
             exclusiveContent {
                 forRepository {
                     maven {
@@ -570,6 +599,10 @@ dependencyResolutionManagement {
                     }
                 }
                 filter { includeGroup 'blue.bex' }
+            }
+            exclusiveContent {
+                forRepository { maven { name = 'immutableCatalog'; url = uri(catalogRepository) } }
+                filter { includeGroup 'blue.repo' }
             }
         }
         mavenCentral()

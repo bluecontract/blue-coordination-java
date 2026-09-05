@@ -13,8 +13,8 @@ def coordinationVersion = stagedVersions.coordination
 def contractsVersion = stagedVersions.contracts
 def bexVersion = stagedVersions.bex
 def dependencyMode = providers.gradleProperty('dependencyMode').get()
-def expectedProtectedGroups = dependencyMode == 'immutable-development-contracts'
-        ? ['blue.coordination', 'blue.language', 'blue.bex'] as Set
+def expectedProtectedGroups = (dependencyMode in ['immutable-development-contracts', 'immutable-local-rc-contracts'])
+        ? ['blue.coordination', 'blue.language', 'blue.bex', 'blue.repo'] as Set
         : ['blue.coordination', 'blue.language'] as Set
 def protectedGroups = providers.gradleProperty('protectedGroups').get()
         .split(',').findAll { !it.isBlank() } as Set
@@ -26,9 +26,10 @@ def coordinationRepository = file(providers.gradleProperty(
         'coordinationRepository').get()).canonicalFile
 def contractsRepository = file(providers.gradleProperty(
         'contractsRepository').get()).canonicalFile
-def bexRepository = dependencyMode == 'immutable-development-contracts'
+def bexRepository = (dependencyMode in ['immutable-development-contracts', 'immutable-local-rc-contracts'])
         ? file(providers.gradleProperty('bexRepository').get()).canonicalFile
         : null
+def catalogRepository = bexRepository == null ? null : file(providers.gradleProperty('catalogRepository').get()).canonicalFile
 def smokeReport = file(providers.gradleProperty('smokeReport').get())
 def testJavaVersion = providers.gradleProperty('testJavaVersion')
         .map { Integer.parseInt(it) }.get()
@@ -175,6 +176,10 @@ def verifyStagedCoordinates = tasks.register('verifyStagedCoordinates') {
                         'BEX manifest does not bind both selected runtimes')
             }
             expected.putAll(expectedBex)
+        }
+        if (catalogRepository != null) {
+            expected.putAll(manifest(catalogRepository).artifacts.findAll { it.kind == 'runtime' }
+                .collectEntries { [(String.valueOf(it.coordinate)): String.valueOf(it.sha256)] })
         }
         if (actual != expected || expected.values().any { it == null }) {
             throw new GradleException(
