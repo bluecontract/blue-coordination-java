@@ -297,6 +297,29 @@ final class ContractsClosureAdapterTest {
     }
 
     @Test
+    void reverseFrontierExtendsWhenAnObservingParentIntroducesAnotherBranch() {
+        // given
+        DocumentId observer = DocumentId.of("observer");
+        ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(List.of(
+                occurrence("ab", A, "/child", B, true),
+                occurrence("ac", A, "/sibling", C, true),
+                occurrence("oc", observer, "/peer", C, true)));
+        ClosureSubscriptionInventory subscriptions = subscriptions(A,
+                demand("all", "/", ClosureSubscriptionInventory.EmbeddedDemandMode.ALL_DESCENDANTS))
+                .replaceEmbeddedDemands(observer, List.of(demand("peer", "/peer",
+                        ClosureSubscriptionInventory.EmbeddedDemandMode.EXACT)));
+
+        // when
+        var selected = ContractsClosureAdapter.initialConnectedSelection(
+                inventory, subscriptions, B);
+
+        // then
+        assertEquals(List.of(A, B, C, observer), selected.members());
+        assertEquals(3, selected.occurrences().size());
+        assertEquals(3L, selected.rowsExamined());
+    }
+
+    @Test
     void inactiveProspectiveRowCannotSelectOrExpandAClosure() {
         // given
         ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(

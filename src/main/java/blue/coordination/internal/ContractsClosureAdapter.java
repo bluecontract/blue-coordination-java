@@ -937,6 +937,11 @@ final class ContractsClosureAdapter implements AutoCloseable {
         pending.addLast(start);
         Map<String, ManagedOccurrenceBinding> occurrences =
                 new LinkedHashMap<>();
+        // The captured inventory cannot change during selection. Retain the
+        // reverse frontier as demand adds parents and their forward branches;
+        // each ancestor's incoming rows need to be opened only once.
+        TreeMap<DocumentId, Boolean> reverseReachable = new TreeMap<>(
+                EmbeddingBinding.DOCUMENT_ORDER);
         long rowsExamined = 0L;
         while (true) {
             while (!pending.isEmpty()) {
@@ -957,9 +962,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 }
             }
 
-            TreeMap<DocumentId, Boolean> reverseReachable =
-                    reverseReachableThroughActiveOccurrences(
-                            inventory, discovered.keySet());
+            extendReverseReachableThroughActiveOccurrences(
+                    inventory, discovered.keySet(), reverseReachable);
             boolean addedSource = false;
             for (DocumentId source : reverseReachable.keySet()) {
                 if (discovered.containsKey(source)) {
@@ -1016,16 +1020,15 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 start);
     }
 
-    private static TreeMap<DocumentId, Boolean>
-            reverseReachableThroughActiveOccurrences(
+    private static void extendReverseReachableThroughActiveOccurrences(
                     ManagedOccurrenceInventory inventory,
-                    Collection<DocumentId> selectedMembers) {
-        TreeMap<DocumentId, Boolean> result = new TreeMap<>(
-                EmbeddingBinding.DOCUMENT_ORDER);
+                    Collection<DocumentId> selectedMembers,
+                    TreeMap<DocumentId, Boolean> result) {
         Deque<DocumentId> pending = new ArrayDeque<>();
         for (DocumentId selected : selectedMembers) {
-            result.put(selected, Boolean.TRUE);
-            pending.addLast(selected);
+            if (result.putIfAbsent(selected, Boolean.TRUE) == null) {
+                pending.addLast(selected);
+            }
         }
         while (!pending.isEmpty()) {
             DocumentId current = pending.removeFirst();
@@ -1042,7 +1045,6 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 }
             }
         }
-        return result;
     }
 
     private static boolean demandReachesSelectedMember(
@@ -3027,7 +3029,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
         return new SubscriptionDelta(added, removed);
     }
 
-    private static List<SubscriptionDelta.Entry> activateInitialSubscriptions(
+    static List<SubscriptionDelta.Entry> activateInitialSubscriptions(
             List<SubscriptionDelta.Entry> desired,
             blue.language.processor.ExternalOrderKey frontier) {
         ArrayList<SubscriptionDelta.Entry> result = new ArrayList<>();
