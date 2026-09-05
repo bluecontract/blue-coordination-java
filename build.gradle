@@ -1600,9 +1600,9 @@ def inspectImmutableDevelopmentBexRepository = {
     def expectedRecords = []
     developmentBexArtifacts.toList().sort().each { artifact ->
         kinds.keySet().toList().sort().each { kind ->
-            String base = 'blue/bex/' + artifact + '/'
+            String base = ('blue/bex/' + artifact + '/'
                     + immutableDevelopmentBexVersion + '/' + artifact + '-'
-                    + immutableDevelopmentBexVersion
+                    + immutableDevelopmentBexVersion)
             expectedRecords << [
                     coordinate: 'blue.bex:' + artifact + ':'
                             + immutableDevelopmentBexVersion,
@@ -1617,8 +1617,8 @@ def inspectImmutableDevelopmentBexRepository = {
         failures.addAll(developmentBexArtifactFieldFailures(record, index))
     }
     def recordKeys = records.collect { record ->
-        String.valueOf(record.coordinate) + ':'
-                + String.valueOf(record.kind)
+        (String.valueOf(record.coordinate) + ':'
+                + String.valueOf(record.kind))
     }
     if (recordKeys != recordKeys.toList().sort()) {
         failures << 'BEX manifest artifact records are not canonically ordered'
