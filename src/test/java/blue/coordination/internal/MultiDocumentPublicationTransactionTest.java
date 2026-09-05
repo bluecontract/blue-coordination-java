@@ -406,8 +406,7 @@ final class MultiDocumentPublicationTransactionTest {
                 0L,
                 new blue.language.processor.closure.DocumentId(A.value()),
                 hash('e'),
-                eventBlueId,
-                event);
+                IntegrationEventEvidence.verify(event, eventBlueId));
     }
 
     private static CheckpointWrite checkpoint(String subjectBlueId) {

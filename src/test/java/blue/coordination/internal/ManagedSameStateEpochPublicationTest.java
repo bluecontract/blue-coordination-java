@@ -720,8 +720,8 @@ public final class ManagedSameStateEpochPublicationTest {
                         0L,
                         contractsDocumentId,
                         occurrenceIdentity,
-                        event.blueId(),
-                        event.copyNode(),
+                        IntegrationEventEvidence.verify(
+                                event.copyNode(), event.blueId()),
                         false);
         ManagedDocumentTransitionReceipt transition = transition(
                 invocationIdentity,

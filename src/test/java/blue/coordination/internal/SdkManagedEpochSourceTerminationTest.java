@@ -376,16 +376,16 @@ final class SdkManagedEpochSourceTerminationTest {
                         0L,
                         contractsDocumentId,
                         occurrenceIdentity,
-                        event.blueId(),
-                        event.copyNode(),
+                        IntegrationEventEvidence.verify(
+                                event.copyNode(), event.blueId()),
                         true);
         PublicEventOccurrence publicEvent = new PublicEventOccurrence(
                 0L,
                 0L,
                 contractsDocumentId,
                 occurrenceIdentity,
-                event.blueId(),
-                event.copyNode());
+                IntegrationEventEvidence.verify(
+                        event.copyNode(), event.blueId()));
         ManagedDocumentTransitionReceipt transition = transition(
                 invocationIdentity,
                 contractsDocumentId,

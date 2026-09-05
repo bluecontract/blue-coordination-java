@@ -21,6 +21,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Focused validation and immutability contracts for SDK public values. */
 final class SdkValueModelTest {
     @Test
+    void listAliasUsesTheSelectedLanguageIdentity() {
+        try (BlueCoordination runtime = BlueCoordination.inMemory()) {
+            ExactBlueValue aliased = runtime.values().yaml("type: List\nitems: [1, 2]\n");
+            ExactBlueValue explicit = runtime.values().yaml("type:\n  blueId: "
+                    + blue.language.model.wire.BlueLanguageConstants.LIST_TYPE_BLUE_ID
+                    + "\nitems: [1, 2]\n");
+            assertEquals(explicit.blueId(), aliased.blueId());
+        }
+    }
+
+    @Test
     void managedDocumentFluentDefinitionIsImmutableAndFailsClosed() {
         // given
         ManagedDocument base = ManagedDocument.yaml(

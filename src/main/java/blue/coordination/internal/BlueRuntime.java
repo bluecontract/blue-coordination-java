@@ -118,8 +118,10 @@ final class BlueRuntime implements AutoCloseable {
                 new CyclicAwareSequentialNodeProvider(providers);
 
         Map<String, String> imports = new LinkedHashMap<>();
-        imports.putAll(RuntimeTypeAliases.AGGREGATE_NAME_TO_BLUE_ID);
         imports.putAll(repository.preprocessingAliases());
+        // The selected Language/Contracts registry owns core spellings, even
+        // when the generated repository was published against an older core.
+        imports.putAll(RuntimeTypeAliases.AGGREGATE_NAME_TO_BLUE_ID);
         BlueLanguage language = BlueLanguage.builder()
                 .nodeProvider(nodeProvider)
                 .preprocessingAliases(imports)

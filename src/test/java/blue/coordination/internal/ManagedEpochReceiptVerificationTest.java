@@ -394,8 +394,8 @@ final class ManagedEpochReceiptVerificationTest {
                             event.occurrenceOrdinal(),
                             wrongDocument,
                             event.occurrenceIdentity(),
-                            event.eventBlueId(),
-                            event.exactEvent(),
+                            IntegrationEventEvidence.verify(
+                                    event.exactEvent(), event.eventBlueId()),
                             event.publicAtSource()));
                 }
                 replacementTransition = transition(
