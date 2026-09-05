@@ -115,8 +115,8 @@ def expectedRecords = {
     List<Map<String, String>> records = []
     artifacts.toList().sort().each { artifact ->
         kinds.keySet().toList().sort().each { kind ->
-            String base = group.replace('.', '/') + '/' + artifact + '/'
-                    + version + '/' + artifact + '-' + version
+            String base = (group.replace('.', '/') + '/' + artifact + '/'
+                    + version + '/' + artifact + '-' + version)
             records << [
                     coordinate: group + ':' + artifact + ':' + version,
                     kind: kind,
