@@ -15,7 +15,7 @@ class BexHandlerEventBindingTest {
         ExactEventIdentityEvidence proof = proof(607);
         FrozenNode bridge = bridge(proof.eventBlueId());
         // when
-        BexValue binding = BexHandlerEventBinding.bind(bridge, proof);
+        BexValue binding = BexWorkflowContextFactory.handlerEventBinding(bridge, proof);
         // then
         assertEquals(bridge.blueId(), binding.exactBlueId());
         assertEquals(proof.eventBlueId(), binding.get("event").exactBlueId());
@@ -27,7 +27,7 @@ class BexHandlerEventBindingTest {
         // given
         ExactEventIdentityEvidence expected = proof(607);
         // when
-        BexValue binding = BexHandlerEventBinding.bind(bridge(expected.eventBlueId()), proof(608));
+        BexValue binding = BexWorkflowContextFactory.handlerEventBinding(bridge(expected.eventBlueId()), proof(608));
         // then
         assertEquals(expected.eventBlueId(), binding.get("event").exactBlueId());
         assertThrows(RuntimeException.class, () -> binding.get("event").get("amount"));
@@ -39,7 +39,7 @@ class BexHandlerEventBindingTest {
         ExactEventIdentityEvidence opaque = ExactEventIdentityEvidence.verify(null,
                 new Node().blueId(expected.eventBlueId()), expected.eventBlueId(), null);
         // when
-        BexValue binding = BexHandlerEventBinding.bind(bridge(expected.eventBlueId()), opaque);
+        BexValue binding = BexWorkflowContextFactory.handlerEventBinding(bridge(expected.eventBlueId()), opaque);
         // then
         assertThrows(RuntimeException.class, () -> binding.get("event").get("amount"));
     }

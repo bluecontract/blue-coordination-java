@@ -2114,8 +2114,6 @@ def verifyReleaseVersionPolicyLogic = tasks.register(
                 ["3.0.0-dev.tree.${commit}", true, commit, true],
                 ['3.0.0-SNAPSHOT', true, commit, true]
         ]
-        rejected.add(new LinkedHashMap<>(rcSelection) + [blueRepositoryManifestSha256: null])
-        rejected.add(new LinkedHashMap<>(rcSelection) + [blueContractsVersion: '3.1.0-dev.' + commit])
         rejected.each { vector ->
             def failures = releaseVersionPolicyFailures(
                     vector[0] as String,
@@ -4252,6 +4250,8 @@ def verifyExtractedSourceArchiveLanePolicyLogic = tasks.register(
                         blueDevelopmentVersion: '3.0.0-dev.' + commit
                 ]
         ]
+        rejected.add(new LinkedHashMap<>(rcSelection) + [blueRepositoryManifestSha256: null])
+        rejected.add(new LinkedHashMap<>(rcSelection) + [blueContractsVersion: '3.1.0-dev.' + commit])
         rejected.each { vector ->
             try {
                 extractedSourceArchivePropertiesFor(vector)

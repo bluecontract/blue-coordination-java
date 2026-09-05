@@ -1,0 +1,32 @@
+name: FINOS variation-margin lazy proof
+documentId: finos-money-margin-proof
+marginRequirement:
+  blueId: DYmqLkDsw1w43ikmx85HQ8c9zgtPEX5LBg1fco88dfNF
+coldRepositoryType:
+  blueId: ABtBnXVxAdtQaWJcxMGz6YJb2tjdXhuV2xZETFPYRVVi
+contracts:
+  ownerChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: playtest/reference-transparent/finos-margin/alice
+    actor:
+      type: MyOS/Principal Actor
+      accountId: alice
+  setMarginRequirement:
+    name: Set FINOS margin requirement
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request:
+      amount:
+        type:
+          blueId: 9eWaHYz2vKrFofdHTHAizNNu8xP6QE3WQ5y7DGrGZvyJ
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /marginRequirement/val
+              val:
+                $binding: event/message/request/amount
+          - $return: true

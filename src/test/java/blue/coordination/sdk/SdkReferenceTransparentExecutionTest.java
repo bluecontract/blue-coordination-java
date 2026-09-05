@@ -29,6 +29,34 @@ final class SdkReferenceTransparentExecutionTest {
             "sdk/reference-transparent/alice";
 
     @Test
+    void referencedCatalogMoneyRetainsTypeEvidenceDuringNestedPatch() throws Exception {
+        // given
+        ExactBlueValue money = providerValue(resource("01-finos-money-content.yaml"));
+        RecordingProvider provider = new RecordingProvider().put(money);
+        // when
+        try (BlueCoordination blue = coordination(provider)) {
+            TimelineHandle timeline = timeline(blue);
+            String source = resource("02-finos-margin-host.yaml")
+                    .replace("finos-money-margin-proof", COUNTER.value())
+                    .replace("playtest/reference-transparent/finos-margin/alice", TIMELINE);
+            DocumentHandle host = blue.documents().admit(
+                    ManagedDocument.yaml(COUNTER, source).publicRoot().fromNow());
+            EntryResult result = blue.operations().on(host).from(timeline)
+                    .call("setMarginRequirement").through("ownerChannel")
+                    .requestYaml("amount: 1250000.0").execute();
+            // then
+            assertEquals(EntryDisposition.APPLIED, result.disposition(), result.diagnostic().toString());
+            assertEquals("1250000", host.snapshot().exact().scalarAt("/marginRequirement/val").toString());
+        }
+    }
+
+    private String resource(String name) throws Exception {
+        try (var input = getClass().getResourceAsStream("/rc/" + name)) {
+            return new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        }
+    }
+
+    @Test
     void missingCounterValueDemandsExactNodeAndSameEntryResumesAfterRestart() {
         // given
         ExactBlueValue counterValue = providerValue("7");

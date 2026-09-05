@@ -20,7 +20,7 @@
       "id": "COORD-EMPTY-03",
       "sourceSet": "test",
       "className": "blue.coordination.processor.TimelineCheckpointSubjectTest",
-      "method": "absentAndEmptyRequestsKeepDistinctCheckpointIdentity",
+      "method": "absentAndEmptyRequestsKeepDistinctSubjectsAtSameTimelinePosition",
       "status": "active"
     },
     {
@@ -62,7 +62,7 @@
       "id": "COORD-COLLECTION-04",
       "sourceSet": "test",
       "className": "blue.coordination.internal.ContractsClosureAdapterTest",
-      "method": "inactiveProspectiveRowCannotSelectOrExpandAClosure",
+      "method": "inactiveReservationIsRetainedForwardWithoutSelectingItsParentInReverse",
       "status": "active"
     },
     {
