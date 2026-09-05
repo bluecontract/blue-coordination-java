@@ -1663,7 +1663,6 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     blue.language.processor.closure.DocumentId target =
                             closureId(occurrence.targetDocumentId());
                     if (historicalEpoch != null
-                            && !retained.targetDocumentId().equals(target)
                             && current.input().snapshot()
                                     .managedDocument(target) != null) {
                         ManagedOccurrenceEvidenceResolution exact =
