@@ -1217,10 +1217,6 @@ final class MultiDocumentPublicationTransaction {
                     "Closure admission requires complete topology and a typed "
                             + "durable receipt");
         }
-        Set<DocumentId> resultDocuments = new LinkedHashSet<>();
-        stagedGraphGeneration.resultingDocuments().forEach(document ->
-                resultDocuments.add(DocumentId.of(
-                        document.documentId().value())));
         Set<DocumentId> companionDocuments = new LinkedHashSet<>();
         stagedGraphGeneration.platformCommitCompanion()
                 .expectedInputDocuments().forEach(document ->
@@ -1229,8 +1225,8 @@ final class MultiDocumentPublicationTransaction {
         LinkedHashSet<DocumentId> expectedMembers = new LinkedHashSet<>(
                 expectedHeads.keySet());
         expectedMembers.addAll(expectedAbsent);
-        if (!resultDocuments.equals(expectedMembers)
-                || !companionDocuments.equals(expectedMembers)
+        var indexedResults = ContractsClosureAdapter.resultingDocuments(stagedGraphGeneration, expectedMembers);
+        if (!companionDocuments.equals(expectedMembers)
                 || !new LinkedHashSet<>(stagedAdmissionReceipt.documentIds())
                         .equals(expectedMembers)
                 || !stagedAdmissionReceipt.attempt().isComplete()
@@ -1263,13 +1259,6 @@ final class MultiDocumentPublicationTransaction {
                         "Admission input, result, and fences name different "
                                 + "members or identities");
             }
-            Map<DocumentId,
-                    blue.language.processor.closure.ResultingDocument>
-                    indexedResults = new LinkedHashMap<>();
-            stagedGraphGeneration.resultingDocuments().forEach(document ->
-                    indexedResults.put(
-                            DocumentId.of(document.documentId().value()),
-                            document));
             for (DocumentId documentId : expectedHeads.keySet()) {
                 blue.language.processor.closure.ManagedDocumentSnapshot input =
                         inputDocuments.get(documentId);
@@ -1355,9 +1344,6 @@ final class MultiDocumentPublicationTransaction {
                 .forEach(document -> inputDocuments.put(
                         DocumentId.of(document.documentId().value()),
                         document));
-        LinkedHashMap<DocumentId,
-                blue.language.processor.closure.ResultingDocument>
-                resultDocuments = new LinkedHashMap<>();
         ClosureProcessResult processResult = stagedClosurePublicationReceipt
                 .attempt().processResult();
         if (!processResult.invocationIdentity().equals(
@@ -1369,10 +1355,7 @@ final class MultiDocumentPublicationTransaction {
                     "Managed expansion receipt does not authenticate its "
                             + "virtual-member input");
         }
-        processResult.resultingDocuments().forEach(document ->
-                resultDocuments.put(
-                        DocumentId.of(document.documentId().value()),
-                        document));
+        var resultDocuments = ContractsClosureAdapter.resultingDocuments(processResult, expectedMembers);
         LinkedHashSet<DocumentId> companionDocuments = new LinkedHashSet<>();
         if (commits) {
             processResult.platformCommitCompanion()
@@ -1381,7 +1364,6 @@ final class MultiDocumentPublicationTransaction {
                                     document.documentId().value())));
         }
         if (!inputDocuments.keySet().equals(expectedMembers)
-                || !resultDocuments.keySet().equals(expectedMembers)
                 || (commits
                         && !companionDocuments.equals(expectedMembers))
                 || !new LinkedHashSet<>(stagedClosurePublicationReceipt
@@ -1397,7 +1379,8 @@ final class MultiDocumentPublicationTransaction {
                     inputDocuments.get(documentId);
             InMemoryDocumentStore.DocumentHead expected = expectedHeads.get(
                     documentId);
-            if (!input.initialized()
+            if (!input.blueId().equals(resultDocuments.get(documentId).beforeBlueId())
+                    || !input.initialized()
                     || input.epoch() != expected.epoch()
                     || !input.blueId().equals(expected.blueId())) {
                 throw new IllegalStateException(
@@ -1411,7 +1394,8 @@ final class MultiDocumentPublicationTransaction {
             blue.language.processor.closure.ResultingDocument result =
                     resultDocuments.get(documentId);
             DocumentSession session = newSessions.get(documentId);
-            if (input.initialized() || input.terminated()
+            if (!input.blueId().equals(result.beforeBlueId())
+                    || input.initialized() || input.terminated()
                     || input.epoch() != 0L
                     || (commits && (!result.initialized()
                             || result.epoch() != 0L
@@ -1450,11 +1434,20 @@ final class MultiDocumentPublicationTransaction {
                             + "complete cohort");
         }
         ClosureProcessResult result = receipt.attempt().processResult();
-        Map<DocumentId, blue.language.processor.closure.ResultingDocument>
-                resultDocuments = new TreeMap<>(
-                        EmbeddingBinding.DOCUMENT_ORDER);
-        result.resultingDocuments().forEach(document -> resultDocuments.put(
-                DocumentId.of(document.documentId().value()), document));
+        if (receipt.rejectedDraftPlan() != null) {
+            ContractsManagedDraftPlan plan = receipt.rejectedDraftPlan();
+            InMemoryDocumentStore.DocumentHead source = expectedHeads.get(plan.targetDocumentId());
+            if (stagedManagedExpansionInput == null || source == null
+                    || source.epoch() != plan.targetEpoch() || !source.blueId().equals(plan.targetBlueId())
+                    || !expectedAbsent.containsAll(plan.drafts().keySet())
+                    || !plan.missingExpectedOccurrence(result)) {
+                throw new IllegalStateException("Managed draft rejection does not match the exact staged input");
+            }
+            plan.expectedOccurrences().forEach(expected -> plan.prospectiveOccurrence(stagedManagedExpansionInput, expected));
+            requireReceiptOnlyStaging();
+            return;
+        }
+        var resultDocuments = ContractsClosureAdapter.resultingDocuments(result, members);
         for (Map.Entry<DocumentId,
                 blue.language.processor.closure.ResultingDocument> entry
                 : resultDocuments.entrySet()) {
@@ -1557,7 +1550,14 @@ final class MultiDocumentPublicationTransaction {
             }
             return;
         }
-        if (!documentUpdates.isEmpty()
+        requireReceiptOnlyStaging();
+    }
+
+    private void requireReceiptOnlyStaging() {
+        if (!newSessions.isEmpty() || !stagedManagedEpochReceipts.isEmpty()
+                || stagedCatchUpPlans != null || !stagedEmbeddedDemands.isEmpty()
+                || resultingOccurrenceInventoryGeneration != null || resultingComponentIndexGeneration != null
+                || !documentUpdates.isEmpty()
                 || !componentRepresentationUpdates.isEmpty()
                 || stagedOccurrenceInventory != null
                 || !stagedComponentStates.isEmpty()

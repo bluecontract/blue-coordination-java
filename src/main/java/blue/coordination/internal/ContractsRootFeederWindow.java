@@ -130,7 +130,7 @@ final class ContractsRootFeederWindow {
         recordTerminal(
                 selected,
                 actual.members(),
-                attempt.processResult().commits(),
+                attempt.processResult().commits() && actual.rejectedDraftPlan() == null,
                 actual.published());
     }
 

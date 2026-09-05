@@ -380,13 +380,19 @@ final class SdkDrainResultMapper {
         }
 
         ClosureProcessResult result = attempt.processResult();
-        EntryDisposition disposition = disposition(result.status());
-        List<PublicEvent> events = publicEvents(result);
+        boolean hostRejected = result.commits() && !retained.published();
+        if (hostRejected && retained.publicationIdentity() == null) {
+            throw new IllegalStateException("Unpublished committing attempt has no durable host decision");
+        }
+        EntryDisposition disposition = hostRejected ? EntryDisposition.REJECTED : disposition(result.status());
+        List<PublicEvent> events = hostRejected ? List.of() : publicEvents(result);
         List<DocumentChange> changes = retained.published()
                 ? changes(entry, retained, result, events)
                 : List.of();
         ProcessingStats stats = stats(result, retained, changes);
-        Diagnostic diagnostic = diagnostic(result);
+        Diagnostic diagnostic = hostRejected
+                ? new Diagnostic("MANAGED_OCCURRENCE_BINDING_MISSING", "Expected managed occurrence was not established; no effects were published", Map.of())
+                : diagnostic(result);
         return new ClosureResult(
                 closureId(entry, retained, index),
                 disposition,

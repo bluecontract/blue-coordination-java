@@ -3,14 +3,10 @@ package blue.coordination.internal;
 import blue.coordination.api.DocumentId;
 import blue.language.processor.closure.ClosureAttemptResult;
 import blue.language.processor.closure.ClosureProcessResult;
-import blue.language.processor.closure.ResultingDocument;
 import blue.language.processor.ProcessorStatus;
 
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 import java.util.TreeSet;
 
 /**
@@ -26,7 +22,14 @@ record ContractsClosurePublicationReceipt(
         List<DocumentId> documentIds,
         ClosureAttemptResult attempt,
         long automaticRetryCount,
-        ManagedSurfacePublicationEvidence managedSurfaceEvidence) {
+        ManagedSurfacePublicationEvidence managedSurfaceEvidence,
+        ContractsManagedDraftPlan rejectedDraftPlan) {
+
+    ContractsClosurePublicationReceipt(String identity, List<DocumentId> members,
+            ClosureAttemptResult attempt, long retries, ManagedSurfacePublicationEvidence evidence) {
+        this(identity, members, attempt, retries, evidence, null);
+    }
+
 
     ContractsClosurePublicationReceipt(
             String publicationIdentity,
@@ -63,35 +66,19 @@ record ContractsClosurePublicationReceipt(
                     "Capability failure is retryable host state, not a durable "
                             + "process disposition");
         }
-        TreeSet<DocumentId> canonical = new TreeSet<>(
-                EmbeddingBinding.DOCUMENT_ORDER);
-        for (DocumentId documentId : Objects.requireNonNull(
-                documentIds, "documentIds")) {
-            if (!canonical.add(Objects.requireNonNull(
-                    documentId, "documentId"))) {
-                throw new IllegalArgumentException(
-                        "Process receipt repeats document " + documentId);
-            }
+        documentIds = List.copyOf(documentIds);
+        TreeSet<DocumentId> canonical = new TreeSet<>(EmbeddingBinding.DOCUMENT_ORDER);
+        canonical.addAll(documentIds);
+        if (canonical.isEmpty() || canonical.size() != documentIds.size()) {
+            throw new IllegalArgumentException("Process receipt requires a non-empty unique cohort");
         }
-        if (canonical.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "A process receipt must identify a non-empty cohort");
-        }
-        documentIds = List.copyOf(new ArrayList<>(canonical));
-
+        documentIds = List.copyOf(canonical);
         ClosureProcessResult result = attempt.processResult();
-        Set<DocumentId> resultDocuments = new LinkedHashSet<>();
-        for (ResultingDocument document : result.resultingDocuments()) {
-            if (!resultDocuments.add(DocumentId.of(
-                    document.documentId().value()))) {
-                throw new IllegalArgumentException(
-                        "Process receipt result repeats document "
-                                + document.documentId().value());
-            }
-        }
-        if (!resultDocuments.equals(new LinkedHashSet<>(documentIds))) {
-            throw new IllegalArgumentException(
-                    "Process receipt cohort differs from its exact result");
+        ContractsClosureAdapter.resultingDocuments(result, canonical);
+        if (rejectedDraftPlan != null && (!result.commits()
+                || managedSurfaceEvidence.present()
+                || !rejectedDraftPlan.missingExpectedOccurrence(result))) {
+            throw new IllegalArgumentException("Host rejection requires an exact unmet managed occurrence expectation");
         }
         if (!result.commits()
                 && managedSurfaceEvidence.present()) {
@@ -118,7 +105,7 @@ record ContractsClosurePublicationReceipt(
 
     /** Whether the retained terminal result committed durable effects. */
     boolean commits() {
-        return attempt.processResult().commits();
+        return rejectedDraftPlan == null && attempt.processResult().commits();
     }
 
     private static String requireText(String value, String label) {

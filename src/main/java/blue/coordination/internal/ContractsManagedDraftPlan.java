@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
 
 /**
  * Exact host evidence for one operation which may create managed children.
@@ -32,6 +33,43 @@ public final class ContractsManagedDraftPlan {
     private final Map<String, DocumentId> managedRequestFields;
     private final List<ExpectedOccurrence> expectedOccurrences;
 
+    boolean missingExpectedOccurrence(blue.language.processor.closure.ClosureProcessResult result) {
+        if (!result.commits()) return false;
+        Map<DocumentId, blue.language.processor.closure.ResultingDocument> documents = new LinkedHashMap<>();
+        result.resultingDocuments().forEach(document -> documents.put(DocumentId.of(document.documentId().value()), document));
+        var source = documents.get(targetDocumentId);
+        if (source == null || !source.beforeBlueId().equals(targetBlueId)) {
+            throw new IllegalArgumentException("Managed draft decision has another source fence");
+        }
+        for (ManagedDraft draft : drafts.values()) {
+            var target = documents.get(draft.documentId());
+            if (target == null || !target.beforeBlueId().equals(draft.initial().blueId())) {
+                throw new IllegalArgumentException("Managed draft decision has another exact draft");
+            }
+        }
+        return expectedOccurrences.stream().anyMatch(expectation -> {
+            var target = documents.get(expectation.targetDocumentId());
+            var matches = result.occurrenceBindings().stream().filter(row ->
+                    row.sourceDocumentId().value().equals(targetDocumentId.value())
+                            && row.sourcePath().equals(expectation.path())).toList();
+            var exact = blue.language.model.NodePathEditor.getOrNull(source.document(), expectation.path());
+            return matches.size() != 1 || !matches.get(0).active()
+                    || !matches.get(0).targetDocumentId().value().equals(expectation.targetDocumentId().value())
+                    || !matches.get(0).expectedTargetBlueId().equals(target.afterBlueId())
+                    || exact == null || !target.afterBlueId().equals(exact.getBlueId());
+        });
+    }
+
+    blue.language.processor.closure.ManagedOccurrenceBinding prospectiveOccurrence(
+            blue.language.processor.closure.ClosureInvocationInput input, ExpectedOccurrence expected) {
+        var rows = input.snapshot().occurrences().stream().filter(row -> !row.active()
+                && row.sourceDocumentId().value().equals(targetDocumentId.value())
+                && row.sourcePath().equals(expected.path())
+                && row.targetDocumentId().value().equals(expected.targetDocumentId().value())).toList();
+        if (rows.size() != 1) throw new IllegalStateException("Managed plan has no unique prospective input row");
+        return rows.get(0);
+    }
+
     /** Creates one canonical exact managed-draft plan. */
     public ContractsManagedDraftPlan(
             DocumentId targetDocumentId,
@@ -47,14 +85,9 @@ public final class ContractsManagedDraftPlan {
         this.targetBlueId = BlueIds.requireBlueIdOrCyclicMember(
                 targetBlueId, "targetBlueId");
 
-        ArrayList<Map.Entry<DocumentId, ManagedDraft>> canonicalDrafts =
-                new ArrayList<>(Objects.requireNonNull(
-                        drafts, "drafts").entrySet());
-        canonicalDrafts.sort(Map.Entry.comparingByKey(
-                EmbeddingBinding.DOCUMENT_ORDER));
-        LinkedHashMap<DocumentId, ManagedDraft> retainedDrafts =
-                new LinkedHashMap<>();
-        for (Map.Entry<DocumentId, ManagedDraft> entry : canonicalDrafts) {
+        TreeMap<DocumentId, ManagedDraft> retainedDrafts = new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
+        retainedDrafts.putAll(Objects.requireNonNull(drafts, "drafts"));
+        for (Map.Entry<DocumentId, ManagedDraft> entry : retainedDrafts.entrySet()) {
             DocumentId documentId = Objects.requireNonNull(
                     entry.getKey(), "draft documentId");
             ManagedDraft draft = Objects.requireNonNull(
@@ -68,7 +101,6 @@ public final class ContractsManagedDraftPlan {
                         "Managed draft cannot reuse the operation target "
                                 + documentId);
             }
-            retainedDrafts.put(documentId, draft);
         }
         if (retainedDrafts.isEmpty()) {
             throw new IllegalArgumentException(
@@ -76,15 +108,11 @@ public final class ContractsManagedDraftPlan {
         }
         this.drafts = Collections.unmodifiableMap(retainedDrafts);
 
-        ArrayList<Map.Entry<String, DocumentId>> canonicalFields =
-                new ArrayList<>(Objects.requireNonNull(
-                        managedRequestFields,
-                        "managedRequestFields").entrySet());
-        canonicalFields.sort(Map.Entry.comparingByKey(
-                EmbeddingBinding.TEXT_ORDER));
+        TreeMap<String, DocumentId> canonicalFields = new TreeMap<>(EmbeddingBinding.TEXT_ORDER);
+        canonicalFields.putAll(Objects.requireNonNull(managedRequestFields, "managedRequestFields"));
         LinkedHashMap<String, DocumentId> retainedFields =
                 new LinkedHashMap<>();
-        for (Map.Entry<String, DocumentId> entry : canonicalFields) {
+        for (Map.Entry<String, DocumentId> entry : canonicalFields.entrySet()) {
             String field = requireText(entry.getKey(), "request field");
             DocumentId documentId = Objects.requireNonNull(
                     entry.getValue(), "request draft DocumentId");

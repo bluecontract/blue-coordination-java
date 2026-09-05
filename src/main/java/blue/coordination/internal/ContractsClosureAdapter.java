@@ -577,15 +577,20 @@ final class ContractsClosureAdapter implements AutoCloseable {
                                 + attempt.processResult().diagnostic()
                                         .details());
             }
+            ContractsManagedDraftPlan rejected = attempt.processResult().commits()
+                    && executed.managedDraftPlan() != null
+                    && executed.managedDraftPlan().missingExpectedOccurrence(attempt.processResult())
+                    ? executed.managedDraftPlan() : null;
+            if (rejected != null) requireCommitFences(executed, attempt.processResult());
             receipt = new ContractsClosurePublicationReceipt(
                     identity,
                     executed.members(),
                     attempt,
                     automatic.expansionCount(),
-                    attempt.processResult().commits()
+                    attempt.processResult().commits() && rejected == null
                             ? ManagedSurfacePublicationEvidence.committed(
                                     executed, attempt.processResult())
-                            : ManagedSurfacePublicationEvidence.empty());
+                            : ManagedSurfacePublicationEvidence.empty(), rejected);
         } finally {
             runtime.metrics().addNanos(
                     RESULT_VALIDATION_PHASE,
@@ -632,7 +637,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 replayed,
                 receipt.automaticRetryCount(),
                 receipt.managedSurfaceEvidence(),
-                List.of());
+                List.of(), receipt.rejectedDraftPlan());
     }
 
     synchronized Optional<ContractsClosurePublicationReceipt>
@@ -728,9 +733,9 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     "Process receipt identity does not identify this cohort");
         }
         requireTerminalResult(invocation, result);
-        if (result.commits()) {
+        if (receipt.commits()) {
             throw new IllegalArgumentException(
-                    "Receipt-only publication requires a non-commit result");
+                    "Receipt-only publication requires a non-commit decision");
         }
         InMemoryDocumentStore.ClosureSnapshot current =
                 documents.closureSnapshot(invocation.existingMemberSet());
@@ -2667,18 +2672,18 @@ final class ContractsClosureAdapter implements AutoCloseable {
     static void requirePublishableResult(
             CohortInvocation invocation,
             ClosureProcessResult result) {
+        requireCommitFences(invocation, result);
+        if (invocation.managedExpansion()) requireManagedExpansionResult(invocation, result);
+        if (invocation.automaticExpansion() != null) requireAutomaticOccurrenceResults(invocation, result);
+    }
+
+    private static void requireCommitFences(CohortInvocation invocation, ClosureProcessResult result) {
         if (!result.commits()
                 || result.platformCommitCompanion() == null) {
             throw new IllegalArgumentException(
                     "Only a committing result can be published");
         }
-        if (!result.invocationIdentity().equals(
-                invocation.executionInvocationIdentity())
-                || !result.inputClosureIdentity().equals(
-                invocation.input().snapshot().closureIdentity())) {
-            throw new IllegalStateException(
-                    "Closure result does not belong to the captured input");
-        }
+        requireTerminalResult(invocation, result);
         ClosureCommitCompanion companion = result.platformCommitCompanion();
         if (companion.expectedInputGraphGeneration()
                 != invocation.input().snapshot().graphGeneration()) {
@@ -2710,12 +2715,6 @@ final class ContractsClosureAdapter implements AutoCloseable {
                                         + "expansion input " + documentId);
                     }
                 });
-        if (invocation.managedExpansion()) {
-            requireManagedExpansionResult(invocation, result);
-        }
-        if (invocation.automaticExpansion() != null) {
-            requireAutomaticOccurrenceResults(invocation, result);
-        }
     }
 
     private static void requireManagedExpansionResult(
@@ -2740,48 +2739,17 @@ final class ContractsClosureAdapter implements AutoCloseable {
         if (invocation.managedDraftPlan() == null) {
             return;
         }
-        ResultingDocument source = documents.get(
-                invocation.managedDraftPlan().targetDocumentId());
-        for (ContractsManagedDraftPlan.ExpectedOccurrence expectation
-                : invocation.managedDraftPlan().expectedOccurrences()) {
-            ResultingDocument target = documents.get(
-                    expectation.targetDocumentId());
-            List<ManagedOccurrenceBinding> prospectiveRows = invocation.input()
-                    .snapshot().occurrences().stream()
-                    .filter(row -> !row.active()
-                            && row.sourceDocumentId().value().equals(
-                                    source.documentId().value())
-                            && row.sourcePath().equals(expectation.path())
-                            && row.targetDocumentId().value().equals(
-                                    expectation.targetDocumentId().value()))
-                    .toList();
-            if (prospectiveRows.size() != 1) {
-                throw new IllegalStateException(
-                        "Managed expansion input has no unique prospective "
-                                + "occurrence at " + expectation.path());
-            }
-            ManagedOccurrenceBinding prospective = prospectiveRows.get(0);
-            List<ManagedOccurrenceBinding> matches = result
-                    .occurrenceBindings().stream()
-                    .filter(row -> row.sourceDocumentId().value().equals(
-                            source.documentId().value())
-                            && row.sourcePath().equals(expectation.path()))
-                    .toList();
-            Node exact = NodePathEditor.getOrNull(
-                    source.document(), expectation.path());
-            if (matches.size() != 1
-                    || !matches.get(0).active()
-                    || !matches.get(0).occurrenceIdentity().equals(
-                            prospective.occurrenceIdentity())
-                    || !matches.get(0).targetDocumentId().value().equals(
-                            expectation.targetDocumentId().value())
-                    || !matches.get(0).expectedTargetBlueId().equals(
-                            target.afterBlueId())
-                    || exact == null
-                    || !target.afterBlueId().equals(exact.getBlueId())) {
-                throw new IllegalStateException(
-                        "Managed occurrence was not established exactly at "
-                                + expectation.path());
+        ContractsManagedDraftPlan plan = invocation.managedDraftPlan();
+        if (plan.missingExpectedOccurrence(result)) {
+            throw new IllegalStateException("Expected managed occurrence was not established");
+        }
+        for (ContractsManagedDraftPlan.ExpectedOccurrence expectation : plan.expectedOccurrences()) {
+            ManagedOccurrenceBinding prospective = plan.prospectiveOccurrence(invocation.input(), expectation);
+            ManagedOccurrenceBinding established = result.occurrenceBindings().stream()
+                    .filter(row -> row.sourceDocumentId().value().equals(plan.targetDocumentId().value())
+                            && row.sourcePath().equals(expectation.path())).findFirst().orElseThrow();
+            if (!established.occurrenceIdentity().equals(prospective.occurrenceIdentity())) {
+                throw new IllegalStateException("Managed occurrence does not preserve its unique prospective identity");
             }
         }
     }
@@ -3985,7 +3953,16 @@ final class ContractsClosureAdapter implements AutoCloseable {
             long automaticRetryCount,
             ManagedSurfacePublicationEvidence managedSurfaceEvidence,
             List<ManagedOccurrenceResolver.UnresolvedDemand>
-                    unresolvedDemands) {
+                    unresolvedDemands,
+            ContractsManagedDraftPlan rejectedDraftPlan) {
+        CohortOutcome(List<DocumentId> members, List<DocumentId> publicationMembers,
+                ClosureAttemptResult attempt, boolean published, String publicationIdentity,
+                boolean replayed, long retries, ManagedSurfacePublicationEvidence evidence,
+                List<ManagedOccurrenceResolver.UnresolvedDemand> demands) {
+            this(members, publicationMembers, attempt, published, publicationIdentity,
+                    replayed, retries, evidence, demands, null);
+        }
+
         CohortOutcome(
                 List<DocumentId> members,
                 ClosureAttemptResult attempt,
@@ -4006,6 +3983,11 @@ final class ContractsClosureAdapter implements AutoCloseable {
         }
 
         CohortOutcome {
+            if (rejectedDraftPlan != null && (published || publicationIdentity == null
+                    || !attempt.isComplete() || !attempt.processResult().commits()
+                    || !rejectedDraftPlan.missingExpectedOccurrence(attempt.processResult()))) {
+                throw new IllegalArgumentException("Unpublished success requires its exact managed draft rejection");
+            }
             members = List.copyOf(Objects.requireNonNull(
                     members, "members"));
             publicationMembers = List.copyOf(Objects.requireNonNull(
@@ -4077,14 +4059,9 @@ final class ContractsClosureAdapter implements AutoCloseable {
 
     static long maximumCapturedGraphGeneration(
             Collection<CapturedDocument> documents) {
-        long maximum = -1L;
-        for (CapturedDocument document : Objects.requireNonNull(
-                documents, "documents")) {
-            maximum = Math.max(
-                    maximum,
-                    Objects.requireNonNull(document, "document")
-                            .graphGeneration());
-        }
+        long maximum = Objects.requireNonNull(documents, "documents").stream()
+                .mapToLong(document -> Objects.requireNonNull(document, "document").graphGeneration())
+                .max().orElse(-1L);
         if (maximum < 0L) {
             throw new IllegalArgumentException(
                     "A captured graph-generation cohort must not be empty");
