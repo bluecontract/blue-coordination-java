@@ -171,14 +171,17 @@ final class ContractsClosureAdapterTest {
 
     @Test
     void livePublicationIncludesBothOccurrencesAndAllParentsWithoutListeners() {
+        // given
         DocumentId otherParent = DocumentId.of("other-parent");
         ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(List.of(
                 occurrence("first", A, "/first", B, true),
                 occurrence("second", A, "/second", B, true),
                 occurrence("other", otherParent, "/child", B, true),
                 occurrence("inactive", C, "/old", B, false)));
+        // when
         var selected = ContractsClosureAdapter.initialConnectedSelection(
                 inventory, ClosureSubscriptionInventory.empty(), B);
+        // then
         assertEquals(List.of(A, B, otherParent), selected.members());
         assertEquals(3, selected.occurrences().size());
         assertEquals(3L, selected.rowsExamined());

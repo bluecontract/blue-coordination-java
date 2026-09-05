@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 final class SdkEmbeddedEventPayloadTest {
     @Test
     void generatedPayloadRemainsReadableThroughEmbeddedDeliveryReference() {
+        // given
         try (BlueCoordination coordination = BlueCoordination.inMemory()) {
             TimelineHandle timeline = coordination.timelines().register("payload/alice", "alice");
             ManagedClosure definition = ManagedClosure.builder()
@@ -60,9 +61,11 @@ final class SdkEmbeddedEventPayloadTest {
                     .bindOccurrence("parent", "/child", "child")
                     .publicRoot("parent").fromNow().build();
             ClosureHandle closure = coordination.documents().admit(definition);
+            // when
             EntryResult result = coordination.operations().on(closure.document("child"))
                     .from(timeline).call("emit").through("owner")
                     .request(request -> { }).execute();
+            // then
             assertEquals(EntryDisposition.APPLIED, result.disposition(), result.diagnostic().toString());
             assertEquals(607L, closure.document("parent").snapshot().longAt("/observed"));
             assertEquals(1, result.publicEvents().size());

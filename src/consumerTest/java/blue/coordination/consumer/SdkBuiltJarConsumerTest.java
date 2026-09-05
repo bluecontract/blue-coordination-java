@@ -45,6 +45,7 @@ final class SdkBuiltJarConsumerTest {
 
     @Test
     void requiredRequestDeclarationIsValidatedOnlyAtInvocation() {
+        // given
         String timelineId = "consumer/required-request/alice";
         String id = "consumer-required-request";
         String source = counterYaml(id, timelineId).replace(
@@ -54,17 +55,20 @@ final class SdkBuiltJarConsumerTest {
             TimelineHandle timeline = coordination.timelines().register(timelineId, "alice");
             DocumentHandle counter = coordination.documents().admit(
                     ManagedDocument.yaml(id, source).publicRoot().fromNow());
+            // when
             EntryResult absent = coordination.operations().on(counter).from(timeline)
                     .call("increment").through("ownerChannel").requestYaml("{}").execute();
-            assertEquals(EntryDisposition.NO_MATCH, absent.disposition(),
-                    () -> "counter=" + counter.snapshot().longAt("/counter") + "; stats=" + absent.stats());
-            assertEquals(0L, counter.snapshot().longAt("/counter"));
+            long afterAbsent = counter.snapshot().longAt("/counter");
             EntryResult wrongKind = coordination.operations().on(counter).from(timeline)
                     .call("increment").through("ownerChannel").requestYaml("amount: wrong").execute();
-            assertEquals(EntryDisposition.NO_MATCH, wrongKind.disposition());
-            assertEquals(0L, counter.snapshot().longAt("/counter"));
+            long afterWrongKind = counter.snapshot().longAt("/counter");
             EntryResult valid = coordination.operations().on(counter).from(timeline)
                     .call("increment").through("ownerChannel").requestYaml("amount: 3").execute();
+            // then
+            assertEquals(EntryDisposition.NO_MATCH, absent.disposition());
+            assertEquals(0L, afterAbsent);
+            assertEquals(EntryDisposition.NO_MATCH, wrongKind.disposition());
+            assertEquals(0L, afterWrongKind);
             assertEquals(EntryDisposition.APPLIED, valid.disposition());
             assertEquals(3L, counter.snapshot().longAt("/counter"));
         }
@@ -72,6 +76,7 @@ final class SdkBuiltJarConsumerTest {
 
     @Test
     void scalarFactoryCreatesAndInitializesAChildAgainstBuiltJar() throws Exception {
+        // given
         String source;
         try (var input = getClass().getResourceAsStream("/rc/scalar-factory.yaml")) {
             source = new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
@@ -80,9 +85,11 @@ final class SdkBuiltJarConsumerTest {
             TimelineHandle timeline = coordination.timelines().register("tutorial/order-factory/merchant", "merchant");
             DocumentHandle host = coordination.documents().admit(
                     ManagedDocument.yaml(coordination.values().yaml(source).blueId(), source).publicRoot().fromNow());
+            // when
             EntryResult created = coordination.operations().on(host).from(timeline)
                     .call("createOrder01").through("merchantChannel")
                     .requestYaml("customerReference: consumer-customer\nquantity: 7").execute();
+            // then
             assertEquals(EntryDisposition.APPLIED, created.disposition(), created.diagnostic().toString());
             assertEquals(1L, host.snapshot().longAt("/initializedOrderCount"));
             assertTrue(coordination.advanced().auditManagedOccurrence(host.id(), "/orders/order-01").isPresent());

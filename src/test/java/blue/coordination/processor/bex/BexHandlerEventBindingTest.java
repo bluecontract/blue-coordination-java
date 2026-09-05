@@ -11,9 +11,12 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class BexHandlerEventBindingTest {
     @Test void matchingEvidenceSuppliesContentWithoutChangingTheExactBridgeOrEdge() {
+        // given
         ExactEventIdentityEvidence proof = proof(607);
         FrozenNode bridge = bridge(proof.eventBlueId());
+        // when
         BexValue binding = BexHandlerEventBinding.bind(bridge, proof);
+        // then
         assertEquals(bridge.blueId(), binding.exactBlueId());
         assertEquals(proof.eventBlueId(), binding.get("event").exactBlueId());
         assertEquals("607", binding.get("event").get("amount").toSimple().toString());
@@ -21,17 +24,23 @@ class BexHandlerEventBindingTest {
     }
 
     @Test void differentOccurrenceCannotSupplyReferencedContent() {
+        // given
         ExactEventIdentityEvidence expected = proof(607);
+        // when
         BexValue binding = BexHandlerEventBinding.bind(bridge(expected.eventBlueId()), proof(608));
+        // then
         assertEquals(expected.eventBlueId(), binding.get("event").exactBlueId());
         assertThrows(RuntimeException.class, () -> binding.get("event").get("amount"));
     }
 
     @Test void referenceOnlyEvidenceCannotInventAnEventBody() {
+        // given
         ExactEventIdentityEvidence expected = proof(607);
         ExactEventIdentityEvidence opaque = ExactEventIdentityEvidence.verify(null,
                 new Node().blueId(expected.eventBlueId()), expected.eventBlueId(), null);
+        // when
         BexValue binding = BexHandlerEventBinding.bind(bridge(expected.eventBlueId()), opaque);
+        // then
         assertThrows(RuntimeException.class, () -> binding.get("event").get("amount"));
     }
 
