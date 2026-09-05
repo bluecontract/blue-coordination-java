@@ -217,9 +217,9 @@ if (dependencyMode in [
                         'blueBexRepository is missing the regular manifest '
                                 + 'and checksum companion')
             }
-            String actualBexIdentity = 'sha256:'
+            String actualBexIdentity = ('sha256:'
                     + java.security.MessageDigest.getInstance('SHA-256')
-                    .digest(bexManifest.bytes).encodeHex().toString()
+                    .digest(bexManifest.bytes).encodeHex().toString())
             if (actualBexIdentity != bexProperties.manifestIdentity) {
                 throw new GradleException(
                         'blueBexManifestSha256 does not identify '
