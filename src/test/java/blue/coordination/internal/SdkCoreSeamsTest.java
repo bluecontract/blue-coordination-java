@@ -51,7 +51,7 @@ final class SdkCoreSeamsTest {
                 "sha256:e3594606cf7eb26743d2c8b4cd9beb0848e857b2faa8f1eac3716eca12544245",
                 manifest.contractsRelease());
         assertEquals(
-                "sha256:5f3cd31a03febb9cf7f07b2eff503521fd6ec40558b2e09c92eb2dd16c40f7bf",
+                "sha256:a84bbb688d247e65411204b5b52046fe481f255a22b3f9ee0c82dd6afe36f4a0",
                 manifest.fixturePackage());
         assertEquals(
                 blue.language.processor.GasSchedule.contracts10().packageIdentity(),
