@@ -184,10 +184,10 @@ final class ContractsManagedDraftExpansionTest {
 
             // then
             assertTrue(outcome.attempt().isComplete());
-            assertEquals(ProcessorStatus.INVALID_PROCESSING_DOCUMENT,
+            assertEquals(ProcessorStatus.RUNTIME_FATAL,
                     outcome.attempt().processResult().status());
             assertEquals(ProcessorErrorCategory
-                            .ManagedOccurrenceBindingMissing,
+                            .ProtectedProcessorStateMutation,
                     outcome.attempt().processResult().diagnostic()
                             .category());
             assertFalse(outcome.attempt().processResult().commits());
@@ -242,7 +242,7 @@ final class ContractsManagedDraftExpansionTest {
 
             // then
             assertEquals(List.of(rejectedEntry), rejected.processedEntries());
-            assertEquals(ProcessorStatus.INVALID_PROCESSING_DOCUMENT,
+            assertEquals(ProcessorStatus.RUNTIME_FATAL,
                     rejected.contractsAttemptsFor(rejectedEntry.blueId())
                             .get(0).attempt().processResult().status());
             assertTrue(engine.documents().find(DRAFT).isEmpty());
@@ -1132,6 +1132,9 @@ final class ContractsManagedDraftExpansionTest {
                     steps:
                       - type: Coordination/Compute
                         do:
+                          - $appendChange:
+                              op: remove
+                              path: /contracts/initialized
                           - $return: true
                 """.formatted(timelineId);
     }

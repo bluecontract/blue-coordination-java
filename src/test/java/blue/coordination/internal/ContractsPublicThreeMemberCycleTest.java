@@ -502,11 +502,9 @@ final class ContractsPublicThreeMemberCycleTest {
                             .workOccurrenceIdentity());
             String rejectedWorkIdentity = result.rejectedWorkOccurrence()
                     .workIdentity();
-            // At the release default the isolated step has emitted LOOP, but
-            // its internal-event enqueue is the exact next charge and is
-            // rejected before that enqueue mutates invocation state.
-            assertEquals("internalEventEnqueued",
-                    result.rejectedCharge().counter());
+            // The bound runtime exhausts the default budget at the handler
+            // call, after testing its candidate and before executing its body.
+            assertEquals("handlerCall", result.rejectedCharge().counter());
             assertEquals(List.of(
                             "closureWorkOccurrenceEnqueued",
                             "closureWorkOccurrenceDequeued",
@@ -517,11 +515,7 @@ final class ContractsPublicThreeMemberCycleTest {
                             "embeddedPathEntryRead",
                             "embeddedPathSegmentValidated",
                             "embeddedEventDelivered",
-                            "handlerCandidateTested",
-                            "handlerCall",
-                            "workflowStepVisited",
-                            "workflowStepExecuted",
-                            "triggerEventStep"),
+                            "handlerCandidateTested"),
                     result.gasTrace().stream()
                             .filter(entryGas -> rejectedWorkIdentity.equals(
                                     entryGas.workOccurrenceId()))
@@ -529,7 +523,7 @@ final class ContractsPublicThreeMemberCycleTest {
                             .toList());
             GasTraceEntry lastAdmitted = result.gasTrace().get(
                     result.gasTrace().size() - 1);
-            assertEquals("triggerEventStep", lastAdmitted.counter());
+            assertEquals("handlerCandidateTested", lastAdmitted.counter());
             assertEquals(rejectedWorkIdentity,
                     lastAdmitted.workOccurrenceId());
             assertEquals(result.totalGas(), result.gasTrace().stream()

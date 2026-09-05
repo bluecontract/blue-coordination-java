@@ -375,10 +375,10 @@ final class EmbeddedOnlyLayoutBuilder {
                     JsonPointer.split(occurrence.scopePath()),
                     opaque);
         }
-        return new ResolvedSnapshot(
+        return ResolvedSnapshot.withDeferredResolution(
                 snapshot.frozenCanonicalRoot(),
                 resolved,
-                snapshot.blueId());
+                snapshot.canonicalTypeIdentities());
     }
     private static Node nodeAt(Node root, String pointer) {
         Node current = root;

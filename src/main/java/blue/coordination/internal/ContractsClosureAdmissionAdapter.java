@@ -555,7 +555,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
             }
         }
 
-        Set<DocumentId> existingMembers = forwardExistingMembers(
+        Set<DocumentId> existingMembers = connectedExistingMembers(
                 current.existingMembers(),
                 selected.existingTargets(),
                 indexed.occurrenceInventory());
@@ -824,7 +824,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
         }
     }
 
-    private static Set<DocumentId> forwardExistingMembers(
+    private static Set<DocumentId> connectedExistingMembers(
             Collection<DocumentId> original,
             Collection<DocumentId> targets,
             ManagedOccurrenceInventory inventory) {
@@ -849,18 +849,15 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                     pending.addLast(target);
                 }
             }
-        }
-        Set<DocumentId> selected = discovered.keySet();
-        for (DocumentId target : selected) {
-            for (ManagedOccurrenceBinding row : inventory.rowsTouching(target)) {
-                DocumentId source = coordinationId(row.sourceDocumentId());
+            // Active containing occurrences participate in the same exact
+            // publication. Inactive reservations retain forward evidence but
+            // do not make their containing documents live participants.
+            for (ManagedOccurrenceBinding row : inventory.rowsTouching(source)) {
+                DocumentId parent = coordinationId(row.sourceDocumentId());
                 if (row.active()
-                        && coordinationId(row.targetDocumentId()).equals(target)
-                        && !selected.contains(source)) {
-                    throw new AdmissionProjectionUnavailableException(
-                            "Automatic forward admission expansion cannot "
-                                    + "merge a target with an external active "
-                                    + "incoming occurrence");
+                        && coordinationId(row.targetDocumentId()).equals(source)
+                        && discovered.putIfAbsent(parent, Boolean.TRUE) == null) {
+                    pending.addLast(parent);
                 }
             }
         }

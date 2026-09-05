@@ -35,6 +35,20 @@ final class SdkValueModelTest {
     }
 
     @Test
+    void exactRootReferenceIdentityDoesNotRequireItsContent() {
+        // given
+        String id = blue.language.identity.DirectBlueIdCalculator.calculateBlueId(
+                new Node().properties("unavailable", new Node().value(true)));
+        try (BlueCoordination runtime = BlueCoordination.inMemory()) {
+            // when
+            ExactBlueValue reference = runtime.values().yaml("blueId: " + id);
+            // then
+            assertEquals(id, reference.blueId());
+            assertTrue(reference.copyNode().isReferenceOnly());
+        }
+    }
+
+    @Test
     void managedDocumentFluentDefinitionIsImmutableAndFailsClosed() {
         // given
         ManagedDocument base = ManagedDocument.yaml(

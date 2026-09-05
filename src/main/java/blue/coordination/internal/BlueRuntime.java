@@ -315,7 +315,11 @@ final class BlueRuntime implements AutoCloseable {
 
     ExactValue exactProcessingSource(String yaml, WholeObjectStore objects, String purpose) {
         Node preprocessed = preprocess(parseSourceYaml(yaml));
-        return objects.put(contracts.canonicalizeProcessingSource(preprocessed), purpose);
+        // A pure reference already states its identity. Its content is an
+        // execution demand; identity inspection must not eagerly require it.
+        return objects.put(preprocessed.isReferenceOnly()
+                ? preprocessed
+                : contracts.canonicalizeProcessingSource(preprocessed), purpose);
     }
 
     /**

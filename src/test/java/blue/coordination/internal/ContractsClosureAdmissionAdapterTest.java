@@ -449,6 +449,7 @@ final class ContractsClosureAdmissionAdapterTest {
                 name: static rollback root
                 child:
                   name: static rollback child
+                  counter: 0
                 contracts:
                   embedded:
                     type:

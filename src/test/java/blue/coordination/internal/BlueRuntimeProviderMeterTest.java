@@ -34,8 +34,8 @@ final class BlueRuntimeProviderMeterTest {
             SequentialNodeProvider sequential =
                     (SequentialNodeProvider) runtime.nodeProvider();
             List<NodeProvider> leaves = sequential.getNodeProviders();
-            assertEquals(4, leaves.size());
-            NodeProvider repositoryLeaf = leaves.get(2);
+            assertEquals(5, leaves.size());
+            NodeProvider repositoryLeaf = leaves.get(3);
             assertTrue(repositoryLeaf instanceof CyclicAwareNodeProvider);
 
             BlueRepository repository = BlueRepository.current();
