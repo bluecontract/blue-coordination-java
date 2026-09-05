@@ -1,23 +1,17 @@
 package blue.coordination.sdk;
 
-import blue.coordination.api.CoordinationErrorCode;
-import blue.coordination.api.CoordinationException;
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.ManagedCatchUpBarrierStatus;
-import blue.coordination.api.ManagedCatchUpStatus;
 import blue.coordination.api.ManagedEpochApplicationWork;
-import blue.coordination.api.ManagedOccurrenceCatchUpPlan;
 import blue.coordination.api.ProcessingSelection;
 import blue.coordination.internal.CoordinationTestControl;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Public-SDK diagnostic for the unsupported catch-up-created lineage lane. */
-final class SdkUnsupportedNestedNewLineageTest {
+/** Strict SDK acceptance for a catch-up-created lineage and its birth evidence. */
+final class SdkNestedNewLineageCatchUpTest {
     private static final String ACTOR = "alice";
     private static final String LIFECYCLE_CHANNEL_BLUE_ID =
             "2ukJitzzDKQWHJ5EVUtn3t4FXieGmNA1NdwFSqG8qcfo";
@@ -29,14 +23,12 @@ final class SdkUnsupportedNestedNewLineageTest {
             "sdk-unsupported-nested-source");
     private static final DocumentId NEW_NESTED = DocumentId.of(
             "sdk-unsupported-nested-new");
-    private static final DocumentId NEW_NESTED_RESULT = DocumentId.of(
-            "3ZxNU3NNJCpBYjQmNtU4u7w1H9QEUga8seogAYhN8KQS");
     private static final String CONSUMER_TIMELINE =
             "sdk/unsupported-nested/consumer";
     private static final String SOURCE_TIMELINE =
             "sdk/unsupported-nested/source";
     @Test
-    void retainedApplicationCreatingNewNestedLineageIsTyped() {
+    void retainedApplicationPublishesVerifiedNestedBirthAtomically() {
         // given
         try (BlueCoordination coordination = BlueCoordination.inMemory()) {
             CoordinationTestControl control = CoordinationTestControl.attach(
@@ -78,8 +70,6 @@ final class SdkUnsupportedNestedNewLineageTest {
                     new DrainBudget(1L, 1L));
             assertEquals(EntryDisposition.APPLIED,
                     attached.entry(attachment).disposition());
-            ManagedOccurrenceCatchUpPlan planBefore = coordination.advanced()
-                    .auditManagedCatchUpPlans(CONSUMER).get(0);
             ProcessingSelection selectionBefore = coordination.advanced()
                     .auditNextProcessingSelection();
             assertEquals(
@@ -87,116 +77,53 @@ final class SdkUnsupportedNestedNewLineageTest {
                     selectionBefore.kind());
             ManagedEpochApplicationWork work = selectionBefore
                     .managedEpochApplicationWork().orElseThrow();
-            var consumerBefore = coordination.advanced()
-                    .auditDocument(CONSUMER);
             var sourceBefore = coordination.advanced().auditDocument(SOURCE);
             int consumerHistoryBefore = consumer.history().size();
             int sourceHistoryBefore = source.history().size();
 
             // when
-            DrainResult blocked = coordination.processing()
+            DrainResult applied = coordination.processing()
                     .drainManagedEpochApplication(work.workIdentity());
 
             // then
-            assertTrue(blocked.managedEpochApplications().isEmpty());
-            assertTrue(blocked.managedEpochEvidenceFailures().isEmpty());
-            assertEquals(1,
-                    blocked.managedEpochApplicationAttempts().size());
-            ManagedEpochApplicationAttempt applicationAttempt = blocked
-                    .managedEpochApplicationAttempts().get(0);
-            assertEquals(work.workIdentity(),
-                    applicationAttempt.work().workIdentity());
-            assertFalse(applicationAttempt.published());
-            assertFalse(applicationAttempt.replayed());
-            assertTrue(applicationAttempt.receipt().isEmpty());
-            assertTrue(applicationAttempt.attempt().complete());
-            assertTrue(applicationAttempt.attempt()
-                    .processResult().commits());
-            ManagedEpochApplicationAttempt.PublicationFailure failure =
-                    applicationAttempt.publicationFailure().orElseThrow();
-
-            assertEquals(
-                    ManagedEpochApplicationAttempt.PublicationFailureCode
-                            .UNSUPPORTED_NESTED_NEW_LINEAGE,
-                    failure.code());
-            assertEquals(CONSUMER.value(),
-                    failure.details().get("consumerDocumentId"));
-            assertEquals(SOURCE.value(),
-                    failure.details().get("sourceDocumentId"));
-            assertEquals("1", failure.details().get("sourceEpoch"));
-            assertEquals("/children/source",
-                    failure.details().get("targetPath"));
-            assertEquals(NEW_NESTED_RESULT.value(),
-                    failure.details().get("newDocumentId"));
-            assertEquals(work.workIdentity(),
-                    failure.details().get("workIdentity"));
-            assertEquals(work.planIdentity(),
-                    failure.details().get("planIdentity"));
-            assertEquals(work.barrierIdentity(),
-                    failure.details().get("barrierIdentity"));
-            assertEquals(work.sourceReceiptIdentity(),
-                    failure.details().get("sourceReceiptIdentity"));
-
-            var consumerAfter = coordination.advanced()
-                    .auditDocument(CONSUMER);
-            var sourceAfter = coordination.advanced().auditDocument(SOURCE);
-            assertEquals(consumerBefore.epoch(), consumerAfter.epoch());
-            assertEquals(consumerBefore.blueId(), consumerAfter.blueId());
-            assertEquals(sourceBefore.epoch(), sourceAfter.epoch());
-            assertEquals(sourceBefore.blueId(), sourceAfter.blueId());
-            assertEquals(consumerHistoryBefore, consumer.history().size());
+            assertEquals(1, applied.managedEpochApplications().size(),
+                    "BLOCKED_UPSTREAM until Contracts supplies verified birth evidence: "
+                            + applied.managedEpochApplicationAttempts());
+            assertTrue(applied.managedEpochApplicationAttempts().get(0).published());
+            var occurrence = coordination.advanced().auditManagedOccurrence(
+                    CONSUMER, "/children/new").orElseThrow();
+            DocumentId born = occurrence.targetDocumentId();
+            var birth = coordination.advanced().auditManagedEpoch(born, 0L).orElseThrow();
+            assertEquals(DocumentRevision.Kind.INITIALIZATION, birth.kind());
+            assertEquals(0L, coordination.advanced().auditDocument(born).epoch());
+            assertEquals("authored-inside-retained-catch-up",
+                    birth.afterDocument().scalarAt("/marker"));
+            assertEquals(1L, occurrence.activationGeneration());
+            assertTrue(occurrence.active());
             assertEquals(sourceHistoryBefore, source.history().size());
-            ManagedOccurrenceCatchUpPlan planAfter = coordination.advanced()
-                    .auditManagedCatchUpPlan(work.planIdentity())
-                    .orElseThrow();
-            assertFalse(planBefore.snapshotIdentity().equals(
-                    planAfter.snapshotIdentity()));
-            assertEquals(ManagedCatchUpStatus.BLOCKED,
-                    planAfter.status());
-            assertEquals(planBefore.nextSourceEpoch(),
-                    planAfter.nextSourceEpoch());
-            assertEquals(
-                    CoordinationErrorCode.UNSUPPORTED_NESTED_NEW_LINEAGE
-                            .name(),
-                    planAfter.waitingCode().orElseThrow());
-            var barrierAfter = coordination.advanced()
-                    .auditManagedCatchUpBarrier(work.barrierIdentity())
-                    .orElseThrow();
-            assertEquals(ManagedCatchUpBarrierStatus.BLOCKED,
-                    barrierAfter.status());
-            assertEquals(
-                    CoordinationErrorCode.UNSUPPORTED_NESTED_NEW_LINEAGE
-                            .name(),
-                    barrierAfter.waitingCode().orElseThrow());
-            ProcessingSelection selectionAfter = coordination.advanced()
-                    .auditNextProcessingSelection();
-            assertEquals(ProcessingSelection.Kind.NONE,
-                    selectionAfter.kind());
-            assertTrue(selectionAfter.managedEpochApplicationWork().isEmpty());
-            CoordinationException notAdmitted = assertThrows(
-                    CoordinationException.class,
-                    () -> coordination.advanced()
-                            .auditDocument(NEW_NESTED_RESULT));
-            assertEquals(CoordinationErrorCode.DOCUMENT_NOT_FOUND,
-                    notAdmitted.code());
-
-            control.restartFromStores();
-            assertEquals(ManagedCatchUpStatus.BLOCKED,
-                    coordination.advanced()
-                            .auditManagedCatchUpPlan(work.planIdentity())
-                            .orElseThrow().status());
-            assertEquals(ManagedCatchUpBarrierStatus.BLOCKED,
-                    coordination.advanced()
-                            .auditManagedCatchUpBarrier(
-                                    work.barrierIdentity())
-                            .orElseThrow().status());
-            assertEquals(ProcessingSelection.Kind.NONE,
-                    coordination.advanced()
-                            .auditNextProcessingSelection().kind());
-            assertEquals(consumerBefore.blueId(), coordination.advanced()
-                    .auditDocument(CONSUMER).blueId());
             assertEquals(sourceBefore.blueId(), coordination.advanced()
                     .auditDocument(SOURCE).blueId());
+            assertEquals(sourceBefore.epoch(), coordination.advanced()
+                    .auditDocument(SOURCE).epoch());
+            assertEquals(consumerHistoryBefore + 1, consumer.history().size());
+            assertEquals(2L, coordination.advanced()
+                    .auditManagedCatchUpPlan(work.planIdentity()).orElseThrow()
+                    .nextSourceEpoch());
+            assertEquals(ManagedCatchUpBarrierStatus.COMPLETE,
+                    coordination.advanced().auditManagedCatchUpBarrier(
+                            work.barrierIdentity()).orElseThrow().status());
+            String committedConsumer = coordination.advanced()
+                    .auditDocument(CONSUMER).blueId();
+            control.restartFromStores();
+            assertEquals(birth.receiptIdentity(), coordination.advanced()
+                    .auditManagedEpoch(born, 0L).orElseThrow().receiptIdentity());
+            assertEquals(committedConsumer, coordination.advanced()
+                    .auditDocument(CONSUMER).blueId());
+            DrainResult retried = coordination.processing().drain();
+            assertTrue(retried.managedEpochApplications().isEmpty());
+            assertTrue(retried.entries().isEmpty());
+            assertEquals(sourceHistoryBefore, source.history().size());
+            assertEquals(consumerHistoryBefore + 1, consumer.history().size());
         }
     }
 

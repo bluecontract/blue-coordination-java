@@ -8,6 +8,7 @@ import blue.coordination.api.ManagedCatchUpBarrier;
 import blue.coordination.api.ManagedEpochApplicationReceipt;
 import blue.coordination.api.ManagedEpochApplicationWork;
 import blue.coordination.api.ManagedEpochReceipt;
+import blue.coordination.api.SessionStatus;
 import blue.coordination.api.TimelineEntry;
 import blue.language.model.Node;
 import blue.language.processor.ExternalOrderKey;
@@ -336,17 +337,26 @@ final class ManagedEpochApplicationExecutor {
             transaction.expectGraphGeneration(
                     document.documentId(), document.graphGeneration());
         }
-        invocation.input().snapshot().components().forEach(
-                transaction::expectComponentState);
-        if (inventoryDelta.changed()) {
+        invocation.newMemberSet().forEach(transaction::expectAbsent);
+        invocation.input().snapshot().components().stream()
+                .filter(component -> component.orderedMemberDocumentIds()
+                        .stream().allMatch(member -> invocation
+                                .existingMemberSet().contains(
+                                        DocumentId.of(member.value()))))
+                .forEach(transaction::expectComponentState);
+        if (invocation.managedExpansion() || inventoryDelta.changed()) {
             transaction.stageOccurrenceInventory(
                     resultingInventory,
                     resultingInventoryGeneration,
                     resultingComponentIndexGeneration);
         }
         transaction.stageComponentStates(result.resultingComponents());
-        transaction.stageClosureGraphGeneration(result);
-        transaction.stageClosureSubscriptionDeltas(result);
+        if (invocation.managedExpansion()) {
+            transaction.stageManagedExpansionResult(invocation.input(), result);
+        } else {
+            transaction.stageClosureGraphGeneration(result);
+            transaction.stageClosureSubscriptionDeltas(result);
+        }
         transaction.stageOutbox(result.publicEvents());
         transaction.stageCheckpointEvidence(result.checkpointWrites());
 
@@ -383,8 +393,16 @@ final class ManagedEpochApplicationExecutor {
                 ContractsClosureAdapter.CapturedDocument before =
                         invocation.documents().get(entry.getKey());
                 if (before == null) {
-                    throw new UnsupportedNestedNewLineageException(
-                            work, entry.getKey());
+                    ManagedEpochReceipt birth = stageNewLineage(
+                            capture, transaction, result, entry.getValue(),
+                            transitionReceipts.get(entry.getKey()),
+                            resultingClosureSubscriptions, routeReplacements,
+                            causalOrder, sourceCausalEntryBlueId);
+                    resultingHeads.put(entry.getKey(),
+                            new ManagedCatchUpPlanner.Head(0L,
+                                    birth.afterBlueId()));
+                    committedEpochReceipts.put(entry.getKey(), birth);
+                    continue;
                 }
                 ResultingDocument after = entry.getValue();
                 ManagedDocumentTransitionReceipt transition =
@@ -706,6 +724,67 @@ final class ManagedEpochApplicationExecutor {
             }
             throw failure;
         }
+    }
+
+    /** Stages one Contracts-authenticated birth in the consumer transaction. */
+    private ManagedEpochReceipt stageNewLineage(
+            ManagedEpochInvocationCapturer.Capture capture,
+            MultiDocumentPublicationTransaction transaction,
+            ClosureProcessResult result,
+            ResultingDocument after,
+            ManagedDocumentTransitionReceipt transition,
+            ClosureSubscriptionInventory subscriptions,
+            List<OperationRouteIndex.Replacement> routeReplacements,
+            ExternalOrderKey causalOrder,
+            String sourceCausalEntryBlueId) {
+        DocumentId id = DocumentId.of(after.documentId().value());
+        ContractsManagedDraftPlan.ManagedDraft draft = capture.invocation()
+                .managedDraft(id);
+        // A resulting body alone does not prove INITIALIZE or its emissions.
+        // The Contracts receipt and companion must authenticate the birth,
+        // including an eventless initialization that preserves the BlueId.
+        if (draft == null || transition == null || after.epoch() != 0L
+                || !after.initialized()
+                || !draft.initial().blueId().equals(after.beforeBlueId())) {
+            throw new UnsupportedNestedNewLineageException(capture.work(), id);
+        }
+        ManagedRootSubscriptionSurface projected = contracts
+                .projectRootSubscriptionSurface(after.document());
+        transaction.stageEmbeddedDemands(id,
+                ClosureSubscriptionInventory.embeddedDemands(projected));
+        EmbeddedOnlyLayout layout = layoutBuilder.retainVerifiedClosureRoot(
+                result, id, projected);
+        ContractsClosureAdapter.requireExactRootSubscriptionSurface(id,
+                projected, host.subscriptionStatesFor(subscriptions, id));
+        List<SubscriptionDelta.Entry> active = ContractsClosureAdapter
+                .activateInitialSubscriptions(
+                        projected.externalSubscriptions(), causalOrder);
+        CheckpointDomainEvidence.retainAll(active, objects);
+        ExactValue authored = objects.put(draft.initial(),
+                "retained-application-authored-birth");
+        ExactValue initialized = objects.put(layout.semanticRoot(),
+                "retained-application-initialized-birth");
+        ManagedEpochReceipt birth = ManagedEpochReceiptMapper.map(id, 0L,
+                DocumentRevision.Kind.INITIALIZATION, authored, initialized,
+                null, causalOrder, transition, result.platformCommitCompanion());
+        List<Node> emitted = result.publicEvents().stream()
+                .filter(event -> event.publicRootDocumentId().value()
+                        .equals(id.value()))
+                .map(PublicEventOccurrence::event).toList();
+        DocumentRevision revision = new DocumentRevision(id, 0L, 0L,
+                DocumentRevision.Kind.INITIALIZATION, authored, initialized,
+                null, causalOrder, sourceCausalEntryBlueId, null, emitted,
+                transition.admittedGas(), birth);
+        DocumentSession session = new DocumentSession(id, authored, layout,
+                active, causalOrder, revision);
+        session.restoreCoordinationState(after.terminated()
+                        ? SessionStatus.TERMINATED : SessionStatus.READY,
+                causalOrder, 0L, 0L);
+        transaction.stageNewSession(session);
+        transaction.stageManagedEpochReceipt(birth, transition);
+        routeReplacements.add(new OperationRouteIndex.Replacement(id,
+                layout.routingSurface(), active));
+        return birth;
     }
 
     /**
