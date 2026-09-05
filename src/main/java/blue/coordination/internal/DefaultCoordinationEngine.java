@@ -1520,6 +1520,27 @@ public final class DefaultCoordinationEngine
         return documents.nextCatchUpWorkExcluding(Set.of());
     }
 
+    /** Projects only the exact receipt already published with this application. */
+    private ManagedSurfacePublicationEvidence committedManagedApplicationSurface(
+            ContractsClosureAdapter.ManagedApplicationOutcome outcome) {
+        if (!outcome.published()) {
+            return ManagedSurfacePublicationEvidence.empty();
+        }
+        ContractsClosurePublicationReceipt retained = documents
+                .closurePublicationReceipt(outcome.work().workIdentity())
+                .orElseThrow(() -> new IllegalStateException(
+                        "Committed managed application is missing publication evidence"));
+        var application = outcome.receipt().orElseThrow();
+        var result = retained.attempt().processResult();
+        if (!retained.commits()
+                || !result.invocationIdentity().equals(application.contractsInvocationIdentity())
+                || !result.outputClosureIdentity().equals(application.contractsResultIdentity())
+                || !result.platformCommitCompanion().companionIdentity().equals(application.commitCompanionIdentity())) {
+            throw new IllegalStateException("Managed application publication evidence binding mismatch");
+        }
+        return retained.managedSurfaceEvidence();
+    }
+
     @Override
     public synchronized Optional<ManagedEpochApplicationReceipt>
             auditManagedEpochApplicationReceipt(
@@ -1980,6 +2001,8 @@ public final class DefaultCoordinationEngine
                     contractsRecoveryState.managedEpochTurn = false;
                     ContractsClosureAdapter.ManagedApplicationOutcome outcome =
                             managed.orElseThrow();
+                    ManagedSurfacePublicationEvidence managedSurface =
+                            committedManagedApplicationSurface(outcome);
                     managedAttempts.add(new ManagedEpochApplicationAttempt(
                             outcome.work(),
                             outcome.attempt(),
@@ -2010,7 +2033,11 @@ public final class DefaultCoordinationEngine
                                             .PublicationFailure(
                                             failure.code(),
                                             failure.message(),
-                                            failure.details()))));
+                                            failure.details())),
+                            managedOccurrenceResolutions(managedSurface),
+                            managedSurface.inputComponents(),
+                            managedSurface.operationRouteChanges().stream()
+                                    .map(DefaultCoordinationEngine::operationRouteChange).toList()));
                     contractsRecoveryState.deferManagedEpochConsumer(
                             outcome.work().consumerDocumentId());
                     if (!outcome.published()) {
@@ -2070,22 +2097,7 @@ public final class DefaultCoordinationEngine
                         exact.publicationIdentity(),
                         exact.replayed(),
                         exact.automaticRetryCount(),
-                        exact.managedSurfaceEvidence()
-                                .resolvedOccurrences()
-                                .stream()
-                                .map(resolution -> new
-                                        ContractsClosureDispatchAttempt
-                                                .ManagedOccurrenceResolution(
-                                                resolution.demandIdentity(),
-                                                resolution.occurrence(),
-                                                ContractsClosureDispatchAttempt
-                                                        .TargetKind.valueOf(
-                                                        resolution.targetKind()
-                                                                .name()),
-                                                Optional.ofNullable(
-                                                        resolution
-                                                                .authoredInitial())))
-                                .toList(),
+                        managedOccurrenceResolutions(exact.managedSurfaceEvidence()),
                         exact.managedSurfaceEvidence().inputComponents(),
                             exact.managedSurfaceEvidence()
                                     .operationRouteChanges()
@@ -2219,6 +2231,16 @@ public final class DefaultCoordinationEngine
             contractsRecoveryState.restoreManagedEpochIsolation(isolated);
             throw failure;
         }
+    }
+
+    private static List<ContractsClosureDispatchAttempt.ManagedOccurrenceResolution>
+            managedOccurrenceResolutions(ManagedSurfacePublicationEvidence surface) {
+        return surface.resolvedOccurrences().stream()
+                .map(resolution -> new ContractsClosureDispatchAttempt.ManagedOccurrenceResolution(
+                        resolution.demandIdentity(), resolution.occurrence(),
+                        ContractsClosureDispatchAttempt.TargetKind.valueOf(resolution.targetKind().name()),
+                        Optional.ofNullable(resolution.authoredInitial())))
+                .toList();
     }
 
     private static ContractsClosureDispatchAttempt.OperationRouteChange

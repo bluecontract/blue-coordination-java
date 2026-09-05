@@ -156,7 +156,12 @@ final class SdkDrainResultMapper {
                                         .PublicationFailureCode.valueOf(
                                                 failure.code().name()),
                                 failure.message(),
-                                failure.details())));
+                                failure.details())),
+                retained.published()
+                        ? managedSurfaceEvidence(retained.attempt().processResult(),
+                                retained.managedOccurrenceResolutions(), retained.inputComponents(),
+                                retained.operationRouteChanges())
+                        : ManagedSurfaceEvidence.empty());
     }
 
     private static ManagedEpochApplicationAttempt
@@ -443,47 +448,28 @@ final class SdkDrainResultMapper {
     private static ManagedSurfaceEvidence managedSurfaceEvidence(
             ContractsClosureDispatchAttempt retained,
             ClosureProcessResult result) {
+        return managedSurfaceEvidence(result, retained.managedOccurrenceResolutions(),
+                retained.inputComponents(), retained.operationRouteChanges());
+    }
+
+    private static ManagedSurfaceEvidence managedSurfaceEvidence(
+            ClosureProcessResult result,
+            List<ContractsClosureDispatchAttempt.ManagedOccurrenceResolution> retainedResolutions,
+            List<ComponentSnapshot> inputComponents,
+            List<ContractsClosureDispatchAttempt.OperationRouteChange> operationRouteChanges) {
         if (!result.commits()) {
             return ManagedSurfaceEvidence.empty();
         }
-        List<ManagedSurfaceEvidence.OccurrenceResolution> resolutions =
-                retained.managedOccurrenceResolutions().stream()
-                        .map(SdkDrainResultMapper::occurrenceResolution)
-                        .toList();
-        List<ManagedSurfaceEvidence.GraphChange> graphChanges = result
-                .graphChanges()
-                .stream()
-                .map(SdkDrainResultMapper::graphChange)
-                .toList();
-        List<ManagedSurfaceEvidence.ComponentTransition> components =
-                componentTransitions(
-                        retained.inputComponents(),
-                        result.resultingComponents());
-        List<ManagedSurfaceEvidence.SubscriptionChange> subscriptions =
-                result.subscriptionDeltas().stream()
-                        .map(SdkDrainResultMapper::subscriptionChange)
-                        .toList();
-        List<ManagedSurfaceEvidence.DocumentTransition> transitions = result
-                .documentTransitionEvidence()
-                .stream()
-                .map(SdkDrainResultMapper::documentTransition)
-                .toList();
-        List<ManagedSurfaceEvidence.OperationRouteChange> routeChanges =
-                new ArrayList<>();
-        for (int index = 0;
-                index < retained.operationRouteChanges().size();
-                index++) {
-            routeChanges.add(operationRouteChange(
-                    index, retained.operationRouteChanges().get(index)));
-        }
         return new ManagedSurfaceEvidence(
                 result.graphGeneration(),
-                resolutions,
-                graphChanges,
-                components,
-                subscriptions,
-                transitions,
-                routeChanges);
+                retainedResolutions.stream().map(SdkDrainResultMapper::occurrenceResolution).toList(),
+                result.graphChanges().stream().map(SdkDrainResultMapper::graphChange).toList(),
+                componentTransitions(inputComponents, result.resultingComponents()),
+                result.subscriptionDeltas().stream().map(SdkDrainResultMapper::subscriptionChange).toList(),
+                result.documentTransitionEvidence().stream().map(SdkDrainResultMapper::documentTransition).toList(),
+                java.util.stream.IntStream.range(0, operationRouteChanges.size())
+                        .mapToObj(index -> operationRouteChange(index, operationRouteChanges.get(index)))
+                        .toList());
     }
 
     private static ManagedSurfaceEvidence.OperationRouteChange
@@ -627,12 +613,7 @@ final class SdkDrainResultMapper {
     private static boolean overlaps(
             ComponentSnapshot before,
             ComponentSnapshot after) {
-        Set<String> members = before.orderedMemberDocumentIds().stream()
-                .map(blue.language.processor.closure.DocumentId::value)
-                .collect(java.util.stream.Collectors.toSet());
-        return after.orderedMemberDocumentIds().stream()
-                .map(blue.language.processor.closure.DocumentId::value)
-                .anyMatch(members::contains);
+        return !Collections.disjoint(componentMembers(before), componentMembers(after));
     }
 
     private static ManagedSurfaceEvidence.ComponentTransition
@@ -783,6 +764,10 @@ final class SdkDrainResultMapper {
             List<PublicEvent> events) {
         ArrayList<DocumentChange> changes = new ArrayList<>();
         for (DocumentId documentId : retained.documentIds()) {
+            List<PublicEvent> documentEvents = events.stream()
+                    .filter(event -> event.sourceDocument().filter(documentId::equals).isPresent())
+                    .toList();
+
             List<blue.coordination.api.DocumentRevision> matching =
                     engine.history(documentId).stream()
                             .filter(revision -> revision.causalEntryBlueId()
@@ -794,11 +779,6 @@ final class SdkDrainResultMapper {
                         matching.get(0);
                 blue.coordination.api.DocumentRevision last =
                         matching.get(matching.size() - 1);
-                List<PublicEvent> documentEvents = events.stream()
-                        .filter(event -> event.sourceDocument()
-                                .filter(documentId::equals)
-                                .isPresent())
-                        .toList();
                 changes.add(new DocumentChange(
                         documentId,
                         last.epoch(),
@@ -821,11 +801,7 @@ final class SdkDrainResultMapper {
                             ExactBlueValue.wrap(
                                     ExactValue.fromVerifiedClosureResult(
                                             result, documentId)),
-                            events.stream()
-                                    .filter(event -> event.sourceDocument()
-                                            .filter(documentId::equals)
-                                            .isPresent())
-                                    .toList())));
+                            documentEvents)));
         }
         return List.copyOf(changes);
     }

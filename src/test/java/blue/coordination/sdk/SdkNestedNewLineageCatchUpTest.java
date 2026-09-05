@@ -11,6 +11,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Strict SDK acceptance for a catch-up-created lineage and its birth evidence. */
 final class SdkNestedNewLineageCatchUpTest {
@@ -105,6 +106,19 @@ final class SdkNestedNewLineageCatchUpTest {
             assertEquals(0L, coordination.advanced().auditDocument(born).epoch());
             assertEquals("authored-inside-retained-catch-up",
                     birth.afterDocument().scalarAt("/marker"));
+            var surface = applied.managedEpochApplicationAttempts().get(0).managedSurfaceEvidence();
+            var resolution = surface.resolvedOccurrences().stream()
+                    .filter(item -> item.occurrence().sourcePath().equals("/children/new"))
+                    .findFirst().orElseThrow();
+            assertEquals(ManagedSurfaceEvidence.ResolutionKind.NEW_AUTHORED, resolution.kind());
+            assertEquals(born, resolution.occurrence().targetDocumentId());
+            assertEquals(born.value(), resolution.authoredInitial().orElseThrow().blueId());
+            assertTrue(surface.documentTransitions().stream().anyMatch(item -> item.documentId().equals(born)));
+            var publishedAttempt = applied.managedEpochApplicationAttempts().get(0);
+            assertThrows(IllegalArgumentException.class, () -> new ManagedEpochApplicationAttempt(
+                    publishedAttempt.work(), publishedAttempt.attempt(), false, false,
+                    java.util.Optional.empty(), 0L, java.util.Optional.empty(), List.of(),
+                    java.util.Optional.empty(), surface));
             assertEquals(1L, occurrence.activationGeneration());
             assertTrue(occurrence.active());
             assertEquals(sourceHistoryBefore, source.history().size());
