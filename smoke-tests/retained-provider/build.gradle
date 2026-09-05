@@ -1,0 +1,109 @@
+plugins { id 'java-library' }
+
+java { toolchain { languageVersion = JavaLanguageVersion.of(17) } }
+
+// This isolated check compiles only the new transport adapter against the
+// published producer. It is not a replacement for the full candidate gates.
+sourceSets {
+    main.java {
+        srcDir '../../src/main/java'
+        include 'blue/coordination/api/RetainedHistoryProvider.java'
+        include 'blue/coordination/api/RetainedHistoryPage.java'
+        include 'blue/coordination/api/RuntimeRetainedHistoryProvider.java'
+    }
+    test.java {
+        srcDir '../../src/test/java'
+        include 'blue/coordination/api/RetainedHistoryProviderTest.java'
+        include 'blue/coordination/sdk/SdkCatchAllCollectionRoutingTest.java'
+    }
+    recovery {
+        java {
+            srcDir '../../src/test/java'
+            srcDir '../../src/testFixtures/java'
+            include 'blue/coordination/internal/CoordinationTestControl.java'
+            include 'blue/coordination/internal/ManagedEpochApplicationAtomicRollbackTest.java'
+            include 'blue/coordination/internal/ManagedEpochApplicationResponseLossTest.java'
+            include 'blue/coordination/internal/ManagedEpochReceiptVerificationTest.java'
+            include 'blue/coordination/sdk/SdkRetainedManagedEpochCatchUpTest.java'
+            include 'blue/coordination/sdk/SdkManagedEpochSelectorAcceptanceTest.java'
+            include 'blue/coordination/sdk/SdkManagedEpochCycleAcceptanceTest.java'
+            include 'blue/coordination/sdk/SdkManagedEpochPromotionAndRetargetTest.java'
+            include 'blue/coordination/sdk/SdkManagedCatchUpBarrierAndLiveExtensionTest.java'
+            include 'blue/coordination/sdk/SdkManagedEpochBudgetFairnessTest.java'
+            include 'blue/coordination/sdk/SdkNestedNewLineageCatchUpTest.java'
+        }
+    }
+}
+
+configurations.recoveryImplementation.extendsFrom(configurations.testImplementation)
+configurations.recoveryRuntimeOnly.extendsFrom(configurations.testRuntimeOnly)
+
+def expectedBlueVersions = [
+    'blue.coordination': '3.0.0-rc.5',
+    'blue.language': '3.1.0-rc.23',
+    'blue.bex': '1.1.0-rc.4',
+    'blue.repo': '3.0.0-rc.21'
+]
+
+dependencies {
+    api 'blue.coordination:blue-coordination-java:3.0.0-rc.5'
+    testImplementation platform('org.junit:junit-bom:5.14.1')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+configurations.configureEach {
+    resolutionStrategy.failOnVersionConflict()
+}
+
+tasks.register('verifyPublishedProducer') {
+    doLast {
+        def rows = configurations.testRuntimeClasspath.resolvedConfiguration
+                .resolvedArtifacts.collect { artifact ->
+            def id = artifact.moduleVersion.id
+            if (expectedBlueVersions.containsKey(id.group)
+                    && id.version != expectedBlueVersions[id.group]) {
+                throw new GradleException("Unexpected Blue dependency: ${id}")
+            }
+            def digest = java.security.MessageDigest.getInstance('SHA-256')
+                    .digest(artifact.file.bytes).encodeHex().toString()
+            [coordinate: id.toString(), sha256: digest]
+        }.sort { it.coordinate }
+        def report = layout.buildDirectory.file('verified-dependencies.json').get().asFile
+        report.parentFile.mkdirs()
+        report.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(rows)) + '\n'
+    }
+}
+
+tasks.named('test') {
+    dependsOn 'verifyPublishedProducer'
+    useJUnitPlatform()
+    include '**/RetainedHistoryProviderTest.class'
+}
+
+tasks.register('publishedRoutingReproduction', Test) {
+    description = 'Reproduces the missing-sourcePath mismatch in the published producer, not the candidate.'
+    dependsOn 'testClasses', 'verifyPublishedProducer'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform()
+    include '**/SdkCatchAllCollectionRoutingTest.class'
+}
+
+tasks.register('publishedRecovery', Test) {
+    description = 'Checks retained recovery invariants in the unchanged published runtime.'
+    dependsOn 'recoveryClasses', 'verifyPublishedProducer'
+    testClassesDirs = sourceSets.recovery.output.classesDirs
+    classpath = sourceSets.recovery.runtimeClasspath
+    useJUnitPlatform()
+    exclude '**/SdkNestedNewLineageCatchUpTest.class'
+}
+
+tasks.register('publishedBirthReproduction', Test) {
+    description = 'Strict birth acceptance on the published runtime; expected to remain red until E2/A2.'
+    dependsOn 'recoveryClasses', 'verifyPublishedProducer'
+    testClassesDirs = sourceSets.recovery.output.classesDirs
+    classpath = sourceSets.recovery.runtimeClasspath
+    useJUnitPlatform()
+    include '**/SdkNestedNewLineageCatchUpTest.class'
+}

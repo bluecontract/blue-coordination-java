@@ -2,6 +2,7 @@ package blue.coordination.sdk;
 
 import blue.coordination.api.CoordinationEngine;
 import blue.coordination.api.DocumentId;
+import blue.coordination.api.RetainedHistoryProvider;
 import blue.coordination.api.EmbeddedCollectionPlanningAudit;
 import blue.coordination.api.ManagedCatchUpBarrier;
 import blue.coordination.api.ManagedDocumentReadiness;
@@ -23,6 +24,16 @@ public final class AdvancedCoordination {
     /** Returns the low-level engine owned by this SDK environment. */
     public CoordinationEngine rawEngine() {
         return runtime.engine();
+    }
+
+    /**
+     * Exports bounded signed pages of already committed source history.
+     * The receiving host must pin this producer's public key independently.
+     * This evidence transport does not install receipts in another engine.
+     */
+    public RetainedHistoryProvider retainedHistoryProvider(
+            java.security.KeyPair producerKeys) {
+        return RetainedHistoryProvider.from(this, producerKeys);
     }
 
     /** Reads a non-READY snapshot for audit and recovery tooling. */
