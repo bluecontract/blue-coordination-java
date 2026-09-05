@@ -142,7 +142,7 @@ public final class Contracts10AuthoredClosureCompiler {
             DocumentIdentityMode identityMode) {
         LinkedHashMap<DocumentId, Node> result = new LinkedHashMap<>();
         for (AuthoredDocument document : documents) {
-            ExactValue exact = runtime.exactSource(
+            ExactValue exact = runtime.exactProcessingSource(
                     document.authoredYaml(),
                     objects,
                     "contracts10-authored-compiler-source");

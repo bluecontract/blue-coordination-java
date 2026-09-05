@@ -43,6 +43,28 @@ final class SdkBuiltJarConsumerTest {
         }
     }
 
+    @Test
+    void requiredRequestDeclarationIsValidatedOnlyAtInvocation() {
+        String timelineId = "consumer/required-request/alice";
+        String id = "consumer-required-request";
+        String source = counterYaml(id, timelineId).replace(
+                "amount: {type: Integer}",
+                "amount: {type: Integer, schema: {required: true}}");
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            TimelineHandle timeline = coordination.timelines().register(timelineId, "alice");
+            DocumentHandle counter = coordination.documents().admit(
+                    ManagedDocument.yaml(id, source).publicRoot().fromNow());
+            EntryResult absent = coordination.operations().on(counter).from(timeline)
+                    .call("increment").through("ownerChannel").requestYaml("{}").execute();
+            assertEquals(EntryDisposition.NO_MATCH, absent.disposition());
+            assertEquals(0L, counter.snapshot().longAt("/counter"));
+            EntryResult valid = coordination.operations().on(counter).from(timeline)
+                    .call("increment").through("ownerChannel").requestYaml("amount: 3").execute();
+            assertEquals(EntryDisposition.APPLIED, valid.disposition());
+            assertEquals(3L, counter.snapshot().longAt("/counter"));
+        }
+    }
+
     private static String counterYaml(
             String id,
             String timelineId) {
