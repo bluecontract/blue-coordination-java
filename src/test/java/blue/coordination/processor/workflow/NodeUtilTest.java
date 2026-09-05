@@ -90,9 +90,10 @@ class NodeUtilTest {
                                         Collections.<String, Node>emptyMap())));
 
         // when
-        // then
+        String entry = FrozenNodeUtil.textProperty(absent, "entry");
 
-        assertNull(FrozenNodeUtil.textProperty(absent, "entry"));
+        // then
+        assertNull(entry);
         assertNull(FrozenNodeUtil.integer(
                 FrozenNodeUtil.property(absent, "gasLimit")));
         assertTrue(FrozenNodeUtil.booleanProperty(

@@ -14,16 +14,17 @@ final class EmbeddedCollectionPlanningAuditTest {
     @Test
     void distinguishesAbsentAndPresentEmptyEvenThoughBothCountZero() {
         // given
-        EmbeddedCollectionPlanningAudit absent =
-                EmbeddedCollectionPlanningAudit.completeObject(
-                        "/games", false, 0);
-        EmbeddedCollectionPlanningAudit empty =
-                EmbeddedCollectionPlanningAudit.completeObject(
-                        "/games", true, 0);
+        String collectionPath = "/games";
 
         // when
-        // then
+        EmbeddedCollectionPlanningAudit absent =
+                EmbeddedCollectionPlanningAudit.completeObject(
+                        collectionPath, false, 0);
+        EmbeddedCollectionPlanningAudit empty =
+                EmbeddedCollectionPlanningAudit.completeObject(
+                        collectionPath, true, 0);
 
+        // then
         assertEquals(EmbeddedCollectionPlanningAudit.State.ABSENT,
                 absent.state());
         assertEquals(0, absent.currentMemberCount());
@@ -50,16 +51,17 @@ final class EmbeddedCollectionPlanningAuditTest {
     @Test
     void distinguishesIncompleteAndInvalidKindAsNonCountable() {
         // given
-        EmbeddedCollectionPlanningAudit incomplete =
-                EmbeddedCollectionPlanningAudit.incomplete(
-                        "/games", "provider offline");
-        EmbeddedCollectionPlanningAudit invalid =
-                EmbeddedCollectionPlanningAudit.invalidKind(
-                        "/games", "present value is not an object");
+        String collectionPath = "/games";
 
         // when
-        // then
+        EmbeddedCollectionPlanningAudit incomplete =
+                EmbeddedCollectionPlanningAudit.incomplete(
+                        collectionPath, "provider offline");
+        EmbeddedCollectionPlanningAudit invalid =
+                EmbeddedCollectionPlanningAudit.invalidKind(
+                        collectionPath, "present value is not an object");
 
+        // then
         assertEquals(EmbeddedCollectionPlanningAudit.State.INCOMPLETE,
                 incomplete.state());
         assertEquals(-1, incomplete.currentMemberCount());

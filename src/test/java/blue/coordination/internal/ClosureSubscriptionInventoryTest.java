@@ -37,6 +37,7 @@ import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -505,8 +506,10 @@ final class ClosureSubscriptionInventoryTest {
                         .COLLECTION_DESCENDANTS);
 
         // when
+        boolean exactMember = exact.matches("/orders/o1");
+
         // then
-        assertTrue(exact.matches("/orders/o1"));
+        assertTrue(exactMember);
         assertFalse(exact.matches("/orders/o1/payment"));
         assertTrue(all.matches("/orders/o1/payment"));
         assertFalse(all.matches("/"));
@@ -563,11 +566,13 @@ final class ClosureSubscriptionInventoryTest {
                         .COLLECTION_DIRECT);
 
         // when
-        // then
-        assertThrows(IllegalArgumentException.class,
+        IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
                 () -> ClosureSubscriptionInventory.empty()
                         .replaceEmbeddedDemands(
                                 A, List.of(exact, collection)));
+
+        // then
+        assertNotNull(failure);
     }
 
     @Test
@@ -585,9 +590,11 @@ final class ClosureSubscriptionInventoryTest {
                         .build();
 
         // when
+        boolean classified = ClosureSubscriptionInventory
+                .isEmbeddedCollectionDemandContract(unrelatedProcessor);
+
         // then
-        assertFalse(ClosureSubscriptionInventory
-                .isEmbeddedCollectionDemandContract(unrelatedProcessor));
+        assertFalse(classified);
     }
 
     @Test
@@ -604,9 +611,11 @@ final class ClosureSubscriptionInventoryTest {
                         .build();
 
         // when
+        boolean classified = ClosureSubscriptionInventory
+                .isEmbeddedCollectionDemandContract(malformedCollection);
+
         // then
-        assertTrue(ClosureSubscriptionInventory
-                .isEmbeddedCollectionDemandContract(malformedCollection),
+        assertTrue(classified,
                 "the exact runtime type must be classified before its "
                         + "required dispatch fields are validated");
     }
