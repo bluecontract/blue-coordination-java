@@ -222,6 +222,7 @@ final class SdkAcceptanceTest {
                     .from(timeline)
                     .call("markProcessed")
                     .through("ownerChannel")
+                    .requestYaml("{}")
                     .execute();
 
             // then
@@ -322,7 +323,7 @@ final class SdkAcceptanceTest {
             // then
             assertFiniteRingResult(
                     fixture, result, initialMaster,
-                    expectedStepOrder, 1_364L);
+                    expectedStepOrder, 1_384L);
         }
     }
 
@@ -345,7 +346,7 @@ final class SdkAcceptanceTest {
             // then
             assertFiniteRingResult(
                     fixture, result, initialMaster,
-                    expectedStepOrder, 1_787L);
+                    expectedStepOrder, 1_822L);
         }
     }
 
@@ -395,6 +396,7 @@ final class SdkAcceptanceTest {
                     .from(timeline)
                     .call("start")
                     .through("ownerChannel")
+                    .requestYaml("{}")
                     .execute();
 
             // then
@@ -419,7 +421,7 @@ final class SdkAcceptanceTest {
                     List.of(members),
                     before,
                     1L,
-                    3_768L);
+                    3_964L);
             assertNotEquals(initialMaster,
                     assertCyclicComponent(handles, members));
             assertEquals("done",
@@ -521,13 +523,14 @@ final class SdkAcceptanceTest {
                     List.of(List.of(a1, b1), List.of(a2, b2)),
                     before,
                     1L,
-                    2_746L);
+                    2_759L);
             assertEquals(List.of(a1, b1, a1), result.closures()
                     .get(0).stats().documentStepOrder());
             assertEquals(List.of(a2, b2, a2), result.closures()
                     .get(1).stats().documentStepOrder());
-            assertExactGas(result.closures().get(0).stats(), 1_373L);
-            assertExactGas(result.closures().get(1).stats(), 1_373L);
+            org.junit.jupiter.api.Assertions.assertAll(
+                    () -> assertExactGas(result.closures().get(0).stats(), 1_375L),
+                    () -> assertExactGas(result.closures().get(1).stats(), 1_384L));
             assertExactPublicEvents(
                     coordination,
                     result.closures().get(0).publicEvents(),
@@ -562,7 +565,7 @@ final class SdkAcceptanceTest {
         List<DocumentId> expectedOrder = expectedAlternatingLoopOrder(
                 DocumentId.of("sdk-gas-loop-a"),
                 DocumentId.of("sdk-gas-loop-b"),
-                742);
+                715);
 
         // when
         GasLoopEvidence first = runGasLoop();
@@ -571,12 +574,29 @@ final class SdkAcceptanceTest {
         // then
         assertEquals(first, retry);
         assertEquals(expectedOrder, first.documentStepOrder());
-        assertEquals(99_967L, first.gas());
+        assertEquals(99_997L, first.gas());
     }
 
     @Test
     void detachBreaksTheLoopAndTheLaterCallTerminates() {
         // given
+        long expectedLoopGas = 99_965L;
+        long expectedDetachGas = 737L;
+        long expectedLaterGas = 708L;
+
+        // when
+        DetachLoopEvidence first = runDetachLoop();
+        DetachLoopEvidence fresh = runDetachLoop();
+
+        // then
+        assertEquals(first, fresh);
+        org.junit.jupiter.api.Assertions.assertAll(
+                () -> assertExactGas(first.stats().get(0), expectedLoopGas),
+                () -> assertExactGas(first.stats().get(1), expectedDetachGas),
+                () -> assertExactGas(first.stats().get(2), expectedLaterGas));
+    }
+
+    private static DetachLoopEvidence runDetachLoop() {
         try (BlueCoordination coordination = BlueCoordination.inMemory()) {
             DynamicLoop scenario = admitDynamicLoop(
                     coordination, "sdk-detach");
@@ -594,6 +614,7 @@ final class SdkAcceptanceTest {
                     .from(scenario.signalTimeline())
                     .call("startLoop")
                     .through("signalChannel")
+                    .requestYaml("{}")
                     .execute();
 
             // then
@@ -609,20 +630,23 @@ final class SdkAcceptanceTest {
             assertEquals(0L, rejected.stats().committedTransitions());
             assertEquals(2L, rejected.stats().documentsOpened());
             assertEquals(expectedAlternatingLoopOrder(
-                            scenario.a().id(), scenario.b().id(), 712),
+                            scenario.a().id(), scenario.b().id(), 687),
                     rejected.stats().documentStepOrder());
-            assertExactGas(rejected.stats(), 99_997L);
             assertEquals(initial, blueIds(handles));
             handles.values().forEach(handle ->
                     assertCurrentHistory(handle, 0L));
             assertEquals(initialMaster, assertCyclicComponent(
                     handles, List.of(scenario.a().id(), scenario.b().id())));
 
+            assertTrue(coordination.processing().drain().entries().isEmpty(),
+                    "a terminal gas failure is not silently retried or given a new budget");
+
             EntryResult detached = coordination.operations()
                     .on(scenario.b())
                     .from(scenario.controlTimeline())
                     .call("detach")
                     .through("controlChannel")
+                    .requestYaml("{}")
                     .execute();
 
             assertEquals(EntryDisposition.APPLIED,
@@ -634,7 +658,6 @@ final class SdkAcceptanceTest {
                     detached.stats().documentStepOrder());
             assertEquals(2L, detached.stats().committedTransitions());
             assertEquals(2L, detached.stats().documentsOpened());
-            assertExactGas(detached.stats(), 736L);
             assertTrue(detached.publicEvents().isEmpty());
             assertExactChangeEvidence(
                     detached,
@@ -658,6 +681,7 @@ final class SdkAcceptanceTest {
                     .from(scenario.signalTimeline())
                     .call("startLoop")
                     .through("signalChannel")
+                    .requestYaml("{}")
                     .execute();
 
             assertEquals(EntryDisposition.APPLIED,
@@ -667,7 +691,6 @@ final class SdkAcceptanceTest {
                     accepted.stats().documentStepOrder());
             assertEquals(1L, accepted.stats().committedTransitions());
             assertEquals(2L, accepted.stats().documentsOpened());
-            assertExactGas(accepted.stats(), 707L);
             assertExactPublicEvents(
                     coordination,
                     accepted.publicEvents(),
@@ -685,6 +708,28 @@ final class SdkAcceptanceTest {
             assertEquals(1L,
                     scenario.a().snapshot().longAt("/loopStarts"));
             assertTrue(accepted.stats().gas() < rejected.stats().gas());
+            assertEquals("GAS_LIMIT_EXCEEDED", rejected.diagnostic().code());
+            assertEquals(Map.of(
+                    "namespace", "processor", "counter", "handlerCall",
+                    "quantity", "1", "weight", "50", "admittedGas", "99965",
+                    "gasLimit", "100000", "effectiveBudget", "100000"),
+                    rejected.diagnostic().details());
+            assertEquals(2L * (344L * 5L + 343L * 6L),
+                    rejected.stats().counter("processor.contractHeaderRecognized"));
+            assertEquals(686L * 50L, rejected.stats().counter("processor.handlerCall"));
+            assertEquals(686L, rejected.stats().counter("runtime.workflowStepVisited"));
+            assertEquals(685L * 3L, rejected.stats().counter("runtime.triggerEventStep"));
+            assertEquals(0L, rejected.stats().counter("processor.checkpointWritten"));
+            assertEquals(0L, accepted.stats().counter("processor.embeddedEventDelivered"));
+            return new DetachLoopEvidence(
+                    List.of(rejected.stats(), detached.stats(), accepted.stats()).stream()
+                            .map(stats -> new ProcessingStats(stats.gas(), stats.committedTransitions(),
+                                    stats.documentsOpened(), 0L, stats.documentStepOrder(), stats.counters()))
+                            .toList(),
+                    List.of(rejected.entry().blueId(), detached.entry().blueId(), accepted.entry().blueId(),
+                            rejected.closures().get(0).closureId(), detached.closures().get(0).closureId(),
+                            accepted.closures().get(0).closureId()),
+                    List.of(initial, afterDetach, blueIds(handles)), rejected.diagnostic());
         }
     }
 
@@ -719,6 +764,7 @@ final class SdkAcceptanceTest {
                     .from(scenario.controlTimeline())
                     .call("detach")
                     .through("controlChannel")
+                    .requestYaml("{}")
                     .execute();
 
             // then
@@ -729,7 +775,7 @@ final class SdkAcceptanceTest {
                     detached.stats().documentStepOrder());
             assertEquals(2L, detached.stats().committedTransitions());
             assertEquals(2L, detached.stats().documentsOpened());
-            assertExactGas(detached.stats(), 736L);
+            assertExactGas(detached.stats(), 737L);
             assertTrue(detached.publicEvents().isEmpty());
             assertExactChangeEvidence(
                     detached,
@@ -754,6 +800,7 @@ final class SdkAcceptanceTest {
                     .from(scenario.signalTimeline())
                     .call("startLoop")
                     .through("signalChannel")
+                    .requestYaml("{}")
                     .execute();
             assertEquals(EntryDisposition.APPLIED, finite.disposition());
             assertSingleAppliedClosure(finite);
@@ -761,7 +808,7 @@ final class SdkAcceptanceTest {
                     finite.stats().documentStepOrder());
             assertEquals(1L, finite.stats().committedTransitions());
             assertEquals(2L, finite.stats().documentsOpened());
-            assertExactGas(finite.stats(), 707L);
+            assertExactGas(finite.stats(), 708L);
             assertExactPublicEvents(
                     coordination,
                     finite.publicEvents(),
@@ -795,7 +842,7 @@ final class SdkAcceptanceTest {
                     readded.stats().documentStepOrder());
             assertEquals(2L, readded.stats().committedTransitions());
             assertEquals(2L, readded.stats().documentsOpened());
-            assertExactGas(readded.stats(), 1_260L);
+            assertExactGas(readded.stats(), 1_265L);
             assertTrue(readded.publicEvents().isEmpty());
             assertExactChangeEvidence(
                     readded,
@@ -938,6 +985,7 @@ final class SdkAcceptanceTest {
                 .from(fixture.timeline())
                 .call("start")
                 .through("ownerChannel")
+                .requestYaml("{}")
                 .execute();
     }
 
@@ -1008,6 +1056,7 @@ final class SdkAcceptanceTest {
                     .from(timeline)
                     .call("startLoop")
                     .through("ownerChannel")
+                    .requestYaml("{}")
                     .execute();
 
             assertEquals(EntryDisposition.GAS_LIMIT_EXCEEDED,
@@ -1016,15 +1065,20 @@ final class SdkAcceptanceTest {
             assertEquals(EntryDisposition.GAS_LIMIT_EXCEEDED,
                     result.closures().get(0).disposition());
             assertTrue(result.diagnostic().present());
+            assertEquals(Map.of(
+                    "namespace", "processor", "counter", "channelCandidateTested",
+                    "quantity", "1", "weight", "5", "admittedGas", "99997",
+                    "gasLimit", "100000", "effectiveBudget", "100000"),
+                    result.diagnostic().details());
             assertTrue(result.closures().get(0).changes().isEmpty());
             assertTrue(result.publicEvents().isEmpty());
             assertTrue(result.closures().get(0).publicEvents().isEmpty());
             assertEquals(result.stats(), result.closures().get(0).stats());
             assertEquals(0L, result.stats().committedTransitions());
             assertEquals(2L, result.stats().documentsOpened());
-            assertEquals(expectedAlternatingLoopOrder(a, b, 742),
+            assertEquals(expectedAlternatingLoopOrder(a, b, 715),
                     result.stats().documentStepOrder());
-            assertExactGas(result.stats(), 99_967L);
+            assertExactGas(result.stats(), 99_997L);
             assertEquals(before, blueIds(handles));
             handles.values().forEach(handle ->
                     assertCurrentHistory(handle, 0L));
@@ -1260,7 +1314,7 @@ final class SdkAcceptanceTest {
             long expectedGas) {
         long counterGas = stats.counters().values().stream()
                 .reduce(0L, Math::addExact);
-        assertEquals(expectedGas, stats.gas());
+        assertEquals(expectedGas, stats.gas(), () -> "Exact gas counters: " + stats.counters());
         assertEquals(expectedGas, counterGas);
     }
 
@@ -1877,6 +1931,13 @@ final class SdkAcceptanceTest {
             documentStepOrder = List.copyOf(documentStepOrder);
             counters = Map.copyOf(counters);
         }
+    }
+
+    private record DetachLoopEvidence(
+            List<ProcessingStats> stats,
+            List<String> entryAndClosureIds,
+            List<Map<DocumentId, String>> states,
+            Diagnostic rejectedCharge) {
     }
 
     private record ExpectedPublicEvent(DocumentId source, String kind) {

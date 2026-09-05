@@ -7,6 +7,8 @@ import blue.coordination.api.ProcessingSelection;
 import blue.coordination.internal.CoordinationTestControl;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -79,6 +81,11 @@ final class SdkNestedNewLineageCatchUpTest {
                     .managedEpochApplicationWork().orElseThrow();
             var sourceBefore = coordination.advanced().auditDocument(SOURCE);
             int consumerHistoryBefore = consumer.history().size();
+            var retainedConsumerHistoryBefore = List.copyOf(
+                    coordination.advanced().rawEngine().history(CONSUMER));
+            assertEquals(consumerHistoryBefore + 1, retainedConsumerHistoryBefore.size());
+            assertEquals(1L, work.expectedConsumerCommittedEpoch());
+            assertEquals(0L, consumer.snapshot().epoch());
             int sourceHistoryBefore = source.history().size();
 
             // when
@@ -87,7 +94,7 @@ final class SdkNestedNewLineageCatchUpTest {
 
             // then
             assertEquals(1, applied.managedEpochApplications().size(),
-                    "BLOCKED_UPSTREAM until Contracts supplies verified birth evidence: "
+                    "Expected one authenticated retained application: "
                             + applied.managedEpochApplicationAttempts());
             assertTrue(applied.managedEpochApplicationAttempts().get(0).published());
             var occurrence = coordination.advanced().auditManagedOccurrence(
@@ -105,7 +112,22 @@ final class SdkNestedNewLineageCatchUpTest {
                     .auditDocument(SOURCE).blueId());
             assertEquals(sourceBefore.epoch(), coordination.advanced()
                     .auditDocument(SOURCE).epoch());
-            assertEquals(consumerHistoryBefore + 1, consumer.history().size());
+            assertEquals(retainedConsumerHistoryBefore.size() + 1, consumer.history().size());
+            assertEquals(retainedConsumerHistoryBefore.stream()
+                            .map(revision -> revision.managedEpochReceipt().orElseThrow().receiptIdentity())
+                            .toList(),
+                    consumer.history().subList(0, retainedConsumerHistoryBefore.size()).stream()
+                            .map(revision -> revision.managedEpochReceipt().orElseThrow().receiptIdentity())
+                            .toList());
+            var application = applied.managedEpochApplications().get(0);
+            var appliedRevision = consumer.history().get(consumer.history().size() - 1);
+            assertEquals(DocumentRevision.Kind.EMBEDDED_REVISION_APPLICATION, appliedRevision.kind());
+            assertEquals(2L, appliedRevision.epoch());
+            assertEquals(application.consumerRevisionEpoch(), appliedRevision.epoch());
+            assertEquals(application.consumerRevisionReceiptIdentity(),
+                    appliedRevision.managedEpochReceipt().orElseThrow().receiptIdentity());
+            assertEquals(birth.commitCompanionIdentity(), application.commitCompanionIdentity());
+            assertEquals(work.sourceReceiptIdentity(), application.sourceReceiptIdentity());
             assertEquals(2L, coordination.advanced()
                     .auditManagedCatchUpPlan(work.planIdentity()).orElseThrow()
                     .nextSourceEpoch());
@@ -123,7 +145,7 @@ final class SdkNestedNewLineageCatchUpTest {
             assertTrue(retried.managedEpochApplications().isEmpty());
             assertTrue(retried.entries().isEmpty());
             assertEquals(sourceHistoryBefore, source.history().size());
-            assertEquals(consumerHistoryBefore + 1, consumer.history().size());
+            assertEquals(retainedConsumerHistoryBefore.size() + 1, consumer.history().size());
         }
     }
 

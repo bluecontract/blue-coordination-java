@@ -82,7 +82,16 @@ final class SdkReferenceTransparentExecutionTest {
                     .requestYaml("amount: 1250000.0").execute();
             // then
             assertEquals(EntryDisposition.APPLIED, result.disposition(), result.diagnostic().toString());
-            assertEquals("1250000", host.snapshot().exact().scalarAt("/marginRequirement/val").toString());
+            assertEquals(0, new java.math.BigDecimal("1250000.0").compareTo(
+                    new java.math.BigDecimal(host.snapshot().exact()
+                            .scalarAt("/marginRequirement/val").toString())));
+            EntryResult invalid = blue.operations().on(host).from(timeline)
+                    .call("setMarginRequirement").through("ownerChannel")
+                    .requestYaml("amount: not-a-decimal").execute();
+            assertEquals(EntryDisposition.NO_MATCH, invalid.disposition());
+            assertEquals(0, new java.math.BigDecimal("1250000.0").compareTo(
+                    new java.math.BigDecimal(host.snapshot().exact()
+                            .scalarAt("/marginRequirement/val").toString())));
         }
     }
 
