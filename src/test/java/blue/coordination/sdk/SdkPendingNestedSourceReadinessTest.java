@@ -33,14 +33,14 @@ final class SdkPendingNestedSourceReadinessTest {
             TimelineHandle timeline = blue.timelines().register(TIMELINE, "alice");
             DocumentHandle c = admit(blue, C, "/unused", observes);
             ExactBlueValue cZero = c.history().get(0).after();
-            applied(operation(blue, c, timeline, "increment").execute());
-            applied(operation(blue, c, timeline, "increment").execute());
+            applied(operation(blue, c, timeline, "increment").requestYaml("{}").execute());
+            applied(operation(blue, c, timeline, "increment").requestYaml("{}").execute());
             List<String> cReceipts = receipts(blue, C);
             String cExact = c.exact().json();
             DocumentHandle b = admit(blue, B, "/c", observes);
             ExactBlueValue bZero = b.history().get(0).after();
-            applied(operation(blue, b, timeline, "increment").execute());
-            applied(operation(blue, b, timeline, "increment").execute());
+            applied(operation(blue, b, timeline, "increment").requestYaml("{}").execute());
+            applied(operation(blue, b, timeline, "increment").requestYaml("{}").execute());
             for (ManagedEpochReceipt receipt : blue.advanced().auditManagedEpochs(B)) {
                 assertFalse(receipt.afterDocument().json().contains("\"c\""));
             }
@@ -100,8 +100,11 @@ final class SdkPendingNestedSourceReadinessTest {
                 assertEquals(blue.advanced().auditManagedEpoch(C, sourceEpoch).orElseThrow()
                         .receiptIdentity(), receipt.sourceReceiptIdentity());
                 assertEquals(sourceEpoch + 1L, receipt.resultingSourceCursor());
-                assertEquals(aEpoch + (observes ? 1L : 0L), blue.advanced().auditDocument(A).epoch(),
-                        "Typed listeners receive B's revision; a non-working parent only changes readiness");
+                assertEquals(aEpoch + 1L, blue.advanced().auditDocument(A).epoch(),
+                        "Every containing parent retains B's changed exact revision");
+                assertEquals(blue.advanced().auditDocument(B).blueId(),
+                        blue.advanced().auditDocument(A).valueAt("/b").blueId(),
+                        "The parent revision must contain the exact newly committed B");
                 appliedCEpochs.add(work.sourceEpoch());
                 List<String> aHistory = receipts(blue, A);
                 List<String> bHistory = receipts(blue, B);
