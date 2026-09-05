@@ -40,34 +40,41 @@ final class SelectedWorkflowBodyLocalityTest {
                     .subscriptionSurfaceProjection().projectInitial(
                             initialized.document(), 0L, activation);
 
-            // when
-            ExternalDeliveryPlan emptyOnlyAbsent = deliveryPlan(
-                    runtime,
-                    initialized,
-                    initial,
-                    requestPresenceEvent("emptyOnly", false));
-            ExternalDeliveryPlan emptyOnlyPresent = deliveryPlan(
-                    runtime,
-                    initialized,
-                    initial,
-                    requestPresenceEvent("emptyOnly", true));
-            ExternalDeliveryPlan unconstrainedAbsent = deliveryPlan(
-                    runtime,
-                    initialized,
-                    initial,
-                    requestPresenceEvent("acceptAny", false));
-            ExternalDeliveryPlan unconstrainedPresent = deliveryPlan(
-                    runtime,
-                    initialized,
-                    initial,
+            List<String> events = List.of(
+                    requestPresenceEvent("emptyOnly", false),
+                    requestPresenceEvent("emptyOnly", true),
+                    requestPresenceEvent("acceptAny", false),
                     requestPresenceEvent("acceptAny", true));
+
+            // when
+            List<PlatformProcessingResult> results = new ArrayList<>();
+            for (String yaml : events) {
+                ExternalDeliveryPlan plan = deliveryPlan(runtime, initialized, initial, yaml);
+                results.add(runtime.contracts().processForPlatformCommit(
+                        initialized.document(), runtime.yamlToNode(yaml),
+                        PlatformProcessInvocation.builder().deliveryPlan(plan)
+                                .nodeProvider(runtime.nodeProvider()).build()));
+            }
 
             // then
             assertEquals(ProcessorStatus.SUCCESS, initialized.status());
-            assertTrue(emptyOnlyAbsent.deliveries().isEmpty());
-            assertEquals(1, emptyOnlyPresent.deliveries().size());
-            assertEquals(1, unconstrainedAbsent.deliveries().size());
-            assertEquals(1, unconstrainedPresent.deliveries().size());
+            assertEquals(List.of(BigInteger.ZERO, BigInteger.ONE, BigInteger.ONE, BigInteger.ONE),
+                    results.stream().map(result -> result.processResult().document()
+                            .getProperties().get("counter").getValue()).toList());
+            results.forEach(result -> assertEquals(ProcessorStatus.SUCCESS, result.processResult().status()));
+            Node absentResult = results.get(0).processResult().document();
+            Node checkpoint = absentResult.getContracts().getProperties().remove("checkpoint");
+            Node entries = checkpoint.getProperties().get("entries");
+            assertEquals(java.util.Set.of("ownerChannel"), entries.getProperties().keySet());
+            Node subject = entries.getProperties().get("ownerChannel").getProperties().get("subject");
+            assertEquals(DirectBlueIdCalculator.calculateBlueId(runtime.yamlToNode(events.get(0))),
+                    subject.getProperties().get("entryBlueId").getValue());
+            // Channel receipt advances even though the required request pattern does not match.
+            // Every other field, including all business state and contracts, stays exact.
+            assertEquals(DirectBlueIdCalculator.calculateBlueId(initialized.document()),
+                    DirectBlueIdCalculator.calculateBlueId(absentResult));
+            results.forEach(result -> assertTrue(result.processResult().events().isEmpty()));
+
         }
     }
 
@@ -205,6 +212,7 @@ final class SelectedWorkflowBodyLocalityTest {
     private static String requestPresenceDocument() {
         return """
                 documentId: request-presence
+                counter: 0
                 contracts:
                   ownerChannel:
                     type: Coordination/Timeline Channel
@@ -220,6 +228,10 @@ final class SelectedWorkflowBodyLocalityTest {
                     steps:
                       - type: Coordination/Compute
                         do:
+                          - $appendChange:
+                              op: replace
+                              path: /counter
+                              val: 1
                           - $return: true
                   emptyOnly:
                     type: Coordination/Sequential Workflow Operation
@@ -228,6 +240,10 @@ final class SelectedWorkflowBodyLocalityTest {
                     steps:
                       - type: Coordination/Compute
                         do:
+                          - $appendChange:
+                              op: replace
+                              path: /counter
+                              val: 1
                           - $return: true
                 """;
     }
