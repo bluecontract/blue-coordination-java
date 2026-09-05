@@ -683,7 +683,7 @@ public final class DefaultCoordinationEngine
     @Override
     public synchronized ExactValue exactValue(String sourceYaml) {
         ensureOpen();
-        return runtime.exactSource(
+        return runtime.exactProcessingSource(
                 sourceYaml, objects, "external-exact-value");
     }
 

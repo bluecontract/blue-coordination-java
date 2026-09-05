@@ -327,6 +327,12 @@ final class SdkDrainResultMapper {
             closures.add(mapClosure(entry, attempts.get(index), index));
         }
         EntryDisposition disposition = aggregateDisposition(closures);
+        if (disposition == EntryDisposition.APPLIED
+                && attempts.stream().allMatch(attempt -> operationDisposition(
+                        attempt.attempt().processResult(), runtime.intent(entry.blueId()))
+                        == EntryDisposition.NO_MATCH)) {
+            disposition = EntryDisposition.NO_MATCH;
+        }
         List<PublicEvent> publicEvents = closures.stream()
                 .flatMap(closure -> closure.publicEvents().stream())
                 .toList();
@@ -959,6 +965,26 @@ final class SdkDrainResultMapper {
         return new TargetOutcome(
                 EntryDisposition.REJECTED,
                 new Diagnostic(code, message, details));
+    }
+
+    private static EntryDisposition operationDisposition(
+            ClosureProcessResult result,
+            SdkCoordinationRuntime.EntryIntent intent) {
+        EntryDisposition status = disposition(result.status());
+        if (status != EntryDisposition.APPLIED || !intent.targeted()) {
+            return status;
+        }
+        // A successful channel transition can commit its checkpoint even when
+        // the requested operation's payload pattern rejected the event. The
+        // complete authenticated trace records handler admission independently
+        // of business mutations, so an executed no-op still reports APPLIED.
+        boolean operationCalled = result.gasTrace().stream().anyMatch(charge ->
+                charge.namespace() == GasTraceEntry.Namespace.PROCESSOR
+                        && "handlerCall".equals(charge.counter())
+                        && intent.operation().equals(charge.contractKey())
+                        && charge.documentId() != null
+                        && intent.targetId().value().equals(charge.documentId().value()));
+        return operationCalled ? EntryDisposition.APPLIED : EntryDisposition.NO_MATCH;
     }
 
     private static EntryDisposition disposition(ProcessorStatus status) {

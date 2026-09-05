@@ -250,6 +250,12 @@ final class SdkCanonicalRetainedManagedEpochScenarioTest {
                             secondPlan.planIdentity()).orElseThrow().status());
             assertEquals(3L, a.snapshot().longAt("/firstChanges"));
             assertEquals(2L, a.snapshot().longAt("/secondChanges"));
+            assertEquals(3L, b.snapshot().longAt("/counter"));
+            for (String path : List.of("/children/first", "/children/second")) {
+                assertEquals(b.snapshot().blueId(), blue.language.model.NodePathEditor
+                        .getOrNull(a.snapshot().exact().copyNode(), path).getBlueId(),
+                        "the parent's exact occurrence must publish B3");
+            }
 
             // 13. B embeds current A and the ordinary resolver forms A <-> B.
             EntryResult cycleFormed = coordination.operations()
@@ -692,7 +698,6 @@ final class SdkCanonicalRetainedManagedEpochScenarioTest {
     private static String sourceAnchorYaml() {
         return """
                 documentId: %s
-                source: {}
                 contracts:
                   embedded:
                     type: Process Embedded

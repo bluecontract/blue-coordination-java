@@ -273,7 +273,6 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     topology.componentIndex(),
                     topology.occurrenceInventory(),
                     selection,
-                    topology.closureSubscriptions()::embeddedDemandsFor,
                     runtime.metrics());
             LinkedHashSet<DocumentId> selectedMembers = new LinkedHashSet<>();
             selectedCohorts.forEach(cohort -> selectedMembers.addAll(
@@ -847,7 +846,6 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 componentIndex,
                 occurrenceInventory,
                 selection,
-                ignored -> List.of(),
                 null);
     }
 
@@ -855,22 +853,6 @@ final class ContractsClosureAdapter implements AutoCloseable {
             ProcessEmbeddedComponentIndex componentIndex,
             ManagedOccurrenceInventory occurrenceInventory,
             OperationRouteIndex.FrozenDirectDeliverySelection selection,
-            EngineMetrics metrics) {
-        return partitionSelection(
-                componentIndex,
-                occurrenceInventory,
-                selection,
-                ignored -> List.of(),
-                metrics);
-    }
-
-    private static List<CohortSelection> partitionSelection(
-            ProcessEmbeddedComponentIndex componentIndex,
-            ManagedOccurrenceInventory occurrenceInventory,
-            OperationRouteIndex.FrozenDirectDeliverySelection selection,
-            Function<DocumentId,
-                    List<ClosureSubscriptionInventory.EmbeddedDemand>>
-                    incomingDemands,
             EngineMetrics metrics) {
         ProcessEmbeddedComponentIndex index = Objects.requireNonNull(
                 componentIndex, "componentIndex");
@@ -889,7 +871,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 continue;
             }
             ConnectedSelection connected = connectedSelection(
-                    inventory, incomingDemands, directTarget);
+                    inventory, directTarget);
             connected = mergeIntersecting(groups, connected);
             groups.add(connected);
             occurrenceRowsExamined = Math.addExact(
@@ -923,13 +905,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
 
     private static ConnectedSelection connectedSelection(
             ManagedOccurrenceInventory inventory,
-            Function<DocumentId,
-                    List<ClosureSubscriptionInventory.EmbeddedDemand>>
-                    incomingDemands,
             DocumentId start) {
-        Function<DocumentId,
-                List<ClosureSubscriptionInventory.EmbeddedDemand>> demands =
-                Objects.requireNonNull(incomingDemands, "incomingDemands");
         TreeMap<DocumentId, Boolean> discovered = new TreeMap<>(
                 EmbeddingBinding.DOCUMENT_ORDER);
         Deque<DocumentId> pending = new ArrayDeque<>();
@@ -938,7 +914,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
         Map<String, ManagedOccurrenceBinding> occurrences =
                 new LinkedHashMap<>();
         // The captured inventory cannot change during selection. Retain the
-        // reverse frontier as demand adds parents and their forward branches;
+        // reverse frontier as publication adds parents and their forward branches;
         // each ancestor's incoming rows need to be opened only once.
         TreeMap<DocumentId, Boolean> reverseReachable = new TreeMap<>(
                 EmbeddingBinding.DOCUMENT_ORDER);
@@ -947,7 +923,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
             while (!pending.isEmpty()) {
                 DocumentId current = pending.removeFirst();
                 for (ManagedOccurrenceBinding row
-                        : inventory.activeRowsFrom(current)) {
+                        : inventory.rowsFrom(current)) {
                     if (occurrences.putIfAbsent(
                             row.occurrenceIdentity(), row) != null) {
                         continue;
@@ -969,25 +945,13 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 if (discovered.containsKey(source)) {
                     continue;
                 }
-                List<ClosureSubscriptionInventory.EmbeddedDemand>
-                        sourceDemands = Objects.requireNonNull(
-                                demands.apply(source),
-                                "embedded demands for " + source);
-                for (ClosureSubscriptionInventory.EmbeddedDemand demand
-                        : sourceDemands) {
-                    if (!demandReachesSelectedMember(
-                            inventory,
-                            source,
-                            demand,
-                            discovered.keySet(),
-                            reverseReachable.keySet())) {
-                        continue;
-                    }
-                    discovered.put(source, Boolean.TRUE);
-                    pending.addLast(source);
-                    addedSource = true;
-                    break;
-                }
+                // Every active occurrence owns an exact embedded value that
+                // must be republished with its child. Typed listener demands
+                // govern event delivery inside Contracts, not this state
+                // publication boundary.
+                discovered.put(source, Boolean.TRUE);
+                pending.addLast(source);
+                addedSource = true;
             }
             if (!addedSource) {
                 break;
@@ -1004,20 +968,16 @@ final class ContractsClosureAdapter implements AutoCloseable {
 
     /**
      * Selects the ordinary affected closure for one managed-revision seed.
-     * Forward occurrences retain their existing descendants, while active
-     * reverse parents join only when their published typed demand observes the
-     * changed child.
+     * Forward occurrences retain authoritative reservations and descendants; active
+     * reverse parents retain every occurrence of the changed child. Listener
+     * matching remains owned by Contracts during event delivery.
      */
     static ConnectedSelection initialConnectedSelection(
             ManagedOccurrenceInventory inventory,
             ClosureSubscriptionInventory subscriptions,
             DocumentId start) {
-        ClosureSubscriptionInventory selectedSubscriptions =
-                Objects.requireNonNull(subscriptions, "subscriptions");
-        return connectedSelection(
-                inventory,
-                selectedSubscriptions::embeddedDemandsFor,
-                start);
+        Objects.requireNonNull(subscriptions, "subscriptions");
+        return connectedSelection(inventory, start);
     }
 
     private static void extendReverseReachableThroughActiveOccurrences(
@@ -1045,46 +1005,6 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 }
             }
         }
-    }
-
-    private static boolean demandReachesSelectedMember(
-            ManagedOccurrenceInventory inventory,
-            DocumentId source,
-            ClosureSubscriptionInventory.EmbeddedDemand demand,
-            Set<DocumentId> selectedMembers,
-            Set<DocumentId> reverseReachable) {
-        Deque<DemandTraversal> pending = new ArrayDeque<>();
-        Set<DemandTraversal> visited = new LinkedHashSet<>();
-        DemandTraversal initial = new DemandTraversal(source, 0);
-        pending.addLast(initial);
-        visited.add(initial);
-        while (!pending.isEmpty()) {
-            DemandTraversal current = pending.removeFirst();
-            for (ManagedOccurrenceBinding row
-                    : inventory.activeRowsFrom(current.documentId())) {
-                DocumentId target = coordinationId(row.targetDocumentId());
-                if (!reverseReachable.contains(target)) {
-                    continue;
-                }
-                int nextCursor = demand.advance(
-                        current.cursor(), JsonPointer.split(row.sourcePath()));
-                if (nextCursor < 0) {
-                    continue;
-                }
-                if (selectedMembers.contains(target)
-                        && demand.accepts(nextCursor)) {
-                    return true;
-                }
-                if (demand.canContinue(nextCursor)) {
-                    DemandTraversal next = new DemandTraversal(
-                            target, nextCursor);
-                    if (visited.add(next)) {
-                        pending.addLast(next);
-                    }
-                }
-            }
-        }
-        return false;
     }
 
     private static ConnectedSelection mergeIntersecting(
@@ -3791,15 +3711,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
         }
     }
 
-    private record DemandTraversal(DocumentId documentId, int cursor) {
-        private DemandTraversal {
-            documentId = Objects.requireNonNull(documentId, "documentId");
-            if (cursor < 0) {
-                throw new IllegalArgumentException(
-                        "demand cursor must be non-negative");
-            }
-        }
-    }
+
 
     record CohortInvocation(
             List<DocumentId> members,

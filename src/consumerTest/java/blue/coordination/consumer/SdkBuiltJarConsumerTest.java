@@ -56,7 +56,12 @@ final class SdkBuiltJarConsumerTest {
                     ManagedDocument.yaml(id, source).publicRoot().fromNow());
             EntryResult absent = coordination.operations().on(counter).from(timeline)
                     .call("increment").through("ownerChannel").requestYaml("{}").execute();
-            assertEquals(EntryDisposition.NO_MATCH, absent.disposition());
+            assertEquals(EntryDisposition.NO_MATCH, absent.disposition(),
+                    () -> "counter=" + counter.snapshot().longAt("/counter") + "; stats=" + absent.stats());
+            assertEquals(0L, counter.snapshot().longAt("/counter"));
+            EntryResult wrongKind = coordination.operations().on(counter).from(timeline)
+                    .call("increment").through("ownerChannel").requestYaml("amount: wrong").execute();
+            assertEquals(EntryDisposition.NO_MATCH, wrongKind.disposition());
             assertEquals(0L, counter.snapshot().longAt("/counter"));
             EntryResult valid = coordination.operations().on(counter).from(timeline)
                     .call("increment").through("ownerChannel").requestYaml("amount: 3").execute();

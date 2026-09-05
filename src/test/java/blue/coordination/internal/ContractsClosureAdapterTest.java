@@ -139,7 +139,7 @@ final class ContractsClosureAdapterTest {
     }
 
     @Test
-    void incomingOccurrenceDoesNotOpenItsSourceWithoutTypedDemand() {
+    void incomingOccurrenceSelectsItsSourceForExactPublicationWithoutTypedDemand() {
         // given
         ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(
                 List.of(occurrence("a-to-b", A, B, true)));
@@ -163,14 +163,29 @@ final class ContractsClosureAdapterTest {
 
         // then
         assertEquals(1, selected.size());
-        assertEquals(List.of(B), selected.get(0).members());
-        assertTrue(selected.get(0).occurrences().isEmpty());
-        assertEquals(0L, metrics.counter(
+        assertEquals(List.of(A, B), selected.get(0).members());
+        assertEquals(1, selected.get(0).occurrences().size());
+        assertEquals(1L, metrics.counter(
                 ContractsClosureAdapter.OCCURRENCE_ROWS_EXAMINED));
     }
 
     @Test
-    void collectionDirectDemandSelectsOnlyDirectMemberParent() {
+    void livePublicationIncludesBothOccurrencesAndAllParentsWithoutListeners() {
+        DocumentId otherParent = DocumentId.of("other-parent");
+        ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(List.of(
+                occurrence("first", A, "/first", B, true),
+                occurrence("second", A, "/second", B, true),
+                occurrence("other", otherParent, "/child", B, true),
+                occurrence("inactive", C, "/old", B, false)));
+        var selected = ContractsClosureAdapter.initialConnectedSelection(
+                inventory, ClosureSubscriptionInventory.empty(), B);
+        assertEquals(List.of(A, B, otherParent), selected.members());
+        assertEquals(3, selected.occurrences().size());
+        assertEquals(3L, selected.rowsExamined());
+    }
+
+    @Test
+    void collectionDirectDemandDoesNotSuppressAncestorStatePublication() {
         // given
         ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(
                 List.of(
@@ -197,8 +212,8 @@ final class ContractsClosureAdapterTest {
         // then
         assertEquals(List.of(A, B, C), direct.members());
         assertEquals(2, direct.occurrences().size());
-        assertEquals(List.of(C), nested.members());
-        assertTrue(nested.occurrences().isEmpty());
+        assertEquals(List.of(A, B, C), nested.members());
+        assertEquals(2, nested.occurrences().size());
     }
 
     @Test
@@ -265,7 +280,7 @@ final class ContractsClosureAdapterTest {
     }
 
     @Test
-    void collectionDemandUsesDecodedEscapedSegmentsNotRawPrefixes() {
+    void collectionListenerPathDoesNotSuppressSiblingStatePublication() {
         // given
         ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(
                 List.of(
@@ -293,7 +308,7 @@ final class ContractsClosureAdapterTest {
 
         // then
         assertEquals(List.of(A, B, C), escaped.members());
-        assertEquals(List.of(C), unrelated.members());
+        assertEquals(List.of(A, B, C), unrelated.members());
     }
 
     @Test
@@ -320,7 +335,7 @@ final class ContractsClosureAdapterTest {
     }
 
     @Test
-    void inactiveProspectiveRowCannotSelectOrExpandAClosure() {
+    void inactiveReservationIsRetainedForwardWithoutSelectingItsParentInReverse() {
         // given
         ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(
                 List.of(occurrence(
@@ -344,8 +359,9 @@ final class ContractsClosureAdapterTest {
         // then
         assertEquals(List.of(B), fromChild.members());
         assertTrue(fromChild.occurrences().isEmpty());
-        assertEquals(List.of(A), fromParent.members());
-        assertTrue(fromParent.occurrences().isEmpty());
+        assertEquals(List.of(A, B), fromParent.members());
+        assertEquals(1, fromParent.occurrences().size());
+        assertFalse(fromParent.occurrences().get(0).active());
     }
 
     @Test
