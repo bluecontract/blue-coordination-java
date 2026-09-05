@@ -734,10 +734,13 @@ class TimelineSubscriptionProjectionTest {
                                     String.class,
                                     String.class,
                                     accessType,
-                                    RuntimeWorkSession.class);
+                                    RuntimeWorkSession.class,
+                                    Node.class);
             constructor.setAccessible(true);
+            // This fixture projects headers; it does not evaluate or return
+            // a processor-admitted event identity.
             return constructor.newInstance(
-                    "/", "timeline", access, session);
+                    "/", "timeline", access, session, null);
         } catch (ReflectiveOperationException exception) {
             throw new IllegalStateException(
                     "Unable to construct projection context",
