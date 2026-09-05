@@ -22,11 +22,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class SdkValueModelTest {
     @Test
     void listAliasUsesTheSelectedLanguageIdentity() {
+        // given
         try (BlueCoordination runtime = BlueCoordination.inMemory()) {
+            // when
             ExactBlueValue aliased = runtime.values().yaml("type: List\nitems: [1, 2]\n");
             ExactBlueValue explicit = runtime.values().yaml("type:\n  blueId: "
                     + blue.language.model.wire.BlueLanguageConstants.LIST_TYPE_BLUE_ID
                     + "\nitems: [1, 2]\n");
+            // then
             assertEquals(explicit.blueId(), aliased.blueId());
         }
     }

@@ -119,8 +119,6 @@ final class BlueRuntime implements AutoCloseable {
 
         Map<String, String> imports = new LinkedHashMap<>();
         imports.putAll(repository.preprocessingAliases());
-        // The selected Language/Contracts registry owns core spellings, even
-        // when the generated repository was published against an older core.
         imports.putAll(RuntimeTypeAliases.AGGREGATE_NAME_TO_BLUE_ID);
         BlueLanguage language = BlueLanguage.builder()
                 .nodeProvider(nodeProvider)
