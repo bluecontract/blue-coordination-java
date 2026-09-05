@@ -526,9 +526,10 @@ final class CyclicTopologyIdentityEvidenceTest {
                     boundary(
                             "gasRejectionBoundary",
                             "CHARACTERIZED",
-                            "The observed rejected internalEventEnqueued charge "
-                                    + "belongs to an already-started work "
-                                    + "occurrence; this round does not claim "
+                            "The observed rejected handlerCall and "
+                                    + "handlerCandidateTested charges belong to "
+                                    + "already-started work occurrences; "
+                                    + "this round does not claim "
                                     + "rejection before that work begins."));
         }
 
