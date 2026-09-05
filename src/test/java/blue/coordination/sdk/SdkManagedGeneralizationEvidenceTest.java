@@ -2,17 +2,16 @@ package blue.coordination.sdk;
 
 import blue.coordination.api.DocumentId;
 import blue.language.api.BlueCachePolicy;
-import blue.language.conformance.ConformanceEngine;
 import blue.language.identity.DirectBlueIdCalculator;
-import blue.language.merge.ResolvedSnapshot;
 import blue.language.model.Node;
 import blue.language.processor.ContractProcessorRegistry;
 import blue.language.processor.ContractProcessorRegistryBuilder;
 import blue.language.processor.DocumentProcessor;
+import blue.language.processor.BlueContracts;
+import blue.language.runtime.BlueLanguage;
 import blue.language.processor.GasSchedule;
 import blue.language.processor.HandlerProcessor;
 import blue.language.processor.HandlerRegistrationContext;
-import blue.language.processor.ProcessingSnapshotManager;
 import blue.language.processor.ProcessorExecutionContext;
 import blue.language.processor.ProcessorStatus;
 import blue.language.processor.closure.AdmissionKind;
@@ -40,7 +39,6 @@ import blue.language.processor.registry.RuntimeBlueIds;
 import blue.language.preprocess.provider.BasicNodeProvider;
 import blue.language.provider.NodeProvider;
 import blue.language.provider.SequentialNodeProvider;
-import blue.language.runtime.BlueLanguageRuntime;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -116,18 +114,18 @@ final class SdkManagedGeneralizationEvidenceTest {
                                 new GeneralizationProcessor())
                         .build();
 
-        try (BlueLanguageRuntime language = BlueLanguageRuntime.create(
-                    provider,
-                    BlueCachePolicy.disabled(),
-                    Collections.emptyMap());
-             ConformanceEngine conformance =
-                     language.newConformanceEngine();
+        try (BlueLanguage language = BlueLanguage.builder()
+                    .nodeProvider(provider)
+                    .cachePolicy(BlueCachePolicy.disabled()).build();
+             blue.language.conformance.ConformanceEngine conformance = language.processing().newConformanceEngine();
+             BlueContracts contracts = BlueContracts.builder(language.processing())
+                    .runtimeRegistry(registry).build();
              DocumentProcessor processor = DocumentProcessor.builder()
-                     .runtimeRegistry(registry)
-                     .nodeProvider(provider)
-                     .conformanceEngine(conformance)
-                     .snapshotStore(new LanguageSnapshotManager(language))
-                     .build()) {
+                    .runtimeAccess(contracts.runtimeAccess())
+                    .conformanceEngine(conformance)
+                    .registerContractProcessor(HANDLER_BLUE_ID, HANDLER_TYPE,
+                            new GeneralizationProcessor())
+                    .runtimeRegistryIdentity(registry.generationIdentity()).build()) {
             // when
 
             ClosureProcessResult result = execute(
@@ -318,49 +316,4 @@ final class SdkManagedGeneralizationEvidenceTest {
         }
     }
 
-    private static final class LanguageSnapshotManager
-            implements ProcessingSnapshotManager {
-        private final BlueLanguageRuntime language;
-
-        private LanguageSnapshotManager(BlueLanguageRuntime language) {
-            this.language = language;
-        }
-
-        @Override
-        public ResolvedSnapshot fromDocument(Node document) {
-            return language.snapshots().resolve(document.clone());
-        }
-
-        @Override
-        public ResolvedSnapshot fromDocumentTransient(Node document) {
-            return language.snapshots().resolve(document.clone());
-        }
-
-        @Override
-        public ResolvedSnapshot fromDocumentPreservingPaths(
-                Node document,
-                java.util.Collection<String> preservedPaths) {
-            return language.snapshots().resolvePreservingPaths(
-                    document.clone(), preservedPaths);
-        }
-
-        @Override
-        public ResolvedSnapshot fromDocumentTransientPreservingPaths(
-                Node document,
-                java.util.Collection<String> preservedPaths) {
-            return fromDocumentPreservingPaths(document, preservedPaths);
-        }
-
-        @Override
-        public ResolvedSnapshot applyPatch(
-                ResolvedSnapshot snapshot,
-                JsonPatch patch) {
-            return language.patching().apply(snapshot, patch);
-        }
-
-        @Override
-        public ResolvedSnapshot cacheSnapshot(ResolvedSnapshot snapshot) {
-            return language.snapshots().cache(snapshot);
-        }
-    }
 }
