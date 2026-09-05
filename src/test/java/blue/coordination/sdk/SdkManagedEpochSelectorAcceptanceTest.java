@@ -173,7 +173,7 @@ final class SdkManagedEpochSelectorAcceptanceTest {
                     type: Coordination/Sequential Workflow Operation
                     channel: sourceChannel
                     request:
-                      desiredState: {}
+                      desiredState: {type: Integer}
                     steps:
                       - type: Coordination/Compute
                         do:

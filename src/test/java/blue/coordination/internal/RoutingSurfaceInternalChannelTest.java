@@ -137,6 +137,7 @@ final class RoutingSurfaceInternalChannelTest {
                         collectionPath: /orders
                       documentUpdate:
                         type: Document Update Channel
+                        path: /orders
                       triggeredEvent:
                         type: Triggered Event Channel
                       onOwnerTimeline:

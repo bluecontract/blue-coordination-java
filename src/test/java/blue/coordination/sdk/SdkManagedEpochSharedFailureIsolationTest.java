@@ -506,7 +506,6 @@ final class SdkManagedEpochSharedFailureIsolationTest {
     private static String failingConsumerYaml() {
         return """
                 documentId: %s
-                peer: {}
                 observedChanges: 0
                 contracts:
                   embedded:
@@ -582,7 +581,6 @@ final class SdkManagedEpochSharedFailureIsolationTest {
     private static String loopPeerYaml() {
         return """
                 documentId: %s
-                peer: {}
                 contracts:
                   embedded:
                     type: Process Embedded

@@ -70,10 +70,13 @@ final class SdkCatchAllCollectionRoutingTest {
             DocumentHandle root = closure.document("root");
             DocumentHandle source = closure.document("source");
             DocumentHandle nested = closure.document("nested");
-            ExactBlueValue empty = blue.values().yaml("{}");
 
             // when
-            replaceMembers(blue, root, timeline, empty);
+            EntryResult removed = blue.operations().on(root).from(timeline)
+                    .call("removeMembers").through("owner")
+                    .requestYaml("{}").execute();
+            assertEquals(EntryDisposition.APPLIED, removed.disposition(),
+                    removed.diagnostic().toString());
             EntryResult detached = emit(blue, source, timeline);
             replaceMembers(blue, root, timeline, ExactBlueValue.wrap(
                     ExactValue.verified(
@@ -128,7 +131,7 @@ final class SdkCatchAllCollectionRoutingTest {
     private static void replaceMembers(BlueCoordination blue, DocumentHandle root,
             TimelineHandle timeline, ExactBlueValue members) {
         EntryResult result = blue.operations().on(root).from(timeline)
-                .call("replaceMembers").through("owner")
+                .call("replaceFirst").through("owner")
                 .request(request -> request.exact("members", members)).execute();
         assertEquals(EntryDisposition.APPLIED, result.disposition(),
                 result.diagnostic().toString());
@@ -184,7 +187,17 @@ final class SdkCatchAllCollectionRoutingTest {
                               val: {$add: [{$document: /observed}, 1]}
                           - $appendEvent: {type: Coordination/Event, kind: observed}
                           - $return: true
-                  replaceMembers:
+                  removeMembers:
+                    type: Coordination/Sequential Workflow Operation
+                    channel: owner
+                    request: {}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange: {op: remove, path: /members/first}
+                          - $appendChange: {op: remove, path: /members/second}
+                          - $return: true
+                  replaceFirst:
                     type: Coordination/Sequential Workflow Operation
                     channel: owner
                     request: {members: {}}
@@ -192,9 +205,9 @@ final class SdkCatchAllCollectionRoutingTest {
                       - type: Coordination/Compute
                         do:
                           - $appendChange:
-                              op: replace
-                              path: /members
-                              val: {$event: /request/members}
+                              op: add
+                              path: /members/first
+                              val: {$event: /message/request/members/first}
                           - $return: true
                 """ + owner();
     }

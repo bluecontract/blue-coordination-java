@@ -70,7 +70,7 @@ final class WholeRequestEntryFactoryPresenceTest {
             assertTrue(empty.exactRequest().isPresent());
             assertEquals(EMPTY_OBJECT_BLUE_ID,
                     empty.exactRequest().orElseThrow().blueId());
-            assertEquals(DirectBlueIdCalculator.calculateBlueId(new Node()),
+            assertEquals(DirectBlueIdCalculator.calculateBlueId(blue.language.model.Nodes.emptyObject()),
                     empty.exactRequest().orElseThrow().blueId());
             assertEquals(EMPTY_OBJECT_BLUE_ID,
                     NodePathEditor.getOrNull(

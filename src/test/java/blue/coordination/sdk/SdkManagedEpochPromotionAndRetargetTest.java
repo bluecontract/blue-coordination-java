@@ -810,7 +810,6 @@ final class SdkManagedEpochPromotionAndRetargetTest {
     private static String promotionAnchorYaml() {
         return """
                 documentId: %s
-                source: {}
                 contracts:
                   embedded:
                     type: Process Embedded

@@ -157,7 +157,7 @@ final class OperationRouteIndexTest {
         // when
         List<DocumentId> selected = index.route(entryWithEnvelopeField(
                 "message",
-                FrozenNode.fromNode(new Node()).withProperty(
+                FrozenNode.fromNode(blue.language.model.Nodes.emptyObject()).withProperty(
                         "document", emptyList())));
 
         // then
@@ -640,7 +640,7 @@ final class OperationRouteIndexTest {
             String field,
             FrozenNode value) {
         ExactValue event = ExactValue.fromFrozen(
-                FrozenNode.fromNode(new Node()).withProperty(field, value));
+                FrozenNode.fromNode(blue.language.model.Nodes.emptyObject()).withProperty(field, value));
         ExternalOrderKey order = ExternalOrderKey.of(List.of(
                 1L, "timeline-a", event.blueId()));
         return entry(

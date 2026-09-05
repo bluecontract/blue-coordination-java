@@ -1,5 +1,7 @@
 package blue.coordination.sdk;
 
+import blue.language.model.wire.BlueLanguageConstants;
+
 import blue.coordination.api.DocumentId;
 import blue.language.model.Node;
 import org.junit.jupiter.api.Test;
@@ -77,7 +79,9 @@ final class SdkOperationRouteAuditTest {
                     "/contracts/add/request").copyNode();
             assertEquals(declared.getProperties().keySet(),
                     effective.getProperties().keySet());
-            assertNotNull(effective.getDescription());
+            assertEquals(declared.getDescription(), effective.getDescription());
+            assertEquals(BlueLanguageConstants.INTEGER_TYPE_BLUE_ID,
+                    effective.getAsNode("/amount/type").getBlueId());
             assertEquals(entriesBefore, blue.advanced().rawEngine()
                     .metrics().journalEntryCount());
             assertThrows(UnsupportedOperationException.class,

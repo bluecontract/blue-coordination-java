@@ -282,7 +282,7 @@ class TimelineCheckpointSubjectTest {
                 .properties("operation", new Node().value("touch"))
                 .properties("channel", new Node().value("ownerChannel"));
         if (emptyRequest) {
-            message.properties("request", new Node());
+            message.properties("request", blue.language.model.Nodes.emptyObject());
         }
         return new Node()
                 .type(new Node().blueId(

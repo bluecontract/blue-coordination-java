@@ -728,11 +728,11 @@ final class SdkManagedEpochBudgetFairnessTest {
                   lifecycleChannel:
                     type: {blueId: %s}
                     order: 0
-                    event:
-                      type: {blueId: %s}
                   onProcessingInitiated:
                     type: Coordination/Sequential Workflow
                     channel: lifecycleChannel
+                    event:
+                      type: {blueId: %s}
                     order: 0
                     steps:
                       - type: Coordination/Compute
@@ -791,7 +791,6 @@ final class SdkManagedEpochBudgetFairnessTest {
     private static String failingConsumerYaml(DocumentId documentId) {
         return """
                 documentId: %s
-                peer: {}
                 observedChanges: 0
                 contracts:
                   embedded:
@@ -863,7 +862,6 @@ final class SdkManagedEpochBudgetFairnessTest {
     private static String loopPeerYaml(DocumentId documentId) {
         return """
                 documentId: %s
-                peer: {}
                 contracts:
                   embedded:
                     type: Process Embedded
