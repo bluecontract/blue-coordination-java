@@ -1,0 +1,27 @@
+{
+  "schema": "blue-coordination-development-inputs/1",
+  "releaseReadinessClaimed": false,
+  "repositories": {
+    "language": {
+      "sourceCommit": "fe7d7d88f1b2b56c4239928afb5fb57c07e85ca2",
+      "sourceTree": "213a68a28ad3c65b966f959c1046141f932255d2",
+      "version": "3.1.0-dev.fe7d7d88f1b2b56c4239928afb5fb57c07e85ca2",
+      "directory": "language-fe7d7d88f1b2b56c4239928afb5fb57c07e85ca2",
+      "manifestSha256": "sha256:db815f80cb9c7400dcf1b3ba391dae80564637bd1a9721ee2f796c240769fb7c"
+    },
+    "bex": {
+      "sourceCommit": "a11f911645330caecf1297223ae14c0cbdb74206",
+      "sourceTree": "dc83850655f10bd8ef7eacbf595ae058c39a6c86",
+      "version": "1.1.0-dev.a11f911645330caecf1297223ae14c0cbdb74206",
+      "directory": "bex-a11f911645330caecf1297223ae14c0cbdb74206",
+      "manifestSha256": "sha256:abcfe740b61b5af2390073be4cefcb84b35891a2bb509ddf9dda32735fec9568"
+    },
+    "catalog": {
+      "sourceCommit": "100686b97fc8da59985013fa18390cfa5801cff4",
+      "sourceTree": "bd82f77bb2d83d3e74c35db99b3875246923c1f6",
+      "version": "3.0.0-dev.100686b97fc8da59985013fa18390cfa5801cff4",
+      "directory": "catalog-100686b97fc8da59985013fa18390cfa5801cff4",
+      "manifestSha256": "sha256:346385c13902a1de060a9d7037815d0f34163f8354a77ba5a70342e70fbb817b"
+    }
+  }
+}
