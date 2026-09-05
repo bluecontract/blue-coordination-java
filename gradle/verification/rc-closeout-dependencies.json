@@ -10,11 +10,11 @@
       "manifestSha256": "sha256:6c82e2733633cd67b9be0b150074c144e2c51295863b993e3f5ab36f51092dac"
     },
     "bex": {
-      "sourceCommit": "fe37f42f79df735e2d29f41b711b4c8b4617dde6",
-      "sourceTree": "555a140d5344e2db64c6058f5c87e4f599ce098b",
-      "version": "1.1.0-dev.fe37f42f79df735e2d29f41b711b4c8b4617dde6",
-      "directory": "bex-fe37f42f79df735e2d29f41b711b4c8b4617dde6",
-      "manifestSha256": "sha256:eb387feda53fb9dd14fa69b4fc5af9b359cd056556e9a93c9b16d705fde7dd57"
+      "sourceCommit": "ab571506301f55a4e9fb59adb49020a4bcb1e98b",
+      "sourceTree": "2517a258252fd2565515898ba8a50739abd49b27",
+      "version": "1.1.0-dev.ab571506301f55a4e9fb59adb49020a4bcb1e98b",
+      "directory": "bex-ab571506301f55a4e9fb59adb49020a4bcb1e98b",
+      "manifestSha256": "sha256:7124c703e1cf7416f946976c7ea5475cdb7c432e243e6e4c7b3ca5952fec6341"
     },
     "catalog": {
       "sourceCommit": "f8e40d1b318b01c43239873513bb8ee3afa71143",

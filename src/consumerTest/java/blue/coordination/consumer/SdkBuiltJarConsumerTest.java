@@ -70,6 +70,25 @@ final class SdkBuiltJarConsumerTest {
         }
     }
 
+    @Test
+    void scalarFactoryCreatesAndInitializesAChildAgainstBuiltJar() throws Exception {
+        String source;
+        try (var input = getClass().getResourceAsStream("/rc/scalar-factory.yaml")) {
+            source = new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        }
+        try (BlueCoordination coordination = BlueCoordination.builder().contentDerivedDocumentIds().build()) {
+            TimelineHandle timeline = coordination.timelines().register("tutorial/order-factory/merchant", "merchant");
+            DocumentHandle host = coordination.documents().admit(
+                    ManagedDocument.yaml(coordination.values().yaml(source).blueId(), source).publicRoot().fromNow());
+            EntryResult created = coordination.operations().on(host).from(timeline)
+                    .call("createOrder01").through("merchantChannel")
+                    .requestYaml("customerReference: consumer-customer\nquantity: 7").execute();
+            assertEquals(EntryDisposition.APPLIED, created.disposition(), created.diagnostic().toString());
+            assertEquals(1L, host.snapshot().longAt("/initializedOrderCount"));
+            assertTrue(coordination.advanced().auditManagedOccurrence(host.id(), "/orders/order-01").isPresent());
+        }
+    }
+
     private static String counterYaml(
             String id,
             String timelineId) {
