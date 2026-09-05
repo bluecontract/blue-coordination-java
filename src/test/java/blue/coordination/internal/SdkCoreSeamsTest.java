@@ -48,7 +48,7 @@ final class SdkCoreSeamsTest {
                         "specifications/blue-contracts-and-processor-specification-1.0.md"),
                 manifest.contractsSpecification());
         assertEquals(
-                "sha256:e3594606cf7eb26743d2c8b4cd9beb0848e857b2faa8f1eac3716eca12544245",
+                "sha256:9bec8c4c6cd97b5323e0a51fc085e99a727c700bb4b5eeef804bb9ea0874d9ff",
                 manifest.contractsRelease());
         assertEquals(
                 "sha256:a84bbb688d247e65411204b5b52046fe481f255a22b3f9ee0c82dd6afe36f4a0",
