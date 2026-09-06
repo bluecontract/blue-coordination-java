@@ -1,6 +1,6 @@
 # MyOS Mini and Coordination POC
 
-> **Design baseline:** 15.12 · **Documentation sync:** 2026-09-06 · **Status:** agreed pre-Phase3 repairs verified; Phase3 remains planned
+> **Design baseline:** 15.12 · **Documentation sync:** 2026-09-06 · **Status:** final implementation review found five open blockers; Phase3 remains planned
 
 This package defines the first POC's processing algorithm, API shape, invariants and planned tests.
 The authorized Phase1/2 implementation passed its baseline integration-readiness checks; see the
@@ -8,6 +8,9 @@ The authorized Phase1/2 implementation passed its baseline integration-readiness
 The subsequent [code-review remediation](implementation/pre-phase-3-review-remediation.md) records
 the completed repair gate and new verification, with F05 and complete F07 selection explicitly
 assigned to Phase3. Earlier green tests are not substituted for those new checks.
+The subsequent [final implementation review](review/final-implementation-review-2026-09-06.md)
+reproduces five further correctness/progress defects on that repaired candidate. Its report and
+separate Java witnesses qualify the earlier readiness claims; those defects are not repaired yet.
 [25](25-phase-3-integration-plan.md) plans the next phase; implementation of that phase has not begun.
 This is not a production release or formal acceptance of every scenario in the full catalog.
 Code and documentation are consolidated on `codex/coordination-external-state-poc`.

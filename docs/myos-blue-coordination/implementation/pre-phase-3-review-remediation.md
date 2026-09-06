@@ -1,8 +1,13 @@
 # Pre-Phase3 review remediation
 
-> Authorized follow-up, 2026-09-06. **Agreed pre-Phase3 repair scope implemented and verified.**
+> Authorized follow-up, 2026-09-06. **Scoped repair regression gate passed; subsequent findings below remain open.**
 > This work repairs the Phase1/2 boundary; it does not start the general Phase3 adapter.
 > F05 and complete F07 interval selection remain explicit Phase3 work, as scoped below.
+
+**Subsequent review:** the [final implementation review](../review/final-implementation-review-2026-09-06.md)
+finds five open defects on the committed repaired candidate, including incomplete fresh-source
+handling for F02/F04 and remaining schema validation for F03. The passing tests below are preserved
+as scoped evidence, not a claim that these newly exercised combinations pass.
 
 ## Baseline and scope
 
@@ -199,8 +204,10 @@ below distinguish predecessor candidates, final affected verification and reused
 
 ## Handoff boundary
 
-F01–F04 and F06/F08 are implemented and verified. F07's lifecycle high-water preparation is
+At the scoped remediation gate, F01–F04 and F06/F08 passed the recorded checks. F07's lifecycle high-water preparation is
 implemented; complete indexed temporal recipient selection remains Phase3B work. F05's actual
 Timeline translation belongs to Phase3A. The [Phase3 plan](../25-phase-3-integration-plan.md)
-contains both acceptance obligations. No general adapter, release, commit or push was performed in
-this remediation. Changes remain local on the existing working branches.
+contains both acceptance obligations. No general adapter or release was performed in this
+remediation. Verification ran before committing; the repairs were subsequently committed and
+pushed as recorded in the [source commit map](source-commits.md). The final review above adds open
+findings and supersedes a broad readiness interpretation of this earlier handoff.

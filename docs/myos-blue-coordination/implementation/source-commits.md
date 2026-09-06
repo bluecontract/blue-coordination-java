@@ -1,10 +1,28 @@
-# Committed Phase1/2 source set
+# Committed Phase1/2 source sets
 
 > Recorded 2026-09-06. Working branches, not releases or an API freeze.
 
-This is the committed **baseline** source set. Later local changes and their verification are
-tracked in [pre-Phase3 review remediation](pre-phase-3-review-remediation.md); the commits below
-must not be cited as containing those subsequent repairs.
+## Reviewed remediation source set
+
+The [pre-Phase3 repairs](pre-phase-3-review-remediation.md) were subsequently committed and pushed
+on the same working branches. Remote branch heads were checked against these exact commits on
+2026-09-06. The [final implementation review](../review/final-implementation-review-2026-09-06.md)
+inspects this source set and finds further open defects; committed/pushed does not mean accepted.
+
+| Repository | Working branch | Reviewed implementation commit |
+|---|---|---|
+| `blue-coordination-java` | `codex/coordination-external-state-poc` | `b08b8e2f9d08e185cc7eb3500d2199d4f71921cc` |
+| `blue-language-java` | `codex/coordination-external-state-poc` | `7dd28cbe917688b1bfb16e7ca9488a5f6a085389` |
+| `blue-bex-java` | `codex/coordination-external-state-poc` | `95ba24fa9bf78930daa690ac1885214b0a4da8a9` |
+| `myos-simple` | `feat/coordination-with-external-state` | `701f70b2aaba3c796a047648551a9fecd5bd915f` |
+
+The final report and readiness notices are a later documentation-only Coordination commit. Use
+the immutable implementation commits above when reproducing its findings. The untracked MyOS
+`src/main/resources/examples/managed/multiplicity/request.yaml` remains excluded and untouched.
+
+## Earlier baseline source set
+
+The commits below are the earlier **baseline**, not the subsequent remediation source set.
 
 These commits capture the implementation underlying the [readiness record](phase-1-2-readiness.md).
 Committing the verified source did not rerun the test suites or begin Phase3. The source trees were

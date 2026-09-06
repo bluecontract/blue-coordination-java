@@ -1,0 +1,15 @@
+SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".
+SLF4J: Defaulting to no-operation (NOP) logger implementation
+SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.
+ISOLATED_SCHEMA=dh_review_7b7e95c10ca14728932984af7d9232af
+RACE retained plan committed while recovery statement's TRUE barrier held; work=Work[key=race-work, account=account, lineage=race-source, intentKey=sha256:b2c930c577382f72ddded56c95c2deff5b81db858a7c5090f7a996ece42e4ffc, completionOwner=original-owner, generation=1, state=LEASED]
+RACE recovered=1 work=Work[key=race-work, account=account, lineage=race-source, intentKey=sha256:b2c930c577382f72ddded56c95c2deff5b81db858a7c5090f7a996ece42e4ffc, completionOwner=original-owner, generation=2, state=READY]
+RACE plan_work=[{invalidated=false, generation=1}]
+RACE retry_rejected=Earlier attempt requires reconciliation
+RACE automatic_reconciliation_candidates=0
+STARVATION good_proof_bytes=1213 configured=1229 bad_proof_bytes=2203
+STARVATION cold_attempt=1 hold=Prefix read exceeds configured proof capacity queue=[{source=P, next_ordinal=0, turn=5}, {source=Q, next_ordinal=0, turn=8}]
+STARVATION cold_attempt=2 hold=Prefix read exceeds configured proof capacity queue=[{source=P, next_ordinal=0, turn=5}, {source=Q, next_ordinal=0, turn=8}]
+STARVATION cold_attempt=3 hold=Prefix read exceeds configured proof capacity queue=[{source=P, next_ordinal=0, turn=5}, {source=Q, next_ordinal=0, turn=8}]
+STARVATION healthy_work_materialized=0
+CLEANED_ONLY=dh_review_7b7e95c10ca14728932984af7d9232af

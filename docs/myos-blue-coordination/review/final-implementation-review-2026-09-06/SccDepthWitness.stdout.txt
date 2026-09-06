@@ -1,0 +1,5 @@
+1000 chain members: 1000 components
+2000 chain members: 2000 components
+4000 chain members: 4000 components
+8000 chain members: StackOverflowError at java.base/java.util.HashMap.hash(HashMap.java:338)
+10000 chain members: StackOverflowError at java.base/java.util.HashMap.hash(HashMap.java:338)

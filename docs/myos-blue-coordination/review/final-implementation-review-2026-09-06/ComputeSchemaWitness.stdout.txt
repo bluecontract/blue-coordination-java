@@ -1,0 +1,29 @@
+Existing invalid-BlueId control: PASS (RuntimeFatal, rollback, runtime gas, no event)
+required: ESCAPED class blue.language.processor.UnclassifiedProcessingException Unclassified processing failure; no semantic result is available
+ rootCause=java.lang.IllegalArgumentException: Object is not a Boolean at blue.language.model.value.ScalarValues.getBooleanFromObject(ScalarValues.java:95)
+ boundary=blue.coordination.processor.workflow.ComputeStepExecutor.execute(ComputeStepExecutor.java:209)
+ boundary=blue.coordination.processor.workflow.ComputeStepExecutor.execute(ComputeStepExecutor.java:42)
+ identical retry: same operational failure; no prepared terminal result
+uniqueItems: ESCAPED class blue.language.processor.UnclassifiedProcessingException Unclassified processing failure; no semantic result is available
+ rootCause=java.lang.IllegalArgumentException: Object is not a Boolean at blue.language.model.value.ScalarValues.getBooleanFromObject(ScalarValues.java:95)
+ boundary=blue.coordination.processor.workflow.ComputeStepExecutor.execute(ComputeStepExecutor.java:209)
+ boundary=blue.coordination.processor.workflow.ComputeStepExecutor.execute(ComputeStepExecutor.java:42)
+ identical retry: same operational failure; no prepared terminal result
+minItems: ESCAPED class blue.language.processor.UnclassifiedProcessingException Unclassified processing failure; no semantic result is available
+ rootCause=java.lang.IllegalArgumentException: Object is not a BigInteger or BigDecimal at blue.language.model.value.ScalarValues.getBigIntegerFromObject(ScalarValues.java:62)
+ boundary=blue.language.processor.SemanticOutputBoundary.admit(SemanticOutputBoundary.java:128)
+ boundary=blue.coordination.processor.workflow.ComputeStepExecutor.execute(ComputeStepExecutor.java:160)
+ boundary=blue.coordination.processor.workflow.ComputeStepExecutor.execute(ComputeStepExecutor.java:42)
+ identical retry: same operational failure; no prepared terminal result
+maxLength: ESCAPED class blue.language.processor.UnclassifiedProcessingException Unclassified processing failure; no semantic result is available
+ rootCause=java.lang.IllegalArgumentException: Object is not a BigInteger or BigDecimal at blue.language.model.value.ScalarValues.getBigIntegerFromObject(ScalarValues.java:62)
+ boundary=blue.language.processor.SemanticOutputBoundary.admit(SemanticOutputBoundary.java:128)
+ boundary=blue.coordination.processor.workflow.ComputeStepExecutor.execute(ComputeStepExecutor.java:160)
+ boundary=blue.coordination.processor.workflow.ComputeStepExecutor.execute(ComputeStepExecutor.java:42)
+ identical retry: same operational failure; no prepared terminal result
+minimum: ESCAPED class blue.language.processor.UnclassifiedProcessingException Unclassified processing failure; no semantic result is available
+ rootCause=java.lang.IllegalArgumentException: Object is not a BigInteger or BigDecimal at blue.language.model.value.ScalarValues.getBigDecimalFromObject(ScalarValues.java:80)
+ boundary=blue.language.processor.SemanticOutputBoundary.admit(SemanticOutputBoundary.java:128)
+ boundary=blue.coordination.processor.workflow.ComputeStepExecutor.execute(ComputeStepExecutor.java:160)
+ boundary=blue.coordination.processor.workflow.ComputeStepExecutor.execute(ComputeStepExecutor.java:42)
+ identical retry: same operational failure; no prepared terminal result

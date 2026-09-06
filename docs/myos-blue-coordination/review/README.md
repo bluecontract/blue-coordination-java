@@ -2,6 +2,11 @@
 
 > **Design baseline:** 15.12 · active documentation synchronized with Phase1/2 handoff, 2026-09-06
 
+Latest: [final implementation review](final-implementation-review-2026-09-06.md) of all four pushed
+repositories. It records five open P1 findings, one separate graph-depth concern, and executable
+[diagnostic evidence](final-implementation-review-2026-09-06/README.md). Previous passing gates
+remain historical evidence for their scoped cases, not a clean sign-off on this reviewed candidate.
+
 Use the current directory for the synchronized proposal. The r15.12 ZIP is an immutable
 preimplementation snapshot, not a copy of these updated files. Start with the
 [implementation summary](../24-phase-1-library-summary.md), [tutorial](../tutorial/README.md) and

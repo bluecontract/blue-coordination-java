@@ -21,6 +21,10 @@ or production-HA project is part of this phase.
 
 ## Entry conditions
 
+- Close R1–R5 from the [final implementation review](review/final-implementation-review-2026-09-06.md)
+  before accepting their dependent integration paths: original producer context on fresh execution,
+  typed schema failures, retained-attempt recovery and blocked-prefix isolation. R6's deep-graph
+  capacity/control belongs in scale acceptance; it does not require another processing model.
 - Close Phase1/2's known correctness failures and final regression/adapter handshake.
 - Verify the review repairs on the changed candidate: lossless historical needs and original-input
   choices, producer-basis compatibility, real BEX validation/operator controls, retained-publication

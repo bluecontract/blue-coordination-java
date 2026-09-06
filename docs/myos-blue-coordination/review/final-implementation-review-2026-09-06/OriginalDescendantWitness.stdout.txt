@@ -1,0 +1,9 @@
+SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".
+SLF4J: Defaulting to no-operation (NOP) logger implementation
+SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.
+AUTHENTIC X status=SUCCESS counter=0 gas=832 operation=sha256:555bc14f34503b873bff6674c828bd8dfb4e4802f6736518b730cf4ae23a6ef8
+A admission owners=[GGXVEbd2TwGYGcB6JBW481LVYmVLpYgGyMk91JcjRinP]; X has separate original admission=4d728501ddfedae4dc625da01471b055ef618d914238e6a33ce57d379507c7d0
+A HISTORICAL RESULT=class blue.coordination.external.CanonicalSourceHistory$Step
+FRESH X status=SUCCESS counter=5 gas=852 operation=sha256:02aa5e752140930bfd0ea8c4afe66dfafd8cd431456d43cf20a2b28c8806bbd8
+A WITH AUTHENTIC X CACHE=class blue.coordination.external.CanonicalSourceHistory$Step
+warm owners=[[GGXVEbd2TwGYGcB6JBW481LVYmVLpYgGyMk91JcjRinP]] consumedX=[sha256:555bc14f34503b873bff6674c828bd8dfb4e4802f6736518b730cf4ae23a6ef8]
