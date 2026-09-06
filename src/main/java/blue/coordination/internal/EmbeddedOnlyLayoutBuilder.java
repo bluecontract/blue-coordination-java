@@ -712,6 +712,16 @@ final class EmbeddedOnlyLayoutBuilder {
                             managedOwnershipProjection(value).toNode()));
             result.properties(properties);
         }
+        if (result.getName() == null
+                && result.getDescription() == null
+                && result.getRawValue() == null
+                && result.getItems() == null
+                && result.getProperties() == null) {
+            // Reference/type-only owned leaves have no parent-owned payload.
+            // Keep that projection explicitly empty; the child's exact value
+            // remains in the semantic root and is validated independently.
+            result.properties(new LinkedHashMap<>());
+        }
         return FrozenNode.fromNode(result);
     }
 
