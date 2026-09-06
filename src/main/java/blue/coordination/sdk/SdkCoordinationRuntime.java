@@ -777,13 +777,8 @@ final class SdkCoordinationRuntime implements AutoCloseable {
             Contracts10AuthoredClosureCompiler.CompiledClosure compiled,
             Set<DocumentId> roots) {
         engine.authorizeContractsPublicRoots(roots);
-        Contracts10AuthoredClosureCompiler.ActivationInputs activation =
-                compiled.activationInputs();
         ContractsClosureAdmissionReceipt receipt =
-                engine.admitContractsClosure(
-                        compiled.invocation(),
-                        activation.policy(),
-                        activation.verifiedFrontier());
+                engine.admitContractsClosure(compiled);
         requirePublishedAdmission(receipt);
         return receipt;
     }

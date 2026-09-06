@@ -7,6 +7,7 @@ import blue.language.identity.BlueIds;
 import blue.language.identity.CircularSetIdentityCalculator;
 import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.model.Node;
+import blue.language.merge.ResolvedSnapshot;
 import blue.language.model.NodePathEditor;
 import blue.language.model.wire.JsonPointer;
 import blue.language.processor.EffectiveFragmentationCatalog;
@@ -121,17 +122,18 @@ public final class Contracts10AuthoredClosureCompiler {
                 verificationObjects,
                 verificationMetrics,
                 engine.retainedExactNodeProvider())) {
+            List<ResolvedSnapshot> sourceSnapshots = new ArrayList<>();
             LinkedHashMap<DocumentId, Node> resolved = resolveDocuments(
                     input.documents(), verificationRuntime,
                     verificationObjects,
-                    Objects.requireNonNull(identityMode, "identityMode"));
+                    Objects.requireNonNull(identityMode, "identityMode"), sourceSnapshots);
             validateDeclarationsAndCoverage(
                     index, resolved, verificationRuntime,
                     verificationObjects);
             LinkedHashMap<DocumentId, Node> authored =
                     installAndVerifyPreliminaryReferences(
                             index, resolved, identityMode);
-            return finalizeClosure(input, index, authored);
+            return finalizeClosure(input, index, authored, sourceSnapshots);
         }
     }
 
@@ -139,13 +141,15 @@ public final class Contracts10AuthoredClosureCompiler {
             List<AuthoredDocument> documents,
             BlueRuntime runtime,
             WholeObjectStore objects,
-            DocumentIdentityMode identityMode) {
+            DocumentIdentityMode identityMode,
+            List<ResolvedSnapshot> sourceSnapshots) {
         LinkedHashMap<DocumentId, Node> result = new LinkedHashMap<>();
         for (AuthoredDocument document : documents) {
             ExactValue exact = runtime.exactProcessingSource(
                     document.authoredYaml(),
                     objects,
                     "contracts10-authored-compiler-source");
+            exact.snapshot().ifPresent(sourceSnapshots::add);
             Node body = exact.copyNode();
             switch (identityMode) {
                 case EXPLICIT_LINEAGE -> requireOrWriteDocumentId(
@@ -299,7 +303,8 @@ public final class Contracts10AuthoredClosureCompiler {
     private CompiledClosure finalizeClosure(
             CompilationRequest request,
             RequestIndex index,
-            LinkedHashMap<DocumentId, Node> authored) {
+            LinkedHashMap<DocumentId, Node> authored,
+            List<ResolvedSnapshot> sourceSnapshots) {
         ContractsClosureAdmissionAdapter adapter =
                 engine.contractsClosureAdmissionAdapter();
         ClosureEnvironment environment = adapter.environment();
@@ -367,7 +372,8 @@ public final class Contracts10AuthoredClosureCompiler {
                 representedBodies,
                 finalization,
                 canonicalBindings,
-                independentlyVerifiedMasters);
+                independentlyVerifiedMasters,
+                sourceSnapshots);
     }
 
     private static List<ManagedOccurrenceBinding> bindings(
@@ -879,6 +885,7 @@ public final class Contracts10AuthoredClosureCompiler {
     /** Immutable result retained by the future SDK runtime bridge. */
     public static final class CompiledClosure {
         private final ClosureInvocationInput invocation;
+        private final List<ExactValue> inlineTypeEvidence;
         private final ActivationInputs activationInputs;
         private final Map<DocumentId, Node> authoredDocuments;
         private final Map<DocumentId, Node> finalizedDocuments;
@@ -895,7 +902,10 @@ public final class Contracts10AuthoredClosureCompiler {
                 Map<blue.language.processor.closure.DocumentId, Node> bodies,
                 ComponentFinalizationResult finalization,
                 List<ManagedOccurrenceBinding> bindings,
-                Map<String, String> verifiedMasters) {
+                Map<String, String> verifiedMasters,
+                List<ResolvedSnapshot> sourceSnapshots) {
+            this.inlineTypeEvidence = sourceSnapshots.stream()
+                    .flatMap(snapshot -> ProcessingSourceTypeEvidence.from(snapshot).stream()).toList();
             this.invocation = Objects.requireNonNull(
                     invocation, "invocation");
             this.activationInputs = Objects.requireNonNull(
@@ -944,6 +954,10 @@ public final class Contracts10AuthoredClosureCompiler {
             }
             this.independentlyVerifiedMasters =
                     Collections.unmodifiableMap(masters);
+        }
+
+        void retainInlineTypeEvidence(WholeObjectStore objects) {
+            inlineTypeEvidence.forEach(value -> objects.put(value, "compiled Source inline type"));
         }
 
         public ClosureInvocationInput invocation() {

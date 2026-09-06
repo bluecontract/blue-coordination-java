@@ -547,6 +547,16 @@ public final class DefaultCoordinationEngine
                 input, selectedPolicy, frontier);
     }
 
+    /** Admits a compiler-authenticated closure with its supplied exact type bodies. */
+    public synchronized ContractsClosureAdmissionReceipt admitContractsClosure(
+            Contracts10AuthoredClosureCompiler.CompiledClosure compiled) {
+        ensureOpen();
+        Objects.requireNonNull(compiled, "compiled").retainInlineTypeEvidence(objects);
+        var activation = compiled.activationInputs();
+        return admitContractsClosure(compiled.invocation(), activation.policy(),
+                activation.verifiedFrontier());
+    }
+
     /**
      * SDK static-admission seam for resolving exact referenced occurrence
      * content without changing the provider used by ordinary operations.
