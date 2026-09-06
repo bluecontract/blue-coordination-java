@@ -3,25 +3,25 @@
   "releaseReadinessClaimed": false,
   "repositories": {
     "language": {
-      "sourceCommit": "803c70065bd1bee39bdc738cecff71ad2ede8c2a",
-      "sourceTree": "3e46b9d04fc84b7a59ff29b0f8cf00cf9d7e401a",
-      "version": "3.1.0-dev.803c70065bd1bee39bdc738cecff71ad2ede8c2a",
-      "directory": "language-803c70065bd1bee39bdc738cecff71ad2ede8c2a",
-      "manifestSha256": "sha256:37fcd0973f68fc93f174c00b9554f571d7da4c8555a6749293a41dce39d49abc"
+      "sourceCommit": "2c52f9af0eb44758fe7b53bf7463e34fcaf9e7d6",
+      "sourceTree": "ab3896900029eb8c8e4eda3d57e0fd30253828ac",
+      "version": "3.1.0-dev.2c52f9af0eb44758fe7b53bf7463e34fcaf9e7d6",
+      "directory": "language-2c52f9af0eb44758fe7b53bf7463e34fcaf9e7d6",
+      "manifestSha256": "sha256:bbc5bb535802ad824795ea0c04605536763901ab7cf6010566aace7054436bca"
     },
     "bex": {
-      "sourceCommit": "9ba845cdf07c25a9c5d2f42d64ecea0092c033d0",
-      "sourceTree": "404b3e7d0019febd4bac185e969209754534c337",
-      "version": "1.1.0-dev.9ba845cdf07c25a9c5d2f42d64ecea0092c033d0",
-      "directory": "bex-9ba845cdf07c25a9c5d2f42d64ecea0092c033d0",
-      "manifestSha256": "sha256:27a5224e523eb7bca8d9a4e390e32821c887f692c1acf65241960255c77e4b27"
+      "sourceCommit": "2948afaae9a119c2ee080562f7d6aa6528ce38f1",
+      "sourceTree": "36f2f53601172b0c9ed4cef09772a8e962276f55",
+      "version": "1.1.0-dev.2948afaae9a119c2ee080562f7d6aa6528ce38f1",
+      "directory": "bex-2948afaae9a119c2ee080562f7d6aa6528ce38f1",
+      "manifestSha256": "sha256:0ef50be4a40b8aac9775a910164c1b38b8bb2540e6961932f6ba22a955080df9"
     },
     "catalog": {
-      "sourceCommit": "07bd4907aa6d665cdc79e854221e7b5f0972cb82",
-      "sourceTree": "8fd2209c950593a0778d818735dbd568bb4dc73a",
-      "version": "3.0.0-dev.07bd4907aa6d665cdc79e854221e7b5f0972cb82",
-      "directory": "catalog-07bd4907aa6d665cdc79e854221e7b5f0972cb82",
-      "manifestSha256": "sha256:557346c69b788e06025d7ec5069c76526d046309c6c0d5b699e624a3537b43b9"
+      "sourceCommit": "45ef8d06e092ae3dff2bd3d2708aa0cc3f2f4aea",
+      "sourceTree": "d145772e078dfb888937925073cd75be3335efb7",
+      "version": "3.0.0-dev.45ef8d06e092ae3dff2bd3d2708aa0cc3f2f4aea",
+      "directory": "catalog-45ef8d06e092ae3dff2bd3d2708aa0cc3f2f4aea",
+      "manifestSha256": "sha256:8bf70ec7d13d7b6be413197bca88dba217d09b1a11feddd256eceec36337a724"
     }
   }
 }
